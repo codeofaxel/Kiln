@@ -24,10 +24,59 @@ The proven pipeline:
     4. Everything is packaged as a Bambu 3MF with proper metadata.
 
 Tested and verified on the Bambu Lab A1 Combo (firmware 01.08.03.00).
+
+Where the templates come from, and why start and end differ
+-----------------------------------------------------------
+BambuStudio ships its start/end G-code per model as template files in
+``profiles/BBL/machine/"Bambu Lab <MODEL> <NOZZLE> nozzle template
+machine_{start,end}_gcode.json"``.  Those templates are UNRESOLVED: they
+carry BambuStudio's own expression language --- ``[bed_temperature_initial_layer_single]``,
+``{nozzle_temperature_initial_layer[initial_extruder]}``, and
+``{if ...}{else}{endif}`` blocks.
+
+``bambu_a1_start_gcode.gcode`` and ``bambu_a1_end_gcode.gcode`` are NOT those
+templates.  They are post-expansion captures taken from a real BambuStudio
+slice of the same bundle version (both carry the bundle's own
+``;===== date:`` stamps), which is why they hold literal values and no
+placeholders, and why they are 20-odd lines longer than the templates: they
+also contain the slicer's injected preamble (``M201``/``M203`` machine limits,
+``M73`` progress) and postamble (``; MACHINE_END_GCODE_END``, spaghetti
+detector).  They are the A1-proven artifacts and are left exactly as they are.
+
+That provenance is what splits start from end here:
+
+* **End G-code is per model.**  Across every model's end template the only
+  variable is ``max_layer_z`` --- a value this module already computes from
+  the G-code body --- plus, on A1 and A1 mini, the bed centre and two
+  slicing flags that are constants for Kiln.  Nothing has to be guessed, so
+  each supported model ships its own end template and
+  :func:`_resolve_end_gcode` expands it at build time.
+* **Start G-code is still A1-flavoured for every model.**  The start
+  templates need ~100 further values that BambuStudio *computes during
+  slicing* and stores nowhere --- ``outer_wall_volumetric_speed``,
+  ``flush_temperatures``, ``min_vitrification_temperature``,
+  ``hold_chamber_temp_for_flat_print``, ``first_layer_print_min`` --- and
+  several of them gate real motion and heating (a bed-obstacle probe height,
+  which bed-levelling branch runs, purge feedrates).  Resolving those by hand
+  would mean guessing numbers that are sent to a machine that moves, so this
+  module does not.  A declared non-A1 model therefore still gets the A1 start
+  sequence and :func:`_select_start_gcode` says so in the log.
+
+Nozzle size does not enter into this, and that is the bundle's own doing: it
+publishes end G-code at the 0.4 nozzle only — one file per model, no per-nozzle
+variant — so the end template a 0.6 owner gets is the only one that exists
+rather than a 0.4 file standing in for theirs.  Start G-code is the opposite:
+P1P, P1S, X1 Carbon and X1E each publish four start templates (0.2 / 0.4 / 0.6
+/ 0.8) whose contents genuinely differ, and ``[nozzle_diameter]`` appears in
+their conditionals.  So whenever per-model start templates do become
+resolvable, ``_MODEL_START_GCODE_FILES`` has to be keyed on nozzle diameter as
+well as model, or refuse a nozzle it has no template for — never silently hand
+a 0.6 nozzle the 0.4 sequence.
 """
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import logging
@@ -58,6 +107,49 @@ _A1_END_GCODE_PATH = _DATA_DIR / "bambu_a1_end_gcode.gcode"
 # Lazy-loaded singletons for gcode templates.
 _a1_start_gcode: str | None = None
 _a1_end_gcode: str | None = None
+
+# ---------------------------------------------------------------------------
+# Per-model template registry
+# ---------------------------------------------------------------------------
+#
+# Keyed on the printer model the OWNER DECLARED (``printer_model`` in
+# ``~/.kiln/config.yaml``, or the profile id a caller passed to the slicer).
+# Never on a model inferred from a serial prefix or a firmware string: a table
+# that guessed wrong in five of six rows once named the wrong printer
+# confidently, so the probes behind ``get_printer_info`` are telemetry only.
+# See ``BambuAdapter._build_print_url`` for the same rule on job URLs.
+#
+# A model that is absent here, and any printer whose owner never declared a
+# model, gets the A1 files --- byte-for-byte what every Bambu print has been
+# wrapped in until now.  An unknown model is never an error: people are
+# printing successfully on this fallback right now.
+
+# Start G-code.  One entry, and that is the honest state of it: see the module
+# docstring for why the other models' start templates cannot be resolved.
+_MODEL_START_GCODE_FILES: dict[str, str] = {
+    "bambu_a1": "bambu_a1_start_gcode.gcode",
+}
+
+# End G-code, one file per model we ship a template for.
+_MODEL_END_GCODE_FILES: dict[str, str] = {
+    "bambu_a1": "bambu_a1_end_gcode.gcode",
+    "bambu_a1_mini": "bambu_a1_mini_end_gcode.gcode",
+    "bambu_p1p": "bambu_p1p_end_gcode.gcode",
+    "bambu_p1s": "bambu_p1s_end_gcode.gcode",
+    "bambu_p2s": "bambu_p2s_end_gcode.gcode",
+    "bambu_x1c": "bambu_x1c_end_gcode.gcode",
+    "bambu_x1e": "bambu_x1e_end_gcode.gcode",
+    "bambu_h2s": "bambu_h2s_end_gcode.gcode",
+}
+
+# Lazy cache for the per-model files, keyed by filename.
+_model_gcode_cache: dict[str, str] = {}
+
+# Fallbacks already reported, so each is logged once per process rather than
+# once per print.  Keyed by ``(kind, model)``: the start-gcode gap and the
+# end-gcode gap are different facts about a model, and one must not silence
+# the other.
+_fallback_warned: set[tuple[str, str]] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -130,16 +222,47 @@ class Bambu3MFResult:
     file_size: int
     md5: str
     est_print_time_sec: int
+    # The model whose start sequence this file actually carries, and the one
+    # the caller asked for.  They differ whenever a template is missing, which
+    # today is every model but the A1.
+    start_gcode_model: str = "bambu_a1"
+    requested_model: str | None = None
+
+    @property
+    def start_gcode_warning(self) -> str | None:
+        """Say so when the start sequence is not this machine's own.
+
+        The fallback itself is deliberate and long-standing --- see
+        :data:`_MODEL_START_GCODE_FILES`.  What was missing is that nobody
+        downstream could tell it had happened: the substitution was a log line
+        on a server the operator is not reading.  This is the same fact on the
+        object every caller already gets back, so a tool response can carry it
+        to the person deciding whether to press print.
+        """
+        requested = _normalize_model(self.requested_model)
+        if not requested or requested == self.start_gcode_model:
+            return None
+        return (
+            f"This file carries the {self.start_gcode_model} startup sequence, not "
+            f"{requested}'s: Kiln ships no validated start G-code for {requested}. "
+            f"The print will start, and prints are running on this fallback today, "
+            f"but the homing, purge and bed-levelling moves are the A1's — it drives "
+            f"X negative and disables soft endstops. Watch the first layer."
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "output_path": self.output_path,
             "total_layers": self.total_layers,
             "max_z": self.max_z,
             "file_size": self.file_size,
             "md5": self.md5,
             "est_print_time_sec": self.est_print_time_sec,
+            "start_gcode_model": self.start_gcode_model,
         }
+        if self.start_gcode_warning:
+            d["start_gcode_warning"] = self.start_gcode_warning
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -169,9 +292,104 @@ def _load_a1_end_gcode() -> str:
     return _a1_end_gcode
 
 
+def _load_model_template(filename: str) -> str:
+    """Load a per-model gcode template from ``kiln/data``, cached by name."""
+    cached = _model_gcode_cache.get(filename)
+    if cached is None:
+        path = _DATA_DIR / filename
+        if not path.is_file():
+            msg = f"Bambu gcode template not found: {path}"
+            raise FileNotFoundError(msg)
+        cached = path.read_text(encoding="utf-8")
+        _model_gcode_cache[filename] = cached
+    return cached
+
+
+def _normalize_model(printer_model: str | None) -> str:
+    """Normalize a declared printer model id for registry lookup."""
+    return (printer_model or "").strip().lower()
+
+
+def _select_start_gcode(printer_model: str | None) -> tuple[str, str]:
+    """Pick the start gcode template for a DECLARED printer model.
+
+    Returns ``(template_text, source_model)``.  ``source_model`` is the model
+    the template actually came from, which is what the caller should believe
+    the file is flavoured for --- it is not always the model asked for.
+
+    Every model except the A1 falls back to the A1 sequence today.  That is
+    logged once per model per process rather than passed over in silence: a
+    P2S owner wrapping a print in A1 initialization is a real defect, and the
+    session that first hit it lost time because nothing said so.
+    """
+    model = _normalize_model(printer_model)
+    filename = _MODEL_START_GCODE_FILES.get(model)
+    if filename is not None:
+        return _load_model_template(filename), model
+
+    if model and ("start", model) not in _fallback_warned:
+        _fallback_warned.add(("start", model))
+        logger.warning(
+            "No start gcode template for %s — using the Bambu A1 initialization "
+            "sequence, which is flavoured for the A1 (bed coordinates, purge and "
+            "calibration moves).  The print will be wrapped and can start, but the "
+            "startup sequence is not this model's own.",
+            model,
+        )
+    return _load_a1_start_gcode(), "bambu_a1"
+
+
+def _select_end_gcode(printer_model: str | None) -> tuple[str, str]:
+    """Pick the end gcode template for a DECLARED printer model.
+
+    Returns ``(template_text, source_model)``.  Falls back to the A1 end
+    sequence for a model with no template and for a printer whose owner never
+    declared one.
+    """
+    model = _normalize_model(printer_model)
+    filename = _MODEL_END_GCODE_FILES.get(model)
+    if filename is not None:
+        return _load_model_template(filename), model
+
+    if model and ("end", model) not in _fallback_warned:
+        _fallback_warned.add(("end", model))
+        logger.warning(
+            "No end gcode template for %s — using the Bambu A1 end sequence.",
+            model,
+        )
+    return _load_a1_end_gcode(), "bambu_a1"
+
+
 # ---------------------------------------------------------------------------
 # Template resolution
 # ---------------------------------------------------------------------------
+
+# A placeholder that survives resolution would be sent to the printer
+# verbatim, so resolution fails loudly instead.  Both shapes BambuStudio uses:
+# ``[option_name]`` and ``{expression}``.  The proven A1 files contain neither
+# character, and this check only ever runs over our own templates --- never
+# over the slicer's gcode body, whose comments legitimately carry brackets.
+_BRACKET_PLACEHOLDER_RE = re.compile(r"\[[a-z_][a-z0-9_\[\]]*\]", re.IGNORECASE)
+_BRACE_PLACEHOLDER_RE = re.compile(r"\{[^{}]*\}")
+
+
+def _assert_fully_resolved(gcode: str, *, source: str) -> None:
+    """Refuse to emit a template that still carries a placeholder.
+
+    :param gcode: Resolved template text.
+    :param source: Human-readable description for the error message.
+    :raises ValueError: If any unresolved placeholder remains.
+    """
+    for pattern in (_BRACE_PLACEHOLDER_RE, _BRACKET_PLACEHOLDER_RE):
+        match = pattern.search(gcode)
+        if match:
+            line = gcode.count("\n", 0, match.start()) + 1
+            msg = (
+                f"Unresolved gcode placeholder {match.group(0)!r} in {source} "
+                f"at line {line}.  Refusing to build a 3MF: this text is sent "
+                f"to the printer verbatim."
+            )
+            raise ValueError(msg)
 
 # Fixed temperatures in the A1 start gcode that must NOT be replaced:
 #   140°C — initial nozzle preheat for bed leveling
@@ -221,22 +439,290 @@ def _resolve_start_gcode(
     return "\n".join(resolved)
 
 
+# ---------------------------------------------------------------------------
+# BambuStudio end-template expansion
+# ---------------------------------------------------------------------------
+#
+# The per-model end templates are shipped verbatim from BambuStudio's bundle so
+# they stay diffable against it, which means they arrive carrying that tool's
+# own expression syntax.  Expanding it needs a tiny evaluator, and this one is
+# deliberately tiny: it covers exactly the surface the end templates use and
+# refuses everything else.  Every value it needs is a value Kiln really has.
+#
+# Validated against ground truth: expanding the bundle's A1 end template with
+# max_layer_z=65 and bed centre 128 reproduces the hardware-proven
+# bambu_a1_end_gcode.gcode capture, guard lines and blank lines included.
+# See test_bundle_a1_template_expands_to_the_proven_capture.
+
+# `{if cond}` / `{else}` / `{endif}` occupy whole lines, nested up to two deep.
+_TPL_IF_RE = re.compile(r"^\s*\{if\s+(?P<cond>.+)\}\s*$")
+_TPL_ELSE_RE = re.compile(r"^\s*\{else\}\s*$")
+_TPL_ENDIF_RE = re.compile(r"^\s*\{endif\}\s*$")
+_TPL_EXPR_RE = re.compile(r"\{(?P<expr>[^{}]*)\}")
+
+# Slicing flags the templates branch on.  Constants for Kiln: this pipeline
+# slices one plate, layer by layer, and never in vase mode.  Both readings are
+# what BambuStudio itself resolved them to in the proven A1 capture.
+_KILN_SPIRAL_MODE = False
+_KILN_PRINT_SEQUENCE = "by layer"
+
+_PRINTER_INTEL_PATH = _DATA_DIR / "printer_intelligence.json"
+_printer_intel_raw: dict[str, Any] | None = None
+
+
+def _bed_center(printer_model: str) -> tuple[float, float] | None:
+    """Bed centre ``(x, y)`` in mm for a DECLARED model, or ``None`` if unknown.
+
+    Read from ``printer_intelligence.json`` — the same spec sheet the rest of
+    Kiln reads — rather than copied into a table here, because a second copy
+    of a machine's bed size drifts silently and keeps answering confidently.
+
+    Exact key only: no fuzzy prefix match and no ``"default"`` profile.  This
+    number becomes a travel move, so an unrecognised model gets ``None`` and
+    the caller refuses instead of parking the head somewhere plausible.
+    """
+    global _printer_intel_raw  # noqa: PLW0603
+    if _printer_intel_raw is None:
+        try:
+            _printer_intel_raw = json.loads(
+                _PRINTER_INTEL_PATH.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            _printer_intel_raw = {}
+    entry = _printer_intel_raw.get(_normalize_model(printer_model))
+    if not isinstance(entry, dict):
+        return None
+    volume = entry.get("build_volume_mm")
+    if isinstance(volume, dict):
+        width, depth = volume.get("x"), volume.get("y")
+    elif isinstance(volume, (list, tuple)) and len(volume) >= 2:
+        width, depth = volume[0], volume[1]
+    else:
+        return None
+    try:
+        return float(width) / 2.0, float(depth) / 2.0
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_template_number(value: float) -> str:
+    """Format a resolved number the way BambuStudio writes it.
+
+    An integral result loses its decimal point (``165.0`` → ``165``), matching
+    the proven A1 capture; a fractional one keeps only the digits it needs.
+    """
+    if isinstance(value, bool):  # bool is an int subclass — not a coordinate
+        msg = f"Boolean {value!r} used where a number was expected"
+        raise ValueError(msg)
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:g}"
+
+
+def _eval_template_expr(expr: str, variables: dict[str, Any]) -> Any:
+    """Evaluate one BambuStudio template expression.
+
+    Supports only what the end templates contain: arithmetic, comparison,
+    ``&&`` / ``||`` / ``!``, string equality, and indexing a known list.  A
+    name it was not given, or any other syntax, raises — this text ends up on
+    a printer, so an expression we do not fully understand must not produce a
+    number anyway.
+
+    :raises ValueError: On unknown names or unsupported syntax.
+    """
+    # BambuStudio spells the boolean operators in C.  Rewrite `!` only when it
+    # is negation, never when it is the `!=` in `print_sequence != "by object"`.
+    py_expr = expr.replace("&&", " and ").replace("||", " or ")
+    # Strip afterwards: rewriting a leading `!` leaves whitespace that
+    # `ast.parse` in eval mode reads as an indent.
+    py_expr = re.sub(r"!(?!=)", " not ", py_expr).strip()
+
+    try:
+        tree = ast.parse(py_expr, mode="eval")
+    except SyntaxError as exc:
+        msg = f"Cannot parse gcode template expression {expr!r}: {exc}"
+        raise ValueError(msg) from exc
+
+    def visit(node: ast.AST) -> Any:
+        if isinstance(node, ast.Expression):
+            return visit(node.body)
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.Name):
+            if node.id not in variables:
+                msg = (
+                    f"Gcode template expression {expr!r} needs {node.id!r}, "
+                    f"which Kiln has no value for."
+                )
+                raise ValueError(msg)
+            return variables[node.id]
+        if isinstance(node, ast.Subscript):
+            container = visit(node.value)
+            index = visit(node.slice)
+            if not isinstance(container, (list, tuple)) or not isinstance(index, int):
+                msg = f"Unsupported subscript in gcode template expression {expr!r}"
+                raise ValueError(msg)
+            return container[index]
+        if isinstance(node, ast.UnaryOp):
+            operand = visit(node.operand)
+            if isinstance(node.op, ast.Not):
+                return not operand
+            if isinstance(node.op, ast.USub):
+                return -operand
+            if isinstance(node.op, ast.UAdd):
+                return +operand
+        elif isinstance(node, ast.BoolOp):
+            values = [visit(v) for v in node.values]
+            if isinstance(node.op, ast.And):
+                return all(values)
+            if isinstance(node.op, ast.Or):
+                return any(values)
+        elif isinstance(node, ast.BinOp):
+            left, right = visit(node.left), visit(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                # BambuStudio divides two integers as integers — measured on
+                # the A1 start capture, where `{...\/(24\/20) * 60}` came out
+                # 720 and not 600.  Nothing in the end templates does that, so
+                # rather than guess which semantics a future template wants,
+                # refuse the ambiguous case.
+                if isinstance(left, int) and isinstance(right, int):
+                    msg = (
+                        f"Integer division in gcode template expression {expr!r}: "
+                        f"BambuStudio truncates here and Kiln will not guess."
+                    )
+                    raise ValueError(msg)
+                return left / right
+        elif isinstance(node, ast.Compare) and len(node.ops) == 1:
+            left = visit(node.left)
+            right = visit(node.comparators[0])
+            op = node.ops[0]
+            if isinstance(op, ast.Lt):
+                return left < right
+            if isinstance(op, ast.LtE):
+                return left <= right
+            if isinstance(op, ast.Gt):
+                return left > right
+            if isinstance(op, ast.GtE):
+                return left >= right
+            if isinstance(op, ast.Eq):
+                return left == right
+            if isinstance(op, ast.NotEq):
+                return left != right
+        msg = (
+            f"Unsupported syntax {type(node).__name__} in gcode template "
+            f"expression {expr!r}"
+        )
+        raise ValueError(msg)
+
+    return visit(tree)
+
+
+def _expand_end_template(template: str, variables: dict[str, Any]) -> str:
+    """Expand a BambuStudio end-gcode template's conditionals and expressions.
+
+    Whitespace follows BambuStudio's own output, which the A1 ground-truth
+    diff pins exactly: an ``{if}`` or ``{endif}`` guard becomes a blank line,
+    an ``{else}`` and every line of the branch not taken disappear, and the
+    branch that is taken keeps its original indentation.
+
+    A template with no braces — the proven A1 capture — comes back unchanged.
+
+    :raises ValueError: On unbalanced conditionals or an expression that
+        cannot be resolved.
+    """
+    out: list[str] = []
+    # One frame per open `{if}`: (branch_active, parent_was_emitting).
+    stack: list[tuple[bool, bool]] = []
+
+    def emitting() -> bool:
+        return all(active for active, _ in stack)
+
+    for lineno, line in enumerate(template.split("\n"), 1):
+        if_match = _TPL_IF_RE.match(line)
+        if if_match:
+            parent = emitting()
+            active = bool(_eval_template_expr(if_match.group("cond"), variables)) if parent else False
+            stack.append((active, parent))
+            if parent:
+                out.append("")
+            continue
+        if _TPL_ELSE_RE.match(line):
+            if not stack:
+                msg = f"Gcode template has {{else}} with no {{if}} at line {lineno}"
+                raise ValueError(msg)
+            active, parent = stack[-1]
+            stack[-1] = ((not active) if parent else False, parent)
+            continue
+        if _TPL_ENDIF_RE.match(line):
+            if not stack:
+                msg = f"Gcode template has {{endif}} with no {{if}} at line {lineno}"
+                raise ValueError(msg)
+            _, parent = stack.pop()
+            if parent:
+                out.append("")
+            continue
+        if not emitting():
+            continue
+        out.append(
+            _TPL_EXPR_RE.sub(
+                lambda m: _format_template_number(
+                    _eval_template_expr(m.group("expr"), variables)
+                ),
+                line,
+            )
+        )
+
+    if stack:
+        msg = f"Gcode template has {len(stack)} unclosed {{if}} block(s)"
+        raise ValueError(msg)
+    return "\n".join(out)
+
+
 def _resolve_end_gcode(
     template: str,
     *,
     max_z: float = 65.0,
+    printer_model: str | None = None,
 ) -> str:
-    """Resolve the A1 end gcode template with print-specific values.
+    """Resolve an end gcode template with print-specific values.
 
-    Adjusts the safe Z-move height based on the actual print height.
-    The first ``G1 Z... F900`` command is the safe-move after the last
-    layer — it needs to clear the print.
+    Two steps, in this order:
+
+    1. Expand BambuStudio's template syntax against the real print height.
+       A pre-expanded template (the proven A1 capture) passes through
+       untouched.
+    2. Adjust the safe Z-move height.  The first ``G1 Z... F900`` command is
+       the safe-move after the last layer — it needs to clear the print.
+       Kiln lifts ``max_z + 5.0`` where Bambu's own template asks for
+       ``max_layer_z + 0.5``; the larger clearance is the A1-proven behaviour
+       and is applied to every model so there is one rule, not eight.
+
+    :param printer_model: Declared model, used only to look up the bed centre
+        for templates that park on it.
     """
+    variables: dict[str, Any] = {
+        "max_layer_z": float(max_z),
+        "spiral_mode": _KILN_SPIRAL_MODE,
+        "print_sequence": _KILN_PRINT_SEQUENCE,
+    }
+    center = _bed_center(printer_model) if printer_model else None
+    if center is not None:
+        # BambuStudio indexes this as a point; the templates only read [1].
+        variables["first_layer_center_no_wipe_tower"] = [center[0], center[1]]
+
+    expanded = _expand_end_template(template, variables)
+
     safe_z = max_z + 5.0
     return re.sub(
         r"(G1 Z)\d+\.?\d*( F900)",
         rf"\g<1>{safe_z:.1f}\2",
-        template,
+        expanded,
         count=1,
     )
 
@@ -681,6 +1167,7 @@ def build_bambu_3mf(
     source_3mf_path: str | None = None,
     stl_paths: list[str] | None = None,
     resume_mode: bool = False,
+    printer_model: str | None = None,
 ) -> Bambu3MFResult:
     """Build a Bambu-compatible 3MF from PrusaSlicer gcode body.
 
@@ -700,9 +1187,16 @@ def build_bambu_3mf(
         optional prime → descend to resume Z).  Re-running Bambu's full
         start sequence on a bed with a partial print risks nozzle
         collision on Z rehome and wastes ~18 minutes on init.
+    :param printer_model: The model the OWNER DECLARED (``bambu_p2s``,
+        ``bambu_h2s``, …) — never one inferred from a serial prefix or a
+        firmware string.  Selects the per-model end gcode.  ``None``, an
+        empty string, or a model with no template of its own all get the A1
+        files, which is what every Bambu print used before this parameter
+        existed.
     :returns: :class:`Bambu3MFResult` with output path and metadata.
     :raises FileNotFoundError: If the start/end gcode data files are missing.
-    :raises ValueError: If the gcode body has no layer changes.
+    :raises ValueError: If the gcode body has no layer changes, or if a
+        template could not be fully resolved.
     """
     if settings is None:
         settings = BambuPrintSettings()
@@ -748,17 +1242,26 @@ def build_bambu_3mf(
         est_minutes,
     )
 
-    # Load and resolve templates.
+    # Load and resolve templates for the declared model.  Both resolved
+    # strings are then checked for surviving placeholders: this text is
+    # copied into the 3MF and sent to the printer verbatim, so a template we
+    # could not fully resolve must stop the build rather than reach a machine.
+    start_template, start_source = _select_start_gcode(printer_model)
     start_gcode = _resolve_start_gcode(
-        _load_a1_start_gcode(),
+        start_template,
         hotend_temp=settings.hotend_temp,
         bed_temp=settings.bed_temp,
         filament_type=settings.filament_type,
     )
+    _assert_fully_resolved(start_gcode, source=f"{start_source} start gcode")
+
+    end_template, end_source = _select_end_gcode(printer_model)
     end_gcode = _resolve_end_gcode(
-        _load_a1_end_gcode(),
+        end_template,
         max_z=max_z,
+        printer_model=end_source,
     )
+    _assert_fully_resolved(end_gcode, source=f"{end_source} end gcode")
 
     # Correct M73 R values in the start gcode template.  The template has
     # hardcoded R186/R184/R183/R179 from a BambuStudio default (~186 min).
@@ -985,6 +1488,8 @@ def build_bambu_3mf(
         file_size=file_size,
         md5=file_md5,
         est_print_time_sec=est_time_sec_with_startup,
+        start_gcode_model=start_source,
+        requested_model=printer_model,
     )
 
 
@@ -1135,6 +1640,9 @@ def repackage_gcode_as_bambu_3mf(
 
 def _reset_cache() -> None:
     """Reset lazy singletons — for testing only."""
-    global _a1_start_gcode, _a1_end_gcode  # noqa: PLW0603
+    global _a1_start_gcode, _a1_end_gcode, _printer_intel_raw  # noqa: PLW0603
     _a1_start_gcode = None
     _a1_end_gcode = None
+    _printer_intel_raw = None
+    _model_gcode_cache.clear()
+    _fallback_warned.clear()

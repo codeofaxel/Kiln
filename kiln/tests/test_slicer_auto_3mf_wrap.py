@@ -278,3 +278,56 @@ class TestStepThumbnailSource:
         assert threemf is not None, "a missing converter must never cost the print"
         assert warning is None
         assert captured["stl_paths"] is None
+
+
+class TestStartGcodeSubstitutionIsAudible:
+    """A successful wrap can still hand back another machine's startup.
+
+    Kiln ships one validated Bambu start sequence — the A1's — and every
+    other model falls back to it.  That fallback is deliberate and prints are
+    running on it, but until now it was announced only in a server log the
+    operator never sees, so a P2S owner received an A1 initialisation
+    sequence with nothing said.  It stopped being a corner case when the
+    relative-E fix let the other seven Bambu models slice at all.
+
+    The A1 sequence disables soft endstops and drives X negative, so the
+    substitution has to reach whoever decides to press print.
+    """
+
+    def test_non_a1_model_returns_a_warning(self, tmp_path) -> None:
+        gcode = _write_dummy_gcode(tmp_path)
+
+        threemf, warning = _auto_wrap_bambu_3mf(
+            str(gcode), effective_printer_id="bambu_p2s", stl_path=None,
+        )
+
+        assert threemf is not None, "the wrap still succeeds — this is a warning"
+        assert warning is not None, "the A1 substitution passed silently"
+        assert "bambu_p2s" in warning
+        assert "bambu_a1" in warning
+
+    def test_a1_itself_stays_silent(self, tmp_path) -> None:
+        """No warning when the file really is flavoured for the machine."""
+        gcode = _write_dummy_gcode(tmp_path)
+
+        threemf, warning = _auto_wrap_bambu_3mf(
+            str(gcode), effective_printer_id="bambu_a1", stl_path=None,
+        )
+
+        assert threemf is not None
+        assert warning is None
+
+    def test_result_object_carries_the_substitution(self, tmp_path) -> None:
+        """One source of truth, so every door reports the same fact."""
+        from kiln.printers.bambu_3mf import build_bambu_3mf
+
+        gcode = _write_dummy_gcode(tmp_path)
+        result = build_bambu_3mf(
+            Path(gcode).read_text(encoding="utf-8"),
+            str(tmp_path / "out.3mf"),
+            printer_model="bambu_x1c",
+        )
+
+        assert result.start_gcode_model == "bambu_a1"
+        assert result.requested_model == "bambu_x1c"
+        assert "start_gcode_warning" in result.to_dict()
