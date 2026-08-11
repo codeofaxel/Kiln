@@ -1496,6 +1496,70 @@ def test_write_3mf_colours_read_back_by_kilns_own_parser(tmp_dir):
     assert 'name="base_plate"' in model
 
 
+def test_write_3mf_keeps_every_colour_when_parts_share_a_name(tmp_dir):
+    """The writer and the reader in this repo have to agree about names.
+
+    Colour is addressed per object BY NAME downstream, so two objects called
+    the same thing cost the file every colour it carries — Kiln's own parser
+    rightly declines to guess which part is which, and the stage goes grey.
+    Duplicates are the normal case, not an edge one: an assembly holds two
+    of the same bracket, and an unnamed STEP body degrades to its shape type.
+    """
+    from kiln.step_import import _write_3mf
+    from kiln.threemf_parser import object_display_colors
+
+    a, b = tmp_dir / "a.stl", tmp_dir / "b.stl"
+    _tiny_binary_stl(a)
+    _tiny_binary_stl(b, offset_x=20.0)
+
+    out = str(tmp_dir / "two_brackets.3mf")
+    written = _write_3mf(
+        [
+            {"stl_path": str(a), "name": "bracket", "color": "#C7542E"},
+            {"stl_path": str(b), "name": "bracket", "color": "#3D6B99"},
+        ],
+        out,
+    )
+
+    assert written == ["bracket", "bracket (2)"]
+    # Both colours survive, each on its own part — not {} for the whole file.
+    assert object_display_colors(out) == {
+        "bracket": (0xC7, 0x54, 0x2E),
+        "bracket (2)": (0x3D, 0x6B, 0x99),
+    }
+
+    # The material list is named the same way as the objects, so a slicer
+    # showing materials and one showing objects tell the same story.
+    import zipfile
+
+    with zipfile.ZipFile(out) as zf:
+        model = zf.read("3D/3dmodel.model").decode("utf-8")
+    assert '<base name="bracket" displaycolor="#C7542E"/>' in model
+    assert '<base name="bracket (2)" displaycolor="#3D6B99"/>' in model
+
+
+def test_write_3mf_gives_a_nameless_part_a_name(tmp_dir):
+    """A blank name would key by object id, which a sibling could be named
+    after — and reads as an empty row in the slicer's object list."""
+    from kiln.step_import import _write_3mf
+    from kiln.threemf_parser import object_display_colors
+
+    a, b = tmp_dir / "a.stl", tmp_dir / "b.stl"
+    _tiny_binary_stl(a)
+    _tiny_binary_stl(b, offset_x=20.0)
+
+    out = str(tmp_dir / "nameless.3mf")
+    written = _write_3mf(
+        [
+            {"stl_path": str(a), "name": "", "color": "#C7542E"},
+            {"stl_path": str(b), "name": "", "color": "#3D6B99"},
+        ],
+        out,
+    )
+    assert written == ["part_1", "part_2"]
+    assert len(object_display_colors(out)) == 2
+
+
 def test_write_3mf_escapes_hostile_part_names(tmp_dir):
     from kiln.step_import import _write_3mf
     from kiln.threemf_parser import parse_colored_3mf
@@ -1512,8 +1576,15 @@ def test_write_3mf_escapes_hostile_part_names(tmp_dir):
     assert mesh.colors_found
 
 
-def _write_colored_two_body_step(path: Path) -> None:
-    """A 2-body coloured STEP authored through XCAF (kernel required)."""
+def _write_colored_two_body_step(
+    path: Path, names: tuple[str, str] | None = ("base_plate", "lid")
+) -> None:
+    """A 2-body coloured STEP authored through XCAF (kernel required).
+
+    ``names=None`` leaves both XCAF labels unnamed, which is how an ordinary
+    CAD export arrives: OCCT then names each label after its shape type, so
+    both bodies read back under one name.
+    """
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.gp import gp_Pnt
     from OCP.IFSelect import IFSelect_ReturnStatus
@@ -1531,13 +1602,13 @@ def _write_colored_two_body_step(path: Path) -> None:
     shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
     color_tool = XCAFDoc_DocumentTool.ColorTool_s(doc.Main())
 
-    for name, x0, rgb in (
-        ("base_plate", 0.0, (0.85, 0.15, 0.15)),
-        ("lid", 50.0, (0.10, 0.35, 0.85)),
+    for i, (x0, rgb) in enumerate(
+        ((0.0, (0.85, 0.15, 0.15)), (50.0, (0.10, 0.35, 0.85)))
     ):
         shape = BRepPrimAPI_MakeBox(gp_Pnt(x0, 0, 0), 40.0, 30.0, 5.0).Shape()
         label = shape_tool.AddShape(shape, False)
-        TDataStd_Name.Set_s(label, TCollection_ExtendedString(name))
+        if names is not None:
+            TDataStd_Name.Set_s(label, TCollection_ExtendedString(names[i]))
         color_tool.SetColor(
             label,
             Quantity_Color(*rgb, Quantity_TOC_RGB),
@@ -1570,6 +1641,89 @@ def test_convert_step_auto_keeps_colour_and_names(real_kernel, tmp_dir):
     assert mesh.colors_found
     xs = [v[0] for t in mesh.triangles for v in (t.v0, t.v1, t.v2)]
     assert max(xs) > 80.0, "second body must keep its STEP position"
+
+
+@pytest.mark.parametrize(
+    ("names", "expected"),
+    [
+        # Two instances of one part — an ordinary assembly.
+        (("bracket", "bracket"), ["bracket", "bracket (2)"]),
+        # Unnamed bodies: OCCT names each label after its shape type, so the
+        # duplicate arrives without anyone having chosen it.
+        (None, None),
+    ],
+    ids=["same_name_twice", "unnamed_bodies"],
+)
+def test_convert_step_keeps_colour_when_bodies_share_a_name(
+    real_kernel, tmp_dir, names, expected
+):
+    """The whole trip: a real coloured STEP whose bodies share a name comes
+    out as a 3MF whose colours are still readable, part by part."""
+    from kiln.step_import import convert_step
+    from kiln.threemf_parser import object_display_colors
+
+    step = tmp_dir / "assembly.step"
+    _write_colored_two_body_step(step, names=names)
+
+    out_dir = tmp_dir / "out"
+    out_dir.mkdir()
+    result = convert_step(str(step), output_dir=str(out_dir))
+
+    assert result.output_format == "3mf"
+    assert result.body_count == 2
+    if expected is not None:
+        assert result.part_names == expected
+    else:
+        # Whatever OCCT called them, the two must not be the same name.
+        assert len(set(result.part_names)) == 2, result.part_names
+
+    colors = object_display_colors(result.output_path)
+    assert set(colors) == set(result.part_names), (
+        "every part reported must be addressable by that name in the file"
+    )
+    assert len(set(colors.values())) == 2, "each body keeps its OWN colour"
+
+
+def test_duplicate_named_3mf_colours_reach_the_viewer_payload(tmp_dir):
+    """The consumer end of the trip: the part has to arrive at the stage with
+    per-vertex colours, not grey.
+
+    Deliberately writes the 3MF rather than converting a STEP, so the OCCT
+    kernel is not required.  The 3MF is the interface between the two halves
+    — the STEP half is proven above with a real kernel, and pinning this half
+    to the kernel too would leave it skipped everywhere: CI installs the dev
+    extra (trimesh + lxml) but not the kernel, and a kernel install here has
+    no lxml.  A test that can only skip is a test that proves nothing.
+    """
+    pytest.importorskip("trimesh", reason="viewer payload reads meshes via trimesh")
+    pytest.importorskip("lxml", reason="trimesh needs lxml to read a 3MF")
+
+    import base64
+
+    from kiln.mesh_payload import mesh_to_viewer_payload
+    from kiln.step_import import _write_3mf
+
+    a, b = tmp_dir / "a.stl", tmp_dir / "b.stl"
+    _tiny_binary_stl(a)
+    _tiny_binary_stl(b, offset_x=20.0)
+    out = str(tmp_dir / "brackets.3mf")
+    _write_3mf(
+        [
+            {"stl_path": str(a), "name": "bracket", "color": "#C7542E"},
+            {"stl_path": str(b), "name": "bracket", "color": "#3D6B99"},
+        ],
+        out,
+    )
+
+    payload = mesh_to_viewer_payload(out)
+    encoded = payload.get("vertex_colors")
+    assert encoded, "a coloured import must not reach the stage colourless"
+
+    raw = base64.b64decode(encoded)  # RGBA per vertex
+    distinct = {tuple(raw[i : i + 3]) for i in range(0, len(raw), 4)}
+    assert distinct == {(0xC7, 0x54, 0x2E), (0x3D, 0x6B, 0x99)}, (
+        f"both body colours must survive, got {distinct}"
+    )
 
 
 def test_convert_step_auto_plain_solid_stays_classic_stl(real_kernel, tmp_dir):

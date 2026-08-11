@@ -241,7 +241,14 @@ class StepImportResult:
     """``"stl"`` or ``"3mf"`` — what :attr:`output_path` actually is."""
 
     part_names: list[str] = field(default_factory=list)
-    """Per-part names from the STEP, when the colour-aware path ran."""
+    """Per-part names from the STEP, when the colour-aware path ran.
+
+    For a 3MF these are the names as they appear IN the file, so a caller can
+    address a part by the name it will see there.  A STEP may name two bodies
+    the same; the 3MF may not (see
+    :func:`~kiln.threemf_parser.unique_object_names`), so a repeat carries a
+    ``" (2)"`` suffix here too.
+    """
 
     part_colors: list[str | None] = field(default_factory=list)
     """Per-part ``#RRGGBB`` colours (or ``None``), same order as names."""
@@ -921,7 +928,7 @@ def _read_binary_stl(path: str) -> list[tuple[tuple[float, float, float], ...]]:
 def _write_3mf(
     parts: list[dict[str, Any]],
     out_path: str,
-) -> None:
+) -> list[str]:
     """Write parts as a core-spec 3MF with per-object colour and name.
 
     ``parts``: dicts with ``stl_path`` (binary STL), ``name``, and ``color``
@@ -932,14 +939,26 @@ def _write_3mf(
     part without a colour gets no ``pid`` and renders in each viewer's
     default, which is honest: the STEP didn't say.
 
+    Names are made unique before they are written
+    (:func:`~kiln.threemf_parser.unique_object_names`) — colour is addressed
+    per object by name downstream, and a STEP whose bodies share one (two
+    instances of the same part, or unnamed bodies that both degrade to their
+    shape type) would otherwise cost the file every colour it carries.
+    Returns the names as written, in part order, so the caller can report
+    what is actually in the file.
+
     Pure stdlib (zipfile + string XML) by design — this module must import
-    with no third-party dependencies installed.
+    with no third-party dependencies installed; the name helper is stdlib
+    too, from a module already sitting beside this one.
     """
     import zipfile
     from xml.sax.saxutils import quoteattr
 
-    colored = [p for p in parts if p.get("color")]
-    color_index = {id(p): i for i, p in enumerate(colored)}
+    from kiln.threemf_parser import unique_object_names
+
+    names = unique_object_names([p.get("name") for p in parts])
+    colored = [i for i, p in enumerate(parts) if p.get("color")]
+    color_index = {part_index: i for i, part_index in enumerate(colored)}
 
     xml: list[str] = [
         '<?xml version="1.0" encoding="UTF-8"?>\n',
@@ -951,10 +970,10 @@ def _write_3mf(
     ]
     if colored:
         xml.append('  <basematerials id="1">\n')
-        for p in colored:
+        for part_index in colored:
             xml.append(
-                f"   <base name={quoteattr(p['name'])} "
-                f"displaycolor=\"{p['color']}\"/>\n"
+                f"   <base name={quoteattr(names[part_index])} "
+                f"displaycolor=\"{parts[part_index]['color']}\"/>\n"
             )
         xml.append("  </basematerials>\n")
 
@@ -975,10 +994,10 @@ def _write_3mf(
 
         pid_attr = ""
         if part.get("color"):
-            pid_attr = f' pid="1" pindex="{color_index[id(part)]}"'
+            pid_attr = f' pid="1" pindex="{color_index[obj_index]}"'
         xml.append(
             f"  <object id=\"{obj_id}\" type=\"model\" "
-            f"name={quoteattr(part['name'])}{pid_attr}>\n   <mesh>\n"
+            f"name={quoteattr(names[obj_index])}{pid_attr}>\n   <mesh>\n"
             "    <vertices>\n"
         )
         for v, _ in sorted(vertex_ids.items(), key=lambda kv: kv[1]):
@@ -1015,6 +1034,8 @@ def _write_3mf(
             "</Relationships>\n",
         )
         zf.writestr("3D/3dmodel.model", "".join(xml))
+
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -1318,7 +1339,7 @@ def convert_step(
         )
 
     out_3mf = str(out_dir / f"{validated_path.stem}.3mf")
-    _write_3mf(parts, out_3mf)
+    written_names = _write_3mf(parts, out_3mf)
     for p in parts:  # the per-part STLs were scaffolding, not output
         with contextlib.suppress(OSError):
             os.unlink(p["stl_path"])
@@ -1331,7 +1352,7 @@ def convert_step(
         conversion_time_s=round(elapsed, 3),
         output_paths=[out_3mf],
         output_format="3mf",
-        part_names=data["names"],
+        part_names=written_names,
         part_colors=data["colors"],
     )
 

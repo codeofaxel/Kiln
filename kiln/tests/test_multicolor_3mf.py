@@ -1445,3 +1445,93 @@ def test_compose_single_extruder_has_no_slicer_note(stl_a: Path, tmp_path: Path)
     )
     assert result["success"] is True
     assert "slicer_note" not in result
+
+
+# ---------------------------------------------------------------------------
+# Duplicate part names — colour is addressed per object BY NAME downstream
+# ---------------------------------------------------------------------------
+
+
+def test_compose_keeps_colours_when_two_parts_share_a_name(
+    stl_a: Path, stl_b: Path, tmp_path: Path
+):
+    """Two parts called "body" is an ordinary thing for a caller to ask for.
+
+    Left duplicated, the name makes every colour in the file unattributable —
+    Kiln's own parser declines to guess which part is which and the preview
+    goes grey, so the composer makes the names unique on the way out.
+    """
+    from kiln.threemf_parser import object_display_colors
+
+    out = str(tmp_path / "dupes.3mf")
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(str(stl_a), extruder=1, name="body", color="#C7542E"),
+            ColorPart(str(stl_b), extruder=2, name="body", color="#3D6B99"),
+        ],
+        output_path=out,
+    )
+    assert result["success"] is True
+    assert object_display_colors(out) == {
+        "body": (0xC7, 0x54, 0x2E),
+        "body (2)": (0x3D, 0x6B, 0x99),
+    }
+
+
+def test_compose_names_agree_across_every_document(
+    stl_a: Path, stl_b: Path, tmp_path: Path
+):
+    """The core model, BambuStudio's sidecar and the PrusaSlicer family's each
+    name the same objects; a slicer's object list and the model it names have
+    to be the same list."""
+    import re
+
+    out = str(tmp_path / "agree.3mf")
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(str(stl_a), extruder=1, name="body"),
+            ColorPart(str(stl_b), extruder=2, name="body"),
+        ],
+        output_path=out,
+    )
+    assert result["success"] is True
+
+    with zipfile.ZipFile(out) as zf:
+        model = zf.read("3D/3dmodel.model").decode()
+        bambu = zf.read("Metadata/model_settings.config").decode()
+        prusa = zf.read("Metadata/Slic3r_PE_model.config").decode()
+
+    assert re.findall(r'<object id="\d+" type="model" name="([^"]*)"', model) == [
+        "body",
+        "body (2)",
+    ]
+    assert re.findall(r'<metadata key="name"\s+value="([^"]*)"', bambu) == [
+        "body",
+        "body (2)",
+    ]
+    assert re.findall(
+        r'<metadata type="object" key="name" value="([^"]*)"', prusa
+    ) == ["body", "body (2)"]
+
+
+def test_compose_nameless_parts_keep_the_positional_names(
+    stl_a: Path, stl_b: Path, tmp_path: Path
+):
+    """Unchanged behaviour: a part with no name is still part_1, part_2 …"""
+    import re
+
+    out = str(tmp_path / "nameless.3mf")
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(str(stl_a), extruder=1),
+            ColorPart(str(stl_b), extruder=2),
+        ],
+        output_path=out,
+    )
+    assert result["success"] is True
+    with zipfile.ZipFile(out) as zf:
+        model = zf.read("3D/3dmodel.model").decode()
+    assert re.findall(r'<object id="\d+" type="model" name="([^"]*)"', model) == [
+        "part_1",
+        "part_2",
+    ]

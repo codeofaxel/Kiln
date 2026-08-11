@@ -535,6 +535,29 @@ _RELS = """\
 _ParsedPart = tuple[ColorPart, list[tuple[float, float, float]], list[tuple[int, int, int]]]
 
 
+def _display_names(parsed: list[_ParsedPart]) -> list[str]:
+    """The object names, XML-escaped, in part order.
+
+    Computed ONCE for the three documents that must agree about them — the
+    core model, BambuStudio's ``model_settings.config``, and the PrusaSlicer
+    family's ``Slic3r_PE_model.config`` — because a slicer's object list and
+    the model it names have to be the same list.
+
+    Names are made unique first
+    (:func:`~kiln.threemf_parser.unique_object_names`): two parts called
+    "body" is an ordinary thing for a caller to ask for, and colour is read
+    back per object BY NAME, so leaving the duplicate would cost the file
+    every colour it carries.  That helper also supplies ``part_N`` for a part
+    whose name is blank, which is what this composer has always written.
+    """
+    from kiln.threemf_parser import unique_object_names
+
+    return [
+        _xml_escape(name)
+        for name in unique_object_names([part.name for part, _, _ in parsed])
+    ]
+
+
 def _build_model_xml(parsed: list[_ParsedPart]) -> str:
     """Build ``3D/3dmodel.model`` XML containing all mesh objects.
 
@@ -586,8 +609,9 @@ def _build_model_xml(parsed: list[_ParsedPart]) -> str:
         lines += [f'      <m:color color="{c}"/>' for c in palette]
         lines.append("    </m:colorgroup>")
 
-    for obj_id, (part, vertices, triangles) in enumerate(parsed, start=1):
-        name = _xml_escape(part.name or f"part_{obj_id}")
+    names = _display_names(parsed)
+    for obj_id, (_part, vertices, triangles) in enumerate(parsed, start=1):
+        name = names[obj_id - 1]
         pindex = part_pindex.get(obj_id)
         tri_ref = (
             f' pid="{colorgroup_id}" p1="{pindex}"' if pindex is not None else ""
@@ -645,10 +669,11 @@ def _build_prusa_model_config(parsed: list[_ParsedPart]) -> str:
         '<?xml version="1.0" encoding="UTF-8"?>',
         "<config>",
     ]
+    names = _display_names(parsed)
     for obj_id, (part, _, triangles) in enumerate(parsed, start=1):
         if not triangles:
             continue  # a rangeless volume would make the reader reject the file
-        name = _xml_escape(part.name or f"part_{obj_id}")
+        name = names[obj_id - 1]
         lines += [
             f' <object id="{obj_id}" instances_count="1">',
             f'  <volume firstid="0" lastid="{len(triangles) - 1}">',
@@ -674,8 +699,9 @@ def _build_model_settings(parsed: list[_ParsedPart]) -> str:
         '<?xml version="1.0" encoding="utf-8"?>',
         "<config>",
     ]
+    names = _display_names(parsed)
     for obj_id, (part, _, _) in enumerate(parsed, start=1):
-        name = _xml_escape(part.name or f"part_{obj_id}")
+        name = names[obj_id - 1]
         lines.append(f'  <object id="{obj_id}">')
         lines.append(f'    <metadata key="name"     value="{name}"/>')
         lines.append(f'    <metadata key="extruder" value="{part.extruder}"/>')
