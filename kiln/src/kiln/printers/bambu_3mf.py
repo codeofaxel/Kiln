@@ -862,7 +862,21 @@ def build_bambu_3mf(
     )
 
     # Extract thumbnails and geometry from source 3MF if available.
+    #
+    # The root model part is copied VERBATIM, so every part it references has
+    # to travel with it.  Under the 3MF production extension a root part holds
+    # <component objectid="..." p:path="/3D/Objects/object_N.model"/> and the
+    # geometry lives in those sub-parts.  Reading only 3D/3dmodel.model
+    # produced an archive whose components pointed at parts that were never
+    # written — a dangling reference we manufactured ourselves.  Bambu Studio,
+    # OrcaSlicer and PrusaSlicer all write that layout, so it is the common
+    # case for a sliced project file, not an exotic one.
+    #
+    # [Content_Types].xml already declares .model by Default Extension, so
+    # carrying extra parts needs no manifest change, and _RELS_XML only has to
+    # name the root part — sub-parts are reached through p:path, not rels.
     thumbnails: dict[str, bytes] = {}
+    model_parts: dict[str, bytes] = {}
     model_data: str = _MINIMAL_3D_MODEL
     if source_3mf_path and os.path.isfile(source_3mf_path):
         try:
@@ -875,6 +889,11 @@ def build_bambu_3mf(
                         thumbnails[name] = zf.read(name)
                     elif name == "3D/3dmodel.model":
                         model_data = zf.read(name).decode("utf-8")
+                    elif name.startswith("3D/") and name.endswith(".model"):
+                        # Copy every sibling part, referenced or not.  An
+                        # unreferenced part is harmless weight; a missing
+                        # referenced one breaks the file.
+                        model_parts[name] = zf.read(name)
         except (zipfile.BadZipFile, KeyError):
             logger.warning(
                 "Could not extract thumbnails from %s", source_3mf_path
@@ -921,6 +940,11 @@ def build_bambu_3mf(
         zf.writestr("[Content_Types].xml", _CONTENT_TYPES_XML)
         zf.writestr("_rels/.rels", _RELS_XML)
         zf.writestr("3D/3dmodel.model", model_data)
+        # Sub-parts the root model reaches through p:path.  Written before the
+        # metadata so a reader walking the archive in order resolves every
+        # component reference in the root part.
+        for name, data in model_parts.items():
+            zf.writestr(name, data)
         zf.writestr("Metadata/plate_1.gcode", complete_gcode)
         zf.writestr("Metadata/plate_1.gcode.md5", gcode_md5)
         zf.writestr("Metadata/slice_info.config", slice_info)

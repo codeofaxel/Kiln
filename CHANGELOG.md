@@ -151,6 +151,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Bambu P2S prints start the first time.** Kiln gave every Bambu the same
+  instructions for where to find your print file, and the P2S expects a
+  different form, so files uploaded fine and prints never began. The P2S now
+  gets the form its firmware wants, and Kiln looks in the folder it actually
+  keeps jobs in. Other Bambu models are unchanged.
+
+- **Bambu printers without an AMS no longer stall asking about the AMS.**
+  Printing from an external spool, Kiln pointed the printer at an AMS slot,
+  so a machine with no AMS stopped and waited on a filament-mapping screen.
+
+  Thanks to [@hype-eth](https://github.com/hype-eth) for finding both of these
+  on a brand-new P2S, and for digging through the printer's own error codes to
+  prove what was happening.
+
+- **3MF files keep all of their objects.** A .3mf you bring to Kiln can hold
+  its shapes in several separate parts, and Kiln was carrying only the first
+  one into the file it sends the printer — so that file could open incomplete,
+  or fail to open at all. Designs Kiln makes itself were never affected.
+
 - **Kiln stops suggesting settings from a different design.** Move a hole or
   resize a slot and Kiln now treats it as the new part it is, instead of
   recommending what worked for the previous version.

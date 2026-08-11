@@ -2202,7 +2202,10 @@ class TestBambuAdapterStartPrintConfigurable:
         adapter_with_mqtt.start_print("model.3mf")
         payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
         assert payload["print"]["use_ams"] is False
-        assert payload["print"]["ams_mapping"] == [0]
+        # External spool is an empty mapping, matching what Bambu's own
+        # networking plugin puts on the wire.  [0] here named AMS slot 0 on a
+        # machine that may have no AMS, and stalled at the mapping dialog.
+        assert payload["print"]["ams_mapping"] == []
 
     def test_start_print_timelapse_enabled(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt.start_print("model.3mf", timelapse=True)
@@ -2243,7 +2246,7 @@ class TestBambuAdapterStartPrintConfigurable:
         """Non-list ams_mapping falls back to default."""
         adapter_with_mqtt.start_print("model.3mf", ams_mapping="invalid")
         payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
-        assert payload["print"]["ams_mapping"] == [0]
+        assert payload["print"]["ams_mapping"] == []
 
     def test_start_print_gcode_ignores_ams_params(self, adapter_with_mqtt: BambuAdapter) -> None:
         """G-code files use gcode_file command, not project_file — kwargs are ignored."""
@@ -2624,9 +2627,9 @@ class TestStartPrintAutoDetect:
         )
         assert result.success is True
         payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
-        # Single filament: no AMS needed.
+        # Single filament: no AMS needed, so the external-spool empty mapping.
         assert payload["print"]["use_ams"] is False
-        assert payload["print"]["ams_mapping"] == [0]
+        assert payload["print"]["ams_mapping"] == []
 
     def test_color_warning_in_result_message(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
         import zipfile
@@ -3485,3 +3488,202 @@ class TestGetPrinterInfo:
         info = adapter.get_printer_info()
         assert info is not None
         assert info.model == "bambu_p1s"
+
+
+# ---------------------------------------------------------------------------
+# Job URL form — per-model, measured on hardware
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPrintUrl:
+    """The MQTT job URL is not the same string on every Bambu model.
+
+    P2S firmware rejects the ``file:///`` form the other models require
+    (measured 2026-08-10: both ``file:///`` variants returned ERROR STATE
+    with print_error 0500_4002, ``ftp://cache/<name>`` started the print).
+    A1 is the mirror image — an ``ftp://`` URL raises HMS
+    0500-C010-010800 there — so these two must never converge.
+    """
+
+    def test_default_is_the_filesystem_form(self) -> None:
+        """An undeclared printer behaves exactly as it did before the split."""
+        assert _adapter()._build_print_url("a.3mf") == "file:///sdcard/model/a.3mf"
+
+    @pytest.mark.parametrize("declared", ["bambu_p2s", "p2s", "BAMBU_P2S", " bambu_p2s "])
+    def test_p2s_gets_the_ftp_form(self, declared: str) -> None:
+        """Declared P2S wins, and the declaration is normalised."""
+        adapter = _adapter(printer_model=declared)
+        assert adapter._build_print_url("a.3mf") == "ftp://cache/a.3mf"
+
+    @pytest.mark.parametrize(
+        "declared",
+        ["bambu_a1", "bambu_a1_mini", "bambu_x1c", "bambu_p1s", "bambu_p1p"],
+    )
+    def test_other_models_never_get_ftp(self, declared: str) -> None:
+        """The A1 regression guard: ftp:// there is HMS 0500-C010-010800."""
+        url = _adapter(printer_model=declared)._build_print_url("a.3mf")
+        assert url == "file:///sdcard/model/a.3mf"
+        assert not url.startswith("ftp://")
+
+    def test_observed_cache_upload_implies_ftp_form(self) -> None:
+        """Where the upload actually landed is evidence, not a model guess.
+
+        This is the path that saves a user who never declared a model in
+        config.yaml — the case that produced the original bug report.
+        """
+        adapter = _adapter()
+        adapter._last_storage_path = "/cache"
+        assert adapter._build_print_url("a.3mf") == "ftp://cache/a.3mf"
+
+    @pytest.mark.parametrize("observed", ["/sdcard", "/model"])
+    def test_observed_non_cache_upload_keeps_filesystem_form(self, observed: str) -> None:
+        adapter = _adapter()
+        adapter._last_storage_path = observed
+        assert adapter._build_print_url("a.3mf") == "file:///sdcard/model/a.3mf"
+
+    def test_declared_model_outranks_observed_path(self) -> None:
+        """A declaration is the owner's word; an observation is a fallback."""
+        adapter = _adapter(printer_model="bambu_p2s")
+        adapter._last_storage_path = "/sdcard"
+        assert adapter._build_print_url("a.3mf") == "ftp://cache/a.3mf"
+
+    def test_basename_is_carried_verbatim(self) -> None:
+        name = "towel_stand_p2s_petg.gcode.3mf"
+        assert _adapter(printer_model="bambu_p2s")._build_print_url(name) == f"ftp://cache/{name}"
+
+
+# ---------------------------------------------------------------------------
+# External-spool mapping — the wire shape when AMS feeding is off
+# ---------------------------------------------------------------------------
+
+
+class TestExternalSpoolMapping:
+    """``ams_mapping`` defaults to [] with AMS off, [0] with AMS on.
+
+    [0] means AMS unit 0 slot 0, so sending it with ``use_ams: false``
+    pointed the firmware at a tray that need not exist — on a machine with
+    no AMS it stalled at the filament-mapping dialog.  Bambu's own
+    networking plugin sends ``use_ams ? "[0]" : "[]"``
+    (open-bamboo-networking src/print_job.cpp:184).
+    """
+
+    def _published(self, adapter: BambuAdapter) -> dict[str, Any]:
+        return json.loads(adapter._mqtt_client.publish.call_args[0][1])["print"]
+
+    def test_ams_on_still_gets_slot_zero(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """The AMS path is untouched — this is the regression guard."""
+        adapter_with_mqtt.start_print("model.3mf", use_ams=True)
+        payload = self._published(adapter_with_mqtt)
+        assert payload["use_ams"] is True
+        assert payload["ams_mapping"] == [0]
+
+    def test_explicit_empty_mapping_is_preserved(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """An explicitly passed [] must not be rewritten.
+
+        Callers already send one — kiln_pro's material routing normalises
+        with ``list(mapping or [])`` — so the default branch must leave a
+        deliberate empty list alone rather than treating it as absent.
+        """
+        adapter_with_mqtt.start_print("model.3mf", ams_mapping=[])
+        assert self._published(adapter_with_mqtt)["ams_mapping"] == []
+
+    def test_explicit_mapping_survives_ams_off(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """A caller forcing a slot with AMS off keeps their mapping."""
+        adapter_with_mqtt.start_print("model.3mf", use_ams=False, ams_mapping=[2])
+        payload = self._published(adapter_with_mqtt)
+        assert payload["use_ams"] is False
+        assert payload["ams_mapping"] == [2]
+
+    def test_no_magic_tray_numbers_reach_the_mapping(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """254/255 are tray identifiers and belong in other fields.
+
+        255 is the virtual external tray in ``ams_mapping2`` and in the
+        ``tray_now`` status field.  Neither is a slot index, so neither may
+        appear here by default.
+        """
+        adapter_with_mqtt.start_print("model.3mf")
+        assert self._published(adapter_with_mqtt)["ams_mapping"] == []
+        assert 254 not in self._published(adapter_with_mqtt)["ams_mapping"]
+        assert 255 not in self._published(adapter_with_mqtt)["ams_mapping"]
+
+
+# ---------------------------------------------------------------------------
+# Storage path probe — /cache, and the two readers that must agree with it
+# ---------------------------------------------------------------------------
+
+
+class TestCacheStoragePath:
+    """The probe never tried ``cache/``, so a P2S upload went somewhere the
+    firmware does not read.
+
+    These are the end-to-end assertions: the earlier ``_build_print_url``
+    tests set ``_last_storage_path`` by hand, which proved the branch behaves
+    if something sets ``/cache`` — not that anything ever does.
+    """
+
+    @staticmethod
+    def _ftp_accepting(*allowed: str) -> mock.MagicMock:
+        """A fake FTP whose ``cwd`` succeeds only for ``allowed`` paths."""
+        import ftplib as _ftplib
+
+        ftp = mock.MagicMock()
+
+        def _cwd(path: str) -> None:
+            if path not in allowed:
+                raise _ftplib.error_perm("550 No such directory")
+
+        ftp.cwd = mock.MagicMock(side_effect=_cwd)
+        return ftp
+
+    def test_probe_finds_cache_when_only_cache_exists(self) -> None:
+        adapter = _adapter(printer_model="bambu_p2s")
+        assert adapter._detect_storage_path(self._ftp_accepting("/cache")) == "/cache"
+
+    def test_declared_p2s_prefers_cache_over_model(self) -> None:
+        """Both exist — the declared model decides, not probe order."""
+        adapter = _adapter(printer_model="bambu_p2s")
+        ftp = self._ftp_accepting("/cache", "/model", "/sdcard")
+        assert adapter._detect_storage_path(ftp) == "/cache"
+
+    def test_undeclared_printer_ordering_is_unchanged(self) -> None:
+        """The A1/X1/P1 regression guard: /model still wins when undeclared."""
+        adapter = _adapter()
+        ftp = self._ftp_accepting("/cache", "/model", "/sdcard")
+        assert adapter._detect_storage_path(ftp) == "/model"
+
+    def test_undeclared_printer_still_resolves_sdcard(self) -> None:
+        adapter = _adapter()
+        assert adapter._detect_storage_path(self._ftp_accepting("/sdcard")) == "/sdcard"
+
+    def test_total_failure_warns_rather_than_looking_like_sdcard(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """"Found nothing" used to be indistinguishable from "found /sdcard"."""
+        adapter = _adapter()
+        with caplog.at_level("WARNING"):
+            assert adapter._detect_storage_path(self._ftp_accepting()) == "/sdcard"
+        assert "No Bambu storage directory answered CWD" in caplog.text
+
+    def test_cache_upload_reaches_the_3mf_job_url(self) -> None:
+        """The whole point: probe → cached path → ftp:// URL, end to end."""
+        adapter = _adapter(printer_model="bambu_p2s")
+        adapter._last_storage_path = adapter._detect_storage_path(
+            self._ftp_accepting("/cache")
+        )
+        assert adapter._last_storage_path == "/cache"
+        assert adapter._build_print_url("a.3mf") == "ftp://cache/a.3mf"
+
+    def test_cache_upload_reaches_the_raw_gcode_path(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """The reader nobody enumerated.
+
+        Making /cache reachable for the first time would otherwise upload a
+        .gcode to cache/ and then tell the firmware to print
+        /sdcard/model/<name> — breaking the raw-G-code flow on the very
+        machine this change exists to fix.
+        """
+        adapter_with_mqtt._last_storage_path = "/cache"
+        adapter_with_mqtt.start_print("test.gcode")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["param"] == "/cache/test.gcode"
