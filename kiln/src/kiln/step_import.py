@@ -215,6 +215,68 @@ print("KILN_RESULT:" + json.dumps(result))
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class TessellationBound:
+    """What a backend was actually TOLD about mesh density, in its own terms.
+
+    Three shapes, because the backends genuinely differ and any record that
+    flattened them to one would have to lie about the others:
+
+    - ``"linear_angular"`` — both bounds given (the OCCT paths, cadquery).
+    - ``"linear"`` — a chord tolerance only, no angular bound (FreeCAD).
+    - ``"unbounded"`` — Kiln named no density at all and the backend used
+      whatever it derives on its own (gmsh).
+
+    ``"unbounded"`` is a state, not a missing number.  The honest answer to
+    "how fine is this mesh?" there is "we did not say" — which a reader must
+    be able to show, because rendering it as blank would let a mesh nobody
+    chose the density of pass for one somebody did.  A backend that later
+    gains a bound fills :attr:`linear`/:attr:`angular` in and changes
+    :attr:`kind`; nothing downstream has to learn a new shape.
+    """
+
+    kind: str
+    """``"linear_angular"``, ``"linear"``, or ``"unbounded"``."""
+
+    linear: float | None = None
+    """Linear (chordal) deflection, in the STEP's OWN units.
+
+    Not necessarily mm: a STEP carries its units, and this is the number
+    handed to the backend, not a conversion of it.
+    """
+
+    angular: float | None = None
+    """Angular deflection in radians, when the backend takes one."""
+
+    reason: str | None = None
+    """Why there is no number, when :attr:`kind` is ``"unbounded"``."""
+
+
+@dataclass(frozen=True)
+class MeshConversion:
+    """How a mesh was made from CAD — the neutral half of that question.
+
+    Records only what this module is in a position to know for certain:
+    which backend did the work, and what it was told.  Both are facts about
+    an operation that just happened here, so neither can be re-derived
+    honestly from outside: the backend is picked by fall-through inside
+    :func:`convert_step_to_stl` (a machine with FreeCAD installed but broken
+    uses a different one than the priority order alone predicts), and the
+    bound is whichever constant that path quotes.
+
+    What the accuracy MEANS — whether it is fine enough for a part, how it
+    compares across backends, whether a tolerance survives it — is judgment,
+    and deliberately not here.
+    """
+
+    backend: str
+    """Which backend ran: ``freecad``, ``gmsh``, ``occt``, ``occt-xcaf``,
+    or ``cadquery``.  Stable tokens, not display strings."""
+
+    bound: TessellationBound
+    """The density it was told to use."""
+
+
 @dataclass
 class StepImportResult:
     """Result of a STEP-to-STL conversion."""
@@ -252,6 +314,14 @@ class StepImportResult:
 
     part_colors: list[str | None] = field(default_factory=list)
     """Per-part ``#RRGGBB`` colours (or ``None``), same order as names."""
+
+    conversion: MeshConversion | None = None
+    """Which backend drew this mesh, and at what density.
+
+    ``None`` only where nothing converted anything — a caller holding a
+    result it did not obtain from a conversion.  Every path in this module
+    that produces a mesh from a STEP fills this in.
+    """
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-friendly dictionary."""
@@ -539,6 +609,30 @@ def _convert_via_gmsh(
 #: :func:`_convert_via_cadquery`) so backend choice never changes density.
 _OCP_LINEAR_DEFLECTION = 5e-3
 _OCP_ANGULAR_DEFLECTION = 0.1
+
+
+# What each backend is told about density, kept beside the constants it
+# quotes rather than restated at the call sites.  One home means the record
+# cannot drift from the value actually passed: change a constant and what
+# gets recorded changes with it, because it IS the constant.
+_FREECAD_BOUND = TessellationBound(kind="linear", linear=TESSELLATION_TOLERANCE)
+_KERNEL_BOUND = TessellationBound(
+    kind="linear_angular",
+    linear=_OCP_LINEAR_DEFLECTION,
+    angular=_OCP_ANGULAR_DEFLECTION,
+)
+#: Gmsh is handed no size option at all, so its density comes from whatever
+#: the installed gmsh derives for itself — which moves with the gmsh build
+#: and is not a number Kiln chose.  Recorded as the state it is rather than
+#: as a blank, so a reader can say so out loud instead of showing nothing
+#: where the other backends show a figure.
+_GMSH_BOUND = TessellationBound(
+    kind="unbounded",
+    reason=(
+        "Kiln names no mesh density for gmsh; the installed gmsh derives "
+        "its own, so it varies with the gmsh build."
+    ),
+)
 
 
 # Runs in a CHILD interpreter — see _convert_via_ocp for why.
@@ -1174,6 +1268,10 @@ def convert_step_to_stl(
     out_dir = _validate_output_dir(output_dir, validated_path)
 
     warnings: list[str] = []
+    # Set where a backend SUCCEEDS, never where one is merely attempted: the
+    # fall-through means the backend that ran is not the one the priority
+    # order names on a machine where an earlier one is installed but broken.
+    conversion: MeshConversion | None = None
     t0 = time.monotonic()
 
     # Try backends in priority order.
@@ -1184,6 +1282,7 @@ def convert_step_to_stl(
             outputs, body_count = _convert_via_freecad(
                 validated_path, out_dir, merge_bodies, freecad_cmd
             )
+            conversion = MeshConversion(backend="freecad", bound=_FREECAD_BOUND)
         except StepImportError:
             raise
         except Exception as exc:
@@ -1202,6 +1301,7 @@ def convert_step_to_stl(
                 )
             try:
                 outputs, body_count = _convert_via_gmsh(validated_path, out_dir)
+                conversion = MeshConversion(backend="gmsh", bound=_GMSH_BOUND)
             except StepImportError:
                 raise
             except Exception as exc:
@@ -1218,10 +1318,14 @@ def convert_step_to_stl(
                 outputs, body_count = _convert_via_ocp(
                     validated_path, out_dir, merge_bodies
                 )
+                conversion = MeshConversion(backend="occt", bound=_KERNEL_BOUND)
             elif _cadquery_available():
                 logger.info("Converting STEP via CadQuery")
                 outputs, body_count = _convert_via_cadquery(
                     validated_path, out_dir, merge_bodies
+                )
+                conversion = MeshConversion(
+                    backend="cadquery", bound=_KERNEL_BOUND
                 )
             else:
                 raise NoBackendError()
@@ -1251,6 +1355,7 @@ def convert_step_to_stl(
         conversion_time_s=round(elapsed, 3),
         warnings=warnings,
         output_paths=outputs,
+        conversion=conversion,
     )
 
 
@@ -1336,6 +1441,9 @@ def convert_step(
             output_format="stl",
             part_names=data["names"],
             part_colors=data["colors"],
+            conversion=MeshConversion(
+                backend="occt-xcaf", bound=_KERNEL_BOUND
+            ),
         )
 
     out_3mf = str(out_dir / f"{validated_path.stem}.3mf")
@@ -1354,6 +1462,7 @@ def convert_step(
         output_format="3mf",
         part_names=written_names,
         part_colors=data["colors"],
+        conversion=MeshConversion(backend="occt-xcaf", bound=_KERNEL_BOUND),
     )
 
 

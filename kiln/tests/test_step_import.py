@@ -2036,3 +2036,215 @@ def test_tool_import_survives_a_census_that_explodes(monkeypatch, tmp_dir):
     assert result["status"] == "ok"
     assert result["output_path"]
     assert "cad_facts" not in result  # skipped, said nothing false
+
+
+# ---------------------------------------------------------------------------
+# 34. The conversion record: WHICH backend drew this mesh, at what density.
+#
+#     A mesh made from CAD is an approximation, and the two bounded backends
+#     sit far apart -- 0.0068 mm of sag from the kernel against 0.162 mm from
+#     the FreeCAD path on the same 150 mm sphere, both measured.  Nothing in
+#     the triangles says which one ran, and nothing outside this module can
+#     work it out: the backend is chosen by fall-through, so the answer is not
+#     the priority order but what that order did on THIS machine.  These pin
+#     the record to what actually happened rather than to what was intended.
+# ---------------------------------------------------------------------------
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value="FreeCADCmd")
+@patch("kiln.step_import._find_gmsh_cmd", return_value=None)
+@patch("kiln.step_import._cadquery_available", return_value=False)
+def test_freecad_records_a_linear_only_bound(
+    mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir
+):
+    """FreeCAD is given a chord tolerance and no angular bound -- say exactly that.
+
+    Recording an angular figure here would invent a guarantee this path never
+    asked for.
+    """
+    out_stl = sample_step_file.parent / "merged.stl"
+    out_stl.write_bytes(b"\x00" * 500)
+    kiln_result = json.dumps({"body_count": 1, "outputs": [str(out_stl)]})
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
+    mock_proc.stderr = ""
+
+    with patch("kiln.step_import.subprocess.run", return_value=mock_proc):
+        result = convert_step_to_stl(str(sample_step_file))
+
+    from kiln.step_import import TESSELLATION_TOLERANCE
+
+    assert result.conversion is not None
+    assert result.conversion.backend == "freecad"
+    assert result.conversion.bound.kind == "linear"
+    assert result.conversion.bound.linear == TESSELLATION_TOLERANCE
+    assert result.conversion.bound.angular is None
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value=None)
+@patch("kiln.step_import._find_gmsh_cmd", return_value="gmsh")
+@patch("kiln.step_import._cadquery_available", return_value=False)
+def test_gmsh_records_unbounded_as_a_state_not_a_blank(
+    mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir
+):
+    """"We did not choose a density" is an ANSWER, and has to survive as one.
+
+    Gmsh is handed no size option, so its fineness comes from the installed
+    build.  If that arrived as two nulls it would be indistinguishable from a
+    record that failed to note the numbers, and a mesh nobody chose the
+    density of would read exactly like one somebody did.  So the state is
+    named, and it carries the reason with it.
+    """
+    out_stl = sample_step_file.parent / "merged.stl"
+    out_stl.write_bytes(b"\x00" * 300)
+    kiln_result = json.dumps({"body_count": 1, "outputs": [str(out_stl)]})
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
+    mock_proc.stderr = ""
+
+    with patch("kiln.step_import.subprocess.run", return_value=mock_proc):
+        result = convert_step_to_stl(str(sample_step_file))
+
+    assert result.conversion is not None
+    assert result.conversion.backend == "gmsh"
+    assert result.conversion.bound.kind == "unbounded"
+    assert result.conversion.bound.linear is None
+    assert result.conversion.bound.angular is None
+    # The distinguishing part: it SAYS why, so a reader can print it.
+    assert result.conversion.bound.reason
+    assert "gmsh" in result.conversion.bound.reason.lower()
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value="FreeCADCmd")
+@patch("kiln.step_import._find_gmsh_cmd", return_value="gmsh")
+@patch("kiln.step_import._cadquery_available", return_value=False)
+def test_record_names_the_backend_that_RAN_not_the_one_first_in_line(
+    mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir
+):
+    """The whole reason this cannot be re-derived from outside.
+
+    FreeCAD is installed and first in priority, but broken -- so gmsh does the
+    work.  Anything reconstructing "which backend ran" from the priority order
+    and a PATH lookup would answer "freecad" with total confidence and be
+    wrong, and would be wrong in the direction that matters: it would report a
+    bounded 0.1 mm chord tolerance for a mesh that was cut at whatever the
+    installed gmsh felt like.
+    """
+    out_stl = sample_step_file.parent / "merged.stl"
+    out_stl.write_bytes(b"\x00" * 300)
+    kiln_result = json.dumps({"body_count": 1, "outputs": [str(out_stl)]})
+    ok = MagicMock()
+    ok.returncode = 0
+    ok.stdout = f"KILN_RESULT:{kiln_result}\n"
+    ok.stderr = ""
+
+    calls = {"n": 0}
+
+    def _freecad_is_installed_but_broken(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # NOT a StepImportError: a non-zero exit is a bad STEP and stops
+            # the conversion.  A broken install is the case that falls through.
+            raise OSError("FreeCADCmd: broken symlink")
+        return ok
+
+    with patch(
+        "kiln.step_import.subprocess.run",
+        side_effect=_freecad_is_installed_but_broken,
+    ):
+        result = convert_step_to_stl(str(sample_step_file))
+
+    assert result.conversion is not None
+    assert result.conversion.backend == "gmsh"
+    assert result.conversion.bound.kind == "unbounded"
+    # The attempt is still visible, so the record and the warnings agree.
+    assert any("FreeCAD failed" in w for w in result.warnings)
+
+
+def test_kernel_records_both_bounds_on_a_real_conversion(real_kernel, tmp_dir):
+    """A real kernel run, not a mock: the record has to describe THIS work."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.IFSelect import IFSelect_ReturnStatus
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    from kiln.step_import import (
+        _OCP_ANGULAR_DEFLECTION,
+        _OCP_LINEAR_DEFLECTION,
+    )
+
+    step = tmp_dir / "box.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    assert writer.Write(str(step)) == IFSelect_ReturnStatus.IFSelect_RetDone
+
+    result = convert_step_to_stl(str(step), output_dir=str(tmp_dir / "out"))
+
+    assert result.conversion is not None
+    assert result.conversion.backend == "occt"
+    assert result.conversion.bound.kind == "linear_angular"
+    # Read off the constants rather than restated: a record that quoted its
+    # own copy of the numbers could drift from what was actually passed.
+    assert result.conversion.bound.linear == _OCP_LINEAR_DEFLECTION
+    assert result.conversion.bound.angular == _OCP_ANGULAR_DEFLECTION
+
+
+def test_colour_aware_path_records_its_own_reader(real_kernel, tmp_dir):
+    """The 3MF path runs a DIFFERENT reader, and says so.
+
+    Same kernel, same bounds, but the XCAF reader is the one that can carry
+    colour and part names -- so a record naming plain ``occt`` would describe
+    a conversion that did not happen.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.IFSelect import IFSelect_ReturnStatus
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    from kiln.step_import import convert_step
+
+    step = tmp_dir / "plain.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(8.0, 8.0, 8.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    assert writer.Write(str(step)) == IFSelect_ReturnStatus.IFSelect_RetDone
+
+    result = convert_step(str(step), output_dir=str(tmp_dir / "out"))
+
+    assert result.conversion is not None
+    assert result.conversion.backend == "occt-xcaf"
+    assert result.conversion.bound.kind == "linear_angular"
+
+
+def test_tool_payload_carries_the_record_as_plain_json(real_kernel, tmp_dir):
+    """The carrier half: it has to cross the tool boundary intact.
+
+    A dataclass that never reaches the payload is a fact the part does not
+    have.  Asserting it survives ``json.dumps`` is the point -- whatever reads
+    this downstream gets it over the wire, not as a Python object.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.IFSelect import IFSelect_ReturnStatus
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    step = tmp_dir / "payload.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(6.0, 6.0, 6.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    assert writer.Write(str(step)) == IFSelect_ReturnStatus.IFSelect_RetDone
+
+    tools = _register_step_tools()
+    payload = tools["import_step_file"](str(step), output_dir=str(tmp_dir))
+
+    assert payload["status"] == "ok"
+    record = payload["conversion"]
+    assert record["backend"] in ("occt", "occt-xcaf")
+    assert record["bound"]["kind"] == "linear_angular"
+    json.dumps(payload["conversion"])  # must not raise
