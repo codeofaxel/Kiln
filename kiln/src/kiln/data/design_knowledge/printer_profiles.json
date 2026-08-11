@@ -1389,7 +1389,7 @@
       "z": 260
     },
     "max_hotend_temp_c": 260,
-    "max_bed_temp_c": 110,
+    "max_bed_temp_c": 100,
     "has_enclosure": false,
     "has_direct_drive": true,
     "supported_materials": [
