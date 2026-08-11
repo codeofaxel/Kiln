@@ -59,7 +59,7 @@ class TestGetSlicerProfile:
     def test_ender3_profile_exists(self) -> None:
         profile = get_slicer_profile("ender3")
         assert profile.id == "ender3"
-        assert profile.display_name == "Creality Ender 3 / Ender 3 Pro / Ender 3 V2"
+        assert profile.display_name == "Creality Ender 3 / Ender 3 Pro"
         assert profile.slicer == "prusaslicer"
 
     def test_ender3_bowden_retraction(self) -> None:

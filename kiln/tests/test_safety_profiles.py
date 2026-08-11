@@ -129,7 +129,7 @@ class TestGetProfile:
         assert profile.max_bed_temp == 110.0
         assert profile.max_chamber_temp is None
         assert profile.max_feedrate == 7500.0
-        assert profile.display_name == "Creality Ender 3 / Ender 3 Pro / Ender 3 V2"
+        assert profile.display_name == "Creality Ender 3 / Ender 3 Pro"
 
     def test_bambu_x1c_limits(self) -> None:
         profile = get_profile("bambu_x1c")
