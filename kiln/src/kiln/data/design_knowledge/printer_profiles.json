@@ -1381,12 +1381,43 @@
   },
   "artillery_sw_x3": {
     "printer_id": "artillery_sw_x3",
-    "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
+    "display_name": "Artillery Sidewinder X3 Pro",
     "manufacturer": "Artillery",
     "build_volume_mm": {
       "x": 240,
       "y": 240,
       "z": 260
+    },
+    "max_hotend_temp_c": 300,
+    "max_bed_temp_c": 100,
+    "has_enclosure": false,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "petg",
+      "pla",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 250,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
+  },
+  "artillery_sw_x3_plus": {
+    "printer_id": "artillery_sw_x3_plus",
+    "display_name": "Artillery Sidewinder X3 Plus",
+    "manufacturer": "Artillery",
+    "build_volume_mm": {
+      "x": 300,
+      "y": 300,
+      "z": 400
     },
     "max_hotend_temp_c": 300,
     "max_bed_temp_c": 100,

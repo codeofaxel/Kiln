@@ -1725,7 +1725,7 @@
     "has_input_shaping": true
   },
   "artillery_sw_x3": {
-    "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
+    "display_name": "Artillery Sidewinder X3 Pro",
     "firmware": "marlin",
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
@@ -1757,6 +1757,44 @@
       240,
       240,
       260
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100,
+    "has_input_shaping": false
+  },
+  "artillery_sw_x3_plus": {
+    "display_name": "Artillery Sidewinder X3 Plus",
+    "firmware": "marlin",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 0
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50
+      }
+    },
+    "build_volume_mm": [
+      300,
+      300,
+      400
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,

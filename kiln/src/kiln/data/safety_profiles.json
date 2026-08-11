@@ -779,7 +779,7 @@
     "notes": "High-speed. All-metal hotend. PowerBoost mode."
   },
   "artillery_sw_x3": {
-    "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
+    "display_name": "Artillery Sidewinder X3 Pro",
     "max_hotend_temp": 300.0,
     "max_bed_temp": 100.0,
     "max_chamber_temp": null,
@@ -790,6 +790,21 @@
       240,
       240,
       260
+    ],
+    "notes": "Marlin-based, no network interface. All-metal hotend. Direct drive."
+  },
+  "artillery_sw_x3_plus": {
+    "display_name": "Artillery Sidewinder X3 Plus",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 20000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 22.0,
+    "build_volume": [
+      300,
+      300,
+      400
     ],
     "notes": "Marlin-based, no network interface. All-metal hotend. Direct drive."
   },
