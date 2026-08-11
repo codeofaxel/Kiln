@@ -171,16 +171,99 @@ def test_a_fresh_day_carries_the_slot():
 # ---------------------------------------------------------------------------
 
 
-def test_the_dispatch_hook_counts_a_raising_tool():
-    """The half that was structurally invisible: recording ran only after a
-    call RETURNED, so a tool that raised produced no signal anywhere."""
-    import inspect
+def _drive_the_real_hook(monkeypatch, tool_impl):
+    """Call ``tool_impl`` through the ACTUAL installed dispatch wrapper.
+
+    Not a re-implementation and not a source grep: the wrapper is monkey-
+    patched onto the live tool manager at import time, so the only way to
+    prove it counts anything is to make it dispatch.  A source assertion
+    would stay green if ``contextlib`` were unimported, if the recorder
+    were misnamed, or if the counter never fired — which is the "green
+    over a dead wire" shape this repo has postmortems about.
+    """
+    import asyncio
 
     from kiln import server
 
-    src = inspect.getsource(server._install_mcp_request_context_capture)
-    assert "record_tool_failure" in src, "a raising tool is still uncounted"
-    assert "raise" in src, "the exception must be re-raised untouched"
+    mgr = server.mcp._tool_manager
+
+    async def _fake_original(name, arguments, context=None, convert_result=False):
+        return tool_impl()
+
+    # Replace the INNER call the wrapper delegates to, leaving the real
+    # wrapper — the code under test — in place.
+    monkeypatch.setattr(mgr, "_kiln_request_context_capture_installed", False)
+    monkeypatch.setattr(mgr, "call_tool", _fake_original)
+    server._install_mcp_request_context_capture()
+    # The terms gate is a refusal we MEANT and would raise before dispatch.
+    monkeypatch.setattr(server, "_terms_gate_blocks", lambda _n: False)
+    return asyncio.run(mgr.call_tool("start_print", {}))
+
+
+def test_a_raising_tool_is_really_counted(monkeypatch):
+    """The half that was structurally invisible: recording ran only after a
+    call RETURNED, so the loudest failure a tool can have — an exception —
+    produced no signal anywhere."""
+    def _boom():
+        raise RuntimeError("the printer exploded")
+
+    with pytest.raises(RuntimeError, match="the printer exploded"):
+        _drive_the_real_hook(monkeypatch, _boom)
+
+    assert _today()["tool_failures"]["start_print"] == 1
+
+
+def test_the_exception_reaches_the_agent_unchanged(monkeypatch):
+    """Counting must never swallow, wrap, or delay the error the caller was
+    going to see — a telemetry hook that eats an exception is worse than one
+    that misses it."""
+    class _Specific(Exception):
+        pass
+
+    def _boom():
+        raise _Specific("exact identity preserved")
+
+    with pytest.raises(_Specific, match="exact identity preserved"):
+        _drive_the_real_hook(monkeypatch, _boom)
+
+
+def test_a_failure_envelope_is_really_counted(monkeypatch):
+    """The other shape, through the same live wrapper."""
+    result = _drive_the_real_hook(
+        monkeypatch, lambda: {"success": False, "error": "no printer"}
+    )
+    assert result == {"success": False, "error": "no printer"}
+    assert _today()["tool_failures"]["start_print"] == 1
+
+
+def test_a_successful_call_counts_no_failure(monkeypatch):
+    _drive_the_real_hook(monkeypatch, lambda: {"success": True, "job_id": "j1"})
+    assert _today()["tool_failures"] == {}
+
+
+def test_a_terms_refusal_is_not_a_kiln_failure(monkeypatch):
+    """The terms gate raises BEFORE dispatch, and it is a refusal we meant —
+    counting it would put the product working correctly into the wire that
+    says the product is broken."""
+    import asyncio
+
+    from kiln import server
+
+    mgr = server.mcp._tool_manager
+
+    async def _never_called(name, arguments, context=None, convert_result=False):
+        raise AssertionError("dispatch must not be reached")
+
+    monkeypatch.setattr(mgr, "_kiln_request_context_capture_installed", False)
+    monkeypatch.setattr(mgr, "call_tool", _never_called)
+    server._install_mcp_request_context_capture()
+    monkeypatch.setattr(server, "_terms_gate_blocks", lambda _n: True)
+    monkeypatch.setattr(server, "_terms_consent_message", lambda: "accept terms")
+
+    with pytest.raises(RuntimeError, match="accept terms"):
+        asyncio.run(mgr.call_tool("start_print", {}))
+
+    assert _today()["tool_failures"] == {}
 
 
 def test_the_dispatch_hook_counts_a_failure_envelope():
@@ -202,3 +285,52 @@ def test_recording_is_suppressed_for_a_real_test_run(monkeypatch, tmp_path):
         daily_stats, "_STATS_PATH", daily_stats._DEFAULT_STATS_PATH
     )
     assert daily_stats._recording_suppressed() is True
+
+
+# ---------------------------------------------------------------------------
+# The ask has to reach the agent — and there is more than one door
+# ---------------------------------------------------------------------------
+
+
+def test_both_discovery_doors_carry_the_ask():
+    """``get_started`` and ``get_skill_manifest`` are two independent agent
+    entry points, built from two different sources — the first assembles its
+    own dict, the second delegates to ``kiln.skill_manifest``.  Doctrine in
+    one of them is doctrine an agent that used the other never sees, which is
+    the one-door fallacy applied to a prompt instead of a security gate.
+
+    The counter tells us a tool is failing.  Only a human's note says WHY, and
+    only if some agent was told to send one.
+    """
+    import inspect
+
+    from kiln.plugins import utility_tools
+    from kiln.skill_manifest import generate_manifest
+
+    started = inspect.getsource(utility_tools)
+    assert "when_kiln_gets_it_wrong" in started, "get_started lost the ask"
+
+    manifest = generate_manifest().to_dict()
+    blob = json.dumps(manifest)
+    assert "when_kiln_gets_it_wrong" in blob, "the skill manifest lost the ask"
+    assert "field_note" in blob, "the manifest names no way to send one"
+    for field in ("observed", "tried", "worked", "evidence"):
+        assert field in blob, f"the manifest omits the {field!r} field"
+
+
+def test_the_ask_does_not_wait_for_an_error():
+    """The defects that cost a real user his whole first session returned
+    SUCCESS — start_print reporting a print that never began, filament state
+    read from a stale cache, RUNNING while the printer sat PAUSED.  None of
+    them produce an error envelope, so none of them can be caught by a hint
+    attached to a failure.  The norm has to be stated up front, and it has to
+    say so explicitly, or an agent waits for a prompt that never comes."""
+    import json as _json
+
+    from kiln.skill_manifest import generate_manifest
+
+    ask = _json.dumps(generate_manifest().to_dict())
+    assert "DO NOT WAIT TO BE ASKED" in ask
+    assert "return success while the printer never starts" in ask, (
+        "the manifest must name the shape: a defect that looks like success"
+    )
