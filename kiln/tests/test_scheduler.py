@@ -29,6 +29,7 @@ import pytest
 from kiln.events import EventBus, EventType
 from kiln.printers.base import (
     JobProgress,
+    JobResult,
     PrinterCapabilities,
     PrinterError,
     PrinterState,
@@ -1240,6 +1241,70 @@ class TestAutoOutcomeRecording:
         assert call_args["determined_by"] == "observed"
         assert "Auto-recorded by scheduler" in call_args["notes"]
 
+    @pytest.mark.parametrize(
+        ("ended", "expect_outcome", "expect_contribute"),
+        [
+            (JobResult.CANCELLED, "cancelled", False),
+            (JobResult.COMPLETED, "success", True),
+            (None, "success", False),
+        ],
+    )
+    def test_only_the_machines_own_verdict_federates(
+        self, queue, registry, event_bus, ended, expect_outcome, expect_contribute
+    ):
+        """A cancel at the printer's touchscreen must not publish as success.
+
+        The scheduler used to read "watched printing, now IDLE" as the
+        machine's testimony that the print finished, and federated it. IDLE is
+        not testimony: every adapter folds a clean finish, a cancel and an
+        untouched printer into that one value, so a print stopped at the
+        machine landed in the community pool as proof the settings worked.
+
+        ``last_job_result`` carries what IDLE threw away. Named ending →
+        believed. No ending named (OctoPrint flags, RRF object model) → still
+        recorded as success for the user's own history, but NOT federated,
+        because contributing is a claim about the model and only the machine
+        gets to make it.
+        """
+        mock_persistence = MagicMock()
+        mock_persistence.get_print_outcome.return_value = None
+        mock_persistence.list_unresolved_outcomes.return_value = [
+            {"job_id": "start:printer-1:1", "file_name": "benchy.gcode",
+             "outcome": "pending"},
+        ]
+        scheduler = JobScheduler(
+            queue, registry, event_bus,
+            poll_interval=0.1, max_retries=0,
+            persistence=mock_persistence,
+        )
+
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        queue.submit(file_name="benchy.gcode", metadata={"file_hash": "abc123"})
+
+        scheduler.tick()
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING,
+        )
+        scheduler.tick()
+
+        # Ended — and the printer reads IDLE either way, which is the whole
+        # point: the only thing separating these cases is last_job_result.
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE, last_job_result=ended,
+        )
+        with patch(
+            "kiln.community_autofire.contribute_resolved_outcome"
+        ) as contribute:
+            scheduler.tick()
+
+        recorded = mock_persistence.save_print_outcome.call_args[0][0]
+        assert recorded["outcome"] == expect_outcome
+        assert contribute.called is expect_contribute, (
+            f"last_job_result={ended!r} should "
+            f"{'federate' if expect_contribute else 'NOT federate'}"
+        )
+
     def test_auto_record_outcome_on_permanent_failure(self, queue, registry, event_bus):
         """Exhaust retries and verify outcome='failed' is recorded."""
         mock_persistence = MagicMock()
@@ -1583,8 +1648,13 @@ class TestSchedulerFederation:
             connected=True, state=PrinterStatus.PRINTING
         )
         scheduler.tick()  # the scheduler SEES the job printing
+        # The machine NAMES its ending. Federating is a claim about the model,
+        # so it takes the machine's word — a bare IDLE, which is also what a
+        # touchscreen cancel produces, is not enough and no longer qualifies.
         adapter.get_state.return_value = PrinterState(
-            connected=True, state=PrinterStatus.IDLE
+            connected=True,
+            state=PrinterStatus.IDLE,
+            last_job_result=JobResult.COMPLETED,
         )
         scheduler.tick()
 
