@@ -18,6 +18,14 @@ Start-on-login is per-user and needs no elevation on all three platforms:
 launchd LaunchAgent (macOS), systemd --user unit (Linux), HKCU Run key
 (Windows, windowless via pythonw).
 
+Either way the bridge is watched, and by exactly one thing.  ``enable`` hands
+the job to launchd (``KeepAlive``) or systemd (``Restart=always``) where those
+exist, since they also survive a reboot.  ``start`` — and ``enable`` on
+Windows, whose Run key launches and forgets — runs
+:mod:`kiln.bridge_supervisor` instead, which restarts a crashed bridge for as
+long as the session lasts.  ``start`` never installs a login item: it offers
+``enable`` and leaves that choice to the person typing.
+
 Needs a signed-in account (``kiln signin`` / ``kiln pair``): the relay routes a
 call only to the bridge running on the SAME account.
 """
@@ -38,6 +46,11 @@ from kiln.bridge_client import (
     _read_license,
     clear_bridge_state,
     read_bridge_state,
+)
+from kiln.bridge_supervisor import (
+    clear_supervisor_state,
+    read_supervisor_state,
+    supervisor_pid,
 )
 
 # launchd label (macOS), systemd unit stem (Linux), and registry Run value
@@ -118,8 +131,15 @@ def _render_systemd_unit(python: str) -> str:
 
 
 def _render_run_command(python: str) -> str:
-    """Windows Run-key command: quoted interpreter + the bridge module."""
-    return f'"{python}" -m kiln.bridge_client'
+    """Windows Run-key command: quoted interpreter + the supervisor.
+
+    The supervisor, unlike the plist and the systemd unit above, because the
+    Run key is the one login mechanism of the three that does not watch what it
+    started: launchd has ``KeepAlive`` and systemd has ``Restart=always``, and
+    stacking our own supervisor under either would mean two parents fighting
+    over one child.  Windows has no such parent, so it gets ours.
+    """
+    return f'"{python}" -m kiln.bridge_supervisor'
 
 
 def _render_protocol_command(python: str) -> str:
@@ -180,11 +200,22 @@ def _describe_status(
     since: float | None,
     now: float,
     signin_detail: str = "",
+    supervised: bool = False,
+    restarts: int = 0,
+    last_exit_at: float | None = None,
+    gave_up: bool = False,
 ) -> tuple[str, list[str]]:
     """Map the facts to a (headline, detail-lines) pair — honest in every state.
 
     The ONLY place the state machine lives, so status never lies and the tests
     can walk the whole matrix.
+
+    The crash facts (*restarts*, *last_exit_at*, *gave_up*) are here because a
+    bridge that died is the one thing this command used to be unable to
+    mention.  A crash-and-restart looked identical to a bridge that had been up
+    all night, and a bridge that had given up looked identical to one that was
+    simply never turned on — the same "off" and the same two suggestions, with
+    no hint that something had tried and failed.  Both now say so.
     """
     if not signed_in:
         # An expired session and a machine that never signed in both land
@@ -210,6 +241,22 @@ def _describe_status(
             "Running, but not connected to the relay yet.",
             f"If this persists, check the log: {_LOG_FILE}",
         ]
+    elif gave_up:
+        # The bridge kept dying seconds after each start and the supervisor
+        # stopped trying.  Saying "off" here would be true and useless.
+        #
+        # Checked BEFORE `enabled`, because on Windows `enable` is supervised
+        # by us and can reach this state — and "enabled, but not running" is
+        # the wrong half of the story when we know exactly why it isn't.  On
+        # macOS and Linux `enable` hands over to launchd/systemd, and enabling
+        # clears any record a previous `start` left, so a stale give-up cannot
+        # shadow a healthy login service.
+        return "off after repeated crashes", [
+            "The bridge kept stopping right after it started, so Kiln stopped "
+            "restarting it.",
+            f"What happened is in the log: {_LOG_FILE}",
+            "Fix that, then start it again: kiln bridge start",
+        ]
     elif enabled:
         headline = "enabled, but not running"
         lines += [
@@ -222,9 +269,23 @@ def _describe_status(
             "Just this session:    kiln bridge start",
         ]
 
+    if restarts and last_exit_at is not None:
+        # A crash the user never saw, said out loud.  The printer keeps
+        # printing through this (the machine owns the job) and the bridge is
+        # back, but "it crashed and recovered" and "it never crashed" are not
+        # the same fact and should not read the same.
+        elapsed = _ago(now - last_exit_at)
+        when = elapsed if elapsed == "just now" else f"{elapsed} ago"
+        lines.append(
+            f"Recovered from a crash {when} "
+            f"({restarts} restart{'s' if restarts != 1 else ''} this run)."
+        )
+
     if enabled:
         lines.append("Starts automatically on every login.")
     else:
+        if supervised:
+            lines.append("Restarts itself if it crashes — but not after a logout or reboot.")
         lines.append("Make it automatic: kiln bridge enable")
     return headline, lines
 
@@ -281,8 +342,28 @@ def _running_pid() -> int | None:
     return None
 
 
-def _spawn_bridge() -> int:
-    """Launch the bridge detached from this terminal; return its pid."""
+def _running_supervisor_pid() -> int | None:
+    """The live supervisor pid, or ``None``.
+
+    A recorded pid that is no longer alive means the supervisor was itself
+    killed (or the machine went down) — the bridge is unsupervised from here
+    on, and status says so rather than claiming a protection that is gone.
+    """
+    pid = supervisor_pid()
+    if pid is not None and _pid_alive(pid):
+        return pid
+    return None
+
+
+def _spawn_supervised_bridge() -> int:
+    """Launch a supervised bridge detached from this terminal; return the
+    supervisor's pid.
+
+    The supervisor, not the bridge, because a bare background process is
+    exactly what left the bridge dead after a ``kill -9`` mid-print: nothing
+    restarted it and nothing said so.  Its pid is the one to stop — killing it
+    stops the child too, whereas killing the child alone just gets it restarted.
+    """
     os.makedirs(os.path.dirname(_LOG_FILE), exist_ok=True)
     log = open(_LOG_FILE, "a", encoding="utf-8")  # noqa: SIM115 — handed to the child
     kwargs: dict = {"stdout": log, "stderr": log, "stdin": subprocess.DEVNULL}
@@ -291,22 +372,38 @@ def _spawn_bridge() -> int:
     else:  # Windows: DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
         kwargs["creationflags"] = 0x00000008 | 0x00000200
     proc = subprocess.Popen(
-        [sys.executable, "-m", "kiln.bridge_client"], **kwargs
+        [sys.executable, "-m", "kiln.bridge_supervisor"], **kwargs
     )
     return proc.pid
 
 
-def _stop_process() -> bool:
-    """SIGTERM the running bridge and wait briefly for it to exit."""
-    pid = _running_pid()
-    if pid is None:
-        return False
+def _terminate(pid: int) -> None:
+    """SIGTERM *pid* and wait up to ~3s for it to go."""
     with contextlib.suppress(OSError):
         os.kill(pid, signal.SIGTERM)
-    for _ in range(30):  # up to ~3s
+    for _ in range(30):
         if not _pid_alive(pid):
-            break
+            return
         time.sleep(0.1)
+
+
+def _stop_process() -> bool:
+    """Stop the supervisor first, then the bridge itself.
+
+    Order is load-bearing: SIGTERM the bridge while its supervisor is still
+    watching and the supervisor does its job and starts a new one, so ``kiln
+    bridge stop`` would report success over a bridge that is still running.
+    """
+    supervisor = _running_supervisor_pid()
+    if supervisor is not None:
+        _terminate(supervisor)
+    clear_supervisor_state()
+
+    pid = _running_pid()
+    if pid is None:
+        clear_bridge_state()
+        return supervisor is not None
+    _terminate(pid)
     clear_bridge_state()
     return not _pid_alive(pid)
 
@@ -454,13 +551,14 @@ def _install_service() -> tuple[bool, str]:
         return True, ""
     if sys.platform == "win32":
         # Run key = start at login (per-user, no elevation, windowless via
-        # pythonw).  It doesn't supervise, but the bridge's own reconnect
-        # loop never exits on error, so in-process keep-alive covers it.
+        # pythonw).  It launches and forgets, so what it launches is our own
+        # supervisor — the bridge's internal reconnect loop covers a dropped
+        # socket but cannot outlive the process it runs in.
         ok, detail = _install_run_key()
         if not ok:
             return False, detail
         try:
-            _spawn_bridge()  # parity: enable starts it NOW, not just at login
+            _spawn_supervised_bridge()  # parity: enable starts it NOW, not just at login
         except OSError as exc:
             return False, f"installed for login, but starting now failed: {exc}"
         return True, ""
@@ -524,9 +622,11 @@ def bridge() -> None:
 def status() -> None:
     """Show whether the bridge is on and connected."""
     st = read_bridge_state()
+    sup = read_supervisor_state()
     running = _running_pid() is not None
     connected = bool(st.get("connected")) and running
     bearer = _resolve_bearer()
+    last_exit = sup.get("last_exit") if isinstance(sup.get("last_exit"), dict) else {}
     headline, lines = _describe_status(
         signed_in=bool(bearer.token),
         enabled=_service_installed(),
@@ -535,6 +635,10 @@ def status() -> None:
         since=st.get("since"),
         now=time.time(),
         signin_detail=bearer.detail,
+        supervised=_running_supervisor_pid() is not None,
+        restarts=int(sup.get("restarts") or 0),
+        last_exit_at=last_exit.get("at"),
+        gave_up=bool(sup.get("gave_up")),
     )
     # Default terminal colour for the off/idle states — a fixed "white" is
     # invisible on a light-background terminal.
@@ -611,7 +715,11 @@ def handle_uri(uri: str) -> None:
 @bridge.command()
 def disable() -> None:
     """Turn the bridge off — stop now and stop starting on login."""
-    was = _service_installed() or _running_pid() is not None
+    was = (
+        _service_installed()
+        or _running_pid() is not None
+        or _running_supervisor_pid() is not None
+    )
     _remove_service()
     _stop_process()
     clear_bridge_state()
@@ -631,18 +739,26 @@ def start() -> None:
         click.echo("Already set to start on login — it's managed for you.")
         click.echo("  See it: kiln bridge status   ·   Turn off: kiln bridge disable")
         return
-    if _running_pid() is not None:
+    # Both, because between a crash and its restart the bridge pid is briefly
+    # absent while the run is very much still going; checking only that one
+    # would start a second supervisor over the top of the first.
+    if _running_pid() is not None or _running_supervisor_pid() is not None:
         click.echo("Bridge is already running.  See: kiln bridge status")
         return
     _preflight()
-    pid = _spawn_bridge()
+    pid = _spawn_supervised_bridge()
     if _await_connected():
         click.echo(click.style("Bridge on ✓", fg="green") + f" (pid {pid}) — connected.")
         click.echo("  Prints from kiln3d.com now reach this machine's printers.")
     else:
         click.echo(click.style("Bridge started", fg="green") + f" (pid {pid}) — connecting…")
         click.echo("  Confirm with: kiln bridge status")
-    click.echo("  Stop it: kiln bridge stop   ·   Start on every login: kiln bridge enable")
+    # Say what this does and does not survive, then offer the thing that
+    # covers the rest.  Installing a login item because someone typed `start`
+    # would be a background process the user never agreed to and would find
+    # later by accident; an offer costs one line and leaves the choice theirs.
+    click.echo("  It restarts itself if it crashes, but not after you log out or reboot.")
+    click.echo("  Survive a reboot too: kiln bridge enable   ·   Stop it: kiln bridge stop")
 
 
 @bridge.command()
