@@ -89,6 +89,8 @@ import json
 import logging
 import os
 import re
+import shutil
+import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -1379,6 +1381,73 @@ def _fit_to_specs(source: bytes, names: list[str]) -> dict[str, bytes]:
     return fitted
 
 
+def _render_plate_preview(
+    stl_paths: list[str],
+    colors: list[str] | None,
+    width: int,
+    height: int,
+) -> bytes | None:
+    """A picture of the part, at the size a thumbnail slot wants.
+
+    Goes through :func:`~kiln.model_visualizer.visualize_model`, the
+    renderer behind every other preview Kiln shows, so the printer's
+    screen carries the same picture of the part the user already saw
+    rather than a lesser one drawn just for this slot.  Its framing and
+    lighting are the ones Kiln has tuned; a thumbnail is the last place
+    to be re-deriving them.
+
+    The stage backend is declined here.  It draws the plate grid the web
+    viewer draws, which reads as scenery around a model on screen and as
+    part of the model on a 2cm printer tile — and it reaches the network,
+    which a slice should not have to.  OpenSCAD renders the same angles
+    locally and takes the filament colour.
+
+    Falls back to the plate composer for a multi-part plate, which
+    ``visualize_model`` cannot draw as one scene, and returns ``None``
+    when nothing renders at all.
+    """
+    color = ""
+    if colors and len(set(colors)) == 1:
+        color = colors[0]
+
+    if len(stl_paths) == 1:
+        tmp_dir = tempfile.mkdtemp(prefix="kiln_thumb_")
+        try:
+            from kiln.model_visualizer import visualize_model
+
+            result = visualize_model(
+                stl_paths[0],
+                output_dir=tmp_dir,
+                width=width,
+                height=height,
+                angles=["isometric"],
+                color=color,
+                allow_stage=False,
+            )
+            for view in result.get("views", []):
+                path = view.get("path")
+                if path and os.path.isfile(path):
+                    return Path(path).read_bytes()
+            logger.warning(
+                "visualize_model returned no image for %s — falling back.",
+                stl_paths[0],
+            )
+        except Exception:  # noqa: BLE001 — a preview never blocks a print
+            logger.warning(
+                "visualize_model failed for %s — falling back.",
+                stl_paths[0],
+                exc_info=True,
+            )
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    from kiln.multicolor_3mf import render_plate_thumbnail
+
+    return render_plate_thumbnail(
+        stl_paths, colors=colors, width=width, height=height,
+    )
+
+
 def _stl_thumbnail_set(
     stl_paths: list[str],
     plate_json: str | None,
@@ -1402,8 +1471,6 @@ def _stl_thumbnail_set(
         return {}
     thumbnails: dict[str, bytes] = {}
     try:
-        from kiln.multicolor_3mf import render_plate_thumbnail
-
         colors = _declared_filament_colors(plate_json)
         for names in _thumbnail_aspect_groups().values():
             # Render the largest slot in the group and scale down into the
@@ -1412,9 +1479,7 @@ def _stl_thumbnail_set(
                 (_BAMBU_THUMBNAIL_SPECS[n] for n in names),
                 key=lambda size: size[0] * size[1],
             )
-            source = render_plate_thumbnail(
-                stl_paths, colors=colors, width=width, height=height,
-            )
+            source = _render_plate_preview(stl_paths, colors, width, height)
             if not source:
                 logger.warning(
                     "No %dx%d thumbnail could be rendered from %s.",

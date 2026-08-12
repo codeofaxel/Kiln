@@ -1361,7 +1361,7 @@ class TestThumbnailsReachTheArchive:
         out = str(tmp_path / "out.3mf")
 
         with caplog.at_level(logging.WARNING), patch(
-            "kiln.multicolor_3mf.render_plate_thumbnail",
+            "kiln.printers.bambu_3mf._render_plate_preview",
             side_effect=RuntimeError("renderer exploded"),
         ):
             repackage_gcode_as_bambu_3mf(
@@ -1375,6 +1375,35 @@ class TestThumbnailsReachTheArchive:
         # And the failure is on the record, with the traceback.
         assert "renderer exploded" in caplog.text
         assert "RuntimeError" in caplog.text
+
+    def test_a_dead_primary_renderer_falls_back_instead_of_giving_up(
+        self, tmp_path, caplog
+    ):
+        """Losing the good renderer costs quality, never the preview.
+
+        Previews come from ``visualize_model`` so the printer's screen
+        shows the same picture of the part as everywhere else in Kiln.
+        When that cannot run, a plainer render still beats the blank tile
+        this whole area exists to prevent — so the fallback is load-
+        bearing, and it says out loud that it was used.
+        """
+        gcode = tmp_path / "ready.gcode"
+        gcode.write_text("; already-bambu gcode\n")
+        out = str(tmp_path / "fallback.3mf")
+
+        with caplog.at_level(logging.WARNING), patch(
+            "kiln.model_visualizer.visualize_model",
+            side_effect=RuntimeError("no openscad here"),
+        ):
+            repackage_gcode_as_bambu_3mf(
+                str(gcode), out, stl_paths=[self._stl(tmp_path)],
+            )
+
+        with zipfile.ZipFile(out) as zf:
+            plate = zf.read("Metadata/plate_1.png")
+        assert plate.startswith(b"\x89PNG\r\n\x1a\n")
+        assert len(plate) > 1000
+        assert "no openscad here" in caplog.text
 
 
 class TestThumbnailInputsForModel:
