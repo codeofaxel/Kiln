@@ -1246,9 +1246,9 @@ class BambuAdapter(PrinterAdapter):
         job_id_for_hook: Any = None
         file_name_for_hook: Any = None
         print_error_for_hook: int = 0
-        # Seconds since this printer last spoke, measured across the merge
-        # below.  ``None`` until one is measured — the first frame of a
-        # process has no previous frame to measure from.
+        # Seconds since we last KNEW this printer's run state, read across the
+        # merge below.  ``None`` when we never have — the first frame of a
+        # process has nothing behind it to measure from.
         push_gap_seconds: float | None = None
         if isinstance(print_data, dict):
             cmd = str(print_data.get("command", "")).lower()
@@ -1283,17 +1283,21 @@ class BambuAdapter(PrinterAdapter):
                     prev_gcode_state = str(
                         self._last_status.get("gcode_state", "")
                     ).lower().strip()
-                    # When did this printer last speak to us?  Read before the
-                    # merge overwrites it: it is the only bound on how late an
-                    # ending carried by this frame might be, and the reconnect
-                    # case below is the reason that bound has to exist.
-                    last_heard_at = self._last_state_time
+                    # How long since we last KNEW what this printer was doing.
+                    # Read BEFORE the merge refreshes it: it is the only bound
+                    # on how late an ending carried by this frame might be.
+                    #
+                    # Deliberately the STATE's age and not the cache's.  A
+                    # partial frame — a temperature, a fan step — advances the
+                    # cache while saying nothing about whether the print is
+                    # still running, so measuring "when did this printer last
+                    # speak" would let one such frame, landing between a
+                    # reconnect and the full dump, present an hour-old ending
+                    # as a one-second-old one.  This is also exactly the
+                    # quantity the polled door guards on as state_age_seconds.
+                    push_gap_seconds = self._gcode_state_age_locked()
                     self._last_status.update(print_data)
                     self._last_state_time = time.monotonic()
-                    if last_heard_at:
-                        push_gap_seconds = max(
-                            0.0, self._last_state_time - last_heard_at
-                        )
                     # Stamp the vintage of the one key that decides the
                     # reported state.  ``update`` is a merge, so without this
                     # a partial push would reset the age of a gcode_state it
@@ -1375,26 +1379,6 @@ class BambuAdapter(PrinterAdapter):
                     )
 
                     if ended:
-                        # Under the id we just gave the hook, so the hours row
-                        # and the outcome row name one job and the two dedupe
-                        # against each other.
-                        #
-                        # A push IS the state, so it has no age of its own —
-                        # what bounds this ending's lateness is how long the
-                        # printer had been silent.  A live stream measures
-                        # seconds and banks; the full dump that arrives on
-                        # RECONNECT measures the whole outage, and its
-                        # prev_gcode_state predates that outage, so it reports
-                        # a print that ended at 31 minutes as however long ago
-                        # we happened to notice.  That reading is monotonic and
-                        # plausible and nothing downstream could ever flag it,
-                        # which is exactly why it is refused here.
-                        _record_watched_duration(
-                            job_label=str(job_id_for_hook),
-                            elapsed_seconds=elapsed_seconds,
-                            state_age_seconds=0.0,
-                            observation_gap_seconds=push_gap_seconds,
-                        )
                         # Stop the stopwatch — the job it was measuring is
                         # over.  The polled door does this on its own terminal
                         # edge and, per the paragraph above, never reaches one
@@ -1403,7 +1387,32 @@ class BambuAdapter(PrinterAdapter):
                         # touchscreen — which never passes ``start_print`` and
                         # so never restamps — inherits it and reports the age
                         # of a job that is already finished.
+                        #
+                        # Before the banking, not after: the elapsed was read
+                        # above, so nothing here still needs the stamp, and a
+                        # ledger that failed must not also leave a stopwatch
+                        # running on the next print.
                         forget_job_start(self)
+                        # Under the id we just gave the hook, so the hours row
+                        # and the outcome row name one job and the two dedupe
+                        # against each other.
+                        #
+                        # This frame IS the state, so what it reports has no
+                        # age — what bounds the ending's lateness is how long
+                        # we had gone without knowing the run state.  A live
+                        # stream measures seconds and banks; the full dump that
+                        # arrives on RECONNECT measures the whole outage, and
+                        # its prev_gcode_state predates that outage, so it
+                        # reports a print that ended at 31 minutes as however
+                        # long ago we happened to notice.  That reading is
+                        # monotonic and plausible and nothing downstream could
+                        # ever flag it, which is exactly why it is refused.
+                        _record_watched_duration(
+                            job_label=str(job_id_for_hook),
+                            elapsed_seconds=elapsed_seconds,
+                            state_age_seconds=0.0,
+                            observation_gap_seconds=push_gap_seconds,
+                        )
                 except Exception as exc:  # pragma: no cover
                     logger.debug(
                         "auto-record hook raised (non-fatal): %s", exc,

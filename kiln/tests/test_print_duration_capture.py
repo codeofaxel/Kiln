@@ -28,11 +28,14 @@ the two doors dedupe against each other through that id.
 
 What differs between the doors is the one measurement neither can borrow: how
 long since we last had current knowledge of the printer.  The wrap ASKS, so it
-counts from the last ask.  The push site is TOLD, so it counts from the last
-time the printer spoke — and it must not use the ask clock, because a Bambu
-``get_state()`` is answered from the push cache, so polling straight through
-an MQTT outage keeps that clock warm while nothing is watching at all.  The
-last section holds both halves of that.
+counts from the last ask.  The push site is TOLD, so it counts from the age of
+the run state it held before the frame arrived — and two cheaper answers are
+both wrong, each by a measured hour.  It cannot use the ask clock, because a
+Bambu ``get_state()`` is answered from the push cache, so polling straight
+through an MQTT outage keeps that clock warm while nothing is watching.  Nor
+can it ask when the printer last SPOKE, because a partial frame carries no run
+state, so one landing ahead of the reconnect dump makes an hour-old ending
+look a second old.  The last section holds every half of that.
 """
 
 from __future__ import annotations
@@ -557,9 +560,26 @@ def _push(adapter, gcode_state: str, **fields) -> None:
     adapter._on_message(None, None, SimpleNamespace(payload=json.dumps(payload).encode()))
 
 
-def _rewind_last_push(adapter, seconds: float) -> None:
-    """Pretend the printer last spoke ``seconds`` ago — an MQTT outage."""
-    adapter._last_state_time = time.monotonic() - seconds
+def _push_partial(adapter, **fields) -> None:
+    """A ``push_status`` frame carrying NO ``gcode_state``.
+
+    Bambu sends these constantly — a temperature change, a fan step.  The
+    cache is a merge, so such a frame proves the socket is up and says
+    nothing whatever about whether the print is still running.
+    """
+    payload = {"print": {"command": "push_status", **fields}}
+    adapter._on_message(None, None, SimpleNamespace(payload=json.dumps(payload).encode()))
+
+
+def _rewind_the_silence(adapter, seconds: float) -> None:
+    """Model an MQTT outage ``seconds`` long.
+
+    Both clocks are wound back together because that is what an outage IS:
+    nothing arrived, so neither the cache's age nor the state's age advanced.
+    """
+    stamp = time.monotonic() - seconds
+    adapter._last_state_time = stamp
+    adapter._gcode_state_time = stamp
 
 
 def _printing_bambu(monkeypatch, *, running_for: float):
@@ -597,7 +617,7 @@ def test_a_reconnect_dump_banks_nothing(monkeypatch):
     whole outage.
     """
     adapter = _printing_bambu(monkeypatch, running_for=91 * 60)
-    _rewind_last_push(adapter, 60 * 60)
+    _rewind_the_silence(adapter, 60 * 60)
 
     # The inflated number IS what the stopwatch would report right now — the
     # test is worthless if it isn't.
@@ -620,7 +640,7 @@ def test_polling_through_the_outage_does_not_launder_the_dump(monkeypatch):
     reconnect dump above walks straight through the guard looking watched.
     """
     adapter = _printing_bambu(monkeypatch, running_for=91 * 60)
-    _rewind_last_push(adapter, 60 * 60)
+    _rewind_the_silence(adapter, 60 * 60)
 
     # A monitor kept polling the whole time the socket was down.
     for _ in range(3):
@@ -630,6 +650,31 @@ def test_polling_through_the_outage_does_not_launder_the_dump(monkeypatch):
     # door's guard would have been given, and it passes.
     look_gap = time.monotonic() - pm._last_looks[pm.observation_key(adapter)]
     assert look_gap < pm.WATCHED_ENDING_MAX_GAP_S
+
+    _push(adapter, "FINISH")
+
+    assert _hours() == (0.0, 0)
+
+
+def test_a_partial_frame_does_not_reopen_the_door(monkeypatch):
+    """The reconnect dump is not always the FIRST frame back.
+
+    Bambu streams partial ``push_status`` frames constantly — a temperature,
+    a fan step — and the cache is a merge, so one of them proves the socket
+    is up and says NOTHING about whether the print is still running.  Let one
+    land between the reconnect and the full dump and a guard measuring "when
+    did this printer last speak" sees a one-second gap sitting in front of an
+    ending that happened during the outage.
+
+    What has to be recent is our knowledge of the RUN STATE, which is the
+    same quantity ``state_age_seconds`` reports to the polled door.  A partial
+    frame cannot refresh it, because it never carried it.
+    """
+    adapter = _printing_bambu(monkeypatch, running_for=91 * 60)
+    _rewind_the_silence(adapter, 60 * 60)
+
+    # The socket comes back and something trivial arrives ahead of the dump.
+    _push_partial(adapter, nozzle_temper=214.0)
 
     _push(adapter, "FINISH")
 
@@ -726,3 +771,7 @@ def test_the_push_door_never_raises_into_the_mqtt_callback(monkeypatch):
     # The frame was still merged: the cache the rest of Kiln reads is intact.
     assert adapter._last_status["mc_percent"] == 100
     assert adapter.get_state().state is PrinterStatus.IDLE
+    # And the stopwatch still stopped.  It is cleared before the banking for
+    # exactly this reason — a failed ledger write must not also hand the next
+    # print a clock that has been running since this one started.
+    assert pm.job_elapsed_seconds(adapter, "bracket.3mf") is None

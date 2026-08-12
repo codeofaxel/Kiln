@@ -1548,15 +1548,23 @@ def _record_watched_duration(
     * the ``get_state`` wrap asks, so its gap is :func:`note_status_read`'s
       "how long since we last asked", and ``state_age_seconds`` is what
       catches an answer served from a cache rather than the machine;
-    * Bambu's MQTT callback is TOLD, so its gap is how long since the printer
-      last spoke.  It must not borrow the look-clock: a Bambu ``get_state()``
-      is answered from the push cache, so a monitor polling through an MQTT
-      outage keeps that clock warm while nothing is being watched at all, and
-      the reconnect dump — whose ``prev`` predates the outage — would sail
-      through this guard carrying the whole outage in its elapsed.
+    * Bambu's MQTT callback is TOLD, so its gap is the age of the run state it
+      held before this frame — the same quantity ``state_age_seconds`` carries
+      above, read one frame earlier.
 
-    Both are the same quantity, so the thresholds below apply unchanged to
-    either, and neither door decides for itself what counts as watched.
+    The push door is fenced off from the two cheaper answers, and both fences
+    were measured rather than reasoned about.  It cannot borrow the look-clock:
+    a Bambu ``get_state()`` is answered from the push cache, so a monitor
+    polling through an MQTT outage keeps that clock warm while nothing is being
+    watched at all.  And it cannot ask merely when the printer last SPOKE,
+    because partial frames — a temperature, a fan step — carry no run state,
+    so one landing between a reconnect and the full dump would present an
+    hour-old ending as a one-second-old one.  Either mistake lets the reconnect
+    dump, whose ``prev`` predates the outage, sail through this guard carrying
+    the whole outage in its elapsed.
+
+    All three are the same quantity, so the thresholds below apply unchanged to
+    either door, and neither decides for itself what counts as watched.
 
     A printer with no clock to report (direct USB: M27 gives SD-card byte
     progress, not time) falls out at the first check and stays honestly
