@@ -15,6 +15,39 @@ from unittest import mock
 import pytest
 
 
+def _settle_drains(module, timeout: float = 10.0) -> None:
+    """Wait until no drain started by an earlier test is still in flight.
+
+    ``contribute()`` starts a daemon drain thread and never joins it, and
+    ``_drain_lock`` is module-level, so a straggler outlives the test that
+    spawned it.  ``drain()`` is deliberately single-flight — it takes the lock
+    with ``blocking=False`` and returns ``sent=0`` rather than risk a double
+    send — so the NEXT test's drain quietly does nothing and an assertion
+    about, say, a failed row count fails for a reason nowhere near the code
+    under test.
+
+    Run serially the straggler finishes during the next test's setup and
+    nothing shows.  Under parallel load it does not, which is why this
+    surfaced as a different victim test on every run and always passed when
+    re-run on its own.  The product behaviour is correct — in production a
+    skipped drain is picked up by the next one — so the fixture is what has
+    to wait.
+    """
+    deadline = time.monotonic() + timeout
+    for thread in threading.enumerate():
+        if thread.name == "kiln-community-outbox-drain" and thread.is_alive():
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+    # A drain holds the lock for its whole run, so a lock we can take means
+    # none is in flight — including one spawned but not yet started.
+    if module._drain_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        module._drain_lock.release()
+    else:  # pragma: no cover — only on a genuinely wedged drain
+        raise AssertionError(
+            "a drain from an earlier test still holds _drain_lock after "
+            f"{timeout}s; this test would have measured that, not the outbox"
+        )
+
+
 @pytest.fixture()
 def ob(tmp_path, monkeypatch):
     """Point the outbox at a temp DB and reset the cached connection."""
@@ -37,8 +70,10 @@ def ob(tmp_path, monkeypatch):
     # the guard's own test below deletes it again.
     monkeypatch.setenv("KILN_COMMUNITY_TEST_SEND", "1")
 
+    _settle_drains(_ob)  # no straggler drain may hold the lock we are about to need
     _ob.close()  # drop any connection cached by another test
     yield _ob
+    _settle_drains(_ob)  # and leave none behind for the next test either
     _ob.close()
 
 
