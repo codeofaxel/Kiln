@@ -53,6 +53,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
     _record_watched_duration,
+    outcome_printer_name,
 )
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
 
@@ -1330,6 +1331,13 @@ class BambuAdapter(PrinterAdapter):
                         self._last_status.get("print_error") or 0
                     )
             # _state_lock has been released here (outside the `with`).
+            # The name its owner registered, not "bambu" — that family name is
+            # shared by every Bambu on the bench.  Resolved once here because
+            # BOTH blocks below key on it, and the reconcile runs on the first
+            # frame of a process, which is exactly when the hook block is
+            # skipped for want of a previous state.
+            lifecycle_name = outcome_printer_name(self)
+            # _state_lock has been released here (outside the `with`).
             # Fire the hook — it's idempotent per (printer, job_id)
             # and cheap when no terminal transition occurred.
             if prev_gcode_state and new_gcode_state and job_id_for_hook:
@@ -1347,7 +1355,7 @@ class BambuAdapter(PrinterAdapter):
                     # process start).  Either works for terminal-transition
                     # detection, but prev_gcode_state from this merge is
                     # strictly fresher.
-                    observe_state(self.name, new_gcode_state)
+                    observe_state(lifecycle_name, new_gcode_state)
 
                     # This frame is where a connected Bambu print ENDS, as far
                     # as the rest of Kiln is concerned.  The line above writes
@@ -1373,7 +1381,7 @@ class BambuAdapter(PrinterAdapter):
                         prev_state=prev_gcode_state,
                         new_state=new_gcode_state,
                         print_error_code=print_error_for_hook,
-                        printer_name=self.name,
+                        printer_name=lifecycle_name,
                         job_id=str(job_id_for_hook),
                         file_name=str(file_name_for_hook) if file_name_for_hook else None,
                     )
@@ -1433,7 +1441,7 @@ class BambuAdapter(PrinterAdapter):
                     )
 
                     reconcile_pending_outcomes(
-                        printer_name=self.name,
+                        printer_name=lifecycle_name,
                         gcode_state=new_gcode_state,
                         print_error_code=print_error_for_hook,
                         current_job_label=(

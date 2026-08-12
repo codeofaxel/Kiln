@@ -1470,6 +1470,61 @@ def delegate_outcome_lifecycle(backend: PrinterAdapter) -> None:
     backend._kiln_outcome_delegated = True  # type: ignore[attr-defined]
 
 
+def name_printer_for_outcomes(adapter: Any, registered_name: str) -> None:
+    """Tell an adapter the name its owner registered it under.
+
+    Called from :meth:`~kiln.registry.PrinterRegistry.register`, the only
+    place that knows it.  An adapter cannot work it out for itself:
+    ``adapter.name`` is the BACKEND FAMILY — ``"bambu"`` for every Bambu ever
+    plugged in, and the same story for the other seven — while the registry
+    holds the name its owner chose, which is what every other surface
+    attributes prints to.
+
+    Best-effort by design.  An adapter that refuses attributes still works;
+    its outcomes are simply filed under the family name, exactly as before.
+    """
+    try:
+        adapter._kiln_registered_name = str(registered_name)
+    except Exception:  # noqa: BLE001
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug(
+            "could not name adapter for outcomes", exc_info=True
+        )
+
+
+def outcome_printer_name(adapter: Any) -> str:
+    """The name this printer's outcomes, transitions and cancels are filed under.
+
+    ONE answer for every part of the lifecycle that keys on a printer: the
+    previous-state table that detects a terminal transition, the idempotency
+    ledger that stops one ending being recorded twice, the cancel-intent table
+    that tells a cancel from a finish, and the ``printer_name`` written onto
+    the outcome row.  They have to agree, because they are the same question.
+
+    The family name was standing in for this, and it collides.  Two Bambus on
+    one bench were ONE machine to all four: the same file printed on both
+    recorded a single outcome, because the second ending read as a replay of
+    the first under the shared key.
+
+    It also quietly unpicked the cancel path.  ``cancel_print`` files intent
+    under the registry name and the hook consumed it under the family name, so
+    the two never met and a print the user cancelled through Kiln's own tool
+    was recorded as a success — on every install, single-printer benches
+    included.  :func:`~kiln.printers.progress_motion.observation_key` refused
+    this same trade for the motion samples and its docstring names the hazard;
+    the lifecycle never got the same treatment.
+
+    Falls back to the family name for an adapter no registry ever saw — one
+    built directly in a test or a script — which is what it reported before
+    and is still a better thing to file under than nothing.
+    """
+    registered = getattr(adapter, "_kiln_registered_name", None)
+    if isinstance(registered, str) and registered:
+        return registered
+    return getattr(adapter, "name", "") or "printer"
+
+
 def _current_job(adapter: PrinterAdapter) -> JobProgress | None:
     """The job the printer is (or was last) running, or ``None``.
 
@@ -1678,7 +1733,10 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
     # that gap is short.  Dict touch, no round trip.
     read_gap_seconds = note_status_read(adapter)
 
-    name = adapter.name
+    # The name its owner registered, not the backend family — see
+    # outcome_printer_name.  Everything below keys on this: the transition
+    # table, the idempotency ledger, the cancel intent, the outcome row.
+    name = outcome_printer_name(adapter)
     if not getattr(adapter, "_base_outcomes_reconciled", False):
         adapter._base_outcomes_reconciled = True  # type: ignore[attr-defined]
         # Only pay for job identity (get_job may be a network round trip)
