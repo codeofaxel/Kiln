@@ -70,6 +70,44 @@ def resolve_printer_model() -> str | None:
     return model
 
 
+def resolve_active_printer_name() -> str | None:
+    """The NAME its owner gave the printer Kiln acts on by default.
+
+    ``config.yaml`` records which printer is active and every entry is keyed
+    by the name its owner chose, so this is a fact the machine already holds —
+    not an inference. It is the answer to "which printer is this?" for every
+    surface that reports on the default adapter without taking a printer
+    argument, and those surfaces previously had no way to say.
+
+    Returns ``None`` when no printer is configured, and when the only name on
+    offer is the ``"default"`` placeholder the config falls back to: that is a
+    label Kiln supplies in the absence of a choice, and echoing it back to
+    someone as the name of their printer is worse than saying nothing.
+
+    Reads the same file, through the same defensive loader, as
+    :func:`resolve_printer_model` — one place understands which config entry
+    is the active one, so a second reader cannot drift from it.
+    """
+    cfg = _load_yaml_config()
+    if not cfg:
+        return None
+    printers = cfg.get("printers")
+    if not isinstance(printers, dict) or not printers:
+        return None
+    active = cfg.get("active_printer")
+    if not active:
+        # No declared choice. One configured printer is still unambiguous;
+        # several without a choice is genuinely unanswerable, and guessing
+        # which is exactly the mistake this function exists to avoid.
+        if len(printers) != 1:
+            return None
+        active = next(iter(printers))
+    name = str(active).strip()
+    if not name or name == "default" or name not in printers:
+        return None
+    return name
+
+
 def _read_printer_model_from_config() -> str | None:
     """Parse ~/.kiln/config.yaml and return the active printer's
     ``printer_model`` field, or None if missing / malformed.

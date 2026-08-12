@@ -3158,6 +3158,32 @@ def _log_print_completion(event: Event) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _reported_printer_name(printer_name: str | None = None) -> str | None:
+    """The name of the printer a status result is describing.
+
+    A status tool that takes no printer argument answers about the default
+    adapter and, until now, never said which machine that was — so a caller
+    holding the reading had no way to label it, and anything downstream had to
+    guess from a fleet listing or go without.  It is not a guess to make:
+    ``config.yaml`` records the active printer under the name its owner chose.
+
+    An explicit argument is its own answer.  Absent one, the active printer's
+    name is, and ``None`` means the config offers no name worth reporting
+    rather than that the printer is unknown.
+    """
+    if printer_name:
+        return printer_name
+    try:
+        from kiln.printer_model_resolver import resolve_active_printer_name
+
+        return resolve_active_printer_name()
+    except Exception:  # noqa: BLE001
+        # A label is a convenience; a status read must never fail for want of
+        # one, least of all while someone is watching a print.
+        logger.debug("Could not resolve the active printer name", exc_info=True)
+        return None
+
+
 @mcp.tool()
 def printer_status() -> dict:
     """Get full printer state, temperatures, job progress, and capabilities (detailed).
@@ -3183,6 +3209,12 @@ def printer_status() -> dict:
             "job": job.to_dict(),
             "capabilities": caps.to_dict(),
         }
+        # Which machine this describes.  Omitted rather than guessed when the
+        # config carries no name for it, so a reader can tell "unnamed" from
+        # "named something we did not bother to pass on".
+        reported_name = _reported_printer_name()
+        if reported_name:
+            response["printer_name"] = reported_name
         # `printer` already carries state_age_seconds when the adapter measures
         # it; this promotes the age to a sentence when it is past the point of
         # being evidence, so the answer cannot be read as current by accident.
@@ -15170,6 +15202,9 @@ def print_status_lite(printer_name: str | None = None) -> dict:
             "completion_pct": job.completion,
             "file_name": job.file_name,
         }
+        reported_name = _reported_printer_name(printer_name)
+        if reported_name:
+            result["printer_name"] = reported_name
 
         # Include ETA if available.
         #
