@@ -309,6 +309,7 @@ from kiln.printers import (
     PrusaLinkAdapter,
     SerialPrinterAdapter,
     describe_stale_state,
+    progress_stall_note,
 )
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
@@ -3193,6 +3194,12 @@ def printer_status() -> dict:
         )
         if stale_note:
             response["telemetry_warning"] = stale_note
+        # The complementary question: the reading is current, but is the
+        # MACHINE moving?  A frozen push cache and a lying state word are
+        # different failures, and each is invisible to the other's check.
+        motion_note = progress_stall_note(adapter, state, job)
+        if motion_note:
+            response["stall_warning"] = motion_note
         from kiln.safety_gap_warning import attach_safety_warning
         return attach_safety_warning(response)
     except (PrinterError, RuntimeError) as exc:
@@ -3554,25 +3561,40 @@ def monitor_print(
             printer_name or _resolve_effective_printer_name(printer_name)
         )
 
-        # --- Telemetry staleness ---
-        # Two independent signals, because each is blind where the other sees.
+        # --- Telemetry staleness and stalled motion ---
+        # Three independent signals, because each is blind where the others
+        # see.
         #
-        # (1) The reading's own age, from the adapter.  This is the only signal
-        #     available at 0% / layer 0 — where a printer paused at layer 0
-        #     with an error was once reported as printing, off a cache that had
-        #     stopped advancing.  Signal (2) could not fire there: it needs
-        #     printer-reported elapsed, which the Bambu adapter only computes
-        #     above 0% completion, so the one staleness witness this report had
-        #     was structurally unreachable for the whole first layer.
+        # (1) The reading's own age, from the adapter.  This is the only
+        #     signal available at 0% / layer 0 — where a printer paused at
+        #     layer 0 with an error was once reported as printing, off a cache
+        #     that had stopped advancing.
         #
         # (2) Printer-reported elapsed failing to advance across calls, which
         #     catches a cache that keeps arriving but stops moving — a shape
         #     signal (1) cannot see, since any push refreshes the age.
+        #     NOTE: this no longer applies to Bambu.  That adapter used to
+        #     EXTRAPOLATE elapsed from percentage and remaining, so its
+        #     elapsed froze exactly when they did and this check was an
+        #     accidental progress detector; it now reports a measured wall
+        #     clock, which advances whatever the machine is doing.  The
+        #     adapters this still speaks for are the ones whose elapsed is
+        #     genuinely printer-reported.
+        #
+        # (3) The progress axes themselves failing to advance — signal (2)
+        #     done deliberately instead of by accident, on the two fields
+        #     that actually mean progress, over a window calibrated against
+        #     a measured legitimate slow first layer.  This is the one that
+        #     covers the 2026-08-11 incident: fresh telemetry, RUNNING state,
+        #     frozen layer and percent for twenty minutes.
         import time as _time_mod
         _now = _time_mod.time()
         _stale_warning = describe_stale_state(
             sd.get("state_age_seconds"), state_str
         ) or ""
+        _motion_note = progress_stall_note(adapter, state, job)
+        if _motion_note:
+            _stale_warning = f"{_stale_warning} {_motion_note}".strip()
         if elapsed_s is not None and state_str == "printing":
             _prev, _prev_ts = _MONITOR_ELAPSED_HISTORY.get(
                 _resolved_printer, (None, None)
@@ -5681,11 +5703,22 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
 
 
 @mcp.tool()
-def resume_print() -> dict:
+def resume_print(force: bool = False) -> dict:
     """Resume a paused print job.
 
     The printer must currently be in a paused state.  Resuming will return
     the nozzle to its previous position and continue extruding.
+
+    Kiln checks afterwards that the resume actually took, so a printer that
+    silently ignored the command reports a failure instead of a cheerful
+    "Print resumed."
+
+    Args:
+        force: Send the resume even when Kiln believes the printer is not
+            paused.  Use this when the printer's own screen disagrees with
+            what Kiln reports — a printer can report ``RUNNING`` with
+            perfectly fresh telemetry while standing still, and without this
+            the wrong state word would leave you unable to recover the print.
     """
     if err := _check_auth("print"):
         return err
@@ -5695,7 +5728,7 @@ def resume_print() -> dict:
         return block
     try:
         adapter = _get_adapter()
-        result = adapter.resume_print()
+        result = adapter.resume_print(force=force)
         # Stop the pause keep-alive thread if one was running — the print
         # is back under firmware control and re-asserting targets here
         # would race with the resume preamble gcode.
@@ -15160,6 +15193,12 @@ def print_status_lite(printer_name: str | None = None) -> dict:
         stale_note = describe_stale_state(state_age, result["state"])
         if stale_note:
             result["telemetry_warning"] = stale_note
+        # This is the tool `printer_status` sends people to for polling
+        # during a print, so it is the surface most likely to be watching at
+        # the moment a print quietly stops moving.
+        motion_note = progress_stall_note(adapter, state, job)
+        if motion_note:
+            result["stall_warning"] = motion_note
 
         return result
 

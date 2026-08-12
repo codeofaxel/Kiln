@@ -28,6 +28,7 @@ from requests.exceptions import RequestException, Timeout
 
 from kiln.printers.base import (
     JobProgress,
+    JobResult,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,
@@ -102,6 +103,21 @@ _STATE_MAP: dict[str, PrinterStatus] = {
     "ERROR": PrinterStatus.ERROR,
     "ATTENTION": PrinterStatus.ERROR,
     "READY": PrinterStatus.IDLE,
+}
+
+# How the last job ENDED, for the Prusa Link states that say so.  Both
+# used to arrive as the same IDLE as a printer sitting untouched — so a
+# print that ran to completion and one a user stopped at layer 3 were
+# reported identically, and so was neither happening at all.
+#
+# "STOPPED" is Prusa Link's word for a print the user ended early; the
+# firmware has no separate cancelled state.  "ERROR" and "ATTENTION" are
+# deliberately absent: those describe a condition the PRINTER is in
+# (a thermal fault, a filament-change prompt), not a verdict on a job,
+# and they already map to an ERROR status that says so.
+_JOB_RESULT_MAP: dict[str, JobResult] = {
+    "FINISHED": JobResult.COMPLETED,
+    "STOPPED": JobResult.CANCELLED,
 }
 
 
@@ -638,6 +654,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         printer = _safe_get(data, "printer", default={})
         state_str = printer.get("state", "IDLE") if isinstance(printer, dict) else "IDLE"
         mapped_status = _STATE_MAP.get(state_str, PrinterStatus.UNKNOWN)
+        job_result = _JOB_RESULT_MAP.get(state_str)
 
         tool_actual = printer.get("temp_nozzle") if isinstance(printer, dict) else None
         tool_target = printer.get("target_nozzle") if isinstance(printer, dict) else None
@@ -660,6 +677,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         return PrinterState(
             connected=True,
             state=mapped_status,
+            last_job_result=job_result,
             tool_temp_actual=tool_actual,
             tool_temp_target=tool_target,
             bed_temp_actual=bed_actual,

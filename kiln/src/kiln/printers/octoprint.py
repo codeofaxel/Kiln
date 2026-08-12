@@ -75,6 +75,18 @@ def _map_flags_to_status(flags: dict[str, Any]) -> PrinterStatus:
     such as ``printing``, ``paused``, ``cancelling``, ``error``, ``ready``,
     ``operational``, ``closedOrError``, etc.  This function evaluates them in
     priority order and returns the single most relevant status enum.
+
+    No :class:`~kiln.printers.base.JobResult` companion here, and that is a
+    finding rather than an omission: OctoPrint's flags describe only what the
+    machine is doing now.  A printer that has just completed a job is
+    ``operational`` + ``ready`` — byte-identical to one that has been sitting
+    untouched — so there is nothing in this payload to read a completion out
+    of, and manufacturing one from ``progress.completion`` would be an
+    inference dressed as a report.  OctoPrint DOES state it, on the event
+    channel (``PrintDone`` / ``PrintCancelled`` / ``PrintFailed``, reachable
+    through the ``on_event`` hook this adapter already installs for flow
+    anomalies).  Wiring that is the honest way to close this gap, and it is a
+    push-only path, so the polled answer would still be ``None``.
     """
     if flags.get("cancelling"):
         return PrinterStatus.CANCELLING

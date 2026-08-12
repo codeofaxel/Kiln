@@ -128,7 +128,23 @@ def test_systemd_unit_render():
 
 def test_run_command_render_quotes_the_interpreter():
     cmd = bcmd._render_run_command(r"C:\Py 3.12\pythonw.exe")
-    assert cmd == '"C:\\Py 3.12\\pythonw.exe" -m kiln.bridge_client'
+    assert cmd == '"C:\\Py 3.12\\pythonw.exe" -m kiln.bridge_supervisor'
+
+
+def test_only_the_unsupervising_login_mechanism_gets_our_supervisor():
+    """launchd and systemd supervise; the Windows Run key does not.
+
+    So the plist and the unit launch the bridge directly and the Run key
+    launches the supervisor.  Stacking ours under launchd or systemd would put
+    two parents on one child, each entitled to restart it.
+    """
+    assert "kiln.bridge_client" in _render_plist("/py", "/log")
+    assert "kiln.bridge_supervisor" not in _render_plist("/py", "/log")
+
+    assert "kiln.bridge_client" in _render_systemd_unit("/py")
+    assert "kiln.bridge_supervisor" not in _render_systemd_unit("/py")
+
+    assert "kiln.bridge_supervisor" in bcmd._render_run_command("py.exe")
 
 
 def test_windows_pythonw_prefers_the_windowless_interpreter(monkeypatch):
@@ -163,7 +179,7 @@ def test_win32_dispatch(monkeypatch):
     # _install_service → Run key + immediate spawn
     spawned = []
     monkeypatch.setattr(bcmd, "_install_run_key", lambda: (True, ""))
-    monkeypatch.setattr(bcmd, "_spawn_bridge", lambda: spawned.append(1) or 999)
+    monkeypatch.setattr(bcmd, "_spawn_supervised_bridge", lambda: spawned.append(1) or 999)
     ok, detail = bcmd._install_service()
     assert ok and detail == "" and spawned == [1]
 
@@ -341,3 +357,148 @@ def test_handle_uri_command_ignores_unrecognised_uris(monkeypatch):
     out = CliRunner().invoke(bridge, ["handle-uri", "kiln://bridge/wipe-everything"])
     assert out.exit_code == 0  # never errors loudly — nobody's watching a console
     assert calls == []
+
+
+# --- crash supervision: `start` survives a kill, and status admits it -------
+#
+# Measured 2026-08-11: `kill -9` on the bridge mid-print left the printer
+# printing and the bridge dead, and nothing anywhere said so.  `start` now runs
+# the bridge under `kiln.bridge_supervisor`; these cover the CLI half of that —
+# the stop ordering, the double-start guard, and the two states status could
+# not previously describe.
+
+
+def test_status_admits_a_crash_it_recovered_from():
+    """"crashed and came back" and "never crashed" are not the same fact."""
+    now = 1000.0
+    _, lines = _describe_status(
+        signed_in=True, enabled=False, running=True, connected=True,
+        since=now - 60, now=now,
+        supervised=True, restarts=1, last_exit_at=now - 300,
+    )
+    assert any("Recovered from a crash 5m ago" in ln for ln in lines)
+    assert any("1 restart " in ln for ln in lines)
+    # And it is honest about the limit of what `start` bought you.
+    assert any("not after a logout or reboot" in ln for ln in lines)
+
+
+def test_status_does_not_invent_a_crash_that_never_happened():
+    now = 1000.0
+    _, lines = _describe_status(
+        signed_in=True, enabled=False, running=True, connected=True,
+        since=now - 60, now=now, supervised=True,
+    )
+    assert not any("Recovered" in ln for ln in lines)
+
+
+def test_status_explains_a_bridge_that_gave_up():
+    """Before this, a bridge that had tried and failed read exactly like one
+    that had simply never been switched on."""
+    head, lines = _describe_status(
+        signed_in=True, enabled=False, running=False, connected=False,
+        since=None, now=1000.0, gave_up=True,
+    )
+    assert head == "off after repeated crashes"
+    assert any("kept stopping" in ln for ln in lines)
+    assert any(bcmd._LOG_FILE in ln for ln in lines)
+
+
+def test_stop_kills_the_supervisor_before_the_bridge(monkeypatch):
+    """Order is load-bearing.  SIGTERM the bridge while its supervisor is still
+    watching and the supervisor does its job — a new bridge — so `stop` would
+    report success over a bridge that is still running.
+    """
+    killed: list[int] = []
+    monkeypatch.setattr(bcmd, "_running_supervisor_pid", lambda: 111)
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: 222)
+    monkeypatch.setattr(bcmd, "_terminate", killed.append)
+    monkeypatch.setattr(bcmd, "_pid_alive", lambda pid: False)
+    monkeypatch.setattr(bcmd, "clear_supervisor_state", lambda: None)
+    monkeypatch.setattr(bcmd, "clear_bridge_state", lambda: None)
+
+    assert bcmd._stop_process() is True
+    assert killed == [111, 222], "the supervisor must be stopped first"
+
+
+def test_stop_reports_success_when_only_the_supervisor_was_up(monkeypatch):
+    """Between a crash and its restart there is a supervisor and no bridge."""
+    monkeypatch.setattr(bcmd, "_running_supervisor_pid", lambda: 111)
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: None)
+    monkeypatch.setattr(bcmd, "_terminate", lambda _pid: None)
+    monkeypatch.setattr(bcmd, "clear_supervisor_state", lambda: None)
+    monkeypatch.setattr(bcmd, "clear_bridge_state", lambda: None)
+
+    assert bcmd._stop_process() is True
+
+
+def test_start_will_not_stack_a_second_supervisor(monkeypatch):
+    """Same window: the bridge pid is briefly absent while the run continues.
+    Checking only that one would start a second supervisor over the first.
+    """
+    monkeypatch.setattr(bcmd, "_read_license", lambda: "lic")
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: False)
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: None)
+    monkeypatch.setattr(bcmd, "_running_supervisor_pid", lambda: 111)
+    spawned: list[int] = []
+    monkeypatch.setattr(bcmd, "_spawn_supervised_bridge", lambda: spawned.append(1) or 9)
+
+    out = CliRunner().invoke(bridge, ["start"])
+    assert out.exit_code == 0
+    assert "already running" in out.output
+    assert spawned == []
+
+
+def test_start_offers_enable_rather_than_installing_it(monkeypatch):
+    """A login item the user never agreed to is one they find by accident."""
+    monkeypatch.setattr(bcmd, "_read_license", lambda: "lic")
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: False)
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: None)
+    monkeypatch.setattr(bcmd, "_running_supervisor_pid", lambda: None)
+    monkeypatch.setattr(bcmd, "_await_connected", lambda: True)
+    monkeypatch.setattr(bcmd, "_spawn_supervised_bridge", lambda: 777)
+    installed: list[int] = []
+    monkeypatch.setattr(bcmd, "_install_service", lambda: installed.append(1) or (True, ""))
+
+    out = CliRunner().invoke(bridge, ["start"])
+    assert out.exit_code == 0
+    assert installed == [], "`start` silently installed a login item"
+    assert "kiln bridge enable" in out.output
+    assert "restarts itself if it crashes" in out.output
+
+
+def test_status_reads_the_supervisor_state_it_finds(tmp_path, monkeypatch):
+    """End to end through the real files: a give-up on disk reaches the user."""
+    import kiln.bridge_supervisor as bsup
+
+    monkeypatch.setattr(bsup, "_SUPERVISOR_STATE", str(tmp_path / "bridge.supervisor"))
+    bsup.update_supervisor_state(gave_up=True, last_exit={"code": 1, "at": 5.0})
+    monkeypatch.setattr(bcmd, "_read_license", lambda: "lic")
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: False)
+    monkeypatch.setattr(bcmd, "read_bridge_state", lambda: {})
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: None)
+
+    out = CliRunner().invoke(bridge, ["status"])
+    assert out.exit_code == 0
+    assert "off after repeated crashes" in out.output
+
+
+def test_a_give_up_outranks_enabled_but_not_running():
+    """On Windows `enable` is supervised by us, so it can reach the give-up
+    state — and "enabled, but not running" withholds the half we know."""
+    head, lines = _describe_status(
+        signed_in=True, enabled=True, running=False, connected=False,
+        since=None, now=1000.0, gave_up=True,
+    )
+    assert head == "off after repeated crashes"
+    assert any("kept stopping" in ln for ln in lines)
+
+
+def test_a_very_recent_crash_reads_like_english():
+    now = 1000.0
+    _, lines = _describe_status(
+        signed_in=True, enabled=False, running=True, connected=True,
+        since=now, now=now, supervised=True, restarts=1, last_exit_at=now - 5,
+    )
+    line = next(ln for ln in lines if "Recovered" in ln)
+    assert "just now ago" not in line
+    assert "Recovered from a crash just now (1 restart this run)." == line

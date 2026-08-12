@@ -27,6 +27,7 @@ from kiln.printers.base import (
     FirmwareComponent,
     FirmwareStatus,
     JobProgress,
+    JobResult,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,
@@ -548,6 +549,7 @@ class SerialPrinterAdapter(PrinterAdapter):
 
         # Check if actively printing via SD card.
         status = PrinterStatus.IDLE
+        job_result: JobResult | None = None
         try:
             sd_response = self._send_command("M27")
             sd_match = _SD_PROGRESS_RE.search(sd_response)
@@ -559,10 +561,17 @@ class SerialPrinterAdapter(PrinterAdapter):
                     # use our internal _paused flag.
                     status = PrinterStatus.PAUSED if self._paused else PrinterStatus.PRINTING
                 elif total > 0 and current >= total:
-                    # Print complete.
+                    # Print complete: the byte counter has reached the file
+                    # size.  The printer is idle and ready — and the job it
+                    # just ran got all the way to the end, which is a
+                    # separate fact that used to die right here, on the line
+                    # whose own comment said "print complete".
                     status = PrinterStatus.IDLE
+                    job_result = JobResult.COMPLETED
                     self._paused = False
             elif "not sd printing" in sd_response.lower():
+                # Marlin says nothing about a job that is no longer loaded,
+                # so this stays an honest absence rather than a completion.
                 status = PrinterStatus.IDLE
                 self._paused = False
         except PrinterError:
@@ -572,6 +581,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         return PrinterState(
             connected=True,
             state=status,
+            last_job_result=job_result,
             tool_temp_actual=temps.get("tool_actual"),
             tool_temp_target=temps.get("tool_target"),
             bed_temp_actual=temps.get("bed_actual"),
@@ -842,7 +852,7 @@ class SerialPrinterAdapter(PrinterAdapter):
             message="Print paused.",
         )
 
-    def resume_print(self) -> PrintResult:
+    def resume_print(self, *, force: bool = False) -> PrintResult:
         """Resume a paused SD print — OVERRIDE of the base template.
 
         Serial has no real printer-state telemetry: pause is tracked by the
@@ -851,8 +861,18 @@ class SerialPrinterAdapter(PrinterAdapter):
         directly here instead of the base template's ``get_state()`` check —
         which would otherwise block a legitimate resume whenever the printer
         reads as idle/printing rather than paused.
+
+        *force* skips that flag, for the case the flag exists to paper over:
+        the print was paused by something other than Kiln (the LCD, a host
+        restart), so Kiln never set it and would otherwise refuse forever.
+
+        Deliberately NO read-back here, unlike the base template.  Verifying
+        a resume means re-reading the state, and this adapter's whole reason
+        for overriding is that its state read cannot see a pause — a
+        confident sentence built on a signal known to be blind is the failure
+        this work exists to remove, not a check.
         """
-        if not self._paused:
+        if not (self._paused or force):
             return self._no_paused_print_result()
         return self._resume_print_impl()
 

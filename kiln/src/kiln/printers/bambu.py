@@ -42,6 +42,7 @@ import paho.mqtt.client as mqtt
 from kiln.printers.base import (
     STALE_STATE_WARN_AGE,
     JobProgress,
+    JobResult,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,
@@ -52,6 +53,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from kiln.printers.progress_motion import job_elapsed_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +145,12 @@ class _BackoffState:
 
 
 # Mapping from Bambu ``gcode_state`` strings to :class:`PrinterStatus`.
+#
+# ``finish`` maps to IDLE on purpose: a printer that has finished is doing
+# nothing and is ready for the next job, which is what every pre-print gate
+# reads this value to decide.  What it does NOT say — that a print just ran
+# to completion — is carried by _JOB_RESULT_MAP below, so the two facts stop
+# competing for one field.
 _STATE_MAP: dict[str, PrinterStatus] = {
     "idle": PrinterStatus.IDLE,
     "finish": PrinterStatus.IDLE,
@@ -155,6 +163,16 @@ _STATE_MAP: dict[str, PrinterStatus] = {
     "cancelling": PrinterStatus.CANCELLING,
     "offline": PrinterStatus.OFFLINE,
     "unknown": PrinterStatus.UNKNOWN,
+}
+
+# How the last job ENDED, for the ``gcode_state`` values that say so.
+# ``idle`` is absent deliberately — on firmware that jumps straight to it
+# after a print, it genuinely carries no ending, and inventing one here
+# would be the same guess this field exists to stop making.  ``failed`` is
+# resolved in :meth:`BambuAdapter._build_state_from_cache` rather than
+# here, because its meaning depends on the ``print_error`` beside it.
+_JOB_RESULT_MAP: dict[str, JobResult] = {
+    "finish": JobResult.COMPLETED,
 }
 
 # States that indicate a print job is active or starting.
@@ -1647,20 +1665,35 @@ class BambuAdapter(PrinterAdapter):
         gcode_state = gcode_state.lower()
 
         mapped = _STATE_MAP.get(gcode_state, PrinterStatus.UNKNOWN)
+        job_result = _JOB_RESULT_MAP.get(gcode_state)
 
         # After a cancelled print the MQTT cache can get stuck with
         # gcode_state="failed" even though the printer is actually idle.
         # When print_error is explicitly present and equals 0 (no real error),
         # this is a stale post-cancel state — treat it as IDLE so preflight
         # checks pass.  If print_error is absent we conservatively keep ERROR.
+        #
+        # The IDLE downgrade stays exactly as it was: the machine really is
+        # ready, and demoting it would block the next print.  What changes is
+        # that the downgrade no longer DESTROYS the fact underneath it.  A job
+        # the firmware calls "failed" while naming no error code is a job that
+        # ended without completing — on this firmware, what a cancel looks
+        # like — so it is reported as CANCELLED rather than silently becoming
+        # indistinguishable from a printer nobody has touched.  Even if such a
+        # state were some unreported failure rather than a cancel, "did not
+        # complete" is the honest half of both, and it errs away from the
+        # false "success" the flattened value used to produce.
         if mapped == PrinterStatus.ERROR:
             raw_error = status.get("print_error")
+            error_val: int = -1
             if raw_error is not None:
-                error_val: int = -1
                 with contextlib.suppress(TypeError, ValueError):
                     error_val = int(raw_error)
                 if error_val == 0:
                     mapped = PrinterStatus.IDLE
+            job_result = (
+                JobResult.CANCELLED if error_val == 0 else JobResult.FAILED
+            )
 
         # Speed profile.
         spd_lvl = status.get("spd_lvl")
@@ -1685,6 +1718,7 @@ class BambuAdapter(PrinterAdapter):
         return PrinterState(
             connected=True,
             state=mapped,
+            last_job_result=job_result,
             tool_temp_actual=status.get("nozzle_temper"),
             tool_temp_target=status.get("nozzle_target_temper"),
             bed_temp_actual=status.get("bed_temper"),
@@ -1775,19 +1809,29 @@ class BambuAdapter(PrinterAdapter):
         if mc_percent is not None:
             completion = float(mc_percent)
 
-        # Estimate elapsed time from completion and remaining.
-        print_time_seconds: int | None = None
         print_time_left_seconds: int | None = None
-
         if mc_remaining is not None:
             print_time_left_seconds = int(mc_remaining) * 60
 
-        if completion is not None and completion > 0 and print_time_left_seconds is not None:
-            # total_est = remaining / (1 - completion/100)
-            fraction_left = 1.0 - (completion / 100.0)
-            if fraction_left > 0:
-                total_est = print_time_left_seconds / fraction_left
-                print_time_seconds = max(0, int(total_est - print_time_left_seconds))
+        # Elapsed is MEASURED from the start Kiln witnessed, or not reported.
+        #
+        # It used to be extrapolated from the two numbers above —
+        # ``remaining / (1 - completion/100) - remaining`` — which is a
+        # restatement of the percentage, not a measurement of time.  Verified
+        # on an A1 (2026-08-11): at 99 % with one minute left it produced
+        # 5940 s and the web rendered "1h 39m" for a print that had run about
+        # 31 minutes.  Whenever remaining is one minute the elapsed in minutes
+        # equals the completion percentage exactly; the "1h39m" WAS the
+        # "99 %".  ``mc_remaining_time`` arrives in whole MINUTES, so as the
+        # divisor approaches 0.01 that coarseness is multiplied by a hundred.
+        #
+        # Bambu's push payload carries no start timestamp to read instead, so
+        # when Kiln did not start the print — it attached to one already
+        # running, or the process restarted — the honest answer is that
+        # elapsed is unknown, and the field is left unset.
+        print_time_seconds: int | None = job_elapsed_seconds(
+            self, file_name or None
+        )
 
         # Layer tracking.
         current_layer: int | None = None

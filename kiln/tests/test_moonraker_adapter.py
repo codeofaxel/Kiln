@@ -1127,12 +1127,36 @@ class TestResumeNotPausedHonest:
 
     def test_resume_when_paused_proceeds(self):
         adapter = _adapter()
+        # PAUSED on the way in, PRINTING on the read-back — the template
+        # re-reads the printer afterwards, because a resume command that was
+        # accepted by the transport is not yet a print that resumed.
+        adapter.get_state = mock.Mock(
+            side_effect=[
+                mock.Mock(state=PrinterStatus.PAUSED),
+                mock.Mock(state=PrinterStatus.PRINTING),
+            ]
+        )
+        adapter._post = mock.Mock()
+        result = adapter.resume_print()
+        assert result.success is True
+        adapter._post.assert_called_once_with("/printer/print/resume")
+
+    def test_resume_the_printer_ignored_is_reported_as_a_failure(self):
+        """Still paused after the resume means the resume did not happen.
+
+        Klipper will accept the HTTP call and answer 200 whether or not the
+        print comes back, so the POST returning cleanly proves only that the
+        message was delivered.
+        """
+        adapter = _adapter()
+        adapter._RESUME_VERIFY_TIMEOUT = 0.0  # no sleeping in the suite
         adapter.get_state = mock.Mock(
             return_value=mock.Mock(state=PrinterStatus.PAUSED)
         )
         adapter._post = mock.Mock()
         result = adapter.resume_print()
-        assert result.success is True
+        assert result.success is False
+        assert "still reports paused" in result.message
         adapter._post.assert_called_once_with("/printer/print/resume")
 
 

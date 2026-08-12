@@ -3008,8 +3008,16 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
 
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.option(
+    "--force",
+    is_flag=True,
+    help=(
+        "Send the resume even if Kiln thinks the printer isn't paused. "
+        "Use when the printer's screen disagrees with what Kiln reports."
+    ),
+)
 @click.pass_context
-def resume(ctx: click.Context, json_mode: bool) -> None:
+def resume(ctx: click.Context, json_mode: bool, force: bool) -> None:
     """Resume a paused print job."""
     try:
         safety_printer = _resolve_emergency_printer_name(ctx)
@@ -3024,7 +3032,7 @@ def resume(ctx: click.Context, json_mode: bool) -> None:
             )
             sys.exit(1)
         adapter = _get_adapter_from_ctx(ctx)
-        result = adapter.resume_print()
+        result = adapter.resume_print(force=force)
         click.echo(format_action("resume", result.to_dict(), json_mode=json_mode))
     except click.ClickException:
         raise

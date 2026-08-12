@@ -103,6 +103,15 @@ _PAUSE_POLL_INTERVAL_S: float = 0.5
 # Object-model status strings, from RepRap::GetStatusString() in
 # src/Platform/RepRap.cpp.  The firmware builds both representations from one
 # index, so the two maps below are the same 13 states in the same order.
+#
+# Neither map has a JobResult companion, and unlike Bambu/Moonraker/Prusa
+# Link that is not a collapse being fixed elsewhere — it is the vocabulary
+# genuinely lacking the word.  RRF's 13 statuses have no terminal member: a
+# finished job, a cancelled job and an untouched machine all return to
+# "idle" (`I`), and the object model records the ending only as history
+# (`job.lastFileName`, `job.lastDuration`), with nothing saying HOW it
+# ended.  Reporting `None` is therefore the accurate answer here, not a
+# gap someone forgot to fill.
 _RRF3_STATUS_MAP: dict[str, PrinterStatus] = {
     "starting": PrinterStatus.BUSY,  # reading config.g
     "updating": PrinterStatus.BUSY,  # flashing firmware

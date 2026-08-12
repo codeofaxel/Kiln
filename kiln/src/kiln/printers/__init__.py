@@ -27,6 +27,16 @@ from kiln.printers.base import (
     UploadResult,
     describe_stale_state,
 )
+from kiln.printers.progress_motion import (
+    Motion,
+    MotionVerdict,
+    ProgressSample,
+    latest_verdict,
+    observe_progress,
+    progress_stall_note,
+    reset_progress_observations,
+    stall_threshold_seconds,
+)
 
 try:
     from kiln.printers.bambu import BambuAdapter
@@ -59,6 +69,8 @@ __all__ = [
     "IdentityConflict",
     "JobProgress",
     "MoonrakerAdapter",
+    "Motion",
+    "MotionVerdict",
     "OctoPrintAdapter",
     "PrinterAdapter",
     "PrinterCapabilities",
@@ -68,8 +80,14 @@ __all__ = [
     "PrinterState",
     "PrinterStatus",
     "PrintResult",
+    "ProgressSample",
     "PrusaLinkAdapter",
     "SerialPrinterAdapter",
     "UploadResult",
     "describe_stale_state",
+    "latest_verdict",
+    "observe_progress",
+    "progress_stall_note",
+    "reset_progress_observations",
+    "stall_threshold_seconds",
 ]

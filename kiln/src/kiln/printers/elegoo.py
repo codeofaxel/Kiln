@@ -122,7 +122,15 @@ _FDM_MACHINE_NAME_SUBSTRINGS: tuple[str, ...] = ("centauri",)
 # this adapter can't reuse _validate_part_fan's PWM-scaled return value.
 _ELEGOO_PART_FAN_ALIASES: frozenset[str] = frozenset({"part", "part_cooling", "cooling"})
 
-# SDCP print status codes → PrinterStatus mapping
+# SDCP print status codes → PrinterStatus mapping.
+#
+# No JobResult companion, for a different reason than the other adapters:
+# this map never collapsed a completion into IDLE in the first place.  Only
+# code 0 is IDLE, and any code not listed here falls through to UNKNOWN
+# rather than being flattened — so an SDCP completion code reads as "Kiln
+# does not know this code", which is honest, if unhelpful.  Naming the
+# terminal codes needs them confirmed against a real machine's traffic
+# rather than guessed from a spec, so the map stays as measured.
 _PRINT_STATUS_MAP: dict[int, PrinterStatus] = {
     0: PrinterStatus.IDLE,
     5: PrinterStatus.BUSY,       # pausing
