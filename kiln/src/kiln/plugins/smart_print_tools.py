@@ -386,8 +386,20 @@ class _SmartPrintToolsPlugin:
                 and slice_result.output_path.endswith(".gcode")
             ):
                 try:
+                    from kiln.printers.bambu_3mf import (
+                        thumbnail_inputs_for_model,
+                    )
+
+                    # Hand the wrap the model it was sliced from, or the
+                    # printer shows a blank tile for a retry the user is
+                    # already watching more closely than a first attempt.
+                    _stl_paths, _source_3mf = thumbnail_inputs_for_model(
+                        model_path
+                    )
                     upload_path = adapter.wrap_gcode_as_3mf(
-                        slice_result.output_path
+                        slice_result.output_path,
+                        stl_paths=_stl_paths,
+                        source_3mf_path=_source_3mf,
                     )
                     _logger.info("Wrapped gcode as Bambu 3MF: %s", upload_path)
                 except Exception:

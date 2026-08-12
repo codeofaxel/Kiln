@@ -1285,6 +1285,61 @@ def _declared_filament_colors(plate_json: str | None) -> list[str] | None:
     return colors or None
 
 
+def thumbnail_inputs_for_model(
+    model_path: str | None,
+) -> tuple[list[str] | None, str | None]:
+    """Route a model file to the two thumbnail inputs of the wrap functions.
+
+    A wrap can learn what the part looks like two ways — by rendering a
+    mesh (``stl_paths``) or by copying the preview a 3MF already carries
+    (``source_3mf_path``) — and which one applies is decided by the file
+    extension.  Every door that wraps gcode has to make that same
+    decision, so it is made once here: a per-door copy is how one door
+    ends up routing a format the others drop on the floor.
+
+    Any other extension yields ``(None, None)`` — the wrap still
+    succeeds, without a preview.
+
+    :param model_path: The model the gcode was sliced from, if known.
+    :returns: ``(stl_paths, source_3mf_path)`` for the wrap call.
+    """
+    if not model_path or not os.path.isfile(model_path):
+        return (None, None)
+    ext = os.path.splitext(model_path)[1].lower()
+    if ext in (".stl", ".obj", ".glb"):
+        return ([model_path], None)
+    if ext == ".3mf":
+        return (None, model_path)
+    if ext in (".step", ".stp"):
+        # PrusaSlicer reads STEP natively, so a CAD file can be sliced
+        # without ever becoming a mesh — but the LCD thumbnail is
+        # rendered FROM a mesh, so the printer's screen went blank for
+        # exactly the CAD-first users this path exists to serve.  Convert
+        # for the preview only.  No converter installed just means no
+        # thumbnail, which is where this started, so it degrades to the
+        # old behavior rather than costing anyone a print.
+        #
+        # DELIBERATELY drops the conversion record, unlike every other
+        # caller of this door.  The gcode was sliced from the STEP itself,
+        # so this mesh is a picture of the part and not the part:
+        # recording its fidelity here would attach an accuracy figure to
+        # geometry that never reached the printer, and would attach it to
+        # the one output whose real accuracy came from PrusaSlicer's own
+        # tessellation instead.  A thumbnail's fidelity is nobody's
+        # question.  Pinned by
+        # test_the_thumbnail_path_deliberately_keeps_no_record.
+        try:
+            from kiln.step_import import ensure_mesh_path
+
+            return ([ensure_mesh_path(model_path)[0]], None)
+        except Exception as exc:  # noqa: BLE001 — no preview beats no print
+            logger.info(
+                "No LCD thumbnail for %s (%s)",
+                os.path.basename(model_path), exc,
+            )
+    return (None, None)
+
+
 def _thumbnail_aspect_groups() -> dict[float, list[str]]:
     """The thumbnail paths, grouped by the shape of the image they want.
 

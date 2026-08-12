@@ -44,6 +44,7 @@ from kiln.printers.bambu_3mf import (
     _resolve_start_gcode,
     build_bambu_3mf,
     repackage_gcode_as_bambu_3mf,
+    thumbnail_inputs_for_model,
 )
 
 # ---------------------------------------------------------------------------
@@ -1374,6 +1375,61 @@ class TestThumbnailsReachTheArchive:
         # And the failure is on the record, with the traceback.
         assert "renderer exploded" in caplog.text
         assert "RuntimeError" in caplog.text
+
+
+class TestThumbnailInputsForModel:
+    """One router, so every wrap door previews the same formats.
+
+    Each door used to decide for itself which of the wrap's two thumbnail
+    inputs a model file belongs in — and one of them never decided at
+    all, wrapping gcode with no geometry and shipping a blank preview.
+    """
+
+    def test_a_mesh_goes_to_the_renderer(self, tmp_path):
+        for name in ("part.stl", "part.obj", "part.glb"):
+            mesh = tmp_path / name
+            mesh.write_text("solid s\nendsolid s\n")
+            assert thumbnail_inputs_for_model(str(mesh)) == ([str(mesh)], None)
+
+    def test_a_3mf_goes_to_the_thumbnail_copier(self, tmp_path):
+        project = tmp_path / "part.3mf"
+        project.write_bytes(b"PK\x03\x04")
+        assert thumbnail_inputs_for_model(str(project)) == (None, str(project))
+
+    def test_an_unpreviewable_file_costs_the_preview_not_the_print(self, tmp_path):
+        other = tmp_path / "part.gcode"
+        other.write_text("G1 X0\n")
+        assert thumbnail_inputs_for_model(str(other)) == (None, None)
+
+    def test_nothing_to_route_is_not_an_error(self, tmp_path):
+        assert thumbnail_inputs_for_model(None) == (None, None)
+        assert thumbnail_inputs_for_model(str(tmp_path / "gone.stl")) == (None, None)
+
+    def test_a_step_is_converted_only_to_draw_the_preview(self, tmp_path):
+        """CAD-first users get a preview; the conversion stays unrecorded."""
+        step = tmp_path / "part.step"
+        step.write_text("ISO-10303-21;\n")
+        mesh = tmp_path / "converted.stl"
+        mesh.write_text("solid s\nendsolid s\n")
+
+        with patch(
+            "kiln.step_import.ensure_mesh_path",
+            return_value=(str(mesh), None, None),
+        ) as convert:
+            assert thumbnail_inputs_for_model(str(step)) == ([str(mesh)], None)
+
+        # No with_record= — see test_the_thumbnail_path_deliberately_keeps_no_record.
+        assert convert.call_args.kwargs == {}
+
+    def test_a_missing_step_converter_costs_only_the_preview(self, tmp_path):
+        step = tmp_path / "part.step"
+        step.write_text("ISO-10303-21;\n")
+
+        with patch(
+            "kiln.step_import.ensure_mesh_path",
+            side_effect=RuntimeError("no backend installed"),
+        ):
+            assert thumbnail_inputs_for_model(str(step)) == (None, None)
 
 
 # ---------------------------------------------------------------------------

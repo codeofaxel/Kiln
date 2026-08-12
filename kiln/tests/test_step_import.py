@@ -2771,10 +2771,14 @@ def test_the_thumbnail_path_deliberately_keeps_no_record():
     fidelity would attach an accuracy figure to geometry that never reached
     the printer. If someone later "fixes" this omission for consistency, this
     fails and sends them to the reasoning first.
-    """
-    from kiln.plugins import slicer_tools
 
-    source = Path(slicer_tools.__file__).read_text(encoding="utf-8")
+    The routing that owns this conversion moved out of slicer_tools and into
+    the shared ``thumbnail_inputs_for_model`` helper, so that every wrap door
+    previews a STEP the same way; the decision travelled with it.
+    """
+    from kiln.printers import bambu_3mf
+
+    source = Path(bambu_3mf.__file__).read_text(encoding="utf-8")
     assert "with_record" not in source
     assert "DELIBERATELY drops the conversion record" in source
 
