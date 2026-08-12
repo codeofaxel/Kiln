@@ -72,6 +72,20 @@ def _pre_v2_database(path: str) -> None:
     conn.close()
 
 
+def _unopenable_database(path: str) -> None:
+    """A file that is not a SQLite database at all.
+
+    The "cannot be opened" tests used a pre-v2 database until the
+    migration fix landed on main and made one open cleanly — correctly,
+    which is the point.  A schema Kiln might learn to repair is the wrong
+    stand-in for "unopenable": the test would keep passing only until
+    somebody fixed the underlying bug, then fail for a good reason and
+    look like a regression.  Corruption stays unopenable forever.
+    """
+    with open(path, "wb") as fh:
+        fh.write(b"this is not a database, it is 40 bytes of junk\x00\xff")
+
+
 @pytest.fixture
 def kiln_home(tmp_path, monkeypatch):
     """An isolated ``~/.kiln`` for one test."""
@@ -270,10 +284,12 @@ class TestKilnDoctorExplainsThisFailure:
 
         The old check connected with raw ``sqlite3``, made a scratch
         table and dropped it — so on the database that killed every
-        upgraded install it printed ``✓ Database: writable``.
+        upgraded install it printed ``✓ Database: writable``.  Writable
+        was never the question, and this proves the answer no longer
+        comes from asking it.
         """
         db = tmp_path / "kiln.db"
-        _pre_v2_database(str(db))
+        _unopenable_database(str(db))
         monkeypatch.setenv("KILN_DB_PATH", str(db))
 
         from kiln.cli.main import _database_check
@@ -293,10 +309,29 @@ class TestKilnDoctorExplainsThisFailure:
 
         assert _database_check()["ok"] is True
 
+    def test_doctor_agrees_with_the_server_about_a_repairable_database(
+        self, tmp_path, monkeypatch
+    ):
+        """A pre-v2 database opens now, so doctor must say so.
+
+        The point of opening the real ``KilnDB`` is that doctor and the
+        server reach the same verdict.  Since the migration fix, that
+        verdict on a pre-v2 database is "fine" — and a doctor still
+        reporting it broken would be the same disagreement in the other
+        direction.
+        """
+        db = tmp_path / "kiln.db"
+        _pre_v2_database(str(db))
+        monkeypatch.setenv("KILN_DB_PATH", str(db))
+
+        from kiln.cli.main import _database_check
+
+        assert _database_check()["ok"] is True
+
     def test_doctor_does_not_tell_you_to_run_doctor(self, tmp_path, monkeypatch):
         """A tool that answers by asking you to ask again reads as broken."""
         db = tmp_path / "kiln.db"
-        _pre_v2_database(str(db))
+        _unopenable_database(str(db))
         monkeypatch.setenv("KILN_DB_PATH", str(db))
 
         from kiln.cli.main import _database_check
@@ -699,10 +734,10 @@ class TestNothingHereCanRaise:
 
     def test_probe_database_reports_rather_than_raises(self, tmp_path, monkeypatch):
         db = tmp_path / "kiln.db"
-        _pre_v2_database(str(db))
+        _unopenable_database(str(db))
         monkeypatch.setenv("KILN_DB_PATH", str(db))
 
         diagnosis = startup_failure.probe_database()
 
         assert diagnosis is not None
-        assert diagnosis.kind == "database_schema"
+        assert diagnosis.kind == "database_corrupt"
