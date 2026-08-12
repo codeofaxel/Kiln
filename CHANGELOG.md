@@ -165,6 +165,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Your Bambu's screen shows the actual print again.** A recent change to how
+  Kiln handles colours quietly stopped previews reaching the printer, so the
+  touchscreen showed a generic icon instead of your model — the one glance that
+  tells you the machine got what you meant. Previews are back, drawn in the
+  colour the file says it will print in. Retried prints now get one too; they
+  never had one before. When the file doesn't name a colour, the preview stays
+  neutral instead of guessing one.
+
 - **Cold starts no longer stop themselves on OctoPrint and Marlin printers.**
   Those printers report that they're printing while still heating up, and Kiln
   read the cold nozzle as a dead heater and hit the emergency stop — which

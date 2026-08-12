@@ -548,11 +548,20 @@ class KilnDB:
         self._write_lock = threading.Lock()
         self._audit_hmac_key_cache: bytes | None = None
 
+        # Runs BEFORE the schema, unlike every other migration here, and the
+        # order is load-bearing.  _ensure_schema indexes
+        # print_dna(geometric_signature_v2), but its CREATE TABLE is an
+        # IF NOT EXISTS: on a database that predates that column the old
+        # table survives untouched and the index fails with "no such
+        # column", taking the whole server down on startup.  This migration
+        # is the thing that adds the column, so it cannot run after the
+        # statement that needs it.  It no-ops on a fresh database.
+        self._migrate_signature_v2()
+
         self._ensure_schema()
         self._migrate_agent_memory()
         self._migrate_print_outcomes()
         self._migrate_printer_materials()
-        self._migrate_signature_v2()
         self._enforce_permissions()
 
     # ------------------------------------------------------------------
@@ -649,6 +658,14 @@ class KilnDB:
                         f"PRAGMA table_info({table})"
                     ).fetchall()
                 }
+            if not columns:
+                # No columns means no table: a brand-new database, where
+                # _ensure_schema is about to CREATE it with this column and
+                # its index already in place.  There is nothing to migrate,
+                # and ALTERing a table that does not exist yet would fail —
+                # which is what a fresh install would hit now that this runs
+                # BEFORE the schema is built.
+                continue
             if "geometric_signature_v2" not in columns:
                 self._conn.execute(
                     f"ALTER TABLE {table} ADD COLUMN geometric_signature_v2 TEXT DEFAULT NULL"

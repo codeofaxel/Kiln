@@ -974,6 +974,42 @@ def _isolate_daily_stats(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_pypi_check(monkeypatch):
+    """Keep the update check off the network, for the whole suite.
+
+    Same class as ``_isolate_daily_stats`` above, and it bites harder because
+    the write happens on a DAEMON THREAD.  ``check_for_update`` is reachable
+    from ordinary surfaces — ``get_started``, ``kiln_health``, the agent nudge,
+    ``kiln bridge status`` — and on a cold cache it kicks a background fetch
+    that later writes ``~/.kiln/update_check.json``.  A test that merely calls
+    one of those surfaces therefore hits PyPI for real and pollutes the
+    developer's cache.
+
+    Worse, it outlives the test that started it: ``test_version_check`` seeds a
+    cache under a patched ``Path.home`` and asserts on it, and a thread left
+    running by an EARLIER module lands its real answer in that tmp directory
+    mid-assertion.  That was a genuine flake, and it moved between runs
+    depending on who won the race.
+
+    Stubbing the fetch leaves the surrounding machinery (thread spawn,
+    in-flight guard, cache read) exercised while making the answer "nothing
+    published" — so the cold-cache path stays honest and no bytes leave the
+    box.  ``test_version_check`` captures the real fetch at import time for its
+    one deliberate live test, so that keeps working.
+    """
+    try:
+        from kiln import version_check
+    except ImportError:  # pragma: no cover — module absent
+        yield
+        return
+
+    monkeypatch.setattr(version_check, "_fetch_latest_from_pypi", lambda: None)
+    version_check._refresh_in_flight = False
+    yield
+    version_check._refresh_in_flight = False
+
+
+@pytest.fixture(autouse=True)
 def _restore_kiln_pro_stubs():
     """Undo ``kiln_pro`` stubs a test installs directly into ``sys.modules``.
 
