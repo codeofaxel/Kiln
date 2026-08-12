@@ -1,0 +1,274 @@
+# Adapter conformance — what each backend really fills in, and why not.
+#
+# Enforced by scripts/audit_adapter_conformance.py.  See that file for what
+# the gate does and does not prove.  Seed a starting point with --seed.
+#
+# Statuses:
+#   provided         the adapter assigns this field
+#   not_in_protocol  the backend genuinely cannot know it — needs `why`
+#   deferred         a real gap, not yet closed — needs `why` and ISO `by`
+#   delegates_to     (whole adapter) forwards to another adapter's objects
+#
+# `not_in_protocol` is a claim about the PROTOCOL, not about our effort.
+# When the honest answer is "nobody has checked yet", the row is deferred —
+# an unverified not_in_protocol is how a real gap becomes permanent.
+
+adapters:
+
+  # ---------------------------------------------------------------- bambu
+  # The reference implementation: MQTT push cache, richest state block.
+  bambu:
+    fields:
+      PrinterState.connected: provided
+      PrinterState.state: provided
+      PrinterState.tool_temp_actual: provided
+      PrinterState.tool_temp_target: provided
+      PrinterState.bed_temp_actual: provided
+      PrinterState.bed_temp_target: provided
+      PrinterState.print_error: provided
+      PrinterState.state_age_seconds: provided
+      PrinterState.last_job_result: provided
+      JobProgress.file_name: provided
+      JobProgress.completion: provided
+      JobProgress.print_time_seconds: provided
+      JobProgress.print_time_left_seconds: provided
+      PrintResult.success: provided
+      PrintResult.message: provided
+      PrintResult.job_id:
+        status: not_in_protocol
+        why: >-
+          No adapter populates this, including this one. The field has no
+          reader anywhere in the codebase, and its one intended consumer
+          (record_print_hours_for_job, which requires it as a dedupe key)
+          can therefore never fire on any backend. Candidate for deletion
+          rather than population — filling it would be inventing data for
+          nobody.
+
+  # ------------------------------------------------------------- creality
+  creality:
+    delegates_to: moonraker-or-octoprint-by-model
+    why: >-
+      Pure wrapper. get_state/get_job/_start_print_impl all forward to
+      self._backend, so it constructs no contract objects of its own and
+      inherits whichever backend its model resolves to.
+
+  # ----------------------------------------------------------------- duet
+  # Fresh-pull over HTTP (/rr_model, or /rr_status on RRF2).
+  duet:
+    fields:
+      PrinterState.connected: provided
+      PrinterState.state: provided
+      PrinterState.tool_temp_actual: provided
+      PrinterState.tool_temp_target: provided
+      PrinterState.bed_temp_actual: provided
+      PrinterState.bed_temp_target: provided
+      PrinterState.state_age_seconds:
+        status: not_in_protocol
+        why: >-
+          get_state issues a fresh HTTP request on every call, so the
+          reading is current by construction and an age would always be
+          ~0. base.PrinterState documents absence as the honest answer
+          for a transport that asks the printer on every call.
+      PrinterState.print_error:
+        status: deferred
+        why: >-
+          Not yet verified whether RepRapFirmware exposes a numeric error
+          code we can map. Recorded rather than guessed.
+        by: "2026-11-30"
+      PrinterState.last_job_result:
+        status: deferred
+        why: >-
+          Not yet verified whether /rr_model carries a last-job outcome.
+        by: "2026-11-30"
+      JobProgress.file_name: provided
+      JobProgress.completion: provided
+      JobProgress.print_time_seconds: provided
+      JobProgress.print_time_left_seconds: provided
+      PrintResult.success: provided
+      PrintResult.message: provided
+      PrintResult.job_id:
+        status: not_in_protocol
+        why: See the bambu row — no adapter populates this field.
+
+  # --------------------------------------------------------------- elegoo
+  # Cache-backed (SDCP over websocket); stamps its own state vintage.
+  elegoo:
+    fields:
+      PrinterState.connected: provided
+      PrinterState.state: provided
+      PrinterState.tool_temp_actual: provided
+      PrinterState.tool_temp_target: provided
+      PrinterState.bed_temp_actual: provided
+      PrinterState.bed_temp_target: provided
+      PrinterState.state_age_seconds: provided
+      PrinterState.print_error:
+        status: deferred
+        why: >-
+          Not yet verified whether SDCP reports a numeric error code.
+        by: "2026-11-30"
+      PrinterState.last_job_result:
+        status: deferred
+        why: >-
+          Not yet verified whether SDCP reports a last-job outcome.
+        by: "2026-11-30"
+      JobProgress.file_name: provided
+      JobProgress.completion: provided
+      JobProgress.print_time_seconds: provided
+      JobProgress.print_time_left_seconds: provided
+      PrintResult.success: provided
+      PrintResult.message: provided
+      PrintResult.job_id:
+        status: not_in_protocol
+        why: See the bambu row — no adapter populates this field.
+
+  # ------------------------------------------------------------ moonraker
+  moonraker:
+    fields:
+      PrinterState.connected: provided
+      PrinterState.state: provided
+      PrinterState.tool_temp_actual: provided
+      PrinterState.tool_temp_target: provided
+      PrinterState.bed_temp_actual: provided
+      PrinterState.bed_temp_target: provided
+      PrinterState.state_age_seconds:
+        status: deferred
+        why: >-
+          CONDITIONAL, and the condition is an env var. get_state prefers
+          a push cache when KILN_PUSH_MONITORING is set, and falls back to
+          fresh HTTP otherwise. The flag defaults to "0", so today this is
+          a fresh-pull adapter and absence is correct — but flip the flag
+          and the identical get_state answers from a cache with no age,
+          silently, with no code change. Klipper pushes DELTAS, so the fix
+          is not one cache-wide timestamp (that would answer "when did any
+          field arrive" and under-report state); it needs the two-clock
+          shape elegoo uses.
+        by: "2026-11-30"
+      PrinterState.print_error:
+        status: deferred
+        why: >-
+          Not yet verified whether Klipper's state carries a mappable
+          numeric error code.
+        by: "2026-11-30"
+      PrinterState.last_job_result: provided
+      JobProgress.file_name: provided
+      JobProgress.completion: provided
+      JobProgress.print_time_seconds: provided
+      JobProgress.print_time_left_seconds: provided
+      PrintResult.success: provided
+      PrintResult.message: provided
+      PrintResult.job_id:
+        status: not_in_protocol
+        why: See the bambu row — no adapter populates this field.
+
+  # ------------------------------------------------------------ octoprint
+  octoprint:
+    fields:
+      PrinterState.connected: provided
+      PrinterState.state: provided
+      PrinterState.tool_temp_actual: provided
+      PrinterState.tool_temp_target: provided
+      PrinterState.bed_temp_actual: provided
+      PrinterState.bed_temp_target: provided
+      PrinterState.state_age_seconds:
+        status: deferred
+        why: >-
+          Same conditional shape as moonraker: push cache when
+          KILN_PUSH_MONITORING is set, fresh HTTP otherwise, flag defaults
+          off. Its cache is a flat dict update, and whether every push
+          carries `state` is unverified — so the safe fix is the same
+          two-clock stamp rather than assuming a cache-wide timestamp is
+          equivalent.
+        by: "2026-11-30"
+      PrinterState.print_error:
+        status: deferred
+        why: >-
+          Not yet verified whether the OctoPrint API exposes a numeric
+          error code distinct from the error STATE.
+        by: "2026-11-30"
+      PrinterState.last_job_result:
+        status: deferred
+        why: >-
+          Not yet verified whether /api/job carries a last-job outcome.
+        by: "2026-11-30"
+      JobProgress.file_name: provided
+      JobProgress.completion: provided
+      JobProgress.print_time_seconds: provided
+      JobProgress.print_time_left_seconds: provided
+      PrintResult.success: provided
+      PrintResult.message: provided
+      PrintResult.job_id:
+        status: not_in_protocol
+        why: See the bambu row — no adapter populates this field.
+
+  # ------------------------------------------------------------ prusalink
+  # Fresh-pull over HTTP (/api/v1/status) on every call.
+  prusalink:
+    fields:
+      PrinterState.connected: provided
+      PrinterState.state: provided
+      PrinterState.tool_temp_actual: provided
+      PrinterState.tool_temp_target: provided
+      PrinterState.bed_temp_actual: provided
+      PrinterState.bed_temp_target: provided
+      PrinterState.state_age_seconds:
+        status: not_in_protocol
+        why: >-
+          get_state issues a fresh request every call, so the reading is
+          current by construction. (_prior_state exists for anomaly
+          bookkeeping and is never read to answer get_state.)
+      PrinterState.print_error:
+        status: deferred
+        why: >-
+          Not yet verified whether PrusaLink exposes a numeric error code.
+        by: "2026-11-30"
+      PrinterState.last_job_result: provided
+      JobProgress.file_name: provided
+      JobProgress.completion: provided
+      JobProgress.print_time_seconds: provided
+      JobProgress.print_time_left_seconds: provided
+      PrintResult.success: provided
+      PrintResult.message: provided
+      PrintResult.job_id:
+        status: not_in_protocol
+        why: See the bambu row — no adapter populates this field.
+
+  # ------------------------------------------------------- serial_adapter
+  # Direct USB/serial. Asks the firmware on every call; the firmware
+  # answers with very little.
+  serial_adapter:
+    fields:
+      PrinterState.connected: provided
+      PrinterState.state: provided
+      PrinterState.tool_temp_actual: provided
+      PrinterState.tool_temp_target: provided
+      PrinterState.bed_temp_actual: provided
+      PrinterState.bed_temp_target: provided
+      PrinterState.state_age_seconds:
+        status: not_in_protocol
+        why: >-
+          get_state sends M105/M27 down the wire on every call, so the
+          reading is current by construction.
+      PrinterState.print_error:
+        status: not_in_protocol
+        why: >-
+          Marlin-style firmware reports errors as free text on the serial
+          line, not as a numeric code this field could carry.
+      PrinterState.last_job_result: provided
+      JobProgress.file_name: provided
+      JobProgress.completion: provided
+      JobProgress.print_time_seconds:
+        status: not_in_protocol
+        why: >-
+          M27 reports SD-card byte progress, not elapsed time, and the
+          firmware keeps no job clock we can query. This is a real bound
+          on print-hours capture: a direct-USB print can never report its
+          own duration, so its hours are unknowable rather than zero.
+      JobProgress.print_time_left_seconds:
+        status: not_in_protocol
+        why: >-
+          No time base to extrapolate from — see print_time_seconds.
+      PrintResult.success: provided
+      PrintResult.message: provided
+      PrintResult.job_id:
+        status: not_in_protocol
+        why: See the bambu row — no adapter populates this field.
