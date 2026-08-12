@@ -555,6 +555,57 @@ class TestRetryPrintWithFix:
         adapter.start_print.assert_called_once()
         watchdog.notify_print_started.assert_called_once()
 
+    def test_the_retry_wrap_gets_the_model_so_the_lcd_shows_the_part(
+        self, smart_print_fns, tmp_path
+    ):
+        """A retry must not reach the printer with a blank screen.
+
+        This door wrapped the gcode without ever telling the wrap what
+        the part was, so there was nothing to render a preview from and
+        the 3MF shipped with none — on the reprint the user is watching
+        hardest.  The model it just sliced is the answer, routed by the
+        same helper every other wrap door uses.
+        """
+        fn = smart_print_fns["retry_print_with_fix"]
+        model = tmp_path / "cube.stl"
+        model.write_text("solid s\nendsolid s\n")
+        adapter = mock.MagicMock(
+            spec=["get_state", "upload_file", "start_print", "wrap_gcode_as_3mf"]
+        )
+        adapter.get_state.return_value = _make_state()
+        adapter.wrap_gcode_as_3mf.return_value = "/tmp/out.gcode.3mf"
+        adapter.upload_file.return_value = self._make_upload_result()
+        adapter.start_print.return_value = self._make_print_result()
+
+        with (
+            mock.patch("kiln.server._get_adapter", return_value=adapter),
+            mock.patch("kiln.server._map_printer_hint_to_profile_id", return_value=None),
+            mock.patch("kiln.server._PRINTER_MODEL", None),
+            mock.patch("kiln.server._resolve_effective_printer_name", return_value="default"),
+            mock.patch("kiln.server._emergency_latch_error", return_value=None),
+            mock.patch("kiln.server.preflight_check", return_value={"ready": True}),
+            mock.patch("kiln.server._heater_watchdog", mock.MagicMock()),
+            mock.patch("kiln.slicer.slice_file", return_value=self._make_slice_result()),
+            mock.patch(
+                "kiln.printability.diagnose_from_signals",
+                return_value=self._make_diagnosis(),
+            ),
+            mock.patch(
+                "kiln.printability.analyze_printability",
+                side_effect=Exception("skip"),
+            ),
+            mock.patch("kiln.slicer_profiles.resolve_slicer_profile", return_value=None),
+        ):
+            fn(model_path=str(model), skip_validation=True)
+
+        adapter.wrap_gcode_as_3mf.assert_called_once()
+        _, kwargs = adapter.wrap_gcode_as_3mf.call_args
+        assert kwargs["stl_paths"] == [str(model)], (
+            "the retry wrap was handed no geometry — the 3MF ships with a "
+            "blank printer preview"
+        )
+        assert kwargs["source_3mf_path"] is None
+
     def test_skip_diagnosis_with_custom_overrides(self, smart_print_fns):
         """skip_diagnosis=True + custom_overrides → overrides applied, no diagnosis."""
         fn = smart_print_fns["retry_print_with_fix"]

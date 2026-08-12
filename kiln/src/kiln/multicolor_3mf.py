@@ -170,7 +170,11 @@ def _part_rgb(color: str | None) -> tuple[int, int, int] | None:
     )
 
 
-def _generate_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
+def _generate_thumbnail(
+    parsed: list[_ParsedPart],
+    width: int = _THUMBNAIL_SIZE,
+    height: int = _THUMBNAIL_SIZE,
+) -> bytes | None:
     """Render the ``Metadata/plate_1.png`` thumbnail for the composed 3MF.
 
     First choice is Kiln's own colored renderer — pure Python, no OpenSCAD
@@ -179,13 +183,17 @@ def _generate_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
     file browser it lands in.  Falls back to the OpenSCAD grey render for
     meshes too big to paint in Python, and to ``None`` when neither path
     is available.  A thumbnail must never fail the compose.
+
+    *width* and *height* default to the square plate thumbnail.  Callers
+    filling a slicer's non-square slots pass those dimensions instead of
+    stretching a square render into them, which turns a round part oval.
     """
     if not parsed:
         return None
     total_triangles = sum(len(t) for _, _, t in parsed)
     if total_triangles <= _COLORED_THUMBNAIL_MAX_TRIANGLES:
         try:
-            data = _render_colored_thumbnail(parsed)
+            data = _render_colored_thumbnail(parsed, width=width, height=height)
             if data:
                 return data
         except Exception:  # noqa: BLE001 — enrichment, never a compose failure
@@ -196,10 +204,16 @@ def _generate_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
     return _generate_thumbnail_openscad(
         [p.stl_path for p, _, _ in parsed],
         [(p.x, p.y, p.z) for p, _, _ in parsed],
+        width=width,
+        height=height,
     )
 
 
-def _render_colored_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
+def _render_colored_thumbnail(
+    parsed: list[_ParsedPart],
+    width: int = _THUMBNAIL_SIZE,
+    height: int = _THUMBNAIL_SIZE,
+) -> bytes | None:
     """PNG bytes from the colored renderer, honoring per-part placement."""
     from kiln.colored_renderer import render_colored_mesh
     from kiln.threemf_parser import _DEFAULT_COLOR, ColoredTriangle
@@ -219,9 +233,7 @@ def _render_colored_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
             )
     if not triangles:
         return None
-    result = render_colored_mesh(
-        triangles, width=_THUMBNAIL_SIZE, height=_THUMBNAIL_SIZE,
-    )
+    result = render_colored_mesh(triangles, width=width, height=height)
     path = result.path
     try:
         with open(path, "rb") as fh:
@@ -234,6 +246,8 @@ def _render_colored_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
 def _generate_thumbnail_openscad(
     stl_paths: list[str],
     offsets: list[tuple[float, float, float]] | None = None,
+    width: int = _THUMBNAIL_SIZE,
+    height: int = _THUMBNAIL_SIZE,
 ) -> bytes | None:
     """Render a plate thumbnail PNG from STL files via OpenSCAD.
 
@@ -249,6 +263,8 @@ def _generate_thumbnail_openscad(
             parallel to *stl_paths*.  Without them, N spaced copies of
             one mesh render stacked — a thumbnail showing one object
             for a four-object plate.
+        width: Output width in pixels.
+        height: Output height in pixels.
 
     Returns PNG bytes suitable for embedding as ``Metadata/plate_1.png``
     in a 3MF archive, or ``None`` if OpenSCAD is unavailable.
@@ -296,7 +312,7 @@ def _generate_thumbnail_openscad(
             cmd = [
                 binary,
                 "-o", png_path,
-                f"--imgsize={_THUMBNAIL_SIZE * ss},{_THUMBNAIL_SIZE * ss}",
+                f"--imgsize={width * ss},{height * ss}",
                 "--autocenter",
                 "--viewall",
                 "--colorscheme", "DeepOcean",
@@ -307,7 +323,7 @@ def _generate_thumbnail_openscad(
             )
             if os.path.isfile(png_path) and os.path.getsize(png_path) > 0:
                 if ss > 1:
-                    downscale_png(png_path, _THUMBNAIL_SIZE, _THUMBNAIL_SIZE)
+                    downscale_png(png_path, width, height)
                 return Path(png_path).read_bytes()
             return None
         finally:
@@ -317,6 +333,101 @@ def _generate_thumbnail_openscad(
     except Exception:
         logger.debug("Thumbnail generation skipped (OpenSCAD unavailable or render failed)")
         return None
+
+
+def _colors_for_parts(
+    stl_paths: list[str],
+    declared: list[str] | None,
+) -> list[str | None]:
+    """Map a file's DECLARED filament colors onto its parts, or refuse to.
+
+    The preview exists to tell the truth about the print, so a color may
+    only be painted when the mapping from declaration to geometry is
+    unambiguous.  Two cases are:
+
+    * one distinct declared color — every part prints in it, whatever the
+      part count;
+    * one color per part — the assignment the declaration already makes.
+
+    Anything else is a guess.  Four declared filaments against a single
+    undifferentiated mesh cannot say WHICH of them that mesh prints in,
+    and picking the first would state something the file never claimed —
+    so those render neutral.  Neutral is honest; invented is not.
+
+    :returns: A per-part list, entries ``None`` where no color is claimed.
+    """
+    usable = [c for c in (declared or []) if c]
+    if not usable:
+        return [None] * len(stl_paths)
+    distinct = set(usable)
+    if len(distinct) == 1:
+        return [usable[0]] * len(stl_paths)
+    if len(usable) == len(stl_paths):
+        return list(usable)
+    logger.info(
+        "Thumbnail rendered neutral: %d declared filament colors cannot be "
+        "mapped onto %d part(s) without guessing which prints in which.",
+        len(usable), len(stl_paths),
+    )
+    return [None] * len(stl_paths)
+
+
+def render_plate_thumbnail(
+    stl_paths: list[str],
+    colors: list[str] | None = None,
+    width: int = _THUMBNAIL_SIZE,
+    height: int = _THUMBNAIL_SIZE,
+) -> bytes | None:
+    """Render a plate thumbnail from bare mesh PATHS, in its declared colors.
+
+    :func:`_generate_thumbnail` wants parsed geometry, because that is what
+    the colored renderer paints.  A caller holding only file paths — every
+    gcode-wrapping path does — cannot reach it without doing that parse
+    first, and handing it the paths instead yields a mesh made of
+    characters.  This is that parse, so a wrap gets the SAME colored
+    preview :func:`compose_multicolor_3mf` embeds rather than nothing.
+
+    :param stl_paths: Mesh files making up the plate.
+    :param colors: The ``#RRGGBB`` colors the 3MF ITSELF declares, so the
+        preview and the file agree on what comes off the printer.  Never
+        a house default: ``None`` renders neutral, because a preview that
+        shows a color the file never claimed misrepresents the print, and
+        that is worse than showing no color at all.  See
+        :func:`_colors_for_parts` for how a declaration maps onto parts.
+    :param width: Output width in pixels.
+    :param height: Output height in pixels.
+    :returns: PNG bytes, or ``None`` when no part yielded geometry.
+    """
+    part_colors = _colors_for_parts(stl_paths, colors)
+    parsed: list[_ParsedPart] = []
+    for index, path in enumerate(stl_paths):
+        try:
+            vertices, triangles = _parse_mesh_file(path)
+        except Exception:  # noqa: BLE001 — one bad part must not blank the plate
+            logger.warning("Could not parse %s for thumbnail", path, exc_info=True)
+            continue
+        # Same degenerate-triangle guard compose_multicolor_3mf applies, so
+        # the preview shows exactly the triangles a composed file would.
+        kept = [t for t in triangles if len(set(t)) == 3]
+        if not kept:
+            logger.warning("No usable triangles in %s for thumbnail", path)
+            continue
+        parsed.append(
+            (
+                ColorPart(
+                    stl_path=path,
+                    extruder=index + 1,
+                    name=Path(path).stem,
+                    color=part_colors[index],
+                ),
+                vertices,
+                kept,
+            )
+        )
+    if not parsed:
+        return None
+    return _generate_thumbnail(parsed, width=width, height=height)
+
 
 # ---------------------------------------------------------------------------
 # Public data class

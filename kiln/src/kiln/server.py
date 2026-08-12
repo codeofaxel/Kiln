@@ -6236,6 +6236,15 @@ def wrap_gcode_as_3mf(
                 code="UNSUPPORTED",
             )
         stl_paths = [stl_path] if stl_path and os.path.isfile(stl_path) else None
+        # A caller who hands us a thumbnail has told us what the preview
+        # should be, and that outranks anything we could render for them.
+        # The injection below only fills slots the archive does not
+        # already have, so the builder must not fill them first —
+        # otherwise the explicit image is silently discarded.  Falls back
+        # to rendering when the given path is not actually a file.
+        caller_supplied_thumbnail = bool(
+            thumbnail_path and os.path.isfile(thumbnail_path)
+        )
         output_path = adapter.wrap_gcode_as_3mf(
             gcode_path,
             hotend_temp=hotend_temp,
@@ -6245,7 +6254,7 @@ def wrap_gcode_as_3mf(
             num_filaments=num_filaments,
             filament_colors=filament_colors,
             filament_types=filament_types,
-            stl_paths=stl_paths,
+            stl_paths=None if caller_supplied_thumbnail else stl_paths,
             resume_mode=resume_mode,
         )
         # Inject thumbnail PNG if provided and not already in the 3MF.

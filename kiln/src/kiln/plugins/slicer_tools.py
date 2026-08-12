@@ -243,12 +243,10 @@ def _auto_wrap_bambu_3mf(
     raw ``.gcode`` via the ``gcode_file`` MQTT command; only
     ``project_file`` works, and that requires ``.3mf``).
 
-    ``stl_path`` is routed by extension: ``.stl`` goes to ``stl_paths``
-    so OpenSCAD generates a thumbnail for the LCD preview, ``.3mf`` goes
-    to ``source_3mf_path`` to copy its embedded thumbnails, and
-    ``.step``/``.stp`` is converted to a mesh for the thumbnail (the
-    slicer reads STEP directly, so a CAD file otherwise reaches the
-    printer with a blank screen).  Any other extension is ignored — the
+    ``stl_path`` is routed by extension — see
+    :func:`~kiln.printers.bambu_3mf.thumbnail_inputs_for_model`, shared
+    with the other wrap doors — into either a mesh to render or a 3MF to
+    copy an existing preview from.  Any other extension is ignored: the
     wrap still succeeds, without a preview.
 
     Returns ``(threemf_path, warning)``.  When no wrap happens, both
@@ -272,45 +270,13 @@ def _auto_wrap_bambu_3mf(
         from kiln.printers.bambu_3mf import (
             BambuPrintSettings,
             build_bambu_3mf,
+            thumbnail_inputs_for_model,
         )
 
         threemf_path = gcode_path.rsplit(".", 1)[0] + ".gcode.3mf"
-        stl_paths: list[str] | None = None
-        source_3mf: str | None = None
-        if stl_path and os.path.isfile(stl_path):
-            ext = os.path.splitext(stl_path)[1].lower()
-            if ext == ".stl":
-                stl_paths = [stl_path]
-            elif ext == ".3mf":
-                source_3mf = stl_path
-            elif ext in (".step", ".stp"):
-                # PrusaSlicer reads STEP natively, so a CAD file can be
-                # sliced without ever becoming a mesh here — but the LCD
-                # thumbnail is rendered FROM a mesh, so the printer's screen
-                # went blank for exactly the CAD-first users this path exists
-                # to serve.  Convert for the preview only.  No converter
-                # installed just means no thumbnail, which is where this
-                # started, so it degrades to the old behavior rather than
-                # costing anyone a print.
-                #
-                # DELIBERATELY drops the conversion record, unlike every other
-                # caller of this door.  The gcode was sliced from the STEP
-                # itself, so this mesh is a picture of the part and not the
-                # part: recording its fidelity here would attach an accuracy
-                # figure to geometry that never reached the printer, and would
-                # attach it to the one output whose real accuracy came from
-                # PrusaSlicer's own tessellation instead.  A thumbnail's
-                # fidelity is nobody's question.  Pinned by
-                # test_the_thumbnail_path_deliberately_keeps_no_record.
-                try:
-                    from kiln.step_import import ensure_mesh_path
-
-                    stl_paths = [ensure_mesh_path(stl_path)[0]]
-                except Exception as exc:  # noqa: BLE001
-                    _logger.info(
-                        "No LCD thumbnail for %s (%s)",
-                        os.path.basename(stl_path), exc,
-                    )
+        # Shared with every other door that wraps gcode, so a format one
+        # of them learns to preview is previewable from all of them.
+        stl_paths, source_3mf = thumbnail_inputs_for_model(stl_path)
 
         gcode_body = _Path(gcode_path).read_text(encoding="utf-8")
         settings = BambuPrintSettings(

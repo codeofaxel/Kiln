@@ -741,10 +741,11 @@ def test_thumbnail_failure_never_fails_the_compose(
 
     monkeypatch.setattr(
         m3, "_render_colored_thumbnail",
-        lambda parsed: (_ for _ in ()).throw(RuntimeError("no renderer")),
+        lambda parsed, **_: (_ for _ in ()).throw(RuntimeError("no renderer")),
     )
     monkeypatch.setattr(
-        m3, "_generate_thumbnail_openscad", lambda paths, offsets=None: None,
+        m3, "_generate_thumbnail_openscad",
+        lambda paths, offsets=None, **_: None,
     )
     out = tmp_path / "out.3mf"
     result = compose_multicolor_3mf(
