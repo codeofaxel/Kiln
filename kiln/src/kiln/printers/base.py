@@ -743,6 +743,22 @@ class PrinterAdapter(ABC):
         if getattr(result, "success", False) and not is_resume_mode_3mf(file_name):
             # A resume 3MF continues the print that's already running (a
             # mid-print swap), so it isn't a new print to count.
+            #
+            # Stamp the elapsed clock here, for the same reason the pending
+            # outcome row opens here: this is the one moment Kiln is
+            # guaranteed to witness, because it is the one Kiln causes.  An
+            # adapter that cannot measure elapsed any other way reads this
+            # instead of extrapolating one from a percentage.
+            try:
+                from kiln.printers.progress_motion import note_job_start
+
+                note_job_start(self, file_name)
+            except Exception:  # noqa: BLE001 — bookkeeping never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "job-start stamp failed", exc_info=True
+                )
             try:
                 from kiln.daily_stats import record_print_start
 
@@ -830,35 +846,192 @@ class PrinterAdapter(ABC):
             PrinterError: If the printer cannot pause.
         """
 
-    def resume_print(self) -> PrintResult:
-        """Resume a previously paused print job.
+    def resume_print(self, *, force: bool = False) -> PrintResult:
+        """Resume a previously paused print job, and CHECK that it took.
 
         TEMPLATE METHOD — adapters must NOT override this; they implement
-        :meth:`_resume_print_impl` instead.  It first checks the live printer
-        state and refuses to claim success when there is no paused print to
-        resume.  "Resume" only continues a *currently-paused* print, so firing
-        it on an idle printer (e.g. after a power loss) or a running one is at
-        best a firmware no-op, often a cryptic firmware error ("Print is not
-        paused, resume aborted"), and on fire-and-forget transports (Bambu
-        MQTT, serial M24) a FALSE ``"Print resumed."`` success.  Either way the
-        user is misled.
+        :meth:`_resume_print_impl` instead.  Two halves:
 
-        We block only on a CONFIDENT not-paused state (idle / printing).
-        Uncertain states (offline, busy, error, unknown) and any state-read
-        failure fail OPEN — delegate to :meth:`_resume_print_impl` and let the
-        real resume surface its own result — so a transient read never blocks
-        a legitimate resume.
+        **The gate.**  "Resume" only continues a *currently-paused* print, so
+        firing it on an idle printer (e.g. after a power loss) or a running one
+        is at best a firmware no-op, often a cryptic firmware error, and on
+        fire-and-forget transports (Bambu MQTT, serial M24) a FALSE
+        ``"Print resumed."``.  So a confident not-paused state refuses.
+
+        But "confident" has to mean something.  On 2026-08-11 a Bambu A1 sat
+        frozen at layer 2 for twenty minutes while ``gcode_state`` said
+        ``RUNNING`` with two-second-fresh telemetry, and this gate read that
+        word, called it PRINTING, and refused the user's second resume — so
+        the lie did not merely misreport the print, it **disabled the recovery
+        path**.  The gate now asks the machine whether it is actually MOVING
+        (:mod:`kiln.printers.progress_motion`) before it treats ``PRINTING`` as
+        grounds to refuse anybody.  Observed motion refuses; observed stall
+        does not; and where Kiln cannot tell, it refuses but names the way
+        through, because a user staring at a paused screen must never be left
+        without one.
+
+        *force* skips the gate entirely.  It exists so the answer to "Kiln is
+        wrong about my printer" is one argument rather than a dead end.  It
+        cannot make the result dishonest: the read-back below reports what
+        actually happened either way.
+
+        **The read-back.**  ``_resume_print_impl`` on a fire-and-forget
+        transport returns success because the *command was published*, which is
+        not the same sentence as "the print resumed".  So the state is re-read
+        afterwards: a printer still reporting PAUSED turns that success into an
+        honest failure.  Bounded, early-exiting, and wrapped — a verification
+        step may never become a way for a resume to fail.
+
+        Honest bound, stated because it is the whole point: the read-back
+        confirms the printer's *state word* changed, and the state word is
+        exactly what lied that night.  It catches a resume the firmware
+        silently rejected; it cannot catch a resume the firmware accepts and
+        then does nothing about.  That second failure is what the stall
+        detector is for, which is why the success message declines to claim
+        the print is progressing and says how to find out.
 
         Raises:
             PrinterError: If the printer cannot resume.
         """
+        if not force:
+            refusal = self._not_paused_refusal()
+            if refusal is not None:
+                return refusal
+        return self._verify_resume_took(self._resume_print_impl())
+
+    def _not_paused_refusal(self) -> PrintResult | None:
+        """The refusal to return before resuming, or ``None`` to go ahead.
+
+        Fails OPEN on anything uncertain — an unreadable state, an offline or
+        busy or unknown printer, or any exception in here at all — because a
+        transient read must never stand between a user and their own print.
+        """
         try:
-            status = self.get_state().state
-        except Exception:  # noqa: BLE001 — never block a real resume on a state-read error
-            status = None
-        if status in (PrinterStatus.IDLE, PrinterStatus.PRINTING):
+            state = self.get_state()
+            status = getattr(state, "state", None)
+        except Exception:  # noqa: BLE001 — never block a real resume on a read error
+            return None
+
+        if status is PrinterStatus.IDLE:
+            # Nothing is running to continue, and no progress signal could
+            # change that.
             return self._no_paused_print_result()
-        return self._resume_print_impl()
+
+        if status is not PrinterStatus.PRINTING:
+            return None
+
+        # PRINTING is the word that lied.  Do not act on it alone.
+        try:
+            from kiln.printers.progress_motion import Motion, observe_progress
+
+            verdict = observe_progress(self, state, self._job_or_none())
+        except Exception:  # noqa: BLE001 — the detector never blocks a resume
+            return None
+
+        if verdict.motion is Motion.MOVING:
+            # Positive evidence: a progress axis advanced.  This really is a
+            # running print, and resume is not the verb for it.
+            return self._no_paused_print_result()
+
+        if verdict.motion is Motion.STALLED:
+            # The state word is contradicted by the machine's own counters.
+            # Refusing here is what cost twenty minutes.
+            return None
+
+        return self._unverified_running_result()
+
+    def _job_or_none(self) -> JobProgress | None:
+        """``get_job()``, or ``None`` if it fails.
+
+        Called only on the rare, user-initiated resume path — never per poll —
+        so the round trip some adapters pay for it is bought once, at the
+        moment its answer decides whether a user can recover their print.
+        """
+        try:
+            return self.get_job()
+        except Exception:  # noqa: BLE001 — progress detail is optional here
+            return None
+
+    #: How long :meth:`_verify_resume_took` will wait for the printer to stop
+    #: reporting PAUSED, and how often it looks.  Short and early-exiting: a
+    #: resume typically confirms on the first or second look, and this is a
+    #: rare user-initiated action, not a polling loop.
+    _RESUME_VERIFY_TIMEOUT: float = 5.0
+    _RESUME_VERIFY_INTERVAL: float = 1.0
+
+    def _verify_resume_took(self, result: PrintResult) -> PrintResult:
+        """Re-read the printer and correct *result* if the resume did not take.
+
+        NEVER converts a failure into a success, never raises, and returns
+        *result* untouched on any problem of its own.
+        """
+        if not getattr(result, "success", False):
+            return result
+        try:
+            import time as _time
+
+            deadline = _time.monotonic() + self._RESUME_VERIFY_TIMEOUT
+            status = None
+            while True:
+                status = getattr(self.get_state(), "state", None)
+                if status is not PrinterStatus.PAUSED:
+                    break
+                if _time.monotonic() >= deadline:
+                    break
+                _time.sleep(self._RESUME_VERIFY_INTERVAL)
+
+            if status is PrinterStatus.PAUSED:
+                return PrintResult(
+                    success=False,
+                    message=(
+                        "Resume was sent but the printer still reports paused "
+                        f"{self._RESUME_VERIFY_TIMEOUT:.0f}s later — the "
+                        "command was not accepted. Check the printer's screen "
+                        "for a prompt it is waiting on (filament, door, a "
+                        "confirmation), then try again."
+                    ),
+                    job_id=getattr(result, "job_id", None),
+                )
+            if status is PrinterStatus.PRINTING:
+                return PrintResult(
+                    success=True,
+                    message=(
+                        "Resume accepted — the printer now reports printing. "
+                        "That is the printer's word, not yet observed motion: "
+                        "check that the layer number climbs over the next few "
+                        "minutes, and Kiln will say so if it does not."
+                    ),
+                    job_id=getattr(result, "job_id", None),
+                )
+            return result
+        except Exception:  # noqa: BLE001 — verification never breaks a resume
+            import logging as _logging
+
+            _logging.getLogger(__name__).debug(
+                "resume verification failed; returning the adapter's own result",
+                exc_info=True,
+            )
+            return result
+
+    def _unverified_running_result(self) -> PrintResult:
+        """Refusal for a printer that says PRINTING with no motion evidence.
+
+        Distinct wording from :meth:`_no_paused_print_result` on purpose.  That
+        one is a statement of fact — the printer is demonstrably running.  This
+        one is a statement about what Kiln can and cannot see, and it must not
+        dead-end: the state word alone has been wrong before, so the user gets
+        told how to overrule it in the same breath they are refused.
+        """
+        return PrintResult(
+            success=False,
+            message=(
+                "The printer reports that it is printing, so there is nothing "
+                "to resume — but Kiln has not seen it advance a layer or a "
+                "percent yet, so it cannot confirm that. If the printer's own "
+                "screen says paused, the reported state is wrong: use "
+                "resume_print(force=True) to send the resume anyway."
+            ),
+        )
 
     @abstractmethod
     def _resume_print_impl(self) -> PrintResult:

@@ -28,6 +28,7 @@ from typing import Any
 
 import click
 
+from kiln.print_start_verdict import resolve_print_start
 from kiln.printer_backends import (
     DEFAULT_SERIAL_BAUDRATE,
     NETWORK_PRINTER_TYPES,
@@ -3007,8 +3008,16 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
 
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.option(
+    "--force",
+    is_flag=True,
+    help=(
+        "Send the resume even if Kiln thinks the printer isn't paused. "
+        "Use when the printer's screen disagrees with what Kiln reports."
+    ),
+)
 @click.pass_context
-def resume(ctx: click.Context, json_mode: bool) -> None:
+def resume(ctx: click.Context, json_mode: bool, force: bool) -> None:
     """Resume a paused print job."""
     try:
         safety_printer = _resolve_emergency_printer_name(ctx)
@@ -3023,7 +3032,7 @@ def resume(ctx: click.Context, json_mode: bool) -> None:
             )
             sys.exit(1)
         adapter = _get_adapter_from_ctx(ctx)
-        result = adapter.resume_print()
+        result = adapter.resume_print(force=force)
         click.echo(format_action("resume", result.to_dict(), json_mode=json_mode))
     except click.ClickException:
         raise
@@ -5519,11 +5528,18 @@ def ingest_watch_cmd(
                     continue
 
                 remote_name = upload_result.file_name or local_path.name
+                # An unconfirmed start is not a failed one: dropping the job
+                # here would leave a running print with nothing tracking it.
+                sent_at = time.monotonic()
                 start_result = adapter.start_print(remote_name)
-                if not start_result.success:
+                start_verdict = resolve_print_start(
+                    adapter, start_result, sent_at=sent_at,
+                    file_name=remote_name,
+                )
+                if not start_verdict.ok:
                     queue_items.popleft()
                     errors.append(
-                        f"{printer_name}: start failed for {remote_name} ({start_result.message or 'unknown'})"
+                        f"{printer_name}: start failed for {remote_name} ({start_verdict.message or 'unknown'})"
                     )
                     continue
 

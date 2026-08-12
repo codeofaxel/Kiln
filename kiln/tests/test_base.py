@@ -385,14 +385,26 @@ class TestResumePrintTemplate:
     """
 
     @staticmethod
-    def _adapter(state):
+    def _adapter(state, after=None):
+        """*after* is the state the printer reports once the resume lands.
+
+        The template re-reads the printer afterwards, because
+        ``_resume_print_impl`` returning success only means the command was
+        PUBLISHED.  ``after=None`` means the state never changes.
+        """
         impl_calls: list[str] = []
 
         class _A(PrinterAdapter):
+            # No sleeping in the test suite; the read-back's real budget is
+            # exercised in test_stalled_print_detection.py.
+            _RESUME_VERIFY_TIMEOUT = 0.0
+            _RESUME_VERIFY_INTERVAL = 0.0
+
             def get_state(self):
                 if isinstance(state, Exception):
                     raise state
-                return PrinterState(connected=True, state=state)
+                current = after if (after and impl_calls) else state
+                return PrinterState(connected=True, state=current)
 
             def _resume_print_impl(self):
                 impl_calls.append("impl")
@@ -404,18 +416,47 @@ class TestResumePrintTemplate:
         return adapter
 
     def test_paused_proceeds_to_impl(self):
-        a = self._adapter(PrinterStatus.PAUSED)
+        a = self._adapter(PrinterStatus.PAUSED, after=PrinterStatus.PRINTING)
         result = a.resume_print()
         assert result.success is True
         assert a._impl_calls == ["impl"]
 
-    @pytest.mark.parametrize("state", [PrinterStatus.IDLE, PrinterStatus.PRINTING])
-    def test_not_paused_returns_honest_failure(self, state):
-        a = self._adapter(state)
+    def test_a_resume_the_printer_ignored_is_not_a_success(self):
+        """The read-back.  A printer still reporting PAUSED did not resume,
+        whatever the fire-and-forget transport reported back."""
+        a = self._adapter(PrinterStatus.PAUSED)  # never leaves paused
+        result = a.resume_print()
+        assert a._impl_calls == ["impl"]
+        assert result.success is False
+        assert "still reports paused" in result.message
+
+    def test_idle_returns_honest_failure(self):
+        a = self._adapter(PrinterStatus.IDLE)
         result = a.resume_print()
         assert result.success is False
         assert "no paused print" in result.message.lower()
         assert a._impl_calls == []  # never fired the resume command
+
+    def test_printing_is_refused_but_names_the_way_through(self):
+        """PRINTING is the word that lied on 2026-08-11, so a refusal built on
+        it alone must hand the user an override rather than a dead end.
+
+        With no observed motion either way the gate still refuses — but it
+        says what it does and does not know, and how to overrule it.  See
+        test_stalled_print_detection.py for the case where motion evidence
+        contradicts the word and the refusal is dropped entirely.
+        """
+        a = self._adapter(PrinterStatus.PRINTING)
+        result = a.resume_print()
+        assert result.success is False
+        assert "force=True" in result.message
+        assert a._impl_calls == []
+
+    def test_force_bypasses_the_gate_entirely(self):
+        a = self._adapter(PrinterStatus.PRINTING, after=PrinterStatus.PRINTING)
+        result = a.resume_print(force=True)
+        assert a._impl_calls == ["impl"]
+        assert result.success is True
 
     @pytest.mark.parametrize(
         "state",

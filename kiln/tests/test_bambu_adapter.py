@@ -495,18 +495,45 @@ class TestBambuAdapterGetJob:
         assert job.completion == 100.0
         assert job.print_time_left_seconds == 0
 
-    def test_job_elapsed_time_calculated(self, adapter_with_mqtt: BambuAdapter) -> None:
-        # 50% complete, 30 minutes remaining -> elapsed should be ~30 minutes
+    def test_job_elapsed_is_measured_not_extrapolated(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """Elapsed comes from the start Kiln witnessed, or it is not reported.
+
+        This test used to assert the EXTRAPOLATION — its own comment spelled
+        out the tautology: "elapsed = (remaining / 0.5) - remaining =
+        remaining".  At 50 % that looks plausible; at 99 % with one minute
+        left the same formula produced 5940 s, and the web rendered "1h 39m"
+        for a print that had run about 31 minutes (measured on an A1,
+        2026-08-11).  It was never a measurement of time, only a restatement
+        of the percentage.
+        """
+        from kiln.printers import progress_motion as pm
+
         adapter_with_mqtt._last_status = {
             "gcode_file": "test.3mf",
             "mc_percent": 50,
             "mc_remaining_time": 30,  # 30 minutes
         }
 
-        job = adapter_with_mqtt.get_job()
+        pm.reset_progress_observations()
+        try:
+            # Kiln did not start this print, so it cannot know when it began.
+            assert adapter_with_mqtt.get_job().print_time_seconds is None
 
-        # elapsed = total - remaining = (remaining / 0.5) - remaining = remaining
-        assert job.print_time_seconds == 1800  # 30 * 60
+            # With a witnessed start, elapsed is the real clock — and stays
+            # the real clock whatever the percentage says.
+            pm.note_job_start(adapter_with_mqtt, "test.3mf")
+            elapsed = adapter_with_mqtt.get_job().print_time_seconds
+            assert elapsed is not None and 0 <= elapsed < 5
+
+            adapter_with_mqtt._last_status["mc_percent"] = 99
+            adapter_with_mqtt._last_status["mc_remaining_time"] = 1
+            still_measured = adapter_with_mqtt.get_job().print_time_seconds
+            assert still_measured is not None and still_measured < 5
+            assert still_measured != 5940  # what the old formula returned here
+        finally:
+            pm.reset_progress_observations()
 
     def test_job_zero_percent_no_elapsed(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._last_status = {

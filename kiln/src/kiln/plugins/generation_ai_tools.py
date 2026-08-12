@@ -16,6 +16,8 @@ import tempfile
 import time
 from typing import Any
 
+from kiln.print_start_verdict import resolve_print_start
+
 _logger = logging.getLogger(__name__)
 
 
@@ -868,6 +870,7 @@ class _GenerationAIToolsPlugin:
 
                 # Auto-print only if the user has opted in via KILN_AUTO_PRINT_GENERATED.
                 print_data = None
+                print_verdict = None
                 auto_printed = False
                 if _srv._AUTO_PRINT_GENERATED:
                     safety_printer = _srv._resolve_effective_printer_name(printer_name)
@@ -888,13 +891,21 @@ class _GenerationAIToolsPlugin:
                             pf.get("summary", "Pre-flight checks failed"),
                             code="PREFLIGHT_FAILED",
                         )
+                    # Captured before the command so the verdict can tell a
+                    # reading about THIS job from the printer's last word
+                    # about the previous one.
+                    sent_at = time.monotonic()
                     print_result = adapter.start_print(file_name)
                     _srv._get_heater_watchdog().notify_print_started()
-                    print_data = print_result.to_dict()
+                    print_verdict = resolve_print_start(
+                        adapter, print_result, sent_at=sent_at,
+                        file_name=file_name,
+                    )
+                    print_data = print_verdict.to_dict()
                     auto_printed = True
 
                 resp: dict[str, Any] = {
-                    "success": True,
+                    "success": print_verdict.ok if auto_printed else True,
                     "generation": result.to_dict(),
                     "slice": slice_result.to_dict(),
                     "upload": upload.to_dict(),
@@ -914,14 +925,29 @@ class _GenerationAIToolsPlugin:
 
                 if auto_printed:
                     resp["print"] = print_data
+                    resp["print_start"] = print_verdict.state
                     resp["safety_notice"] = (
                         "WARNING: Auto-print for generated models is enabled "
                         "(KILN_AUTO_PRINT_GENERATED=true). AI-generated models "
                         "are experimental and may damage printer hardware. "
                         "Disable this setting unless you accept the risk."
                     )
+                    if print_verdict.confirmed:
+                        _tail = "and started printing (auto-print ON)."
+                    elif print_verdict.ok:
+                        _tail = (
+                            "and sent the print command (auto-print ON). The "
+                            "printer has not confirmed it is running yet — "
+                            "call printer_status() to watch it start."
+                        )
+                    else:
+                        _tail = (
+                            f"but the printer did not start it. "
+                            f"{print_verdict.message}"
+                        )
                     resp["message"] = (
-                        f"Generated '{prompt[:80]}' via {gen.display_name}, sliced, and started printing (auto-print ON)."
+                        f"Generated '{prompt[:80]}' via {gen.display_name}, "
+                        f"sliced, {_tail}"
                     )
                 else:
                     resp["ready_to_print"] = True

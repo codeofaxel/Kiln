@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from kiln.events import EventBus, EventType
+from kiln.print_start_verdict import resolve_print_start
 from kiln.printers.base import PrinterError, PrinterStatus
 from kiln.queue import JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
@@ -583,8 +584,16 @@ class JobScheduler:
                 adapter = self._registry.get(printer_name)
                 self._queue.mark_starting(next_job.id)
 
+                # An unconfirmed start must not be read as a failure here:
+                # requeuing a job the printer actually took dispatches the
+                # same file at a machine that is already running it.
+                sent_at = time.monotonic()
                 result = adapter.start_print(next_job.file_name)
-                if result.success:
+                verdict = resolve_print_start(
+                    adapter, result, sent_at=sent_at,
+                    file_name=next_job.file_name,
+                )
+                if verdict.ok:
                     self._queue.mark_printing(next_job.id)
                     with self._lock:
                         self._active_jobs[next_job.id] = printer_name
@@ -605,8 +614,9 @@ class JobScheduler:
                         }
                     )
                 else:
-                    error_msg = result.message or "start_print returned failure"
-                    self._requeue_or_fail(next_job.id, error_msg, failed)
+                    # The verdict always carries a sentence, including when
+                    # the adapter returned none — no local fallback needed.
+                    self._requeue_or_fail(next_job.id, verdict.message, failed)
 
             except PrinterError as exc:
                 error_msg = f"Failed to start print on {printer_name}: {exc}"

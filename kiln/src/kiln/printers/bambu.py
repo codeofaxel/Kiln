@@ -53,6 +53,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from kiln.printers.progress_motion import job_elapsed_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -1808,19 +1809,29 @@ class BambuAdapter(PrinterAdapter):
         if mc_percent is not None:
             completion = float(mc_percent)
 
-        # Estimate elapsed time from completion and remaining.
-        print_time_seconds: int | None = None
         print_time_left_seconds: int | None = None
-
         if mc_remaining is not None:
             print_time_left_seconds = int(mc_remaining) * 60
 
-        if completion is not None and completion > 0 and print_time_left_seconds is not None:
-            # total_est = remaining / (1 - completion/100)
-            fraction_left = 1.0 - (completion / 100.0)
-            if fraction_left > 0:
-                total_est = print_time_left_seconds / fraction_left
-                print_time_seconds = max(0, int(total_est - print_time_left_seconds))
+        # Elapsed is MEASURED from the start Kiln witnessed, or not reported.
+        #
+        # It used to be extrapolated from the two numbers above —
+        # ``remaining / (1 - completion/100) - remaining`` — which is a
+        # restatement of the percentage, not a measurement of time.  Verified
+        # on an A1 (2026-08-11): at 99 % with one minute left it produced
+        # 5940 s and the web rendered "1h 39m" for a print that had run about
+        # 31 minutes.  Whenever remaining is one minute the elapsed in minutes
+        # equals the completion percentage exactly; the "1h39m" WAS the
+        # "99 %".  ``mc_remaining_time`` arrives in whole MINUTES, so as the
+        # divisor approaches 0.01 that coarseness is multiplied by a hundred.
+        #
+        # Bambu's push payload carries no start timestamp to read instead, so
+        # when Kiln did not start the print — it attached to one already
+        # running, or the process restarted — the honest answer is that
+        # elapsed is unknown, and the field is left unset.
+        print_time_seconds: int | None = job_elapsed_seconds(
+            self, file_name or None
+        )
 
         # Layer tracking.
         current_layer: int | None = None
