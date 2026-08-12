@@ -27,7 +27,7 @@ iniconfig==2.3.0
 jsonschema-specifications==2025.9.1
 jsonschema==4.26.0
 lxml==6.1.1
-manifold3d==3.4.1
+manifold3d==3.5.2
 markdown-it-py==4.2.0
 mcp-types==2.0.0
 mcp==2.0.0

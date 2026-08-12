@@ -131,7 +131,7 @@ dev = [
     # production never runs a boolean.  Undeclared, it passed on any
     # machine that happened to have it and failed in CI, which reads as a
     # renderer bug rather than a missing package.
-    "manifold3d>=2.5",
+    "manifold3d>=3.5.2",
 ]
 
 [project.scripts]
