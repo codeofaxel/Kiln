@@ -852,7 +852,7 @@ class SerialPrinterAdapter(PrinterAdapter):
             message="Print paused.",
         )
 
-    def resume_print(self) -> PrintResult:
+    def resume_print(self, *, force: bool = False) -> PrintResult:
         """Resume a paused SD print — OVERRIDE of the base template.
 
         Serial has no real printer-state telemetry: pause is tracked by the
@@ -861,8 +861,18 @@ class SerialPrinterAdapter(PrinterAdapter):
         directly here instead of the base template's ``get_state()`` check —
         which would otherwise block a legitimate resume whenever the printer
         reads as idle/printing rather than paused.
+
+        *force* skips that flag, for the case the flag exists to paper over:
+        the print was paused by something other than Kiln (the LCD, a host
+        restart), so Kiln never set it and would otherwise refuse forever.
+
+        Deliberately NO read-back here, unlike the base template.  Verifying
+        a resume means re-reading the state, and this adapter's whole reason
+        for overriding is that its state read cannot see a pause — a
+        confident sentence built on a signal known to be blind is the failure
+        this work exists to remove, not a check.
         """
-        if not self._paused:
+        if not (self._paused or force):
             return self._no_paused_print_result()
         return self._resume_print_impl()
 
