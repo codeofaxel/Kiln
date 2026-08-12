@@ -433,15 +433,42 @@ class JobScheduler:
                             determined_by="observed",
                         )
                     elif job_id in self._seen_printing:
-                        # Watched printing, now idle with no error: the
-                        # machine's own testimony that the print ended
-                        # cleanly — the one resolution here that is a
-                        # verdict about the MODEL, so it may federate.
-                        self._auto_record_outcome(
-                            job_id, printer_name, "success",
-                            determined_by="observed",
-                            contribute=True,
-                        )
+                        # IDLE is NOT testimony.  Every adapter folds a clean
+                        # finish, a cancel and an untouched printer into that
+                        # one value, so "watched printing, now idle" cannot
+                        # tell a completed print from one stopped at the
+                        # machine's own touchscreen.  Reading it as success
+                        # and federating it published a cancel to the
+                        # community pool as proof the settings worked.
+                        #
+                        # PrinterState.last_job_result is the field that
+                        # carries what IDLE threw away.  When the machine
+                        # NAMES its ending, that is testimony and is taken at
+                        # its word.  When it names nothing — OctoPrint's
+                        # flags, RRF's object model — the print most likely
+                        # did finish, so it is still recorded as success for
+                        # the user's own history, but it is an INFERENCE and
+                        # does not federate.  Contributing is a claim about
+                        # the model; only the machine gets to make it.
+                        ended = getattr(state, "last_job_result", None)
+                        named = getattr(ended, "value", None)
+                        if named == "cancelled":
+                            self._auto_record_outcome(
+                                job_id, printer_name, "cancelled",
+                                determined_by="observed",
+                            )
+                        elif named == "failed":
+                            self._auto_record_outcome(
+                                job_id, printer_name, "failed",
+                                determined_by="observed",
+                                contribute=True,
+                            )
+                        else:
+                            self._auto_record_outcome(
+                                job_id, printer_name, "success",
+                                determined_by="observed",
+                                contribute=(named == "completed"),
+                            )
                     else:
                         self._auto_record_outcome(
                             job_id, printer_name, "unknown",

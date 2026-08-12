@@ -126,6 +126,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- `cancel_job` has been renamed `cancel_queued_job`. It only ever removed a job
+  that was still waiting in the queue line, but sitting next to `cancel_print`,
+  the name suggested otherwise. This tool also used to sometimes accept a job
+  that had already started and mark it cancelled while the machine kept
+  printing; now it tells you the print is already running and points you at
+  `cancel_print`.
+
 - **Preview pictures now match the 3D viewer.** Kiln's stills get the same
   studio lighting as the model viewer instead of the flat grey render — in
   your chosen filament colour, from the angles Kiln already picks for your
@@ -164,6 +171,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **Your Bambu's screen shows the actual print again.** A recent change to how
+  Kiln handles colours quietly stopped previews reaching the printer, so the
+  touchscreen showed a generic icon instead of your model — the one glance that
+  tells you the machine got what you meant. Previews are back, drawn in the
+  colour the file says it will print in. Retried prints now get one too; they
+  never had one before. When the file doesn't name a colour, the preview stays
+  neutral instead of guessing one.
 
 - **Cold starts no longer stop themselves on OctoPrint and Marlin printers.**
   Those printers report that they're printing while still heating up, and Kiln

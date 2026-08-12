@@ -185,6 +185,28 @@ def _read_license() -> str:
         return ""
 
 
+def _running_version() -> str:
+    """The Kiln version THIS process is actually running.
+
+    Frozen at import, which is the point: a ``pip install --upgrade`` while the
+    daemon runs changes the files on disk and changes nothing in here.  Read
+    deliberately from the imported module rather than the installed
+    distribution's metadata, because the two answer different questions —
+    metadata says what pip last put on disk, and what a long-lived daemon is
+    serving is what it loaded.
+
+    One helper for both readers (the relay handshake and the state file) so the
+    version the server sees and the version ``kiln bridge status`` reports can
+    never drift into disagreeing about one process.
+    """
+    try:
+        from kiln import __version__ as _v  # noqa: PLC0415
+
+        return str(_v)
+    except Exception:  # noqa: BLE001 -- version introspection is never fatal
+        return ""
+
+
 def _device_fingerprint() -> str:
     """Stable per-machine id the activation-cap accounting expects (env or MAC)."""
     fp = os.environ.get("KILN_DEVICE_FINGERPRINT", "").strip()
@@ -241,12 +263,10 @@ class BridgeClient:
         return self._pinned_license or _read_license()
 
     def _auth_headers(self) -> dict[str, str]:
-        from kiln import __version__ as _v  # noqa: PLC0415
-
         return {
             "Authorization": f"Bearer {self._bearer()}",
             "X-Kiln-Device-Fingerprint": _device_fingerprint(),
-            "X-Kiln-Client-Version": str(_v),
+            "X-Kiln-Client-Version": _running_version(),
         }
 
     async def _handle_and_reply(self, ws, req: dict) -> None:
@@ -319,6 +339,14 @@ def write_bridge_state(*, connected: bool) -> None:
 
     ``since`` is preserved across a reconnect flap so status can honestly say
     "connected for 2h" rather than resetting on every dropped frame.
+
+    ``version`` is the version this process is RUNNING, and it is the only
+    place that fact is recorded on the machine.  A daemon started by launchd
+    six weeks ago holds the code it imported then; every command typed since
+    reports what is on disk now.  Writing it here is what lets
+    ``kiln bridge status`` notice the two have parted company (see
+    :mod:`kiln.bridge_version`).  Written on connect and on drop — never per
+    relayed call, so nothing about a print touches this file.
     """
     try:
         prev = read_bridge_state()
@@ -331,7 +359,8 @@ def write_bridge_state(*, connected: bool) -> None:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(
                 {"pid": os.getpid(), "connected": bool(connected),
-                 "since": since, "updated": now},
+                 "since": since, "updated": now,
+                 "version": _running_version()},
                 fh,
             )
         os.replace(tmp, path)
