@@ -115,6 +115,92 @@ class TestSchemaCreation:
         assert db.path == str(tmp_path / "test_kiln.db")
 
 
+class TestOpeningAPreV2Database:
+    """A database older than the v2 signature column must still open.
+
+    ``_ensure_schema`` indexes ``print_dna(geometric_signature_v2)``, but
+    its ``CREATE TABLE`` is an ``IF NOT EXISTS`` — so on a database that
+    predates the column, the old table survived and the index failed with
+    ``no such column``, killing the MCP server on startup.  The migration
+    that adds the column ran four lines too late to help.  Every install
+    that upgraded across that change would have hit this.
+    """
+
+    def _pre_v2_database(self, path: str) -> None:
+        """The two tables as they existed before the v2 column shipped.
+
+        Mirrors the live schema exactly, minus ``geometric_signature_v2``
+        and its index — a bare stand-in table would fail on a different
+        missing column and prove nothing about this one.
+        """
+        conn = sqlite3.connect(path)
+        for table in ("print_dna", "community_prints"):
+            conn.execute(
+                f"CREATE TABLE {table} ("
+                "  id              INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  file_hash       TEXT NOT NULL,"
+                "  geometric_signature TEXT NOT NULL,"
+                "  triangle_count  INTEGER,"
+                "  bounding_box    TEXT,"
+                "  surface_area    REAL,"
+                "  volume          REAL,"
+                "  overhang_ratio  REAL,"
+                "  complexity_score REAL,"
+                "  printer_model   TEXT,"
+                "  material        TEXT,"
+                "  settings        TEXT,"
+                "  outcome         TEXT NOT NULL,"
+                "  quality_grade   TEXT DEFAULT 'B',"
+                "  failure_mode    TEXT,"
+                "  print_time_seconds INTEGER DEFAULT 0,"
+                "  timestamp       REAL NOT NULL"
+                ")"
+            )
+        conn.commit()
+        conn.close()
+
+    def test_a_pre_v2_database_still_opens(self, tmp_path):
+        db_path = str(tmp_path / "pre_v2.db")
+        self._pre_v2_database(db_path)
+
+        db = KilnDB(db_path=db_path)  # used to raise OperationalError
+        try:
+            for table in ("print_dna", "community_prints"):
+                columns = {
+                    row[1]
+                    for row in db._conn.execute(
+                        f"PRAGMA table_info({table})"
+                    ).fetchall()
+                }
+                assert "geometric_signature_v2" in columns, (
+                    f"{table} was never migrated"
+                )
+        finally:
+            db.close()
+
+    def test_a_fresh_database_still_opens(self, tmp_path):
+        """The other half of the ordering fix.
+
+        The migration now runs BEFORE the schema exists, so it has to be a
+        no-op on a brand-new database — ``ALTER TABLE`` on a table that has
+        not been created yet would trade an upgrade crash for a
+        first-install crash.
+        """
+        db_path = str(tmp_path / "brand_new.db")
+
+        db = KilnDB(db_path=db_path)
+        try:
+            columns = {
+                row[1]
+                for row in db._conn.execute(
+                    "PRAGMA table_info(print_dna)"
+                ).fetchall()
+            }
+            assert "geometric_signature_v2" in columns
+        finally:
+            db.close()
+
+
 # ---------------------------------------------------------------------------
 # Job CRUD
 # ---------------------------------------------------------------------------
