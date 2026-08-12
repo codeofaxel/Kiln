@@ -400,12 +400,41 @@ class TestRecordingSuppression:
 
 
 class TestAwaitCompletionHours:
-    def _fake_adapter(self, states, print_time_seconds=7200):
-        from kiln.printers.base import JobProgress, PrinterState, PrinterStatus
+    """The watcher's hours come from the lifecycle wrap, not from itself.
 
-        class _Fake:
+    ``await_print_completion`` used to record hours on its own IDLE branch.
+    It no longer does: the ``adapter.get_state()`` it polls with already
+    feeds the terminal transition through the wrap every adapter inherits,
+    which banks the duration keyed by job.  Recording again on the call site
+    counted one print twice, in the total AND the denominator.
+
+    So the fake below must be a REAL ``PrinterAdapter`` subclass.  It was a
+    bare class, which no ``__init_subclass__`` wiring ever touched — the
+    tests passed against a shape production does not have, and could only
+    ever have exercised the call site rather than the path that ships.
+    """
+
+    def _fake_adapter(self, states, print_time_seconds=7200):
+        from kiln.printers.base import (
+            JobProgress,
+            PrinterAdapter,
+            PrinterCapabilities,
+            PrinterState,
+            PrintResult,
+            UploadResult,
+        )
+
+        class _Fake(PrinterAdapter):
             def __init__(self):
                 self._states = list(states)
+
+            @property
+            def name(self) -> str:
+                return "moonraker"
+
+            @property
+            def capabilities(self) -> PrinterCapabilities:
+                return PrinterCapabilities()
 
             def get_state(self):
                 status = (
@@ -420,6 +449,40 @@ class TestAwaitCompletionHours:
                     completion=100.0,
                     print_time_seconds=print_time_seconds,
                 )
+
+            # -- remaining contract, unused by these tests ---------------
+            def _start_print_impl(self, file_name, **kwargs):
+                return PrintResult(success=True, message="ok")
+
+            def list_files(self):
+                return []
+
+            def upload_file(self, file_path):
+                return UploadResult(success=True, message="ok")
+
+            def delete_file(self, file_name):
+                return True
+
+            def cancel_print(self):
+                return PrintResult(success=True, message="ok")
+
+            def pause_print(self):
+                return PrintResult(success=True, message="ok")
+
+            def _resume_print_impl(self):
+                return PrintResult(success=True, message="ok")
+
+            def emergency_stop(self):
+                return PrintResult(success=True, message="ok")
+
+            def send_gcode(self, command):
+                return "ok"
+
+            def set_tool_temp(self, celsius, tool=0):
+                return True
+
+            def set_bed_temp(self, celsius):
+                return True
 
         return _Fake()
 

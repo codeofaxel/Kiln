@@ -19,6 +19,7 @@ from kiln.printers.base import (
     PrinterState,
     PrintResult,
     UploadResult,
+    delegate_outcome_lifecycle,
 )
 from kiln.printers.moonraker import MoonrakerAdapter
 
@@ -719,6 +720,12 @@ class CrealityAdapter(PrinterAdapter):
             retries=retries,
             verify_ssl=verify_ssl,
         )
+        # Both this adapter's get_state and the backend's are wrapped for the
+        # outcome lifecycle, and one call runs both.  This printer reports
+        # under the name the user registered it by, so the inner one stays
+        # quiet — otherwise a single print is recorded twice, under two names
+        # the hook's idempotency key cannot tell are one machine.
+        delegate_outcome_lifecycle(self._backend)
         if self._model:
             self.set_safety_profile(self._model)
 

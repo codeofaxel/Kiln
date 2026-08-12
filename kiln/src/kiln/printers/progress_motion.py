@@ -282,6 +282,8 @@ _anchors: dict[str, ProgressSample] = {}
 _latest: dict[str, ProgressSample] = {}
 #: printer name → (normalised job label, ``time.monotonic()`` at start).
 _job_starts: dict[str, tuple[str | None, float]] = {}
+#: printer key → ``time.monotonic()`` of the last status read.
+_last_looks: dict[str, float] = {}
 
 
 def reset_progress_observations(adapter: Any = None) -> None:
@@ -295,11 +297,13 @@ def reset_progress_observations(adapter: Any = None) -> None:
             _anchors.clear()
             _latest.clear()
             _job_starts.clear()
+            _last_looks.clear()
         else:
             key = observation_key(adapter)
             _anchors.pop(key, None)
             _latest.pop(key, None)
             _job_starts.pop(key, None)
+            _last_looks.pop(key, None)
 
 
 def _round_percent(value: Any) -> float | None:
@@ -574,6 +578,42 @@ def note_job_start(adapter: Any, job_label: Any, *, at: float | None = None) -> 
             )
     except Exception:  # noqa: BLE001
         logger.debug("job-start stamp failed", exc_info=True)
+
+
+#: How long a gap between two status reads still counts as WATCHING.
+#:
+#: The elapsed clock below is read at the moment Kiln NOTICES an ending, not
+#: at the moment the print ended, so the reading carries however long it took
+#: to notice.  Bounding the gap bounds that error: with a 15 s monitoring
+#: poll this leaves room for several missed beats and network retries, while
+#: keeping the error under two minutes — noise against any real print.  A
+#: longer gap is not a watched ending at all: it is finding out afterwards,
+#: which yields a confidently wrong number rather than an honest absence.
+WATCHED_ENDING_MAX_GAP_S: float = 120.0
+
+
+def note_status_read(adapter: Any, *, now: float | None = None) -> float | None:
+    """Record that a status read just happened; return the gap since the last.
+
+    ``None`` on the first read for a printer — no previous look means no gap
+    to measure, and the caller must treat "unknown" as "not watching" rather
+    than assume the reading is fresh.  A reconnect builds a new adapter and
+    therefore a new key, so it honestly starts over.
+
+    Cheap by construction: this is called on every ``get_state()`` for every
+    adapter, so it touches only a dict under the existing lock and never asks
+    the printer anything.  Never raises.
+    """
+    try:
+        key = observation_key(adapter)
+        stamp = time.monotonic() if now is None else now
+        with _lock:
+            previous = _last_looks.get(key)
+            _last_looks[key] = stamp
+        return None if previous is None else max(0.0, stamp - previous)
+    except Exception:  # noqa: BLE001 — bookkeeping never breaks a status read
+        logger.debug("status-read stamp failed", exc_info=True)
+        return None
 
 
 def forget_job_start(adapter: Any) -> None:

@@ -9388,9 +9388,6 @@ def await_print_completion(
     start = time.time()
     progress_log: list[dict] = []
     last_pct: float | None = None
-    # True once this call has seen the printer actively printing —
-    # the gate on recording print-hours at the terminal transition.
-    _saw_active_print = False
     # B10 + D3: resolve once at entry — the brief context is stable for
     # the lifetime of this poll loop.  We attach the same dict to every
     # terminal-state response so the agent always sees the goal
@@ -9517,30 +9514,15 @@ def await_print_completion(
                 )
                 last_pct = pct
 
-            if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
-                _saw_active_print = True
-
             if state.state == PrinterStatus.IDLE:
-                # Telemetry: hours for a print WE watched finish.  Only
-                # when this call actually observed the print running —
-                # re-awaiting an idle printer re-reads the firmware's
-                # most-recent-job stats and would count the same hours
-                # twice.  No queue job record exists on this path, so
-                # record_print_outcome can't double-report it later
-                # (its hours read requires one).
-                if _saw_active_print:
-                    try:
-                        _elapsed_print_s = job_progress.print_time_seconds
-                        if _elapsed_print_s and _elapsed_print_s > 0:
-                            from kiln.daily_stats import record_print_hours
-
-                            record_print_hours(_elapsed_print_s / 3600.0)
-                    except Exception:
-                        logger.debug(
-                            "await_print_completion: print-hours telemetry "
-                            "skipped",
-                            exc_info=True,
-                        )
+                # Print hours are NOT recorded here.  The ``adapter.get_state()``
+                # above already fed the terminal transition through the
+                # adapter-generic lifecycle wrap, which banks the duration
+                # keyed by job — so doing it again on this line counted one
+                # print twice, and twice in the denominator too.  That wrap
+                # covers every caller that polls, not just this tool, and it
+                # refuses a duration when the ending was noticed too late to
+                # have been watched; this call site could do neither.
                 return _attach_goal({
                     "success": True,
                     "outcome": "completed",
