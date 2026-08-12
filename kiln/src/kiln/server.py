@@ -3158,31 +3158,84 @@ def _log_print_completion(event: Event) -> None:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
-def printer_status() -> dict:
-    """Get full printer state, temperatures, job progress, and capabilities (detailed).
+# What `lite` keeps off the `printer` block: everything that MOVES during
+# a print, which is everything a monitoring surface renders — temps,
+# state, speed, errors, reading age.
+#
+# What it drops is static hardware description that cannot change between
+# two polls seconds apart (nozzle diameter and type, wifi signal), plus
+# the fan speeds, which no surface displays.  `capabilities` is dropped
+# the same way, and is the bulk of the saving: eleven fields including
+# `device_type` and `can_pause` that are fixed for the life of the
+# printer, re-sent 1,440 times an hour at a 2.5s poll.
+#
+# The list is deliberately generous.  A trim that blanks a readout is not
+# a saving, it is a regression with a smaller payload.
+_LITE_PRINTER_KEYS = (
+    "connected",
+    "state",
+    "tool_temp_actual",
+    "tool_temp_target",
+    "bed_temp_actual",
+    "bed_temp_target",
+    "chamber_temp_actual",
+    "chamber_temp_target",
+    "speed_profile",
+    "speed_magnitude",
+    "print_error",
+    "state_age_seconds",
+)
 
-    Returns a comprehensive JSON object with:
+
+@mcp.tool()
+def printer_status(
+    printer_name: str | None = None,
+    detail: str = "full",
+) -> dict:
+    """Get printer state, temperatures, job progress, and capabilities.
+
+    Returns a JSON object with:
     - ``printer``: connection status, operational state, tool/bed temperatures
     - ``job``: current file name, completion percentage, elapsed and remaining time
-    - ``capabilities``: what this printer backend supports
+    - ``capabilities``: what this printer backend supports (``full`` only)
 
     Use this as the first call to understand what the printer is doing.
-    For lightweight polling during prints, use ``print_status_lite`` instead
-    (fewer tokens, accepts printer name).
+
+    Args:
+        printer_name: Target printer.  Omit for the default printer.
+        detail: ``"full"`` (default) for everything, or ``"lite"`` for
+            frequent polling during a print — same field names, but
+            ``capabilities`` is omitted and ``printer`` is trimmed to the
+            readings that actually move.  Both levels carry every warning.
+
+    ``detail`` exists so polling and inspection share ONE vocabulary.  The
+    retired ``print_status_lite`` returned the same numbers under different
+    names (``completion_pct``, ``hotend_temp``), which is why clients grew
+    defensive key-alias lists to read either shape.
     """
     try:
-        adapter = _get_adapter()
+        if detail not in ("full", "lite"):
+            return _error_dict(
+                f"detail must be 'full' or 'lite', got {detail!r}.",
+                code="VALIDATION_ERROR",
+            )
+        adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
         state = adapter.get_state()
         job = adapter.get_job()
-        caps = adapter.capabilities
+
+        printer_block = state.to_dict()
+        if detail == "lite":
+            printer_block = {
+                k: v for k, v in printer_block.items() if k in _LITE_PRINTER_KEYS
+            }
 
         response = {
             "success": True,
-            "printer": state.to_dict(),
+            "printer": printer_block,
             "job": job.to_dict(),
-            "capabilities": caps.to_dict(),
         }
+        if detail == "full":
+            response["capabilities"] = adapter.capabilities.to_dict()
         # `printer` already carries state_age_seconds when the adapter measures
         # it; this promotes the age to a sentence when it is past the point of
         # being evidence, so the answer cannot be read as current by accident.
@@ -3202,6 +3255,8 @@ def printer_status() -> dict:
             response["stall_warning"] = motion_note
         from kiln.safety_gap_warning import attach_safety_warning
         return attach_safety_warning(response)
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
             f"Failed to get printer status: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."
@@ -15149,75 +15204,19 @@ def get_fulfillment_quote_cached(
 
 @mcp.tool()
 def print_status_lite(printer_name: str | None = None) -> dict:
-    """Lightweight print status — minimal fields for efficient agent polling.
+    """DEPRECATED — call ``printer_status(detail="lite")`` instead.
 
-    Returns only state, completion %, file name, ETA, and temps.
-    Use this for frequent polling during prints. For full detail
-    (capabilities, all flags, full job data), use ``printer_status``.
-    For a formatted text report with cost estimate and health commentary,
-    use ``monitor_print``.
+    Kept so an existing caller does not break.  It now delegates, and
+    therefore returns ``printer_status``'s shape: nested ``printer`` /
+    ``job`` blocks, not the flat ``completion_pct`` / ``hotend_temp``
+    keys this tool used to invent.  That rename was the whole problem —
+    two tools describing one nozzle temperature with two different words,
+    which is why clients grew alias lists to read either.
 
     Args:
         printer_name: Target printer.  Omit for the default printer.
     """
-    try:
-        adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
-        state = adapter.get_state()
-        job = adapter.get_job()
-
-        result: dict[str, Any] = {
-            "state": state.state.value,
-            "completion_pct": job.completion,
-            "file_name": job.file_name,
-        }
-
-        # Include ETA if available.
-        #
-        # These four reads used to name attributes that no adapter return type
-        # has ever had (`job.time_left`, `job.time_elapsed`,
-        # `state.hotend_temp`, `state.bed_temp`).  The first one raised
-        # AttributeError on every call for every backend in every state, the
-        # bare `except Exception` below turned that into `{"state": "error"}`,
-        # and the tests passed because they handed the tool MagicMocks, which
-        # answer to any attribute name.  The names below are the real fields on
-        # JobProgress and PrinterState.
-        if job.print_time_left_seconds is not None:
-            result["eta_seconds"] = job.print_time_left_seconds
-        if job.print_time_seconds is not None:
-            result["elapsed_seconds"] = job.print_time_seconds
-
-        # Include temperatures if printing.
-        if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
-            if state.tool_temp_actual is not None:
-                result["hotend_temp"] = state.tool_temp_actual
-            if state.bed_temp_actual is not None:
-                result["bed_temp"] = state.bed_temp_actual
-
-        # How old the reading is, when the adapter measures it.  This tool is
-        # what `printer_status` recommends for polling during a print, so it is
-        # exactly where a frozen cache gets read as progress.
-        state_age = getattr(state, "state_age_seconds", None)
-        if state_age is not None:
-            result["state_age_seconds"] = state_age
-        stale_note = describe_stale_state(state_age, result["state"])
-        if stale_note:
-            result["telemetry_warning"] = stale_note
-        # This is the tool `printer_status` sends people to for polling
-        # during a print, so it is the surface most likely to be watching at
-        # the moment a print quietly stops moving.
-        motion_note = progress_stall_note(adapter, state, job)
-        if motion_note:
-            result["stall_warning"] = motion_note
-
-        return result
-
-    except PrinterNotFoundError:
-        return {"state": "not_found", "error": f"Printer {printer_name!r} not found"}
-    except (PrinterError, RuntimeError) as exc:
-        return {"state": "error", "error": str(exc)}
-    except Exception as exc:
-        logger.exception("Error in print_status_lite")
-        return {"state": "error", "error": str(exc)}
+    return printer_status(printer_name=printer_name, detail="lite")
 
 
 # ---------------------------------------------------------------------------
