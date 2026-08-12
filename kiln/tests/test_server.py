@@ -2781,6 +2781,78 @@ class TestWrapGcodeAs3mf:
         )
 
     @patch("kiln.server._get_adapter")
+    def test_an_stl_without_a_thumbnail_still_reaches_the_builder(
+        self, mock_get_adapter, tmp_path
+    ):
+        adapter = MagicMock(spec=BambuAdapter)
+        out = tmp_path / "output.3mf"
+        out.write_bytes(b"")
+        adapter.wrap_gcode_as_3mf.return_value = str(out)
+        mock_get_adapter.return_value = adapter
+        stl = tmp_path / "part.stl"
+        stl.write_text("solid s\nendsolid s\n")
+
+        wrap_gcode_as_3mf(gcode_path="/tmp/test.gcode", stl_path=str(stl))
+
+        _, kwargs = adapter.wrap_gcode_as_3mf.call_args
+        assert kwargs["stl_paths"] == [str(stl)]
+
+    @patch("kiln.server._get_adapter")
+    def test_a_supplied_thumbnail_outranks_a_generated_one(
+        self, mock_get_adapter, tmp_path
+    ):
+        """The caller's own image must not be silently discarded.
+
+        The injection below the builder call only fills slots the archive
+        does not already have.  Once the builder learned to render a
+        preview from ``stl_path``, it filled all seven of them first — so
+        a caller who passed BOTH got our render and never their picture,
+        with nothing logged.  Passing both is the case to pin.
+        """
+        adapter = MagicMock(spec=BambuAdapter)
+        out = tmp_path / "output.3mf"
+        out.write_bytes(b"")
+        adapter.wrap_gcode_as_3mf.return_value = str(out)
+        mock_get_adapter.return_value = adapter
+        stl = tmp_path / "part.stl"
+        stl.write_text("solid s\nendsolid s\n")
+        thumb = tmp_path / "mine.png"
+        thumb.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        wrap_gcode_as_3mf(
+            gcode_path="/tmp/test.gcode",
+            stl_path=str(stl),
+            thumbnail_path=str(thumb),
+        )
+
+        _, kwargs = adapter.wrap_gcode_as_3mf.call_args
+        assert kwargs["stl_paths"] is None, (
+            "the builder rendered a preview over the caller's own thumbnail"
+        )
+
+    @patch("kiln.server._get_adapter")
+    def test_a_missing_thumbnail_file_falls_back_to_rendering(
+        self, mock_get_adapter, tmp_path
+    ):
+        """A path that is not a file cannot outrank anything."""
+        adapter = MagicMock(spec=BambuAdapter)
+        out = tmp_path / "output.3mf"
+        out.write_bytes(b"")
+        adapter.wrap_gcode_as_3mf.return_value = str(out)
+        mock_get_adapter.return_value = adapter
+        stl = tmp_path / "part.stl"
+        stl.write_text("solid s\nendsolid s\n")
+
+        wrap_gcode_as_3mf(
+            gcode_path="/tmp/test.gcode",
+            stl_path=str(stl),
+            thumbnail_path=str(tmp_path / "nope.png"),
+        )
+
+        _, kwargs = adapter.wrap_gcode_as_3mf.call_args
+        assert kwargs["stl_paths"] == [str(stl)]
+
+    @patch("kiln.server._get_adapter")
     def test_unsupported_printer_returns_error(self, mock_get_adapter):
         adapter = MagicMock(spec=OctoPrintAdapter)
         # OctoPrintAdapter does not have wrap_gcode_as_3mf

@@ -1233,6 +1233,157 @@ _MINIMAL_3D_MODEL = (
 )
 
 
+#: BambuStudio's thumbnail set: archive path -> (width, height).  Firmware
+#: and Studio each pick a different entry by path, so the whole set travels
+#: together or some surface shows a blank tile.
+_BAMBU_THUMBNAIL_SPECS: dict[str, tuple[int, int]] = {
+    "Metadata/plate_1.png": (512, 512),
+    "Metadata/plate_1_small.png": (128, 128),
+    "Metadata/top_1.png": (512, 512),
+    "Metadata/pick_1.png": (512, 512),
+    "Auxiliaries/.thumbnails/thumbnail_3mf.png": (240, 180),
+    "Auxiliaries/.thumbnails/thumbnail_middle.png": (680, 510),
+    "Auxiliaries/.thumbnails/thumbnail_small.png": (251, 188),
+}
+
+
+def _declared_filament_colors(plate_json: str | None) -> list[str] | None:
+    """The filament colors THIS archive declares, read back from its own JSON.
+
+    The preview has one job — say what the print will look like — so the
+    only defensible source for its color is the file's own claim, and the
+    file makes that claim in the ``Metadata/plate_1.json`` written beside
+    the thumbnail.  Reading it back from that exact string is what keeps
+    the two in agreement: pass the JSON the archive gets, and the preview
+    cannot show a color the file does not declare.
+
+    Deliberately NOT a caller-supplied parameter.  A parameter is a
+    promise every call site has to keep, and the wrap that copies its
+    metadata from a source 3MF has no colors of its own to pass — so a
+    parameter would have gone unfilled there and quietly fallen back to a
+    default, which is exactly the failure this is written to prevent.
+
+    :param plate_json: The ``Metadata/plate_1.json`` text bound for the
+        archive, or ``None`` when the archive will declare no plate at all.
+    :returns: The declared ``#RRGGBB`` list, or ``None`` when the file
+        declares nothing usable — never a substituted default.
+    """
+    if not plate_json:
+        return None
+    try:
+        declared = json.loads(plate_json).get("filament_colors")
+    except (ValueError, AttributeError):
+        logger.warning(
+            "plate_1.json is not readable JSON — the preview renders "
+            "neutral rather than guessing a filament color.",
+            exc_info=True,
+        )
+        return None
+    if not isinstance(declared, list):
+        return None
+    colors = [c for c in declared if isinstance(c, str) and c.strip()]
+    return colors or None
+
+
+def _thumbnail_aspect_groups() -> dict[float, list[str]]:
+    """The thumbnail paths, grouped by the shape of the image they want.
+
+    Rendering once and stretching that image into every slot turns a round
+    coaster into an ellipse in the 4:3 ones, so each SHAPE gets its own
+    render.  Ratios bucket to one decimal, which puts 251x188 (1.335) in
+    with 4:3 (1.333): a tenth of a percent of stretch nobody can see, and
+    one render saved.
+    """
+    groups: dict[float, list[str]] = {}
+    for name, (width, height) in _BAMBU_THUMBNAIL_SPECS.items():
+        groups.setdefault(round(width / height, 1), []).append(name)
+    return groups
+
+
+def _fit_to_specs(source: bytes, names: list[str]) -> dict[str, bytes]:
+    """*source* scaled to each of *names*' declared sizes."""
+    try:
+        from PIL import Image
+    except ImportError:
+        # Pillow absent: ship the render at its native size under every
+        # path.  The display scales it itself — a wrong-sized preview
+        # still beats a blank one.
+        logger.warning("Pillow unavailable — embedding the thumbnail unresized.")
+        return dict.fromkeys(names, source)
+
+    from io import BytesIO
+
+    resample = getattr(Image, "Resampling", Image).LANCZOS
+    fitted: dict[str, bytes] = {}
+    with Image.open(BytesIO(source)) as img:
+        img.load()
+        for name in names:
+            buf = BytesIO()
+            img.resize(_BAMBU_THUMBNAIL_SPECS[name], resample).save(buf, format="PNG")
+            fitted[name] = buf.getvalue()
+    return fitted
+
+
+def _stl_thumbnail_set(
+    stl_paths: list[str],
+    plate_json: str | None,
+) -> dict[str, bytes]:
+    """Every BambuStudio thumbnail entry, rendered from *stl_paths*.
+
+    Both wraps in this module need the identical set, and each carried its
+    own copy of the code that built it.  That is how both came to hand a
+    list of PATHS to a renderer that takes parsed geometry, and how both
+    stayed broken: every 3MF shipped with no preview at all.  One helper,
+    one call per door.
+
+    Best-effort by contract — a missing thumbnail must never fail the
+    wrap.  It must not fail SILENTLY either: the defect above hid behind a
+    bare ``except Exception: pass``, so every unhappy exit here logs.
+
+    :param plate_json: The plate metadata this archive will carry, read
+        for the colors it declares.  See :func:`_declared_filament_colors`.
+    """
+    if not stl_paths:
+        return {}
+    thumbnails: dict[str, bytes] = {}
+    try:
+        from kiln.multicolor_3mf import render_plate_thumbnail
+
+        colors = _declared_filament_colors(plate_json)
+        for names in _thumbnail_aspect_groups().values():
+            # Render the largest slot in the group and scale down into the
+            # rest — downsampling is free of the softness upscaling adds.
+            width, height = max(
+                (_BAMBU_THUMBNAIL_SPECS[n] for n in names),
+                key=lambda size: size[0] * size[1],
+            )
+            source = render_plate_thumbnail(
+                stl_paths, colors=colors, width=width, height=height,
+            )
+            if not source:
+                logger.warning(
+                    "No %dx%d thumbnail could be rendered from %s.",
+                    width, height, stl_paths,
+                )
+                continue
+            thumbnails.update(_fit_to_specs(source, names))
+    except Exception:  # noqa: BLE001 — a preview never blocks a print
+        logger.warning(
+            "STL thumbnail generation failed for %s — the 3MF ships without "
+            "a printer preview.",
+            stl_paths,
+            exc_info=True,
+        )
+        return {}
+    if not thumbnails:
+        logger.warning(
+            "No thumbnail could be rendered from %s — the 3MF ships without "
+            "a printer preview.",
+            stl_paths,
+        )
+    return thumbnails
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -1489,40 +1640,12 @@ def build_bambu_3mf(
                 "Could not extract thumbnails from %s", source_3mf_path
             )
 
-    # If no thumbnails were extracted and STL paths are available,
-    # generate a thumbnail via OpenSCAD (best-effort), resized to
-    # BambuStudio's expected dimensions per path.
+    # No thumbnails in the source: render the STLs instead, in the same
+    # filament colors this file declares, so the printer shows the part
+    # rather than a blank preview.  ``plate_json`` is the declaration —
+    # the very string written to the archive below.
     if not thumbnails and stl_paths:
-        try:
-            from kiln.multicolor_3mf import _generate_thumbnail
-            thumb_data = _generate_thumbnail(stl_paths)
-            if thumb_data:
-                _thumb_specs: dict[str, tuple[int, int]] = {
-                    "Metadata/plate_1.png": (512, 512),
-                    "Metadata/plate_1_small.png": (128, 128),
-                    "Metadata/top_1.png": (512, 512),
-                    "Metadata/pick_1.png": (512, 512),
-                    "Auxiliaries/.thumbnails/thumbnail_3mf.png": (240, 180),
-                    "Auxiliaries/.thumbnails/thumbnail_middle.png": (680, 510),
-                    "Auxiliaries/.thumbnails/thumbnail_small.png": (251, 188),
-                }
-                try:
-                    from io import BytesIO
-
-                    from PIL import Image
-
-                    src_img = Image.open(BytesIO(thumb_data))
-                    for name, (tw, th) in _thumb_specs.items():
-                        resized = src_img.resize((tw, th), Image.LANCZOS)
-                        buf = BytesIO()
-                        resized.save(buf, format="PNG")
-                        thumbnails[name] = buf.getvalue()
-                except ImportError:
-                    # Pillow not available — use raw data for all paths
-                    for name in _thumb_specs:
-                        thumbnails[name] = thumb_data
-        except Exception:
-            pass
+        thumbnails = _stl_thumbnail_set(stl_paths, plate_json)
 
     # Build the 3MF.
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -1603,9 +1726,10 @@ def repackage_gcode_as_bambu_3mf(
 
     Thumbnails are resolved in this order:
       1. Copied from ``source_3mf_path`` if it's a valid 3MF zip.
-      2. Generated from ``stl_paths`` via OpenSCAD when no source
-         thumbnails were found.  Without this fallback the printer's
-         LCD shows a blank preview for freshly-sliced parts.
+      2. Rendered from ``stl_paths`` when no source thumbnails were
+         found, in the filament colors the copied plate metadata
+         declares.  Without this fallback the printer's LCD shows a
+         blank preview for freshly-sliced parts.
 
     :param gcode_path: Path to the .gcode file (already Bambu-ready).
     :param output_path: Path for the output .gcode.3mf file.
@@ -1656,39 +1780,14 @@ def repackage_gcode_as_bambu_3mf(
                 "Could not extract metadata from %s", source_3mf_path
             )
 
-    # Fallback: generate thumbnails from STL via OpenSCAD so the Bambu
-    # LCD shows the actual part rather than a blank square.  Mirrors
-    # the logic in :func:`build_bambu_3mf`.
+    # Fallback: render the STLs so the Bambu LCD shows the actual part
+    # rather than a blank square.  Same helper :func:`build_bambu_3mf`
+    # uses — one implementation, so the two doors cannot drift apart.
+    # The colors come from the plate metadata copied out of the source
+    # above; when there is none, the archive declares no color and the
+    # render stays neutral rather than inventing one.
     if not thumbnails and stl_paths:
-        try:
-            from kiln.multicolor_3mf import _generate_thumbnail
-            thumb_data = _generate_thumbnail(stl_paths)
-            if thumb_data:
-                _thumb_specs: dict[str, tuple[int, int]] = {
-                    "Metadata/plate_1.png": (512, 512),
-                    "Metadata/plate_1_small.png": (128, 128),
-                    "Metadata/top_1.png": (512, 512),
-                    "Metadata/pick_1.png": (512, 512),
-                    "Auxiliaries/.thumbnails/thumbnail_3mf.png": (240, 180),
-                    "Auxiliaries/.thumbnails/thumbnail_middle.png": (680, 510),
-                    "Auxiliaries/.thumbnails/thumbnail_small.png": (251, 188),
-                }
-                try:
-                    from io import BytesIO
-
-                    from PIL import Image
-
-                    src_img = Image.open(BytesIO(thumb_data))
-                    for name, (tw, th) in _thumb_specs.items():
-                        resized = src_img.resize((tw, th), Image.LANCZOS)
-                        buf = BytesIO()
-                        resized.save(buf, format="PNG")
-                        thumbnails[name] = buf.getvalue()
-                except ImportError:
-                    for name in _thumb_specs:
-                        thumbnails[name] = thumb_data
-        except Exception:
-            logger.warning("STL thumbnail generation failed", exc_info=True)
+        thumbnails = _stl_thumbnail_set(stl_paths, plate_json)
 
     # Update the time prediction in slice_info.config so the printer
     # display shows correct time remaining instead of the full plate's

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import zipfile
@@ -97,6 +98,42 @@ FAKE_END_GCODE = """\
 G1 Z65.0 F900
 M104 S0
 M140 S0
+"""
+
+# A real, parseable solid — four facets with actual volume, so the
+# thumbnail renderer has something to paint and the result can be looked
+# at rather than merely counted.
+TETRAHEDRON_STL = """\
+solid wedge
+facet normal 0 0 -1
+  outer loop
+    vertex 0 0 0
+    vertex 20 0 0
+    vertex 10 18 0
+  endloop
+endfacet
+facet normal 0 -1 0
+  outer loop
+    vertex 0 0 0
+    vertex 10 9 16
+    vertex 20 0 0
+  endloop
+endfacet
+facet normal 1 1 0
+  outer loop
+    vertex 20 0 0
+    vertex 10 9 16
+    vertex 10 18 0
+  endloop
+endfacet
+facet normal -1 1 0
+  outer loop
+    vertex 10 18 0
+    vertex 10 9 16
+    vertex 0 0 0
+  endloop
+endfacet
+endsolid wedge
 """
 
 
@@ -1005,35 +1042,36 @@ class TestBuildBambu3mfSourceExtraction:
 
 class TestRepackageStlThumbnailFallback:
     """When no source_3mf_path thumbnails are available, stl_paths must
-    trigger OpenSCAD-based thumbnail generation so the Bambu LCD shows
-    the actual part (not a blank preview)."""
+    trigger thumbnail generation so the Bambu LCD shows the actual part
+    (not a blank preview)."""
 
     def test_stl_paths_triggers_thumbnail_generation(self, tmp_path):
+        """A REAL mesh through the REAL renderer, asserted on the archive.
+
+        The version of this test that mocked ``_generate_thumbnail`` was
+        green for the entire life of the bug it was written to catch: the
+        wraps passed a list of file PATHS to a function that takes parsed
+        geometry, every call raised, and the mock stood in for the call
+        that never worked.  A thumbnail test that never renders anything
+        tests the mock.
+        """
         gcode = tmp_path / "test.gcode"
         gcode.write_text("; test gcode\nG1 X0 Y0 Z0\n")
-        stl = tmp_path / "disc.stl"
-        stl.write_text("solid test\nendsolid\n")
+        stl = tmp_path / "wedge.stl"
+        stl.write_text(TETRAHEDRON_STL)
         out = str(tmp_path / "output.3mf")
 
-        # Real PNG bytes — PIL needs a valid image to resize.
-        from io import BytesIO
-        from PIL import Image
-        buf = BytesIO()
-        Image.new("RGB", (64, 64), color=(255, 255, 255)).save(buf, format="PNG")
-        fake_png = buf.getvalue()
-
-        with patch(
-            "kiln.multicolor_3mf._generate_thumbnail",
-            return_value=fake_png,
-        ):
-            repackage_gcode_as_bambu_3mf(
-                str(gcode), out, stl_paths=[str(stl)],
-            )
+        repackage_gcode_as_bambu_3mf(str(gcode), out, stl_paths=[str(stl)])
 
         with zipfile.ZipFile(out) as zf:
             names = zf.namelist()
             assert "Metadata/plate_1.png" in names
             assert "Auxiliaries/.thumbnails/thumbnail_3mf.png" in names
+            plate = zf.read("Metadata/plate_1.png")
+        # Non-trivial bytes: a real render, not a placeholder or an empty
+        # entry the archive would happily hold.
+        assert plate.startswith(b"\x89PNG\r\n\x1a\n")
+        assert len(plate) > 1000
 
     def test_source_3mf_thumbnails_win_over_stl_fallback(self, tmp_path):
         gcode = tmp_path / "test.gcode"
@@ -1041,13 +1079,14 @@ class TestRepackageStlThumbnailFallback:
         source = tmp_path / "source.3mf"
         with zipfile.ZipFile(source, "w") as zf:
             zf.writestr("Metadata/plate_1.png", b"source_thumb_bytes")
-        stl = tmp_path / "disc.stl"
-        stl.write_text("solid test\nendsolid\n")
+        stl = tmp_path / "wedge.stl"
+        stl.write_text(TETRAHEDRON_STL)
         out = str(tmp_path / "output.3mf")
 
-        # _generate_thumbnail should NOT be called when source 3MF has thumbnails
+        # The renderer should NOT run when the source 3MF already has
+        # thumbnails — its own preview is truer than anything we'd make.
         with patch(
-            "kiln.multicolor_3mf._generate_thumbnail",
+            "kiln.multicolor_3mf.render_plate_thumbnail",
             return_value=b"stl_fallback_bytes",
         ) as gen:
             repackage_gcode_as_bambu_3mf(
@@ -1068,6 +1107,273 @@ class TestRepackageStlThumbnailFallback:
         repackage_gcode_as_bambu_3mf(str(gcode), out)
 
         assert zipfile.is_zipfile(out)
+
+
+# ---------------------------------------------------------------------------
+# Thumbnails actually land in the archive — both doors, declared colors
+# ---------------------------------------------------------------------------
+
+def _part_pixels(png_bytes: bytes) -> list[tuple[int, int, int]]:
+    """The lit pixels of the part, background aside.
+
+    The renderer paints on a near-black field, so anything appreciably
+    brighter than it belongs to the model.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    with Image.open(BytesIO(png_bytes)) as img:
+        raw = img.convert("RGB").tobytes()
+    pixels = [tuple(raw[i:i + 3]) for i in range(0, len(raw), 3)]
+    return [p for p in pixels if sum(p) / 3 > 60]
+
+
+def _cast_pixels(png_bytes: bytes) -> list[tuple[int, int, int]]:
+    """Part pixels carrying a real color cast, shading and grey aside."""
+    return [p for p in _part_pixels(png_bytes) if max(p) - min(p) > 40]
+
+
+class TestThumbnailsReachTheArchive:
+    """Every Bambu 3MF must carry a real preview for the printer screen.
+
+    Both wraps passed bare file paths to a renderer that takes parsed
+    geometry.  Every call raised ``ValueError`` inside a bare
+    ``except Exception: pass``, so every 3MF Kiln uploaded had zero
+    thumbnail entries and nothing anywhere went red.  These tests assert
+    on the bytes in the emitted archive, which is the only place the
+    defect was visible.
+    """
+
+    #: path -> the exact pixel size BambuStudio expects there.
+    EXPECTED = {
+        "Metadata/plate_1.png": (512, 512),
+        "Metadata/plate_1_small.png": (128, 128),
+        "Metadata/top_1.png": (512, 512),
+        "Metadata/pick_1.png": (512, 512),
+        "Auxiliaries/.thumbnails/thumbnail_3mf.png": (240, 180),
+        "Auxiliaries/.thumbnails/thumbnail_middle.png": (680, 510),
+        "Auxiliaries/.thumbnails/thumbnail_small.png": (251, 188),
+    }
+
+    def _mock_templates(self):
+        return (
+            patch(
+                "kiln.printers.bambu_3mf._load_a1_start_gcode",
+                return_value=FAKE_START_GCODE,
+            ),
+            patch(
+                "kiln.printers.bambu_3mf._load_a1_end_gcode",
+                return_value=FAKE_END_GCODE,
+            ),
+        )
+
+    def _stl(self, tmp_path):
+        stl = tmp_path / "wedge.stl"
+        stl.write_text(TETRAHEDRON_STL)
+        return str(stl)
+
+    def _source_declaring(self, tmp_path, colors):
+        """A source 3MF that declares *colors* and carries NO thumbnail."""
+        source = tmp_path / "source.3mf"
+        with zipfile.ZipFile(source, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json", json.dumps({"filament_colors": colors}),
+            )
+        return str(source)
+
+    def test_build_bambu_3mf_embeds_the_full_thumbnail_set(self, tmp_path):
+        out = str(tmp_path / "built.3mf")
+        p_start, p_end = self._mock_templates()
+        with p_start, p_end:
+            build_bambu_3mf(
+                MINIMAL_GCODE_BODY, out, stl_paths=[self._stl(tmp_path)],
+            )
+
+        from io import BytesIO
+
+        from PIL import Image
+
+        with zipfile.ZipFile(out) as zf:
+            names = zf.namelist()
+            for path, size in self.EXPECTED.items():
+                assert path in names, f"{path} missing from the 3MF"
+                data = zf.read(path)
+                assert len(data) > 500, f"{path} is a stub, {len(data)} bytes"
+                with Image.open(BytesIO(data)) as img:
+                    assert img.size == size, f"{path} is {img.size}, want {size}"
+
+    def test_repackage_embeds_the_full_thumbnail_set(self, tmp_path):
+        gcode = tmp_path / "ready.gcode"
+        gcode.write_text("; already-bambu gcode\nG1 X0 Y0 Z0\n")
+        out = str(tmp_path / "repacked.3mf")
+
+        repackage_gcode_as_bambu_3mf(
+            str(gcode), out, stl_paths=[self._stl(tmp_path)],
+        )
+
+        from io import BytesIO
+
+        from PIL import Image
+
+        with zipfile.ZipFile(out) as zf:
+            names = zf.namelist()
+            for path, size in self.EXPECTED.items():
+                assert path in names, f"{path} missing from the 3MF"
+                with Image.open(BytesIO(zf.read(path))) as img:
+                    assert img.size == size, f"{path} is {img.size}, want {size}"
+
+    def test_pixels_match_the_colour_the_SAME_archive_declares(self, tmp_path):
+        """The file's own claim and its own preview must agree.
+
+        Read wholly from the emitted 3MF: the color out of
+        ``Metadata/plate_1.json``, the pixels out of
+        ``Metadata/plate_1.png``.  Nothing the test supplies is trusted,
+        so this cannot pass by agreeing with an input that the archive
+        does not actually carry.
+        """
+        out = str(tmp_path / "red.3mf")
+        settings = BambuPrintSettings(filament_color="#FF0000")
+        p_start, p_end = self._mock_templates()
+        with p_start, p_end:
+            build_bambu_3mf(
+                MINIMAL_GCODE_BODY, out,
+                settings=settings,
+                stl_paths=[self._stl(tmp_path)],
+            )
+
+        with zipfile.ZipFile(out) as zf:
+            declared = json.loads(zf.read("Metadata/plate_1.json"))["filament_colors"]
+            lit = _cast_pixels(zf.read("Metadata/plate_1.png"))
+
+        assert declared == ["#FF0000"]
+        assert len(lit) > 1000, f"only {len(lit)} coloured pixels — grey preview?"
+        mean_r = sum(p[0] for p in lit) / len(lit)
+        mean_g = sum(p[1] for p in lit) / len(lit)
+        mean_b = sum(p[2] for p in lit) / len(lit)
+        assert mean_r > 2 * mean_g and mean_r > 2 * mean_b, (
+            f"archive declares {declared} but the preview averages "
+            f"({mean_r:.0f}, {mean_g:.0f}, {mean_b:.0f})"
+        )
+
+    def test_repackage_paints_the_colour_the_source_declared(self, tmp_path):
+        """The copied declaration drives the copied-metadata door too.
+
+        This door has no colors of its own — it inherits the plate
+        metadata from the source 3MF.  A colour parameter here would have
+        gone unpassed by its real caller and silently defaulted, so the
+        colour is read back out of that copied JSON instead.
+        """
+        gcode = tmp_path / "ready.gcode"
+        gcode.write_text("; already-bambu gcode\n")
+        out = str(tmp_path / "blue.3mf")
+
+        repackage_gcode_as_bambu_3mf(
+            str(gcode), out,
+            source_3mf_path=self._source_declaring(tmp_path, ["#0000FF"]),
+            stl_paths=[self._stl(tmp_path)],
+        )
+
+        with zipfile.ZipFile(out) as zf:
+            lit = _cast_pixels(zf.read("Metadata/plate_1.png"))
+
+        assert len(lit) > 1000, f"only {len(lit)} coloured pixels — grey preview?"
+        mean_r = sum(p[0] for p in lit) / len(lit)
+        mean_b = sum(p[2] for p in lit) / len(lit)
+        assert mean_b > 2 * mean_r, (
+            "the source declared #0000FF but the preview did not render blue"
+        )
+
+    def test_a_white_declaration_renders_white_not_a_house_colour(self, tmp_path):
+        """White means white — the preview may not brand the print.
+
+        An earlier fix rendered this exact case (a plate declaring
+        ``#FFFFFF``) in a warm house colour.  It looked like a working
+        thumbnail and was a lie about what comes off the printer, which
+        is worse than no thumbnail at all: the preview is how a
+        non-technical user checks that the machine understood them.
+        """
+        out = str(tmp_path / "white.3mf")
+        p_start, p_end = self._mock_templates()
+        with p_start, p_end:
+            # Default settings — the everyday slice-and-print case.
+            build_bambu_3mf(
+                MINIMAL_GCODE_BODY, out, stl_paths=[self._stl(tmp_path)],
+            )
+
+        with zipfile.ZipFile(out) as zf:
+            declared = json.loads(zf.read("Metadata/plate_1.json"))["filament_colors"]
+            plate = zf.read("Metadata/plate_1.png")
+
+        assert declared == ["#FFFFFF"]
+        part = _part_pixels(plate)
+        assert len(part) > 1000, "the part did not render at all"
+        # No colour cast: the failure mode this exists for is a preview
+        # that paints a hue the file never declared.
+        cast = _cast_pixels(plate)
+        assert len(cast) < 0.02 * len(part), (
+            f"declared {declared} but {len(cast)} of {len(part)} part pixels "
+            "carry a colour cast — the preview invented a colour"
+        )
+        # ...and actually white, not a neutral grey standing in for it.
+        bright = [p for p in part if sum(p) / 3 > 180]
+        assert len(bright) > 1000, (
+            f"a white part rendered only {len(bright)} bright pixels — "
+            "the preview is too dark to be the declared white"
+        )
+
+    def test_an_undeclared_colour_renders_neutral_never_invented(self, tmp_path):
+        """No declaration, no colour — render neutral rather than guess.
+
+        Repackaging without a source 3MF writes no ``plate_1.json`` at
+        all, so the archive claims nothing about filament.  A preview
+        must not fill that silence with a colour of its own choosing.
+        """
+        gcode = tmp_path / "ready.gcode"
+        gcode.write_text("; already-bambu gcode\n")
+        out = str(tmp_path / "undeclared.3mf")
+
+        repackage_gcode_as_bambu_3mf(
+            str(gcode), out, stl_paths=[self._stl(tmp_path)],
+        )
+
+        with zipfile.ZipFile(out) as zf:
+            assert "Metadata/plate_1.json" not in zf.namelist()
+            plate = zf.read("Metadata/plate_1.png")
+
+        part = _part_pixels(plate)
+        assert len(part) > 1000, "the part did not render at all"
+        cast = _cast_pixels(plate)
+        assert len(cast) < 0.02 * len(part), (
+            f"{len(cast)} of {len(part)} part pixels carry a colour cast, but "
+            "the archive declares no filament colour — a colour was invented"
+        )
+
+    def test_thumbnail_failure_is_logged_not_swallowed(self, tmp_path, caplog):
+        """A broken render still ships the print — and still says so.
+
+        The bug survived because its exception was discarded by a bare
+        ``except Exception: pass``.  Best-effort must never mean silent.
+        """
+        gcode = tmp_path / "ready.gcode"
+        gcode.write_text("; already-bambu gcode\n")
+        out = str(tmp_path / "out.3mf")
+
+        with caplog.at_level(logging.WARNING), patch(
+            "kiln.multicolor_3mf.render_plate_thumbnail",
+            side_effect=RuntimeError("renderer exploded"),
+        ):
+            repackage_gcode_as_bambu_3mf(
+                str(gcode), out, stl_paths=[self._stl(tmp_path)],
+            )
+
+        # The print still shipped.
+        assert zipfile.is_zipfile(out)
+        with zipfile.ZipFile(out) as zf:
+            assert not [n for n in zf.namelist() if n.endswith(".png")]
+        # And the failure is on the record, with the traceback.
+        assert "renderer exploded" in caplog.text
+        assert "RuntimeError" in caplog.text
 
 
 # ---------------------------------------------------------------------------
