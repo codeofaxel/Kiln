@@ -12,7 +12,7 @@ It runs ONLY when you turn it on here.  Installing Kiln never connects anything;
     kiln bridge disable    off — stop now and stop starting on login
     kiln bridge start      run once in the background (until you log out)
     kiln bridge stop       stop the background run
-    kiln bridge status     is it on, and is it connected?
+    kiln bridge status     is it on, is it connected, is it current?
 
 Start-on-login is per-user and needs no elevation on all three platforms:
 launchd LaunchAgent (macOS), systemd --user unit (Linux), HKCU Run key
@@ -38,6 +38,7 @@ import subprocess
 import sys
 import time
 import urllib.parse
+from collections.abc import Sequence
 from typing import NamedTuple
 
 import click
@@ -52,6 +53,7 @@ from kiln.bridge_supervisor import (
     read_supervisor_state,
     supervisor_pid,
 )
+from kiln.bridge_version import describe as describe_bridge_version
 
 # launchd label (macOS), systemd unit stem (Linux), and registry Run value
 # (Windows).  One name each so status, install, and remove all agree on what
@@ -204,6 +206,7 @@ def _describe_status(
     restarts: int = 0,
     last_exit_at: float | None = None,
     gave_up: bool = False,
+    version_lines: Sequence[str] = (),
 ) -> tuple[str, list[str]]:
     """Map the facts to a (headline, detail-lines) pair — honest in every state.
 
@@ -216,6 +219,15 @@ def _describe_status(
     all night, and a bridge that had given up looked identical to one that was
     simply never turned on — the same "off" and the same two suggestions, with
     no hint that something had tried and failed.  Both now say so.
+
+    *version_lines* arrive already worded (:func:`kiln.bridge_version.describe`
+    owns that); what belongs here is WHERE they go, which is a state-machine
+    decision.  They are shown only while the bridge is actually up, because
+    both things they can say are about a live process: a bridge that is off has
+    nothing to restart, and the next start picks up whatever is installed by
+    itself.  On a bridge that is off, the one fact worth acting on is that it
+    is off — a version note underneath it would be a second errand competing
+    with the only one that matters.
     """
     if not signed_in:
         # An expired session and a machine that never signed in both land
@@ -281,6 +293,13 @@ def _describe_status(
             f"({restarts} restart{'s' if restarts != 1 else ''} this run)."
         )
 
+    if connected or running:
+        # Only while something is actually up.  "enabled, but not running"
+        # reaches this tail too, and there the note would be wrong twice over:
+        # no process is holding old code, and the start it is about to get
+        # picks up whatever is installed on its own.
+        lines.extend(version_lines)
+
     if enabled:
         lines.append("Starts automatically on every login.")
     else:
@@ -340,6 +359,41 @@ def _running_pid() -> int | None:
     if isinstance(pid, int) and _pid_alive(pid):
         return pid
     return None
+
+
+def _installed_version() -> str:
+    """What a bridge started right now would run — i.e. what is on disk.
+
+    This process was launched seconds ago, so its import IS the current disk
+    contents; the daemon's is whatever disk held when IT started.  Same
+    question asked of two processes, which is exactly what makes the two
+    answers comparable.
+    """
+    try:
+        from kiln import __version__ as _v  # noqa: PLC0415
+
+        return str(_v)
+    except Exception:  # noqa: BLE001 -- a version we cannot read is simply no news
+        return ""
+
+
+def _latest_published_version() -> str | None:
+    """The newest release on PyPI when we happen to know it, else ``None``.
+
+    Cache-backed and non-blocking by construction — :func:`check_for_update`
+    reads the shared 24h cache and warms it in a daemon thread — and honours
+    the ``KILN_NO_UPDATE_CHECK`` / ``KILN_OFFLINE`` opt-out by returning
+    nothing.  That opt-out costs the user only this line: the restart-pending
+    half needs no network and is reported either way.
+    """
+    try:
+        from kiln.version_check import check_for_update  # noqa: PLC0415
+
+        info = check_for_update()
+        latest = (info or {}).get("latest")
+        return latest if isinstance(latest, str) else None
+    except Exception:  # noqa: BLE001 -- status must never fail over a nudge
+        return None
 
 
 def _running_supervisor_pid() -> int | None:
@@ -627,9 +681,16 @@ def status() -> None:
     connected = bool(st.get("connected")) and running
     bearer = _resolve_bearer()
     last_exit = sup.get("last_exit") if isinstance(sup.get("last_exit"), dict) else {}
+    enabled = _service_installed()
+    version = describe_bridge_version(
+        running=st.get("version"),
+        installed=_installed_version(),
+        latest=_latest_published_version(),
+        enabled=enabled,
+    )
     headline, lines = _describe_status(
         signed_in=bool(bearer.token),
-        enabled=_service_installed(),
+        enabled=enabled,
         running=running,
         connected=connected,
         since=st.get("since"),
@@ -639,6 +700,7 @@ def status() -> None:
         restarts=int(sup.get("restarts") or 0),
         last_exit_at=last_exit.get("at"),
         gave_up=bool(sup.get("gave_up")),
+        version_lines=version.lines,
     )
     # Default terminal colour for the off/idle states — a fixed "white" is
     # invisible on a light-background terminal.
