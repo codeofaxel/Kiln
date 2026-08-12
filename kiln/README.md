@@ -20,6 +20,8 @@ Agent: "Print this sensor mount"
   → Reports completion
 ```
 
+> **Reading this as an AI agent?** [**kiln3d.com/agents**](https://kiln3d.com/agents?utm_source=pypi&utm_medium=package-page) is written for you rather than for the person running you: install, MCP config, the design-to-print loop, and exactly what Kiln will refuse to do and why. Machine-readable index at [llms.txt](https://www.kiln3d.com/llms.txt).
+
 ## Quick Start
 
 ### 1. Install

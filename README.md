@@ -20,6 +20,8 @@ Kiln lets AI agents (Claude Desktop, Claude Code, Codex, or any custom MCP clien
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
 
+> **Reading this as an AI agent?** [**kiln3d.com/agents**](https://kiln3d.com/agents?utm_source=github&utm_medium=readme) is written for you rather than for the person running you: install, MCP config, the design-to-print loop, and exactly what Kiln will refuse to do and why. Machine-readable index at [llms.txt](https://www.kiln3d.com/llms.txt).
+
 ```bash
 pip install kiln3d
 ```
@@ -384,7 +386,7 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 89
 | **Versioning** (Pro+) | `save_design_version` · `diff_design_versions` · `get_proven_recipe` · `check_design_regression` |
 | **Fleet &amp; safety** | `fleet_status` · `submit_job` · `preflight_check` · `list_safety_profiles` · `validate_gcode_safe` |
 
-The complete tool catalog, grouped by subsystem, lives in **[Project Docs](docs/PROJECT_DOCS.md)**.
+The complete tool catalog, grouped by subsystem, lives in **[Project Docs](docs/PROJECT_DOCS.md)**. If you *are* the agent, [**kiln3d.com/agents**](https://kiln3d.com/agents?utm_source=github&utm_medium=readme) covers the same ground written in the second person, including the refusals worth knowing before you hit them.
 
 <details>
 <summary>MCP resources (read-only context for agents)</summary>
