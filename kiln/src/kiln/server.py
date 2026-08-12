@@ -5167,10 +5167,16 @@ def cancel_print(
         # cancel rather than a success, so the learning DB gets
         # ``outcome="cancelled"`` instead of a bogus ``"success"``.
         try:
-            from kiln.auto_record_hook import register_cancel_intent
-            register_cancel_intent(_resolve_effective_printer_name(None))
+            from kiln.auto_record_hook import note_cancel_requested
+
+            # Keyed off the ADAPTER, not a name resolved beside it.  The name
+            # this used to pass was the registry's FIRST entry, which is the
+            # printer being cancelled only by coincidence, and the reader
+            # looked the flag up under a different name again — so the intent
+            # was filed where nothing would ever go looking for it.
+            note_cancel_requested(adapter)
         except Exception as exc:  # pragma: no cover — best-effort
-            logger.debug("cancel_print: register_cancel_intent failed: %s", exc)
+            logger.debug("cancel_print: note_cancel_requested failed: %s", exc)
 
         # Layer 6: if the print is being cancelled very early (before
         # layer 5), auto-capture an incident envelope to ~/.kiln/incidents/.

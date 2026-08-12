@@ -40,6 +40,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.auto_record_hook import note_cancel_requested
 from kiln.events import Event, EventBus, EventType
 
 logger = logging.getLogger(__name__)
@@ -763,6 +764,7 @@ class EmergencyCoordinator:
         # Prefer the adapter's hardware-level emergency stop (M112 or
         # firmware equivalent).  This is the fastest path to halt.
         try:
+            note_cancel_requested(adapter)
             result = adapter.emergency_stop()
             if result.success:
                 logger.info(

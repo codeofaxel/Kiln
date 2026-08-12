@@ -28,6 +28,7 @@ from typing import Any
 
 import click
 
+from kiln.auto_record_hook import note_cancel_requested
 from kiln.print_start_verdict import resolve_print_start
 from kiln.printer_backends import (
     DEFAULT_SERIAL_BAUDRATE,
@@ -2917,6 +2918,11 @@ def cancel(ctx: click.Context, json_mode: bool) -> None:
     """Cancel the current print job."""
     try:
         adapter = _get_adapter_from_ctx(ctx)
+        # This process sends the stop and exits; the ending is seen by
+        # whatever is watching the printer, usually the running server. The
+        # intent has to be durable to survive that gap, and note_cancel_
+        # requested is what makes it so -- so this reads like the others.
+        note_cancel_requested(adapter)
         result = adapter.cancel_print()
         click.echo(format_action("cancel", result.to_dict(), json_mode=json_mode))
     except click.ClickException:

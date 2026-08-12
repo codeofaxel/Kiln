@@ -43,6 +43,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.auto_record_hook import note_cancel_requested
+
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
@@ -726,6 +728,9 @@ class PrintWatchdog:
         # Emergency stop — isolated try/except so a failed e-stop still
         # fires the callback and sets the latch.
         try:
+            # An e-stop ends the print as surely as a cancel does, and it is
+            # the one ending we are most certain was not a clean finish.
+            note_cancel_requested(self._adapter)
             self._adapter.emergency_stop()
             logger.error("PrintWatchdog: emergency_stop() dispatched")
         except Exception:

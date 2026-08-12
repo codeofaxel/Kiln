@@ -789,7 +789,18 @@ class PrinterAdapter(ABC):
             # print existed and settle how it went, instead of the print
             # vanishing from history entirely.
             try:
-                from kiln.auto_record_hook import open_pending_outcome
+                from kiln.auto_record_hook import (
+                    clear_cancel_intent,
+                    open_pending_outcome,
+                )
+
+                # A cancel asked for before this print has nothing to say
+                # about this print.  Dropping it HERE is what lets the intent
+                # outlive a slow stop sequence safely: the mechanism no longer
+                # has to guess how many seconds a printer takes to stop
+                # moving, retract, park and report idle, because the event
+                # that guess was standing in for is this one, exactly.
+                clear_cancel_intent(outcome_printer_name(self))
 
                 # The material Kiln COMMANDED at start is the strongest
                 # honest source — it survives even when the outcome is

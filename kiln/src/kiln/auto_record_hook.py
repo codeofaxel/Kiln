@@ -114,6 +114,33 @@ _TERMINAL_STATE_DEBOUNCE_S: float = 2.5
 # cancel intent can't bleed into an unrelated subsequent print.
 _CANCEL_INTENT_TTL_S: float = 5.0
 
+# Backstop for the DURABLE half of the same intent (see _HookState).
+#
+# The in-memory TTL above is a proxy for one thing: don't let an intent
+# label a LATER print's ending.  A window is a poor proxy, because the
+# quantity it is guessing at — how long a printer takes to stop moving,
+# retract, park and report idle — is not knowable here and is certainly
+# not the ~1-2s the note above assumes for every backend.  Guess short
+# and the intent expires before the cancel lands, which records the
+# cancelled print as a success; that is the failure this exists to stop.
+#
+# So the real guard is not time: ``clear_cancel_intent`` is called when a
+# NEW print starts on the printer, which is the event the window was
+# standing in for, and it is exact.  This bound only limits how long a
+# never-observed intent can sit when no next print ever comes.
+#
+# Two minutes buys generous headroom over any real stop sequence — abort,
+# retract, park, report idle is seconds to tens of seconds — while keeping
+# the one case this costs narrow: a cancel that silently failed, on a print
+# that then finished naturally inside the window, is recorded as cancelled
+# when it did finish.  That needs the user to have cancelled a print which
+# was already about to complete, and it errs toward "did not complete"
+# rather than toward claiming a success nobody witnessed.
+_CANCEL_INTENT_MAX_AGE_S: float = 120.0
+
+#: ``settings`` key holding one printer's durable cancel intent.
+_CANCEL_INTENT_KEY = "cancel_intent:{}"
+
 # Which state values count as "actively printing" (so a transition OUT
 # of one into a terminal state is the trigger).  Case-insensitive —
 # upper A1 sometimes emits "RUNNING", lowercase X1 sends "running".
@@ -157,6 +184,44 @@ _CANCELLED_STATES: frozenset[str] = frozenset({"cancelled"})
 _IDLE_STATES: frozenset[str] = frozenset({"idle"})
 
 
+def _write_durable_cancel_intent(printer: str, at: float) -> None:
+    """Record the intent where another PROCESS can find it.  Never raises."""
+    try:
+        from kiln.persistence import get_db
+
+        get_db().set_setting(_CANCEL_INTENT_KEY.format(printer), repr(float(at)))
+    except Exception as exc:  # noqa: BLE001 — telemetry never blocks a cancel
+        _logger.debug("durable cancel intent write failed: %s", exc)
+
+
+def _consume_durable_cancel_intent(printer: str) -> bool:
+    """Read-and-clear the durable intent.  ``True`` only if one was live.
+
+    Stamped with the wall clock, because a monotonic one means nothing to
+    the process that reads it.  That makes the value vulnerable to a clock
+    change in a way the in-memory half is not, so a stamp in the FUTURE is
+    treated as no intent rather than as an eternally valid one.
+
+    Never raises: a database that will not answer must cost a print its
+    label, never its recording.
+    """
+    key = _CANCEL_INTENT_KEY.format(printer)
+    try:
+        from kiln.persistence import get_db
+
+        db = get_db()
+        raw = db.get_setting(key)
+        if not raw:
+            return False
+        # Cleared by overwrite — one row per printer, reused, never grows.
+        db.set_setting(key, "")
+        age = time.time() - float(raw)
+        return 0 <= age <= _CANCEL_INTENT_MAX_AGE_S
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("durable cancel intent read failed: %s", exc)
+        return False
+
+
 class _HookState:
     """Thread-safe state the hook needs: debouncing, cancel intents,
     and the "did we already record this job_id" idempotency ledger.
@@ -191,16 +256,33 @@ class _HookState:
     def register_cancel_intent(self, printer: str) -> None:
         with self._lock:
             self._cancel_intents[printer] = time.monotonic()
+        _write_durable_cancel_intent(printer, time.time())
 
     def consume_cancel_intent(self, printer: str) -> bool:
         """Return True and clear the intent if a cancel was registered
-        within the TTL; else False.  Single-consumer — first terminal
-        transition after a cancel claims the intent."""
+        recently; else False.  Single-consumer — the first terminal
+        transition after a cancel claims the intent.
+
+        Checks memory first and the durable record second, and clears BOTH
+        either way.  Two backings, one intent: the process that asks for a
+        cancel is very often not the process that sees the ending — ``kiln
+        cancel`` sends the command and exits, leaving the running server to
+        watch the printer stop — and this state is per-process and stamped
+        with a monotonic clock, which is not even comparable across
+        processes.  Without the durable half the intent from that door
+        could never be found, whoever called it.
+        """
         with self._lock:
             ts = self._cancel_intents.pop(printer, None)
-            if ts is None:
-                return False
-            return time.monotonic() - ts <= _CANCEL_INTENT_TTL_S
+        in_memory = ts is not None and time.monotonic() - ts <= _CANCEL_INTENT_TTL_S
+        durable = _consume_durable_cancel_intent(printer)
+        return in_memory or durable
+
+    def clear_cancel_intent(self, printer: str) -> None:
+        """Drop any intent without consuming it as an answer."""
+        with self._lock:
+            self._cancel_intents.pop(printer, None)
+        _consume_durable_cancel_intent(printer)
 
     def mark_recorded(self, printer: str, job_id: str) -> bool:
         """Return True if this is the first recording for (printer,
@@ -218,15 +300,64 @@ _HOOK_STATE = _HookState()
 
 
 def register_cancel_intent(printer_name: str) -> None:
-    """Call from :func:`cancel_print` before issuing the cancel command.
+    """Record that the next ending on ``printer_name`` was ASKED for.
 
-    The next idle transition for ``printer_name`` within
-    ``_CANCEL_INTENT_TTL_S`` is classified as a cancelled outcome
-    rather than a success.  Without this, kiln can't distinguish a
-    clean finish from a cancel because Bambu firmware doesn't expose
-    a "cancelled" gcode_state.
+    Prefer :func:`note_cancel_requested`, which takes the adapter and so
+    cannot file the intent under a name the reader will not look up.  This
+    remains for callers holding only a name.
+
+    The next idle transition for that printer is then classified as a
+    cancelled outcome rather than a success.  Without it Kiln cannot tell a
+    clean finish from a cancel, because Bambu firmware exposes no
+    "cancelled" gcode_state — an idle printer looks the same either way.
     """
     _HOOK_STATE.register_cancel_intent(printer_name)
+
+
+def note_cancel_requested(adapter: Any) -> None:
+    """THE call for any path that deliberately ends a running print.
+
+    One helper, every door, because the two halves of this mechanism have
+    to agree on a name and they are written in different places.  The
+    intent is filed under :func:`~kiln.printers.base.outcome_printer_name`
+    — the same string the lifecycle will look it up under when the ending
+    arrives.  Passing a name instead is how the original call site went
+    wrong: it guessed one from the registry and the reader used the backend
+    family, so the flag was written where nothing would ever read it and a
+    cancelled print was recorded as a success on every install.
+
+    Every deliberate stop belongs here, not just the one tool: a cancel
+    from the CLI, a stop the health monitor orders because it SAW the print
+    fail, a watchdog's emergency stop.  Those recorded successes too, and
+    the auto-cancel ones are the worst of them — the loop was being taught
+    that the prints Kiln itself judged to be failing were the good ones.
+
+    Never raises.  A print must always be stoppable, whatever the ledger
+    thinks; an unlabelled cancel is a small loss, a cancel that did not
+    happen is a ruined plate or worse.
+    """
+    try:
+        from kiln.printers.base import outcome_printer_name
+
+        _HOOK_STATE.register_cancel_intent(outcome_printer_name(adapter))
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("note_cancel_requested failed (non-fatal): %s", exc)
+
+
+def clear_cancel_intent(printer_name: str) -> None:
+    """Forget any pending intent — a NEW print is starting on this printer.
+
+    This is what lets the intent outlive a slow stop sequence safely.  The
+    thing a time window was guarding against is precisely this event, and
+    here it is exactly rather than estimated: whatever the last cancel did
+    or failed to do, it has nothing to say about the print starting now.
+
+    Never raises.
+    """
+    try:
+        _HOOK_STATE.clear_cancel_intent(printer_name)
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("clear_cancel_intent failed (non-fatal): %s", exc)
 
 
 def _failure_mode_from_code(print_error_code: int) -> str:
@@ -597,6 +728,8 @@ def reconcile_pending_outcomes(
 
 __all__ = [
     "fire_terminal_state_hook",
+    "clear_cancel_intent",
+    "note_cancel_requested",
     "observe_state",
     "open_pending_outcome",
     "reconcile_pending_outcomes",
