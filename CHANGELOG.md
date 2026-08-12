@@ -169,6 +169,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   X1E, H2S and A1 mini were quietly failing every print through Kiln's own
   profile — no error message, just no file at the end. All seven work now.
 
+- **Print estimates stopped saying your filament weighs nothing.** Asking how
+  much filament a print needed answered zero grams and zero cost, every time.
+  Kiln now works the weight out from the material you name, and when it isn't
+  told the material it leaves the figure out rather than reporting nothing as
+  a number. Time, length and layer count were always right.
+
 - **Your stats stopped counting failed work as finished.** A tool that failed
   could still tick over your generations or decorations count for the day, so
   the totals on your stats page read higher than what you actually made.
