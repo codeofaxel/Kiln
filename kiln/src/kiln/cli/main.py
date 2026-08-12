@@ -7957,13 +7957,65 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         sys.exit(1)
 
 
+def _database_check() -> dict[str, Any]:
+    """Can Kiln open its database?  The check both doctor doors call.
+
+    This used to connect with raw ``sqlite3``, create a scratch table and
+    drop it — which answers "is this file writable", a question nobody
+    was asking.  The server dies further in, inside
+    ``KilnDB._ensure_schema``, and a database can be perfectly writable
+    and still fail there.  When a schema-ordering bug took down every
+    upgraded install on 2026-08-12, this check reported ``✓ writable``:
+    a confident all-clear on the one thing that was broken, printed to
+    the user most likely to be looking for an answer.
+
+    It now opens the real :class:`~kiln.persistence.KilnDB`, exactly as
+    the server does — which also means it honours ``KILN_DB_PATH``
+    instead of assuming ``~/.kiln/kiln.db`` and inspecting a file the
+    server never touches.
+    """
+    from kiln import startup_failure
+
+    diagnosis = startup_failure.probe_database()
+    if diagnosis is None:
+        return {"name": "database", "ok": True, "detail": "opens cleanly"}
+    steps = diagnosis.steps_elsewhere()
+    detail = diagnosis.headline
+    if steps:
+        detail = f"{detail} {steps[0]}"
+    return {"name": "database", "ok": False, "detail": detail}
+
+
+def _last_startup_failure_check() -> dict[str, Any] | None:
+    """Report the last time the MCP server failed to start, if it did.
+
+    ``None`` when there is no breadcrumb, so a healthy machine gets no
+    line at all rather than a reassuring one nobody reads.  A successful
+    start clears the file, so anything here describes a launch that has
+    not yet been fixed.
+    """
+    from kiln import startup_failure
+
+    crumb = startup_failure.read()
+    if not crumb:
+        return None
+    when = f" on {crumb['when']}" if crumb.get("when") else ""
+    return {
+        "name": "last_startup",
+        "ok": False,
+        "detail": (
+            f"the MCP server failed to start{when}: {crumb['headline']} "
+            f"Full explanation and fix: {crumb['path']}"
+        ),
+    }
+
+
 def _quickstart_verify() -> list[dict[str, Any]]:
     """Run lightweight environment checks for quickstart.
 
     Returns a list of check dicts with 'name', 'ok', 'detail' keys.
     """
     import platform
-    import sqlite3
 
     checks: list[dict[str, Any]] = []
 
@@ -8005,20 +8057,13 @@ def _quickstart_verify() -> list[dict[str, Any]]:
             }
         )
 
-    # Database writable
-    db_dir = os.path.join(os.path.expanduser("~"), ".kiln")
-    db_path = os.path.join(db_dir, "kiln.db")
-    try:
-        os.makedirs(db_dir, exist_ok=True)
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE IF NOT EXISTS _verify_check (id INTEGER)")
-        conn.execute("DROP TABLE IF EXISTS _verify_check")
-        conn.close()
-        checks.append({"name": "database", "ok": True, "detail": "writable"})
-    except OSError as exc:
-        checks.append({"name": "database", "ok": False, "detail": str(exc)})
-    except Exception as exc:
-        checks.append({"name": "database", "ok": False, "detail": str(exc)})
+    # Database opens (not merely writable — see _database_check)
+    checks.append(_database_check())
+
+    # Did the MCP server last fail to start?  Only appears when it did.
+    _startup = _last_startup_failure_check()
+    if _startup is not None:
+        checks.append(_startup)
 
     # WSL 2 detection
     if sys.platform == "linux":
@@ -8048,7 +8093,22 @@ def serve() -> None:
     variables (KILN_PRINTER_HOST, KILN_PRINTER_API_KEY, KILN_PRINTER_TYPE)
     or register printers dynamically via the register_printer tool.
     """
-    from kiln.server import main as _server_main
+    # ``kiln.server.main`` guards everything it does, but it cannot guard
+    # its own import — and importing that module pulls in most of Kiln.
+    # A failure here is the same silence from the user's point of view,
+    # so it gets the same breadcrumb and the same recovery server.  Only
+    # the import is wrapped: once ``main()`` is running it owns the
+    # difference between "could not start" and "died mid-session".
+    from kiln import startup_failure
+
+    try:
+        from kiln.server import main as _server_main
+    except Exception as exc:  # noqa: BLE001
+        diagnosis, breadcrumb = startup_failure.handle(
+            exc, phase="importing the server"
+        )
+        startup_failure.serve_safe_mode(diagnosis, breadcrumb)
+        sys.exit(1)
 
     _server_main()
 
@@ -9489,7 +9549,6 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
     """Run pre-flight system checks to verify Kiln is ready to use."""
     import json as _json
     import platform
-    import sqlite3
 
     checks: list[dict] = []
 
@@ -9854,20 +9913,16 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
             "detail": f"could not check STEP support ({type(_step_exc).__name__})",
         })
 
-    # 8. SQLite writable
-    db_dir = os.path.join(os.path.expanduser("~"), ".kiln")
-    db_path = os.path.join(db_dir, "kiln.db")
-    try:
-        os.makedirs(db_dir, exist_ok=True)
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE IF NOT EXISTS _verify_check (id INTEGER)")
-        conn.execute("DROP TABLE IF EXISTS _verify_check")
-        conn.close()
-        checks.append({"name": "database", "ok": True, "detail": "writable"})
-    except OSError as exc:
-        checks.append({"name": "database", "ok": False, "detail": str(exc)})
-    except Exception as exc:
-        checks.append({"name": "database", "ok": False, "detail": str(exc)})
+    # 8. SQLite opens (not merely writable — see _database_check)
+    checks.append(_database_check())
+
+    # 8b. Did the MCP server last fail to start?  A startup crash happens
+    # before any tool exists to report it, so the server leaves a
+    # breadcrumb behind and this is where a stuck user finds it.  Absent
+    # on a machine that has never had one — silence beats reassurance.
+    _startup = _last_startup_failure_check()
+    if _startup is not None:
+        checks.append(_startup)
 
     # 9. WSL 2 detection
     wsl = False

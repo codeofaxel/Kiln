@@ -74,7 +74,7 @@ with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
 
 
-from kiln import parse_float_env, parse_int_env
+from kiln import parse_float_env, parse_int_env, startup_failure
 from kiln.auth import AuthManager
 from kiln.bed_leveling import BedLevelManager, LevelingPolicy
 
@@ -3158,6 +3158,32 @@ def _log_print_completion(event: Event) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _reported_printer_name(printer_name: str | None = None) -> str | None:
+    """The name of the printer a status result is describing.
+
+    A status tool that takes no printer argument answers about the default
+    adapter and, until now, never said which machine that was — so a caller
+    holding the reading had no way to label it, and anything downstream had to
+    guess from a fleet listing or go without.  It is not a guess to make:
+    ``config.yaml`` records the active printer under the name its owner chose.
+
+    An explicit argument is its own answer.  Absent one, the active printer's
+    name is, and ``None`` means the config offers no name worth reporting
+    rather than that the printer is unknown.
+    """
+    if printer_name:
+        return printer_name
+    try:
+        from kiln.printer_model_resolver import resolve_active_printer_name
+
+        return resolve_active_printer_name()
+    except Exception:  # noqa: BLE001
+        # A label is a convenience; a status read must never fail for want of
+        # one, least of all while someone is watching a print.
+        logger.debug("Could not resolve the active printer name", exc_info=True)
+        return None
+
+
 # What `lite` keeps off the `printer` block: everything that MOVES during
 # a print, which is everything a monitoring surface renders — temps,
 # state, speed, errors, reading age.
@@ -3185,32 +3211,6 @@ _LITE_PRINTER_KEYS = (
     "print_error",
     "state_age_seconds",
 )
-
-
-def _reported_printer_name(printer_name: str | None = None) -> str | None:
-    """The name of the printer a status result is describing.
-
-    A status tool that takes no printer argument answers about the default
-    adapter and, until now, never said which machine that was — so a caller
-    holding the reading had no way to label it, and anything downstream had to
-    guess from a fleet listing or go without.  It is not a guess to make:
-    ``config.yaml`` records the active printer under the name its owner chose.
-
-    An explicit argument is its own answer.  Absent one, the active printer's
-    name is, and ``None`` means the config offers no name worth reporting
-    rather than that the printer is unknown.
-    """
-    if printer_name:
-        return printer_name
-    try:
-        from kiln.printer_model_resolver import resolve_active_printer_name
-
-        return resolve_active_printer_name()
-    except Exception:  # noqa: BLE001
-        # A label is a convenience; a status read must never fail for want of
-        # one, least of all while someone is watching a print.
-        logger.debug("Could not resolve the active printer name", exc_info=True)
-        return None
 
 
 @mcp.tool()
@@ -3264,7 +3264,9 @@ def printer_status(
             response["capabilities"] = adapter.capabilities.to_dict()
         # Which machine this describes.  Omitted rather than guessed when the
         # config carries no name for it, so a reader can tell "unnamed" from
-        # "named something we did not bother to pass on".
+        # "named something we did not bother to pass on".  Reported at BOTH
+        # detail levels: a label is what makes a reading attributable, and the
+        # lite path is the one being polled every few seconds.
         reported_name = _reported_printer_name(printer_name)
         if reported_name:
             response["printer_name"] = reported_name
@@ -12721,8 +12723,17 @@ def _graceful_shutdown(
         hard_exit(0)
 
 
-def main() -> None:
-    """Run the Kiln MCP server."""
+def _start() -> None:
+    """Everything the server does before it can serve a single request.
+
+    Split out from :func:`main` so the whole of it sits inside one
+    ``try``.  Every line here runs with no client attached and nothing
+    yet written to stdout, so an exception anywhere in this function used
+    to close the JSON-RPC pipe before a byte crossed it — the host had
+    nothing to report but "server failed to start".  ``mcp.run()``
+    deliberately does NOT live here: a failure *during* a session is a
+    different animal and must not be dressed up as a startup crash.
+    """
     # Load .env, then re-snapshot env/config.yaml-backed globals — they were
     # read at import time, before .env was loaded.  Shared with the REST API
     # and the web->printer bridge so all three doors initialise identically.
@@ -13058,6 +13069,48 @@ def main() -> None:
         update_nudge.install(mcp)
     except Exception:
         logger.debug("update nudge not installed", exc_info=True)
+
+
+def main() -> None:
+    """Run the Kiln MCP server.
+
+    Startup is guarded.  Before this guard existed, anything that raised
+    between process start and ``mcp.run()`` killed the server with the
+    user's entire signal being "MCP server failed to start" — no error
+    they could read, no log they would find, and ``kiln doctor`` happily
+    reporting the database as fine.  Measured against the schema crash
+    fixed in ``8e14b88d``: exit 1, zero bytes on stdout, a raw traceback
+    on a stderr stream most hosts discard, and nothing written to disk.
+
+    Now a startup failure leaves three things behind: a breadcrumb at
+    ``~/.kiln/last-startup-error.log`` that ``kiln doctor`` reads, a
+    plain-English block on stderr for whoever can see it, and — the one
+    that reaches a user who never leaves their assistant — a recovery
+    server that comes up and answers ``get_started()`` with what broke
+    and how to fix it.
+
+    The exit code still says failure.  A supervisor that restarts on a
+    non-zero exit keeps doing so, and ``KILN_DISABLE_SAFE_MODE=1`` opts
+    out of the recovery server entirely for anyone who would rather
+    crash-loop than serve a server that cannot print.
+    """
+    try:
+        _start()
+    except Exception as exc:  # noqa: BLE001 — the whole point is to catch it
+        # Nothing in this handler may raise: a second exception here
+        # would replace the explanation with a pair of chained
+        # tracebacks, which is worse than the silence it replaces.
+        diagnosis, breadcrumb = startup_failure.handle(exc, phase="server startup")
+        startup_failure.serve_safe_mode(diagnosis, breadcrumb)
+        # Non-zero whether or not recovery mode ran: the server did not
+        # start, and having explained that does not make it a success.
+        sys.exit(1)
+
+    # Startup got all the way through, so any breadcrumb on disk is from a
+    # launch that has since been fixed.  Leaving it would have `kiln
+    # doctor` reporting a stale failure forever, and a doctor that cries
+    # wolf is worth less than one that says nothing.
+    startup_failure.clear()
 
     mcp.run()
 
