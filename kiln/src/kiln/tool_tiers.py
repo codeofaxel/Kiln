@@ -98,7 +98,7 @@ TIER_STANDARD: list[str] = TIER_ESSENTIAL + [
     # File & job management
     "delete_file",
     "job_history",
-    "cancel_job",
+    "cancel_queued_job",
     # Onboarding
     "get_started",
 ]
@@ -125,7 +125,7 @@ TIER_FULL: list[str] = [
     "submit_job",
     "job_status",
     "queue_summary",
-    "cancel_job",
+    "cancel_queued_job",
     "job_history",
     # --- Events ---
     "recent_events",

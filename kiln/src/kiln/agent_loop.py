@@ -164,7 +164,7 @@ _STANDARD_TOOLS = _ESSENTIAL_TOOLS | frozenset(
         "send_gcode",
         "submit_job",
         "job_status",
-        "cancel_job",
+        "cancel_queued_job",
         "job_history",
         "recent_events",
         "download_model",

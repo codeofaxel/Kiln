@@ -1187,7 +1187,7 @@ class TestValidateLocalFile:
 
 from kiln.events import EventBus, EventType
 from kiln.plugins.queue_tools import (
-    cancel_job as server_cancel_job,
+    cancel_queued_job as server_cancel_queued_job,
 )
 from kiln.plugins.queue_tools import (
     job_status as server_job_status,
@@ -1954,11 +1954,11 @@ class TestQueueSummary:
 
 
 # ---------------------------------------------------------------------------
-# cancel_job()
+# cancel_queued_job()
 # ---------------------------------------------------------------------------
 
 class TestCancelJob:
-    """Tests for the cancel_job MCP tool."""
+    """Tests for the cancel_queued_job MCP tool."""
 
     def test_cancel_queued_job(self, monkeypatch):
         import kiln.server as mod
@@ -1969,7 +1969,7 @@ class TestCancelJob:
         monkeypatch.setattr(mod, "_event_bus", fresh_bus)
 
         job_id = fresh_queue.submit(file_name="cancel_me.gcode", submitted_by="test")
-        result = server_cancel_job(job_id)
+        result = server_cancel_queued_job(job_id)
         assert result["success"] is True
         assert result["job"]["status"] == "cancelled"
 
@@ -1977,7 +1977,19 @@ class TestCancelJob:
         events = fresh_bus.recent_events()
         assert any(e.type == EventType.JOB_CANCELLED for e in events)
 
-    def test_cancel_printing_job(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "advance_to",
+        ["starting", "printing", "paused"],
+    )
+    def test_refuses_a_job_already_at_the_printer(self, monkeypatch, advance_to):
+        """The queue must not claim it stopped a print it cannot reach.
+
+        ``cancel_queued_job`` is queue bookkeeping — it makes no adapter
+        call.  The state machine still permits STARTING/PRINTING/PAUSED ->
+        CANCELLED, so without an explicit guard the row reads "cancelled"
+        while the machine keeps extruding.  Stopping the hardware is
+        ``cancel_print``'s job, and the refusal has to say so.
+        """
         import kiln.server as mod
 
         fresh_queue = PrintQueue()
@@ -1987,11 +1999,22 @@ class TestCancelJob:
 
         job_id = fresh_queue.submit(file_name="active.gcode", submitted_by="test")
         fresh_queue.mark_starting(job_id)
-        fresh_queue.mark_printing(job_id)
+        if advance_to in ("printing", "paused"):
+            fresh_queue.mark_printing(job_id)
+        if advance_to == "paused":
+            fresh_queue.mark_paused(job_id)
 
-        result = server_cancel_job(job_id)
-        assert result["success"] is True
-        assert result["job"]["status"] == "cancelled"
+        result = server_cancel_queued_job(job_id)
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "PRINT_IN_PROGRESS"
+        assert "cancel_print" in result["error"]["message"]
+
+        # The row is untouched — the queue still agrees with the machine.
+        assert fresh_queue.get_job(job_id).status.value == advance_to
+        assert not any(
+            e.type == EventType.JOB_CANCELLED for e in fresh_bus.recent_events()
+        )
 
     def test_cancel_not_found(self, monkeypatch):
         import kiln.server as mod
@@ -2001,7 +2024,7 @@ class TestCancelJob:
         monkeypatch.setattr(mod, "_queue", fresh_queue)
         monkeypatch.setattr(mod, "_event_bus", fresh_bus)
 
-        result = server_cancel_job("nonexistent-id")
+        result = server_cancel_queued_job("nonexistent-id")
         assert result["success"] is False
         assert result["error"]["code"] == "NOT_FOUND"
 
@@ -2018,7 +2041,7 @@ class TestCancelJob:
         fresh_queue.mark_printing(job_id)
         fresh_queue.mark_completed(job_id)
 
-        result = server_cancel_job(job_id)
+        result = server_cancel_queued_job(job_id)
         assert result["success"] is False
         assert result["error"]["code"] == "INVALID_STATE"
 
@@ -2033,7 +2056,7 @@ class TestCancelJob:
         job_id = fresh_queue.submit(file_name="twice.gcode", submitted_by="test")
         fresh_queue.cancel(job_id)
 
-        result = server_cancel_job(job_id)
+        result = server_cancel_queued_job(job_id)
         assert result["success"] is False
         assert result["error"]["code"] == "INVALID_STATE"
 

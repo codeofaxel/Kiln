@@ -3,7 +3,7 @@
 The REST / local-admin server (``run_rest_server``) never initialises the raw
 ``kiln.server._queue`` module global, so every queue tool that read it directly
 crashed with ``'NoneType' object has no attribute ...``.  ``queue_summary`` was
-the reported case; ``submit_job``, ``job_status``, ``cancel_job``,
+the reported case; ``submit_job``, ``job_status``, ``cancel_queued_job``,
 ``cancel_queued_jobs`` and ``job_history`` shared the bug.  The fix routes every
 access through ``kiln.server._get_queue()`` (the lazy initialiser every other
 plugin already uses), so the tools self-initialise regardless of server context.

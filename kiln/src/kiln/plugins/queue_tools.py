@@ -1,8 +1,8 @@
 """Queue/job management tool plugin.
 
 Extracts the job queue MCP tools from server.py into a focused plugin
-module.  Provides submit_job, job_status, queue_summary, cancel_job,
-cancel_queued_jobs, and job_history tools.
+module.  Provides submit_job, job_status, queue_summary,
+cancel_queued_job, cancel_queued_jobs, and job_history tools.
 
 Discovered and registered automatically by
 :func:`~kiln.plugin_loader.register_all_plugins`.
@@ -20,6 +20,13 @@ _logger = logging.getLogger(__name__)
 # A bulk queue clear must see every queued job, not the default 100-row
 # page that list_jobs returns — ask for an effectively-unbounded page.
 _ALL_QUEUED_JOBS = 1_000_000
+
+# Job states that mean the file has already reached the printer.  The queue
+# can still flip any of these to CANCELLED, but doing so only rewrites the
+# row — the machine keeps running.  Stopping one needs cancel_print().
+# Compared by JobStatus.value so this module keeps importing kiln.queue
+# lazily, the way every function below does.
+_ON_THE_MACHINE = frozenset({"starting", "printing", "paused"})
 
 
 # ---------------------------------------------------------------------------
@@ -210,13 +217,22 @@ def queue_summary() -> dict:
         return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
-def cancel_job(job_id: str) -> dict:
-    """Cancel a queued or running print job.
+def cancel_queued_job(job_id: str) -> dict:
+    """Remove one job from the print queue while it is still WAITING.
+
+    Queue bookkeeping only: this marks the row cancelled and never sends
+    anything to a printer.  To STOP a job the machine has already
+    started, use ``cancel_print`` — that is the tool that talks to the
+    hardware.
 
     Args:
         job_id: The job ID to cancel.
 
-    Only jobs in QUEUED or PRINTING state can be cancelled.
+    Only a job still in the QUEUED state can be cancelled here.  A job
+    that has reached the machine (starting, printing, or paused) is
+    refused with ``code="PRINT_IN_PROGRESS"`` rather than cancelled,
+    because marking the row cancelled would leave the queue claiming a
+    print had stopped while the printer carried on running it.
     """
     import kiln.server as _srv
     from kiln.queue import JobNotFoundError
@@ -224,6 +240,18 @@ def cancel_job(job_id: str) -> dict:
     if err := _srv._check_auth("queue"):
         return err
     try:
+        # Read the state BEFORE cancelling.  The state machine happily
+        # allows QUEUED/STARTING/PRINTING/PAUSED -> CANCELLED, so without
+        # this the row and the machine disagree about reality.
+        current = _srv._get_queue().get_job(job_id)
+        if current.status.value in _ON_THE_MACHINE:
+            return _srv._error_dict(
+                f"Job {job_id!r} is already at the printer (status: "
+                f"{current.status.value}), so removing it from the queue "
+                f"would not stop it. Use cancel_print() to stop the "
+                f"running print.",
+                code="PRINT_IN_PROGRESS",
+            )
         job = _srv._get_queue().cancel(job_id)
         _srv._event_bus.publish(
             Event(
@@ -241,11 +269,11 @@ def cancel_job(job_id: str) -> dict:
         return _srv._error_dict(f"Job not found: {job_id!r}", code="NOT_FOUND")
     except ValueError as exc:
         return _srv._error_dict(
-            f"Cannot cancel job {job_id!r}: {exc}. Only jobs in QUEUED or PRINTING state can be cancelled.",
+            f"Cannot cancel job {job_id!r}: {exc}. Only a job still in the QUEUED state can be cancelled here.",
             code="INVALID_STATE",
         )
     except Exception as exc:
-        _logger.exception("Unexpected error in cancel_job")
+        _logger.exception("Unexpected error in cancel_queued_job")
         return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
@@ -255,7 +283,7 @@ def cancel_queued_jobs(
 ) -> dict:
     """Cancel ALL queued print jobs at once.
 
-    The bulk companion to ``cancel_job`` (which cancels one job by id).
+    The bulk companion to ``cancel_queued_job`` (which cancels one job by id).
     Cancels every job currently in the QUEUED state — clear a backed-up
     queue in one call instead of cancelling one job at a time.
 
@@ -270,7 +298,7 @@ def cancel_queued_jobs(
     finished, or was cancelled elsewhere) is skipped rather than
     interrupted.  Use ``cancel_print`` to stop the job that is actually
     running.  Each cancel emits the same ``JOB_CANCELLED`` event as
-    ``cancel_job``.
+    ``cancel_queued_job``.
 
     Returns ``{success, dry_run, count, cancelled, skipped, message}`` —
     ``count`` always equals ``len(cancelled)``; ``skipped`` is a list of
@@ -438,7 +466,7 @@ class _QueueToolsPlugin:
         mcp.tool()(submit_job)
         mcp.tool()(job_status)
         mcp.tool()(queue_summary)
-        mcp.tool()(cancel_job)
+        mcp.tool()(cancel_queued_job)
         mcp.tool()(cancel_queued_jobs)
 
         @mcp.tool()

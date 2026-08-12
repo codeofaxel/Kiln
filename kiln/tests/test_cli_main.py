@@ -1573,7 +1573,7 @@ class TestQueueCLI:
             "job": {"id": "job-cancel-me", "status": "cancelled"},
             "message": "Job job-cancel-me cancelled.",
         }
-        with patch("kiln.plugins.queue_tools.cancel_job", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.cancel_queued_job", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "cancel", "job-cancel-me"])
         assert result.exit_code == 0
         assert "cancel" in result.output.lower() or "success" in result.output.lower()
@@ -1585,7 +1585,7 @@ class TestQueueCLI:
             "error": "Job not found: 'ghost'",
             "code": "NOT_FOUND",
         }
-        with patch("kiln.plugins.queue_tools.cancel_job", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.cancel_queued_job", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "cancel", "ghost"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
@@ -1671,7 +1671,7 @@ class TestQueueCLI:
             "job": {"id": "job-c", "status": "cancelled"},
             "message": "Job cancelled.",
         }
-        with patch("kiln.plugins.queue_tools.cancel_job", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.cancel_queued_job", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "cancel", "job-c", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)

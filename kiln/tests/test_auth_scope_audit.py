@@ -311,7 +311,7 @@ class TestAuthScopeAudit:
             "set_temperature",
             "register_printer",
             "submit_job",
-            "cancel_job",
+            "cancel_queued_job",
             "register_webhook",
             "delete_webhook",
             "generate_model",

@@ -5274,14 +5274,15 @@ def queue_list_cmd(filter_status: str | None, limit: int, json_mode: bool) -> No
 @click.argument("job_id")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def queue_cancel_cmd(job_id: str, json_mode: bool) -> None:
-    """Cancel a queued or running job.
+    """Cancel a job that is still waiting in the queue.
 
-    JOB_ID is the ID returned by 'kiln queue submit'.
+    JOB_ID is the ID returned by 'kiln queue submit'.  To stop a print the
+    machine has already started, use 'kiln cancel' instead.
     """
     try:
-        from kiln.plugins.queue_tools import cancel_job as _cancel_job
+        from kiln.plugins.queue_tools import cancel_queued_job as _cancel_queued_job
 
-        result = _cancel_job(job_id)
+        result = _cancel_queued_job(job_id)
         if not result.get("success"):
             click.echo(
                 format_error(

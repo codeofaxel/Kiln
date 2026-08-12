@@ -101,7 +101,7 @@
     "queue_summary": {
       "level": "safe"
     },
-    "cancel_job": {
+    "cancel_queued_job": {
       "level": "confirm"
     },
     "job_history": {
