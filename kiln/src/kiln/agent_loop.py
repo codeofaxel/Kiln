@@ -327,9 +327,27 @@ _tool_cache: dict[str, Any] | None = None
 
 
 def _get_mcp_server():
-    """Lazily import the MCP server to avoid circular imports."""
-    from kiln.server import mcp  # noqa: F811
+    """Lazily import the MCP server to avoid circular imports.
 
+    ``ensure_runtime_config()`` is why this is more than an import. Importing
+    ``kiln.server`` registers the tools but leaves the printer globals at their
+    import-time defaults; only ``main()`` (the MCP server) and the REST API's
+    ``create_app()`` resolve ``~/.kiln/config.yaml`` into them, and neither runs
+    on this path. Without it ``kiln agent`` answers every printer question with
+    "No printer configured" in the same terminal where ``kiln status`` works
+    fine — because the CLI's printer commands read the config through their own
+    reader and never touch these globals. The user sees a confused agent, not a
+    misconfigured Kiln.
+
+    This is the chokepoint for every agent front-end (the ``kiln agent`` REPL
+    and ``python -m kiln.openrouter`` both reach tools through here), so it is
+    the one place that fixes them together and covers whatever comes next.
+    Same defect the web->printer bridge shipped with; a third door skipped the
+    same step.
+    """
+    from kiln.server import ensure_runtime_config, mcp  # noqa: F811
+
+    ensure_runtime_config()
     return mcp
 
 
