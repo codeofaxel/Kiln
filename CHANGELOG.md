@@ -165,6 +165,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Cold starts no longer stop themselves on OctoPrint and Marlin printers.**
+  Those printers report that they're printing while still heating up, and Kiln
+  read the cold nozzle as a dead heater and hit the emergency stop — which
+  meant switching the printer off and on again to recover. A cold start or a
+  filament change is no longer mistaken for a failure. Thanks
+  [@riverray121](https://github.com/riverray121), who found it on an Ender-3
+  V3 SE and fixed it.
+
+- **A heater that never comes up to temperature now gets reported.** Before,
+  the print would just sit there waiting.
+
 - **Seven Bambu printer profiles can slice again.** P2S, P1S, P1P, X1 Carbon,
   X1E, H2S and A1 mini were quietly failing every print through Kiln's own
   profile — no error message, just no file at the end. All seven work now.
