@@ -8104,11 +8104,10 @@ def serve() -> None:
     try:
         from kiln.server import main as _server_main
     except Exception as exc:  # noqa: BLE001
-        diagnosis = startup_failure.handle(exc, phase="importing the server")
-        breadcrumb = startup_failure.breadcrumb_path()
-        startup_failure.serve_safe_mode(
-            diagnosis, breadcrumb if breadcrumb.is_file() else None
+        diagnosis, breadcrumb = startup_failure.handle(
+            exc, phase="importing the server"
         )
+        startup_failure.serve_safe_mode(diagnosis, breadcrumb)
         sys.exit(1)
 
     _server_main()

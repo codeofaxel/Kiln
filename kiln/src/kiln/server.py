@@ -13026,11 +13026,11 @@ def main() -> None:
     try:
         _start()
     except Exception as exc:  # noqa: BLE001 — the whole point is to catch it
-        diagnosis = startup_failure.handle(exc, phase="server startup")
-        breadcrumb = startup_failure.breadcrumb_path()
-        startup_failure.serve_safe_mode(
-            diagnosis, breadcrumb if breadcrumb.is_file() else None
-        )
+        # Nothing in this handler may raise: a second exception here
+        # would replace the explanation with a pair of chained
+        # tracebacks, which is worse than the silence it replaces.
+        diagnosis, breadcrumb = startup_failure.handle(exc, phase="server startup")
+        startup_failure.serve_safe_mode(diagnosis, breadcrumb)
         # Non-zero whether or not recovery mode ran: the server did not
         # start, and having explained that does not make it a success.
         sys.exit(1)

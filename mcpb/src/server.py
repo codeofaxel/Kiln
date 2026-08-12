@@ -28,11 +28,10 @@ if __name__ == "__main__":
             # to explain it with.  Let the traceback stand — the MCPB
             # runtime surfaces install failures on its own.
             raise exc from None
-        diagnosis = startup_failure.handle(exc, phase="importing the server")
-        breadcrumb = startup_failure.breadcrumb_path()
-        startup_failure.serve_safe_mode(
-            diagnosis, breadcrumb if breadcrumb.is_file() else None
+        diagnosis, breadcrumb = startup_failure.handle(
+            exc, phase="importing the server"
         )
+        startup_failure.serve_safe_mode(diagnosis, breadcrumb)
         sys.exit(1)
 
     main()

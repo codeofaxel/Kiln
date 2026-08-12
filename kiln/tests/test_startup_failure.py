@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import sys
 
 import pytest
 
@@ -358,15 +359,93 @@ class TestEveryDoorIsGuarded:
     silence survives at whichever one was forgotten.
     """
 
-    def test_the_cli_guards_the_server_import(self):
-        import inspect
+    @pytest.fixture
+    def broken_server_import(self, monkeypatch):
+        """Make ``import kiln.server`` fail the way a bad install does."""
+        monkeypatch.setitem(sys.modules, "kiln.server", None)
 
+    def test_the_cli_guards_the_server_import(
+        self, kiln_home, broken_server_import, monkeypatch
+    ):
+        """Executed, not just read.
+
+        Source inspection proves the shape and nothing about whether the
+        code runs — it would happily pass while the call underneath it
+        raised TypeError on a changed signature.
+        """
         from kiln.cli.main import serve
 
-        src = inspect.getsource(serve.callback)
+        served: list = []
+        monkeypatch.setattr(
+            startup_failure,
+            "serve_safe_mode",
+            lambda diagnosis, breadcrumb: served.append((diagnosis, breadcrumb)),
+        )
 
-        assert "startup_failure" in src
-        assert "from kiln.server import main" in src
+        with pytest.raises(SystemExit) as exit_info:
+            serve.callback()
+
+        assert exit_info.value.code == 1
+        assert (kiln_home / "last-startup-error.log").is_file()
+        (diagnosis, breadcrumb) = served[0]
+        assert diagnosis.kind == "broken_install"
+        assert breadcrumb == kiln_home / "last-startup-error.log"
+
+    def test_the_mcpb_entry_point_runs_its_guard(
+        self, kiln_home, broken_server_import, monkeypatch
+    ):
+        """Actually execute the bundle entry point with a broken import."""
+        import runpy
+        from pathlib import Path
+
+        entry = (
+            Path(__file__).resolve().parent.parent.parent
+            / "mcpb"
+            / "src"
+            / "server.py"
+        )
+        served: list = []
+        monkeypatch.setattr(
+            startup_failure,
+            "serve_safe_mode",
+            lambda diagnosis, breadcrumb: served.append((diagnosis, breadcrumb)),
+        )
+
+        with pytest.raises(SystemExit) as exit_info:
+            runpy.run_path(str(entry), run_name="__main__")
+
+        assert exit_info.value.code == 1
+        assert served, "the MCPB door never offered recovery mode"
+        assert (kiln_home / "last-startup-error.log").is_file()
+
+    def test_the_mcpb_fallback_shows_the_real_failure(self, monkeypatch):
+        """When ``kiln`` itself is missing, do not bury the reason.
+
+        MCPB installs ``kiln3d`` on first run, so "not importable at all"
+        is a real outcome there.  Nothing can explain it — but raising the
+        ORIGINAL import error keeps the MCPB runtime's own install
+        diagnostics pointed at the actual problem, instead of replacing
+        them with a confusing secondary failure about a missing
+        ``startup_failure``.
+        """
+        import runpy
+        from pathlib import Path
+
+        entry = (
+            Path(__file__).resolve().parent.parent.parent
+            / "mcpb"
+            / "src"
+            / "server.py"
+        )
+        monkeypatch.setitem(sys.modules, "kiln", None)
+        monkeypatch.setitem(sys.modules, "kiln.server", None)
+
+        with pytest.raises(ImportError) as exc_info:
+            runpy.run_path(str(entry), run_name="__main__")
+
+        assert "kiln.server" in str(exc_info.value), (
+            "the original import failure was masked by the fallback"
+        )
 
     def test_the_mcpb_bundle_guards_the_server_import(self):
         """The likeliest door for a broken install.
@@ -517,6 +596,87 @@ class TestNothingHereCanRaise:
         assert startup_failure.record(RuntimeError("boom")) is None
         assert startup_failure.read() is None
         startup_failure.clear()
+        assert startup_failure.breadcrumb_path().name == "last-startup-error.log"
+
+    def test_the_guard_does_not_crash_inside_its_own_handler(
+        self, tmp_path, monkeypatch
+    ):
+        """The failure this whole module exists to prevent, aimed at itself.
+
+        ``breadcrumb_path`` used to create ``~/.kiln`` on the way to
+        naming it, and the doors called it from inside their ``except``
+        blocks.  On a machine where that directory cannot be made, the
+        mkdir raised *while handling* the startup exception, so the user
+        got two chained tracebacks where they used to get one — the guard
+        making things worse than the silence it replaced.
+        """
+        blocked = tmp_path / "not-a-directory"
+        blocked.write_text("this is a file, so mkdir on it fails")
+        monkeypatch.setenv("KILN_HOME", str(blocked))
+
+        from kiln import server
+
+        monkeypatch.setattr(
+            server, "_start", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+        )
+        monkeypatch.setattr(
+            server.startup_failure, "serve_safe_mode", lambda *a, **k: False
+        )
+
+        with pytest.raises(SystemExit) as exit_info:
+            server.main()
+
+        assert exit_info.value.code == 1
+
+    def test_naming_the_home_directory_never_creates_it(self, tmp_path, monkeypatch):
+        """Readers must not be writers.
+
+        ``explain`` names ``~/.kiln`` in the permissions diagnosis, and
+        ``kiln doctor`` calls ``read`` on every run — neither is a reason
+        to bring the directory into existence.
+        """
+        absent = tmp_path / "never-made"
+        monkeypatch.setenv("KILN_HOME", str(absent))
+
+        assert startup_failure.kiln_home() == absent
+        assert startup_failure.breadcrumb_path().parent == absent
+        assert startup_failure.read() is None
+        startup_failure.clear()
+
+        assert not absent.exists(), "merely looking created the directory"
+
+    def test_the_permissions_diagnosis_survives_an_unwritable_home(
+        self, tmp_path, monkeypatch
+    ):
+        """The diagnosis for unwritable homes must not need a writable home.
+
+        It used to: naming the directory did a mkdir, the mkdir raised,
+        and the answer degraded to "unknown" in precisely the case it was
+        written for.
+        """
+        blocked = tmp_path / "not-a-directory"
+        blocked.write_text("this is a file, so mkdir on it fails")
+        monkeypatch.setenv("KILN_HOME", str(blocked))
+
+        diagnosis = startup_failure.explain(
+            PermissionError(13, "Permission denied", "/x/.kiln/kiln.db")
+        )
+
+        assert diagnosis.kind == "permissions"
+        assert str(blocked) in diagnosis.what_happened
+
+    def test_the_stderr_report_stays_ascii(self, kiln_home, startup_error):
+        """cp1252 has no ``✗`` or ``→``.
+
+        A Windows console renders them as ``\\u2717`` literals, which is
+        noise in the middle of the one message that has to land on an
+        unknown terminal.
+        """
+        diagnosis = startup_failure.explain(startup_error)
+        report = startup_failure.stderr_report(diagnosis, None)
+
+        for glyph in ("✗", "→", "✓"):
+            assert glyph not in report, f"{glyph!r} does not survive cp1252"
 
     def test_explaining_a_hostile_exception_still_answers(self):
         class Nasty(Exception):

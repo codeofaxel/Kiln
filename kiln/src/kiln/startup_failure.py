@@ -70,14 +70,40 @@ _DISABLE_SAFE_MODE_ENV = "KILN_DISABLE_SAFE_MODE"
 
 
 def kiln_home() -> Path:
-    """``~/.kiln`` (override with ``KILN_HOME``), created on demand."""
-    d = Path(os.environ.get("KILN_HOME", "").strip() or (Path.home() / ".kiln"))
+    """``~/.kiln`` (override with ``KILN_HOME``).  Resolved, never created.
+
+    Naming a directory must not require creating it.  When this function
+    also did the ``mkdir``, an unwritable home turned every *reader* into
+    a writer: :func:`explain` names this directory in the permissions
+    diagnosis — the one case where creating it is guaranteed to fail — so
+    the diagnosis that existed for unwritable homes was the diagnosis an
+    unwritable home destroyed, and it degraded to "unknown".  Worse, the
+    doors called :func:`breadcrumb_path` from inside their own ``except``
+    blocks, so the ``mkdir`` raised *while handling* the startup failure
+    and the user got two chained tracebacks instead of an explanation.
+
+    ``expanduser`` rather than ``Path.home()``: the latter raises when it
+    cannot resolve a home directory, and nothing in this module may raise.
+    """
+    override = os.environ.get("KILN_HOME", "").strip()
+    if override:
+        return Path(override)
+    return Path(os.path.expanduser("~")) / ".kiln"
+
+
+def _ensure_kiln_home() -> Path:
+    """:func:`kiln_home`, created on demand.  For the write path only."""
+    d = kiln_home()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def breadcrumb_path() -> Path:
-    """Absolute path to the startup-failure breadcrumb."""
+    """Absolute path to the startup-failure breadcrumb.
+
+    Pure: safe to call from an exception handler, and safe to call on a
+    machine where ``~/.kiln`` does not exist and cannot be made.
+    """
     return kiln_home() / _BREADCRUMB_NAME
 
 
@@ -308,7 +334,7 @@ def record(exc: BaseException, *, phase: str = "startup") -> Path | None:
             f"TECHNICAL DETAIL (for a bug report — you do not need to read this)\n"
             f"{trace}"
         )
-        path = breadcrumb_path()
+        path = _ensure_kiln_home() / _BREADCRUMB_NAME
         path.write_text(body, encoding="utf-8")
         return path
     except Exception as write_exc:  # noqa: BLE001
@@ -376,10 +402,17 @@ def clear() -> None:
 
 
 def stderr_report(diagnosis: Diagnosis, breadcrumb: Path | None) -> str:
-    """The block printed to stderr, for whoever can see it."""
+    """The block printed to stderr, for whoever can see it.
+
+    ASCII marker, not a glyph.  This block lands directly after whatever
+    logging the failed startup already emitted, so it needs to be
+    findable at a glance — but ``✗`` and ``→`` are absent from cp1252,
+    and a Windows console renders them as ``\\u2717`` literals.  ``[!]``
+    scans just as well and survives every terminal.
+    """
     lines = [
         "",
-        "  ✗ Kiln could not start.",
+        "  [!] Kiln could not start.",
         "",
         f"    {diagnosis.headline}",
         "",
@@ -405,13 +438,26 @@ def report_to_stderr(diagnosis: Diagnosis, breadcrumb: Path | None) -> None:
         print(stderr_report(diagnosis, breadcrumb), file=sys.stderr, flush=True)
 
 
-def handle(exc: BaseException, *, phase: str = "startup") -> Diagnosis:
-    """Record the failure and announce it.  The one call every door makes."""
+def handle(
+    exc: BaseException, *, phase: str = "startup"
+) -> tuple[Diagnosis, Path | None]:
+    """Record the failure and announce it.  The one call every door makes.
+
+    Returns the breadcrumb alongside the diagnosis — ``None`` when it
+    could not be written — so a door never has to reach for the path
+    itself.  Doors call this from inside an ``except`` block, where a
+    second exception would replace the explanation with a pair of
+    chained tracebacks; everything reachable from here swallows its own
+    failures so there is nothing left for the door to guard.
+    """
     diagnosis = explain(exc)
     breadcrumb = record(exc, phase=phase)
-    logger.error("Kiln startup failed (%s): %s", diagnosis.kind, exc, exc_info=True)
+    with contextlib.suppress(Exception):
+        logger.error(
+            "Kiln startup failed (%s): %s", diagnosis.kind, exc, exc_info=True
+        )
     report_to_stderr(diagnosis, breadcrumb)
-    return diagnosis
+    return diagnosis, breadcrumb
 
 
 # ---------------------------------------------------------------------------
@@ -498,7 +544,6 @@ def build_safe_mode_server(diagnosis: Diagnosis, breadcrumb: Path | None):
     """
     from kiln.mcp_compat import FastMCP
 
-    payload = _payload(diagnosis, breadcrumb)
     steps = "\n".join(f"{i}. {s}" for i, s in enumerate(diagnosis.what_to_do, 1))
     instructions = (
         "KILN IS NOT RUNNING NORMALLY. The server could not finish "
@@ -513,20 +558,22 @@ def build_safe_mode_server(diagnosis: Diagnosis, breadcrumb: Path | None):
 
     server = FastMCP("kiln", instructions=instructions)
 
+    # Built fresh per call rather than closing over one dict, so no two
+    # callers can ever share (or mutate) the same reply.
     @server.tool()
     def get_started() -> dict:
         """Kiln could not start — read this for what went wrong and how to fix it."""
-        return dict(payload)
+        return _payload(diagnosis, breadcrumb)
 
     @server.tool()
     def kiln_health() -> dict:
         """Kiln could not start — read this for what went wrong and how to fix it."""
-        return dict(payload)
+        return _payload(diagnosis, breadcrumb)
 
     @server.tool()
     def kiln_startup_diagnosis() -> dict:
         """Why the Kiln server failed to start, in plain language, with the fix."""
-        return dict(payload)
+        return _payload(diagnosis, breadcrumb)
 
     return server
 
@@ -552,7 +599,7 @@ def serve_safe_mode(diagnosis: Diagnosis, breadcrumb: Path | None) -> bool:
         return False
     with contextlib.suppress(Exception):
         print(
-            "  → Kiln is starting in recovery mode so it can tell you this "
+            "  Kiln is starting in recovery mode so it can tell you this "
             "in your client.\n",
             file=sys.stderr,
             flush=True,
