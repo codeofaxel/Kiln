@@ -13,10 +13,12 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 import zipfile
 from pathlib import Path
 from typing import Any
 
+from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
@@ -1359,6 +1361,20 @@ class _SlicerToolsPlugin:
 
             Combines ``slice_model``, ``upload_file``, and ``start_print`` into
             a single action.
+
+            Branch on ``print_start`` — one field, three values, and the
+            nested ``print`` block carries the identical pair so the two
+            halves cannot disagree:
+
+            - ``"started"``: the printer, asked after the command, is printing.
+            - ``"accepted"``: the command was sent and not refused, and the
+              machine has not confirmed it is running.  Normal during the
+              start-up transient (homing, AMS load, calibration).  Call
+              ``printer_status()`` to watch it start.
+            - ``"failed"``: the printer, asked after the command, is idle or
+              errored — it did not take the job.
+
+            ``success`` is ``False`` only for ``"failed"``.
             """
             if err := _srv._check_auth("print"):
                 return err
@@ -1763,17 +1779,40 @@ class _SlicerToolsPlugin:
                 if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):
                     print_kwargs["local_file_path"] = upload_path
 
+                # ``sent_at`` is what lets the verdict below tell a reading
+                # about THIS command from the printer's last word about the
+                # previous job.  Capture it before the command, not after.
+                sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name, **print_kwargs)
                 _srv._get_heater_watchdog().notify_print_started()
 
+                base_name = os.path.basename(input_path)
+                verdict = resolve_print_start(
+                    adapter, print_result, sent_at=sent_at, file_name=base_name,
+                )
+                if verdict.confirmed:
+                    outer_message = f"Sliced, uploaded, and started printing {base_name}."
+                elif verdict.ok:
+                    outer_message = (
+                        f"Sliced, uploaded, and sent the print command for "
+                        f"{base_name}. The printer has not confirmed it is "
+                        f"running yet — call printer_status() to watch it start."
+                    )
+                else:
+                    outer_message = (
+                        f"Sliced and uploaded {base_name}, but the printer did "
+                        f"not start it. {verdict.message}"
+                    )
+
                 resp: dict[str, Any] = {
-                    "success": True,
+                    "success": verdict.ok,
+                    "print_start": verdict.state,
                     "slice": result.to_dict(),
                     "upload": upload.to_dict(),
-                    "print": print_result.to_dict(),
+                    "print": verdict.to_dict(),
                     "printer_id": effective_printer_id,
                     "profile_path": effective_profile,
-                    "message": f"Sliced, uploaded, and started printing {os.path.basename(input_path)}.",
+                    "message": outer_message,
                 }
                 if validation_summary is not None:
                     resp["validation"] = validation_summary

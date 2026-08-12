@@ -12,8 +12,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from typing import Any
 
+from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
@@ -419,6 +421,10 @@ class _SmartPrintToolsPlugin:
                 )
 
             try:
+                # Captured before the command: it is what lets the verdict
+                # below tell a reading about THIS job from the printer's last
+                # word about the previous one.
+                sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name)
             except Exception as exc:
                 return _srv._error_dict(
@@ -442,17 +448,33 @@ class _SmartPrintToolsPlugin:
                 if len(merged_overrides) > 3:
                     override_summary += f" (+{len(merged_overrides) - 3} more)"
                 msg_parts.append(f"Applied overrides: {override_summary}.")
-            msg_parts.append(f"Re-sliced and started printing {model_name}.")
+            verdict = resolve_print_start(
+                adapter, print_result, sent_at=sent_at, file_name=model_name,
+            )
+            if verdict.confirmed:
+                msg_parts.append(f"Re-sliced and started printing {model_name}.")
+            elif verdict.ok:
+                msg_parts.append(
+                    f"Re-sliced {model_name} and sent the print command. The "
+                    f"printer has not confirmed it is running yet — call "
+                    f"printer_status() to watch it start."
+                )
+            else:
+                msg_parts.append(
+                    f"Re-sliced {model_name}, but the printer did not start "
+                    f"it. {verdict.message}"
+                )
             message = "  ".join(msg_parts)
 
             result: dict[str, Any] = {
-                "success": True,
+                "success": verdict.ok,
+                "print_start": verdict.state,
                 "diagnosis": diagnosis_dict,
                 "material_detected": material_detected,
                 "overrides_applied": merged_overrides,
                 "slice": slice_result.to_dict(),
                 "upload": upload_result.to_dict(),
-                "print": print_result.to_dict(),
+                "print": verdict.to_dict(),
                 "message": message,
             }
             if validation_summary is not None:

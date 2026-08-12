@@ -28,6 +28,7 @@ from typing import Any
 
 import click
 
+from kiln.print_start_verdict import resolve_print_start
 from kiln.printer_backends import (
     DEFAULT_SERIAL_BAUDRATE,
     NETWORK_PRINTER_TYPES,
@@ -5519,11 +5520,18 @@ def ingest_watch_cmd(
                     continue
 
                 remote_name = upload_result.file_name or local_path.name
+                # An unconfirmed start is not a failed one: dropping the job
+                # here would leave a running print with nothing tracking it.
+                sent_at = time.monotonic()
                 start_result = adapter.start_print(remote_name)
-                if not start_result.success:
+                start_verdict = resolve_print_start(
+                    adapter, start_result, sent_at=sent_at,
+                    file_name=remote_name,
+                )
+                if not start_verdict.ok:
                     queue_items.popleft()
                     errors.append(
-                        f"{printer_name}: start failed for {remote_name} ({start_result.message or 'unknown'})"
+                        f"{printer_name}: start failed for {remote_name} ({start_verdict.message or 'unknown'})"
                     )
                     continue
 

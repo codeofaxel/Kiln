@@ -288,6 +288,7 @@ from kiln.pipelines import (
 )
 from kiln.plugin_loader import register_all_plugins
 from kiln.plugins import PluginContext, PluginManager
+from kiln.print_start_verdict import resolve_print_start
 from kiln.printer_backends import DEFAULT_SERIAL_BAUDRATE, format_printer_types
 from kiln.printer_intelligence import (
     diagnose_issue,
@@ -4571,6 +4572,17 @@ def start_print(
             cool-on-new-job policy will otherwise drop the bed to 0
             before the resume preamble executes.  Set ``True`` to
             disable this safety net.  Default ``False``.
+
+    Branch on ``print_start`` — one field, three values:
+
+    - ``"started"``: the printer, asked after the command, is printing.
+    - ``"accepted"``: the command was sent and not refused, and the machine
+      has not confirmed it is running.  Normal during the start-up transient
+      (homing, AMS load, calibration).  Call ``printer_status()`` to watch.
+    - ``"failed"``: the printer, asked after the command, is idle or errored
+      — it did not take the job.
+
+    ``success`` is ``False`` only for ``"failed"``.
     """
     if err := _check_auth("print"):
         return err
@@ -4866,6 +4878,10 @@ def start_print(
         except Exception as exc:
             logger.debug("Nozzle capacity check skipped: %s", exc)
 
+        # ``sent_at`` is the line between the printer's last word about the
+        # previous job and its first word about this one.  Capture it before
+        # the command; ``resolve_print_start`` needs it to know which it has.
+        sent_at = time.monotonic()
         result = adapter.start_print(file_name, **print_kwargs)
         _get_heater_watchdog().notify_print_started()
 
@@ -4924,7 +4940,9 @@ def start_print(
                 **print_kwargs,
             },
         )
-        out = result.to_dict()
+        out = resolve_print_start(
+            adapter, result, sent_at=sent_at, file_name=file_name,
+        ).to_dict()
         if is_resume_3mf:
             out["resume_3mf_detected"] = True
         if reasserted is not None:
@@ -8294,6 +8312,7 @@ def download_and_upload(
 
         # Auto-print only if user opted in via KILN_AUTO_PRINT_MARKETPLACE.
         print_data = None
+        print_verdict = None
         auto_printed = False
         if _AUTO_PRINT_MARKETPLACE:
             safety_printer = _resolve_effective_printer_name(printer_name)
@@ -8314,13 +8333,17 @@ def download_and_upload(
                     pf.get("summary", "Pre-flight checks failed"),
                     code="PREFLIGHT_FAILED",
                 )
+            sent_at = time.monotonic()
             print_res = adapter.start_print(file_name)
             _get_heater_watchdog().notify_print_started()
-            print_data = print_res.to_dict()
+            print_verdict = resolve_print_start(
+                adapter, print_res, sent_at=sent_at, file_name=file_name,
+            )
+            print_data = print_verdict.to_dict()
             auto_printed = True
 
         resp = {
-            "success": True,
+            "success": print_verdict.ok if auto_printed else True,
             "file_id": str(file_id),
             "source": source,
             "local_path": local_path,
@@ -8332,13 +8355,26 @@ def download_and_upload(
 
         if auto_printed:
             resp["print"] = print_data
+            resp["print_start"] = print_verdict.state
             resp["safety_notice"] = (
                 "WARNING: Auto-print for marketplace models is enabled "
                 "(KILN_AUTO_PRINT_MARKETPLACE=true). Community models "
                 "are unverified and could cause print failures. "
                 "Disable this setting unless you accept the risk."
             )
-            resp["message"] = f"Downloaded from {source}, uploaded, and started printing (auto-print ON)."
+            if print_verdict.confirmed:
+                _tail = "and started printing (auto-print ON)."
+            elif print_verdict.ok:
+                _tail = (
+                    "and sent the print command (auto-print ON). The printer "
+                    "has not confirmed it is running yet — call "
+                    "printer_status() to watch it start."
+                )
+            else:
+                _tail = (
+                    f"but the printer did not start it. {print_verdict.message}"
+                )
+            resp["message"] = f"Downloaded from {source}, uploaded, {_tail}"
         else:
             resp["safety_notice"] = (
                 "Model uploaded but NOT started. Community models are "
