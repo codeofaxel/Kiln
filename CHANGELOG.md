@@ -293,6 +293,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   recognize your printer's model, and still reported as applied. On Bambu
   that could also leave the print file itself wrong. Now fixed.
 
+- **When Kiln can't start, it now says why instead of just disappearing.** A
+  problem at startup used to make Kiln vanish from your assistant with nothing
+  but a generic "server failed to start" — now it comes up in recovery mode and
+  tells you what went wrong and how to fix it, `kiln doctor` reports the same
+  thing, and the full details are saved to `~/.kiln/last-startup-error.log`.
+
 ## [1.3.2] - 2026-08-01
 
 ### Added
