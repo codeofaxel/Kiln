@@ -54,6 +54,7 @@ from kiln.bridge_supervisor import (
     read_supervisor_state,
     supervisor_pid,
 )
+from kiln.bridge_version import RESTART_COMMAND
 from kiln.bridge_version import describe as describe_bridge_version
 
 # launchd label (macOS), systemd unit stem (Linux), and registry Run value
@@ -276,7 +277,7 @@ def _describe_status(
             # nothing.  That is the same dead end as the enabled-but-not-running
             # hint below, one branch over, and it survived the fix to that one.
             "Fix that, then start it again: "
-            + ("kiln bridge restart" if enabled else "kiln bridge start"),
+            + (RESTART_COMMAND if enabled else "kiln bridge start"),
         ]
     elif enabled:
         headline = "enabled, but not running"
@@ -286,7 +287,7 @@ def _describe_status(
             # that command refuses: it sees a login service and returns
             # "Already set to start on login" without starting anything, so
             # the advice read as help and did nothing.
-            f"Start it now: kiln bridge restart   ·   Log: {_LOG_FILE}",
+            f"Start it now: {RESTART_COMMAND}   ·   Log: {_LOG_FILE}",
         ]
     else:
         return "off", [
@@ -420,6 +421,17 @@ def _running_supervisor_pid() -> int | None:
     if pid is not None and _pid_alive(pid):
         return pid
     return None
+
+
+def _anything_running() -> bool:
+    """Whether a bridge run is in flight — the bridge, its supervisor, or both.
+
+    Both, because between a crash and its restart the bridge pid is briefly
+    absent while the run is very much still going.  Asking only about that one
+    would read a live run as a dead one, and `start` would put a second
+    supervisor over the top of the first.
+    """
+    return _running_pid() is not None or _running_supervisor_pid() is not None
 
 
 def _spawn_supervised_bridge() -> int:
@@ -831,17 +843,14 @@ def start() -> None:
         # and the person typing `start` is typing it precisely because nothing
         # is running.  Point them at the verb that does start a managed bridge
         # rather than sending them away reassured.
-        if _running_pid() is None and _running_supervisor_pid() is None:
+        if not _anything_running():
             click.echo("Set to start on login, but it isn't running right now.")
-            click.echo("  Start it: kiln bridge restart   ·   Why it stopped: kiln bridge status")
+            click.echo(f"  Start it: {RESTART_COMMAND}   ·   More: kiln bridge status")
             return
         click.echo("Already set to start on login — it's managed for you.")
         click.echo("  See it: kiln bridge status   ·   Turn off: kiln bridge disable")
         return
-    # Both, because between a crash and its restart the bridge pid is briefly
-    # absent while the run is very much still going; checking only that one
-    # would start a second supervisor over the top of the first.
-    if _running_pid() is not None or _running_supervisor_pid() is not None:
+    if _anything_running():
         click.echo("Bridge is already running.  See: kiln bridge status")
         return
     _preflight()
