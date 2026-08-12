@@ -84,6 +84,28 @@ HEATING_RISE_C: float = 1.0
 #: climbing slowly is fine at any speed; one that has stopped is not.
 DEFAULT_NO_RISE_TIMEOUT_S: float = 120.0
 
+#: How long a heater may warm toward a target it has never reached before
+#: the gap is judged on its own merits.
+#:
+#: "Still climbing" alone leaves one state with no detector: a heater that
+#: keeps rising, arbitrarily slowly, toward a target it never arrives at.
+#: A rise of 1°C per 119s satisfies the rule above forever, and the layer
+#: stall timer is paused while warming, so nothing reports it.
+#:
+#: This ends the AMBIGUITY rather than delivering a verdict.  "Below
+#: setpoint early in a print" is genuinely ambiguous; thirty minutes in it
+#: is not, so the already-calibrated drop threshold takes over.  A heater
+#: within that threshold of its target is still never flagged — that is
+#: the asymptotic final approach, where patience is correct.  Getting this
+#: number wrong by a factor of two therefore shifts WHEN ambiguity ends,
+#: never WHAT counts as broken.  It is a policy choice about how long to
+#: tolerate not knowing; it is not a physical constant.
+DEFAULT_WARMUP_TIMEOUT_S: float = 1800.0
+
+#: Fraction of that ceiling at which a warning is raised.  Logged and sent
+#: to ``on_anomaly``; it stops nothing.
+WARMUP_WARN_FRACTION: float = 0.5
+
 
 # --------------------------------------------------------------------------
 # Data classes
@@ -110,6 +132,193 @@ class Flag:
         }
 
 
+@dataclass
+class _Verdict:
+    """What one heater has to say this poll."""
+
+    red: Flag | None = None
+    warning: Flag | None = None
+    #: True while the heater is climbing toward a target it has not reached
+    #: AND the ceiling has not expired.  The layer-stall timer is held for
+    #: exactly that long: heating blocks the G-code stream, so no layer can
+    #: finish, but once the ceiling ends the grace the stall rule resumes.
+    warming: bool = False
+
+
+class _HeaterWatch:
+    """One heater's warmup state, and every verdict that depends on it.
+
+    The hotend and the bed run the SAME rules; only the labels, the context
+    keys and the drop threshold differ.  Two copies is how a fix to one
+    silently misses the other, and it is why adding the ceiling to a
+    copy-pasted pair would have tripled forty lines instead of adding ten.
+
+    Honest bound, because it is easy to read more into this than it does:
+    every rule here reads the temperature the PRINTER REPORTS.  If that
+    number is wrong the watchdog is wrong with it, so this is not thermal
+    runaway protection and cannot be — a thermistor that under-reports
+    fools the firmware's protection in exactly the same way.  What the
+    ceiling adds is that a reported temperature which never arrives is
+    eventually treated as a fault instead of tolerated forever.
+    """
+
+    def __init__(
+        self,
+        *,
+        prefix: str,
+        label: str,
+        drop_c: float,
+        no_rise_timeout_s: float,
+        warmup_timeout_s: float,
+        drop_tail: str = "",
+    ) -> None:
+        self._prefix = prefix  # "tool" / "bed" — rule names and context keys
+        self._label = label  # "Hotend" / "Bed" — user-facing prose
+        self._drop_c = drop_c
+        self._no_rise_timeout_s = no_rise_timeout_s
+        self._warmup_timeout_s = warmup_timeout_s
+        self._drop_tail = drop_tail
+        self.reset()
+
+    def reset(self) -> None:
+        """Forget everything: a new print judges its heaters afresh."""
+        self._reached = False
+        self._target_prev: float | None = None
+        self._rise_ref: tuple[float, float] | None = None
+        self._warming_since: float | None = None
+        self._warned = False
+        self._grace_expired = False
+
+    def _flag(
+        self, rule: str, message: str, now: float, *, kind: str = "red", **context: float
+    ) -> Flag:
+        # kind is passed, never inferred from the rule name: inferring it read
+        # the UNPREFIXED name and quietly minted the warning as a red flag,
+        # which would have filed an incident for every slow warmup.
+        return Flag(
+            kind=kind,
+            rule=f"{self._prefix}_{rule}",
+            message=message,
+            timestamp=now,
+            context={
+                f"{self._prefix}_temp_actual": context["actual"],
+                f"{self._prefix}_temp_target": context["target"],
+                **{k: v for k, v in context.items() if k not in ("actual", "target")},
+            },
+        )
+
+    def evaluate(self, actual: Any, target: Any, now: float) -> _Verdict:
+        if target is None:
+            return _Verdict()
+
+        if target < MIN_ACTIVE_TARGET_C:
+            # Heater switched off, as filament-change macros do with M104 S0.
+            # The rise reference and the warmup clock both STAY: a target
+            # toggling through zero must not restart either, or a dead heater
+            # is never reported and the ceiling never arrives.
+            self._reached = False
+            self._target_prev = None
+            return _Verdict()
+
+        if actual is None:
+            # A missing reading neither arms nor disarms anything.
+            return _Verdict()
+
+        if self._target_prev != target:
+            # New setpoint: the heater has to climb to it again.  The clock
+            # keeps running for the same anti-evasion reason as above.
+            self._target_prev = target
+            self._reached = False
+
+        if actual >= target - REACHED_MARGIN_C:
+            self._reached = True
+            self._rise_ref = None
+            self._warming_since = None
+            self._warned = False
+            self._grace_expired = False
+
+        drop = target - actual
+
+        # The drop rule is armed once the heater has ARRIVED — or once the
+        # ceiling has decided the question is no longer ambiguous.
+        if drop >= self._drop_c and (self._reached or self._grace_expired):
+            return _Verdict(
+                red=self._flag(
+                    "drop",
+                    f"{self._label} dropped {drop:.1f}°C below setpoint "
+                    f"({actual:.1f}°C vs {target:.0f}°C target){self._drop_tail}",
+                    now,
+                    actual=float(actual),
+                    target=float(target),
+                    drop_c=float(drop),
+                )
+            )
+
+        if self._reached or self._grace_expired:
+            return _Verdict()
+
+        # --- still warming -------------------------------------------
+        if self._warming_since is None:
+            self._warming_since = now
+        warmed_for = now - self._warming_since
+
+        if self._rise_ref is None:
+            self._rise_ref = (actual, now)
+        ref_c, ref_at = self._rise_ref
+        if actual >= ref_c + HEATING_RISE_C:
+            self._rise_ref = (actual, now)
+        elif now - ref_at >= self._no_rise_timeout_s:
+            return _Verdict(
+                red=self._flag(
+                    "not_heating",
+                    f"{self._label} stopped climbing {drop:.1f}°C below setpoint "
+                    f"({actual:.1f}°C vs {target:.0f}°C target) "
+                    f"— heater failure or thermistor fault",
+                    now,
+                    actual=float(actual),
+                    target=float(target),
+                    no_rise_seconds=float(now - ref_at),
+                )
+            )
+
+        if warmed_for >= self._warmup_timeout_s:
+            self._grace_expired = True
+            if drop >= self._drop_c:
+                # Its own rule and its own words: a heater that never started
+                # is a different fault from one that died mid-print, and the
+                # user's next move differs.
+                return _Verdict(
+                    red=self._flag(
+                        "warmup_timeout",
+                        f"{self._label} never reached setpoint: {actual:.1f}°C vs "
+                        f"{target:.0f}°C target after {warmed_for / 60:.1f} min "
+                        f"— heater, thermistor, or a fan cooling it faster "
+                        f"than it heats",
+                        now,
+                        actual=float(actual),
+                        target=float(target),
+                        warming_seconds=float(warmed_for),
+                    )
+                )
+            # Close enough that the ordinary drop rule can take it from here.
+            return _Verdict()
+
+        warning = None
+        if not self._warned and warmed_for >= self._warmup_timeout_s * WARMUP_WARN_FRACTION:
+            self._warned = True
+            warning = self._flag(
+                "warmup_slow",
+                f"{self._label} has been warming for {warmed_for / 60:.0f} min "
+                f"and is still {drop:.1f}°C below its {target:.0f}°C target",
+                now,
+                kind="yellow",
+                actual=float(actual),
+                target=float(target),
+                warming_seconds=float(warmed_for),
+            )
+        return _Verdict(warning=warning, warming=True)
+
+
 # --------------------------------------------------------------------------
 # Watchdog
 # --------------------------------------------------------------------------
@@ -133,6 +342,10 @@ class PrintWatchdog:
         stall_seconds: Override for layer-stall timeout.
         no_rise_timeout_s: Override for how long a warming heater may
             show no temperature rise before the gap counts as a failure.
+        warmup_timeout_s: Override for how long a heater may warm toward a
+            target it has never reached before the gap is judged.  Raise it
+            for a large enclosed machine in a cold room, which legitimately
+            takes longer than a desktop printer.
         time_fn: Injectable clock for deterministic testing.  Defaults
             to :func:`time.monotonic`.
     """
@@ -148,6 +361,7 @@ class PrintWatchdog:
         bed_drop_c: float = DEFAULT_BED_DROP_C,
         stall_seconds: float = DEFAULT_STALL_SECONDS,
         no_rise_timeout_s: float = DEFAULT_NO_RISE_TIMEOUT_S,
+        warmup_timeout_s: float = DEFAULT_WARMUP_TIMEOUT_S,
         time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         self._adapter = adapter
@@ -177,13 +391,24 @@ class PrintWatchdog:
         # that holds for hours is reported once rather than every poll.
         self._yellow_seen: set[str] = set()
 
-        # Warmup tracking: a drop only counts once its heater has arrived.
-        self._tool_reached = False
-        self._tool_target_prev: float | None = None
-        self._tool_rise_ref: tuple[float, float] | None = None
-        self._bed_reached = False
-        self._bed_target_prev: float | None = None
-        self._bed_rise_ref: tuple[float, float] | None = None
+        # One object per heater, same rules in both — a drop only counts once
+        # its heater has arrived, and a heater that never arrives is judged
+        # when the ceiling says the question has stopped being ambiguous.
+        self._tool = _HeaterWatch(
+            prefix="tool",
+            label="Hotend",
+            drop_c=self._tool_drop_c,
+            no_rise_timeout_s=self._no_rise_timeout_s,
+            warmup_timeout_s=float(warmup_timeout_s),
+            drop_tail=" — likely clog or heater failure",
+        )
+        self._bed = _HeaterWatch(
+            prefix="bed",
+            label="Bed",
+            drop_c=self._bed_drop_c,
+            no_rise_timeout_s=self._no_rise_timeout_s,
+            warmup_timeout_s=float(warmup_timeout_s),
+        )
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -355,137 +580,33 @@ class PrintWatchdog:
             # weak on your last print" is not a useful thing to withhold.
             self._yellow_seen.clear()
             # Clear warmup tracking so the next print checks afresh.
-            self._tool_reached = False
-            self._tool_target_prev = None
-            self._tool_rise_ref = None
-            self._bed_reached = False
-            self._bed_target_prev = None
-            self._bed_rise_ref = None
+            self._tool.reset()
+            self._bed.reset()
             return None
 
-        # --- Tool temperature drop -----------------------------------
-        tool_actual = _getattr(state, "tool_temp_actual")
-        tool_target = _getattr(state, "tool_temp_target")
-        tool_warming = False
-        if (
-            tool_actual is not None
-            and tool_target is not None
-            and tool_target >= MIN_ACTIVE_TARGET_C
+        # --- Heater temperature and warmup ---------------------------
+        # Both heaters, same rules, one implementation.  A red flag returns
+        # immediately; a warning is recorded and passed on without stopping
+        # anything, which it can only do because reporting and stopping are
+        # separate acts.
+        warming = False
+        for watch, actual_key, target_key in (
+            (self._tool, "tool_temp_actual", "tool_temp_target"),
+            (self._bed, "bed_temp_actual", "bed_temp_target"),
         ):
-            if self._tool_target_prev != tool_target:
-                # New setpoint: the heater has to climb to it again.
-                self._tool_target_prev = tool_target
-                self._tool_reached = False
-            if tool_actual >= tool_target - REACHED_MARGIN_C:
-                self._tool_reached = True
-                self._tool_rise_ref = None
-            tool_warming = not self._tool_reached
-            drop = tool_target - tool_actual
-            if drop >= self._tool_drop_c and self._tool_reached:
-                return Flag(
-                    kind="red",
-                    rule="tool_drop",
-                    message=(
-                        f"Hotend dropped {drop:.1f}°C below setpoint "
-                        f"({tool_actual:.1f}°C vs {tool_target:.0f}°C target) "
-                        f"— likely clog or heater failure"
-                    ),
-                    timestamp=now,
-                    context={
-                        "tool_temp_actual": float(tool_actual),
-                        "tool_temp_target": float(tool_target),
-                        "drop_c": float(drop),
-                    },
-                )
-            if tool_warming:
-                if self._tool_rise_ref is None:
-                    self._tool_rise_ref = (tool_actual, now)
-                ref_c, ref_at = self._tool_rise_ref
-                if tool_actual >= ref_c + HEATING_RISE_C:
-                    self._tool_rise_ref = (tool_actual, now)
-                elif now - ref_at >= self._no_rise_timeout_s:
-                    return Flag(
-                        kind="red",
-                        rule="tool_not_heating",
-                        message=(
-                            f"Hotend stopped climbing {drop:.1f}°C below setpoint "
-                            f"({tool_actual:.1f}°C vs {tool_target:.0f}°C target) "
-                            f"— heater failure or thermistor fault"
-                        ),
-                        timestamp=now,
-                        context={
-                            "tool_temp_actual": float(tool_actual),
-                            "tool_temp_target": float(tool_target),
-                            "no_rise_seconds": float(now - ref_at),
-                        },
-                    )
-        elif tool_target is not None and tool_target < MIN_ACTIVE_TARGET_C:
-            # Heater switched off, as filament-change macros do with M104 S0.
-            # The rise reference stays: a target toggling through zero must not
-            # restart the timer, or a dead heater is never reported.
-            self._tool_reached = False
-            self._tool_target_prev = None
-
-        # --- Bed temperature drop ------------------------------------
-        bed_actual = _getattr(state, "bed_temp_actual")
-        bed_target = _getattr(state, "bed_temp_target")
-        bed_warming = False
-        if (
-            bed_actual is not None
-            and bed_target is not None
-            and bed_target >= MIN_ACTIVE_TARGET_C
-        ):
-            if self._bed_target_prev != bed_target:
-                self._bed_target_prev = bed_target
-                self._bed_reached = False
-            if bed_actual >= bed_target - REACHED_MARGIN_C:
-                self._bed_reached = True
-                self._bed_rise_ref = None
-            bed_warming = not self._bed_reached
-            drop = bed_target - bed_actual
-            if drop >= self._bed_drop_c and self._bed_reached:
-                return Flag(
-                    kind="red",
-                    rule="bed_drop",
-                    message=(
-                        f"Bed dropped {drop:.1f}°C below setpoint "
-                        f"({bed_actual:.1f}°C vs {bed_target:.0f}°C target)"
-                    ),
-                    timestamp=now,
-                    context={
-                        "bed_temp_actual": float(bed_actual),
-                        "bed_temp_target": float(bed_target),
-                        "drop_c": float(drop),
-                    },
-                )
-            if bed_warming:
-                if self._bed_rise_ref is None:
-                    self._bed_rise_ref = (bed_actual, now)
-                ref_c, ref_at = self._bed_rise_ref
-                if bed_actual >= ref_c + HEATING_RISE_C:
-                    self._bed_rise_ref = (bed_actual, now)
-                elif now - ref_at >= self._no_rise_timeout_s:
-                    return Flag(
-                        kind="red",
-                        rule="bed_not_heating",
-                        message=(
-                            f"Bed stopped climbing {drop:.1f}°C below setpoint "
-                            f"({bed_actual:.1f}°C vs {bed_target:.0f}°C target) "
-                            f"— heater failure or thermistor fault"
-                        ),
-                        timestamp=now,
-                        context={
-                            "bed_temp_actual": float(bed_actual),
-                            "bed_temp_target": float(bed_target),
-                            "no_rise_seconds": float(now - ref_at),
-                        },
-                    )
-        elif bed_target is not None and bed_target < MIN_ACTIVE_TARGET_C:
-            self._bed_reached = False
-            self._bed_target_prev = None
+            verdict = watch.evaluate(
+                _getattr(state, actual_key), _getattr(state, target_key), now
+            )
+            if verdict.red is not None:
+                return verdict.red
+            if verdict.warning is not None and verdict.warning.rule not in self._yellow_seen:
+                self._yellow_seen.add(verdict.warning.rule)
+                logger.warning("PrintWatchdog yellow: %s", verdict.warning.message)
+                self._notify(verdict.warning)
+            warming = warming or verdict.warming
 
         # --- Layer / completion stall --------------------------------
-        if tool_warming or bed_warming:
+        if warming:
             # Heating blocks the G-code stream, so no progress is expected.
             self._last_progress_time = now
         progressed = self._update_progress(job, now)
