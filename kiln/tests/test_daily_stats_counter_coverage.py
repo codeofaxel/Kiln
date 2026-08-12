@@ -205,6 +205,52 @@ class TestPrintHoursDedupe:
         daily_stats.record_print_hours_for_job("job-1", 0)
         assert daily_stats.get_daily_stats()["print_hours"] == 0.0
 
+    def test_hours_carry_a_denominator(self, stats_path):
+        """Hours without a count of how many prints they cover cannot be
+        read.  4.0 hours means something different over two prints than
+        over nine hundred — and in production it was the latter, which is
+        how a counter that had never worked passed for a small number."""
+        daily_stats.record_print_start("bambu", "a.3mf")
+        daily_stats.record_print_start("bambu", "b.3mf")
+        daily_stats.record_print_start("bambu", "c.3mf")
+        daily_stats.record_print_hours_for_job("job-a", 3.0)
+
+        stats = daily_stats.get_daily_stats()
+        assert stats["prints"] == 3
+        assert stats["print_hours"] == 3.0
+        # One of the three prints told us how long it took.
+        assert stats["prints_hours_known"] == 1
+        # The other two are an ABSENCE, not two zero-hour prints.
+        assert stats["prints"] - stats["prints_hours_known"] == 2
+
+    def test_both_hours_writers_credit_the_denominator(self, stats_path):
+        """Either path may learn a duration; neither may add hours
+        without saying that it did, or the coverage figure lies in the
+        reassuring direction."""
+        daily_stats.record_print_hours(1.5)
+        assert daily_stats.get_daily_stats()["prints_hours_known"] == 1
+        daily_stats.record_print_hours_for_job("job-z", 2.0)
+        assert daily_stats.get_daily_stats()["prints_hours_known"] == 2
+
+    def test_deduped_report_does_not_double_credit(self, stats_path):
+        """The dedupe that stops hours being counted twice must stop the
+        denominator too, or coverage drifts above reality."""
+        daily_stats.record_print_hours_for_job("job-1", 2.5)
+        daily_stats.record_print_hours_for_job("job-1", 2.5)
+        stats = daily_stats.get_daily_stats()
+        assert stats["print_hours"] == 2.5
+        assert stats["prints_hours_known"] == 1
+
+    def test_denominator_survives_day_rollover(self, stats_path):
+        daily_stats.record_print_hours_for_job("job-1", 4.0)
+        data = json.loads(stats_path.read_text())
+        data["date"] = str(date.today() - timedelta(days=1))
+        stats_path.write_text(json.dumps(data))
+
+        stats = daily_stats.get_daily_stats()
+        assert stats["prints_hours_known"] == 0
+        assert stats["previous_day"]["prints_hours_known"] == 1
+
     def test_hours_ledger_survives_day_rollover(self, stats_path):
         """An outcome re-recorded after midnight must not re-add the
         hours the pre-midnight record already counted."""

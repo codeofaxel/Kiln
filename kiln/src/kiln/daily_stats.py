@@ -102,7 +102,7 @@ _COUNTED_OUTCOMES_MAX = 500
 # Valid event types (top-level counters).
 _VALID_EVENTS = frozenset({
     "prints", "generations", "decorations", "textures",
-    "slices", "downloads", "print_hours",
+    "slices", "downloads", "print_hours", "prints_hours_known",
 })
 
 # Tool name → daily counter, applied at the tool-dispatch chokepoint
@@ -227,6 +227,13 @@ def _empty_day() -> dict[str, Any]:
         "slices": 0,
         "downloads": 0,
         "print_hours": 0.0,
+        # How many of today's prints we actually LEARNED the duration of.
+        # print_hours without this denominator is uninterpretable: 4.0
+        # hours reads the same whether it covers two prints or nine
+        # hundred.  ``prints - prints_hours_known`` is the number whose
+        # duration nobody ever learned — an absence, which is a different
+        # fact from a short print and must not render as one.
+        "prints_hours_known": 0,
         # Detailed breakdowns (name → count)
         "texture_names": {},       # {"tiger_stripe": 3, "custom": 1}
         "decoration_types": {},    # {"photo": 2, "qr": 1, "text": 5}
@@ -289,6 +296,7 @@ def _empty_day() -> dict[str, Any]:
 _ROLLOVER_COUNTERS = (
     "prints", "generations", "decorations",
     "textures", "slices", "downloads", "print_hours",
+    "prints_hours_known",
 )
 
 # The name->count maps carried through the day rollover alongside the
@@ -560,12 +568,26 @@ def record_print_outcome_event(
         _logger.debug("record_print_outcome_event(%s) failed: %s", job_id, exc)
 
 
+def _credit_hours(data: dict[str, Any], hours: float) -> None:
+    """Add one print's duration, and count that we LEARNED it.
+
+    One writer for one physical fact, so the total and its denominator
+    cannot drift apart.  Every path that adds hours goes through here;
+    a path that adds hours without crediting the count would make the
+    coverage figure lie in the reassuring direction.
+
+    Caller must hold ``_lock`` — it is not reentrant.
+    """
+    data["print_hours"] = round(data.get("print_hours", 0.0) + hours, 2)
+    data["prints_hours_known"] = int(data.get("prints_hours_known", 0)) + 1
+
+
 def record_print_hours(hours: float) -> None:
     """Add print hours to today's total.  Thread-safe, never raises."""
     try:
         with _lock:
             data = _read()
-            data["print_hours"] = round(data.get("print_hours", 0.0) + hours, 2)
+            _credit_hours(data, hours)
             _write(data)
     except Exception as exc:
         _logger.debug("record_print_hours failed: %s", exc)
@@ -595,9 +617,7 @@ def record_print_hours_for_job(job_id: str, hours: float) -> None:
                 return
             seen.append(key)
             data["counted_hours"] = seen[-_COUNTED_OUTCOMES_MAX:]
-            data["print_hours"] = round(
-                data.get("print_hours", 0.0) + hours, 2
-            )
+            _credit_hours(data, hours)
             _write(data)
     except Exception as exc:
         _logger.debug("record_print_hours_for_job(%s) failed: %s", job_id, exc)
@@ -755,6 +775,10 @@ def get_daily_stats() -> dict[str, Any]:
         "slices": data.get("slices", 0),
         "downloads": data.get("downloads", 0),
         "print_hours": data.get("print_hours", 0.0),
+        # Ships beside print_hours, never without it: the pair is what
+        # makes the hours readable, and a reader that gets one and not
+        # the other is back to guessing.
+        "prints_hours_known": data.get("prints_hours_known", 0),
         "texture_names": data.get("texture_names", {}),
         "decoration_types": data.get("decoration_types", {}),
         "slicer_profiles": data.get("slicer_profiles", {}),
