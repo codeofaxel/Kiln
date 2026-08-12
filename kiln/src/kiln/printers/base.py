@@ -77,7 +77,14 @@ class PrinterError(Exception):
 
 
 class PrinterStatus(enum.Enum):
-    """High-level operational state of a printer."""
+    """High-level operational state of a printer.
+
+    This answers "what is the machine doing right now", and nothing else.
+    A printer that has just finished a print is doing nothing, so it is
+    :attr:`IDLE` — exactly as ready for the next job as one that has been
+    sitting cold all week.  How the *last job* ended is a different
+    question with a different answer: see :class:`JobResult`.
+    """
 
     IDLE = "idle"
     PRINTING = "printing"
@@ -87,6 +94,36 @@ class PrinterStatus(enum.Enum):
     BUSY = "busy"
     CANCELLING = "cancelling"
     UNKNOWN = "unknown"
+
+
+class JobResult(enum.Enum):
+    """How the most recent print job ENDED, as the firmware reports it.
+
+    Deliberately a separate axis from :class:`PrinterStatus` rather than
+    extra members on it.  Every adapter used to fold "the print finished"
+    into ``IDLE`` (Bambu ``finish``, Moonraker ``complete``, Prusa Link
+    ``FINISHED``, Marlin's M27 at 100 %), and folded a *cancel* into the
+    same value, so a completed print, a cancelled print and a printer
+    nobody had touched all reported the identical thing.  A user watching
+    a print run to 100 % was told the printer was ``idle``.
+
+    Widening :class:`PrinterStatus` instead would have fixed the report by
+    breaking the machine: ``IDLE`` is load-bearing as "ready to print" in
+    the pre-print gate, the CLI preflight, ``registry.get_idle_printers``
+    and the fleet routers — several of which compare the raw string, where
+    no type checker can see them.  A printer that just finished IS ready,
+    so it must keep reading ``IDLE``.  This field adds the missing fact
+    without moving the one every gate already depends on.
+
+    ``None`` means "no information", which is the honest answer for a
+    printer that is mid-print, and for a protocol whose polled status
+    carries no completion signal at all (OctoPrint's state flags, RRF's
+    object model).  ``None`` is never a claim that a job ended well.
+    """
+
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
 
 
 class DeviceType(enum.Enum):
@@ -174,22 +211,31 @@ class PrinterState:
     # from a push cache sets it, because "the last thing the printer said"
     # and "what the printer is doing right now" are not the same sentence.
     state_age_seconds: float | None = None
+    # How the most recent job ENDED, when the printer says so — the axis
+    # :attr:`state` cannot carry, because a finished printer and an
+    # untouched one are both genuinely idle.  ``None`` means the printer
+    # is not reporting an ended job (it is mid-print, or its protocol has
+    # no completion signal); it never means "ended fine".
+    last_job_result: JobResult | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
 
-        The :attr:`state` enum is converted to its string value so the
-        result can be passed directly to ``json.dumps``.  Extended
-        monitoring fields that are ``None`` are omitted for compactness.
+        The :attr:`state` and :attr:`last_job_result` enums are converted
+        to their string values so the result can be passed directly to
+        ``json.dumps``.  Extended monitoring fields that are ``None`` are
+        omitted for compactness.
         """
         data = asdict(self)
         data["state"] = self.state.value
+        if self.last_job_result is not None:
+            data["last_job_result"] = self.last_job_result.value
         # Omit None extended fields.
         _EXTENDED = (
             "cooling_fan_speed", "aux_fan_speed", "chamber_fan_speed",
             "heatbreak_fan_speed", "wifi_signal", "nozzle_diameter",
             "nozzle_type", "speed_profile", "speed_magnitude", "print_error",
-            "state_age_seconds",
+            "state_age_seconds", "last_job_result",
         )
         for key in _EXTENDED:
             if data.get(key) is None:
@@ -1269,9 +1315,24 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
     layers resolve only rows that are still pending and dedupe per
     (printer, job), so whichever sees the ending first wins and the
     other no-ops.
+
+    The token this feeds the loop is :attr:`PrinterState.last_job_result`
+    when the printer named one, and the operational status otherwise.
+    That ordering is the whole point: the loop's own vocabulary already
+    distinguishes a finish from a cancel, but until the adapters carried
+    the distinction, every ending arrived here as the single word
+    ``"idle"`` — which :func:`_infer_outcome` resolves to ``success``.  A
+    print cancelled anywhere except Kiln's own ``cancel_print`` tool was
+    therefore recorded as a success, and a finished print nobody watched
+    could only ever reconcile to ``unknown``, because the machine's
+    testimony had been flattened before the loop could read it.
     """
     status = getattr(state, "state", None)
-    value = getattr(status, "value", "") or ""
+    # The job's ending outranks the machine's current state: "completed"
+    # and "cancelled" are facts about the print, and both live inside the
+    # same IDLE the printer reports afterwards.
+    result = getattr(state, "last_job_result", None)
+    value = getattr(result, "value", None) or getattr(status, "value", "") or ""
     if not value:
         return
 

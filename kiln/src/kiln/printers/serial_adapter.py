@@ -27,6 +27,7 @@ from kiln.printers.base import (
     FirmwareComponent,
     FirmwareStatus,
     JobProgress,
+    JobResult,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,
@@ -548,6 +549,7 @@ class SerialPrinterAdapter(PrinterAdapter):
 
         # Check if actively printing via SD card.
         status = PrinterStatus.IDLE
+        job_result: JobResult | None = None
         try:
             sd_response = self._send_command("M27")
             sd_match = _SD_PROGRESS_RE.search(sd_response)
@@ -559,10 +561,17 @@ class SerialPrinterAdapter(PrinterAdapter):
                     # use our internal _paused flag.
                     status = PrinterStatus.PAUSED if self._paused else PrinterStatus.PRINTING
                 elif total > 0 and current >= total:
-                    # Print complete.
+                    # Print complete: the byte counter has reached the file
+                    # size.  The printer is idle and ready — and the job it
+                    # just ran got all the way to the end, which is a
+                    # separate fact that used to die right here, on the line
+                    # whose own comment said "print complete".
                     status = PrinterStatus.IDLE
+                    job_result = JobResult.COMPLETED
                     self._paused = False
             elif "not sd printing" in sd_response.lower():
+                # Marlin says nothing about a job that is no longer loaded,
+                # so this stays an honest absence rather than a completion.
                 status = PrinterStatus.IDLE
                 self._paused = False
         except PrinterError:
@@ -572,6 +581,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         return PrinterState(
             connected=True,
             state=status,
+            last_job_result=job_result,
             tool_temp_actual=temps.get("tool_actual"),
             tool_temp_target=temps.get("tool_target"),
             bed_temp_actual=temps.get("bed_actual"),

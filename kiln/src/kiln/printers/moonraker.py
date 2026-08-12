@@ -29,6 +29,7 @@ from kiln.printers.base import (
     FirmwareStatus,
     FirmwareUpdateResult,
     JobProgress,
+    JobResult,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,
@@ -68,6 +69,31 @@ _STATE_MAP: dict[str, PrinterStatus] = {
     "complete": PrinterStatus.IDLE,
     "cancelled": PrinterStatus.IDLE,
 }
+
+# How the last job ENDED, for the ``print_stats.state`` values that say so.
+# Klipper is unusually explicit here — it distinguishes "complete" from
+# "cancelled" natively — and both used to arrive as the same IDLE, which
+# threw the distinction away at the one adapter best placed to keep it.
+# ``standby`` is absent on purpose: it is a printer that has not run a job
+# this session, which is a genuine absence of information rather than an
+# ending.  ``error`` too — that is a Klipper fault state, not a verdict on
+# a job, and the status it already maps to says so.
+_JOB_RESULT_MAP: dict[str, JobResult] = {
+    "complete": JobResult.COMPLETED,
+    "cancelled": JobResult.CANCELLED,
+}
+
+
+def _map_moonraker_job_result(print_state: str | None) -> JobResult | None:
+    """How the last job ended, per ``print_stats.state``, or ``None``.
+
+    Only ``print_stats`` can answer this; the klippy connection state
+    describes the host process, not a print.
+    """
+    if not print_state:
+        return None
+    return _JOB_RESULT_MAP.get(print_state)
+
 
 # Klipper's two filament runout sensor modules.  Both are registered under
 # "<type> <name>" (see get_filament_status), so these are section-name
@@ -928,6 +954,7 @@ class MoonrakerAdapter(PrinterAdapter):
         return PrinterState(
             connected=True,
             state=mapped_status,
+            last_job_result=_map_moonraker_job_result(print_state),
             tool_temp_actual=tool_actual,
             tool_temp_target=tool_target,
             bed_temp_actual=bed_actual,
@@ -973,6 +1000,7 @@ class MoonrakerAdapter(PrinterAdapter):
         return PrinterState(
             connected=True,
             state=mapped_status,
+            last_job_result=_map_moonraker_job_result(print_state),
             tool_temp_actual=tool_actual,
             tool_temp_target=tool_target,
             bed_temp_actual=bed_actual,

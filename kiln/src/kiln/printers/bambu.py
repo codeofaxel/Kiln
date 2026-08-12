@@ -42,6 +42,7 @@ import paho.mqtt.client as mqtt
 from kiln.printers.base import (
     STALE_STATE_WARN_AGE,
     JobProgress,
+    JobResult,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,
@@ -143,6 +144,12 @@ class _BackoffState:
 
 
 # Mapping from Bambu ``gcode_state`` strings to :class:`PrinterStatus`.
+#
+# ``finish`` maps to IDLE on purpose: a printer that has finished is doing
+# nothing and is ready for the next job, which is what every pre-print gate
+# reads this value to decide.  What it does NOT say — that a print just ran
+# to completion — is carried by _JOB_RESULT_MAP below, so the two facts stop
+# competing for one field.
 _STATE_MAP: dict[str, PrinterStatus] = {
     "idle": PrinterStatus.IDLE,
     "finish": PrinterStatus.IDLE,
@@ -155,6 +162,16 @@ _STATE_MAP: dict[str, PrinterStatus] = {
     "cancelling": PrinterStatus.CANCELLING,
     "offline": PrinterStatus.OFFLINE,
     "unknown": PrinterStatus.UNKNOWN,
+}
+
+# How the last job ENDED, for the ``gcode_state`` values that say so.
+# ``idle`` is absent deliberately — on firmware that jumps straight to it
+# after a print, it genuinely carries no ending, and inventing one here
+# would be the same guess this field exists to stop making.  ``failed`` is
+# resolved in :meth:`BambuAdapter._build_state_from_cache` rather than
+# here, because its meaning depends on the ``print_error`` beside it.
+_JOB_RESULT_MAP: dict[str, JobResult] = {
+    "finish": JobResult.COMPLETED,
 }
 
 # States that indicate a print job is active or starting.
@@ -1647,20 +1664,35 @@ class BambuAdapter(PrinterAdapter):
         gcode_state = gcode_state.lower()
 
         mapped = _STATE_MAP.get(gcode_state, PrinterStatus.UNKNOWN)
+        job_result = _JOB_RESULT_MAP.get(gcode_state)
 
         # After a cancelled print the MQTT cache can get stuck with
         # gcode_state="failed" even though the printer is actually idle.
         # When print_error is explicitly present and equals 0 (no real error),
         # this is a stale post-cancel state — treat it as IDLE so preflight
         # checks pass.  If print_error is absent we conservatively keep ERROR.
+        #
+        # The IDLE downgrade stays exactly as it was: the machine really is
+        # ready, and demoting it would block the next print.  What changes is
+        # that the downgrade no longer DESTROYS the fact underneath it.  A job
+        # the firmware calls "failed" while naming no error code is a job that
+        # ended without completing — on this firmware, what a cancel looks
+        # like — so it is reported as CANCELLED rather than silently becoming
+        # indistinguishable from a printer nobody has touched.  Even if such a
+        # state were some unreported failure rather than a cancel, "did not
+        # complete" is the honest half of both, and it errs away from the
+        # false "success" the flattened value used to produce.
         if mapped == PrinterStatus.ERROR:
             raw_error = status.get("print_error")
+            error_val: int = -1
             if raw_error is not None:
-                error_val: int = -1
                 with contextlib.suppress(TypeError, ValueError):
                     error_val = int(raw_error)
                 if error_val == 0:
                     mapped = PrinterStatus.IDLE
+            job_result = (
+                JobResult.CANCELLED if error_val == 0 else JobResult.FAILED
+            )
 
         # Speed profile.
         spd_lvl = status.get("spd_lvl")
@@ -1685,6 +1717,7 @@ class BambuAdapter(PrinterAdapter):
         return PrinterState(
             connected=True,
             state=mapped,
+            last_job_result=job_result,
             tool_temp_actual=status.get("nozzle_temper"),
             tool_temp_target=status.get("nozzle_target_temper"),
             bed_temp_actual=status.get("bed_temper"),
