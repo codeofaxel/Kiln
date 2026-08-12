@@ -684,8 +684,10 @@ class TestStartPrintFailure:
 
         result = scheduler.tick()
 
+        # An adapter that fails without saying why still produces a usable
+        # error: the shared print-start resolver names the file.
         assert len(result["failed"]) == 1
-        assert "start_print returned failure" in result["failed"][0]["error"]
+        assert "did not start test.gcode" in result["failed"][0]["error"]
 
 
 # ---------------------------------------------------------------------------

@@ -38,6 +38,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.print_start_verdict import resolve_print_start
+
 logger = logging.getLogger(__name__)
 
 
@@ -88,6 +90,20 @@ class PipelineResult:
             "total_duration_seconds": round(self.total_duration_seconds, 2),
             "steps": [s.to_dict() for s in self.steps],
         }
+
+
+def _start_print_step_message(verdict: Any, remote_name: str) -> str:
+    """The start_print step's one-line message, matching its verdict.
+
+    Both pipelines that start a print say the same three things, so they say
+    them from one place — the step used to report "Print started" whatever the
+    printer answered, including when it answered nothing.
+    """
+    if verdict.confirmed:
+        return f"Print started: {remote_name}"
+    if verdict.ok:
+        return f"Print command accepted, not yet confirmed running: {remote_name}"
+    return f"Printer did not start {remote_name}. {verdict.message}"
 
 
 # ---------------------------------------------------------------------------
@@ -705,14 +721,22 @@ def quick_print(
                 # absent on purpose — that's the R3 safety net.)
                 start_kwargs["use_ams"] = False
 
-            adapter.start_print(remote_name, **start_kwargs)
+            sent_at = time.monotonic()
+            print_result = adapter.start_print(remote_name, **start_kwargs)
+            verdict = resolve_print_start(
+                adapter, print_result, sent_at=sent_at, file_name=remote_name,
+            )
 
-            step_data: dict[str, Any] = {"file_name": remote_name}
+            step_data: dict[str, Any] = {
+                "file_name": remote_name,
+                "print_start": verdict.state,
+                "print": verdict.to_dict(),
+            }
             if ams_selection is not None:
                 step_data["ams_selection"] = ams_selection
             if ams_warnings:
                 step_data["ams_warnings"] = ams_warnings
-            msg = f"Print started: {remote_name}"
+            msg = _start_print_step_message(verdict, remote_name)
             if ams_selection is not None:
                 msg += (
                     f" (AMS slot {ams_selection['slot']} — "
@@ -720,7 +744,7 @@ def quick_print(
                 )
             return PipelineStep(
                 name="start_print",
-                success=True,
+                success=verdict.ok,
                 message=msg,
                 data=step_data,
                 duration_seconds=time.time() - step_start,
@@ -1167,13 +1191,21 @@ def reslice_and_print(
                         start_kwargs["ams_mapping"] = ams_decision["ams_mapping"]
                     ams_selection = ams_decision.get("selection")
 
-            adapter.start_print(remote_name, **start_kwargs)
-            step_data: dict[str, Any] = {"file_name": remote_name}
+            sent_at = time.monotonic()
+            print_result = adapter.start_print(remote_name, **start_kwargs)
+            verdict = resolve_print_start(
+                adapter, print_result, sent_at=sent_at, file_name=remote_name,
+            )
+            step_data: dict[str, Any] = {
+                "file_name": remote_name,
+                "print_start": verdict.state,
+                "print": verdict.to_dict(),
+            }
             if ams_selection is not None:
                 step_data["ams_selection"] = ams_selection
             if ams_warnings:
                 step_data["ams_warnings"] = ams_warnings
-            msg = f"Print started: {remote_name}"
+            msg = _start_print_step_message(verdict, remote_name)
             if ams_selection is not None:
                 msg += (
                     f" (AMS slot {ams_selection['slot']} — "
@@ -1181,7 +1213,7 @@ def reslice_and_print(
                 )
             return PipelineStep(
                 name="start_print",
-                success=True,
+                success=verdict.ok,
                 message=msg,
                 data=step_data,
                 duration_seconds=time.time() - step_start,

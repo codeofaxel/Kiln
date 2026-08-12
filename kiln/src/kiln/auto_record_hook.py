@@ -52,22 +52,34 @@ Outcome inference
 The ``gcode_state`` / ``print_error`` pair maps to outcomes as:
 
 ==========================  ==========  =====================
-gcode_state (previous)      new         outcome
+previous state              new         outcome
 ==========================  ==========  =====================
 printing / paused / busy    finish      success
+printing / paused / busy    completed   success
 printing / paused / busy    failed      failed
-printing / paused / busy    idle(*)     cancelled (*see note)
+printing / paused / busy    cancelled   cancelled
+printing / paused / busy    idle(*)     success, or cancelled
+                                         with a live intent (*)
 anything                    anything    (no record, not a
                                          terminal-after-active
                                          transition)
 ==========================  ==========  =====================
 
-(*) Bambu firmware has no dedicated "cancelled" state — a successful
-cancel lands in ``idle``.  We can only tell it was a cancel vs a
-natural finish if the cancel command was issued by our side within
-the last few seconds.  :func:`register_cancel_intent` records the
-intent so the next idle transition for that printer is treated as a
-cancel rather than a success.
+Two vocabularies arrive here.  Bambu's MQTT push path feeds its raw
+firmware ``gcode_state``; every adapter's polled path feeds
+``JobResult`` (``completed`` / ``cancelled`` / ``failed``) when the
+printer named an ending, and the ``PrinterStatus`` value otherwise.
+
+(*) The bare ``idle`` row is the residual guess, and it is only
+reached now by firmware that names no ending at all — Bambu versions
+that jump straight to ``idle`` after a print, rather than through
+``finish``.  There, a cancel is distinguishable from a finish only if
+our own side registered the intent within the last few seconds
+(:func:`register_cancel_intent`, called from the ``cancel_print``
+tool).  A cancel from the touchscreen or a rival client on such
+firmware still lands as ``success``.  Adapters that CAN name the
+ending no longer take this path: they report ``cancelled`` outright,
+which needs no intent and beats one.
 
 Upsert semantics
 ----------------
@@ -122,15 +134,26 @@ _ACTIVE_STATES: frozenset[str] = frozenset({
     "cancelling",  # a cancel in flight is still an active job
 })
 
-# gcode_state that means "the print finished cleanly".
-_FINISH_STATES: frozenset[str] = frozenset({"finish"})
+# State that means "the print finished cleanly": Bambu's firmware
+# "finish" plus ``JobResult.COMPLETED``, the adapter-generic report.
+_FINISH_STATES: frozenset[str] = frozenset({"finish", "completed"})
 
-# State that means "the print failed": Bambu's firmware "failed" plus
-# the normalized PrinterStatus "error".
+# State that means "the print failed": Bambu's firmware "failed", the
+# normalized PrinterStatus "error", and ``JobResult.FAILED`` (which
+# spells itself "failed" and so is already covered).
 _FAILED_STATES: frozenset[str] = frozenset({"failed", "error"})
 
+# ``JobResult.CANCELLED`` — a print that ENDED without completing, said
+# by the machine rather than inferred from our own cancel intent.  This
+# is the token Moonraker's "cancelled", Prusa Link's "STOPPED" and
+# Bambu's post-cancel cache now arrive as.  Distinct from the ACTIVE
+# "cancelling", which is a cancel still in flight.
+_CANCELLED_STATES: frozenset[str] = frozenset({"cancelled"})
+
 # Neutral idle — could mean finished naturally, cancelled, or startup.
-# The cancel-intent table disambiguates.
+# The cancel-intent table disambiguates.  Reaching this set is now the
+# fallback for firmware that names no ending, not the common path: an
+# adapter that can tell a finish from a cancel reports it above.
 _IDLE_STATES: frozenset[str] = frozenset({"idle"})
 
 
@@ -259,6 +282,13 @@ def _infer_outcome(
         return ("failed", _failure_mode_from_code(print_error_code))
     if state in _FINISH_STATES:
         return ("success", None)
+    if state in _CANCELLED_STATES:
+        # The machine said the job ended without completing.  This needs
+        # no cancel intent and beats one: it is true for a cancel from
+        # the touchscreen, from a rival client, or from any Kiln path
+        # that isn't the one tool wired to register an intent.
+        _HOOK_STATE.consume_cancel_intent(printer_name)
+        return ("cancelled", None)
     if state in _IDLE_STATES:
         # Ambiguous — check cancel intent.  If someone called
         # register_cancel_intent recently, treat as cancelled.  Else
@@ -282,7 +312,10 @@ def is_terminal_transition(prev_state: str | None, new_state: str | None) -> boo
     prev = prev_state.lower().strip()
     new = new_state.lower().strip()
     return prev in _ACTIVE_STATES and (
-        new in _FINISH_STATES or new in _FAILED_STATES or new in _IDLE_STATES
+        new in _FINISH_STATES
+        or new in _FAILED_STATES
+        or new in _CANCELLED_STATES
+        or new in _IDLE_STATES
     )
 
 
@@ -496,6 +529,12 @@ def reconcile_pending_outcomes(
             note = (
                 "resolved on reconnect: printer still reported this job "
                 f"in a failed state (print_error={print_error_code})"
+            )
+        elif state in _CANCELLED_STATES and (matches or lone_unlabelled):
+            outcome = "cancelled"
+            note = (
+                "resolved on reconnect: printer still reported this job "
+                "as ended without completing"
             )
         else:
             outcome = "unknown"

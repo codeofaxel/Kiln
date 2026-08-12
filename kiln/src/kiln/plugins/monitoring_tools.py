@@ -25,6 +25,7 @@ from typing import Any
 
 from kiln.errors import HostedUnavailableError
 from kiln.events import EventType
+from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
@@ -1307,7 +1308,10 @@ class _MonitoringToolsPlugin:
                     result["preflight"] = pf
                     return result
 
-                # Start the print
+                # Start the print.  ``sent_at`` is captured before the command
+                # so the verdict below can tell a reading about THIS job from
+                # the printer's last word about the previous one.
+                sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name)
                 _srv._get_heater_watchdog().notify_print_started()
                 _srv._audit(
@@ -1332,18 +1336,36 @@ class _MonitoringToolsPlugin:
                 _srv._first_layer_monitors[monitor_id] = monitor
                 monitor.start()
 
-                return {
-                    "success": True,
-                    "print_result": print_result.to_dict(),
-                    "monitor_id": monitor_id,
-                    "monitor_status": "started",
-                    "first_layer_policy": policy.to_dict(),
-                    "message": (
-                        f"Print started and first-layer monitor launched (id={monitor_id}). "
+                verdict = resolve_print_start(
+                    adapter, print_result, sent_at=sent_at, file_name=file_name,
+                )
+                if verdict.ok:
+                    lead = (
+                        "Print started"
+                        if verdict.confirmed
+                        else "Print command accepted (not yet confirmed running)"
+                    )
+                    monitored_message = (
+                        f"{lead} and first-layer monitor launched (id={monitor_id}). "
                         "Use watch_print_status or check back after "
                         f"~{first_layer_delay + first_layer_checks * first_layer_interval}s "
                         "for first-layer snapshots."
-                    ),
+                    )
+                else:
+                    monitored_message = (
+                        f"The printer did not start {file_name}. "
+                        f"{verdict.message} The first-layer monitor was "
+                        f"launched anyway (id={monitor_id}) and will find "
+                        f"nothing to look at."
+                    )
+                return {
+                    "success": verdict.ok,
+                    "print_start": verdict.state,
+                    "print_result": verdict.to_dict(),
+                    "monitor_id": monitor_id,
+                    "monitor_status": "started",
+                    "first_layer_policy": policy.to_dict(),
+                    "message": monitored_message,
                 }
             except PrinterNotFoundError:
                 return _srv._error_dict(
