@@ -123,6 +123,23 @@ class TestPrintStatusLite:
         # `job` is small already and is not trimmed.
         assert lite["job"] == full["job"]
 
+    @patch("kiln.server._reported_printer_name", return_value="garage")
+    @patch("kiln.server._get_adapter")
+    def test_the_printer_label_survives_the_lite_trim(self, mock_get_adapter, _name):
+        """Merged behaviour: `printer_name` says which machine a reading
+        describes. It has to be on BOTH detail levels — a label is what
+        makes a reading attributable, and lite is the level being polled
+        every few seconds."""
+        from kiln.server import printer_status
+
+        self._wire(
+            mock_get_adapter,
+            PrinterState(connected=True, state=PrinterStatus.PRINTING),
+            JobProgress(file_name="a.3mf", completion=0.5),
+        )
+        assert printer_status()["printer_name"] == "garage"
+        assert printer_status(detail="lite")["printer_name"] == "garage"
+
     @patch("kiln.server._get_adapter")
     def test_idle_omits_absent_readings_at_both_levels(self, mock_get_adapter):
         from kiln.server import printer_status
