@@ -36,7 +36,7 @@ def test_a_daemon_older_than_the_install_asks_only_for_a_restart():
     assert v.state == RESTART_PENDING
     body = " ".join(v.lines)
     assert "1.2.0" in body and "1.3.2" in body
-    assert "kiln bridge stop && kiln bridge start" in body
+    assert "kiln bridge restart" in body
     # It is already downloaded; do not send anyone to pip for it.
     assert "pip install" not in body
 
@@ -47,8 +47,8 @@ def test_a_newer_release_on_pypi_asks_for_both_steps():
     body = " ".join(v.lines)
     assert "1.4.0" in body
     # Installing alone never reaches the running daemon, so the restart is
-    # not a footnote — it is half the instruction.
-    assert "pip install --upgrade kiln3d && kiln bridge stop && kiln bridge start" in body
+    # not a footnote — it is half the instruction, and still one paste.
+    assert "pip install --upgrade kiln3d && kiln bridge restart" in body
 
 
 def test_behind_on_both_counts_names_both():
@@ -69,16 +69,20 @@ def test_restart_pending_survives_having_no_network():
     assert v.state == RESTART_PENDING
 
 
-def test_a_login_managed_bridge_is_told_the_command_that_works():
-    """`kiln bridge start` against a login-managed bridge prints "Already set
-    to start on login" and does nothing — advice that fails silently is worse
-    than none, because the operator watches the version not change."""
-    managed = describe(running="1.2.0", installed="1.3.2", enabled=True)
-    assert "kiln bridge disable && kiln bridge enable" in " ".join(managed.lines)
-    assert "kiln bridge stop" not in " ".join(managed.lines)
-
-    session = describe(running="1.2.0", installed="1.3.2", enabled=False)
-    assert "kiln bridge stop && kiln bridge start" in " ".join(session.lines)
+def test_the_advice_is_one_verb_and_never_a_command_pair():
+    """This used to branch: `disable && enable` for a login-managed bridge,
+    `stop && start` for a session one — two commands to do one thing, and the
+    wrong pair does nothing at all.  The verb exists now, so the branch is
+    gone and there is nothing left to pick wrong."""
+    for state in (
+        describe(running="1.2.0", installed="1.3.2"),
+        describe(running="1.2.0", installed="1.2.5", latest="1.4.0"),
+        describe(running="1.3.2", installed="1.3.2", latest="1.4.0"),
+    ):
+        body = " ".join(state.lines)
+        assert "kiln bridge restart" in body
+        for pair in ("disable && kiln bridge enable", "stop && kiln bridge start"):
+            assert pair not in body, f"advice regrew a command pair: {pair}"
 
 
 def test_a_daemon_that_reports_no_version_is_not_guessed_about():
@@ -118,6 +122,7 @@ def test_an_unknown_running_version_still_reports_a_pypi_update():
 _REPORTS_ONLY = (
     "bridge_version.py",       # the version brain
     "bridge_supervisor.py",    # the one place an update could be applied
+    "cli/bridge_commands.py",  # where `kiln bridge restart` lives
 )
 
 # Executing an installer.  Naming the pip command as TEXT is required — the
@@ -127,10 +132,35 @@ _FORBIDDEN_CALLS = frozenset({
 })
 _FORBIDDEN_IMPORTS = frozenset({"pip", "kiln.self_update"})
 
+#: Calls that start a process.  The pip ban applies to these ONLY, because the
+#: rule is about what the bridge EXECUTES.  `_preflight` legitimately raises an
+#: exception whose text tells the user to `pip install websockets`, and telling
+#: someone to install something is the opposite of doing it behind their back.
+_PROCESS_LAUNCHERS = frozenset({"run", "Popen", "call"})
+
 
 def _module_source(name: str) -> tuple[Path, ast.Module]:
     path = Path(__file__).resolve().parents[1] / "src" / "kiln" / name
     return path, ast.parse(path.read_text(encoding="utf-8"))
+
+
+def _literal_args(call: ast.Call) -> list[str]:
+    """Every string literal passed to *call*, including inside a list/tuple.
+
+    `bridge_commands` legitimately shells out (launchctl, systemctl), so the
+    ban there cannot be on subprocess itself — it has to be on WHAT is run.
+    Reading only call arguments keeps the prose out of it: the docstrings in
+    these modules discuss pip at length, and must stay free to.
+    """
+    found: list[str] = []
+    stack: list[ast.expr] = [*call.args, *(kw.value for kw in call.keywords)]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            found.append(node.value)
+        elif isinstance(node, (ast.List, ast.Tuple)):
+            stack.extend(node.elts)
+    return found
 
 
 def test_the_bridge_never_upgrades_itself():
@@ -149,6 +179,12 @@ def test_the_bridge_never_upgrades_itself():
                     "upgrade itself. See the decision in bridge_version.py's docstring; "
                     "reopening it is a conscious change, not a quiet one."
                 )
+                if called in _PROCESS_LAUNCHERS:
+                    for literal in _literal_args(node):
+                        assert literal != "pip" and "pip install" not in literal, (
+                            f"{path.name} runs pip ({literal!r}). `kiln bridge "
+                            "restart` cycles a process; it does not install software."
+                        )
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     assert alias.name not in _FORBIDDEN_IMPORTS, (
@@ -180,3 +216,35 @@ def test_the_ban_would_actually_catch_an_upgrade_being_added():
         for a in n.names
     ]
     assert "self_update" in imported
+
+
+def test_the_ban_would_catch_a_restart_that_quietly_ran_pip():
+    """The other way in, and the one `restart` makes plausible: not importing
+    the upgrade machinery, just shelling out — in a module that already shells
+    out to launchctl and systemctl for perfectly good reasons.
+    """
+    tree = ast.parse(
+        'subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "kiln3d"])'
+    )
+    call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call))
+    assert call.func.attr in _PROCESS_LAUNCHERS
+    assert "pip" in _literal_args(call), "the detector cannot see a pip argument"
+
+    # And it does not fire on the shell-outs that belong there.
+    benign = ast.parse('subprocess.run(["launchctl", "load", "-w", path])')
+    call = next(n for n in ast.walk(benign) if isinstance(n, ast.Call))
+    assert not any(a == "pip" or "pip install" in a for a in _literal_args(call))
+
+
+def test_telling_someone_to_install_something_is_not_installing_it():
+    """The distinction the ban has to hold, and the one it got wrong first
+    time: `_preflight` raises an exception whose TEXT says
+    "pip install websockets".  Advice is the opposite of a silent install, and
+    a gate that cannot tell them apart is a gate that gets deleted.
+    """
+    tree = ast.parse(
+        'raise click.ClickException("not installed\\n  pip install websockets")'
+    )
+    call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call))
+    called = call.func.attr if isinstance(call.func, ast.Attribute) else call.func.id
+    assert called not in _PROCESS_LAUNCHERS, "advice text would be read as an install"

@@ -12,6 +12,7 @@ It runs ONLY when you turn it on here.  Installing Kiln never connects anything;
     kiln bridge disable    off — stop now and stop starting on login
     kiln bridge start      run once in the background (until you log out)
     kiln bridge stop       stop the background run
+    kiln bridge restart    cycle it, however it happens to be supervised
     kiln bridge status     is it on, is it connected, is it current?
 
 Start-on-login is per-user and needs no elevation on all three platforms:
@@ -273,7 +274,11 @@ def _describe_status(
         headline = "enabled, but not running"
         lines += [
             "Set to start on login, but not running right now.",
-            f"Start it now: kiln bridge start   ·   Log: {_LOG_FILE}",
+            # NOT `kiln bridge start`, which this state is precisely the one
+            # that command refuses: it sees a login service and returns
+            # "Already set to start on login" without starting anything, so
+            # the advice read as help and did nothing.
+            f"Start it now: kiln bridge restart   ·   Log: {_LOG_FILE}",
         ]
     else:
         return "off", [
@@ -570,6 +575,20 @@ def _service_installed() -> bool:
     return False
 
 
+def _os_supervises_the_bridge() -> bool:
+    """True where the login service itself brings a dead bridge back.
+
+    The axis a restart turns on, and it is NOT "is a service installed".
+    launchd (``KeepAlive``) and systemd (``Restart=always``) watch the process
+    and respawn it, so restarting there means ending the process and letting
+    the OS do what it already does.  The Windows Run key launches at login and
+    never looks again — which is exactly why ``enable`` starts our own
+    supervisor there — so a Windows bridge, installed or not, is cycled the
+    same way a session one is.
+    """
+    return _service_installed() and sys.platform != "win32"
+
+
 def _atomic_write(path: str, content: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.tmp"
@@ -674,7 +693,7 @@ def bridge() -> None:
 
 @bridge.command()
 def status() -> None:
-    """Show whether the bridge is on and connected."""
+    """Show whether the bridge is on, connected, and running current code."""
     st = read_bridge_state()
     sup = read_supervisor_state()
     running = _running_pid() is not None
@@ -686,7 +705,6 @@ def status() -> None:
         running=st.get("version"),
         installed=_installed_version(),
         latest=_latest_published_version(),
-        enabled=enabled,
     )
     headline, lines = _describe_status(
         signed_in=bool(bearer.token),
@@ -823,6 +841,85 @@ def start() -> None:
     click.echo("  Survive a reboot too: kiln bridge enable   ·   Stop it: kiln bridge stop")
 
 
+#: How long ``restart`` waits for the bridge to come back.  launchd throttles
+#: respawns to one per ``ThrottleInterval`` (10s by default) and systemd waits
+#: ``RestartSec=3``, so a bridge cycled twice in quick succession can take
+#: about ten seconds.  Measured on macOS: one that had been up longer than the
+#: throttle came back in about a second.
+_RESTART_WAIT_S = 12.0
+
+
+@bridge.command()
+def restart() -> None:
+    """Restart the bridge — the way to pick up a newer Kiln.
+
+    One verb over the two-command pairs this used to take, because which pair
+    worked depended on how the bridge was supervised and the wrong one does
+    nothing at all.  That is a fact about our own plumbing and there is no
+    reason a user should have to hold it.
+
+    A bridge keeps the code it imported at boot, and neither launchd nor
+    systemd restarts a process merely for being old, so this is what a
+    ``pip install --upgrade kiln3d`` needs before the daemon is actually
+    running the version you installed.  It does NOT install anything — see
+    :mod:`kiln.bridge_version` for why that stays a separate, asked-for act.
+    """
+    running = _running_pid()
+    supervised = _running_supervisor_pid()
+
+    if running is None and supervised is None:
+        if not _service_installed():
+            click.echo("Bridge isn't running, so there's nothing to restart.")
+            click.echo("  Start it: kiln bridge start   ·   Or for good: kiln bridge enable")
+            return
+        # Set to start on login but nothing is up — the honest action is to
+        # start it through the login service, which is also the one thing
+        # `kiln bridge start` refuses to do for a managed bridge.
+        _preflight()
+        ok, detail = _install_service()
+        if not ok:
+            raise click.ClickException(f"Couldn't start the login service: {detail}")
+        _report_restart("Bridge started", interrupted=False)
+        return
+
+    _preflight()
+    if _os_supervises_the_bridge():
+        # End the process and let launchd/systemd do what they already do for
+        # a bridge that dies.  Deliberately NOT a reinstall of the service:
+        # on Linux `systemctl enable --now` only STARTS an inactive unit and
+        # would leave a running one on its old code — the exact failure this
+        # whole command exists to prevent.  The state file is left alone; the
+        # replacement process rewrites it, and clearing it here would race.
+        if running is not None:
+            _terminate(running)
+    else:
+        # Our supervisor (a session `start`, or Windows `enable`).  A full
+        # stop-and-respawn rather than killing the child and letting the
+        # supervisor catch it: a deliberate restart is not a crash, and it
+        # should not spend the crash-loop budget that exists to notice a
+        # genuinely broken install.
+        _stop_process()
+        _spawn_supervised_bridge()
+
+    _report_restart("Bridge restarted", interrupted=True)
+
+
+def _report_restart(headline: str, *, interrupted: bool) -> None:
+    """Say whether it came back, and what it came back as."""
+    if _await_connected(timeout=_RESTART_WAIT_S):
+        version = read_bridge_state().get("version")
+        running_now = f" — now running Kiln {version}" if version else ""
+        click.echo(click.style(f"{headline} ✓", fg="green") + f"{running_now}, connected.")
+    else:
+        click.echo(click.style(f"{headline}.", fg="green") + " Connecting…")
+        click.echo("  Confirm with: kiln bridge status")
+    if interrupted:
+        # A print in progress is owned by the machine, not by us: it keeps
+        # going through this.  What drops is the web's route to it, briefly.
+        # Only worth saying when there was something to interrupt.
+        click.echo("  Your printer keeps printing; the link from kiln3d.com blinks.")
+
+
 @bridge.command()
 def stop() -> None:
     """Stop the background bridge run."""
@@ -837,7 +934,7 @@ def stop() -> None:
 
 
 def register_bridge_cli(cli_group: click.Group) -> None:
-    """Attach ``kiln bridge {status,start,stop,enable,disable}``.
+    """Attach ``kiln bridge {status,start,stop,restart,enable,disable}``.
 
     Called unconditionally from ``kiln.cli.main`` — the bridge ships in the
     public package and depends on nothing proprietary.

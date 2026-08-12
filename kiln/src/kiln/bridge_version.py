@@ -81,18 +81,14 @@ class BridgeVersionVerdict:
     lines: tuple[str, ...]
 
 
-def _restart_command(enabled: bool) -> str:
-    """The command pair that actually restarts THIS user's bridge.
-
-    Which pair depends on how it was started, and getting it wrong is not a
-    cosmetic miss: ``kiln bridge start`` against a login-managed bridge prints
-    "Already set to start on login" and does nothing, so an operator following
-    the advice would watch the version fail to change and conclude the report
-    was wrong.
-    """
-    if enabled:
-        return "kiln bridge disable && kiln bridge enable"
-    return "kiln bridge stop && kiln bridge start"
+#: One verb, unconditionally.  This advice used to branch — ``disable &&
+#: enable`` for a login-managed bridge, ``stop && start`` for a session one —
+#: because no single command restarted a bridge, and the wrong pair does
+#: nothing at all (``kiln bridge start`` refuses on a login-managed bridge).
+#: Two commands to do one thing, and a branch to pick which two.  The fix was
+#: not better wording, it was the missing verb: ``kiln bridge restart`` works
+#: out how this bridge is supervised so nobody reading this has to.
+RESTART_COMMAND = "kiln bridge restart"
 
 
 def describe(
@@ -100,7 +96,6 @@ def describe(
     running: str | None,
     installed: str,
     latest: str | None = None,
-    enabled: bool = False,
 ) -> BridgeVersionVerdict:
     """Compare what the daemon loaded against what exists, and say what is owed.
 
@@ -125,15 +120,13 @@ def describe(
     if not needs_install and not needs_restart:
         return BridgeVersionVerdict(state=CURRENT, lines=())
 
-    restart = _restart_command(enabled)
-
     if not needs_install:
         return BridgeVersionVerdict(
             state=RESTART_PENDING,
             lines=(
                 f"Running Kiln {running}, but {installed} is installed here. "
                 "A bridge keeps the version it started with.",
-                f"Pick up the newer one: {restart}",
+                f"Pick up the newer one: {RESTART_COMMAND}",
             ),
         )
 
@@ -152,6 +145,9 @@ def describe(
         state=UPDATE_AVAILABLE,
         lines=(
             f"Kiln {latest} is available ({behind}).",
-            f"Update and pick it up: {UPGRADE_COMMAND} && {restart}",
+            # Two genuinely different actions — fetch it, then pick it up —
+            # chained so they are still one paste.  `&&` is the honest join:
+            # if the install fails there is nothing new to restart into.
+            f"Update and pick it up: {UPGRADE_COMMAND} && {RESTART_COMMAND}",
         ),
     )

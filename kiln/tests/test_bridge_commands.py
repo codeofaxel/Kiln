@@ -196,7 +196,7 @@ def test_group_exposes_all_verbs():
     # handle-uri is hidden from --help (it's OS-invoked, never typed) but
     # still a real registered command — `hidden=True` only affects listing.
     assert set(bridge.commands) == {
-        "status", "start", "stop", "enable", "disable", "handle-uri",
+        "status", "start", "stop", "restart", "enable", "disable", "handle-uri",
     }
     assert bridge.commands["handle-uri"].hidden is True
 
@@ -518,10 +518,10 @@ def test_status_says_when_the_daemon_is_older_than_the_install():
         signed_in=True, enabled=True, running=True, connected=True,
         since=now - 60, now=now,
         version_lines=["Running Kiln 1.2.0, but 1.3.2 is installed here.",
-                       "Pick up the newer one: kiln bridge disable && kiln bridge enable"],
+                       "Pick up the newer one: kiln bridge restart"],
     )
     assert any("1.2.0" in ln and "1.3.2" in ln for ln in lines)
-    assert any("disable && kiln bridge enable" in ln for ln in lines)
+    assert any("kiln bridge restart" in ln for ln in lines)
 
 
 def test_version_news_is_withheld_from_a_bridge_that_is_not_running():
@@ -610,7 +610,7 @@ def test_status_end_to_end_tells_an_operator_their_daemon_is_stale(
     assert out.exit_code == 0
     assert "on, connected" in out.output
     assert "1.2.0" in out.output and "1.3.2" in out.output
-    assert "kiln bridge stop && kiln bridge start" in out.output
+    assert "kiln bridge restart" in out.output
 
 
 def test_status_survives_a_pypi_check_that_explodes(tmp_path, monkeypatch):
@@ -631,3 +631,185 @@ def test_status_survives_a_pypi_check_that_explodes(tmp_path, monkeypatch):
     out = CliRunner().invoke(bridge, ["status"])
     assert out.exit_code == 0
     assert "on, connected" in out.output
+
+
+# --- `kiln bridge restart`: one verb over the two-command pairs -------------
+#
+# Which pair worked depended on how the bridge was supervised, and the wrong
+# one does nothing at all.  The axis that matters is not "is a service
+# installed" but "who brings a dead bridge back": launchd and systemd do, the
+# Windows Run key does not, and a session `start` is watched by our own
+# supervisor.  These walk all three.
+
+
+def _arm_restart(
+    monkeypatch,
+    *,
+    running_pid,
+    supervisor_pid,
+    service_installed,
+    os_supervises,
+    connected_after=False,
+    version_after=None,
+):
+    """Stand in for every OS interaction `restart` can reach, and record it."""
+    seen: dict[str, list] = {"killed": [], "stopped": [], "spawned": [], "installed": []}
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: running_pid)
+    monkeypatch.setattr(bcmd, "_running_supervisor_pid", lambda: supervisor_pid)
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: service_installed)
+    monkeypatch.setattr(bcmd, "_os_supervises_the_bridge", lambda: os_supervises)
+    monkeypatch.setattr(bcmd, "_preflight", lambda: None)
+    monkeypatch.setattr(bcmd, "_terminate", seen["killed"].append)
+    monkeypatch.setattr(bcmd, "_stop_process", lambda: seen["stopped"].append(1) or True)
+    monkeypatch.setattr(
+        bcmd, "_spawn_supervised_bridge", lambda: seen["spawned"].append(1) or 77
+    )
+    monkeypatch.setattr(
+        bcmd, "_install_service", lambda: seen["installed"].append(1) or (True, "")
+    )
+    monkeypatch.setattr(bcmd, "_await_connected", lambda timeout=0: connected_after)
+    monkeypatch.setattr(
+        bcmd, "read_bridge_state",
+        lambda: {"version": version_after} if version_after else {},
+    )
+    return seen
+
+
+def test_restart_under_launchd_ends_the_process_and_lets_the_os_respawn(monkeypatch):
+    """Verified by execution on macOS: a KeepAlive job SIGTERM'd at the
+    process level is respawned by launchd, in about a second once its throttle
+    interval has passed.  Deliberately NOT a service reinstall — on Linux
+    `systemctl enable --now` only STARTS an inactive unit, so a running one
+    would keep its old code and the restart would silently do nothing.
+    """
+    seen = _arm_restart(
+        monkeypatch, running_pid=333, supervisor_pid=None,
+        service_installed=True, os_supervises=True,
+    )
+    out = CliRunner().invoke(bridge, ["restart"])
+    assert out.exit_code == 0, out.output
+    assert seen["killed"] == [333], "did not end the process launchd would replace"
+    assert seen["installed"] == [], "rewrote the service definition instead"
+    assert seen["stopped"] == [], "killed the supervisor launchd is standing in for"
+
+
+def test_restart_on_windows_cycles_our_own_supervisor(monkeypatch):
+    """The Run key launches at login and never looks again, so an installed
+    service there is NOT a supervisor: killing the bridge and waiting would
+    leave nothing to bring it back."""
+    seen = _arm_restart(
+        monkeypatch, running_pid=333, supervisor_pid=444,
+        service_installed=True, os_supervises=False,
+    )
+    out = CliRunner().invoke(bridge, ["restart"])
+    assert out.exit_code == 0, out.output
+    assert seen["stopped"] == [1] and seen["spawned"] == [1]
+    assert seen["installed"] == [], "reinstalled the Run key to restart a process"
+
+
+def test_restart_of_a_session_bridge_stops_and_respawns(monkeypatch):
+    """A deliberate restart is not a crash, so it goes through a clean stop
+    rather than killing the child and spending the supervisor's crash-loop
+    budget, which exists to notice a genuinely broken install."""
+    seen = _arm_restart(
+        monkeypatch, running_pid=333, supervisor_pid=444,
+        service_installed=False, os_supervises=False,
+    )
+    out = CliRunner().invoke(bridge, ["restart"])
+    assert out.exit_code == 0, out.output
+    assert seen["stopped"] == [1] and seen["spawned"] == [1]
+    assert seen["killed"] == [], "killed the child out from under its supervisor"
+
+
+def test_restart_starts_an_enabled_bridge_that_is_not_running(monkeypatch):
+    """The dead end this fixes: status used to send this exact state to
+    `kiln bridge start`, which sees a login service and returns without
+    starting anything."""
+    seen = _arm_restart(
+        monkeypatch, running_pid=None, supervisor_pid=None,
+        service_installed=True, os_supervises=True,
+    )
+    out = CliRunner().invoke(bridge, ["restart"])
+    assert out.exit_code == 0, out.output
+    assert seen["installed"] == [1], "left an enabled-but-dead bridge dead"
+
+
+def test_restart_says_so_when_there_is_nothing_to_restart(monkeypatch):
+    seen = _arm_restart(
+        monkeypatch, running_pid=None, supervisor_pid=None,
+        service_installed=False, os_supervises=False,
+    )
+    out = CliRunner().invoke(bridge, ["restart"])
+    assert out.exit_code == 0, out.output
+    assert "nothing to restart" in out.output
+    assert "kiln bridge start" in out.output
+    assert seen["spawned"] == [] and seen["installed"] == []
+
+
+def test_restart_reports_the_version_it_came_back_as(monkeypatch):
+    """Closes the loop on the fact that motivated the restart."""
+    _arm_restart(
+        monkeypatch, running_pid=333, supervisor_pid=None,
+        service_installed=True, os_supervises=True,
+        connected_after=True, version_after="1.3.2",
+    )
+    out = CliRunner().invoke(bridge, ["restart"])
+    assert "now running Kiln 1.3.2" in out.output
+    # A restart cycles a process; the machine owns the job and keeps going.
+    assert "keeps printing" in out.output
+
+
+def test_restart_refuses_rather_than_killing_a_working_bridge(monkeypatch):
+    """If the environment can no longer run a bridge, restarting into it
+    would trade a working stale bridge for no bridge at all."""
+    seen = _arm_restart(
+        monkeypatch, running_pid=333, supervisor_pid=None,
+        service_installed=True, os_supervises=True,
+    )
+
+    def refuse():
+        raise bcmd.click.ClickException("Sign in first")
+
+    monkeypatch.setattr(bcmd, "_preflight", refuse)
+    out = CliRunner().invoke(bridge, ["restart"])
+    assert out.exit_code != 0
+    assert seen["killed"] == [], "killed a working bridge it could not bring back"
+
+
+def test_the_status_hint_for_an_enabled_dead_bridge_points_at_a_command_that_works():
+    """`kiln bridge start` refuses in exactly this state.  The advice read as
+    help and did nothing, which is the same class of defect as the version
+    advice that used to branch."""
+    _, lines = _describe_status(
+        signed_in=True, enabled=True, running=False, connected=False,
+        since=None, now=1000.0,
+    )
+    hint = next(ln for ln in lines if "Start it now" in ln)
+    assert "kiln bridge restart" in hint
+    assert "kiln bridge start " not in hint
+
+
+def test_which_platforms_have_a_supervising_login_service(monkeypatch):
+    """The axis `restart` turns on, tested directly rather than only stubbed.
+
+    Verified by execution on macOS (a KeepAlive LaunchAgent respawns a
+    SIGTERM'd child in about a second); by documented behaviour on Linux
+    (`Restart=always` covers a process killed by a signal, and only an
+    explicit `systemctl stop` suppresses it) and on Windows (a Run key runs
+    once at login and watches nothing, which is why `enable` starts our own
+    supervisor there).
+    """
+    import sys as _sys
+
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: True)
+    for platform, supervises in (
+        ("darwin", True), ("linux", True), ("win32", False),
+    ):
+        monkeypatch.setattr(_sys, "platform", platform)
+        assert bcmd._os_supervises_the_bridge() is supervises, platform
+
+    # No service installed means nobody is watching, on any platform.
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: False)
+    for platform in ("darwin", "linux", "win32"):
+        monkeypatch.setattr(_sys, "platform", platform)
+        assert bcmd._os_supervises_the_bridge() is False, platform
