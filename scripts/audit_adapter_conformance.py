@@ -293,7 +293,19 @@ def audit() -> list[dict[str, str]]:
                         "adapter": stem, "kind": "missing_reason",
                         "detail": f"{key}: not_in_protocol needs a why",
                     })
-            if status == DEFERRED:
+            if status == DEFERRED and really:
+                # A gap that got closed must not leave its deferral
+                # standing: the row would keep excusing an absence that no
+                # longer exists, and the field would sit unprotected
+                # against regressing back.
+                findings.append({
+                    "adapter": stem, "kind": "stale_deferral",
+                    "detail": (
+                        f"{key} is declared deferred but the adapter now sets "
+                        "it — promote the row to provided so the gate guards it"
+                    ),
+                })
+            elif status == DEFERRED:
                 by = "" if isinstance(claim, str) else str(claim.get("by") or "")
                 if not by or not why:
                     findings.append({

@@ -309,6 +309,15 @@ class MoonrakerWebSocketMonitor:
         self._cache_lock: threading.Lock = threading.Lock()
         self._connected: bool = False
 
+        # When a push last carried the PRINT STATE, as distinct from when
+        # the cache was last written at all.  Klipper sends deltas, so a
+        # single cache-wide clock would answer "when did any field
+        # arrive" — a temperature tick every second would report a fresh
+        # age beside a print_stats.state that stopped updating minutes
+        # ago, which is the exact reassuring-lie this age exists to
+        # prevent.  ``None`` until a push actually carries the state.
+        self._print_state_time: float | None = None
+
         self._thread: threading.Thread | None = None
         self._stop_event: threading.Event = threading.Event()
         self._ws: Any | None = None  # websocket.WebSocketApp instance
@@ -325,6 +334,28 @@ class MoonrakerWebSocketMonitor:
         """Return the latest cached status dict, or ``None`` if empty."""
         with self._cache_lock:
             return dict(self._cache) if self._cache else None
+
+    def _stamp_print_state_locked(self, status: dict[str, Any]) -> None:
+        """Note that this push carried the print state.  Holds the lock.
+
+        Only a payload containing ``print_stats`` counts.  Everything else
+        Klipper subscribes us to — temperatures, fans, the toolhead — says
+        nothing about whether the machine is still printing.
+        """
+        if isinstance(status.get("print_stats"), dict):
+            self._print_state_time = time.time()
+
+    def get_print_state_age(self) -> float | None:
+        """Seconds since a push last carried the print state, or ``None``.
+
+        ``None`` means no push ever has — which is not a claim of
+        freshness, and the caller must pass it through as-is rather than
+        substituting a zero.
+        """
+        with self._cache_lock:
+            if self._print_state_time is None:
+                return None
+            return max(0.0, time.time() - self._print_state_time)
 
     def start(self) -> None:
         """Start the background listener thread.
@@ -447,6 +478,7 @@ class MoonrakerWebSocketMonitor:
                 status = params[0]
                 with self._cache_lock:
                     _merge_status_into(self._cache, status)
+                    self._stamp_print_state_locked(status)
                 self._maybe_record_flow_anomaly(status)
                 if self._on_state_update:
                     try:
@@ -462,6 +494,7 @@ class MoonrakerWebSocketMonitor:
             if isinstance(status, dict):
                 with self._cache_lock:
                     _merge_status_into(self._cache, status)
+                    self._stamp_print_state_locked(status)
 
     def _maybe_record_flow_anomaly(self, status: dict[str, Any]) -> None:
         """Feed flow / extrusion signals into the kiln-pro wear cross-check.
@@ -997,9 +1030,19 @@ class MoonrakerAdapter(PrinterAdapter):
         chamber = cached.get("temperature_sensor chamber", {})
         chamber_actual = chamber.get("temperature") if isinstance(chamber, dict) else None
 
+        # How old the STATE is — not how old the cache is.  This is the
+        # push path, so the answer is only as current as the last frame
+        # that carried print_stats.  Without it the identical get_state
+        # returns a cache-backed reading with no age, and the "these
+        # readings may be stale" warning can never fire on this backend.
+        # The HTTP fallback below deliberately has no age: it asks the
+        # printer on every call, so its reading is current by construction.
+        age = self._ws_monitor.get_print_state_age()
+
         return PrinterState(
             connected=True,
             state=mapped_status,
+            state_age_seconds=round(age, 1) if age is not None else None,
             last_job_result=_map_moonraker_job_result(print_state),
             tool_temp_actual=tool_actual,
             tool_temp_target=tool_target,

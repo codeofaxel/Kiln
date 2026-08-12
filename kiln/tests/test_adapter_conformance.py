@@ -135,6 +135,19 @@ def test_a_deferred_row_expires(gate, tmp_path, monkeypatch):
     assert [f["kind"] for f in found] == ["past_due"]
 
 
+def test_a_deferral_whose_gap_got_closed_is_caught(gate, tmp_path, monkeypatch):
+    """Found by using the gate: closing a deferred gap left the row
+    standing, and the gate said clean.  A stale deferral keeps excusing an
+    absence that no longer exists, and leaves the field unprotected
+    against regressing back — which is the one thing the ledger is for."""
+    rows = dict(FULL_ROWS)
+    rows["JobProgress.completion"] = {
+        "status": "deferred", "why": "was a gap", "by": "2099-01-01",
+    }
+    found = _rig(gate, tmp_path, monkeypatch, {"fake": {"fields": rows}})
+    assert [f["kind"] for f in found] == ["stale_deferral"]
+
+
 def test_a_row_for_a_field_that_no_longer_exists_is_caught(gate, tmp_path, monkeypatch):
     rows = dict(FULL_ROWS)
     rows["PrinterState.invented_field"] = "provided"
