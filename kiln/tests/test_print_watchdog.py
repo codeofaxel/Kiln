@@ -825,9 +825,16 @@ class TestYellowFlagsAreDelivered:
 class TestRedFlagBehaviourUnchanged:
     """The split must be invisible to red flags."""
 
+    # Both of these reach the setpoint before dropping away from it. A gap
+    # present before the heater ever arrived is a warmup ramp, and the drop
+    # rules are right not to fire on it — the same correction the warmup
+    # grace required of the two temperature-drop tests above.
+
     def test_red_still_records_notifies_and_stops(self):
         wd, adapter, _, anomalies = _make_watchdog()
         adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 220.0
+        assert wd.step() is None  # arrived
         adapter.state.tool_temp_actual = 220.0 - (DEFAULT_TOOL_DROP_C + 5.0)
 
         flag = wd.step()
@@ -841,8 +848,11 @@ class TestRedFlagBehaviourUnchanged:
     def test_a_red_flag_short_circuits_the_yellow_pass(self):
         """Unchanged: step() returns on the red flag before yellows run."""
         wd, adapter, _, anomalies = _make_watchdog()
-        adapter.state.wifi_signal = "-90dBm"
         adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 220.0
+        assert wd.step() is None  # arrive first, with nothing yellow to say
+        # Now both conditions are live on the same poll.
+        adapter.state.wifi_signal = "-90dBm"
         adapter.state.tool_temp_actual = 220.0 - (DEFAULT_TOOL_DROP_C + 5.0)
 
         wd.step()
