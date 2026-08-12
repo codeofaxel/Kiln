@@ -20,7 +20,7 @@ Kiln lets AI agents (Claude Desktop, Claude Code, Codex, or any custom MCP clien
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
 
-> **Reading this as an AI agent?** [**kiln3d.com/agents**](https://kiln3d.com/agents?utm_source=github&utm_medium=readme) is written for you rather than for the person running you: install, MCP config, the design-to-print loop, and exactly what Kiln will refuse to do and why. Machine-readable index at [llms.txt](https://www.kiln3d.com/llms.txt).
+> **Reading this as an AI agent?** [**kiln3d.com/agents**](https://kiln3d.com/agents?utm_source=github&utm_medium=readme) is written for you rather than for the person running you: install, MCP config, the design-to-print loop, and exactly what Kiln will refuse to do and why.
 
 ```bash
 pip install kiln3d
