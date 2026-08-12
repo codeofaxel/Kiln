@@ -18,23 +18,28 @@ NOTHING, because a confidently wrong number is worse than an honest absence
 and ``prints - prints_hours_known`` is what makes that absence visible.
 These tests hold that line against the two ways it silently breaks.
 
-KNOWN GAP — Bambu endings seen over MQTT are still not counted.  The push
-callback (``bambu._on_message``) fires the terminal hook itself, and calls
-``observe_state`` while doing so.  That is the SAME shared state the wrap
-reads, so the push consumes the transition: the next ``get_state()`` sees
-prev == terminal, ``is_terminal_transition`` is False, and nothing here
-runs.  Measured, not assumed — a push-observed ending banks 0.0 hours.
-Closing it means giving the push site the same treatment, and needs two
-answers first: a reconnect delivers a full status dump whose ``prev`` predates
-the outage, so it needs the same lateness guard or it reintroduces the
-inflation above through another door; and the push site keys jobs by
-``subtask_name``/``task_id`` while this path keys them by ``file_name``, so
-the two would have to agree on a dedupe key before both can bank.
+Bambu reaches that ending by a SECOND door, and it is wired to the same rule.
+Its MQTT callback (``bambu._on_message``) fires the terminal hook itself and
+calls ``observe_state`` while doing so — the same shared state the wrap reads
+— so the push CONSUMES the transition and the wrap's next poll finds prev ==
+terminal and no edge at all.  The push site therefore calls the same
+``_record_watched_duration``, under the same job id it just gave the hook, and
+the two doors dedupe against each other through that id.
+
+What differs between the doors is the one measurement neither can borrow: how
+long since we last had current knowledge of the printer.  The wrap ASKS, so it
+counts from the last ask.  The push site is TOLD, so it counts from the last
+time the printer spoke — and it must not use the ask clock, because a Bambu
+``get_state()`` is answered from the push cache, so polling straight through
+an MQTT outage keeps that clock warm while nothing is watching at all.  The
+last section holds both halves of that.
 """
 
 from __future__ import annotations
 
+import json
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -517,3 +522,207 @@ def test_an_absurd_duration_is_refused():
     _watch_to_the_end(adapter)
 
     assert _hours() == (0.0, 0)
+
+
+# ---------------------------------------------------------------------------
+# The second door — a Bambu ending that arrives over MQTT
+# ---------------------------------------------------------------------------
+#
+# Driven through the real ``BambuAdapter._on_message`` with real push frames,
+# because the whole failure being closed here was a door that LOOKED wired.
+
+
+def _bambu(monkeypatch):
+    """A real BambuAdapter with only its socket withheld."""
+    from kiln.printers.bambu import BambuAdapter
+
+    monkeypatch.setattr(BambuAdapter, "_ensure_mqtt", lambda self: None)
+    return BambuAdapter(
+        host="192.0.2.20", access_code="00000000", serial="00M09A000000000",
+    )
+
+
+def _push(adapter, gcode_state: str, **fields) -> None:
+    """Deliver one ``push_status`` frame the way the printer's broker would."""
+    payload = {
+        "print": {
+            "command": "push_status",
+            "gcode_state": gcode_state,
+            "subtask_name": "bracket",
+            "gcode_file": "/sdcard/bracket.3mf",
+            "print_error": 0,
+            **fields,
+        }
+    }
+    adapter._on_message(None, None, SimpleNamespace(payload=json.dumps(payload).encode()))
+
+
+def _rewind_last_push(adapter, seconds: float) -> None:
+    """Pretend the printer last spoke ``seconds`` ago — an MQTT outage."""
+    adapter._last_state_time = time.monotonic() - seconds
+
+
+def _printing_bambu(monkeypatch, *, running_for: float):
+    """A Bambu mid-print, its stopwatch started ``running_for`` seconds ago."""
+    adapter = _bambu(monkeypatch)
+    pm.note_job_start(adapter, "bracket.3mf")
+    _push(adapter, "RUNNING")
+    _rewind_job_start(adapter, running_for)
+    return adapter
+
+
+def test_a_streamed_bambu_ending_is_banked(monkeypatch):
+    """The measured gap this whole branch exists to close.
+
+    A connected Bambu never reaches the polled door — its own push wiring
+    consumes the transition first — so before this, every Bambu ending banked
+    0.0 hours no matter how closely it was watched.
+    """
+    adapter = _printing_bambu(monkeypatch, running_for=31 * 60)
+
+    _push(adapter, "FINISH")
+
+    hours, known = _hours()
+    assert hours == pytest.approx(31 / 60, abs=0.02)
+    assert known == 1
+
+
+def test_a_reconnect_dump_banks_nothing(monkeypatch):
+    """The inflation this door would otherwise have reintroduced.
+
+    MQTT drops mid-print; the print ends; an hour later the socket comes back
+    and the printer sends a full status dump.  ``prev_gcode_state`` comes from
+    the cache and still says RUNNING, so the frame looks exactly like a live
+    ending — while the stopwatch, which nothing stopped, has been counting the
+    whole outage.
+    """
+    adapter = _printing_bambu(monkeypatch, running_for=91 * 60)
+    _rewind_last_push(adapter, 60 * 60)
+
+    # The inflated number IS what the stopwatch would report right now — the
+    # test is worthless if it isn't.
+    assert pm.job_elapsed_seconds(adapter, "bracket.3mf") == pytest.approx(
+        91 * 60, abs=5
+    )
+
+    _push(adapter, "FINISH")
+
+    assert _hours() == (0.0, 0)
+
+
+def test_polling_through_the_outage_does_not_launder_the_dump(monkeypatch):
+    """Why the push door measures the printer's silence, not our own looking.
+
+    ``note_status_read`` — the clock the polled door guards with — cannot be
+    reused here.  A Bambu ``get_state()`` is answered from the push CACHE, so
+    a monitor polling every few seconds through an MQTT outage keeps stamping
+    that clock while the printer says nothing at all.  Borrow it and the
+    reconnect dump above walks straight through the guard looking watched.
+    """
+    adapter = _printing_bambu(monkeypatch, running_for=91 * 60)
+    _rewind_last_push(adapter, 60 * 60)
+
+    # A monitor kept polling the whole time the socket was down.
+    for _ in range(3):
+        adapter.get_state()
+
+    # It really did leave the look-clock warm: this is the reading the polled
+    # door's guard would have been given, and it passes.
+    look_gap = time.monotonic() - pm._last_looks[pm.observation_key(adapter)]
+    assert look_gap < pm.WATCHED_ENDING_MAX_GAP_S
+
+    _push(adapter, "FINISH")
+
+    assert _hours() == (0.0, 0)
+
+
+def test_the_push_door_banks_under_the_id_it_gave_the_hook(_no_db_writes, monkeypatch):
+    """One print, one identity — across the hours row and the outcome row.
+
+    ``record_print_hours_for_job`` dedupes on the job id ALONE, and the other
+    writer that can bank the same print (``record_print_outcome``, reading the
+    job record when an agent later refines an auto-recorded outcome) keys on
+    the hook's ``job_id``.  Bank under the file name instead and the two spell
+    one print two ways: nothing collapses them, and the hours row stops naming
+    the job the outcome row named.
+    """
+    adapter = _printing_bambu(monkeypatch, running_for=31 * 60)
+
+    _push(adapter, "FINISH")
+
+    recorded = _hours()
+    assert recorded[1] == 1
+    job_id = _no_db_writes[-1]["job_id"]
+    assert job_id == "bracket"  # subtask_name, not /sdcard/bracket.3mf
+
+    # Banking again under that id is refused, which is what proves it IS the
+    # key — the outcome row and the hours row cannot drift onto two names.
+    daily_stats.record_print_hours_for_job(job_id, 1.0)
+    assert _hours() == recorded
+
+
+def test_a_streamed_ending_stops_the_stopwatch(monkeypatch):
+    """The polled door's ``forget_job_start`` never runs on a connected Bambu.
+
+    So this door owes it.  Left running, the stamp outlives its print and the
+    next print started from the touchscreen — which never passes
+    ``start_print`` and so never restamps — inherits it and reports the age of
+    a job that finished hours ago.
+    """
+    adapter = _printing_bambu(monkeypatch, running_for=31 * 60)
+
+    _push(adapter, "FINISH")
+
+    assert pm.observation_key(adapter) not in pm._job_starts
+    assert pm.job_elapsed_seconds(adapter, "bracket.3mf") is None
+
+
+def test_a_pause_leaves_the_stopwatch_running(monkeypatch):
+    """A filament runout is not an ending, and resuming must not restart the clock."""
+    adapter = _printing_bambu(monkeypatch, running_for=10 * 60)
+
+    _push(adapter, "PAUSE")
+
+    assert _hours() == (0.0, 0)
+    assert pm.job_elapsed_seconds(adapter, "bracket.3mf") == pytest.approx(
+        10 * 60, abs=5
+    )
+
+
+def test_one_bambu_ending_is_banked_once(monkeypatch):
+    """Both doors witness this printer; only one may bank the print.
+
+    The push door observes the state, so the polled door that follows it sees
+    no edge.  Pinned by driving both in the order a real install does.
+    """
+    adapter = _printing_bambu(monkeypatch, running_for=31 * 60)
+
+    _push(adapter, "FINISH")
+    banked = _hours()
+    for _ in range(3):
+        adapter.get_state()
+    _push(adapter, "FINISH")
+
+    assert _hours() == banked
+    assert banked[1] == 1
+
+
+def test_the_push_door_never_raises_into_the_mqtt_callback(monkeypatch):
+    """A broken ledger must not break live print monitoring for every Bambu.
+
+    ``_on_message`` is the callback the status cache, the progress display and
+    the concurrency gate all read from.  Telemetry raising here would take all
+    of it down.
+    """
+    adapter = _printing_bambu(monkeypatch, running_for=31 * 60)
+
+    def _explode(*args, **kwargs):
+        raise RuntimeError("ledger is on fire")
+
+    monkeypatch.setattr(daily_stats, "record_print_hours_for_job", _explode)
+
+    _push(adapter, "FINISH", mc_percent=100)
+
+    # The frame was still merged: the cache the rest of Kiln reads is intact.
+    assert adapter._last_status["mc_percent"] == 100
+    assert adapter.get_state().state is PrinterStatus.IDLE

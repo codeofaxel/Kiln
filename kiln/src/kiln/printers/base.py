@@ -1507,11 +1507,11 @@ _MAX_CREDIBLE_PRINT_HOURS: float = 168.0
 
 
 def _record_watched_duration(
-    adapter: PrinterAdapter,
-    state: PrinterState,
-    job: JobProgress | None,
+    *,
     job_label: str,
-    read_gap_seconds: float | None,
+    elapsed_seconds: Any,
+    state_age_seconds: float | None,
+    observation_gap_seconds: float | None,
 ) -> None:
     """Bank this print's duration — but only if Kiln really WATCHED it end.
 
@@ -1528,45 +1528,67 @@ def _record_watched_duration(
     * a printer-reported duration (Moonraker, OctoPrint, PrusaLink, Duet,
       Elegoo) freezes at the ending, so a late read is merely late;
     * Bambu's is a Kiln-side stopwatch (:func:`note_job_start` at print start,
-      subtracted here) that NOTHING on the ``get_state`` path stops, so a late
-      read keeps counting: a print that ended at 31 minutes and is noticed an
-      hour later reads ~91.  Monotonic and plausible, so it would never look
-      wrong — it would just quietly inflate every Bambu install's total.
+      subtracted here) that NOTHING stops on its own, so a late read keeps
+      counting: a print that ended at 31 minutes and is noticed an hour later
+      reads ~91.  Monotonic and plausible, so it would never look wrong — it
+      would just quietly inflate every Bambu install's total.
 
     One rule covers both, and it is the rule the design asks for: a duration
-    is recorded only when this ending was WATCHED — the previous status read
-    was recent, and the reading itself is not a stale cache.  Anything else
-    is finding out afterwards, and an honest absence beats a confident wrong
-    number.  ``prints - prints_hours_known`` is what makes that absence
-    visible instead of reading as zero hours printed.
+    is recorded only when this ending was WATCHED — the last time we had
+    current knowledge of this printer was recent, and the reading itself is
+    not a stale cache.  Anything else is finding out afterwards, and an honest
+    absence beats a confident wrong number.  ``prints - prints_hours_known``
+    is what makes that absence visible instead of reading as zero hours
+    printed.
+
+    TWO DOORS reach an ending, and this is the only place the rule lives.
+    Each measures *observation_gap_seconds* — how long since we last had
+    current knowledge of this printer — the only way it honestly can:
+
+    * the ``get_state`` wrap asks, so its gap is :func:`note_status_read`'s
+      "how long since we last asked", and ``state_age_seconds`` is what
+      catches an answer served from a cache rather than the machine;
+    * Bambu's MQTT callback is TOLD, so its gap is how long since the printer
+      last spoke.  It must not borrow the look-clock: a Bambu ``get_state()``
+      is answered from the push cache, so a monitor polling through an MQTT
+      outage keeps that clock warm while nothing is being watched at all, and
+      the reconnect dump — whose ``prev`` predates the outage — would sail
+      through this guard carrying the whole outage in its elapsed.
+
+    Both are the same quantity, so the thresholds below apply unchanged to
+    either, and neither door decides for itself what counts as watched.
 
     A printer with no clock to report (direct USB: M27 gives SD-card byte
     progress, not time) falls out at the first check and stays honestly
     unknown, as :file:`scripts/adapter_conformance.yaml` already declares.
 
-    Never raises — this runs inside a status read.
+    Never raises — this runs inside a status read and inside an MQTT callback.
     """
-    elapsed = getattr(job, "print_time_seconds", None) if job is not None else None
-    if not isinstance(elapsed, (int, float)) or elapsed <= 0:
+    if not isinstance(elapsed_seconds, (int, float)) or elapsed_seconds <= 0:
         return
 
     from kiln.printers.progress_motion import WATCHED_ENDING_MAX_GAP_S
 
-    # Did we look recently enough for "we saw it end" to be true?  Unknown
-    # (first read for this adapter, or a fresh instance after a reconnect)
-    # counts as no — it never watched anything.
-    if read_gap_seconds is None or read_gap_seconds > WATCHED_ENDING_MAX_GAP_S:
+    # Was our last current knowledge recent enough for "we saw it end" to be
+    # true?  Unknown — a first read, or a printer that has never spoken to
+    # this process — counts as no: it never watched anything.
+    if (
+        observation_gap_seconds is None
+        or observation_gap_seconds > WATCHED_ENDING_MAX_GAP_S
+    ):
         return
 
     # And is the reading itself the present tense?  A push-cache answer that
     # is minutes old dates the transition we just "saw", by exactly the same
-    # amount and for the same reason.  Absent age means the adapter asked the
-    # printer on this call, which is current by construction.
-    state_age = getattr(state, "state_age_seconds", None)
-    if isinstance(state_age, (int, float)) and state_age > STALE_STATE_WARN_AGE:
+    # amount and for the same reason.  Absent age means the caller learned
+    # this from the printer on this call, which is current by construction.
+    if (
+        isinstance(state_age_seconds, (int, float))
+        and state_age_seconds > STALE_STATE_WARN_AGE
+    ):
         return
 
-    hours = float(elapsed) / 3600.0
+    hours = float(elapsed_seconds) / 3600.0
     if hours > _MAX_CREDIBLE_PRINT_HOURS:
         return
 
@@ -1574,6 +1596,15 @@ def _record_watched_duration(
 
     # Keyed by job so the two layers that can both witness one ending — the
     # adapter-generic wrap and Bambu's own push wiring — cannot bank it twice.
+    #
+    # *job_label* must be the SAME string its caller hands
+    # ``fire_terminal_state_hook`` as ``job_id``.  That is the whole dedupe
+    # contract: ``record_print_hours_for_job`` keys on the job id alone, and
+    # the other writer in the system — ``record_print_outcome``, banking from
+    # the job record when an agent later refines an auto-recorded outcome —
+    # keys on the hook's ``job_id``.  Bank under a second spelling of the same
+    # print and nothing collapses them; the hours row and the outcome row also
+    # stop naming the same job.
     record_print_hours_for_job(job_label, hours)
 
 
@@ -1670,7 +1701,14 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
                 job_id=label,
                 file_name=label,
             )
-            _record_watched_duration(adapter, state, job, label, read_gap_seconds)
+            _record_watched_duration(
+                # The id this door just gave the hook, so the hours row and
+                # the outcome row name one job.
+                job_label=label,
+                elapsed_seconds=getattr(job, "print_time_seconds", None),
+                state_age_seconds=getattr(state, "state_age_seconds", None),
+                observation_gap_seconds=read_gap_seconds,
+            )
         # Stop the elapsed clock: the job it was measuring is over.  This is
         # the first caller ``forget_job_start`` has ever had, and without it
         # the stamp outlives its print — so a NEXT print started from the
