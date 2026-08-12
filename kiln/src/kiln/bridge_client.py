@@ -94,8 +94,18 @@ def _default_tool_caller() -> ToolCaller:
 
     Reuses the server's tool registry so every safety gate the tool already
     carries (preflight, auto-print-off default, validation) applies unchanged.
+
+    ``ensure_runtime_config()`` is what makes that reuse real.  Importing
+    ``kiln.server`` registers the tools but leaves the printer globals at
+    their import-time defaults; the MCP server resolves them in ``main()``
+    and the REST API in ``create_app()``, neither of which runs here.
+    Without this call every printer-touching relay tool answers "No printer
+    configured" on a machine whose ``~/.kiln/config.yaml`` is perfectly
+    good — the browser sees "no printer" forever.
     """
     from kiln import server as _server
+
+    _server.ensure_runtime_config()
 
     def call_tool(name: str, args: dict) -> Any:
         tool = _server.mcp._tool_manager._tools.get(name)
@@ -106,18 +116,23 @@ def _default_tool_caller() -> ToolCaller:
     return call_tool
 
 
-def _default_artifact_fetcher(license_key: str) -> ArtifactFetcher:
+def _default_artifact_fetcher(get_bearer: Callable[[], str]) -> ArtifactFetcher:
     """Fetch a saved make's geometry from the cloud to a local temp file.
 
     The web only holds a cloud reference; the bridge pulls the actual mesh with
-    the user's license so it has a real local path for ``slice_and_print``.
+    the user's credential so it has a real local path for ``slice_and_print``.
+
+    Takes a *getter* rather than a token because a sign-in session expires
+    hourly while the bridge runs for days: a string captured at construction
+    would 401 on the first fetch after expiry, turning a print into an
+    unexplained failure.
     """
     api = os.environ.get("KILN_API_URL", _DEFAULT_API_URL).rstrip("/")
 
     def fetch(token: str) -> str:
         url = f"{api}/api/artifact/{token}"
         request = urllib.request.Request(
-            url, headers={"Authorization": f"Bearer {license_key}"}
+            url, headers={"Authorization": f"Bearer {get_bearer()}"}
         )
         with urllib.request.urlopen(request, timeout=30) as resp:  # noqa: S310
             data = resp.read()
@@ -130,10 +145,35 @@ def _default_artifact_fetcher(license_key: str) -> ArtifactFetcher:
 
 
 def _read_license() -> str:
-    """Best-effort read of the user's license key (env, then ~/.kiln/config)."""
-    key = os.environ.get("KILN_LICENSE_KEY", "").strip()
-    if key:
-        return key
+    """The bearer this machine presents to the relay, or ``""`` if there is none.
+
+    Routes through :func:`kiln.auth_session.resolve_api_bearer` — the one
+    resolver every authenticated Kiln API caller uses — so a
+    ``KILN_LICENSE_KEY`` wins, and otherwise the ``kiln signin`` / ``kiln
+    pair`` session is used and transparently refreshed near expiry.
+
+    It has to be that resolver and not a local re-read.  This function used
+    to check only the env var and ``license_key`` in ``~/.kiln/config.yaml``
+    — neither of which sign-in writes — so a fully signed-in machine was
+    told "Bridge: signed out.  Sign in first: kiln signin", by the one
+    command that could not fix it.  ``kiln signin --help`` promises the
+    opposite in writing: the rest of the CLI picks the session up with no
+    license key needed.  The relay accepts a Supabase JWT, so the session
+    was always a valid bearer; the bridge was simply the surface that never
+    learned to read it.
+
+    The ``config.yaml`` fallback stays last so an operator who put a license
+    key in the file keeps working.
+    """
+    try:
+        from kiln.auth_session import resolve_api_bearer
+
+        token = resolve_api_bearer().token.strip()
+        if token:
+            return token
+    except Exception:  # never let auth resolution break the bridge
+        logger.debug("session bearer resolution failed", exc_info=True)
+
     try:
         import yaml  # kiln already depends on PyYAML
 
@@ -177,17 +217,34 @@ class BridgeClient:
         call_tool: ToolCaller | None = None,
         fetch_artifact: ArtifactFetcher | None = None,
     ) -> None:
-        self._license = license_key or _read_license()
+        #: An explicitly supplied bearer pins the credential (tests, an
+        #: operator passing a license); otherwise it is resolved fresh on
+        #: every use — see :meth:`_bearer`.
+        self._pinned_license = license_key
         self._url = relay_url or os.environ.get("KILN_RELAY_URL", _DEFAULT_RELAY_URL)
         self._call_tool = call_tool or _default_tool_caller()
-        self._fetch_artifact = fetch_artifact or _default_artifact_fetcher(self._license)
+        self._fetch_artifact = fetch_artifact or _default_artifact_fetcher(self._bearer)
         self._stop = False
+
+    def _bearer(self) -> str:
+        """The credential to present, resolved at the moment it is used.
+
+        Deliberately not cached.  A ``kiln signin`` session token expires in
+        about an hour and the bridge is a daemon that runs for days, so a
+        bearer captured at construction would be dead by the first reconnect
+        and the client would retry forever with a credential the relay can
+        only refuse.  Re-resolving lets
+        :func:`kiln.auth_session.resolve_api_bearer` hand back a refreshed
+        token, which is the whole reason that resolver exists.  A license
+        key passed in explicitly is honoured as-is and never re-read.
+        """
+        return self._pinned_license or _read_license()
 
     def _auth_headers(self) -> dict[str, str]:
         from kiln import __version__ as _v  # noqa: PLC0415
 
         return {
-            "Authorization": f"Bearer {self._license}",
+            "Authorization": f"Bearer {self._bearer()}",
             "X-Kiln-Device-Fingerprint": _device_fingerprint(),
             "X-Kiln-Client-Version": str(_v),
         }
@@ -204,10 +261,10 @@ class BridgeClient:
             await ws.send(json.dumps(resp))
 
     async def run(self) -> None:
-        if not self._license:
+        if not self._bearer():
             raise RuntimeError(
-                "No license key found. Set KILN_LICENSE_KEY or add license_key to "
-                "~/.kiln/config.yaml, then enable web control."
+                "Not signed in, so the relay can't route to this machine. "
+                "Run 'kiln signin' (or 'kiln pair'), then enable web control."
             )
         import websockets  # local import: only needed when actually running
 

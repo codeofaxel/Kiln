@@ -622,6 +622,40 @@ def _reload_env_config() -> None:
     _HEATER_TIMEOUT_MIN = parse_float_env("KILN_HEATER_TIMEOUT", 30.0)
 
 
+def ensure_runtime_config() -> None:
+    """Load ``.env`` files, then resolve the printer + env-backed globals.
+
+    **Every entry point that runs a tool function must call this first.**
+    Module-level env reads happen at import time, before any ``.env`` is
+    loaded, and ``~/.kiln/config.yaml`` is only read by
+    :func:`_reload_env_config` — so an entry point that merely imports this
+    module and calls ``tool.fn(...)`` runs every printer tool against an
+    unconfigured adapter and answers "No printer configured" no matter what
+    the user has set up.
+
+    That is not hypothetical.  The web->printer bridge
+    (:mod:`kiln.bridge_client`) does exactly that import-and-call, and
+    because it called neither ``main()`` nor the REST API's ``create_app()``
+    it could not see the user's printer at all — nine of the twelve
+    relay-safe tools failed on a correctly configured machine.  The two
+    older entry points each carried their own copy of this two-step, which
+    is why adding a third one silently skipped it.  One helper, called by
+    every door, so the next door inherits it.
+
+    Idempotent and safe to call repeatedly: ``load_dotenv`` does not
+    override already-set environment variables, and re-resolving the config
+    globals simply re-reads the same files.
+    """
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()  # .env from cwd first
+        load_dotenv(Path.home() / ".kiln" / ".env")  # then ~/.kiln/.env
+    except ImportError:
+        pass
+    _reload_env_config()
+
+
 # ---------------------------------------------------------------------------
 # MCP server instance
 # ---------------------------------------------------------------------------
@@ -12542,18 +12576,10 @@ def _graceful_shutdown(
 
 def main() -> None:
     """Run the Kiln MCP server."""
-    # Load .env file if present (project root or ~/.kiln/.env).
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv()  # loads .env from cwd first
-        load_dotenv(Path.home() / ".kiln" / ".env")  # then ~/.kiln/.env
-    except ImportError:
-        pass
-
-    # Re-snapshot env-backed config vars — they were read at import time
-    # before .env was loaded, so they may have stale defaults.
-    _reload_env_config()
+    # Load .env, then re-snapshot env/config.yaml-backed globals — they were
+    # read at import time, before .env was loaded.  Shared with the REST API
+    # and the web->printer bridge so all three doors initialise identically.
+    ensure_runtime_config()
 
     # Configure structured logging if requested (before any log calls).
     _configure_logging()
