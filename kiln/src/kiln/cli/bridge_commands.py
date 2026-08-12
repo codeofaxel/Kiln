@@ -268,7 +268,15 @@ def _describe_status(
             "The bridge kept stopping right after it started, so Kiln stopped "
             "restarting it.",
             f"What happened is in the log: {_LOG_FILE}",
-            "Fix that, then start it again: kiln bridge start",
+            # Which verb works depends on `enabled`, and this is the one branch
+            # that can be either.  Windows is why: `enable` there installs a Run
+            # key AND runs our own supervisor, so a give-up is reachable with the
+            # login service still in place — and in that state `kiln bridge
+            # start` refuses, prints "Already set to start on login", and starts
+            # nothing.  That is the same dead end as the enabled-but-not-running
+            # hint below, one branch over, and it survived the fix to that one.
+            "Fix that, then start it again: "
+            + ("kiln bridge restart" if enabled else "kiln bridge start"),
         ]
     elif enabled:
         headline = "enabled, but not running"
@@ -816,6 +824,17 @@ def disable() -> None:
 def start() -> None:
     """Run the bridge once, in the background (until you log out)."""
     if _service_installed():
+        # Still a refusal — starting our own supervisor under launchd/systemd
+        # would be two parents over one child, which is the whole reason this
+        # branch exists.  But "it's managed for you" is only true while it is
+        # actually up: said over a bridge that is DOWN it reads as an all-clear,
+        # and the person typing `start` is typing it precisely because nothing
+        # is running.  Point them at the verb that does start a managed bridge
+        # rather than sending them away reassured.
+        if _running_pid() is None and _running_supervisor_pid() is None:
+            click.echo("Set to start on login, but it isn't running right now.")
+            click.echo("  Start it: kiln bridge restart   ·   Why it stopped: kiln bridge status")
+            return
         click.echo("Already set to start on login — it's managed for you.")
         click.echo("  See it: kiln bridge status   ·   Turn off: kiln bridge disable")
         return

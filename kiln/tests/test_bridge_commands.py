@@ -789,6 +789,102 @@ def test_the_status_hint_for_an_enabled_dead_bridge_points_at_a_command_that_wor
     assert "kiln bridge start " not in hint
 
 
+def test_the_gave_up_hint_points_at_a_command_that_works_under_a_login_service():
+    """The same dead end as the test above, one branch over, and it outlived
+    the fix to that one.
+
+    Reachable on Windows, where `enable` installs a Run key AND runs our own
+    supervisor — so the supervisor can give up while the login service is still
+    installed.  `kiln bridge start` refuses in exactly that state, so telling
+    the operator to "start it again" left them with a bridge still down and
+    nothing to try.
+    """
+    _, lines = _describe_status(
+        signed_in=True, enabled=True, running=False, connected=False,
+        since=None, now=1000.0, gave_up=True,
+    )
+    hint = next(ln for ln in lines if "Fix that" in ln)
+    assert "kiln bridge restart" in hint
+    assert "kiln bridge start " not in hint
+
+
+def test_the_gave_up_hint_still_says_start_when_there_is_no_login_service():
+    """The other half of the same branch, so the fix above is a fork and not a
+    swap: a session `start` that gave up has no service installed, `start` is
+    not refused, and it is the command that works."""
+    _, lines = _describe_status(
+        signed_in=True, enabled=False, running=False, connected=False,
+        since=None, now=1000.0, gave_up=True,
+    )
+    hint = next(ln for ln in lines if "Fix that" in ln)
+    assert "kiln bridge start" in hint
+    assert "restart" not in hint
+
+
+def test_start_does_not_reassure_over_a_managed_bridge_that_is_down(monkeypatch):
+    """The other door onto the same state.  `start` is the command someone
+    types precisely because nothing is running, and over a down bridge
+    "it's managed for you" reads as an all-clear — the same advice-that-does-
+    nothing defect, met by typing rather than by reading status.
+
+    It must still refuse to spawn: two supervisors over one child is why this
+    branch exists.  Only the words change.
+    """
+    monkeypatch.setattr(bcmd, "_read_license", lambda: "lic")
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: True)
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: None)
+    monkeypatch.setattr(bcmd, "_running_supervisor_pid", lambda: None)
+    spawned: list[int] = []
+    monkeypatch.setattr(bcmd, "_spawn_supervised_bridge", lambda: spawned.append(1) or 9)
+
+    out = CliRunner().invoke(bridge, ["start"])
+
+    assert out.exit_code == 0
+    assert spawned == [], "stacked a second supervisor under the login service"
+    assert "managed for you" not in out.output
+    assert "kiln bridge restart" in out.output
+
+
+def test_start_still_says_it_is_managed_when_the_managed_bridge_is_up(monkeypatch):
+    """The fork above must not cost the honest message in the state that
+    always was honest: service installed AND running really is managed."""
+    monkeypatch.setattr(bcmd, "_read_license", lambda: "lic")
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: True)
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: 4242)
+    monkeypatch.setattr(bcmd, "_running_supervisor_pid", lambda: None)
+    spawned: list[int] = []
+    monkeypatch.setattr(bcmd, "_spawn_supervised_bridge", lambda: spawned.append(1) or 9)
+
+    out = CliRunner().invoke(bridge, ["start"])
+
+    assert out.exit_code == 0
+    assert spawned == []
+    assert "managed for you" in out.output
+
+
+def test_both_doors_onto_a_down_managed_bridge_name_the_same_verb(monkeypatch):
+    """`status` and `start` reach this state independently and each names the
+    recovery command in its own string.  Pin that they agree, so a later rename
+    of the verb cannot fix one door and leave the other advising a command that
+    does nothing — which is the defect this whole cluster is about.
+    """
+    monkeypatch.setattr(bcmd, "_read_license", lambda: "lic")
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: True)
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: None)
+    monkeypatch.setattr(bcmd, "_running_supervisor_pid", lambda: None)
+    monkeypatch.setattr(bcmd, "_spawn_supervised_bridge", lambda: 9)
+    from_start = CliRunner().invoke(bridge, ["start"]).output
+
+    verb = "kiln bridge restart"
+    for enabled_state in (dict(gave_up=True), dict(gave_up=False)):
+        _, lines = _describe_status(
+            signed_in=True, enabled=True, running=False, connected=False,
+            since=None, now=1000.0, **enabled_state,
+        )
+        assert any(verb in ln for ln in lines), enabled_state
+    assert verb in from_start
+
+
 def test_which_platforms_have_a_supervising_login_service(monkeypatch):
     """The axis `restart` turns on, tested directly rather than only stubbed.
 
