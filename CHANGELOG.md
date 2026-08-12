@@ -126,6 +126,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- `cancel_job` has been renamed `cancel_queued_job`. It only ever removed a job
+  that was still waiting in the queue line, but sitting next to `cancel_print`,
+  the name suggested otherwise. This tool also used to sometimes accept a job
+  that had already started and mark it cancelled while the machine kept
+  printing; now it tells you the print is already running and points you at
+  `cancel_print`.
+
 - **Preview pictures now match the 3D viewer.** Kiln's stills get the same
   studio lighting as the model viewer instead of the flat grey render — in
   your chosen filament colour, from the angles Kiln already picks for your
