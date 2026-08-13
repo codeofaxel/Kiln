@@ -246,12 +246,15 @@ class _FleetToolsPlugin:
                     code="INVALID_INPUT",
                 )
 
-            # Imported outside the try below: if kiln-pro (which provides
-            # kiln.job_router) is absent, the handler names must still
-            # resolve — and the caller gets a clear answer, not a
-            # laundered ImportError.
+            # Public Kiln's own module — a failure here is a real bug and
+            # must not be reported as "kiln-pro is missing".
+            from kiln.routing_candidates import collect_routing_candidates
+
+            # kiln.job_router is provided by kiln-pro.  Imported outside
+            # the main try so its absence gets a clear answer rather than
+            # a laundered ImportError, and so the handler names below
+            # still resolve.
             try:
-                from kiln.cli.main import _collect_routing_candidates
                 from kiln.job_router import (
                     RoutingCriteria,
                     RoutingValidationError,
@@ -289,7 +292,7 @@ class _FleetToolsPlugin:
                 # one engine, two doors — fed from the live registry
                 # instead of on-disk printer configs.
                 adapters = {name: registry.get(name) for name in names}
-                candidates = _collect_routing_candidates(
+                candidates = collect_routing_candidates(
                     adapters=adapters,
                     material=material,
                     pending_counts=pending,

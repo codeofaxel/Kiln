@@ -335,6 +335,15 @@ class PrintQueue:
         queued this" (the MCP ``submit_job`` tool) use this; everything
         else keeps the plain job-ID ``submit``.  One implementation —
         ``submit`` is a thin wrapper over this method.
+
+        Within one process the in-memory key index decides replays and
+        is authoritative.  Across processes sharing one queue.db, the
+        unique index decides and the loser adopts the winner, which
+        leaves a sub-millisecond window: a same-process caller racing a
+        submission that another process is about to win can be handed a
+        job id whose row never lands.  Closing it would mean holding the
+        queue lock across the disk write, which would let a submission
+        delay a cancel — the worse trade, so this stays open and named.
         """
         with self._lock:
             if idempotency_key is not None:
@@ -356,27 +365,39 @@ class PrintQueue:
                 metadata=metadata or {},
                 idempotency_key=idempotency_key,
             )
-            try:
-                self._persist_job(job)
-            except sqlite3.IntegrityError:
-                # Another process holding the same queue.db won the key
-                # race between our lookup and our INSERT — the unique
-                # index refused the duplicate.  Adopt the winner's row
-                # exactly as an in-process replay.
+            # Reserve in memory under the lock so a concurrent caller
+            # with the same key sees this submission before its row
+            # reaches disk — the in-process dedup is decided here.
+            self._jobs[job_id] = job
+            if idempotency_key is not None:
+                self._idem_index[idempotency_key] = job_id
+
+        # Persist OUTSIDE the lock.  SQLite can block for up to
+        # busy_timeout (5s) on a contended database, and this is the
+        # same lock cancel() / next_job() / pending_count() take — a
+        # submission must never be able to delay a cancellation.
+        try:
+            self._persist_job(job)
+        except sqlite3.IntegrityError:
+            # Another PROCESS sharing this queue.db won the key race:
+            # the partial unique index refused our duplicate row.  Drop
+            # our reservation and adopt the winner as a replay.
+            with self._lock:
+                self._jobs.pop(job_id, None)
+                if (
+                    idempotency_key is not None
+                    and self._idem_index.get(idempotency_key) == job_id
+                ):
+                    del self._idem_index[idempotency_key]
                 winner = (
                     self._db_find_by_key(idempotency_key)
                     if idempotency_key is not None
                     else None
                 )
-                if winner is None:
-                    raise
-                self._check_replay_matches(
-                    winner, file_name, printer_name, priority
-                )
-                return SubmitResult(job=winner, replayed=True)
-            self._jobs[job_id] = job
-            if idempotency_key is not None:
-                self._idem_index[idempotency_key] = job_id
+            if winner is None:
+                raise
+            self._check_replay_matches(winner, file_name, printer_name, priority)
+            return SubmitResult(job=winner, replayed=True)
         return SubmitResult(job=job, replayed=False)
 
     def find_by_idempotency_key(self, idempotency_key: str) -> PrintJob | None:

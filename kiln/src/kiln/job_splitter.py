@@ -319,16 +319,16 @@ def submit_split_plan(plan: SplitPlan, idempotency_key: str | None = None) -> st
     except Exception:
         logger.exception("Failed to save split plan (non-fatal)")
 
-    # Submit each part to the job queue
+    # Submit each part to the job queue.  The queue accessor lives on
+    # the server module, not kiln.queue — the old
+    # `from kiln.queue import get_queue` raised ImportError on every
+    # part and the blanket except below silently marked them all failed.
+    import kiln.server as _srv
+
+    queue = _srv._get_queue()
+
     for part in plan.parts:
         try:
-            # The queue accessor lives on the server module, not
-            # kiln.queue — the old `from kiln.queue import get_queue`
-            # raised ImportError on every part and the blanket except
-            # below silently marked them all "failed".
-            import kiln.server as _srv
-
-            queue = _srv._get_queue()
             job_id = queue.submit(
                 file_name=part.file_path,
                 printer_name=part.printer_name,

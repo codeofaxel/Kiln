@@ -86,37 +86,26 @@ from kiln.cli.output import (
     format_status,
 )
 from kiln.cli.spend_caps_commands import register_spend_caps_cli
+from kiln.materials import MATERIAL_TEMPS, normalise_material_type
+from kiln.routing_candidates import (
+    adapter_supports_extension,
+    collect_routing_candidates,
+)
 
 logger = logging.getLogger(__name__)
 
 _MATERIAL_CHOICES: tuple[str, ...] = ("PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC")
-_MATERIAL_TEMPS: dict[str, tuple[int, int, int, int]] = {
-    "PLA": (200, 210, 60, 60),
-    "PETG": (240, 245, 80, 80),
-    "ABS": (250, 255, 100, 100),
-    "TPU": (225, 230, 50, 50),
-    "ASA": (250, 255, 100, 100),
-    "NYLON": (260, 265, 70, 70),
-    "PC": (280, 285, 110, 110),
-}
+# Material temps and name normalisation moved to kiln.materials, and
+# candidate building to kiln.routing_candidates, so the route_print_job
+# tool can reach the same code without importing the CLI.  Aliased back
+# under their original private names: this module's call sites and the
+# tests that patch them are unchanged.
+_MATERIAL_TEMPS = MATERIAL_TEMPS
+_normalise_material_type = normalise_material_type
+_adapter_supports_extension = adapter_supports_extension
+_collect_routing_candidates = collect_routing_candidates
 _SUPPORT_MODE_CHOICES: tuple[str, ...] = ("off", "auto", "minimal", "aggressive")
 _INGEST_EXTENSIONS: tuple[str, ...] = (".gcode", ".gco", ".g", ".3mf")
-
-
-def _normalise_material_type(raw: str | None) -> str | None:
-    """Normalize material names to canonical keys used by temp defaults."""
-    if not raw:
-        return None
-    value = raw.strip().upper()
-    aliases = {
-        "PA": "NYLON",
-        "PA6": "NYLON",
-        "PA12": "NYLON",
-    }
-    value = aliases.get(value, value)
-    if value in _MATERIAL_TEMPS:
-        return value
-    return None
 
 
 def _material_profile_overrides(material: str) -> dict[str, str]:
@@ -524,20 +513,6 @@ def _get_adapter_from_ctx(ctx: click.Context):
     return _make_adapter(cfg)
 
 
-def _adapter_supports_extension(adapter: Any, extension: str) -> bool:
-    """Return True if the adapter advertises support for the file extension."""
-    ext = extension.lower().strip()
-    if not ext:
-        return True
-    try:
-        capabilities = getattr(adapter, "capabilities", None)
-        supported = getattr(capabilities, "supported_extensions", None)
-        if not supported:
-            return True
-        return ext in {str(v).lower() for v in supported}
-    except Exception:
-        return True
-
 
 def _list_configured_printer_names() -> list[str]:
     """Return configured printer names in stable order."""
@@ -574,101 +549,6 @@ def _load_fleet_adapters(printer_filter: str | None = None) -> tuple[dict[str, A
             errors.append(f"{name}: {exc}")
     return adapters, errors
 
-
-def _collect_routing_candidates(
-    *,
-    adapters: dict[str, Any],
-    material: str,
-    pending_counts: dict[str, int] | None = None,
-    file_extension: str | None = None,
-) -> list[dict[str, Any]]:
-    """Build JobRouter candidate dictionaries from configured adapters."""
-    from kiln.persistence import get_db
-
-    pending = pending_counts or {}
-    file_ext = (file_extension or "").lower().strip()
-    candidates: list[dict[str, Any]] = []
-
-    try:
-        from kiln.materials import MaterialTracker
-
-        tracker = MaterialTracker(db=get_db())
-    except Exception:
-        tracker = None
-
-    db = None
-    try:
-        db = get_db()
-    except Exception:
-        db = None
-
-    for name, adapter in adapters.items():
-        if file_ext and not _adapter_supports_extension(adapter, file_ext):
-            continue
-
-        status = "unknown"
-        try:
-            state = adapter.get_state()
-            raw_state = getattr(state, "state", None)
-            status = str(getattr(raw_state, "value", raw_state or "unknown")).lower()
-        except Exception:
-            status = "offline"
-
-        supported_materials: list[str] = []
-        if tracker is not None:
-            try:
-                loaded = tracker.get_material(name, tool_index=0)
-                loaded_material = _normalise_material_type(getattr(loaded, "material_type", None))
-                if loaded_material:
-                    supported_materials = [loaded_material]
-            except Exception:
-                supported_materials = []
-
-        success_rate: float | None = None
-        if db is not None:
-            try:
-                insights = db.get_printer_learning_insights(name)
-                raw_rate = insights.get("success_rate")
-                if raw_rate is not None:
-                    success_rate = float(raw_rate)
-            except Exception:
-                success_rate = None
-
-        queue_depth = max(0, int(pending.get(name, 0)))
-        estimated_wait_s = float(queue_depth * 1800)
-        if status in {"printing", "busy", "paused", "cancelling"}:
-            estimated_wait_s = max(estimated_wait_s, 1800.0)
-
-        candidates.append(
-            {
-                "printer_id": name,
-                "printer_model": name,
-                "status": status,
-                "queue_depth": queue_depth,
-                "supported_materials": supported_materials,
-                "success_rate": success_rate,
-                "estimated_wait_s": estimated_wait_s,
-                "print_speed_factor": 1.0,
-            }
-        )
-
-    # Keep at least one candidate path for normal .gcode flows.
-    if not candidates and file_ext in {".gcode", ".gco", ".g"}:
-        for name in adapters:
-            candidates.append(
-                {
-                    "printer_id": name,
-                    "printer_model": name,
-                    "status": "unknown",
-                    "queue_depth": max(0, int(pending.get(name, 0))),
-                    "supported_materials": [],
-                    "success_rate": None,
-                    "estimated_wait_s": float(max(0, int(pending.get(name, 0))) * 1800),
-                    "print_speed_factor": 1.0,
-                }
-            )
-
-    return candidates
 
 
 def _route_printer_for_job(
