@@ -723,6 +723,24 @@ class PrintWatchdog:
         with self._lock:
             self.anomaly_triggered = True
 
+        # This door bypasses the EmergencyCoordinator (it holds the adapter
+        # and halts it directly, which is the point — no lookups between a
+        # red flag and the M112), so it files its own this-job-is-ending
+        # intent.  Without one, the idle the printer lands on after the halt
+        # reads as a natural finish and a watchdog-stopped print is recorded
+        # a SUCCESS — the exact print the learning DB most needs to know
+        # went wrong.  Filed before the halt: the terminal transition can
+        # arrive the moment the command lands.
+        try:
+            from kiln.auto_record_hook import register_cancel_intent
+            from kiln.printers.base import outcome_printer_name
+
+            register_cancel_intent(outcome_printer_name(self._adapter))
+        except Exception:  # noqa: BLE001 — never delay the halt
+            logger.debug(
+                "PrintWatchdog: cancel-intent registration failed", exc_info=True
+            )
+
         # Emergency stop — isolated try/except so a failed e-stop still
         # fires the callback and sets the latch.
         try:

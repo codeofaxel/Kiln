@@ -504,3 +504,185 @@ def test_cancel_does_not_tell_the_heater_watchdog_someone_elses_print_ended(
     # Cancelling the machine it IS watching still notifies it.
     server.cancel_print(printer_name="garage")
     assert notified == ["ended"]
+
+
+# ---------------------------------------------------------------------------
+# Emergency stops are endings too — and must not be recorded as successes
+# ---------------------------------------------------------------------------
+#
+# An M112 has no "cancelled" gcode_state: the printer lands on error or
+# idle, and an idle with no intent on record is inferred to be a natural
+# finish.  cancel_print had this bug and got the intent flag; the emergency
+# paths never did, so the one stop reserved for the WORST endings — thermal
+# runaway, collision, spaghetti — wrote those prints into the learning DB
+# as successes.  Four doors reach an e-stop: the emergency_stop tool,
+# emergency_trip_input, and the CLI's estop all route through
+# EmergencyCoordinator.emergency_stop (stop-all loops through it), and the
+# PrintWatchdog halts its adapter directly.  Two seams, both pinned here.
+
+
+def _fresh_coordinator(monkeypatch):
+    from kiln.emergency import EmergencyCoordinator
+
+    monkeypatch.setenv("KILN_EMERGENCY_PERSIST", "0")
+    return EmergencyCoordinator()
+
+
+def test_coordinator_estop_files_intent_before_the_halt(monkeypatch):
+    """Ordering is the contract: the halt can end the job instantly."""
+    _garage, workshop = _two_printers(monkeypatch)
+    order: list[str] = []
+    monkeypatch.setattr(hook, "register_cancel_intent", lambda n: order.append(f"intent:{n}"))
+    original_send = _FakePrinter.send_gcode
+
+    def _spy(self, commands):
+        order.append("halt")
+        return original_send(self, commands)
+
+    monkeypatch.setattr(_FakePrinter, "send_gcode", _spy)
+    workshop.emergency_stop = lambda: (_ for _ in ()).throw(RuntimeError("no hw estop"))
+
+    coord = _fresh_coordinator(monkeypatch)
+    coord.emergency_stop("workshop")
+
+    assert order[0] == "intent:workshop"
+    assert "halt" in order
+
+
+def test_estop_intent_uses_the_lifecycle_name_not_the_alias(monkeypatch):
+    """One machine, two registry names — the intent must use the stamped one.
+
+    The server registers the active printer as "default" AND its config
+    name, and the outcome lifecycle keys on the LAST stamp.  An e-stop
+    aimed at the "default" alias that filed intent under "default" would
+    never be consumed — the stop would be recorded a success again, which
+    is the bug this whole file exists to keep dead.
+    """
+    printer = _FakePrinter("192.0.2.10")
+    registry = server._get_registry()
+    registry.register("default", printer)
+    registry.register("garage", printer)   # stamp ends up "garage"
+    filed: list[str] = []
+    monkeypatch.setattr(hook, "register_cancel_intent", filed.append)
+
+    coord = _fresh_coordinator(monkeypatch)
+    coord.emergency_stop("default")
+
+    assert filed == ["garage"]
+
+
+def test_estop_on_an_unregistered_name_still_files_an_intent(monkeypatch):
+    """A latch can exist for a printer the registry never met this boot.
+
+    The G-code cannot be delivered (no adapter), but the record and the
+    intent still happen — under the caller's name, which is the best name
+    there is.
+    """
+    filed: list[str] = []
+    monkeypatch.setattr(hook, "register_cancel_intent", filed.append)
+
+    coord = _fresh_coordinator(monkeypatch)
+    coord.emergency_stop("ghost-printer")
+
+    assert filed == ["ghost-printer"]
+
+
+def test_watchdog_estop_is_not_recorded_a_success(monkeypatch):
+    """The full path: red flag → adapter-level M112 → idle → "cancelled".
+
+    The PrintWatchdog bypasses the coordinator on purpose (it holds the
+    adapter; nothing stands between a red flag and the halt), so it files
+    its own intent.  This is the print the learning DB most needs to know
+    went wrong — a spaghetti detection recorded as a success poisons every
+    similarity lookup that follows.
+    """
+    from kiln.print_watchdog import Flag, PrintWatchdog
+    from kiln.printers.bambu import BambuAdapter
+
+    monkeypatch.setattr(BambuAdapter, "_ensure_mqtt", lambda self: None)
+    recorded: list[dict] = []
+    import kiln.plugins.learning_tools as lt
+
+    monkeypatch.setattr(
+        lt, "record_print_outcome",
+        lambda **kw: recorded.append(kw) or {"success": True},
+    )
+
+    printer = BambuAdapter(
+        host="192.0.2.20", access_code="00000000", serial="00M09A000000003",
+    )
+    server._get_registry().register("workshop", printer)
+
+    def _push(gcode_state: str) -> None:
+        payload = {
+            "print": {
+                "command": "push_status",
+                "gcode_state": gcode_state,
+                "subtask_name": "bracket",
+                "gcode_file": "/sdcard/bracket.3mf",
+                "print_error": 0,
+            }
+        }
+        printer._on_message(
+            None, None, SimpleNamespace(payload=json.dumps(payload).encode())
+        )
+
+    _push("RUNNING")
+
+    wd = PrintWatchdog(adapter=printer, poll_interval_sec=999, on_anomaly=lambda f: None)
+    wd._trip(Flag(kind="red", rule="tool_drop", message="nozzle dive", timestamp=0.0))
+
+    _push("IDLE")
+
+    assert [(c["printer_name"], c["outcome"]) for c in recorded] == [
+        ("workshop", "cancelled")
+    ]
+
+
+def test_a_spent_intent_cannot_poison_the_next_jobs_ending(monkeypatch):
+    """Every terminal transition spends the intent, even ones that don't
+    need it — so a stop that surfaced as an error state cannot leave its
+    intent behind to flip the NEXT job's honest finish into "cancelled".
+    """
+    from kiln.printers.bambu import BambuAdapter
+
+    monkeypatch.setattr(BambuAdapter, "_ensure_mqtt", lambda self: None)
+    recorded: list[dict] = []
+    import kiln.plugins.learning_tools as lt
+
+    monkeypatch.setattr(
+        lt, "record_print_outcome",
+        lambda **kw: recorded.append(kw) or {"success": True},
+    )
+
+    printer = BambuAdapter(
+        host="192.0.2.20", access_code="00000000", serial="00M09A000000004",
+    )
+    server._get_registry().register("garage", printer)
+
+    def _push(gcode_state: str, *, job: str) -> None:
+        payload = {
+            "print": {
+                "command": "push_status",
+                "gcode_state": gcode_state,
+                "subtask_name": job,
+                "gcode_file": f"/sdcard/{job}.3mf",
+                "print_error": 0,
+            }
+        }
+        printer._on_message(
+            None, None, SimpleNamespace(payload=json.dumps(payload).encode())
+        )
+
+    # Job 1: a stop whose ending surfaced as an ERROR state, not idle.
+    _push("RUNNING", job="bracket")
+    hook.register_cancel_intent("garage")
+    _push("FAILED", job="bracket")
+
+    # Job 2 ends honestly, within the intent TTL.
+    _push("RUNNING", job="spool-holder")
+    _push("FINISH", job="spool-holder")
+
+    by_job = {c["job_id"]: c["outcome"] for c in recorded}
+    assert by_job["bracket"] == "failed"       # firmware's word wins
+    assert by_job["spool-holder"] == "success"  # not "cancelled"
