@@ -7,6 +7,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **A dropped connection can't cost you a duplicate print.** If your assistant
+  queues a print and the reply goes missing, it can now retry safely: sending
+  the same job again with the same one-time key gives back the original
+  instead of quietly adding a second copy, and Kiln says which of the two
+  happened. Jobs sent without a key behave exactly as before, and a new key is
+  still a new print. Thanks [@artiehinz](https://github.com/artiehinz) for
+  [reporting it](https://github.com/codeofaxel/Kiln/issues/112), with the queue
+  and scheduler traced well enough to reproduce.
+
 - **Kiln works with OrcaSlicer and BambuStudio now.** If one of those is the
   slicer you have, Kiln can finally use it. Kiln had listed them as supported
   for a long time while only ever being able to drive PrusaSlicer, so anyone
@@ -171,6 +180,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **Sending a job to your fleet works again (Business).** Handing a print to
+  the fleet, and asking Kiln which machine should take it, failed with an
+  unhelpful error on every call since April. Both work now, and the routing
+  reads the real state of your machines: what's loaded, what's already queued,
+  and how each has done with that material before.
 
 - **Your Bambu's screen shows the actual print again.** A recent change to how
   Kiln handles colours quietly stopped previews reaching the printer, so the
