@@ -4840,7 +4840,29 @@ def start_print(
         return err
     if err := _check_rate_limit("start_print"):
         return err
-    if conf := _check_confirmation("start_print", {"file_name": file_name}):
+    # Complete args — confirm_action replays the tool with exactly what is
+    # stored here, so anything omitted reverts to its default on the replay.
+    # With only file_name stored, a confirmed start silently dropped the
+    # plate number, AMS mapping and calibration switches it was shown with.
+    if conf := _check_confirmation(
+        "start_print",
+        {
+            "file_name": file_name,
+            "use_ams": use_ams,
+            "ams_mapping": ams_mapping,
+            "timelapse": timelapse,
+            "bed_leveling": bed_leveling,
+            "flow_cali": flow_cali,
+            "vibration_cali": vibration_cali,
+            "layer_inspect": layer_inspect,
+            "nozzle_clog_detect": nozzle_clog_detect,
+            "bed_type": bed_type,
+            "plate_number": plate_number,
+            "resume_from_paused": resume_from_paused,
+            "skip_preheat_reassert": skip_preheat_reassert,
+            "preview_token": preview_token,
+        },
+    ):
         return conf
     if block := _emergency_latch_error("start_print", _resolve_effective_printer_name()):
         return block
@@ -5267,7 +5289,21 @@ def cancel_print(
         return err
     if err := _check_rate_limit("cancel_print"):
         return err
-    if conf := _check_confirmation("cancel_print", {"printer_name": printer_name}):
+    # The confirmation stores the COMPLETE call: confirm_action replays the
+    # tool with exactly these args, so a missing key silently reverts to its
+    # default on the replay — the confirmed action differs from the one the
+    # user was shown.  (Measured: {"printer_name": ...} alone replayed a
+    # preserve_temperatures=True cancel as a plain cooling cancel.)
+    if conf := _check_confirmation(
+        "cancel_print",
+        {
+            "printer_name": printer_name,
+            "preserve_temperatures": preserve_temperatures,
+            "expected_tool_target": expected_tool_target,
+            "expected_bed_target": expected_bed_target,
+            "expected_chamber_target": expected_chamber_target,
+        },
+    ):
         return conf
     try:
         try:
@@ -5494,7 +5530,18 @@ def emergency_stop(
         return err
     if err := _check_rate_limit("emergency_stop"):
         return err
-    if conf := _check_confirmation("emergency_stop", {}):
+    # Complete args, not {} — confirm_action replays with what is stored
+    # here, and an empty dict replayed a stop aimed at ONE printer as
+    # emergency_stop() with printer_name=None: stop ALL printers.
+    if conf := _check_confirmation(
+        "emergency_stop",
+        {
+            "printer_name": printer_name,
+            "reason": reason,
+            "source": source,
+            "note": note,
+        },
+    ):
         return conf
     try:
         from kiln.emergency import EmergencyReason, get_emergency_coordinator
@@ -5597,9 +5644,17 @@ def clear_emergency_stop(
     """
     if err := _check_auth("print"):
         return err
+    # acknowledgement_note included: it is a REQUIRED parameter, and a
+    # stored-args dict without it made every confirmed replay die on a
+    # TypeError — in confirm mode the latch could not be cleared through
+    # this tool at all.
     if conf := _check_confirmation(
         "clear_emergency_stop",
-        {"printer_name": printer_name, "acknowledged_by": acknowledged_by},
+        {
+            "printer_name": printer_name,
+            "acknowledgement_note": acknowledgement_note,
+            "acknowledged_by": acknowledged_by,
+        },
     ):
         return conf
     if not (acknowledgement_note or "").strip():
@@ -7319,7 +7374,14 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         return err
     if err := _check_rate_limit("send_gcode"):
         return err
-    if not dry_run and (conf := _check_confirmation("send_gcode", {"commands": commands})):
+    # dry_run is stored too (always False here — a dry run never reaches
+    # this gate) so the stored args stay the tool's complete signature and
+    # the replay is verbatim.
+    if not dry_run and (
+        conf := _check_confirmation(
+            "send_gcode", {"commands": commands, "dry_run": dry_run}
+        )
+    ):
         return conf
     if not dry_run and (block := _emergency_latch_error("send_gcode", _resolve_effective_printer_name())):
         return block
