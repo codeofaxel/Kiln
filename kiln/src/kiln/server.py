@@ -1615,6 +1615,81 @@ def _resolve_adapter(printer_name: str | None = None) -> PrinterAdapter:
     return adapter
 
 
+def _lifecycle_printer_name(adapter: PrinterAdapter) -> str:
+    """The name this adapter's stop-path bookkeeping is filed under.
+
+    Thin pass-through to :func:`~kiln.printers.base.outcome_printer_name`,
+    which is the one answer the outcome lifecycle already uses — the
+    cancel-intent table, the terminal-transition table, the idempotency
+    ledger and the ``printer_name`` on the outcome row.  A stop path that
+    computed its own name would file intent under a key the hook never
+    reads, which is exactly how a cancelled print came to be recorded as a
+    success (see that function's docstring).
+    """
+    from kiln.printers.base import outcome_printer_name
+
+    return outcome_printer_name(adapter)
+
+
+def _resolve_control_target(printer_name: str | None) -> tuple[PrinterAdapter, str]:
+    """Resolve ``(adapter, lifecycle_name)`` for a control verb.
+
+    The single door for ``pause_print``, ``resume_print`` and
+    ``cancel_print``: the adapter is the machine the command is sent to,
+    and the name is what every piece of bookkeeping about that command —
+    cancel intent, watchdog teardown, incident envelope, audit line —
+    must be filed under.  Deriving both here, from one resolution, is
+    what stops a stop being *sent* to one machine and *recorded* against
+    another.
+
+    ``printer_name=None`` keeps the default-printer behaviour these tools
+    had before they could be aimed.
+    """
+    adapter = _resolve_adapter(printer_name)
+    return adapter, _lifecycle_printer_name(adapter)
+
+
+def _is_heater_watchdog_machine(adapter: PrinterAdapter) -> bool:
+    """True when *adapter* is the machine the heater watchdog watches.
+
+    :class:`~kiln.heater_watchdog.HeaterWatchdog` is one process-wide
+    instance built with ``get_adapter=lambda: _get_adapter()``, so it
+    watches the default printer and nothing else.  Its idle tick checks
+    heater targets but never re-reads whether a job is running, which
+    makes ``notify_print_ended()`` a claim only the default printer's
+    caller is entitled to make.
+
+    Compared by machine fingerprint rather than by name, so the
+    ``"default"`` alias and the config.yaml name for one machine both
+    answer True.  Anything unresolvable answers False — skipping the
+    notification costs a delayed cooldown; getting it wrong cools a
+    printer mid-print.
+    """
+    try:
+        from kiln.registry import machine_fingerprint
+
+        return machine_fingerprint(adapter) == machine_fingerprint(_get_adapter())
+    except Exception as exc:  # noqa: BLE001 — no default printer, or unreachable
+        logger.debug("Heater-watchdog ownership check skipped: %s", exc)
+        return False
+
+
+def _unknown_printer_error(printer_name: str | None, verb: str) -> dict:
+    """Error dict for a control verb aimed at a printer Kiln doesn't know."""
+    try:
+        known = _get_registry().list_names() or sorted(_read_config_printers())
+    except Exception:  # noqa: BLE001 — the error must survive a broken registry
+        known = []
+    known_msg = f" Registered printers: {', '.join(known)}." if known else ""
+    return _error_dict(
+        f"No printer named {printer_name!r} — cannot {verb} it.{known_msg} "
+        "Omit printer_name to target the default printer, or register this "
+        "one with register_printer().",
+        code="PRINTER_NOT_FOUND",
+        retryable=False,
+    )
+
+
 def _get_emergency_latch_status(printer_name: str) -> dict[str, Any] | None:
     """Best-effort emergency latch status lookup for a printer."""
     try:
@@ -1858,74 +1933,125 @@ _CONFIRM_TOKEN_TTL: float = 300.0  # 5 minutes
 # ``_PAUSE_KEEPALIVE_INTERVAL_S`` seconds via the existing adapter API.
 #
 # Design:
-#   - One daemon thread per process.  Idempotent ``start`` so repeat
-#     pauses don't compound threads.
-#   - ``stop()`` is called from resume/cancel/error paths.
+#   - One daemon thread per PAUSED MACHINE, keyed by machine fingerprint.
+#     Idempotent ``start`` so repeat pauses don't compound threads.
+#   - ``stop(adapter)`` is called from resume/cancel/error paths.
 #   - All adapter calls are best-effort; a failed re-assert is logged
 #     once at INFO level and the loop keeps trying.
+#
+# Every entry point takes the adapter it is actually driving, and the
+# thread re-asserts on THAT adapter.  A process-wide singleton bound to
+# ``_get_adapter()`` was the earlier shape, and on two machines it meant
+# pausing the second one spawned a thread that pushed the second one's
+# targets onto the FIRST — reheating an idle printer, or fighting a
+# running print's own temperatures, for as long as the pause lasted.
 _PAUSE_KEEPALIVE_INTERVAL_S: float = 120.0  # 2 min — well under firmware idle threshold
 
 
 class _PauseKeepAlive:
-    """Daemon thread that re-asserts heater targets across long pauses.
+    """Daemon threads that re-assert heater targets across long pauses.
 
-    Singleton-ish: one instance lives in the module.  ``start`` is
-    idempotent; calling it twice while the thread is running just
-    refreshes the stored targets.  ``stop`` is fast and side-effect
-    free if the thread isn't running.
+    One instance lives in the module and holds one thread per paused
+    machine.  ``start`` is idempotent per machine; calling it twice
+    while that machine's thread is running just refreshes its stored
+    targets.  ``stop`` is fast and side-effect free if the named
+    machine has no thread.
+
+    Keyed by :func:`~kiln.registry.machine_fingerprint`, not by printer
+    name: the server registers the active printer as ``"default"`` AND
+    again under its config.yaml name, so a name key would run two
+    threads against one machine.  The fingerprint is serial- or
+    host-derived, so the two names collapse to one entry and two real
+    printers never do.
     """
 
     def __init__(self) -> None:
         import threading
         self._lock = threading.Lock()
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._targets: dict[str, float] = {}
+        # fingerprint -> {"thread", "stop_event", "targets", "adapter", "label"}
+        self._entries: dict[str, dict[str, Any]] = {}
 
-    def start(self, tool_target: float, bed_target: float) -> bool:
-        """Begin re-asserting ``tool_target`` and ``bed_target`` every 2 min.
+    @staticmethod
+    def _key(adapter: PrinterAdapter) -> str:
+        from kiln.registry import machine_fingerprint
 
-        If the thread is already running, just update the stored targets.
-        Returns ``True`` if a new thread was spawned, ``False`` if an
-        existing thread was just refreshed.
+        return machine_fingerprint(adapter)
+
+    def start(
+        self, adapter: PrinterAdapter, tool_target: float, bed_target: float,
+    ) -> bool:
+        """Begin re-asserting the targets on *adapter* every 2 min.
+
+        If a thread for this machine is already running, just update its
+        stored targets.  Returns ``True`` if a new thread was spawned,
+        ``False`` if an existing one was refreshed.
         """
         import threading
+
+        key = self._key(adapter)
+        label = _lifecycle_printer_name(adapter)
+        targets = {"tool": float(tool_target or 0.0), "bed": float(bed_target or 0.0)}
         with self._lock:
-            self._targets = {
-                "tool": float(tool_target or 0.0),
-                "bed": float(bed_target or 0.0),
-            }
-            if self._thread is not None and self._thread.is_alive():
-                return False  # Refreshed in place, no new thread.
-            self._stop_event.clear()
-            self._thread = threading.Thread(
+            entry = self._entries.get(key)
+            if entry is not None and entry["thread"].is_alive():
+                # Refreshed in place, no new thread.  The adapter is
+                # refreshed too: a lazily-rebuilt adapter for the same
+                # machine must not leave the thread holding a stale one.
+                entry["targets"] = targets
+                entry["adapter"] = adapter
+                return False
+            stop_event = threading.Event()
+            thread = threading.Thread(
                 target=self._loop,
-                name="kiln-pause-keepalive",
+                args=(key, stop_event),
+                name=f"kiln-pause-keepalive-{label}",
                 daemon=True,
             )
-            self._thread.start()
+            self._entries[key] = {
+                "thread": thread,
+                "stop_event": stop_event,
+                "targets": targets,
+                "adapter": adapter,
+                "label": label,
+            }
+            thread.start()
             return True
 
-    def stop(self) -> None:
-        """Signal the thread to exit.  Safe to call when not running."""
-        with self._lock:
-            self._stop_event.set()
-            self._thread = None
-            self._targets = {}
+    def stop(self, adapter: PrinterAdapter) -> None:
+        """Signal *adapter*'s thread to exit.  Safe when none is running.
 
-    def is_running(self) -> bool:
+        Only this machine's thread is stopped — a fleet's other pauses
+        are none of this cancel's business.
+        """
         with self._lock:
-            return self._thread is not None and self._thread.is_alive()
+            entry = self._entries.pop(self._key(adapter), None)
+        if entry is not None:
+            entry["stop_event"].set()
 
-    def _loop(self) -> None:
+    def is_running(self, adapter: PrinterAdapter) -> bool:
+        with self._lock:
+            entry = self._entries.get(self._key(adapter))
+            return entry is not None and entry["thread"].is_alive()
+
+    def _loop(self, key: str, stop_event: threading.Event) -> None:
         """Re-assert targets until stopped or the printer leaves PAUSED."""
         # Wait first — the immediate post-pause state already has the
         # targets set by the slicer/firmware; we only need to fight the
         # cooldown that kicks in a few minutes later.
-        while not self._stop_event.wait(_PAUSE_KEEPALIVE_INTERVAL_S):
+        while not stop_event.wait(_PAUSE_KEEPALIVE_INTERVAL_S):
             try:
                 from kiln.printers.base import PrinterStatus
-                adapter = _get_adapter()
+
+                with self._lock:
+                    entry = self._entries.get(key)
+                    # Replaced by a newer thread for the same machine, or
+                    # stopped between the wait and the lock — either way
+                    # this thread no longer speaks for the machine.
+                    if entry is None or entry["stop_event"] is not stop_event:
+                        return
+                    adapter = entry["adapter"]
+                    targets = dict(entry["targets"])
+
                 # Stop if the printer left PAUSED on its own (resume,
                 # cancel, error, or operator pressed buttons on the printer).
                 try:
@@ -1935,12 +2061,13 @@ class _PauseKeepAlive:
                             "Pause keep-alive: printer state is %s, not paused — exiting loop",
                             state.state,
                         )
+                        with self._lock:
+                            if self._entries.get(key) is entry:
+                                del self._entries[key]
                         return
                 except Exception as exc:
                     logger.debug("Pause keep-alive: state read failed (%s); continuing", exc)
 
-                with self._lock:
-                    targets = dict(self._targets)
                 if targets.get("tool", 0) > 0:
                     try:
                         adapter.set_tool_temp(targets["tool"])
@@ -2083,7 +2210,12 @@ def _spawn_print_watchdog(adapter: Any, file_name: str) -> None:
     """
     from kiln.print_watchdog import PrintWatchdog
 
-    printer_name = _resolve_effective_printer_name() or "default"
+    # Keyed the same way the teardown looks it up — off the adapter that
+    # is actually printing.  Both ends called ``_resolve_effective_printer_name()``
+    # before, which agreed only because neither end could name a printer:
+    # the moment cancel_print could be aimed, the default's key would have
+    # torn down the default's watchdog on a cancel meant for another machine.
+    printer_name = _lifecycle_printer_name(adapter)
 
     def _on_anomaly(flag):
         # Yellow flags report a condition; red flags report a stopped print.
@@ -2128,10 +2260,19 @@ def _spawn_print_watchdog(adapter: Any, file_name: str) -> None:
 
 
 def _stop_print_watchdog(printer_name: str | None = None) -> None:
-    """Stop the PrintWatchdog for a printer (e.g., on cancel / finish)."""
+    """Stop the PrintWatchdog for a printer (e.g., on cancel / finish).
+
+    Omitting the name means the default printer, and resolves it through
+    the same function ``_spawn_print_watchdog`` keyed on — a teardown that
+    computes the name a different way just leaks the watchdog it meant to
+    stop.
+    """
+    name = printer_name
+    if not name:
+        with contextlib.suppress(Exception):
+            name = _lifecycle_printer_name(_get_adapter())
     with _print_watchdogs_lock:
-        name = printer_name or _resolve_effective_printer_name() or "default"
-        wd = _print_watchdogs.pop(name, None)
+        wd = _print_watchdogs.pop(name or "default", None)
     if wd is not None:
         try:
             wd.stop(timeout=1.5)
@@ -5010,10 +5151,10 @@ def start_print(
                 file_name, _wd_exc,
             )
 
-        # Stop any pause keep-alive thread now that the print is back
-        # under firmware control.  Safe to call when nothing's running.
+        # Stop this printer's pause keep-alive thread now that the print is
+        # back under firmware control.  Safe to call when nothing's running.
         try:
-            _pause_keepalive.stop()
+            _pause_keepalive.stop(adapter)
         except Exception as exc:
             logger.debug("start_print: keep-alive stop failed (best-effort): %s", exc)
 
@@ -5072,6 +5213,7 @@ def start_print(
 
 @mcp.tool()
 def cancel_print(
+    printer_name: str | None = None,
     preserve_temperatures: bool = False,
     expected_tool_target: float | None = None,
     expected_bed_target: float | None = None,
@@ -5084,6 +5226,12 @@ def cancel_print(
 
     The printer must have an active job (printing or paused).
 
+    :param printer_name: Which printer to stop.  Omit to stop the default
+        printer, which is what this did before it could be aimed.  Owning
+        more than one printer is free at every tier (only running them at
+        the same time is a fleet feature), so the second machine is a
+        supported setup on a free licence — and control of a hot machine
+        is never something a licence takes away.
     :param preserve_temperatures: When ``True``, re-asserts the pre-cancel
         hotend + bed (+ chamber, if expected_chamber_target is provided)
         targets immediately after the cancel command, so the printer
@@ -5119,10 +5267,13 @@ def cancel_print(
         return err
     if err := _check_rate_limit("cancel_print"):
         return err
-    if conf := _check_confirmation("cancel_print", {}):
+    if conf := _check_confirmation("cancel_print", {"printer_name": printer_name}):
         return conf
     try:
-        adapter = _get_adapter()
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "cancel a print on")
 
         # Snapshot pre-cancel targets so we can restore them below.
         # Caller-supplied ``expected_*`` values take precedence over the
@@ -5153,9 +5304,10 @@ def cancel_print(
         # cancel will leave the printer in IDLE/CANCELLING and the
         # keep-alive's get_state() check would exit anyway, but
         # explicit shutdown avoids a possible race where set_*_temp
-        # fights the cancel-cool sequence.
+        # fights the cancel-cool sequence.  Only THIS machine's thread:
+        # another printer's pause is not this cancel's business.
         try:
-            _pause_keepalive.stop()
+            _pause_keepalive.stop(adapter)
         except Exception as exc:
             logger.debug("cancel_print: keep-alive stop failed (best-effort): %s", exc)
 
@@ -5166,9 +5318,15 @@ def cancel_print(
         # auto_record_hook classify the next idle transition as a
         # cancel rather than a success, so the learning DB gets
         # ``outcome="cancelled"`` instead of a bogus ``"success"``.
+        #
+        # The name comes off the adapter we are about to cancel, not off
+        # "which printer is the default" — those are the same string only
+        # on a one-machine bench.  File it under the wrong machine and the
+        # cancelled print is recorded a success while some other printer's
+        # honest finish is recorded cancelled.
         try:
             from kiln.auto_record_hook import register_cancel_intent
-            register_cancel_intent(_resolve_effective_printer_name(None))
+            register_cancel_intent(target_name)
         except Exception as exc:  # pragma: no cover — best-effort
             logger.debug("cancel_print: register_cancel_intent failed: %s", exc)
 
@@ -5187,7 +5345,7 @@ def cancel_print(
                 incident_recorder.record_incident(
                     incident_type="user_cancel_pre_layer_5",
                     printer_status={
-                        "printer_name": _resolve_effective_printer_name(None),
+                        "printer_name": target_name,
                         "layer_at_cancel": _layer_at_cancel,
                         "state": getattr(_state_at_cancel, "state", None),
                     },
@@ -5199,9 +5357,22 @@ def cancel_print(
             )
 
         result = adapter.cancel_print()
-        _get_heater_watchdog().notify_print_ended()
-        # Layer 5: tear down the PrintWatchdog for this printer.
-        _stop_print_watchdog()
+
+        # The heater watchdog is a single process-wide instance bound to
+        # ``_get_adapter()`` — it only ever watches the default printer.
+        # Telling it "the print ended" after cancelling a DIFFERENT machine
+        # clears its print-active flag while the machine it watches is still
+        # printing, and its idle tick does not re-check for a running job:
+        # _HEATER_TIMEOUT_MIN later it would set that printer's hotend and
+        # bed to 0 mid-print.  So only notify when the machine we cancelled
+        # is the machine it is watching.
+        if _is_heater_watchdog_machine(adapter):
+            _get_heater_watchdog().notify_print_ended()
+
+        # Layer 5: tear down the PrintWatchdog for the printer we cancelled.
+        # Nameless, this tore down the DEFAULT printer's watchdog — blinding
+        # the machine still printing while leaving the cancelled one watched.
+        _stop_print_watchdog(target_name)
 
         # Re-assert targets AFTER cancel so the firmware's default-cool
         # behaviour is overridden.  Only fires when the caller asked for
@@ -5239,9 +5410,12 @@ def cancel_print(
                         expected_chamber_target, exc,
                     )
 
-        _audit("cancel_print", "executed")
+        _audit("cancel_print", f"executed for {target_name}")
 
         out = result.to_dict()
+        # Say which machine stopped.  An agent driving two printers has no
+        # other way to tell from the reply that it stopped the right one.
+        out["printer_name"] = target_name
         if preserve_temperatures:
             out["preserved_temperatures"] = restored
             if chamber_restored is not None:
@@ -5602,7 +5776,7 @@ def emergency_trip_input(
 
 
 @mcp.tool()
-def pause_print(keep_temps: bool = True) -> dict:
+def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dict:
     """Pause the currently running print job.
 
     Pausing lifts the nozzle and parks the head.
@@ -5631,16 +5805,23 @@ def pause_print(keep_temps: bool = True) -> dict:
             keep-alive (legacy behaviour — printer may cool during long
             pauses).  The keep-alive thread is idempotent: repeat
             pause/resume cycles do not compound threads.
+        printer_name: Which printer to pause.  Omit for the default
+            printer.  Each paused machine gets its own keep-alive thread,
+            re-asserting its own targets on its own adapter.
 
-    Use ``resume_print()`` to continue from where the print left off.
-    The keep-alive thread is automatically stopped on resume or cancel.
+    Use ``resume_print()`` to continue from where the print left off — pass
+    the same ``printer_name`` you paused with.  The keep-alive thread is
+    automatically stopped on that printer's resume or cancel.
     """
     if err := _check_auth("print"):
         return err
     if err := _check_rate_limit("pause_print"):
         return err
     try:
-        adapter = _get_adapter()
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "pause a print on")
 
         # Snapshot pre-pause targets BEFORE issuing the pause command —
         # some firmwares clear them within seconds of the pause being
@@ -5666,16 +5847,20 @@ def pause_print(keep_temps: bool = True) -> dict:
         if keep_temps and snapshot is not None and (snapshot["tool"] > 0 or snapshot["bed"] > 0):
             try:
                 keepalive_started = _pause_keepalive.start(
+                    adapter,
                     tool_target=snapshot["tool"],
                     bed_target=snapshot["bed"],
                 )
             except Exception as exc:
                 logger.warning("pause_print: failed to start keep-alive: %s", exc)
 
+        _audit("pause_print", f"executed for {target_name}")
+
         out = result.to_dict()
+        out["printer_name"] = target_name
         if keep_temps and snapshot is not None:
             out["keep_alive"] = {
-                "active": _pause_keepalive.is_running(),
+                "active": _pause_keepalive.is_running(adapter),
                 "started_new_thread": keepalive_started,
                 "interval_seconds": _PAUSE_KEEPALIVE_INTERVAL_S,
                 "targets": snapshot,
@@ -5792,7 +5977,7 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
 
 
 @mcp.tool()
-def resume_print(force: bool = False) -> dict:
+def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
     """Resume a paused print job.
 
     The printer must currently be in a paused state.  Resuming will return
@@ -5808,24 +5993,42 @@ def resume_print(force: bool = False) -> dict:
             what Kiln reports — a printer can report ``RUNNING`` with
             perfectly fresh telemetry while standing still, and without this
             the wrong state word would leave you unable to recover the print.
+        printer_name: Which printer to resume.  Omit for the default
+            printer.  Pass the same name you paused with.
     """
     if err := _check_auth("print"):
         return err
     if err := _check_rate_limit("resume_print"):
         return err
-    if block := _emergency_latch_error("resume_print", _resolve_effective_printer_name()):
+    # Asked about the printer being resumed, not about the default one:
+    # checking the default's latch would let a latched machine be restarted
+    # by any command that named it.  Still asked BEFORE anything is built or
+    # connected — a latched printer is refused, not investigated.  The latch
+    # namespace is registry names, which is what emergency_stop latches under.
+    if block := _emergency_latch_error(
+        "resume_print", _resolve_effective_printer_name(printer_name)
+    ):
         return block
     try:
-        adapter = _get_adapter()
-        result = adapter.resume_print(force=force)
-        # Stop the pause keep-alive thread if one was running — the print
-        # is back under firmware control and re-asserting targets here
-        # would race with the resume preamble gcode.
         try:
-            _pause_keepalive.stop()
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "resume a print on")
+
+        result = adapter.resume_print(force=force)
+        # Stop this printer's pause keep-alive thread if one was running —
+        # the print is back under firmware control and re-asserting targets
+        # here would race with the resume preamble gcode.
+        try:
+            _pause_keepalive.stop(adapter)
         except Exception as exc:
             logger.debug("resume_print: keep-alive stop failed (best-effort): %s", exc)
-        return result.to_dict()
+
+        _audit("resume_print", f"executed for {target_name}")
+
+        out = result.to_dict()
+        out["printer_name"] = target_name
+        return out
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to resume print: {exc}. Check that the printer is in a paused state.")
     except Exception as exc:
