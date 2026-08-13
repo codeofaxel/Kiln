@@ -159,6 +159,49 @@ def _read_printer_model_from_config() -> str | None:
     return None
 
 
+def resolve_printer_model_for(printer_name: str | None) -> str | None:
+    """The config-declared ``printer_model`` for one NAMED printer.
+
+    :func:`resolve_printer_model` answers "what is the active printer",
+    which is the right answer only for a tool that acts on the default
+    connection.  A tool that can be aimed needs the model of the machine
+    it was aimed at: bed-fit, temperature ceilings and the PTFE clamp all
+    key off this value, so reading the active printer's model while
+    talking to a different machine certifies geometry against the wrong
+    bed — the failure the bed-fit gate exists to prevent.
+
+    ``printer_name=None``, or the name of the active printer, resolves
+    through :func:`resolve_printer_model` unchanged, so the default path
+    keeps its legacy top-level fallback and its missing-model warning.
+
+    For any OTHER name the top-level ``printer_model`` is deliberately
+    NOT consulted: a legacy single-printer config states the default
+    machine's model, and applying it to a second machine is exactly the
+    wrong-bed answer above.  Returning ``None`` instead makes the safety
+    gates soft-pass and say so, which is the posture this module already
+    takes for an unknown model — a skipped check is recoverable, a check
+    passed against the wrong hardware is not.
+    """
+    if not printer_name:
+        return resolve_printer_model()
+    cfg = _load_yaml_config()
+    active_printer = (cfg.get("active_printer") or "default") if cfg else "default"
+    if printer_name == active_printer:
+        return resolve_printer_model()
+    printers = cfg.get("printers") or {} if cfg else {}
+    entry = printers.get(printer_name) or {}
+    model = str(entry.get("printer_model") or "").strip() if isinstance(entry, dict) else ""
+    if model:
+        return model
+    logger.warning(
+        "No `printer_model` set for printer %r in %s.  Bed-fit and "
+        "temperature checks for prints aimed at it will be skipped.  Add "
+        "`printer_model: <model>` under `printers.%s` in the config file.",
+        printer_name, _CONFIG_PATH, printer_name,
+    )
+    return None
+
+
 def resolve_all_printer_models() -> list[str]:
     """Return the ``printer_model`` of EVERY printer entry in
     ``~/.kiln/config.yaml`` (active or not), deduped, order-stable.

@@ -1336,26 +1336,44 @@ def _get_adapter() -> PrinterAdapter:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_printer_model_live() -> str:
+def _resolve_printer_model_live(printer_name: str | None = None) -> str:
     """Return the current printer_id preferring the live config.yaml
     resolver over the frozen module global.  This lets safety gates
     always see the latest user config without requiring a server
     restart — and it gives them a fighting chance when the user never
     set _PRINTER_MODEL explicitly.  Returns empty string when no
     source has a value.
+
+    Pass *printer_name* from a tool that can be aimed, so the gate reads
+    the model of the machine the file is going to.  For a name that is
+    NOT the default printer the ``_PRINTER_MODEL`` fallback is skipped:
+    that global is the DEFAULT printer's model, and lending it to another
+    machine is how a bed-fit check comes to pass against a bed the file
+    never touches.  Naming the default printer explicitly resolves
+    exactly as omitting the name does.
     """
     try:
-        from kiln.printer_model_resolver import resolve_printer_model
-        live = resolve_printer_model()
+        from kiln.printer_model_resolver import resolve_printer_model_for
+        live = resolve_printer_model_for(printer_name)
         if live:
             return live
     except Exception as exc:
         logger.debug("live printer-model resolution failed: %s", exc)
+    if printer_name:
+        try:
+            if printer_name != _resolve_effective_printer_name(None):
+                return ""
+        except Exception:  # noqa: BLE001 — an unresolvable default is not this call's problem
+            return ""
     return _PRINTER_MODEL or ""
 
 
-def _get_temp_limits() -> tuple:
+def _get_temp_limits(printer_name: str | None = None) -> tuple:
     """Return ``(max_tool, max_bed)`` from the printer's safety profile.
+
+    Pass *printer_name* to read the ceilings of a machine other than the
+    default one; omitting it keeps the default-printer answer these
+    limits have always given.
 
     Resolution order (via :func:`_resolve_printer_model_live`):
       1. ``printer_model`` field in ``~/.kiln/config.yaml``
@@ -1373,13 +1391,16 @@ def _get_temp_limits() -> tuple:
     Set ``KILN_OVERRIDE_PTFE_LIMIT=1`` to disable this clamp (only do this
     if you've physically replaced the PTFE with an all-metal conversion).
     """
-    live_model = _resolve_printer_model_live()
+    live_model = _resolve_printer_model_live(printer_name)
     if live_model:
         # Temporarily rebind _PRINTER_MODEL for the PTFE clamp branch
         # below so the existing logic reads the live value.
         _resolved = live_model
     else:
-        _resolved = _PRINTER_MODEL
+        # Empty for a named non-default machine — _resolve_printer_model_live
+        # refuses to lend it the default's model, so this falls through to
+        # the unknown-printer ceiling rather than a borrowed one.
+        _resolved = _PRINTER_MODEL if not printer_name else ""
     if _resolved:
         try:
             from kiln.safety_profiles import get_profile  # noqa: E402
@@ -1634,13 +1655,14 @@ def _lifecycle_printer_name(adapter: PrinterAdapter) -> str:
 def _resolve_control_target(printer_name: str | None) -> tuple[PrinterAdapter, str]:
     """Resolve ``(adapter, lifecycle_name)`` for a control verb.
 
-    The single door for ``pause_print``, ``resume_print`` and
-    ``cancel_print``: the adapter is the machine the command is sent to,
-    and the name is what every piece of bookkeeping about that command —
-    cancel intent, watchdog teardown, incident envelope, audit line —
-    must be filed under.  Deriving both here, from one resolution, is
-    what stops a stop being *sent* to one machine and *recorded* against
-    another.
+    The single door for the verbs that act on one machine — ``pause_print``,
+    ``resume_print``, ``cancel_print`` on the stop side, ``upload_file`` and
+    ``start_print`` on the start side: the adapter is the machine the command
+    is sent to, and the name is what every piece of bookkeeping about that
+    command — cancel intent, watchdog teardown, incident envelope, safety
+    model lookup, audit line — must be filed under.  Deriving both here, from
+    one resolution, is what stops a command being *sent* to one machine and
+    *recorded* (or *safety-checked*) against another.
 
     ``printer_name=None`` keeps the default-printer behaviour these tools
     had before they could be aimed.
@@ -1815,9 +1837,10 @@ class _ToolRateLimiter:
 
 _tool_limiter = _ToolRateLimiter()
 
-# Pending upload confirmations (token -> file_path).
-# Only populated when KILN_CONFIRM_UPLOAD is enabled.
-_pending_uploads: dict[str, str] = {}
+# Pending upload confirmations, token -> (file_path, printer_name-as-passed).
+# Only populated when KILN_CONFIRM_UPLOAD is enabled.  The target rides with
+# the token because upload_file_confirm is handed nothing else to aim by.
+_pending_uploads: dict[str, tuple[str, str | None]] = {}
 
 # Rate limits: {tool_name: (min_interval_ms, max_per_minute)}.
 # Read-only tools have no limits.  Physically-dangerous tools get cooldowns.
@@ -4194,7 +4217,7 @@ def printer_files() -> dict:
 
 
 @mcp.tool()
-def upload_file(file_path: str) -> dict:
+def upload_file(file_path: str, printer_name: str | None = None) -> dict:
     """Upload a local G-code file to the printer.
 
     Handles FTPS (Bambu), REST multipart upload (OctoPrint/Moonraker), and
@@ -4204,6 +4227,11 @@ def upload_file(file_path: str) -> dict:
         file_path: Absolute path to the G-code file on the local filesystem.
             The file must exist, be readable, and have a recognised extension
             (.gcode, .gco, or .g).
+        printer_name: Which printer to upload to.  Omit to upload to the
+            default printer, which is what this did before it could be
+            aimed.  The G-code dialect scan and the bed-fit gate follow the
+            named machine too, so the bytes are checked against the bed
+            they are actually going to.
 
     After a successful upload the file will appear in ``printer_files()`` and
     can be started with ``start_print()``.
@@ -4213,7 +4241,10 @@ def upload_file(file_path: str) -> dict:
     if err := _check_rate_limit("upload_file"):
         return err
     try:
-        adapter = _get_adapter()
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "upload to")
 
         # Check file exists and size before uploading
         if not os.path.isfile(file_path):
@@ -4244,17 +4275,31 @@ def upload_file(file_path: str) -> dict:
 
                 # Use dialect-aware scanning so that commands standard for
                 # the printer firmware (e.g. M500 for Bambu bed-leveling)
-                # are not falsely blocked.
+                # are not falsely blocked.  Read off the adapter that will
+                # receive the bytes rather than the default connection's
+                # frozen type, so an aimed upload is scanned in its own
+                # firmware's dialect.
+                _target_type = (getattr(adapter, "name", "") or _PRINTER_TYPE or "").lower()
                 _dialect = (
                     GCodeDialect.BAMBU
-                    if _PRINTER_TYPE == "bambu"
+                    if _target_type == "bambu"
                     else GCodeDialect.KLIPPER
-                    if _PRINTER_TYPE in ("moonraker", "creality")
+                    if _target_type in ("moonraker", "creality")
                     else GCodeDialect.GENERIC
+                )
+                # Unaimed, this keeps reading the frozen global it always
+                # read; aimed, it must not, because that global names the
+                # default machine.  (The bed-fit gate below already prefers
+                # the live resolver — the two disagreeing on the default
+                # path predates this and is left alone deliberately.)
+                _scan_model = (
+                    _resolve_printer_model_live(printer_name)
+                    if printer_name
+                    else _PRINTER_MODEL
                 )
                 scan = scan_gcode_file(
                     file_path,
-                    printer_id=_PRINTER_MODEL or None,
+                    printer_id=_scan_model or None,
                     dialect=_dialect,
                 )
                 if not scan.valid:
@@ -4285,7 +4330,11 @@ def upload_file(file_path: str) -> dict:
             )
             _ext = os.path.splitext(file_path)[1].lower()
             bed_fit_result: dict[str, Any] | None = None
-            _live_model = _resolve_printer_model_live() or _PRINTER_MODEL
+            # The bed this file is going to, not the bed of whichever
+            # printer happens to be the default one.
+            _live_model = _resolve_printer_model_live(printer_name) or (
+                "" if printer_name else _PRINTER_MODEL
+            )
             if _ext in _GCODE_EXTENSIONS:
                 bed_fit_result = validate_gcode_for_printer(
                     file_path, _live_model,
@@ -4302,6 +4351,7 @@ def upload_file(file_path: str) -> dict:
                         "bed_fit_blocked",
                         details={
                             "file": os.path.basename(file_path),
+                            "printer": target_name,
                             "error_code": code,
                             "bbox": bed_fit_result.get("bbox"),
                         },
@@ -4330,17 +4380,21 @@ def upload_file(file_path: str) -> dict:
             import hashlib
 
             token = hashlib.sha256(f"{file_path}:{file_size}".encode()).hexdigest()[:16]
-            # Store token for upload_file_confirm() to verify.
-            _pending_uploads[token] = file_path
+            # Store the target alongside the path: upload_file_confirm has
+            # only the token to go on, so a token that remembers just the
+            # file would send a confirmed, aimed upload to the default
+            # printer instead of the one the user was asked about.
+            _pending_uploads[token] = (file_path, printer_name)
             summary: dict[str, Any] = {
                 "confirmation_required": True,
                 "token": token,
                 "file_name": file_name,
+                "printer_name": target_name,
                 "file_size_bytes": file_size,
                 "message": (
                     f"Upload of {file_name} ({file_size / 1024:.1f} KB) "
-                    f"requires confirmation. Call upload_file_confirm(token='{token}') "
-                    f"to proceed."
+                    f"to {target_name} requires confirmation. Call "
+                    f"upload_file_confirm(token='{token}') to proceed."
                 ),
             }
             if scan_warnings:
@@ -4349,6 +4403,9 @@ def upload_file(file_path: str) -> dict:
 
         result = adapter.upload_file(file_path)
         resp = result.to_dict()
+        # Which machine now holds the file — start_print has to be aimed at
+        # the same one, and on a multi-printer bench that is not a given.
+        resp["printer_name"] = target_name
         if scan_warnings:
             resp["warnings"] = scan_warnings
 
@@ -4398,16 +4455,26 @@ def upload_file_confirm(token: str) -> dict:
     """
     if err := _check_auth("files"):
         return err
-    file_path = _pending_uploads.pop(token, None)
-    if file_path is None:
+    pending = _pending_uploads.pop(token, None)
+    if pending is None:
         return _error_dict(
             f"Invalid or expired upload token: {token!r}. Call upload_file() again to get a new token.",
             code="INVALID_TOKEN",
         )
+    # Tokens issued before this tool could be aimed stored a bare path.
+    if isinstance(pending, tuple):
+        file_path, pending_printer = pending
+    else:
+        file_path, pending_printer = pending, None
     try:
-        adapter = _get_adapter()
+        try:
+            adapter, target_name = _resolve_control_target(pending_printer)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(pending_printer, "upload to")
         result = adapter.upload_file(file_path)
-        return result.to_dict()
+        resp = result.to_dict()
+        resp["printer_name"] = target_name
+        return resp
     except FileNotFoundError as exc:
         return _error_dict(f"Failed to confirm upload: {exc}", code="FILE_NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
@@ -4761,6 +4828,7 @@ def start_print(
     resume_from_paused: bool = False,
     skip_preheat_reassert: bool = False,
     preview_token: str | None = None,
+    printer_name: str | None = None,
 ) -> dict:
     """Start printing a file already uploaded to the printer (file must exist on printer).
 
@@ -4824,6 +4892,14 @@ def start_print(
             cool-on-new-job policy will otherwise drop the bed to 0
             before the resume preamble executes.  Set ``True`` to
             disable this safety net.  Default ``False``.
+        printer_name: Which printer to start the job on.  Omit to start
+            on the default printer, which is what this did before it
+            could be aimed.  Everything the start decides — the pre-flight
+            verdict, the preview token's printer, the emergency latch,
+            the nozzle-wear consult, the watchdog that will be watching —
+            follows the named machine, so upload the file to that same
+            printer first (``upload_file(..., printer_name=...)``).
+            Listed last so existing positional calls keep their meaning.
 
     Branch on ``print_start`` — one field, three values:
 
@@ -4861,10 +4937,18 @@ def start_print(
             "resume_from_paused": resume_from_paused,
             "skip_preheat_reassert": skip_preheat_reassert,
             "preview_token": preview_token,
+            "printer_name": printer_name,
         },
     ):
         return conf
-    if block := _emergency_latch_error("start_print", _resolve_effective_printer_name()):
+    # Asked about the printer being started, not about the default one, and
+    # asked BEFORE anything is built or connected — a latched printer is
+    # refused, not investigated.  This is the caller's-alias half of the
+    # check; it is asked again below under the lifecycle name, so a latch
+    # filed under either name of one machine refuses the start.
+    if block := _emergency_latch_error(
+        "start_print", _resolve_effective_printer_name(printer_name)
+    ):
         return block
 
     # -- Preview confirmation gate -----------------------------------------
@@ -4894,7 +4978,13 @@ def start_print(
             # instead (token must have been issued with file_name as path
             # argument or as a pre-computed hash).
             ok, reason = get_preview_gate().validate(
-                preview_token, file_name, printer_id=_PRINTER_MODEL,
+                preview_token,
+                file_name,
+                printer_id=(
+                    _resolve_printer_model_live(printer_name)
+                    if printer_name
+                    else _PRINTER_MODEL
+                ),
             )
             if not ok:
                 return _error_dict(
@@ -4927,7 +5017,19 @@ def start_print(
         )
 
     try:
-        adapter = _get_adapter()
+        # One resolution for the whole start: the adapter the file is sent
+        # to, and the name every gate and every piece of bookkeeping about
+        # this start is filed under.  Inside the try, so an unconfigured or
+        # unreachable printer comes back as a structured error.
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "start a print on")
+        # The lifecycle-name half of the latch check: the alias above and
+        # the registered name can differ, and a latch under either of them
+        # is about this machine.
+        if block := _emergency_latch_error("start_print", target_name):
+            return block
 
         # Snapshot pre-start temperature targets BEFORE the cancel/start
         # so we can re-assert them after the MQTT start command kicks
@@ -4966,10 +5068,18 @@ def start_print(
                 "only be used with custom firmware or during development.",
                 file_name,
             )
-            _audit("start_print", "preflight_skipped", details={"file": file_name})
+            _audit(
+                "start_print",
+                "preflight_skipped",
+                details={"file": file_name, "printer": target_name},
+            )
         else:
             pf = unwrap_tool_result(
-                preflight_check(remote_file=file_name, accept_paused=resume_from_paused)
+                preflight_check(
+                    remote_file=file_name,
+                    accept_paused=resume_from_paused,
+                    printer_name=printer_name,
+                )
             )
             if not pf.get("ready", False):
                 # Build a detailed remediation message from individual checks
@@ -4998,6 +5108,7 @@ def start_print(
                     "preflight_failed",
                     details={
                         "file": file_name,
+                        "printer": target_name,
                         "summary": summary,
                         "failed_checks": [c.get("name") for c in failed],
                     },
@@ -5062,11 +5173,17 @@ def start_print(
             from kiln import _pro_nozzle_bridge
 
             if _pro_nozzle_bridge.available():
+                # The machine about to print, not whichever name the
+                # registry happens to list first — nozzle wear is a
+                # property of one hotend, and consulting a sibling's
+                # wear record answers for the wrong nozzle.  Same key
+                # space (the registered name) the listing used.  The
+                # registry-populated guard stays: with no registry there
+                # is no wear record to consult, and inventing a key here
+                # would start refusing prints that used to be skipped.
                 _printer_id = ""
                 if _get_registry().count > 0:
-                    _names = _get_registry().list_names()
-                    if _names:
-                        _printer_id = _names[0]
+                    _printer_id = target_name
 
                 _planned_grams = 0.0
                 _filament_material = ""
@@ -5114,6 +5231,7 @@ def start_print(
                                     "nozzle_capacity_blocked",
                                     details={
                                         "file": file_name,
+                                        "printer": target_name,
                                         "status": _nz_status,
                                         "narrative": _nozzle_verdict.get(
                                             "narrative", ""
@@ -5157,7 +5275,14 @@ def start_print(
         # the command; ``resolve_print_start`` needs it to know which it has.
         sent_at = time.monotonic()
         result = adapter.start_print(file_name, **print_kwargs)
-        _get_heater_watchdog().notify_print_started()
+        # The heater watchdog is one process-wide instance built around the
+        # default adapter, so "a print started" is only its news when the
+        # default printer is the one that started.  Told about a sibling's
+        # print it would mark itself busy and stop cooling down a default
+        # printer that is sitting idle and hot — see
+        # _is_heater_watchdog_machine.
+        if _is_heater_watchdog_machine(adapter):
+            _get_heater_watchdog().notify_print_started()
 
         # Layer 5: spawn in-process PrintWatchdog to catch HMS codes,
         # thermal anomalies, stuck-layer conditions.  Agent-driven
@@ -5209,6 +5334,7 @@ def start_print(
             "start_print", "executed",
             details={
                 "file": file_name,
+                "printer": target_name,
                 "resume_from_paused": resume_from_paused,
                 "is_resume_3mf": is_resume_3mf,
                 **print_kwargs,
@@ -5217,6 +5343,9 @@ def start_print(
         out = resolve_print_start(
             adapter, result, sent_at=sent_at, file_name=file_name,
         ).to_dict()
+        # Say which machine took the job.  With more than one printer on the
+        # bench, "started" on its own does not tell the caller where to look.
+        out["printer_name"] = target_name
         if is_resume_3mf:
             out["resume_3mf_detected"] = True
         if reasserted is not None:
@@ -6829,6 +6958,7 @@ def preflight_check(
     expected_material: str | None = None,
     remote_file: str | None = None,
     accept_paused: bool = False,
+    printer_name: str | None = None,
 ) -> dict:
     """Run pre-print safety checks to verify the printer is ready.
 
@@ -6854,12 +6984,24 @@ def preflight_check(
             ``start_print(resume_from_paused=True)`` for mid-print
             resume 3MFs (which start from a paused-state printer).
             Default ``False`` — only ``idle`` is accepted.
+        printer_name: Which printer to check.  Omit to check the default
+            printer, which is what this did before it could be aimed.
+            The state, the temperature ceilings and the material profile
+            all follow the named machine — a readiness verdict is about
+            one printer, and it has to be the printer that will print.
 
     Call this before ``start_print()`` to catch problems early.  The result
     includes a ``ready`` boolean and detailed per-check breakdowns.
     """
     try:
-        adapter = _get_adapter()
+        try:
+            adapter, _pf_target = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "run pre-flight checks on")
+        # Unaimed, the frozen global is what this check has always read.
+        _pf_model = (
+            _resolve_printer_model_live(printer_name) if printer_name else _PRINTER_MODEL
+        )
 
         # -- Printer state checks ------------------------------------------
         state = adapter.get_state()
@@ -6911,7 +7053,7 @@ def preflight_check(
 
         # -- Temperature checks --------------------------------------------
         temp_warnings: list[str] = []
-        MAX_TOOL, MAX_BED = _get_temp_limits()
+        MAX_TOOL, MAX_BED = _get_temp_limits(printer_name)
 
         if state.tool_temp_actual is not None and state.tool_temp_actual > MAX_TOOL:
             temp_warnings.append(f"Tool temp ({state.tool_temp_actual:.1f}C) exceeds safe max ({MAX_TOOL:.0f}C)")
@@ -6988,13 +7130,13 @@ def preflight_check(
                 logger.debug("Material match check failed: %s", exc)
 
             # 2) Check against printer intelligence DB (material compatibility)
-            if _PRINTER_MODEL:
+            if _pf_model:
                 try:
-                    mat_settings = get_material_settings(_PRINTER_MODEL, expected_material)
+                    mat_settings = get_material_settings(_pf_model, expected_material)
                     if mat_settings is None:
                         msg = (
                             f"Material {expected_material.upper()} is not validated "
-                            f"for printer model '{_PRINTER_MODEL}'. "
+                            f"for printer model '{_pf_model}'. "
                             f"This material may damage the printer."
                         )
                         # Strict mode = blocking; non-strict = warning only
@@ -7014,7 +7156,7 @@ def preflight_check(
                                 "passed": True,
                                 "message": (
                                     f"{expected_material.upper()} is validated for "
-                                    f"'{_PRINTER_MODEL}' "
+                                    f"'{_pf_model}' "
                                     f"(hotend {mat_settings.hotend_temp}C, bed {mat_settings.bed_temp}C)"
                                 ),
                             }
@@ -7306,7 +7448,7 @@ def preflight_check(
 
                 resolved = resolve_filament(
                     expected_material,
-                    printer_id=_PRINTER_MODEL,
+                    printer_id=_pf_model,
                 )
                 if resolved.warnings:
                     for w in resolved.warnings:
