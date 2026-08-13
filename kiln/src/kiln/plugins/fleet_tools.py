@@ -219,35 +219,107 @@ class _FleetToolsPlugin:
         def route_print_job(
             file_path: str,
             *,
-            material: str | None = None,
+            material: str,
             quality: str | None = None,
             priority: str | None = None,
         ) -> dict:
             """Route a print job to the best available printer in the fleet.
 
-            Scores each printer based on material match, build volume, availability,
-            and quality/speed preference, then recommends the optimal assignment.
+            Scores each registered printer on material match, availability,
+            queue depth, and historical success rate, then recommends the
+            best assignment with scored alternatives.
 
             Args:
                 file_path: Path to the file to print.
                 material: Required filament material (e.g. "PLA", "PETG").
                 quality: Quality preference — "draft", "standard", or "fine".
-                priority: Job priority — "low", "normal", or "high".
+                priority: Job urgency — "low", "normal", or "high".
             """
             if err := _srv._check_auth("print"):
                 return err
 
-            try:
-                from kiln.job_router import get_job_router
-
-                router = get_job_router()
-                result = router.route_job(
-                    file_path=file_path,
-                    material=material,
-                    quality=quality,
-                    priority=priority,
+            if not material or not material.strip():
+                return _srv._error_dict(
+                    "material is required — routing scores printers on what "
+                    "they can run, so it cannot recommend one without knowing "
+                    "the material.",
+                    code="INVALID_INPUT",
                 )
+
+            # Imported outside the try below: if kiln-pro (which provides
+            # kiln.job_router) is absent, the handler names must still
+            # resolve — and the caller gets a clear answer, not a
+            # laundered ImportError.
+            try:
+                from kiln.cli.main import _collect_routing_candidates
+                from kiln.job_router import (
+                    RoutingCriteria,
+                    RoutingValidationError,
+                    get_job_router,
+                )
+            except ImportError:
+                return _srv._error_dict(
+                    "Fleet routing requires kiln-pro, which is not installed "
+                    "on this server.",
+                    code="ROUTING_UNAVAILABLE",
+                )
+
+            try:
+                import os
+
+                from kiln.queue import JobStatus
+
+                registry = _srv._get_registry()
+                names = registry.list_names()
+                if not names:
+                    return _srv._error_dict(
+                        "No printers registered. Register printers before "
+                        "routing jobs across a fleet.",
+                        code="NO_PRINTERS",
+                    )
+
+                # Per-printer pending counts feed the router's wait
+                # estimates; the same numbers queue_summary reports.
+                pending: dict[str, int] = {}
+                for job in _srv._get_queue().list_jobs(status=JobStatus.QUEUED):
+                    if job.printer_name:
+                        pending[job.printer_name] = pending.get(job.printer_name, 0) + 1
+
+                # Same candidate builder the CLI's routing path uses —
+                # one engine, two doors — fed from the live registry
+                # instead of on-disk printer configs.
+                adapters = {name: registry.get(name) for name in names}
+                candidates = _collect_routing_candidates(
+                    adapters=adapters,
+                    material=material,
+                    pending_counts=pending,
+                    file_extension=os.path.splitext(file_path)[1],
+                )
+                if not candidates:
+                    return _srv._error_dict(
+                        "No registered printer can accept this file type.",
+                        code="NO_ELIGIBLE_PRINTERS",
+                    )
+
+                # quality picks how much the score favours reliability;
+                # priority picks how much it favours getting started fast.
+                # Both map onto the router's 1-5 weight knobs, defaulting
+                # to its neutral 3.
+                criteria = RoutingCriteria(
+                    material=material.strip(),
+                    quality_priority={"draft": 1, "standard": 3, "fine": 5}.get(
+                        (quality or "standard").lower(), 3
+                    ),
+                    speed_priority={"low": 1, "normal": 3, "high": 5}.get(
+                        (priority or "normal").lower(), 3
+                    ),
+                )
+                result = get_job_router().route_job(criteria, candidates)
                 return {"success": True, "routing": result.to_dict()}
+            except RoutingValidationError as exc:
+                # A recommendation the engine cannot back with scores is
+                # not downgraded to a guess — the refusal carries why.
+                return _srv._error_dict(str(exc), code="ROUTING_ERROR")
             except Exception as exc:
                 _logger.exception("Error in route_print_job")
                 return _srv._error_dict(f"Failed to route print job: {exc}", code="ROUTING_ERROR")
