@@ -506,6 +506,34 @@ def test_cancel_does_not_tell_the_heater_watchdog_someone_elses_print_ended(
     assert notified == ["ended"]
 
 
+def test_a_latch_under_either_name_refuses_the_resume(monkeypatch):
+    """One machine, latched under one of its two registry names.
+
+    The latch namespace is whatever name the e-stop was aimed at; the
+    resume may arrive under the machine's other name.  The wrapper checks
+    the caller's alias and the engine checks the lifecycle name, so the
+    latch refuses from both directions — a restart is exactly what the
+    latch exists to prevent.
+    """
+    printer = _FakePrinter("192.0.2.10", state=PrinterStatus.PAUSED)
+    registry = server._get_registry()
+    registry.register("default", printer)
+    registry.register("garage", printer)   # lifecycle stamp ends up "garage"
+
+    latched = {"garage"}
+    monkeypatch.setattr(
+        server, "_get_emergency_latch_status",
+        lambda name: {"latched": name in latched, "critical_interlocks_pending": []},
+    )
+
+    # Resume aimed at the alias; the latch lives under the lifecycle name.
+    out = server.resume_print(printer_name="default")
+
+    assert out["success"] is False
+    assert out["error"]["code"] == "E_STOP_LATCHED"
+    assert printer.resumed == 0
+
+
 # ---------------------------------------------------------------------------
 # Emergency stops are endings too — and must not be recorded as successes
 # ---------------------------------------------------------------------------

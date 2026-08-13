@@ -5233,6 +5233,175 @@ def start_print(
         return _error_dict(f"Unexpected error in start_print: {exc}", code="INTERNAL_ERROR")
 
 
+def _cancel_print_on(
+    adapter: PrinterAdapter,
+    target_name: str,
+    *,
+    preserve_temperatures: bool = False,
+    expected_tool_target: float | None = None,
+    expected_bed_target: float | None = None,
+    expected_chamber_target: float | None = None,
+) -> dict:
+    """Cancel the print on *adapter*, with every per-printer side effect.
+
+    THE cancel engine — the ``cancel_print`` tool and kiln-pro's fleet
+    fan-out both call this, so intent filing, keep-alive shutdown,
+    watchdog teardown and temperature restore cannot drift apart between
+    the one-printer door and the many-printer door.  Callers resolve
+    ``(adapter, target_name)`` via :func:`_resolve_control_target` and
+    own their own auth / rate-limit / confirmation policy.
+
+    Raises :class:`PrinterError` / :class:`RuntimeError` on adapter
+    failure — callers convert to their own error dicts.
+    """
+    # Snapshot pre-cancel targets so we can restore them below.
+    # Caller-supplied ``expected_*`` values take precedence over the
+    # introspected state — this is the escape hatch for the case
+    # where MQTT cache lag or firmware idle-cooldown has already
+    # zeroed out the bed target before we can read it.
+    preserved: dict[str, float] | None = None
+    if preserve_temperatures:
+        tool_t = 0.0
+        bed_t = 0.0
+        try:
+            state = adapter.get_state()
+            tool_t = float(state.tool_temp_target or 0.0)
+            bed_t = float(state.bed_temp_target or 0.0)
+        except Exception:
+            # Best-effort — fall through to caller overrides.
+            pass
+        if expected_tool_target is not None:
+            tool_t = float(expected_tool_target)
+        if expected_bed_target is not None:
+            bed_t = float(expected_bed_target)
+        preserved = {
+            "tool_target": tool_t,
+            "bed_target": bed_t,
+        }
+
+    # Stop any pause keep-alive thread BEFORE the cancel — the
+    # cancel will leave the printer in IDLE/CANCELLING and the
+    # keep-alive's get_state() check would exit anyway, but
+    # explicit shutdown avoids a possible race where set_*_temp
+    # fights the cancel-cool sequence.  Only THIS machine's thread:
+    # another printer's pause is not this cancel's business.
+    try:
+        _pause_keepalive.stop(adapter)
+    except Exception as exc:
+        logger.debug("cancel_print: keep-alive stop failed (best-effort): %s", exc)
+
+    # Bug #10: register the cancel intent BEFORE issuing the cancel
+    # command.  Bambu firmware has no "cancelled" gcode_state — a
+    # successful cancel transitions the printer to "idle", which
+    # looks identical to a natural finish.  The intent flag lets
+    # auto_record_hook classify the next idle transition as a
+    # cancel rather than a success, so the learning DB gets
+    # ``outcome="cancelled"`` instead of a bogus ``"success"``.
+    #
+    # The name comes off the adapter we are about to cancel, not off
+    # "which printer is the default" — those are the same string only
+    # on a one-machine bench.  File it under the wrong machine and the
+    # cancelled print is recorded a success while some other printer's
+    # honest finish is recorded cancelled.
+    try:
+        from kiln.auto_record_hook import register_cancel_intent
+        register_cancel_intent(target_name)
+    except Exception as exc:  # pragma: no cover — best-effort
+        logger.debug("cancel_print: register_cancel_intent failed: %s", exc)
+
+    # Layer 6: if the print is being cancelled very early (before
+    # layer 5), auto-capture an incident envelope to ~/.kiln/incidents/.
+    # That's usually a crash, nozzle issue, or user stopping a bad
+    # start — exactly when we want to preserve evidence.  Local only,
+    # no upload.
+    try:
+        _state_at_cancel = adapter.get_state()
+        _layer_at_cancel = getattr(
+            getattr(_state_at_cancel, "job", None), "current_layer", 0,
+        ) or 0
+        if _layer_at_cancel < 5:
+            from kiln import incident_recorder
+            incident_recorder.record_incident(
+                incident_type="user_cancel_pre_layer_5",
+                printer_status={
+                    "printer_name": target_name,
+                    "layer_at_cancel": _layer_at_cancel,
+                    "state": getattr(_state_at_cancel, "state", None),
+                },
+                tags=["cancel", "early", "auto"],
+            )
+    except Exception as _inc_exc:
+        logger.debug(
+            "Early-cancel incident auto-capture skipped: %s", _inc_exc,
+        )
+
+    result = adapter.cancel_print()
+
+    # The heater watchdog is a single process-wide instance bound to
+    # ``_get_adapter()`` — it only ever watches the default printer.
+    # Telling it "the print ended" after cancelling a DIFFERENT machine
+    # clears its print-active flag while the machine it watches is still
+    # printing, and its idle tick does not re-check for a running job:
+    # _HEATER_TIMEOUT_MIN later it would set that printer's hotend and
+    # bed to 0 mid-print.  So only notify when the machine we cancelled
+    # is the machine it is watching.
+    if _is_heater_watchdog_machine(adapter):
+        _get_heater_watchdog().notify_print_ended()
+
+    # Layer 5: tear down the PrintWatchdog for the printer we cancelled.
+    # Nameless, this tore down the DEFAULT printer's watchdog — blinding
+    # the machine still printing while leaving the cancelled one watched.
+    _stop_print_watchdog(target_name)
+
+    # Re-assert targets AFTER cancel so the firmware's default-cool
+    # behaviour is overridden.  Only fires when the caller asked for
+    # it AND the pre-cancel targets were non-zero (no point restoring
+    # a printer that was already idle).  Uses the adapter's split
+    # ``set_tool_temp`` / ``set_bed_temp`` methods — present on every
+    # adapter subclass (base, bambu, octoprint, moonraker, creality,
+    # serial, elegoo, prusalink).  Chamber temp (rare) is sent as raw
+    # M141 G-code since most adapters don't expose a chamber setter.
+    restored: dict[str, float] | None = None
+    chamber_restored: float | None = None
+    if preserve_temperatures and preserved is not None:
+        if preserved["tool_target"] > 0 or preserved["bed_target"] > 0:
+            try:
+                if preserved["tool_target"] > 0:
+                    adapter.set_tool_temp(preserved["tool_target"])
+                if preserved["bed_target"] > 0:
+                    adapter.set_bed_temp(preserved["bed_target"])
+                restored = preserved
+            except Exception as exc:
+                logger.warning(
+                    "cancel_print: failed to restore temperatures "
+                    "after cancel (%s): %s",
+                    preserved, exc,
+                )
+        if expected_chamber_target is not None and expected_chamber_target > 0:
+            # Best-effort — not every printer supports M141.  Bambu
+            # X1 enclosed printers and some Voron/Ratrig setups do.
+            try:
+                adapter.send_gcode([f"M141 S{int(expected_chamber_target)}"])
+                chamber_restored = float(expected_chamber_target)
+            except Exception as exc:
+                logger.info(
+                    "cancel_print: chamber temp re-assert (M141 S%s) failed (printer may not support chamber heating): %s",
+                    expected_chamber_target, exc,
+                )
+
+    _audit("cancel_print", f"executed for {target_name}")
+
+    out = result.to_dict()
+    # Say which machine stopped.  An agent driving two printers has no
+    # other way to tell from the reply that it stopped the right one.
+    out["printer_name"] = target_name
+    if preserve_temperatures:
+        out["preserved_temperatures"] = restored
+        if chamber_restored is not None:
+            out["preserved_chamber"] = chamber_restored
+    return out
+
+
 @mcp.tool()
 def cancel_print(
     printer_name: str | None = None,
@@ -5310,153 +5479,14 @@ def cancel_print(
             adapter, target_name = _resolve_control_target(printer_name)
         except PrinterNotFoundError:
             return _unknown_printer_error(printer_name, "cancel a print on")
-
-        # Snapshot pre-cancel targets so we can restore them below.
-        # Caller-supplied ``expected_*`` values take precedence over the
-        # introspected state — this is the escape hatch for the case
-        # where MQTT cache lag or firmware idle-cooldown has already
-        # zeroed out the bed target before we can read it.
-        preserved: dict[str, float] | None = None
-        if preserve_temperatures:
-            tool_t = 0.0
-            bed_t = 0.0
-            try:
-                state = adapter.get_state()
-                tool_t = float(state.tool_temp_target or 0.0)
-                bed_t = float(state.bed_temp_target or 0.0)
-            except Exception:
-                # Best-effort — fall through to caller overrides.
-                pass
-            if expected_tool_target is not None:
-                tool_t = float(expected_tool_target)
-            if expected_bed_target is not None:
-                bed_t = float(expected_bed_target)
-            preserved = {
-                "tool_target": tool_t,
-                "bed_target": bed_t,
-            }
-
-        # Stop any pause keep-alive thread BEFORE the cancel — the
-        # cancel will leave the printer in IDLE/CANCELLING and the
-        # keep-alive's get_state() check would exit anyway, but
-        # explicit shutdown avoids a possible race where set_*_temp
-        # fights the cancel-cool sequence.  Only THIS machine's thread:
-        # another printer's pause is not this cancel's business.
-        try:
-            _pause_keepalive.stop(adapter)
-        except Exception as exc:
-            logger.debug("cancel_print: keep-alive stop failed (best-effort): %s", exc)
-
-        # Bug #10: register the cancel intent BEFORE issuing the cancel
-        # command.  Bambu firmware has no "cancelled" gcode_state — a
-        # successful cancel transitions the printer to "idle", which
-        # looks identical to a natural finish.  The intent flag lets
-        # auto_record_hook classify the next idle transition as a
-        # cancel rather than a success, so the learning DB gets
-        # ``outcome="cancelled"`` instead of a bogus ``"success"``.
-        #
-        # The name comes off the adapter we are about to cancel, not off
-        # "which printer is the default" — those are the same string only
-        # on a one-machine bench.  File it under the wrong machine and the
-        # cancelled print is recorded a success while some other printer's
-        # honest finish is recorded cancelled.
-        try:
-            from kiln.auto_record_hook import register_cancel_intent
-            register_cancel_intent(target_name)
-        except Exception as exc:  # pragma: no cover — best-effort
-            logger.debug("cancel_print: register_cancel_intent failed: %s", exc)
-
-        # Layer 6: if the print is being cancelled very early (before
-        # layer 5), auto-capture an incident envelope to ~/.kiln/incidents/.
-        # That's usually a crash, nozzle issue, or user stopping a bad
-        # start — exactly when we want to preserve evidence.  Local only,
-        # no upload.
-        try:
-            _state_at_cancel = adapter.get_state()
-            _layer_at_cancel = getattr(
-                getattr(_state_at_cancel, "job", None), "current_layer", 0,
-            ) or 0
-            if _layer_at_cancel < 5:
-                from kiln import incident_recorder
-                incident_recorder.record_incident(
-                    incident_type="user_cancel_pre_layer_5",
-                    printer_status={
-                        "printer_name": target_name,
-                        "layer_at_cancel": _layer_at_cancel,
-                        "state": getattr(_state_at_cancel, "state", None),
-                    },
-                    tags=["cancel", "early", "auto"],
-                )
-        except Exception as _inc_exc:
-            logger.debug(
-                "Early-cancel incident auto-capture skipped: %s", _inc_exc,
-            )
-
-        result = adapter.cancel_print()
-
-        # The heater watchdog is a single process-wide instance bound to
-        # ``_get_adapter()`` — it only ever watches the default printer.
-        # Telling it "the print ended" after cancelling a DIFFERENT machine
-        # clears its print-active flag while the machine it watches is still
-        # printing, and its idle tick does not re-check for a running job:
-        # _HEATER_TIMEOUT_MIN later it would set that printer's hotend and
-        # bed to 0 mid-print.  So only notify when the machine we cancelled
-        # is the machine it is watching.
-        if _is_heater_watchdog_machine(adapter):
-            _get_heater_watchdog().notify_print_ended()
-
-        # Layer 5: tear down the PrintWatchdog for the printer we cancelled.
-        # Nameless, this tore down the DEFAULT printer's watchdog — blinding
-        # the machine still printing while leaving the cancelled one watched.
-        _stop_print_watchdog(target_name)
-
-        # Re-assert targets AFTER cancel so the firmware's default-cool
-        # behaviour is overridden.  Only fires when the caller asked for
-        # it AND the pre-cancel targets were non-zero (no point restoring
-        # a printer that was already idle).  Uses the adapter's split
-        # ``set_tool_temp`` / ``set_bed_temp`` methods — present on every
-        # adapter subclass (base, bambu, octoprint, moonraker, creality,
-        # serial, elegoo, prusalink).  Chamber temp (rare) is sent as raw
-        # M141 G-code since most adapters don't expose a chamber setter.
-        restored: dict[str, float] | None = None
-        chamber_restored: float | None = None
-        if preserve_temperatures and preserved is not None:
-            if preserved["tool_target"] > 0 or preserved["bed_target"] > 0:
-                try:
-                    if preserved["tool_target"] > 0:
-                        adapter.set_tool_temp(preserved["tool_target"])
-                    if preserved["bed_target"] > 0:
-                        adapter.set_bed_temp(preserved["bed_target"])
-                    restored = preserved
-                except Exception as exc:
-                    logger.warning(
-                        "cancel_print: failed to restore temperatures "
-                        "after cancel (%s): %s",
-                        preserved, exc,
-                    )
-            if expected_chamber_target is not None and expected_chamber_target > 0:
-                # Best-effort — not every printer supports M141.  Bambu
-                # X1 enclosed printers and some Voron/Ratrig setups do.
-                try:
-                    adapter.send_gcode([f"M141 S{int(expected_chamber_target)}"])
-                    chamber_restored = float(expected_chamber_target)
-                except Exception as exc:
-                    logger.info(
-                        "cancel_print: chamber temp re-assert (M141 S%s) failed (printer may not support chamber heating): %s",
-                        expected_chamber_target, exc,
-                    )
-
-        _audit("cancel_print", f"executed for {target_name}")
-
-        out = result.to_dict()
-        # Say which machine stopped.  An agent driving two printers has no
-        # other way to tell from the reply that it stopped the right one.
-        out["printer_name"] = target_name
-        if preserve_temperatures:
-            out["preserved_temperatures"] = restored
-            if chamber_restored is not None:
-                out["preserved_chamber"] = chamber_restored
-        return out
+        return _cancel_print_on(
+            adapter,
+            target_name,
+            preserve_temperatures=preserve_temperatures,
+            expected_tool_target=expected_tool_target,
+            expected_bed_target=expected_bed_target,
+            expected_chamber_target=expected_chamber_target,
+        )
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to cancel print: {exc}. Check that a print is currently active.")
     except Exception as exc:
@@ -5830,6 +5860,64 @@ def emergency_trip_input(
         return _error_dict(f"Unexpected error in emergency_trip_input: {exc}", code="INTERNAL_ERROR")
 
 
+def _pause_print_on(
+    adapter: PrinterAdapter, target_name: str, *, keep_temps: bool = True,
+) -> dict:
+    """Pause the print on *adapter* and start its keep-alive thread.
+
+    THE pause engine — shared by the ``pause_print`` tool and kiln-pro's
+    fleet fan-out, so the temperature keep-alive can never be wired into
+    one door and forgotten in the other.  Callers resolve the target via
+    :func:`_resolve_control_target` and own auth / rate-limit policy.
+
+    Raises :class:`PrinterError` / :class:`RuntimeError` on adapter
+    failure — callers convert to their own error dicts.
+    """
+    # Snapshot pre-pause targets BEFORE issuing the pause command —
+    # some firmwares clear them within seconds of the pause being
+    # accepted.
+    snapshot: dict[str, float] | None = None
+    if keep_temps:
+        try:
+            state = adapter.get_state()
+            snapshot = {
+                "tool": float(state.tool_temp_target or 0.0),
+                "bed": float(state.bed_temp_target or 0.0),
+            }
+        except Exception as exc:
+            logger.debug("pause_print: state snapshot failed (%s); keep-alive disabled", exc)
+            snapshot = None
+
+    result = adapter.pause_print()
+
+    # Start (or refresh) the keep-alive daemon.  Idempotent: if a
+    # thread is already running from a previous pause that wasn't
+    # cleanly resumed, the targets are refreshed in place.
+    keepalive_started = False
+    if keep_temps and snapshot is not None and (snapshot["tool"] > 0 or snapshot["bed"] > 0):
+        try:
+            keepalive_started = _pause_keepalive.start(
+                adapter,
+                tool_target=snapshot["tool"],
+                bed_target=snapshot["bed"],
+            )
+        except Exception as exc:
+            logger.warning("pause_print: failed to start keep-alive: %s", exc)
+
+    _audit("pause_print", f"executed for {target_name}")
+
+    out = result.to_dict()
+    out["printer_name"] = target_name
+    if keep_temps and snapshot is not None:
+        out["keep_alive"] = {
+            "active": _pause_keepalive.is_running(adapter),
+            "started_new_thread": keepalive_started,
+            "interval_seconds": _PAUSE_KEEPALIVE_INTERVAL_S,
+            "targets": snapshot,
+        }
+    return out
+
+
 @mcp.tool()
 def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dict:
     """Pause the currently running print job.
@@ -5877,50 +5965,7 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
             adapter, target_name = _resolve_control_target(printer_name)
         except PrinterNotFoundError:
             return _unknown_printer_error(printer_name, "pause a print on")
-
-        # Snapshot pre-pause targets BEFORE issuing the pause command —
-        # some firmwares clear them within seconds of the pause being
-        # accepted.
-        snapshot: dict[str, float] | None = None
-        if keep_temps:
-            try:
-                state = adapter.get_state()
-                snapshot = {
-                    "tool": float(state.tool_temp_target or 0.0),
-                    "bed": float(state.bed_temp_target or 0.0),
-                }
-            except Exception as exc:
-                logger.debug("pause_print: state snapshot failed (%s); keep-alive disabled", exc)
-                snapshot = None
-
-        result = adapter.pause_print()
-
-        # Start (or refresh) the keep-alive daemon.  Idempotent: if a
-        # thread is already running from a previous pause that wasn't
-        # cleanly resumed, the targets are refreshed in place.
-        keepalive_started = False
-        if keep_temps and snapshot is not None and (snapshot["tool"] > 0 or snapshot["bed"] > 0):
-            try:
-                keepalive_started = _pause_keepalive.start(
-                    adapter,
-                    tool_target=snapshot["tool"],
-                    bed_target=snapshot["bed"],
-                )
-            except Exception as exc:
-                logger.warning("pause_print: failed to start keep-alive: %s", exc)
-
-        _audit("pause_print", f"executed for {target_name}")
-
-        out = result.to_dict()
-        out["printer_name"] = target_name
-        if keep_temps and snapshot is not None:
-            out["keep_alive"] = {
-                "active": _pause_keepalive.is_running(adapter),
-                "started_new_thread": keepalive_started,
-                "interval_seconds": _PAUSE_KEEPALIVE_INTERVAL_S,
-                "targets": snapshot,
-            }
-        return out
+        return _pause_print_on(adapter, target_name, keep_temps=keep_temps)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to pause print: {exc}. Check that a print is currently active.")
     except Exception as exc:
@@ -6031,6 +6076,40 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
         return _error_dict(f"Unexpected error in skip_print_objects: {exc}", code="INTERNAL_ERROR")
 
 
+def _resume_print_on(
+    adapter: PrinterAdapter, target_name: str, *, force: bool = False,
+) -> dict:
+    """Resume the print on *adapter*, refusing a latched machine.
+
+    THE resume engine — shared by the ``resume_print`` tool and kiln-pro's
+    fleet fan-out.  The emergency-latch refusal lives HERE, not in the
+    tool wrapper, so no door that resumes a printer can skip it: restart
+    is exactly the action an e-stop latch exists to prevent.
+
+    Raises :class:`PrinterError` / :class:`RuntimeError` on adapter
+    failure — callers convert to their own error dicts.
+    """
+    # Checked under the lifecycle name — the wrapper additionally checks
+    # the caller's alias, so a latch filed under either name refuses.
+    if block := _emergency_latch_error("resume_print", target_name):
+        return block
+
+    result = adapter.resume_print(force=force)
+    # Stop this printer's pause keep-alive thread if one was running —
+    # the print is back under firmware control and re-asserting targets
+    # here would race with the resume preamble gcode.
+    try:
+        _pause_keepalive.stop(adapter)
+    except Exception as exc:
+        logger.debug("resume_print: keep-alive stop failed (best-effort): %s", exc)
+
+    _audit("resume_print", f"executed for {target_name}")
+
+    out = result.to_dict()
+    out["printer_name"] = target_name
+    return out
+
+
 @mcp.tool()
 def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
     """Resume a paused print job.
@@ -6057,9 +6136,11 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
         return err
     # Asked about the printer being resumed, not about the default one:
     # checking the default's latch would let a latched machine be restarted
-    # by any command that named it.  Still asked BEFORE anything is built or
-    # connected — a latched printer is refused, not investigated.  The latch
-    # namespace is registry names, which is what emergency_stop latches under.
+    # by any command that named it.  Asked BEFORE anything is built or
+    # connected — a latched printer is refused, not investigated.  This is
+    # the caller's-alias half of the check; the engine re-checks under the
+    # lifecycle name, so a latch filed under either name of one machine
+    # refuses the resume.
     if block := _emergency_latch_error(
         "resume_print", _resolve_effective_printer_name(printer_name)
     ):
@@ -6069,21 +6150,7 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
             adapter, target_name = _resolve_control_target(printer_name)
         except PrinterNotFoundError:
             return _unknown_printer_error(printer_name, "resume a print on")
-
-        result = adapter.resume_print(force=force)
-        # Stop this printer's pause keep-alive thread if one was running —
-        # the print is back under firmware control and re-asserting targets
-        # here would race with the resume preamble gcode.
-        try:
-            _pause_keepalive.stop(adapter)
-        except Exception as exc:
-            logger.debug("resume_print: keep-alive stop failed (best-effort): %s", exc)
-
-        _audit("resume_print", f"executed for {target_name}")
-
-        out = result.to_dict()
-        out["printer_name"] = target_name
-        return out
+        return _resume_print_on(adapter, target_name, force=force)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to resume print: {exc}. Check that the printer is in a paused state.")
     except Exception as exc:
