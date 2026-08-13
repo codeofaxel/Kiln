@@ -264,6 +264,7 @@ class _FleetToolsPlugin:
             printer_name: str | None = None,
             material: str | None = None,
             priority: str | None = None,
+            idempotency_key: str | None = None,
         ) -> dict:
             """Submit a print job to the fleet orchestrator.
 
@@ -275,21 +276,73 @@ class _FleetToolsPlugin:
                 printer_name: Specific printer to assign to (auto-routes if None).
                 material: Required filament material.
                 priority: Job priority (low, normal, high).
+                idempotency_key: Optional opaque key (e.g. a UUID you
+                    generate) naming this one submission.  If the call
+                    fails in a way where you cannot tell whether the job
+                    was queued, retry with the SAME key to get the
+                    original job back (``submission: "replayed"``)
+                    instead of queuing a duplicate print.  Use a new key
+                    for each job you genuinely want printed.
             """
             if err := _srv._check_auth("print"):
                 return err
+
+            # Import outside the try: this is public Kiln's own module,
+            # and the handler below must be resolvable even when the
+            # kiln-pro import inside the try fails.
+            from kiln.queue import IdempotencyConflict
 
             try:
                 from kiln.fleet_orchestrator import get_fleet_orchestrator
 
                 orch = get_fleet_orchestrator()
-                job = orch.submit_job(
-                    file_path=file_path,
-                    printer_name=printer_name,
-                    material=material,
-                    priority=priority,
+                # The orchestrator schedules on an integer priority
+                # (higher = more urgent); this tool speaks the
+                # low/normal/high vocabulary the apps present.
+                priority_rank = {"low": -1, "normal": 0, "high": 1}.get(
+                    (priority or "normal").lower(), 0
                 )
-                return {"success": True, "job": job.to_dict()}
+                job, replayed = orch.submit_job_result(
+                    file_path,
+                    submitted_by="mcp-agent",
+                    priority=priority_rank,
+                    preferred_printer=printer_name,
+                    metadata={"material": material} if material else None,
+                    idempotency_key=idempotency_key,
+                )
+                return {
+                    "success": True,
+                    "job": job.to_dict(),
+                    "submission": "replayed" if replayed else "queued",
+                    **(
+                        {
+                            "message": (
+                                f"Job {job.job_id} was already submitted with "
+                                "this idempotency key. No duplicate was queued."
+                            )
+                        }
+                        if replayed
+                        else {}
+                    ),
+                }
+            except AttributeError:
+                # An older kiln-pro build predates submit_job_result.
+                # Refuse honestly rather than guessing at its contract.
+                _logger.exception("fleet orchestrator is older than this Kiln release")
+                return _srv._error_dict(
+                    "The installed kiln-pro is older than this Kiln release "
+                    "and cannot accept fleet submissions from it. Upgrade "
+                    "kiln-pro to matching versions.",
+                    code="FLEET_VERSION_MISMATCH",
+                )
+            except IdempotencyConflict as exc:
+                return _srv._error_dict(
+                    f"Idempotency key already used by job {exc.existing_job_id!r} "
+                    "with different parameters (file, printer, or priority). "
+                    "Retries must repeat the original submission exactly; a new "
+                    "job needs a new key.",
+                    code="IDEMPOTENCY_CONFLICT",
+                )
             except Exception as exc:
                 _logger.exception("Error in fleet_submit_job")
                 return _srv._error_dict(f"Failed to submit fleet job: {exc}", code="FLEET_ERROR")
