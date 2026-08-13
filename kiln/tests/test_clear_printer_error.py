@@ -156,36 +156,44 @@ def test_the_default_refuses_rather_than_pretending():
     assert _Unteachable().capabilities.can_clear_error is False
 
 
-def test_bambu_sends_the_acknowledgement_the_firmware_listens_for(monkeypatch):
-    """Pinned by the payload, because this one talks to real hardware.
+def test_bambu_refuses_and_names_the_only_thing_that_works():
+    """Measured against a real latched fault on an A1, not assumed.
 
-    ``clean_print_error`` is a print-category command like ``stop`` and
-    ``pause``.  Bambu ignores commands it does not recognise, so a model that
-    lacks it is left exactly as it was rather than harmed.
+    Induced deliberately (``print_error=50348044``, "Z axis homing failed",
+    from a print cancelled during bed levelling) and then attacked twice:
+
+    * ``clean_print_error`` — the print-command one implementation documents
+      for exactly this — was accepted and changed nothing over 15 seconds;
+    * ``G28`` was accepted and the printer physically homed, and the fault
+      stayed latched, so performing the very move that failed does not retire
+      it.
+
+    Dismissing the message on the touchscreen cleared the notification while a
+    one-second-old push still reported the error.  Only a power cycle worked.
+
+    So Bambu declares False and says the useful thing instead.  Shipping the
+    documented command would have been a button that reports success and
+    leaves the printer exactly as stuck — the failure this whole capability
+    exists to avoid.
     """
     from kiln.printers.bambu import BambuAdapter
 
-    monkeypatch.setattr(BambuAdapter, "_ensure_mqtt", lambda self: None)
-    sent: list[dict] = []
-    monkeypatch.setattr(
-        BambuAdapter, "_publish_command", lambda self, payload, **kw: sent.append(payload)
-    )
     adapter = BambuAdapter(
         host="192.0.2.20", access_code="00000000", serial="00M09A000000000",
     )
-    adapter._last_status["subtask_id"] = "12345"
 
+    assert adapter.capabilities.can_clear_error is False
     result = adapter.clear_error()
+    assert result.success is False
+    # The advice has to be Bambu-specific: the generic "clear it on the
+    # printer's screen" is actively wrong here, and a user who follows it
+    # believes the machine is fixed while Kiln still refuses to print.
+    assert "power-" in result.message.lower()
+    assert "screen" in result.message.lower()
 
-    assert result.success is True
-    assert len(sent) == 1
-    assert sent[0]["print"]["command"] == "clean_print_error"
-    # Named, so the printer knows which job is being acknowledged.
-    assert sent[0]["print"]["subtask_id"] == "12345"
 
-
-def test_bambu_falls_back_to_a_local_jobs_id(monkeypatch):
-    """Once the cache no longer names a job, "0" is what Bambu itself uses."""
+def test_bambu_sends_nothing_to_the_printer(monkeypatch):
+    """A refusal that still published a command would be the worst of both."""
     from kiln.printers.bambu import BambuAdapter
 
     monkeypatch.setattr(BambuAdapter, "_ensure_mqtt", lambda self: None)
@@ -199,7 +207,7 @@ def test_bambu_falls_back_to_a_local_jobs_id(monkeypatch):
 
     adapter.clear_error()
 
-    assert sent[0]["print"]["subtask_id"] == "0"
+    assert sent == []
 
 
 def test_the_tool_refuses_mid_print(monkeypatch):
