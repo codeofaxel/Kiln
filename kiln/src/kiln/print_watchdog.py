@@ -728,13 +728,18 @@ class PrintWatchdog:
         # Emergency stop — isolated try/except so a failed e-stop still
         # fires the callback and sets the latch.
         try:
-            # An e-stop ends the print as surely as a cancel does, and it is
-            # the one ending we are most certain was not a clean finish.
-            note_cancel_requested(self._adapter)
             self._adapter.emergency_stop()
             logger.error("PrintWatchdog: emergency_stop() dispatched")
         except Exception:
             logger.exception("PrintWatchdog: emergency_stop() FAILED")
+        finally:
+            # An e-stop ends the print as surely as a cancel does, and it is
+            # the ending we are most certain was not a clean finish.  Noted
+            # AFTER the halt is dispatched: this touches the database, and
+            # nothing queues in front of stopping the machine.  In
+            # ``finally`` so a failed e-stop still records why the print
+            # ended — that is the case worth learning from.
+            note_cancel_requested(self._adapter)
 
         # Recording stays above the e-stop and dispatch stays below it, so a
         # red flag's ordering is exactly what it has always been.
