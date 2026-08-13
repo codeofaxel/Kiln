@@ -3425,12 +3425,15 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _peek_loaded_ams_trays(self) -> list[dict[str, Any]] | None:
-        """Return loaded AMS trays from cached MQTT status, without any I/O.
+        """Return loaded AMS trays from cached MQTT status.
 
-        Unlike ``get_ams_status``, this does not trigger a pushall request
-        when the cache is empty — it returns ``None`` instead.  Intended
-        for auto-routing decisions where an extra MQTT round-trip per
-        ``start_print`` call would be wasteful.
+        Unlike ``get_ams_status`` this never re-reads the AMS itself, so a
+        warm cache costs nothing.  It is NOT free on a cold one: it goes
+        through ``_get_cached_status``, which connects and, with no status
+        cached yet, publishes a pushall and sleeps up to two seconds.  A
+        caller that must not block — anything on the path of emitting a
+        file — should read ``_last_status`` directly instead, the way
+        ``active_filament_color`` does.
 
         :returns: List of loaded-tray dicts (``tray_type`` non-empty), or
             ``None`` if no AMS data is cached yet.  Empty list means AMS
@@ -3475,9 +3478,11 @@ class BambuAdapter(PrinterAdapter):
         preview and then a mismatch warning about a discrepancy Kiln had
         introduced itself.
 
-        Reads CACHED telemetry only — no MQTT round-trip, because wrapping
-        a file must not wait on a printer, and a preview is never worth
-        stalling a slice for.
+        Reads the status cache DIRECTLY — never ``_get_cached_status``,
+        which connects and, on a cold cache, publishes a pushall and
+        sleeps up to two seconds.  Wrapping a file must not wait on a
+        printer, and a preview is never worth stalling a slice for, so an
+        unheard-from machine simply yields ``None`` here.
 
         Refuses rather than guesses, returning ``None`` when the machine
         has not said clearly: no AMS data yet, an external spool
@@ -3486,26 +3491,42 @@ class BambuAdapter(PrinterAdapter):
         ``None`` leaves the caller's existing default alone.
         """
         try:
-            trays = self._peek_loaded_ams_trays()
+            with self._state_lock:
+                status = dict(self._last_status or {})
         except Exception:  # noqa: BLE001 — telemetry never blocks a wrap
             logger.debug("AMS colour unavailable", exc_info=True)
             return None
+        if not status:
+            return None
+
+        ams_data = status.get("ams")
+        raw_now = None
+        if isinstance(ams_data, dict):
+            raw_now = ams_data.get("tray_now")
+            ams_data = ams_data.get("ams")
+        if raw_now is None:
+            raw_now = status.get("tray_now")
+        if not isinstance(ams_data, list):
+            return None
+
+        trays: list[dict[str, Any]] = []
+        for unit in ams_data:
+            if not isinstance(unit, dict):
+                continue
+            raw_trays = unit.get("tray")
+            if not isinstance(raw_trays, list):
+                continue
+            trays.extend(
+                {"slot": t.get("id", 0), "tray_color": t.get("tray_color", "")}
+                for t in raw_trays
+                if isinstance(t, dict) and t.get("tray_type")
+            )
         if not trays:
             return None
 
         active: int | None = None
-        try:
-            status = self._get_cached_status()
-            ams_data = status.get("ams")
-            raw = None
-            if isinstance(ams_data, dict):
-                raw = ams_data.get("tray_now")
-            if raw is None:
-                raw = status.get("tray_now")
-            if raw is not None and str(raw).strip().lstrip("-").isdigit():
-                active = int(str(raw).strip())
-        except Exception:  # noqa: BLE001
-            active = None
+        if raw_now is not None and str(raw_now).strip().lstrip("-").isdigit():
+            active = int(str(raw_now).strip())
 
         # 255 is Bambu's "no tray" — an external spool, whose colour the
         # printer does not report at all.

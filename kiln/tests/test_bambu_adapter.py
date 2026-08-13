@@ -1978,6 +1978,30 @@ class TestBambuAdapterAMSStatus:
         adapter._last_status = {}
         assert adapter.active_filament_color() is None
 
+    def test_a_cold_cache_never_talks_to_the_printer(self) -> None:
+        """Emitting a file must not wait on a machine.
+
+        The obvious way to read the AMS goes through
+        ``_get_cached_status``, which connects and — with nothing cached
+        yet — publishes a pushall and sleeps up to two seconds.  On the
+        slice path that is a stall bought for a preview colour, so this
+        reads the cache directly and gives up instead.
+
+        Asserts the calls were never MADE rather than letting them raise:
+        this method swallows exceptions by design, so a raising stub gets
+        caught and the test passes against the very bug it targets.
+        """
+        adapter = _adapter()
+        adapter._last_status = {}
+        with mock.patch.object(adapter, "_ensure_mqtt") as ensure, \
+             mock.patch.object(adapter, "_get_cached_status") as cached, \
+             mock.patch("time.sleep") as slept:
+            assert adapter.active_filament_color() is None
+
+        ensure.assert_not_called()
+        cached.assert_not_called()
+        slept.assert_not_called()
+
     def test_ams_status_single_unit_four_trays(self) -> None:
         adapter = self._adapter_with_ams([
             {

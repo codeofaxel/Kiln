@@ -1350,6 +1350,38 @@ class TestThumbnailsReachTheArchive:
             "the archive declares no filament colour — a colour was invented"
         )
 
+    def test_building_a_preview_never_uploads_the_model(self, tmp_path):
+        """Slicing is local, and drawing its preview must not change that.
+
+        ``visualize_model`` attaches a shareable viewer URL by uploading
+        the mesh to Kiln's API.  That is right for a preview handed to a
+        person and wrong for one embedded in a file: routing thumbnails
+        through it quietly put a copy of the user's model on the network
+        during every slice, and made an offline machine wait on a reply,
+        to fill a field this path never reads.
+
+        Declining the stage backend does NOT prevent it — the render goes
+        local while the upload still goes out — so this asserts on the
+        upload itself rather than on the renderer.
+        """
+        import kiln.stage_link as stage_link
+
+        uploads: list[str] = []
+        with patch.object(
+            stage_link,
+            "stage_link_for",
+            side_effect=lambda p, *a, **k: uploads.append(str(p)),
+        ):
+            build_bambu_3mf(
+                MINIMAL_GCODE_BODY,
+                str(tmp_path / "local.3mf"),
+                stl_paths=[self._stl(tmp_path)],
+            )
+
+        assert not uploads, (
+            f"the mesh was uploaded while building a thumbnail: {uploads}"
+        )
+
     def test_thumbnail_failure_is_logged_not_swallowed(self, tmp_path, caplog):
         """A broken render still ships the print — and still says so.
 
