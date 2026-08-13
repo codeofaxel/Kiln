@@ -494,6 +494,7 @@ def visualize_model(
     angles: list[str] | None = None,
     color: str = "",
     timeout: int = 120,
+    allow_stage: bool = True,
 ) -> dict:
     """Primary 3D preview tool — renders high-quality PNGs via OpenSCAD.
 
@@ -510,6 +511,14 @@ def visualize_model(
         angles: Subset of angle labels to render (e.g. ["top", "bottom"]).
             Defaults to all 6 standard angles.
         timeout: Max seconds per OpenSCAD render.
+        allow_stage: Whether the three.js stage may serve this render.
+            The stage is the right look for a preview a person is shown —
+            it draws the plate grid the web viewer draws.  Pass ``False``
+            when the image is going somewhere that grid would read as
+            part of the model rather than as the room around it, such as
+            a 3MF thumbnail bound for a printer's screen.  It also keeps
+            the render local: the stage reaches the network, OpenSCAD
+            does not.
 
     Returns:
         Dict with ``success``, ``views`` list, ``output_dir``, and metadata.
@@ -722,7 +731,7 @@ def visualize_model(
             width=width,
             height=height,
             color=color,
-        )
+        ) if allow_stage else None
         if stage_views:
             views = stage_views
             used_stage = True

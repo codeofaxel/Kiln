@@ -94,6 +94,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import shutil
 import struct
 import tempfile
 import zipfile
@@ -427,6 +428,72 @@ def render_plate_thumbnail(
     if not parsed:
         return None
     return _generate_thumbnail(parsed, width=width, height=height)
+
+
+def render_plate_preview(
+    stl_paths: list[str],
+    colors: list[str] | None = None,
+    width: int = _THUMBNAIL_SIZE,
+    height: int = _THUMBNAIL_SIZE,
+) -> bytes | None:
+    """The canonical picture of a plate, for embedding in an emitted file.
+
+    Goes through :func:`~kiln.model_visualizer.visualize_model`, the
+    renderer behind every other preview Kiln shows, so an embedded
+    thumbnail carries the same picture of the part the user already saw
+    rather than a lesser one drawn just for that slot.  Its framing and
+    lighting are the ones Kiln has tuned; a thumbnail is the last place
+    to be re-deriving them.
+
+    The stage backend is declined here.  It draws the plate grid the web
+    viewer draws, which reads as scenery around a model on screen and as
+    part of the model on a 2cm printer tile — and it reaches the network,
+    which emitting a file should never depend on.  OpenSCAD renders the
+    same angles locally and takes the filament colour.
+
+    Falls back to :func:`render_plate_thumbnail` for a multi-part plate,
+    which ``visualize_model`` cannot draw as one scene, and returns
+    ``None`` when nothing renders at all.  Colour rules are unchanged:
+    the declared colour or neutral, never an invented one.
+    """
+    color = ""
+    if colors and len(set(colors)) == 1:
+        color = colors[0]
+
+    if len(stl_paths) == 1:
+        tmp_dir = tempfile.mkdtemp(prefix="kiln_thumb_")
+        try:
+            from kiln.model_visualizer import visualize_model
+
+            result = visualize_model(
+                stl_paths[0],
+                output_dir=tmp_dir,
+                width=width,
+                height=height,
+                angles=["isometric"],
+                color=color,
+                allow_stage=False,
+            )
+            for view in result.get("views", []):
+                path = view.get("path")
+                if path and os.path.isfile(path):
+                    return Path(path).read_bytes()
+            logger.warning(
+                "visualize_model returned no image for %s — falling back.",
+                stl_paths[0],
+            )
+        except Exception:  # noqa: BLE001 — a preview never blocks the emit
+            logger.warning(
+                "visualize_model failed for %s — falling back.",
+                stl_paths[0],
+                exc_info=True,
+            )
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return render_plate_thumbnail(
+        stl_paths, colors=colors, width=width, height=height,
+    )
 
 
 # ---------------------------------------------------------------------------

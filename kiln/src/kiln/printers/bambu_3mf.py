@@ -1379,6 +1379,26 @@ def _fit_to_specs(source: bytes, names: list[str]) -> dict[str, bytes]:
     return fitted
 
 
+def _render_plate_preview(
+    stl_paths: list[str],
+    colors: list[str] | None,
+    width: int,
+    height: int,
+) -> bytes | None:
+    """A picture of the part, at the size a thumbnail slot wants.
+
+    Thin seam over :func:`kiln.multicolor_3mf.render_plate_preview` —
+    the shared canonical-preview door every 3MF-emitting path calls, so
+    the Bambu slots and the generic exporter cannot drift apart.  Kept
+    as a module-level name so tests can fail this door in isolation.
+    """
+    from kiln.multicolor_3mf import render_plate_preview
+
+    return render_plate_preview(
+        stl_paths, colors=colors, width=width, height=height,
+    )
+
+
 def _stl_thumbnail_set(
     stl_paths: list[str],
     plate_json: str | None,
@@ -1402,8 +1422,6 @@ def _stl_thumbnail_set(
         return {}
     thumbnails: dict[str, bytes] = {}
     try:
-        from kiln.multicolor_3mf import render_plate_thumbnail
-
         colors = _declared_filament_colors(plate_json)
         for names in _thumbnail_aspect_groups().values():
             # Render the largest slot in the group and scale down into the
@@ -1412,9 +1430,7 @@ def _stl_thumbnail_set(
                 (_BAMBU_THUMBNAIL_SPECS[n] for n in names),
                 key=lambda size: size[0] * size[1],
             )
-            source = render_plate_thumbnail(
-                stl_paths, colors=colors, width=width, height=height,
-            )
+            source = _render_plate_preview(stl_paths, colors, width, height)
             if not source:
                 logger.warning(
                     "No %dx%d thumbnail could be rendered from %s.",

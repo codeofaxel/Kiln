@@ -1012,6 +1012,31 @@ class TestExport3MF:
         assert result == out_path
         assert os.path.isfile(out_path)
 
+    def test_export_embeds_a_real_thumbnail(self, tmp_path):
+        """The exported 3MF carries an actual preview, not a dead slot.
+
+        This door handed a list of PATHS to a renderer that takes parsed
+        geometry — the same defect the Bambu wraps carried — so every
+        export since the renderer's signature changed shipped without
+        ``Metadata/plate_1.png``, behind a bare ``except: pass``.  Assert
+        on the archive, the only place the failure was visible.
+        """
+        import zipfile as zf
+
+        from kiln.generation.validation import export_3mf
+
+        stl_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl_path, 10.0)
+
+        out = export_3mf(stl_path, output_path=str(tmp_path / "t.3mf"))
+        with zf.ZipFile(out) as z:
+            assert "Metadata/plate_1.png" in z.namelist(), (
+                "the export shipped without its preview"
+            )
+            data = z.read("Metadata/plate_1.png")
+        assert data.startswith(b"\x89PNG\r\n\x1a\n")
+        assert len(data) > 1000, f"stub thumbnail, {len(data)} bytes"
+
     def test_unsupported_format_raises(self, tmp_path):
         """Unsupported input format raises."""
         from kiln.generation.validation import export_3mf
