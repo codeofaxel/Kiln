@@ -1902,6 +1902,82 @@ class TestBambuAdapterAMSStatus:
         adapter._last_state_time = time.monotonic()
         return adapter
 
+    def _adapter_with_tray_now(
+        self, ams_data: list[dict[str, Any]], tray_now: str
+    ) -> BambuAdapter:
+        adapter = self._adapter_with_ams(ams_data)
+        adapter._last_status["tray_now"] = tray_now
+        return adapter
+
+    def test_the_active_tray_names_the_colour_that_gets_declared(self) -> None:
+        """A red spool must not produce a white preview.
+
+        The wrap declares the colour it prints in, and that declaration
+        draws the printer's thumbnail and feeds the AMS mismatch check.
+        Left to defaults it said white for everyone, so Kiln drew a white
+        preview at a printer holding red and then warned about the
+        discrepancy it had introduced itself.
+        """
+        adapter = self._adapter_with_tray_now(
+            [
+                {
+                    "id": 0,
+                    "tray": [
+                        {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF"},
+                        {"id": 1, "tray_type": "PLA", "tray_color": "0000FFFF"},
+                    ],
+                }
+            ],
+            tray_now="1",
+        )
+        # Slot 1 is loaded, so the blue one — not the first in the list.
+        assert adapter.active_filament_color() == "#0000FF"
+
+    def test_a_lone_loaded_tray_needs_no_active_slot(self) -> None:
+        adapter = self._adapter_with_tray_now(
+            [{"id": 0, "tray": [
+                {"id": 0, "tray_type": "PLA", "tray_color": "1A2B3CFF"},
+            ]}],
+            tray_now="",
+        )
+        assert adapter.active_filament_color() == "#1A2B3C"
+
+    def test_an_external_spool_declares_nothing(self) -> None:
+        """255 is "no tray" — nothing reports that spool's colour."""
+        adapter = self._adapter_with_tray_now(
+            [{"id": 0, "tray": [
+                {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF"},
+            ]}],
+            tray_now="255",
+        )
+        assert adapter.active_filament_color() is None
+
+    def test_several_trays_with_no_active_one_refuses_to_guess(self) -> None:
+        """Picking the first would state a colour the machine never did."""
+        adapter = self._adapter_with_tray_now(
+            [{"id": 0, "tray": [
+                {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF"},
+                {"id": 1, "tray_type": "PLA", "tray_color": "0000FFFF"},
+            ]}],
+            tray_now="",
+        )
+        assert adapter.active_filament_color() is None
+
+    def test_an_unusable_tray_colour_declares_nothing(self) -> None:
+        for bad in ("", "zzz", "FF"):
+            adapter = self._adapter_with_tray_now(
+                [{"id": 0, "tray": [
+                    {"id": 0, "tray_type": "PLA", "tray_color": bad},
+                ]}],
+                tray_now="0",
+            )
+            assert adapter.active_filament_color() is None, f"accepted {bad!r}"
+
+    def test_no_ams_data_declares_nothing(self) -> None:
+        adapter = _adapter()
+        adapter._last_status = {}
+        assert adapter.active_filament_color() is None
+
     def test_ams_status_single_unit_four_trays(self) -> None:
         adapter = self._adapter_with_ams([
             {

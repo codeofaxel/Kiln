@@ -279,11 +279,29 @@ def _auto_wrap_bambu_3mf(
         stl_paths, source_3mf = thumbnail_inputs_for_model(stl_path)
 
         gcode_body = _Path(gcode_path).read_text(encoding="utf-8")
+        # This door builds its own settings rather than going through the
+        # adapter, so it has to ask the machine what colour is loaded the
+        # same way the adapter does — otherwise the everyday slice keeps
+        # declaring white at a printer holding red, drawing a white
+        # preview and then warning about the mismatch it just created.
+        # Best-effort and cached-only: an unreachable printer costs the
+        # colour, never the wrap.
+        _loaded_color: str | None = None
+        try:
+            import kiln.server as _s
+
+            _adapter = _s._get_adapter()
+            if hasattr(_adapter, "active_filament_color"):
+                _loaded_color = _adapter.active_filament_color()
+        except Exception as exc:  # noqa: BLE001
+            _logger.debug("Filament colour unavailable for wrap: %s", exc)
+
         settings = BambuPrintSettings(
             model_name=_Path(gcode_path).stem,
             # Temps default to PLA; the PrusaSlicer gcode body already
             # contains M104/M190 with the correct values from the
             # profile, so these are only used for metadata fields.
+            filament_colors=[_loaded_color] if _loaded_color else None,
         )
         wrap = build_bambu_3mf(
             gcode_body,

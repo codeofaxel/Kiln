@@ -2245,6 +2245,14 @@ class BambuAdapter(PrinterAdapter):
         stem = Path(abs_path).stem
         output_path = os.path.join(os.path.dirname(abs_path), f"{stem}.3mf")
 
+        # Nothing declared: ask the machine what is actually loaded rather
+        # than declaring the default white at a printer holding red.  A
+        # caller's own colours always win; ``None`` keeps the old default.
+        if not filament_colors and num_filaments == 1:
+            loaded = self.active_filament_color()
+            if loaded:
+                filament_colors = [loaded]
+
         settings = BambuPrintSettings(
             hotend_temp=hotend_temp,
             bed_temp=bed_temp,
@@ -3456,6 +3464,75 @@ class BambuAdapter(PrinterAdapter):
                         "tray_color": tray.get("tray_color", ""),
                     })
         return loaded
+
+    def active_filament_color(self) -> str | None:
+        """The ``#RRGGBB`` of the filament actually loaded, or ``None``.
+
+        A wrapped 3MF declares the colour it will print in, and that
+        declaration is what draws the preview on the printer's screen and
+        what the AMS mismatch check measures against.  Left to defaults it
+        declares white for everyone, so a red spool produced a white
+        preview and then a mismatch warning about a discrepancy Kiln had
+        introduced itself.
+
+        Reads CACHED telemetry only — no MQTT round-trip, because wrapping
+        a file must not wait on a printer, and a preview is never worth
+        stalling a slice for.
+
+        Refuses rather than guesses, returning ``None`` when the machine
+        has not said clearly: no AMS data yet, an external spool
+        (``tray_now`` 255, whose colour nothing reports), a tray with no
+        usable colour, or several loaded trays with no active one named.
+        ``None`` leaves the caller's existing default alone.
+        """
+        try:
+            trays = self._peek_loaded_ams_trays()
+        except Exception:  # noqa: BLE001 — telemetry never blocks a wrap
+            logger.debug("AMS colour unavailable", exc_info=True)
+            return None
+        if not trays:
+            return None
+
+        active: int | None = None
+        try:
+            status = self._get_cached_status()
+            ams_data = status.get("ams")
+            raw = None
+            if isinstance(ams_data, dict):
+                raw = ams_data.get("tray_now")
+            if raw is None:
+                raw = status.get("tray_now")
+            if raw is not None and str(raw).strip().lstrip("-").isdigit():
+                active = int(str(raw).strip())
+        except Exception:  # noqa: BLE001
+            active = None
+
+        # 255 is Bambu's "no tray" — an external spool, whose colour the
+        # printer does not report at all.
+        if active == 255:
+            return None
+
+        chosen: dict[str, Any] | None = None
+        if active is not None:
+            chosen = next(
+                (t for t in trays if t.get("slot") == active), None
+            )
+        if chosen is None:
+            # No active tray named.  One loaded tray is unambiguous; more
+            # than one is a question only the machine can answer.
+            if len(trays) != 1:
+                return None
+            chosen = trays[0]
+
+        # Bambu reports RRGGBBAA; the alpha is not ours to carry.
+        value = str(chosen.get("tray_color") or "").strip().lstrip("#")
+        if len(value) < 6:
+            return None
+        try:
+            int(value[:6], 16)
+        except ValueError:
+            return None
+        return "#" + value[:6].upper()
 
     def get_ams_status(self) -> dict[str, Any]:
         """Query AMS status: what's loaded in each tray.
