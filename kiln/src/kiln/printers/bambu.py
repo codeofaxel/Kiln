@@ -841,6 +841,7 @@ class BambuAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
+            can_clear_error=True,
             # Port 6000 TLS+JPEG works on A1 / A1 Mini / P1P / P1S
             # without ffmpeg.  get_snapshot() tries port 6000 first
             # and falls back to RTSPS (X1 series, port 322) only if
@@ -3082,6 +3083,47 @@ class BambuAdapter(PrinterAdapter):
         return PrintResult(
             success=True,
             message="Emergency stop triggered (M112 sent).",
+        )
+
+    def clear_error(self) -> PrintResult:
+        """Acknowledge a latched ``print_error`` so the next print can start.
+
+        Bambu firmware holds ``gcode_state`` at ``failed`` with a non-zero
+        ``print_error`` after a job ends badly, and keeps reporting it until
+        something acknowledges it.  Dismissing the message on the printer's own
+        touchscreen clears the NOTIFICATION, not the reported state — measured
+        on an A1 (2026-08-13), where the screen read "ready" while the push
+        payload still carried ``print_error=50348032`` and every pre-flight
+        check refused.  Only a power cycle cleared it.
+
+        ``clean_print_error`` is a print-category command alongside ``stop``
+        and ``pause``.  Bambu firmware ignores commands it does not recognise,
+        so a model or firmware without it is left exactly as it was.
+
+        This reports only that the acknowledgement was SENT; the caller
+        re-reads state to learn whether the printer acted on it.
+        """
+        # subtask_id names the job being acknowledged.  The push cache still
+        # carries it for the job that failed; "0" is what Bambu itself uses for
+        # a local print with no cloud task, and is the honest fallback once the
+        # cache no longer names one.
+        with self._state_lock:
+            subtask_id = str(self._last_status.get("subtask_id") or "0")
+        self._publish_command(
+            {
+                "print": {
+                    "sequence_id": self._next_seq(),
+                    "command": "clean_print_error",
+                    "subtask_id": subtask_id,
+                }
+            }
+        )
+        return PrintResult(
+            success=True,
+            message=(
+                "Sent clean_print_error. Re-read printer_status to confirm the "
+                "printer has left its error state."
+            ),
         )
 
     def pause_print(self) -> PrintResult:

@@ -373,6 +373,11 @@ class PrinterCapabilities:
     can_update_firmware: bool = False
     can_snapshot: bool = False
     can_detect_filament: bool = False
+    #: Whether :meth:`PrinterAdapter.clear_error` can acknowledge a latched
+    #: firmware error.  Defaults to False so a backend that has not been
+    #: taught its firmware's acknowledgement advertises the truth — a caller
+    #: offering the user a button that cannot work is worse than no button.
+    can_clear_error: bool = False
     device_type: str = "fdm_printer"
     supported_extensions: tuple[str, ...] = (".gcode", ".gco", ".g")
 
@@ -1075,6 +1080,45 @@ class PrinterAdapter(ABC):
         Raises:
             PrinterError: If the e-stop command cannot be delivered.
         """
+
+    def clear_error(self) -> PrintResult:
+        """Acknowledge a latched firmware error so the printer can print again.
+
+        Deliberately NOT abstract, and it refuses by default.  A printer whose
+        error nobody knows how to clear must say so, because the alternative —
+        a default that pretends to work — is a button that reports success and
+        leaves the machine exactly as stuck as it was.  Adapters that know
+        their firmware's acknowledgement override this and set
+        :attr:`PrinterCapabilities.can_clear_error`.
+
+        This exists because a latched error is a DEAD END, not an
+        inconvenience.  Measured on an A1 (2026-08-13): a print cancelled
+        during bed levelling left the firmware reporting ``gcode_state=failed``
+        with a non-zero ``print_error``, which maps to
+        :attr:`PrinterStatus.ERROR`; the pre-flight check then refused every
+        subsequent print.  Dismissing the message on the printer's own screen
+        cleared the notification but NOT the reported state, so the machine
+        showed "ready" while Kiln — correctly — would not start a job.  There
+        was no way back through Kiln at all; only a power cycle cleared it.
+
+        The rule this restores is the one the rest of the status stack already
+        keeps: Kiln may refuse to act on what a printer reports, but it must
+        never leave the user with no way to reconcile the two.
+
+        :returns: A :class:`PrintResult` whose ``success`` says whether the
+            acknowledgement was DELIVERED, not whether the printer has since
+            gone idle — the caller re-reads state for that, and some firmware
+            takes a moment.
+        """
+        return PrintResult(
+            success=False,
+            message=(
+                f"{self.name} has no known way to clear a firmware error from "
+                "Kiln. Clear it on the printer's own screen or power-cycle it. "
+                "See scripts/adapter_conformance.yaml for what each backend "
+                "declares."
+            ),
+        )
 
     # -- calibration -----------------------------------------------------
 

@@ -5398,6 +5398,77 @@ def emergency_status(printer_name: str | None = None, include_unlatched: bool = 
 
 
 @mcp.tool()
+def clear_printer_error(printer_name: str | None = None) -> dict:
+    """Clear a latched error on the PRINTER so it will accept prints again.
+
+    Different from ``clear_emergency_stop``, which releases Kiln's own safety
+    latch.  This one acknowledges an error the FIRMWARE is holding — the state
+    the machine itself reports — after which pre-flight checks pass again.
+
+    Reach for it when ``printer_status`` reports ``error`` and the printer's
+    own screen looks fine.  That combination is not a Kiln bug; the firmware
+    really is still reporting the fault, and on some machines dismissing the
+    on-screen message clears the notification without clearing the state.
+    Before this existed there was no way out of that from Kiln at all — only a
+    power cycle — so one bad print locked the machine out of every later one.
+
+    What it does NOT do is fix the cause.  A printer that halted for a real
+    fault will halt again the moment it retries, which is the honest outcome:
+    this reconciles Kiln with the machine, it does not overrule the machine.
+    Nothing is cleared while a print is running.
+
+    :param printer_name: Target printer.  Omit for the default printer.
+    :returns: Whether the acknowledgement was sent, plus the printer state
+        read back afterwards so the caller can see whether it took.
+
+    See also: ``printer_status()``, ``preflight_check()``, ``emergency_stop()``.
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
+
+        # Never while a print is live: the machine is mid-job, and an
+        # acknowledgement that resets a board would end it far less gracefully
+        # than cancel_print would.
+        state = adapter.get_state()
+        if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+            return _error_dict(
+                f"Not clearing anything while a print is {state.state.value}. "
+                "Use cancel_print first if you mean to stop it.",
+                code="PRINTER_BUSY",
+            )
+
+        if not adapter.capabilities.can_clear_error:
+            return _error_dict(
+                f"{adapter.name} has no known way to clear a firmware error "
+                "from Kiln. Clear it on the printer's own screen, or power-"
+                "cycle the machine.",
+                code="NOT_SUPPORTED",
+            )
+
+        result = adapter.clear_error()
+        after = adapter.get_state()
+        return {
+            "success": bool(result.success),
+            "message": result.message,
+            # Read back rather than claimed: some firmware takes a moment, so
+            # a caller that needs certainty polls printer_status again.
+            "printer_state": after.state.value,
+            "cleared": after.state is not PrinterStatus.ERROR,
+            "printer_name": _reported_printer_name(printer_name),
+        }
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found", code="NOT_FOUND")
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Could not clear the printer error: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in clear_printer_error")
+        return _error_dict(f"Unexpected error in clear_printer_error: {exc}",
+                           code="INTERNAL_ERROR")
+
+
+@mcp.tool()
 def clear_emergency_stop(
     printer_name: str,
     acknowledgement_note: str,

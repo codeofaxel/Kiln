@@ -650,6 +650,7 @@ class MoonrakerAdapter(PrinterAdapter):
     def capabilities(self) -> PrinterCapabilities:
         """Capabilities supported by the Moonraker/Klipper backend."""
         return PrinterCapabilities(
+            can_clear_error=True,
             can_upload=True,
             can_set_temp=True,
             can_send_gcode=True,
@@ -1313,6 +1314,29 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
+
+    def clear_error(self) -> PrintResult:
+        """Clear a Klipper shutdown/error state with ``FIRMWARE_RESTART``.
+
+        A Klipper host that has shut down — after an ``M112``, a failed
+        homing move, a thermal fault — refuses every subsequent command until
+        the firmware is restarted, which is exactly the dead end this method
+        exists to open.  Moonraker exposes it as its own endpoint rather than
+        as a G-code line, because a shut-down Klipper will not accept G-code.
+
+        The restart re-initialises the MCU; it does not clear the CAUSE.  A
+        printer that shut down for a real fault will shut down again, which is
+        the correct outcome — this reconciles Kiln with the machine, it does
+        not overrule the machine.
+        """
+        self._post("/printer/firmware_restart")
+        return PrintResult(
+            success=True,
+            message=(
+                "Sent FIRMWARE_RESTART. Re-read printer_status to confirm "
+                "Klipper came back ready."
+            ),
+        )
 
     def send_gcode(self, commands: list[str]) -> bool:
         """Send G-code commands to Klipper via Moonraker.

@@ -758,6 +758,15 @@ class CrealityAdapter(PrinterAdapter):
     def capabilities(self) -> PrinterCapabilities:
         return self._backend.capabilities
 
+    def clear_error(self) -> PrintResult:
+        """Delegate to the Moonraker backend that actually holds the link.
+
+        ``capabilities`` is delegated too, so without this the adapter would
+        advertise ``can_clear_error`` and then answer with the base class's
+        refusal — a button that reports itself available and does nothing.
+        """
+        return self._backend.clear_error()
+
     def set_safety_profile(self, profile_id: str) -> None:
         super().set_safety_profile(profile_id)
         self._backend.set_safety_profile(profile_id)
