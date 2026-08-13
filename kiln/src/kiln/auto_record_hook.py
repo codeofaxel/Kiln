@@ -552,9 +552,30 @@ def observe_state(printer_name: str, current_state: str) -> str | None:
     Call from the adapter's state-update path BEFORE mutating its
     cached state.  The returned value is the caller's previous-state
     argument to :func:`fire_terminal_state_hook`.
+
+    Watching a printer ENTER an active state also retires any pending cancel
+    intent, because a new print has begun and the last cancel cannot be about
+    it.  ``start_print`` says the same thing earlier for prints Kiln causes;
+    this is the half that covers the prints it does not — one started from
+    the printer's own touchscreen never passes through ``start_print`` at
+    all.  Both doors already call this, so the rule lives in one place
+    rather than being re-stated per door.
+
+    Without it, ``emergency_stop`` with no printer named — which sweeps every
+    registered machine, idle ones included — left an intent on a printer that
+    had no print to cancel, and the next touchscreen print to end on an
+    ambiguous idle inherited it and was recorded cancelled after finishing.
     """
     prev = _HOOK_STATE.previous_state(printer_name)
     _HOOK_STATE.set_previous_state(printer_name, current_state)
+    # Cheap string checks first: the clear touches durable storage, and this
+    # runs on every status frame, but the edge itself happens once per print.
+    if (
+        current_state
+        and current_state.lower().strip() in _ACTIVE_STATES
+        and (prev or "").lower().strip() not in _ACTIVE_STATES
+    ):
+        clear_cancel_intent(printer_name)
     return prev
 
 

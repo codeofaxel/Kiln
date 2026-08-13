@@ -255,6 +255,47 @@ def test_start_print_clears_the_intent(monkeypatch):
     assert "clear_cancel_intent" in source
 
 
+def test_a_stop_on_an_idle_printer_cannot_label_the_next_print(
+    _no_db_writes, monkeypatch
+):
+    """``emergency_stop`` with no printer named sweeps EVERY machine.
+
+    Idle ones included — and an idle printer has no print to cancel, so the
+    intent left on it belongs to nothing.  ``start_print`` cannot clear it
+    either, because the next print may be started from the printer's own
+    touchscreen, which never passes through Kiln at all.  Watching the
+    machine ENTER an active state is what retires it, and that is observed
+    whoever started the print.
+    """
+    adapter = _bambu(monkeypatch)
+
+    _push(adapter, "IDLE")                       # nothing running
+    hook.note_cancel_requested(adapter)          # the sweep hits it anyway
+    _push(adapter, "RUNNING", job="next-job")    # a touchscreen print begins
+    _push(adapter, "IDLE", job="next-job")       # and finishes, ambiguously
+
+    assert _outcomes(_no_db_writes) == ["success"]
+
+
+def test_resuming_a_paused_print_does_not_retire_the_intent(monkeypatch):
+    """The clear fires on entering an active state, and pause IS one.
+
+    So a resume is not mistaken for a new print — otherwise cancelling a
+    paused print would lose its label the moment the printer moved again.
+    """
+    adapter = _bambu(monkeypatch)
+    _push(adapter, "RUNNING")
+    _push(adapter, "PAUSE")
+    hook.note_cancel_requested(adapter)
+    _push(adapter, "RUNNING")
+
+    from kiln.printers.base import outcome_printer_name
+
+    assert hook._HOOK_STATE.consume_cancel_intent(
+        outcome_printer_name(adapter)
+    ) is True
+
+
 def test_a_slow_stop_still_counts(_no_db_writes, monkeypatch):
     """The five-second window is no longer what decides this.
 
