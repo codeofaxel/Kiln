@@ -24,7 +24,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
-from kiln.printers.base import PrinterAdapter, PrinterStatus
+from kiln.printers.base import (
+    PrinterAdapter,
+    PrinterStatus,
+    name_printer_for_outcomes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +172,12 @@ class PrinterRegistry:
             )
             if name not in self._printer_locks:
                 self._printer_locks[name] = threading.Lock()
+            # Tell the adapter what its owner calls it.  Everything downstream
+            # that keys on a printer — the outcome row, the terminal-transition
+            # table, the cancel intent — otherwise has only ``adapter.name``,
+            # which is the backend family and so identical for two printers of
+            # one brand.  This is the only place both names are in scope.
+            name_printer_for_outcomes(adapter, name)
             logger.info("Registered printer %r (%s) at site %r", name, adapter.name, site)
         # Disconnect outside the lock to avoid holding it during I/O
         # (MQTT disconnect can block waiting for thread join).

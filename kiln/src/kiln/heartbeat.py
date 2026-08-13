@@ -389,6 +389,9 @@ def _send_heartbeat() -> None:
             "p_slices_today": stats.get("slices", 0),
             "p_downloads_today": stats.get("downloads", 0),
             "p_print_hours_today": stats.get("print_hours", 0.0),
+            # The denominator for the line above.  Without it, a small
+            # hours figure and an unmeasured one are the same number.
+            "p_prints_hours_known_today": stats.get("prints_hours_known", 0),
             "p_pro_installed": _is_pro_installed(),
             "p_os_platform": platform.system().lower(),
             "p_device_fingerprint": device_fingerprint,

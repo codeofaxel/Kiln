@@ -73,6 +73,13 @@ scripts/*
 # test so a tuned engine axis (material, printer_id) can never be silently
 # unreachable through the @mcp.tool() door an agent actually calls.
 !scripts/audit_tool_param_parity.py
+# …and for the adapter-conformance gate + its ledger, which are run by a
+# CI-collected test so a contract field one printer backend fills and the
+# other seven leave empty can never again be invisible to the type system
+# and to every per-adapter test.  The ledger is the public record of what
+# each backend really provides and why anything is absent.
+!scripts/audit_adapter_conformance.py
+!scripts/adapter_conformance.yaml
 
 # Internal working docs (backed up via iCloud)
 .dev

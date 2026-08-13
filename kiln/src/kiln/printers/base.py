@@ -1450,19 +1450,225 @@ DeviceAdapter = PrinterAdapter
 # ---------------------------------------------------------------------------
 
 
-def _current_job_label(adapter: PrinterAdapter) -> str | None:
-    """Best-effort name of the job the printer is (or was last) running.
+def delegate_outcome_lifecycle(backend: PrinterAdapter) -> None:
+    """Mark ``backend`` as an inner adapter its owner reports on behalf of.
 
-    Used only on the rare paths that need identity — a terminal
-    transition or the once-per-process reconcile — never on every poll:
-    ``get_job()`` may cost a network round trip on some adapters.
+    An adapter that fulfils the protocol by holding ANOTHER adapter — today
+    only :class:`~kiln.printers.creality.CrealityAdapter`, which speaks to a
+    Moonraker backend — has two wrapped ``get_state`` methods on one call:
+    the inner one runs first, then the outer.  Both would feed the lifecycle,
+    and the hook's idempotency key is ``(adapter.name, job_id)``, so the two
+    names ("creality", "moonraker") do not dedupe each other and one print
+    lands twice.
+
+    The OUTER adapter is the one that reports, because its name is the one
+    the user registered and the one every other surface attributes the print
+    to.  Call this on the backend at the seam where the delegation is built,
+    so the next delegating adapter inherits the fix by using the same helper
+    rather than growing a second opinion about it.
+    """
+    backend._kiln_outcome_delegated = True  # type: ignore[attr-defined]
+
+
+def name_printer_for_outcomes(adapter: Any, registered_name: str) -> None:
+    """Tell an adapter the name its owner registered it under.
+
+    Called from :meth:`~kiln.registry.PrinterRegistry.register`, the only
+    place that knows it.  An adapter cannot work it out for itself:
+    ``adapter.name`` is the BACKEND FAMILY — ``"bambu"`` for every Bambu ever
+    plugged in, and the same story for the other seven — while the registry
+    holds the name its owner chose, which is what every other surface
+    attributes prints to.
+
+    Best-effort by design.  An adapter that refuses attributes still works;
+    its outcomes are simply filed under the family name, exactly as before.
     """
     try:
-        job = adapter.get_job()
-        label = getattr(job, "file_name", None)
-        return str(label) if label else None
+        adapter._kiln_registered_name = str(registered_name)
+    except Exception:  # noqa: BLE001
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug(
+            "could not name adapter for outcomes", exc_info=True
+        )
+
+
+def outcome_printer_name(adapter: Any) -> str:
+    """The name this printer's outcomes, transitions and cancels are filed under.
+
+    ONE answer for every part of the lifecycle that keys on a printer: the
+    previous-state table that detects a terminal transition, the idempotency
+    ledger that stops one ending being recorded twice, the cancel-intent table
+    that tells a cancel from a finish, and the ``printer_name`` written onto
+    the outcome row.  They have to agree, because they are the same question.
+
+    The family name was standing in for this, and it collides.  Two Bambus on
+    one bench were ONE machine to all four: the same file printed on both
+    recorded a single outcome, because the second ending read as a replay of
+    the first under the shared key.
+
+    It also quietly unpicked the cancel path.  ``cancel_print`` files intent
+    under the registry name and the hook consumed it under the family name, so
+    the two never met and a print the user cancelled through Kiln's own tool
+    was recorded as a success — on every install, single-printer benches
+    included.  :func:`~kiln.printers.progress_motion.observation_key` refused
+    this same trade for the motion samples and its docstring names the hazard;
+    the lifecycle never got the same treatment.
+
+    Falls back to the family name for an adapter no registry ever saw — one
+    built directly in a test or a script — which is what it reported before
+    and is still a better thing to file under than nothing.
+    """
+    registered = getattr(adapter, "_kiln_registered_name", None)
+    if isinstance(registered, str) and registered:
+        return registered
+    return getattr(adapter, "name", "") or "printer"
+
+
+def _current_job(adapter: PrinterAdapter) -> JobProgress | None:
+    """The job the printer is (or was last) running, or ``None``.
+
+    Used only on the rare paths that need it — a terminal transition or the
+    once-per-process reconcile — never on every poll: ``get_job()`` may cost
+    a network round trip on some adapters.  One call serves every question
+    asked at the transition (identity AND elapsed), so noticing an ending
+    still costs exactly one round trip.
+    """
+    try:
+        return adapter.get_job()
     except Exception:  # noqa: BLE001 — identity is optional, status is not
         return None
+
+
+def _job_label(job: JobProgress | None) -> str | None:
+    """Best-effort name of ``job``, or ``None`` when it has none."""
+    label = getattr(job, "file_name", None) if job is not None else None
+    return str(label) if label else None
+
+
+def _current_job_label(adapter: PrinterAdapter) -> str | None:
+    """Best-effort name of the job the printer is (or was last) running."""
+    return _job_label(_current_job(adapter))
+
+
+#: Longest single print whose duration is credible enough to bank.
+#:
+#: Not a limit on what a printer may do — it is an absurdity floor under a
+#: number nothing downstream can sanity-check.  The longest real prints run a
+#: few days; a week means a clock artifact or a counter that is measuring
+#: something other than this job, and one such reading would outweigh every
+#: honest print in the daily total.
+_MAX_CREDIBLE_PRINT_HOURS: float = 168.0
+
+
+def _record_watched_duration(
+    *,
+    job_label: str,
+    elapsed_seconds: Any,
+    state_age_seconds: float | None,
+    observation_gap_seconds: float | None,
+) -> None:
+    """Bank this print's duration — but only if Kiln really WATCHED it end.
+
+    ``print_hours`` means the printer was RUNNING, not that parts shipped: a
+    print cancelled at ten minutes really did run for ten minutes, and this
+    records it as such.  The outcome lives beside it on the print's own row,
+    so "successful hours" stays a derivation and nobody can quote this total
+    as parts-shipped.
+
+    Everything here is about refusing to guess.  The elapsed number is read
+    when Kiln NOTICES the ending, which is not when the print ended, and the
+    two adapter families fail in opposite directions:
+
+    * a printer-reported duration (Moonraker, OctoPrint, PrusaLink, Duet,
+      Elegoo) freezes at the ending, so a late read is merely late;
+    * Bambu's is a Kiln-side stopwatch (:func:`note_job_start` at print start,
+      subtracted here) that NOTHING stops on its own, so a late read keeps
+      counting: a print that ended at 31 minutes and is noticed an hour later
+      reads ~91.  Monotonic and plausible, so it would never look wrong — it
+      would just quietly inflate every Bambu install's total.
+
+    One rule covers both, and it is the rule the design asks for: a duration
+    is recorded only when this ending was WATCHED — the last time we had
+    current knowledge of this printer was recent, and the reading itself is
+    not a stale cache.  Anything else is finding out afterwards, and an honest
+    absence beats a confident wrong number.  ``prints - prints_hours_known``
+    is what makes that absence visible instead of reading as zero hours
+    printed.
+
+    TWO DOORS reach an ending, and this is the only place the rule lives.
+    Each measures *observation_gap_seconds* — how long since we last had
+    current knowledge of this printer — the only way it honestly can:
+
+    * the ``get_state`` wrap asks, so its gap is :func:`note_status_read`'s
+      "how long since we last asked", and ``state_age_seconds`` is what
+      catches an answer served from a cache rather than the machine;
+    * Bambu's MQTT callback is TOLD, so its gap is the age of the run state it
+      held before this frame — the same quantity ``state_age_seconds`` carries
+      above, read one frame earlier.
+
+    The push door is fenced off from the two cheaper answers, and both fences
+    were measured rather than reasoned about.  It cannot borrow the look-clock:
+    a Bambu ``get_state()`` is answered from the push cache, so a monitor
+    polling through an MQTT outage keeps that clock warm while nothing is being
+    watched at all.  And it cannot ask merely when the printer last SPOKE,
+    because partial frames — a temperature, a fan step — carry no run state,
+    so one landing between a reconnect and the full dump would present an
+    hour-old ending as a one-second-old one.  Either mistake lets the reconnect
+    dump, whose ``prev`` predates the outage, sail through this guard carrying
+    the whole outage in its elapsed.
+
+    All three are the same quantity, so the thresholds below apply unchanged to
+    either door, and neither decides for itself what counts as watched.
+
+    A printer with no clock to report (direct USB: M27 gives SD-card byte
+    progress, not time) falls out at the first check and stays honestly
+    unknown, as :file:`scripts/adapter_conformance.yaml` already declares.
+
+    Never raises — this runs inside a status read and inside an MQTT callback.
+    """
+    if not isinstance(elapsed_seconds, (int, float)) or elapsed_seconds <= 0:
+        return
+
+    from kiln.printers.progress_motion import WATCHED_ENDING_MAX_GAP_S
+
+    # Was our last current knowledge recent enough for "we saw it end" to be
+    # true?  Unknown — a first read, or a printer that has never spoken to
+    # this process — counts as no: it never watched anything.
+    if (
+        observation_gap_seconds is None
+        or observation_gap_seconds > WATCHED_ENDING_MAX_GAP_S
+    ):
+        return
+
+    # And is the reading itself the present tense?  A push-cache answer that
+    # is minutes old dates the transition we just "saw", by exactly the same
+    # amount and for the same reason.  Absent age means the caller learned
+    # this from the printer on this call, which is current by construction.
+    if (
+        isinstance(state_age_seconds, (int, float))
+        and state_age_seconds > STALE_STATE_WARN_AGE
+    ):
+        return
+
+    hours = float(elapsed_seconds) / 3600.0
+    if hours > _MAX_CREDIBLE_PRINT_HOURS:
+        return
+
+    from kiln.daily_stats import record_print_hours_for_job
+
+    # Keyed by job so the two layers that can both witness one ending — the
+    # adapter-generic wrap and Bambu's own push wiring — cannot bank it twice.
+    #
+    # *job_label* must be the SAME string its caller hands
+    # ``fire_terminal_state_hook`` as ``job_id``.  That is the whole dedupe
+    # contract: ``record_print_hours_for_job`` keys on the job id alone, and
+    # the other writer in the system — ``record_print_outcome``, banking from
+    # the job record when an agent later refines an auto-recorded outcome —
+    # keys on the hook's ``job_id``.  Bank under a second spelling of the same
+    # print and nothing collapses them; the hours row and the outcome row also
+    # stop naming the same job.
+    record_print_hours_for_job(job_label, hours)
 
 
 def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> None:
@@ -1500,6 +1706,11 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
     could only ever reconcile to ``unknown``, because the machine's
     testimony had been flattened before the loop could read it.
     """
+    # An adapter that delegates to another adapter would otherwise feed the
+    # loop twice per call, under two names that do not dedupe each other.
+    if getattr(adapter, "_kiln_outcome_delegated", False):
+        return
+
     status = getattr(state, "state", None)
     # The job's ending outranks the machine's current state: "completed"
     # and "cancelled" are facts about the print, and both live inside the
@@ -1515,8 +1726,17 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
         observe_state,
         reconcile_pending_outcomes,
     )
+    from kiln.printers.progress_motion import forget_job_start, note_status_read
 
-    name = adapter.name
+    # Stamp the look on EVERY status read — it is the only record of how
+    # long ago we last saw this printer, and a duration is only honest if
+    # that gap is short.  Dict touch, no round trip.
+    read_gap_seconds = note_status_read(adapter)
+
+    # The name its owner registered, not the backend family — see
+    # outcome_printer_name.  Everything below keys on this: the transition
+    # table, the idempotency ledger, the cancel intent, the outcome row.
+    name = outcome_printer_name(adapter)
     if not getattr(adapter, "_base_outcomes_reconciled", False):
         adapter._base_outcomes_reconciled = True  # type: ignore[attr-defined]
         # Only pay for job identity (get_job may be a network round trip)
@@ -1536,7 +1756,8 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
     # Job identity may cost a network round trip — pay it only for an
     # edge that could actually record something.
     if is_terminal_transition(prev, value):
-        label = _current_job_label(adapter)
+        job = _current_job(adapter)
+        label = _job_label(job)
         if label:
             fire_terminal_state_hook(
                 prev_state=prev,
@@ -1546,6 +1767,22 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
                 job_id=label,
                 file_name=label,
             )
+            _record_watched_duration(
+                # The id this door just gave the hook, so the hours row and
+                # the outcome row name one job.
+                job_label=label,
+                elapsed_seconds=getattr(job, "print_time_seconds", None),
+                state_age_seconds=getattr(state, "state_age_seconds", None),
+                observation_gap_seconds=read_gap_seconds,
+            )
+        # Stop the elapsed clock: the job it was measuring is over.  This is
+        # the first caller ``forget_job_start`` has ever had, and without it
+        # the stamp outlives its print — so a NEXT print started from the
+        # touchscreen (never passing ``start_print``, never restamping)
+        # would inherit it and report the age of the previous job.  The
+        # label guard cannot save that case: Bambu's file name comes from
+        # the push cache, which keeps naming the finished job.
+        forget_job_start(adapter)
 
 
 # ---------------------------------------------------------------------------

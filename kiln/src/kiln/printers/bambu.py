@@ -52,8 +52,10 @@ from kiln.printers.base import (
     PrinterStatus,
     PrintResult,
     UploadResult,
+    _record_watched_duration,
+    outcome_printer_name,
 )
-from kiln.printers.progress_motion import job_elapsed_seconds
+from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -1245,6 +1247,10 @@ class BambuAdapter(PrinterAdapter):
         job_id_for_hook: Any = None
         file_name_for_hook: Any = None
         print_error_for_hook: int = 0
+        # Seconds since we last KNEW this printer's run state, read across the
+        # merge below.  ``None`` when we never have — the first frame of a
+        # process has nothing behind it to measure from.
+        push_gap_seconds: float | None = None
         if isinstance(print_data, dict):
             cmd = str(print_data.get("command", "")).lower()
             if cmd == "push_status":
@@ -1278,6 +1284,19 @@ class BambuAdapter(PrinterAdapter):
                     prev_gcode_state = str(
                         self._last_status.get("gcode_state", "")
                     ).lower().strip()
+                    # How long since we last KNEW what this printer was doing.
+                    # Read BEFORE the merge refreshes it: it is the only bound
+                    # on how late an ending carried by this frame might be.
+                    #
+                    # Deliberately the STATE's age and not the cache's.  A
+                    # partial frame — a temperature, a fan step — advances the
+                    # cache while saying nothing about whether the print is
+                    # still running, so measuring "when did this printer last
+                    # speak" would let one such frame, landing between a
+                    # reconnect and the full dump, present an hour-old ending
+                    # as a one-second-old one.  This is also exactly the
+                    # quantity the polled door guards on as state_age_seconds.
+                    push_gap_seconds = self._gcode_state_age_locked()
                     self._last_status.update(print_data)
                     self._last_state_time = time.monotonic()
                     # Stamp the vintage of the one key that decides the
@@ -1312,12 +1331,20 @@ class BambuAdapter(PrinterAdapter):
                         self._last_status.get("print_error") or 0
                     )
             # _state_lock has been released here (outside the `with`).
+            # The name its owner registered, not "bambu" — that family name is
+            # shared by every Bambu on the bench.  Resolved once here because
+            # BOTH blocks below key on it, and the reconcile runs on the first
+            # frame of a process, which is exactly when the hook block is
+            # skipped for want of a previous state.
+            lifecycle_name = outcome_printer_name(self)
+            # _state_lock has been released here (outside the `with`).
             # Fire the hook — it's idempotent per (printer, job_id)
             # and cheap when no terminal transition occurred.
             if prev_gcode_state and new_gcode_state and job_id_for_hook:
                 try:
                     from kiln.auto_record_hook import (
                         fire_terminal_state_hook,
+                        is_terminal_transition,
                         observe_state,
                     )
 
@@ -1328,15 +1355,72 @@ class BambuAdapter(PrinterAdapter):
                     # process start).  Either works for terminal-transition
                     # detection, but prev_gcode_state from this merge is
                     # strictly fresher.
-                    observe_state(self.name, new_gcode_state)
+                    observe_state(lifecycle_name, new_gcode_state)
+
+                    # This frame is where a connected Bambu print ENDS, as far
+                    # as the rest of Kiln is concerned.  The line above writes
+                    # the same shared table the adapter-generic get_state wrap
+                    # reads, so the wrap that banks every other backend's
+                    # duration sees prev == terminal on its next poll and finds
+                    # no edge at all.  Bambu therefore has to do here what that
+                    # wrap does there — with the same helper, the same rule and
+                    # the same job id, not a second set of them.
+                    ended = is_terminal_transition(
+                        prev_gcode_state, new_gcode_state
+                    )
+                    # Read the stopwatch BEFORE the hook's database write: it
+                    # is still running, so anything that takes time between
+                    # the ending and this read is added to the print.
+                    elapsed_seconds = (
+                        job_elapsed_seconds(self, file_name_for_hook)
+                        if ended
+                        else None
+                    )
+
                     fire_terminal_state_hook(
                         prev_state=prev_gcode_state,
                         new_state=new_gcode_state,
                         print_error_code=print_error_for_hook,
-                        printer_name=self.name,
+                        printer_name=lifecycle_name,
                         job_id=str(job_id_for_hook),
                         file_name=str(file_name_for_hook) if file_name_for_hook else None,
                     )
+
+                    if ended:
+                        # Stop the stopwatch — the job it was measuring is
+                        # over.  The polled door does this on its own terminal
+                        # edge and, per the paragraph above, never reaches one
+                        # on a connected Bambu.  Without it the stamp outlives
+                        # its print, and the next print started from the
+                        # touchscreen — which never passes ``start_print`` and
+                        # so never restamps — inherits it and reports the age
+                        # of a job that is already finished.
+                        #
+                        # Before the banking, not after: the elapsed was read
+                        # above, so nothing here still needs the stamp, and a
+                        # ledger that failed must not also leave a stopwatch
+                        # running on the next print.
+                        forget_job_start(self)
+                        # Under the id we just gave the hook, so the hours row
+                        # and the outcome row name one job and the two dedupe
+                        # against each other.
+                        #
+                        # This frame IS the state, so what it reports has no
+                        # age — what bounds the ending's lateness is how long
+                        # we had gone without knowing the run state.  A live
+                        # stream measures seconds and banks; the full dump that
+                        # arrives on RECONNECT measures the whole outage, and
+                        # its prev_gcode_state predates that outage, so it
+                        # reports a print that ended at 31 minutes as however
+                        # long ago we happened to notice.  That reading is
+                        # monotonic and plausible and nothing downstream could
+                        # ever flag it, which is exactly why it is refused.
+                        _record_watched_duration(
+                            job_label=str(job_id_for_hook),
+                            elapsed_seconds=elapsed_seconds,
+                            state_age_seconds=0.0,
+                            observation_gap_seconds=push_gap_seconds,
+                        )
                 except Exception as exc:  # pragma: no cover
                     logger.debug(
                         "auto-record hook raised (non-fatal): %s", exc,
@@ -1357,7 +1441,7 @@ class BambuAdapter(PrinterAdapter):
                     )
 
                     reconcile_pending_outcomes(
-                        printer_name=self.name,
+                        printer_name=lifecycle_name,
                         gcode_state=new_gcode_state,
                         print_error_code=print_error_for_hook,
                         current_job_label=(

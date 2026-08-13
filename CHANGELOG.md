@@ -126,6 +126,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- `cancel_job` has been renamed `cancel_queued_job`. It only ever removed a job
+  that was still waiting in the queue line, but sitting next to `cancel_print`,
+  the name suggested otherwise. This tool also used to sometimes accept a job
+  that had already started and mark it cancelled while the machine kept
+  printing; now it tells you the print is already running and points you at
+  `cancel_print`.
+
 - **Preview pictures now match the 3D viewer.** Kiln's stills get the same
   studio lighting as the model viewer instead of the flat grey render — in
   your chosen filament colour, from the angles Kiln already picks for your
@@ -285,6 +292,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   thicker layers, a wider brim — was silently dropped whenever Kiln didn't
   recognize your printer's model, and still reported as applied. On Bambu
   that could also leave the print file itself wrong. Now fixed.
+
+- **When Kiln can't start, it now says why instead of just disappearing.** A
+  problem at startup used to make Kiln vanish from your assistant with nothing
+  but a generic "server failed to start" — now it comes up in recovery mode and
+  tells you what went wrong and how to fix it, `kiln doctor` reports the same
+  thing, and the full details are saved to `~/.kiln/last-startup-error.log`.
 
 ## [1.3.2] - 2026-08-01
 

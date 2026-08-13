@@ -293,6 +293,16 @@ class OctoPrintSockJSMonitor:
         # Shared state cache -- written by the WS thread, read by the adapter.
         self._cache: dict[str, Any] = {}
         self._cache_lock: threading.Lock = threading.Lock()
+
+        # When a push last carried the printer STATE, as distinct from
+        # when the cache was last written at all.  OctoPrint's ``current``
+        # message is documented as a full snapshot, which would make the
+        # two clocks identical — but that is not verifiable from this
+        # code, and a temps-only frame resetting a state clock would
+        # report a fresh age beside a state minutes old.  Keeping them
+        # separate is correct under either behaviour and costs nothing.
+        # ``None`` until a push actually carries the state.
+        self._print_state_time: float | None = None
         self._connected: bool = False
 
         self._thread: threading.Thread | None = None
@@ -310,6 +320,18 @@ class OctoPrintSockJSMonitor:
         """Return the latest cached ``current`` payload, or ``None``."""
         with self._cache_lock:
             return dict(self._cache) if self._cache else None
+
+    def get_print_state_age(self) -> float | None:
+        """Seconds since a push last carried the printer state, or ``None``.
+
+        ``None`` means no push ever has — which is not a claim of
+        freshness, so the caller passes it through rather than
+        substituting a zero.
+        """
+        with self._cache_lock:
+            if self._print_state_time is None:
+                return None
+            return max(0.0, time.time() - self._print_state_time)
 
     def start(self) -> None:
         """Start the background listener thread.
@@ -422,6 +444,10 @@ class OctoPrintSockJSMonitor:
             if isinstance(current, dict):
                 with self._cache_lock:
                     self._cache.update(current)
+                    # Same critical section as the write it describes, so
+                    # the clock can never disagree with the cache.
+                    if isinstance(current.get("state"), dict):
+                        self._print_state_time = time.time()
                 if self._on_state_update:
                     try:
                         self._on_state_update(current)
@@ -819,9 +845,17 @@ class OctoPrintAdapter(PrinterAdapter):
         # inspection; this catches the flag transitions for completeness.
         self._check_flow_flag_transitions(flags)
 
+        # How old the STATE is — not how old the cache is.  This is the
+        # push path, so the answer is only as current as the last frame
+        # that carried it.  The HTTP fallback deliberately has no age: it
+        # asks the printer on every call, so its reading is current by
+        # construction and an age would always be ~0.
+        age = self._sockjs_monitor.get_print_state_age()
+
         return PrinterState(
             connected=True,
             state=status,
+            state_age_seconds=round(age, 1) if age is not None else None,
             tool_temp_actual=tool.get("actual") if isinstance(tool, dict) else None,
             tool_temp_target=tool.get("target") if isinstance(tool, dict) else None,
             bed_temp_actual=bed.get("actual") if isinstance(bed, dict) else None,
