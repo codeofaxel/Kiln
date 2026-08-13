@@ -773,8 +773,10 @@ def _build_instructions() -> str:
                 )
             else:
                 parts.append(
-                    f"FLEET: {len(printer_names)} printers registered. "
-                    "Use `fleet_status` for overview, `printer_status` for details."
+                    f"PRINTERS: {len(printer_names)} registered. "
+                    "Use `printer_status(printer_name=...)` for any one of "
+                    "them. Seeing and driving them together is a Business "
+                    "feature (`fleet_status` and the other fleet tools)."
                 )
 
         # --- Model marketplaces ---
@@ -7727,9 +7729,15 @@ def confirm_action(token: str) -> dict:
 
 
 @mcp.tool()
-@requires_tier(LicenseTier.PRO)
+@requires_tier(LicenseTier.BUSINESS)
 def fleet_status() -> dict:
     """Get live status of all fleet printers (state, temps, connection — current snapshot).
+
+    The multi-machine view is a fleet feature.  For ONE printer — which is
+    the single-printer experience at every tier — use ``printer_status``,
+    ``print_status_lite``, ``printer_snapshot`` or ``monitor_print``; each
+    takes a ``printer_name`` and none of them is tier-gated, so any machine
+    you own can be inspected and stopped whatever your licence.
 
     For historical analytics (success rates, throughput), use ``fleet_analytics``.
     For grouping by physical location, use ``fleet_status_by_site``.
@@ -7835,8 +7843,11 @@ def register_printer(
             ``DEFAULT_SERIAL_BAUDRATE``; many Marlin boards are flashed
             for 250000 and will not talk at the default.
 
-    Once registered the printer appears in ``fleet_status()`` and can be
-    targeted by ``submit_job()``.
+    Once registered the printer can be targeted by name — ``printer_status``,
+    ``monitor_print``, ``cancel_print``, ``pause_print`` and ``resume_print``
+    all take a ``printer_name`` at every tier, so owning a second machine
+    never costs you sight of it or control over it.  Seeing them together
+    (``fleet_status``) and driving them together are Business features.
     """
     if err := _check_auth("admin"):
         return err

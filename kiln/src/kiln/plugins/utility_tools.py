@@ -587,7 +587,9 @@ class _UtilityToolsPlugin:
 
             _quick_start_base = [
                 "1. Call `printer_status` to check if a printer is connected and its current state.",
-                "2. Call `fleet_status` if managing multiple printers.",
+                "2. `printer_status` takes a printer name — use it per machine "
+                "when you have more than one (managing them together is a "
+                "Business feature).",
                 "3. Call `preflight_check` before starting any print to validate readiness.",
                 "4. Use `search_all_models` to find 3D models across marketplaces.",
                 "5. Use `slice_model` or `slice_and_print` to prepare and print files.",

@@ -174,8 +174,13 @@ class SkillManifest:
                 "validate_design_for_requirements(design, reqs) — verification",
                 "get_post_processing_guide(material) — finishing guidance",
             ],
-            "fleet_management": [
+            # Every entry here is Business+.  Running machines together is
+            # the fleet product; the single-printer experience is the
+            # printer_status / monitor_print family, which takes a printer
+            # name and is free, so one machine is never behind this.
+            "fleet_management (Business+)": [
                 "fleet_status() — all printers overview",
+                "fleet_pause() / fleet_resume() / fleet_cancel() — stop the fleet gracefully",
                 "route_print_job(file, requirements) — intelligent job routing",
                 "fleet_job_status(job_id) — track distributed jobs",
             ],
@@ -213,7 +218,7 @@ class SkillManifest:
             "recovery": "retry_print_with_fix(file, fixes) — re-slice with corrections",
             "troubleshooting": "troubleshoot_print_issue(issue) — design intelligence diagnosis",
             "post_processing": "get_post_processing_guide(material) — finishing techniques",
-            "fleet": "fleet_status() — fleet overview and job routing",
+            "fleet": "fleet_status() — fleet overview and job routing (Business+; for one machine use printer_status(printer_name=...), free)",
             "cost_estimate": "estimate_cost(file) — print cost estimation",
         }
     )
