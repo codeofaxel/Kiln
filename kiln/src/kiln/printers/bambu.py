@@ -1447,6 +1447,10 @@ class BambuAdapter(PrinterAdapter):
                         current_job_label=(
                             str(job_id_for_hook) if job_id_for_hook else None
                         ),
+                        # Rows opened before the identity fix live under the
+                        # family name; when this adapter is unregistered the
+                        # two names coincide and the sweep no-ops.
+                        legacy_printer_name=self.name,
                     )
                 except Exception as exc:  # pragma: no cover
                     logger.debug(

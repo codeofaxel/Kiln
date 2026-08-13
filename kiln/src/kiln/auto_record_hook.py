@@ -410,6 +410,20 @@ def _infer_outcome(
     """
     state = new_state.lower().strip()
     if state in _FAILED_STATES:
+        # A deliberate stop outranks the firmware's error word.  Aborting a
+        # print can ITSELF trip a fault — measured on an A1 (2026-08-13):
+        # a cancel during bed levelling aborts the homing move and the
+        # firmware reports ``failed`` with a real Z-homing code.  Without
+        # this check the ending we know the MOST about (it was asked for)
+        # was recorded as a machine failure, with a failure_mode fabricated
+        # from the code the abort produced — faults that never happened on
+        # their own, filed into the failure statistics.  "Cancelled" also
+        # keeps the row out of success-rate math entirely, so it errs
+        # conservative in both directions; a monitor that diagnosed a REAL
+        # failure before stopping the print still refines the row through
+        # record_print_outcome, the documented path for outranking the hook.
+        if _HOOK_STATE.consume_cancel_intent(printer_name):
+            return ("cancelled", None)
         return ("failed", _failure_mode_from_code(print_error_code))
     if state in _FINISH_STATES:
         return ("success", None)
@@ -617,6 +631,7 @@ def reconcile_pending_outcomes(
     gcode_state: str,
     print_error_code: int = 0,
     current_job_label: str | None = None,
+    legacy_printer_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """Settle pending outcome rows with what a reconnected printer can say.
 
@@ -635,6 +650,16 @@ def reconcile_pending_outcomes(
       success-rate and proven-settings math and surfaced next session
       so the user, who is holding the part, can settle it.
 
+    *legacy_printer_name* sweeps rows stranded under an older name for the
+    same machine.  Pending rows used to be opened under the backend FAMILY
+    (``adapter.name`` — "bambu" for every Bambu) while every resolver now
+    keys on the registered name, so upgraded installs carry rows nothing
+    would ever look up again — 693 of them on the install this was found
+    on.  Legacy rows resolve by the same stem-match testimony as current
+    ones, except that a lone unlabelled row never adopts a terminal state:
+    these rows are old by definition, and a terminal state on reconnect is
+    not testimony about a days-old job unless it still NAMES it.
+
     :returns: The rows that were resolved (possibly empty).
     """
     state = (gcode_state or "").lower().strip()
@@ -648,16 +673,23 @@ def reconcile_pending_outcomes(
         pending = db.list_print_outcomes(
             printer_name=printer_name, outcome="pending", limit=50,
         )
+        legacy: list[dict[str, Any]] = []
+        if legacy_printer_name and legacy_printer_name != printer_name:
+            # Bounded and drained over successive connects, not all at once.
+            legacy = db.list_print_outcomes(
+                printer_name=legacy_printer_name, outcome="pending", limit=200,
+            )
     except Exception as exc:
         _logger.debug("reconcile_pending_outcomes: DB unavailable: %s", exc)
         return []
 
-    if not pending:
+    if not pending and not legacy:
         return []
 
     label_token = _file_stem_token(current_job_label)
     resolved: list[dict[str, Any]] = []
-    for row in pending:
+    rows = [(r, False) for r in pending] + [(r, True) for r in legacy]
+    for row, is_legacy in rows:
         row_token = _file_stem_token(row.get("file_name"))
         # The machine's terminal report is only testimony about the job
         # it names.  A stem match ties them; a lone pending row may
@@ -665,7 +697,9 @@ def reconcile_pending_outcomes(
         # MISmatched label means some other job ran after ours — which
         # tells us nothing about how ours ended.
         matches = bool(label_token) and label_token == row_token
-        lone_unlabelled = not label_token and len(pending) == 1
+        lone_unlabelled = (
+            not is_legacy and not label_token and len(pending) == 1
+        )
 
         outcome: str
         failure_mode: str | None = None

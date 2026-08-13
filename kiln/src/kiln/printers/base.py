@@ -809,8 +809,15 @@ class PrinterAdapter(ABC):
                 # generic key; absent both, the record-time backfill
                 # (job metadata, live AMS on watched endings) covers it.
                 commanded_material = kwargs.get("material_type") or kwargs.get("material")
+                # Under the name every RESOLVER looks it up by.  self.name
+                # is the backend family — identical for every printer of a
+                # brand — while both reconcile doors and save_print_outcome's
+                # pending-row adoption key on outcome_printer_name.  Opened
+                # under the family name, the row could never be found again:
+                # each print left one more forever-pending row and its real
+                # ending was inserted as a second row beside it.
                 open_pending_outcome(
-                    self.name,
+                    outcome_printer_name(self),
                     file_name,
                     material_type=(
                         str(commanded_material) if commanded_material else None
@@ -1754,13 +1761,27 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
         # when there is actually a pending row to settle.
         from kiln.persistence import get_db
 
-        if get_db().list_print_outcomes(
-            printer_name=name, outcome="pending", limit=1,
-        ):
+        # The family name is where rows opened before the identity fix
+        # live; the gate must see them or the sweep never even fires.
+        family = getattr(adapter, "name", "") or ""
+        has_pending = bool(
+            get_db().list_print_outcomes(
+                printer_name=name, outcome="pending", limit=1,
+            )
+        ) or (
+            family != name
+            and bool(
+                get_db().list_print_outcomes(
+                    printer_name=family, outcome="pending", limit=1,
+                )
+            )
+        )
+        if has_pending:
             reconcile_pending_outcomes(
                 printer_name=name,
                 gcode_state=value,
                 current_job_label=_current_job_label(adapter),
+                legacy_printer_name=family or None,
             )
 
     prev = observe_state(name, value)

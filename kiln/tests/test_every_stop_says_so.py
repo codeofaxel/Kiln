@@ -371,3 +371,206 @@ def test_a_broken_database_never_blocks_a_cancel(monkeypatch):
     adapter = _bambu(monkeypatch, registered_as=None)
     hook.note_cancel_requested(adapter)      # must not raise
     assert hook._HOOK_STATE.consume_cancel_intent("bambu") is True  # memory still works
+
+
+# ---------------------------------------------------------------------------
+# The ending we know most about — the one that was asked for
+# ---------------------------------------------------------------------------
+
+
+def test_a_cancel_that_trips_a_fault_is_still_a_cancel(_no_db_writes, monkeypatch):
+    """Aborting a print can ITSELF trip a firmware fault.
+
+    Measured on an A1 (2026-08-13): cancelling during bed levelling aborts
+    the homing move, and the firmware reports ``gcode_state=failed`` with a
+    real Z-homing error code — ``print_error=50348044``.  The failed branch
+    returned before ever consulting the cancel intent, so the one ending we
+    know the MOST about (the user asked for it) was recorded as a machine
+    failure, with a failure_mode fabricated from the code the abort itself
+    produced.  Every such cancel taught the failure statistics about a fault
+    that never happened on its own.
+    """
+    adapter = _bambu(monkeypatch)
+
+    _push(adapter, "RUNNING")
+    hook.note_cancel_requested(adapter)
+    payload = {
+        "print": {
+            "command": "push_status",
+            "gcode_state": "FAILED",
+            "subtask_name": "bracket",
+            "gcode_file": "/sdcard/bracket.3mf",
+            "print_error": 50348044,
+        }
+    }
+    adapter._on_message(
+        None, None, SimpleNamespace(payload=json.dumps(payload).encode())
+    )
+
+    assert _outcomes(_no_db_writes) == ["cancelled"]
+    # And no fabricated failure mode rides along with it.
+    assert _no_db_writes[-1].get("failure_mode") in (None, "")
+
+
+def test_a_spontaneous_fault_still_records_failed(_no_db_writes, monkeypatch):
+    """No intent, same fault — the diagnosis must survive untouched.
+
+    The change above is only allowed to reclassify endings somebody asked
+    for.  A fault with no cancel behind it keeps its code-derived
+    failure_mode, or the fix would cost exactly the signal it protects.
+    """
+    adapter = _bambu(monkeypatch)
+
+    _push(adapter, "RUNNING")
+    payload = {
+        "print": {
+            "command": "push_status",
+            "gcode_state": "FAILED",
+            "subtask_name": "bracket",
+            "gcode_file": "/sdcard/bracket.3mf",
+            "print_error": 50348044,
+        }
+    }
+    adapter._on_message(
+        None, None, SimpleNamespace(payload=json.dumps(payload).encode())
+    )
+
+    assert _outcomes(_no_db_writes) == ["failed"]
+    assert _no_db_writes[-1].get("failure_mode")
+
+
+# ---------------------------------------------------------------------------
+# Pending rows: opened under the name their resolvers will look up
+# ---------------------------------------------------------------------------
+
+
+def test_pending_rows_open_under_the_registered_name():
+    """The identity fix moved every RESOLVER to the registered name.
+
+    Both reconcile doors and save_print_outcome's pending-row adoption key
+    on outcome_printer_name — but the row was still OPENED under self.name,
+    the backend family.  Opened under a name no resolver looks up, every
+    print left one more forever-pending row, and its real ending was
+    inserted as a second row beside it.  Pinned by source because what
+    regressed is which name a call site passes.
+    """
+    import inspect
+
+    from kiln.printers.base import PrinterAdapter
+
+    source = inspect.getsource(PrinterAdapter.start_print)
+    assert "open_pending_outcome(\n                    outcome_printer_name(self)" in source, (
+        "start_print opens pending rows under a name the resolvers will "
+        "never look up"
+    )
+
+
+def test_reconcile_sweeps_rows_stranded_under_the_family_name(
+    _no_db_writes, monkeypatch
+):
+    """Rows opened before the identity fix are keyed by the family name.
+
+    A resolver that only queries the registered name leaves them pending
+    FOREVER — 693 of them on the install this was found on.  On the first
+    status after connect, the sweep settles them with exactly the honesty
+    the reconciler already promises: a row today's testimony cannot reach
+    resolves to unknown, never success.
+    """
+    from kiln.persistence import get_db
+
+    db = get_db()
+    db.open_pending_outcome(
+        job_id="start:bambu:1691000000000",
+        printer_name="bambu",              # the family name, as before the fix
+        file_name="old-part.gcode",
+    )
+
+    adapter = _bambu(monkeypatch)           # registered as "garage"
+    _push(adapter, "IDLE", job="bracket")   # first status after connect
+
+    assert db.list_print_outcomes(printer_name="bambu", outcome="pending") == []
+    # Settled to unknown — testimony from today cannot reach a days-old job —
+    # and never laundered into a success.  include_all, because the default
+    # listing hides unresolved rows.
+    rows = db.list_print_outcomes(printer_name="bambu", limit=5, include_all=True)
+    assert [r.get("outcome") for r in rows] == ["unknown"]
+
+
+def test_the_polled_door_sweeps_the_family_name_too(_no_db_writes, monkeypatch):
+    """The other door to the same reconciler, with its own cheap gate.
+
+    The gate only calls reconcile when a pending row exists — and it asked
+    under the registered name alone, so a backlog stranded under the family
+    name never even triggered the sweep on polled backends.
+    """
+    from kiln.persistence import get_db
+    from kiln.printers.base import (
+        JobProgress,
+        PrinterAdapter,
+        PrinterCapabilities,
+        PrinterState,
+        PrinterStatus,
+        PrintResult,
+        UploadResult,
+    )
+
+    class _Idle(PrinterAdapter):
+        @property
+        def name(self) -> str:
+            return "moonraker"
+
+        @property
+        def capabilities(self) -> PrinterCapabilities:
+            return PrinterCapabilities()
+
+        def get_state(self) -> PrinterState:
+            return PrinterState(connected=True, state=PrinterStatus.IDLE)
+
+        def get_job(self) -> JobProgress:
+            return JobProgress(file_name=None)
+
+        def _start_print_impl(self, file_name, **kw):
+            return PrintResult(success=True, message="ok")
+
+        def list_files(self):
+            return []
+
+        def upload_file(self, file_path):
+            return UploadResult(success=True, message="ok")
+
+        def delete_file(self, file_name):
+            return True
+
+        def cancel_print(self):
+            return PrintResult(success=True, message="ok")
+
+        def pause_print(self):
+            return PrintResult(success=True, message="ok")
+
+        def _resume_print_impl(self):
+            return PrintResult(success=True, message="ok")
+
+        def emergency_stop(self):
+            return PrintResult(success=True, message="ok")
+
+        def send_gcode(self, command):
+            return "ok"
+
+        def set_tool_temp(self, celsius, tool=0):
+            return True
+
+        def set_bed_temp(self, celsius):
+            return True
+
+    db = get_db()
+    db.open_pending_outcome(
+        job_id="start:moonraker:1691000000001",
+        printer_name="moonraker",
+        file_name="old-benchy.gcode",
+    )
+
+    adapter = _Idle()
+    PrinterRegistry().register("shop", adapter)
+    adapter.get_state()                      # first poll after connect
+
+    assert db.list_print_outcomes(printer_name="moonraker", outcome="pending") == []
