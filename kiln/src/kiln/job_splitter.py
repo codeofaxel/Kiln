@@ -280,13 +280,19 @@ def plan_assembly_split(
 # ---------------------------------------------------------------------------
 
 
-def submit_split_plan(plan: SplitPlan) -> str:
+def submit_split_plan(plan: SplitPlan, idempotency_key: str | None = None) -> str:
     """Submit all parts of a split plan to the job queue.
 
     Each part is submitted as a separate job with metadata linking it
     back to the plan.
 
     :param plan: The :class:`SplitPlan` to submit.
+    :param idempotency_key: Optional opaque key naming this whole
+        submission.  Each part's queue job is keyed
+        ``{idempotency_key}:part:{part_id}``, so a retry of the same
+        plan submission after a lost response re-adopts the parts it
+        already queued instead of queuing every part twice.  Without a
+        key, behaviour is unchanged (a fresh plan every call).
     :returns: A plan_id string for tracking.
     """
     from kiln.persistence import get_db
@@ -313,17 +319,26 @@ def submit_split_plan(plan: SplitPlan) -> str:
     except Exception:
         logger.exception("Failed to save split plan (non-fatal)")
 
-    # Submit each part to the job queue
+    # Submit each part to the job queue.  The queue accessor lives on
+    # the server module, not kiln.queue — the old
+    # `from kiln.queue import get_queue` raised ImportError on every
+    # part and the blanket except below silently marked them all failed.
+    import kiln.server as _srv
+
+    queue = _srv._get_queue()
+
     for part in plan.parts:
         try:
-            from kiln.queue import get_queue
-
-            queue = get_queue()
             job_id = queue.submit(
                 file_name=part.file_path,
                 printer_name=part.printer_name,
                 submitted_by="split-plan",
                 metadata={"split_plan_id": plan_id, "part_id": part.part_id},
+                idempotency_key=(
+                    f"{idempotency_key}:part:{part.part_id}"
+                    if idempotency_key
+                    else None
+                ),
             )
             part.job_id = job_id
             part.status = "pending"

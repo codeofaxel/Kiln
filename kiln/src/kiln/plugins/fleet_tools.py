@@ -219,35 +219,110 @@ class _FleetToolsPlugin:
         def route_print_job(
             file_path: str,
             *,
-            material: str | None = None,
+            material: str,
             quality: str | None = None,
             priority: str | None = None,
         ) -> dict:
             """Route a print job to the best available printer in the fleet.
 
-            Scores each printer based on material match, build volume, availability,
-            and quality/speed preference, then recommends the optimal assignment.
+            Scores each registered printer on material match, availability,
+            queue depth, and historical success rate, then recommends the
+            best assignment with scored alternatives.
 
             Args:
                 file_path: Path to the file to print.
                 material: Required filament material (e.g. "PLA", "PETG").
                 quality: Quality preference — "draft", "standard", or "fine".
-                priority: Job priority — "low", "normal", or "high".
+                priority: Job urgency — "low", "normal", or "high".
             """
             if err := _srv._check_auth("print"):
                 return err
 
-            try:
-                from kiln.job_router import get_job_router
-
-                router = get_job_router()
-                result = router.route_job(
-                    file_path=file_path,
-                    material=material,
-                    quality=quality,
-                    priority=priority,
+            if not material or not material.strip():
+                return _srv._error_dict(
+                    "material is required — routing scores printers on what "
+                    "they can run, so it cannot recommend one without knowing "
+                    "the material.",
+                    code="INVALID_INPUT",
                 )
+
+            # Public Kiln's own module — a failure here is a real bug and
+            # must not be reported as "kiln-pro is missing".
+            from kiln.routing_candidates import collect_routing_candidates
+
+            # kiln.job_router is provided by kiln-pro.  Imported outside
+            # the main try so its absence gets a clear answer rather than
+            # a laundered ImportError, and so the handler names below
+            # still resolve.
+            try:
+                from kiln.job_router import (
+                    RoutingCriteria,
+                    RoutingValidationError,
+                    get_job_router,
+                )
+            except ImportError:
+                return _srv._error_dict(
+                    "Fleet routing requires kiln-pro, which is not installed "
+                    "on this server.",
+                    code="ROUTING_UNAVAILABLE",
+                )
+
+            try:
+                import os
+
+                from kiln.queue import JobStatus
+
+                registry = _srv._get_registry()
+                names = registry.list_names()
+                if not names:
+                    return _srv._error_dict(
+                        "No printers registered. Register printers before "
+                        "routing jobs across a fleet.",
+                        code="NO_PRINTERS",
+                    )
+
+                # Per-printer pending counts feed the router's wait
+                # estimates; the same numbers queue_summary reports.
+                pending: dict[str, int] = {}
+                for job in _srv._get_queue().list_jobs(status=JobStatus.QUEUED):
+                    if job.printer_name:
+                        pending[job.printer_name] = pending.get(job.printer_name, 0) + 1
+
+                # Same candidate builder the CLI's routing path uses —
+                # one engine, two doors — fed from the live registry
+                # instead of on-disk printer configs.
+                adapters = {name: registry.get(name) for name in names}
+                candidates = collect_routing_candidates(
+                    adapters=adapters,
+                    material=material,
+                    pending_counts=pending,
+                    file_extension=os.path.splitext(file_path)[1],
+                )
+                if not candidates:
+                    return _srv._error_dict(
+                        "No registered printer can accept this file type.",
+                        code="NO_ELIGIBLE_PRINTERS",
+                    )
+
+                # quality picks how much the score favours reliability;
+                # priority picks how much it favours getting started fast.
+                # Both map onto the router's 1-5 weight knobs, defaulting
+                # to its neutral 3.
+                criteria = RoutingCriteria(
+                    material=material.strip(),
+                    quality_priority={"draft": 1, "standard": 3, "fine": 5}.get(
+                        (quality or "standard").lower(), 3
+                    ),
+                    speed_priority={"low": 1, "normal": 3, "high": 5}.get(
+                        (priority or "normal").lower(), 3
+                    ),
+                )
+                result = get_job_router().route_job(criteria, candidates)
                 return {"success": True, "routing": result.to_dict()}
+            except RoutingValidationError as exc:
+                # A recommendation the engine cannot back with scores is
+                # not downgraded to a guess — the refusal carries why.
+                return _srv._error_dict(str(exc), code="ROUTING_ERROR")
             except Exception as exc:
                 _logger.exception("Error in route_print_job")
                 return _srv._error_dict(f"Failed to route print job: {exc}", code="ROUTING_ERROR")
@@ -264,6 +339,7 @@ class _FleetToolsPlugin:
             printer_name: str | None = None,
             material: str | None = None,
             priority: str | None = None,
+            idempotency_key: str | None = None,
         ) -> dict:
             """Submit a print job to the fleet orchestrator.
 
@@ -275,21 +351,73 @@ class _FleetToolsPlugin:
                 printer_name: Specific printer to assign to (auto-routes if None).
                 material: Required filament material.
                 priority: Job priority (low, normal, high).
+                idempotency_key: Optional opaque key (e.g. a UUID you
+                    generate) naming this one submission.  If the call
+                    fails in a way where you cannot tell whether the job
+                    was queued, retry with the SAME key to get the
+                    original job back (``submission: "replayed"``)
+                    instead of queuing a duplicate print.  Use a new key
+                    for each job you genuinely want printed.
             """
             if err := _srv._check_auth("print"):
                 return err
+
+            # Import outside the try: this is public Kiln's own module,
+            # and the handler below must be resolvable even when the
+            # kiln-pro import inside the try fails.
+            from kiln.queue import IdempotencyConflict
 
             try:
                 from kiln.fleet_orchestrator import get_fleet_orchestrator
 
                 orch = get_fleet_orchestrator()
-                job = orch.submit_job(
-                    file_path=file_path,
-                    printer_name=printer_name,
-                    material=material,
-                    priority=priority,
+                # The orchestrator schedules on an integer priority
+                # (higher = more urgent); this tool speaks the
+                # low/normal/high vocabulary the apps present.
+                priority_rank = {"low": -1, "normal": 0, "high": 1}.get(
+                    (priority or "normal").lower(), 0
                 )
-                return {"success": True, "job": job.to_dict()}
+                job, replayed = orch.submit_job_result(
+                    file_path,
+                    submitted_by="mcp-agent",
+                    priority=priority_rank,
+                    preferred_printer=printer_name,
+                    metadata={"material": material} if material else None,
+                    idempotency_key=idempotency_key,
+                )
+                return {
+                    "success": True,
+                    "job": job.to_dict(),
+                    "submission": "replayed" if replayed else "queued",
+                    **(
+                        {
+                            "message": (
+                                f"Job {job.job_id} was already submitted with "
+                                "this idempotency key. No duplicate was queued."
+                            )
+                        }
+                        if replayed
+                        else {}
+                    ),
+                }
+            except AttributeError:
+                # An older kiln-pro build predates submit_job_result.
+                # Refuse honestly rather than guessing at its contract.
+                _logger.exception("fleet orchestrator is older than this Kiln release")
+                return _srv._error_dict(
+                    "The installed kiln-pro is older than this Kiln release "
+                    "and cannot accept fleet submissions from it. Upgrade "
+                    "kiln-pro to matching versions.",
+                    code="FLEET_VERSION_MISMATCH",
+                )
+            except IdempotencyConflict as exc:
+                return _srv._error_dict(
+                    f"Idempotency key already used by job {exc.existing_job_id!r} "
+                    "with different parameters (file, printer, or priority). "
+                    "Retries must repeat the original submission exactly; a new "
+                    "job needs a new key.",
+                    code="IDEMPOTENCY_CONFLICT",
+                )
             except Exception as exc:
                 _logger.exception("Error in fleet_submit_job")
                 return _srv._error_dict(f"Failed to submit fleet job: {exc}", code="FLEET_ERROR")

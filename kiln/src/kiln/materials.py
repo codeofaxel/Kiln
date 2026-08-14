@@ -436,3 +436,46 @@ class MaterialTracker:
         if row is None:
             return None
         return Spool(**{k: row[k] for k in Spool.__dataclass_fields__ if k in row})
+
+
+# ---------------------------------------------------------------------------
+# Canonical material names
+#
+# Lives here rather than in the CLI because more than one door asks the
+# same question — the CLI's slicing defaults and fleet routing both need
+# to turn whatever a user typed into a name the rest of Kiln recognises.
+# ---------------------------------------------------------------------------
+
+#: Canonical material -> (nozzle_c, first_layer_nozzle_c, bed_c, first_layer_bed_c).
+#: These names are the vocabulary :func:`normalise_material_type` maps onto.
+MATERIAL_TEMPS: dict[str, tuple[int, int, int, int]] = {
+    "PLA": (200, 210, 60, 60),
+    "PETG": (240, 245, 80, 80),
+    "ABS": (250, 255, 100, 100),
+    "TPU": (225, 230, 50, 50),
+    "ASA": (250, 255, 100, 100),
+    "NYLON": (260, 265, 70, 70),
+    "PC": (280, 285, 110, 110),
+}
+
+#: Spellings users and vendors use for a name already in MATERIAL_TEMPS.
+_MATERIAL_ALIASES: dict[str, str] = {
+    "PA": "NYLON",
+    "PA6": "NYLON",
+    "PA12": "NYLON",
+}
+
+
+def normalise_material_type(raw: str | None) -> str | None:
+    """Return the canonical name for *raw*, or ``None`` if unrecognised.
+
+    ``None`` means "not a material Kiln has defaults for" — callers treat
+    that as unknown rather than substituting a guess.
+    """
+    if not raw:
+        return None
+    value = raw.strip().upper()
+    value = _MATERIAL_ALIASES.get(value, value)
+    if value in MATERIAL_TEMPS:
+        return value
+    return None

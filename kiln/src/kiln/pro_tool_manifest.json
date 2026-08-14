@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-11T16:59:13.665719+00:00",
+  "generated": "2026-08-13T22:24:21.086423+00:00",
   "tool_count": 414,
   "categories": {
     "product_generators": {
@@ -1595,9 +1595,9 @@
     },
     {
       "name": "export_step",
-      "description": "Export a design as a STEP file \u2014 real analytic B-rep, always.\n\nFree tier: 3 STEP exports/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Export a design as a STEP file \u2014 real analytic B-rep, always.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "cad_exchange",
       "parameters": {
         "properties": {
@@ -1616,12 +1616,6 @@
         ],
         "title": "export_stepArguments",
         "type": "object"
-      },
-      "quota": {
-        "bucket": "export",
-        "limit": 3,
-        "noun": "STEP exports",
-        "period": "month"
       }
     },
     {
