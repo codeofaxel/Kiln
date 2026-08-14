@@ -841,6 +841,7 @@ class BambuAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
+            can_clear_error=True,
             cancel_during_calibration_faults=True,
             # Port 6000 TLS+JPEG works on A1 / A1 Mini / P1P / P1S
             # without ffmpeg.  get_snapshot() tries port 6000 first
@@ -3090,51 +3091,50 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def clear_error(self) -> PrintResult:
-        """Bambu keeps no acknowledgement Kiln can send.  Say so, and say why.
+        """Acknowledge a latched ``print_error`` so the next print can start.
 
-        Overrides the base refusal only to be SPECIFIC, because the generic
-        advice — "clear it on the printer's screen" — is wrong here, and a
-        user who follows it is left believing the machine is fixed when Kiln
-        still will not print.
+        Bambu firmware holds ``gcode_state`` at ``failed`` with a non-zero
+        ``print_error`` after a job ends badly, and keeps reporting it until
+        something acknowledges it.  Dismissing the message on the printer's
+        own touchscreen clears the NOTIFICATION, not the reported state —
+        measured on an A1 (2026-08-13), where the screen read "ready" while
+        the push payload still carried ``print_error=50348032`` and every
+        pre-flight check refused.
 
-        Measured on an A1 (2026-08-13), against a real latched fault
-        (``print_error=50348044``, "Z axis homing failed" from a print
-        cancelled during bed levelling):
+        The payload mirrors BambuStudio's own ``command_clean_print_error``,
+        field for field and type for type: a string ``sequence_id``, the
+        string ``subtask_id`` of the job being acknowledged, and the INTEGER
+        ``print_error`` naming which error is being cleared.  That last field
+        is the one that matters and the one an earlier attempt here omitted —
+        acknowledging an error without saying which error changed nothing at
+        all, which is what the printer did with it.
 
-        * ``clean_print_error``, the print-command one implementation
-          documents for this, was accepted and changed nothing over 15s;
-        * ``G28`` was accepted and the printer physically homed — and the
-          fault stayed latched, so executing the very move that failed does
-          not retire it;
-        * dismissing the message on the touchscreen cleared the NOTIFICATION
-          while the push payload kept reporting the error, so the screen read
-          "ready" against a printer Kiln still refused to use;
-        * a power cycle cleared it, every time.
-
-        Throughout, ``gcode_state`` was never re-pushed — the age of the last
-        one climbed past 800s while temperatures kept arriving — so the
-        firmware is not merely ignoring the commands, it is not revisiting the
-        state at all.
-
-        ``can_clear_error`` stays False so nothing offers the user a button
-        for this.  If a working acknowledgement is found, this method and that
-        flag are the two places to change.
-
-        Kiln now reaches this state far less often: cancelling inside the
-        calibration window pauses first (see
-        :attr:`PrinterCapabilities.cancel_during_calibration_faults`), which
-        makes the same fault transient rather than latched.  This remains the
-        honest answer for the faults that arrive anyway — a real thermal or
-        motion failure is not something a pause was ever going to soften.
+        This reports only that the acknowledgement was SENT.  Firmware takes
+        a moment, so the caller re-reads state to learn whether it took.
         """
+        with self._state_lock:
+            subtask_id = str(self._last_status.get("subtask_id") or "0")
+            try:
+                print_error = int(self._last_status.get("print_error") or 0)
+            except (TypeError, ValueError):
+                print_error = 0
+
+        self._publish_command(
+            {
+                "print": {
+                    "sequence_id": self._next_seq(),
+                    "command": "clean_print_error",
+                    "subtask_id": subtask_id,
+                    "print_error": print_error,
+                }
+            }
+        )
         return PrintResult(
-            success=False,
+            success=True,
             message=(
-                "This printer's firmware holds the error until it is power-"
-                "cycled — turn it off and on again. Dismissing the message on "
-                "its screen clears the notification but not the state it "
-                "reports, so the screen will read ready while prints keep "
-                "being refused."
+                "Sent the error acknowledgement. Re-read printer_status to "
+                "confirm the printer has left its error state; if it has not, "
+                "this firmware needs a power cycle."
             ),
         )
 
