@@ -244,6 +244,7 @@ def record_print_outcome(
     auto_classify: bool = False,
     auto_recorded: bool = False,
     determined_by: str | None = None,
+    print_error: int | None = None,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -314,9 +315,21 @@ def record_print_outcome(
             Recording an outcome for a print that started while Kiln
             wasn't watching RESOLVES its pending row in place rather
             than duplicating it.
+        print_error: Optional raw firmware error code the print tripped
+            (Bambu HMS, e.g. ``50348044``).  Stored as EVIDENCE and kept
+            deliberately separate from ``failure_mode``, which is a
+            VERDICT: a print the user CANCELLED carries whatever code the
+            abort tripped and no failure_mode at all, because a deliberate
+            stop is not a machine failure but the firmware's complaint
+            still happened and is worth keeping.  A single machine cannot
+            characterise a fault from codes like these — what predicts one
+            sticking is a question for many printers — so the code is
+            captured now against the day there are enough of them to ask.
+            ``0`` and unset both store NULL; a backend with no such code
+            simply omits it.
     """
     import kiln.server as _srv
-    from kiln.persistence import get_db
+    from kiln.persistence import get_db, normalize_print_error
 
     if err := _srv._check_auth("learning"):
         return err
@@ -339,6 +352,23 @@ def record_print_outcome(
         )
     if determined_by is None:
         determined_by = "observed" if auto_recorded else "user_reported"
+
+    # A code that cannot be grouped is not evidence of anything, and this
+    # column's whole purpose is to be grouped.  Rejected here rather than
+    # blanked, because a caller that meant to file a code deserves to hear
+    # that it did not land; the storage layer still blanks junk on its own,
+    # since the auto-record hook must never raise into a print's ending.
+    if print_error is not None:
+        try:
+            if isinstance(print_error, bool):
+                raise TypeError(print_error)
+            print_error = int(print_error)
+        except (TypeError, ValueError):
+            return _srv._error_dict(
+                f"Invalid print_error {print_error!r} — expected a firmware "
+                "error code as an integer.",
+                code="VALIDATION_ERROR",
+            )
 
     # --- Auto-classification (opt-in) ---
     # Runs only for failed outcomes with no explicit failure_mode, and
@@ -434,6 +464,10 @@ def record_print_outcome(
                 "notes": notes,
                 "agent_id": "auto" if auto_recorded else "mcp",
                 "determined_by": determined_by,
+                # Rides along whatever the outcome word turned out to be —
+                # a cancel that tripped a fault keeps the code even though
+                # it gets no failure_mode.
+                "print_error": print_error,
                 "created_at": time.time(),
             }
         )
@@ -629,6 +663,11 @@ def record_print_outcome(
         }
         if failure_mode is not None:
             result["failure_mode"] = failure_mode
+        # Echoed through the same rule that stored it, so a caller reading
+        # the reply sees exactly what the row now holds — 0 lands as absent,
+        # because the row records no code either.
+        if (_stored_error := normalize_print_error(print_error)) is not None:
+            result["print_error"] = _stored_error
         # Echo the material only when one is actually known — its ABSENCE is
         # the signal that per-material learning will skip this row, and a
         # caller that expected material data should see that, not a filler.
