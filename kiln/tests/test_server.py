@@ -211,10 +211,16 @@ class TestPrinterStatus:
 
     @patch("kiln.server._get_adapter")
     def test_printer_error(self, mock_get_adapter):
+        # An unreachable printer is a STATE the caller can render, not a tool
+        # failure: structured offline, with the adapter's words preserved.
+        # (Auth refusals and missing config remain typed errors — pinned in
+        # test_lite_status_contract.py.)
         mock_get_adapter.side_effect = PrinterError("connection lost")
         result = printer_status()
-        assert result["success"] is False
-        assert "connection lost" in result["error"]["message"]
+        assert result["success"] is True
+        assert result["printer"]["connected"] is False
+        assert result["printer"]["state"] == "offline"
+        assert "connection lost" in result["offline_reason"]
 
     @patch("kiln.server._get_adapter")
     def test_runtime_error(self, mock_get_adapter):
