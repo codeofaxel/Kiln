@@ -87,6 +87,9 @@ class _FakePrinter:
         self._state = state
         self.uploaded: list[str] = []
         self.started: list[str] = []
+        self.tool_temps: list[float] = []
+        self.bed_temps: list[float] = []
+        self.gcode: list[str] = []
 
     @property
     def capabilities(self) -> PrinterCapabilities:
@@ -114,11 +117,16 @@ class _FakePrinter:
         self._state = PrinterStatus.PRINTING
         return PrintResult(success=True, message="started")
 
-    def set_tool_temp(self, value: float) -> None:
-        pass
+    def set_tool_temp(self, value: float) -> bool:
+        self.tool_temps.append(value)
+        return True
 
-    def set_bed_temp(self, value: float) -> None:
-        pass
+    def set_bed_temp(self, value: float) -> bool:
+        self.bed_temps.append(value)
+        return True
+
+    def send_gcode(self, commands) -> None:
+        self.gcode.extend(commands)
 
 
 def _two_printers(monkeypatch, **kwargs) -> tuple[_FakePrinter, _FakePrinter]:
@@ -156,7 +164,9 @@ def _start(*, skip_preflight=True, **kwargs) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("verb", ["upload_file", "start_print", "preflight_check"])
+@pytest.mark.parametrize(
+    "verb", ["upload_file", "start_print", "preflight_check", "set_temperature"],
+)
 def test_every_start_side_verb_can_name_a_printer(verb):
     """The signature IS the capability — this is what was missing.
 
@@ -488,6 +498,107 @@ def test_an_unaimed_confirmed_upload_still_lands_on_the_default(monkeypatch, gco
 
     assert out.get("success") is True
     assert (garage.uploaded, workshop.uploaded) == ([gcode], [])
+
+
+# ---------------------------------------------------------------------------
+# Heat is aimed too: preheating is the step before a start
+# ---------------------------------------------------------------------------
+
+
+def test_heat_reaches_the_printer_it_names(monkeypatch):
+    """Preheating the second machine used to heat the default one."""
+    garage, workshop = _two_printers(monkeypatch)
+
+    out = server.set_temperature(tool_temp=200.0, bed_temp=60.0, printer_name="workshop")
+
+    assert out["success"] is True
+    assert out["printer_name"] == "workshop"
+    assert (workshop.tool_temps, workshop.bed_temps) == ([200.0], [60.0])
+    assert (garage.tool_temps, garage.bed_temps) == ([], [])
+
+
+def test_unaimed_heat_still_means_the_default(monkeypatch):
+    garage, workshop = _two_printers(monkeypatch)
+
+    out = server.set_temperature(tool_temp=200.0)
+
+    assert out["printer_name"] == "garage"
+    assert (garage.tool_temps, workshop.tool_temps) == ([200.0], [])
+
+
+def test_heating_a_name_kiln_does_not_know_heats_nothing(monkeypatch):
+    garage, workshop = _two_printers(monkeypatch)
+
+    out = server.set_temperature(tool_temp=200.0, printer_name="workshopp")
+
+    assert out["success"] is False
+    assert out["error"]["code"] == "PRINTER_NOT_FOUND"
+    assert (garage.tool_temps, workshop.tool_temps) == ([], [])
+
+
+def test_the_ceiling_belongs_to_the_machine_being_heated(monkeypatch):
+    """A machine with no declared model is held to the unknown-printer
+    ceiling, not to the default printer's — which may be the looser of the
+    two, and lending it out is how an unidentified hotend gets overdriven."""
+    garage, workshop = _two_printers(monkeypatch)
+    seen: list[str | None] = []
+    real_limits = server._get_temp_limits
+
+    def _spy(printer_name=None):
+        seen.append(printer_name)
+        return real_limits(printer_name)
+
+    monkeypatch.setattr(server, "_get_temp_limits", _spy)
+
+    server.set_temperature(tool_temp=200.0, printer_name="workshop")
+
+    assert seen == ["workshop"]
+
+
+def test_a_latched_machine_can_still_be_cooled_but_not_heated(monkeypatch):
+    """The heater-off carve-out survives aiming.
+
+    A latched printer must never be told to heat, and must always be
+    allowed to cool — that is the whole point of the latch.
+    """
+    garage, workshop = _two_printers(monkeypatch)
+    monkeypatch.setattr(
+        server,
+        "_emergency_latch_error",
+        lambda tool, name: (
+            {"success": False, "error": {"code": "EMERGENCY_LATCHED", "message": name}}
+            if name == "workshop"
+            else None
+        ),
+    )
+
+    heated = server.set_temperature(tool_temp=200.0, printer_name="workshop")
+    assert heated["success"] is False
+    assert heated["error"]["code"] == "EMERGENCY_LATCHED"
+    assert workshop.tool_temps == []
+
+    cooled = server.set_temperature(tool_temp=0.0, printer_name="workshop")
+    assert cooled["success"] is True
+    assert workshop.tool_temps == [0.0]
+
+
+def test_the_heater_watchdog_is_not_told_about_a_siblings_heaters(monkeypatch):
+    """It watches the default printer; a sibling's heaters are not its news."""
+    garage, workshop = _two_printers(monkeypatch)
+    notified: list[str] = []
+
+    class _Watchdog:
+        @staticmethod
+        def notify_heater_set() -> None:
+            notified.append("set")
+
+    monkeypatch.setattr(server, "_get_heater_watchdog", lambda: _Watchdog)
+
+    server.set_temperature(tool_temp=200.0, printer_name="workshop")
+    assert notified == []
+
+    server.set_temperature(tool_temp=200.0)
+    assert notified == ["set"]
 
 
 def test_a_token_issued_before_aiming_still_confirms(monkeypatch, gcode):

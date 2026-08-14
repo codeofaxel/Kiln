@@ -6291,6 +6291,7 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
 def set_temperature(
     tool_temp: float | None = None,
     bed_temp: float | None = None,
+    printer_name: str | None = None,
 ) -> dict:
     """Set the target temperature for the hotend (tool) and/or heated bed.
 
@@ -6299,6 +6300,13 @@ def set_temperature(
             the heater off.  Omit or pass ``null`` to leave unchanged.
         bed_temp: Target bed temperature in Celsius.  Pass ``0`` to turn
             the heater off.  Omit or pass ``null`` to leave unchanged.
+        printer_name: Which printer to heat.  Omit for the default printer,
+            which is what this did before it could be aimed — so asking to
+            preheat a second machine heated the default one instead.  The
+            safety ceiling follows the named machine: a printer with no
+            declared model is held to the unknown-printer limit rather than
+            to the default printer's, which may be the more permissive of
+            the two.
 
     At least one of ``tool_temp`` or ``bed_temp`` must be provided.
 
@@ -6310,22 +6318,41 @@ def set_temperature(
         return err
     if err := _check_rate_limit("set_temperature"):
         return err
-    if conf := _check_confirmation("set_temperature", {"tool_temp": tool_temp, "bed_temp": bed_temp}):
+    # Complete args — confirm_action replays the tool with exactly what is
+    # stored here, so a replay missing the name would heat the default
+    # machine after the user approved a different one.
+    if conf := _check_confirmation(
+        "set_temperature",
+        {
+            "tool_temp": tool_temp,
+            "bed_temp": bed_temp,
+            "printer_name": printer_name,
+        },
+    ):
         return conf
     if tool_temp is None and bed_temp is None:
         return _error_dict(
             "At least one of tool_temp or bed_temp must be provided.",
             code="INVALID_ARGS",
         )
-    if block := _emergency_latch_error("set_temperature", _resolve_effective_printer_name()):
-        tool_heating = tool_temp is not None and tool_temp > 0
-        bed_heating = bed_temp is not None and bed_temp > 0
-        # Allow heater-off/cooldown commands while latched.
-        if tool_heating or bed_heating:
-            return block
+    # Turning heat OFF is allowed on a latched machine; turning it ON is not.
+    _is_heating = (tool_temp is not None and tool_temp > 0) or (
+        bed_temp is not None and bed_temp > 0
+    )
+    # The caller's-alias half of the latch check, asked before anything is
+    # built; the lifecycle name is checked again once the adapter resolves.
+    if _is_heating and (
+        block := _emergency_latch_error(
+            "set_temperature", _resolve_effective_printer_name(printer_name)
+        )
+    ):
+        return block
 
     # -- Temperature safety validation (per-printer when configured) ------
-    _MAX_TOOL, _MAX_BED = _get_temp_limits()
+    # The ceiling of the machine being heated.  Resolved without an adapter
+    # and before one is built, so an over-limit request is refused on its
+    # own terms whether or not the printer answers.
+    _MAX_TOOL, _MAX_BED = _get_temp_limits(printer_name)
     if tool_temp is not None:
         if tool_temp < 0:
             return _error_dict(
@@ -6350,8 +6377,18 @@ def set_temperature(
             )
 
     try:
-        adapter = _get_adapter()
-        results: dict[str, Any] = {"success": True}
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "set the temperature on")
+        # The lifecycle-name half of the latch check: one machine can answer
+        # to two names, and a latch under either of them is about this
+        # machine's heaters.  Cooldowns stay allowed, as above.
+        if _is_heating and (
+            block := _emergency_latch_error("set_temperature", target_name)
+        ):
+            return block
+        results: dict[str, Any] = {"success": True, "printer_name": target_name}
 
         # -- Relative temperature change advisory (non-blocking) ----------
         _DELTA_WARN_TOOL = 10.0
@@ -6415,8 +6452,11 @@ def set_temperature(
         if rate_warnings:
             results["warnings"] = rate_warnings
 
-        # Notify heater watchdog when heaters are turned on.
-        if (tool_temp is not None and tool_temp > 0) or (bed_temp is not None and bed_temp > 0):
+        # Notify heater watchdog when heaters are turned on.  It is one
+        # process-wide instance around the default adapter, so a sibling's
+        # heaters are not its news: told about them it would start timing
+        # the wrong machine's idle heat.
+        if _is_heating and _is_heater_watchdog_machine(adapter):
             _get_heater_watchdog().notify_heater_set()
 
         _audit(
@@ -6425,6 +6465,7 @@ def set_temperature(
             details={
                 "tool_temp": tool_temp,
                 "bed_temp": bed_temp,
+                "printer": target_name,
             },
         )
         return results
