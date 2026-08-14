@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-14
+
 ### Added
 
 - **Point a print at the printer you mean (Business+).** Starting a print,
