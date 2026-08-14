@@ -1664,15 +1664,22 @@ def in_calibration_window(state: Any, job: Any) -> bool:
 def _pause_before_calibration_cancel(adapter: Any) -> bool:
     """Pause, briefly, when cancelling would abort a calibration move.
 
-    Measured on an A1 (2026-08-13).  Cancelling during bed levelling kills a
-    homing move and the firmware latches "Z axis homing failed": that state
-    outlived thirteen minutes, a ``clean_print_error``, and a ``G28`` that
-    physically homed the machine, and only a power cycle released it.  The
-    same cancel with a pause in front of it produces the same fault code and
-    it CLEARS ITSELF in about fifteen seconds, landing on ``cancelled``.
+    Measured on an A1 (2026-08-13), across four cancels inside this window.
+    Every one of them produced the same fault — "Z axis homing failed", from
+    the abort killing a homing move.  What VARIED was whether it stuck: twice
+    it latched, outliving thirteen minutes, a ``clean_print_error`` and a
+    ``G28`` that physically homed the machine, until a power cycle released
+    it; twice it cleared itself inside about a minute and landed on
+    ``cancelled``.  One of the two that cleared had been paused first and one
+    had not, so the pause is NOT what separates them and nothing measured so
+    far is.
 
-    The pause does not prevent the fault.  It makes it survivable, which is
-    the whole distance between carrying on and walking over to the printer.
+    So this is a hedge, not a cure, and it is documented as one.  What the
+    window reliably predicts is the fault; what nothing yet predicts is
+    whether that fault strands the printer.  A pause costs about a second in
+    a window where nothing is being extruded, against an outcome that
+    sometimes costs a power cycle and a walk to the machine — worth doing on
+    those odds, and worth re-testing rather than trusted.
 
     Only for backends that DECLARE the hazard, and only inside the window —
     everywhere else this returns immediately, having asked the adapter
