@@ -17,14 +17,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   It names the file and covers that one print. Elsewhere the previous approval
   step is unchanged.
 
-- **Stop the printer you mean, by name.** Cancel, pause and resume now take a
-  printer name, so an assistant minding two machines can stop the right one —
-  before this, those commands only ever reached your default printer, and the
-  only way to stop a second machine remotely was the hard emergency stop.
-  Naming no printer still means your default, so nothing changes if you have
-  one machine. Each machine keeps its own books too: a paused printer holds
-  its own temperatures, and a cancelled print is remembered as cancelled on
-  the machine it actually happened on.
+- **Stop the printer you mean, by name (Business+).** Cancel, pause and resume
+  now take a printer name, so an assistant minding two machines can stop the
+  right one — before this, those commands only ever reached your default
+  printer, and the only way to stop a second machine remotely was the hard
+  emergency stop. Naming no printer still means your default, so nothing changes
+  if you have one machine. Each machine keeps its own books too: a paused
+  printer holds its own temperatures, and a cancelled print is remembered as
+  cancelled on the machine it actually happened on.
 
 - **Clear a stuck printer error without walking over to it.** `clear_printer_error`
   works on Klipper/Moonraker, OctoPrint, Duet, Creality and USB.
