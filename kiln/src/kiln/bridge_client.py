@@ -309,6 +309,27 @@ class BridgeClient:
             except Exception as exc:
                 write_bridge_state(connected=False)
                 logger.info("bridge link down (%s); retrying in %.0fs", exc, backoff)
+                # A handshake refusal is the relay refusing our CREDENTIAL,
+                # and one credential state is unrecoverable from this loop:
+                # a session whose refresh token has been rejected.  Left
+                # unsaid, that produced a measured 281-rejection retry storm
+                # whose every line read "HTTP 403" and none read "run kiln
+                # signin" — the one command that fixes it.  Asked once per
+                # failure, said only when the resolver is certain.
+                if "403" in str(exc):
+                    try:
+                        from kiln.auth_session import resolve_session_bearer
+
+                        session = resolve_session_bearer()
+                        if session.state == "needs_signin":
+                            logger.warning(
+                                "bridge: your Kiln session has expired and "
+                                "can't refresh itself. Run `kiln signin` on "
+                                "this machine, and the bridge will reconnect "
+                                "on its own."
+                            )
+                    except Exception:  # diagnosis must never break the loop
+                        logger.debug("session-state check failed", exc_info=True)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60.0)
 

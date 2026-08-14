@@ -99,3 +99,69 @@ def test_local_slice_and_print_does_not_trigger_a_fetch():
     )
     assert resp["ok"] is True
     assert recorded[0][1] == {"input_path": "/local/a.stl"}
+
+
+class TestHandshake403NamesTheFix:
+    """A 403 loop with an expired session must say `kiln signin` — once the
+    resolver is CERTAIN that is the problem.  Measured before this: 281
+    rejections, every line "HTTP 403", none naming the one command that
+    fixes it."""
+
+    def _run_one_loop_iteration(self, monkeypatch, session_state, caplog):
+        import asyncio
+        import logging
+
+        import kiln.bridge_client as bc
+        from kiln.auth_session import SessionBearer
+
+        class _Refused(Exception):
+            def __str__(self):
+                return "server rejected WebSocket connection: HTTP 403"
+
+        class _FailingConnect:
+            def __init__(self, *a, **k):
+                pass
+
+            async def __aenter__(self):
+                raise _Refused()
+
+            async def __aexit__(self, *a):
+                return False
+
+        import types
+        fake_ws = types.SimpleNamespace(connect=_FailingConnect)
+        monkeypatch.setitem(__import__("sys").modules, "websockets", fake_ws)
+        monkeypatch.setattr(
+            "kiln.auth_session.resolve_session_bearer",
+            lambda *a, **k: SessionBearer(
+                token="", state=session_state, detail="run kiln signin"
+            ),
+        )
+
+        client = bc.BridgeClient.__new__(bc.BridgeClient)
+        client._pinned_license = "unit-test-license"
+        client._url = "wss://unit.invalid/api/bridge/connect"
+        client._stop = False
+
+        async def _one_pass():
+            # Stop after the first failure sleeps.
+            async def _sleep(_s):
+                client._stop = True
+
+            monkeypatch.setattr(bc.asyncio, "sleep", _sleep)
+            await client.run()
+
+        with caplog.at_level(logging.DEBUG, logger="kiln.bridge_client"):
+            asyncio.run(_one_pass())
+        return caplog.text
+
+    def test_needs_signin_is_said_in_plain_words(self, monkeypatch, caplog):
+        text = self._run_one_loop_iteration(monkeypatch, "needs_signin", caplog)
+        assert "kiln signin" in text
+
+    def test_a_live_session_gets_no_false_signin_advice(self, monkeypatch, caplog):
+        """A 403 while the session is fine (server-side refusal, an outage)
+        must NOT tell the user to sign in — chasing the wrong fix hides the
+        real one."""
+        text = self._run_one_loop_iteration(monkeypatch, "live", caplog)
+        assert "session has expired" not in text
