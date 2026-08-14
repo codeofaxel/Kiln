@@ -8,11 +8,11 @@ the full set.
 Tiers
 -----
 ``essential``
-    16 core tools for weak models (Llama, Mistral, Phi, Qwen).
+    15 core tools for weak models (Llama, Mistral, Phi, Qwen).
 ``standard``
-    ~50 tools for capable models (GPT-4o-mini, Gemini Flash, Command R+).
+    ~60 tools for capable models (GPT-4o-mini, Gemini Flash, Command R+).
 ``full``
-    ~160 curated tools for strong models (Claude, GPT-4, Gemini Pro).
+    ~135 curated tools for strong models (Claude, GPT-4, Gemini Pro).
 ``all``
     Every registered tool (includes plugin-contributed tools not in other tiers).
 """
@@ -34,7 +34,12 @@ TIER_ESSENTIAL: list[str] = [
     "set_temperature",
     "preflight_check",
     "send_gcode",
-    "fleet_status",
+    # No fleet tool here.  This list is the ENTIRE surface a weak model
+    # gets, and the multi-machine view is a fleet feature — handing it to
+    # a single-printer user spends one of their few slots on a door that
+    # answers "upgrade".  ``printer_status`` above is the single-printer
+    # experience and takes a printer_name, so any machine is reachable.
+    # ``fleet_status`` stays in TIER_FULL for the strong-model fleet user.
     "submit_job",
     "job_status",
     "queue_summary",

@@ -23,6 +23,7 @@ import threading
 import time
 from typing import Any
 
+from kiln.auto_record_hook import note_cancel_requested
 from kiln.errors import HostedUnavailableError
 from kiln.events import EventType
 from kiln.print_start_verdict import resolve_print_start
@@ -372,6 +373,7 @@ class _PrintWatcher:
                         f"(cancel_at_percent={self._cancel_at_percent}%)."
                     )
                     _logger.info("[watch %s] %s", self._watch_id, cancel_msg)
+                    note_cancel_requested(adapter)
                     try:
                         adapter.cancel_print()
                     except Exception as cancel_exc:
@@ -1006,6 +1008,17 @@ class _MonitoringToolsPlugin:
                 adapter = (
                     _srv._get_registry().get(printer_name) if printer_name else _srv._get_adapter()
                 )
+
+                # Kiln watches what Kiln runs: a live watch is a running
+                # service pointed at a machine, and a plan that runs one
+                # printer at a time keeps one watched.  Same helper the
+                # health monitor uses, so the two watcher surfaces cannot
+                # drift into two different answers.  Checking this printer
+                # by hand stays free and unlimited either way.
+                if block := _srv._watch_capacity_error(
+                    adapter, printer_name or "default",
+                ):
+                    return block
 
                 # Early exit: if printer is idle with no active job, don't start
                 initial_state = adapter.get_state()

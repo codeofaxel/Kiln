@@ -563,6 +563,7 @@ class OctoPrintAdapter(PrinterAdapter):
     def capabilities(self) -> PrinterCapabilities:
         """Capabilities supported by the OctoPrint backend."""
         return PrinterCapabilities(
+            can_clear_error=True,
             can_upload=True,
             can_set_temp=True,
             can_send_gcode=True,
@@ -1296,6 +1297,27 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
+
+    def clear_error(self) -> PrintResult:
+        """Recover OctoPrint's link to a printer that faulted.
+
+        OctoPrint's error state is a property of the SERIAL LINK it holds, not
+        of a job: after a firmware halt it marks the connection closed and
+        every print refuses.  Re-establishing that connection is what clears
+        it, so there is no G-code to send — a halted board would not read it.
+
+        Reconnecting re-runs OctoPrint's own auto-detect against the configured
+        port, so a printer that is genuinely gone stays disconnected instead of
+        being reported ready.
+        """
+        self._post("/api/connection", json={"command": "connect"})
+        return PrintResult(
+            success=True,
+            message=(
+                "Asked OctoPrint to reconnect to the printer. Re-read "
+                "printer_status to confirm it came back ready."
+            ),
+        )
 
     def send_gcode(self, commands: list[str]) -> bool:
         """Send G-code commands to OctoPrint.

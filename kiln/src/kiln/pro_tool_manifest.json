@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-13T23:12:33.072455+00:00",
+  "generated": "2026-08-14T05:20:54.158894+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -49,7 +49,11 @@
     },
     "speed_control": {
       "label": "Speed Control",
-      "pitch": "Real-time printer speed control, scheduling, and fleet-wide adjustments."
+      "pitch": "Real-time printer speed control and layer-based scheduling."
+    },
+    "fleet_operations": {
+      "label": "Fleet Operations",
+      "pitch": "Drive every printer at once \u2014 pause, resume or cancel the whole farm gracefully, fan mid-print changes across machines, and plan material swaps and reroutes for the fleet."
     },
     "ams_control": {
       "label": "AMS Control",
@@ -1595,9 +1599,9 @@
     },
     {
       "name": "export_step",
-      "description": "Export a design as a STEP file \u2014 real analytic B-rep, always.\n\nFree tier: 3 STEP exports/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Export a design as a STEP file \u2014 real analytic B-rep, always.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "cad_exchange",
       "parameters": {
         "properties": {
@@ -1616,12 +1620,6 @@
         ],
         "title": "export_stepArguments",
         "type": "object"
-      },
-      "quota": {
-        "bucket": "export",
-        "limit": 3,
-        "noun": "STEP exports",
-        "period": "month"
       }
     },
     {
@@ -2582,6 +2580,15 @@
         ],
         "title": "generate_qr_decorationArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "qr_branding_v1",
+        "variant": "qr_branding",
+        "feature": "QR codes on printed products",
+        "headline": "Put a scannable QR on this product.",
+        "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
+        "free_included": "The product itself still generates without the QR."
       }
     },
     {
@@ -4608,6 +4615,15 @@
         ],
         "title": "create_design_branchArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -5961,6 +5977,15 @@
         ],
         "title": "merge_design_branchesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -6299,6 +6324,15 @@
         ],
         "title": "rebase_design_branchArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -7316,6 +7350,15 @@
         ],
         "title": "show_design_lineageArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -8088,6 +8131,15 @@
         ],
         "title": "assess_drawing_manufacturabilityArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8113,6 +8165,15 @@
         ],
         "title": "intake_engineering_drawingArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8165,6 +8226,15 @@
         ],
         "title": "manage_drawing_intakesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8196,6 +8266,15 @@
         ],
         "title": "submit_drawing_extractionArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8617,6 +8696,15 @@
         ],
         "title": "compute_iso_fitArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -9052,6 +9140,15 @@
         ],
         "title": "recommend_running_clearanceArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -9629,6 +9726,15 @@
         },
         "title": "assess_fair_reaccomplishmentArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -9801,6 +9907,15 @@
         ],
         "title": "design_hole_for_productArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -10176,6 +10291,15 @@
         ],
         "title": "manage_fair_characteristicsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10206,6 +10330,15 @@
         ],
         "title": "manage_fair_evidence_bundleArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10259,6 +10392,15 @@
         ],
         "title": "manage_fair_registryArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10668,6 +10810,15 @@
         ],
         "title": "prepopulate_fair_draftArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10805,6 +10956,15 @@
         ],
         "title": "recommend_adhesiveArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "adhesive_guidance_v1",
+        "variant": "adhesive_guidance",
+        "feature": "Adhesive and bonding guidance",
+        "headline": "Choose a bonding path for this material pair and exposure.",
+        "outcome_preview": "Kiln Pro would rank suitable bonding paths and prepare the surface-preparation and cure steps for the stated conditions.",
+        "free_included": "General bonding cautions stay available where safety requires them."
       }
     },
     {
@@ -10878,6 +11038,15 @@
         },
         "title": "recommend_holeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -11123,6 +11292,15 @@
         ],
         "title": "record_bond_outcomeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "adhesive_guidance_v1",
+        "variant": "adhesive_guidance",
+        "feature": "Adhesive and bonding guidance",
+        "headline": "Choose a bonding path for this material pair and exposure.",
+        "outcome_preview": "Kiln Pro would rank suitable bonding paths and prepare the surface-preparation and cure steps for the stated conditions.",
+        "free_included": "General bonding cautions stay available where safety requires them."
       }
     },
     {
@@ -11324,6 +11502,488 @@
           }
         },
         "title": "review_magnet_supplier_packetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "add_feature_during_print_fleet",
+      "description": "Add the same feature (e.g. a hat) to N paused printers (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "feature": {
+            "title": "Feature",
+            "type": "string"
+          },
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          },
+          "first_layer_height_mm": {
+            "default": 0.2,
+            "title": "First Layer Height Mm",
+            "type": "number"
+          },
+          "orient": {
+            "default": "auto",
+            "title": "Orient",
+            "type": "string"
+          },
+          "hotend_temp": {
+            "default": 220,
+            "title": "Hotend Temp",
+            "type": "integer"
+          },
+          "bed_temp": {
+            "default": 65,
+            "title": "Bed Temp",
+            "type": "integer"
+          },
+          "filament_type": {
+            "default": "PLA",
+            "title": "Filament Type",
+            "type": "string"
+          },
+          "parent_design_id": {
+            "default": "",
+            "title": "Parent Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature",
+          "printers"
+        ],
+        "title": "add_feature_during_print_fleetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "assess_fleet_power_loss",
+      "description": "Triage a whole fleet after a power loss \u2014 mixed brands/models (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "failures": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failures"
+          }
+        },
+        "title": "assess_fleet_power_lossArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "decorate_during_print_fleet",
+      "description": "Apply the same decoration to N paused printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "decoration": {
+            "title": "Decoration",
+            "type": "string"
+          },
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          },
+          "depth_mm": {
+            "default": 1.2,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "image_scale": {
+            "default": 0.7,
+            "title": "Image Scale",
+            "type": "number"
+          },
+          "threshold": {
+            "default": 0.35,
+            "title": "Threshold",
+            "type": "number"
+          },
+          "bevel": {
+            "default": true,
+            "title": "Bevel",
+            "type": "boolean"
+          },
+          "aspect_policy": {
+            "default": "auto_crop",
+            "title": "Aspect Policy",
+            "type": "string"
+          },
+          "hotend_temp": {
+            "default": 220,
+            "title": "Hotend Temp",
+            "type": "integer"
+          },
+          "bed_temp": {
+            "default": 65,
+            "title": "Bed Temp",
+            "type": "integer"
+          },
+          "filament_type": {
+            "default": "PLA",
+            "title": "Filament Type",
+            "type": "string"
+          },
+          "parent_design_id": {
+            "default": "",
+            "title": "Parent Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decoration",
+          "printers"
+        ],
+        "title": "decorate_during_print_fleetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "evaluate_fleet_reroute",
+      "description": "Decide whether a failed FDM job should move to another printer (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "failure_id": {
+            "title": "Failure Id",
+            "type": "string"
+          },
+          "alternative_printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Alternative Printers",
+            "type": "array"
+          },
+          "completion_pct": {
+            "default": 0.0,
+            "title": "Completion Pct",
+            "type": "number"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "model_size_mm": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Size Mm"
+          }
+        },
+        "required": [
+          "failure_id",
+          "alternative_printers"
+        ],
+        "title": "evaluate_fleet_rerouteArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_cancel",
+      "description": "Cancel prints across the whole fleet, gracefully (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "preserve_temperatures": {
+            "default": false,
+            "title": "Preserve Temperatures",
+            "type": "boolean"
+          }
+        },
+        "title": "fleet_cancelArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_pause",
+      "description": "Pause printing across the whole fleet, gracefully (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "keep_temps": {
+            "default": true,
+            "title": "Keep Temps",
+            "type": "boolean"
+          }
+        },
+        "title": "fleet_pauseArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_resume",
+      "description": "Resume paused prints across the whole fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          }
+        },
+        "title": "fleet_resumeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_set_speed",
+      "description": "Set speed across all registered printers in the fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "percent": {
+            "title": "Percent",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "percent"
+        ],
+        "title": "fleet_set_speedArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_skip_objects",
+      "description": "Skip failed objects across several fleet printers at once (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "printers"
+        ],
+        "title": "fleet_skip_objectsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "plan_fleet_material_change",
+      "description": "Plan future-object material/color changes across a fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          },
+          "targets": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Targets",
+            "type": "array"
+          },
+          "trigger_object": {
+            "default": "",
+            "title": "Trigger Object",
+            "type": "string"
+          },
+          "plate_number": {
+            "default": 1,
+            "title": "Plate Number",
+            "type": "integer"
+          },
+          "source_filament_type": {
+            "default": "PLA",
+            "title": "Source Filament Type",
+            "type": "string"
+          },
+          "source_filament_color": {
+            "default": "",
+            "title": "Source Filament Color",
+            "type": "string"
+          },
+          "require_ams_match": {
+            "default": true,
+            "title": "Require Ams Match",
+            "type": "boolean"
+          },
+          "build_artifacts": {
+            "default": false,
+            "title": "Build Artifacts",
+            "type": "boolean"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "execute_ready": {
+            "default": false,
+            "title": "Execute Ready",
+            "type": "boolean"
+          },
+          "prepared_sessions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prepared Sessions"
+          }
+        },
+        "required": [
+          "printers",
+          "targets"
+        ],
+        "title": "plan_fleet_material_changeArguments",
+        "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cross_machine_inventory_v1",
+        "variant": "cross_machine_inventory",
+        "feature": "Cross-machine material inventory",
+        "headline": "Answer this material question across every machine at once.",
+        "outcome_preview": "Kiln Business would compare spools and capability across the registered machines and prepare one cross-machine answer.",
+        "free_included": "The per-printer answer stays available."
+      }
+    },
+    {
+      "name": "revert_mid_print_fleet",
+      "description": "Revert mid-print transforms on N printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "title": "revert_mid_print_fleetArguments",
         "type": "object"
       }
     },
@@ -12146,65 +12806,6 @@
       }
     },
     {
-      "name": "add_feature_during_print_fleet",
-      "description": "Add the same feature (e.g. a hat) to N paused printers (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "feature": {
-            "title": "Feature",
-            "type": "string"
-          },
-          "printers": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Printers",
-            "type": "array"
-          },
-          "first_layer_height_mm": {
-            "default": 0.2,
-            "title": "First Layer Height Mm",
-            "type": "number"
-          },
-          "orient": {
-            "default": "auto",
-            "title": "Orient",
-            "type": "string"
-          },
-          "hotend_temp": {
-            "default": 220,
-            "title": "Hotend Temp",
-            "type": "integer"
-          },
-          "bed_temp": {
-            "default": 65,
-            "title": "Bed Temp",
-            "type": "integer"
-          },
-          "filament_type": {
-            "default": "PLA",
-            "title": "Filament Type",
-            "type": "string"
-          },
-          "parent_design_id": {
-            "default": "",
-            "title": "Parent Design Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "feature",
-          "printers"
-        ],
-        "title": "add_feature_during_print_fleetArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "add_pin_joints",
       "description": "Give two touching parts a REAL pin-and-socket joint. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -12385,34 +12986,6 @@
           }
         },
         "title": "apply_mid_print_decoration_planArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "assess_fleet_power_loss",
-      "description": "Triage a whole fleet after a power loss \u2014 mixed brands/models (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "failures": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Failures"
-          }
-        },
-        "title": "assess_fleet_power_lossArguments",
         "type": "object"
       }
     },
@@ -13029,257 +13602,6 @@
           "current_layer"
         ],
         "title": "decorate_during_printArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "decorate_during_print_fleet",
-      "description": "Apply the same decoration to N paused printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "decoration": {
-            "title": "Decoration",
-            "type": "string"
-          },
-          "printers": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Printers",
-            "type": "array"
-          },
-          "depth_mm": {
-            "default": 1.2,
-            "title": "Depth Mm",
-            "type": "number"
-          },
-          "image_scale": {
-            "default": 0.7,
-            "title": "Image Scale",
-            "type": "number"
-          },
-          "threshold": {
-            "default": 0.35,
-            "title": "Threshold",
-            "type": "number"
-          },
-          "bevel": {
-            "default": true,
-            "title": "Bevel",
-            "type": "boolean"
-          },
-          "aspect_policy": {
-            "default": "auto_crop",
-            "title": "Aspect Policy",
-            "type": "string"
-          },
-          "hotend_temp": {
-            "default": 220,
-            "title": "Hotend Temp",
-            "type": "integer"
-          },
-          "bed_temp": {
-            "default": 65,
-            "title": "Bed Temp",
-            "type": "integer"
-          },
-          "filament_type": {
-            "default": "PLA",
-            "title": "Filament Type",
-            "type": "string"
-          },
-          "parent_design_id": {
-            "default": "",
-            "title": "Parent Design Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "decoration",
-          "printers"
-        ],
-        "title": "decorate_during_print_fleetArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "evaluate_fleet_reroute",
-      "description": "Decide whether a failed FDM job should move to another printer (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "failure_id": {
-            "title": "Failure Id",
-            "type": "string"
-          },
-          "alternative_printers": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Alternative Printers",
-            "type": "array"
-          },
-          "completion_pct": {
-            "default": 0.0,
-            "title": "Completion Pct",
-            "type": "number"
-          },
-          "material": {
-            "default": "",
-            "title": "Material",
-            "type": "string"
-          },
-          "model_size_mm": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "number"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Model Size Mm"
-          }
-        },
-        "required": [
-          "failure_id",
-          "alternative_printers"
-        ],
-        "title": "evaluate_fleet_rerouteArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "fleet_cancel",
-      "description": "Cancel prints across the whole fleet, gracefully (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "printer_names": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Printer Names"
-          },
-          "preserve_temperatures": {
-            "default": false,
-            "title": "Preserve Temperatures",
-            "type": "boolean"
-          }
-        },
-        "title": "fleet_cancelArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "fleet_pause",
-      "description": "Pause printing across the whole fleet, gracefully (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "printer_names": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Printer Names"
-          },
-          "keep_temps": {
-            "default": true,
-            "title": "Keep Temps",
-            "type": "boolean"
-          }
-        },
-        "title": "fleet_pauseArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "fleet_resume",
-      "description": "Resume paused prints across the whole fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "printer_names": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Printer Names"
-          },
-          "force": {
-            "default": false,
-            "title": "Force",
-            "type": "boolean"
-          }
-        },
-        "title": "fleet_resumeArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "fleet_skip_objects",
-      "description": "Skip failed objects across several fleet printers at once (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "printers": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Printers",
-            "type": "array"
-          }
-        },
-        "required": [
-          "printers"
-        ],
-        "title": "fleet_skip_objectsArguments",
         "type": "object"
       }
     },
@@ -13914,95 +14236,6 @@
           "printer_id"
         ],
         "title": "nozzle_wear_statusArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "plan_fleet_material_change",
-      "description": "Plan future-object material/color changes across a fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "printers": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Printers",
-            "type": "array"
-          },
-          "targets": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Targets",
-            "type": "array"
-          },
-          "trigger_object": {
-            "default": "",
-            "title": "Trigger Object",
-            "type": "string"
-          },
-          "plate_number": {
-            "default": 1,
-            "title": "Plate Number",
-            "type": "integer"
-          },
-          "source_filament_type": {
-            "default": "PLA",
-            "title": "Source Filament Type",
-            "type": "string"
-          },
-          "source_filament_color": {
-            "default": "",
-            "title": "Source Filament Color",
-            "type": "string"
-          },
-          "require_ams_match": {
-            "default": true,
-            "title": "Require Ams Match",
-            "type": "boolean"
-          },
-          "build_artifacts": {
-            "default": false,
-            "title": "Build Artifacts",
-            "type": "boolean"
-          },
-          "output_dir": {
-            "default": "",
-            "title": "Output Dir",
-            "type": "string"
-          },
-          "execute_ready": {
-            "default": false,
-            "title": "Execute Ready",
-            "type": "boolean"
-          },
-          "prepared_sessions": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Prepared Sessions"
-          }
-        },
-        "required": [
-          "printers",
-          "targets"
-        ],
-        "title": "plan_fleet_material_changeArguments",
         "type": "object"
       }
     },
@@ -14867,32 +15100,6 @@
           }
         },
         "title": "revert_mid_printArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "revert_mid_print_fleet",
-      "description": "Revert mid-print transforms on N printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "sessions": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Sessions",
-            "type": "array"
-          }
-        },
-        "required": [
-          "sessions"
-        ],
-        "title": "revert_mid_print_fleetArguments",
         "type": "object"
       }
     },
@@ -16714,6 +16921,15 @@
         ],
         "title": "add_qr_to_productArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "qr_branding_v1",
+        "variant": "qr_branding",
+        "feature": "QR codes on printed products",
+        "headline": "Put a scannable QR on this product.",
+        "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
+        "free_included": "The product itself still generates without the QR."
       }
     },
     {
@@ -17176,26 +17392,6 @@
       "parameters": {
         "properties": {},
         "title": "cancel_speed_scheduleArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "fleet_set_speed",
-      "description": "Set speed across all registered printers in the fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "speed_control",
-      "parameters": {
-        "properties": {
-          "percent": {
-            "title": "Percent",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "percent"
-        ],
-        "title": "fleet_set_speedArguments",
         "type": "object"
       }
     },
@@ -17847,6 +18043,15 @@
         },
         "title": "list_approval_gatesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       }
     },
     {
@@ -18038,6 +18243,15 @@
         ],
         "title": "remove_approval_gateArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       }
     },
     {
@@ -18243,6 +18457,15 @@
         ],
         "title": "set_approval_gateArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       }
     },
     {

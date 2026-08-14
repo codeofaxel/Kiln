@@ -44,6 +44,7 @@ def submit_job(
     file_name: str,
     printer_name: str | None = None,
     priority: int = 0,
+    idempotency_key: str | None = None,
 ) -> dict:
     """Submit a print job to the queue.
 
@@ -55,11 +56,21 @@ def submit_job(
         printer_name: Target printer name, or omit to let the scheduler
             pick any idle printer.
         priority: Higher values are scheduled first (default 0).
+        idempotency_key: Optional opaque key (e.g. a UUID you generate)
+            naming this one submission.  If your call fails in a way
+            where you cannot tell whether the job was queued — a timeout,
+            a dropped connection — retry with the SAME key: you will get
+            the original job back (``submission: "replayed"``) instead of
+            queuing a duplicate print.  Use a NEW key for each job you
+            genuinely want printed; reusing a key with different
+            parameters is refused.
 
     Jobs are executed in priority order, with FIFO tie-breaking.
     Use ``job_status`` to check progress and ``queue_summary`` for an overview.
     """
     import kiln.server as _srv
+    from kiln.queue import IdempotencyConflict
+
     try:
         from kiln.licensing import FREE_TIER_MAX_QUEUED_JOBS, LicenseTier, get_tier
     except ImportError:
@@ -70,13 +81,22 @@ def submit_job(
 
     if err := _srv._check_auth("queue"):
         return err
+    # A replay of an already-queued job must not be judged by the cap:
+    # the original job is already counted against it, and refusing the
+    # retry would tell the caller "queue full" about a job that is in
+    # the queue.  Racing submissions are still serialised inside
+    # submit_result — this pre-check only decides whether the cap runs.
+    _is_replay_candidate = (
+        idempotency_key is not None
+        and _srv._get_queue().find_by_idempotency_key(idempotency_key) is not None
+    )
     # Free-tier queue cap: limit pending jobs.
     current_tier = get_tier()
     _is_free = (
         (LicenseTier is not None and current_tier is not None and current_tier < LicenseTier.PRO)
         or LicenseTier is None  # kiln-pro not installed → free tier
     )
-    if _is_free:
+    if _is_free and not _is_replay_candidate:
         pending = _srv._get_queue().pending_count()
         if pending >= FREE_TIER_MAX_QUEUED_JOBS:
             from kiln.tiers_and_terms import (
@@ -100,24 +120,51 @@ def submit_job(
                 **signin_hint_fields(),
             }
     try:
-        job_id = _srv._get_queue().submit(
+        outcome = _srv._get_queue().submit_result(
             file_name=file_name,
             printer_name=printer_name,
             submitted_by="mcp-agent",
             priority=priority,
+            idempotency_key=idempotency_key,
         )
+        job = outcome.job
+        if outcome.replayed:
+            # Nothing new was queued, so no JOB_QUEUED event — the
+            # original submission already published one.  Answer with
+            # the original job's identity and current state so a caller
+            # retrying after a lost response knows exactly where it is.
+            return {
+                "success": True,
+                "job_id": job.id,
+                "submission": "replayed",
+                "job_state": job.status.value,
+                "message": (
+                    f"Job {job.id} was already submitted with this "
+                    f"idempotency key (current state: {job.status.value}). "
+                    "No duplicate was queued."
+                ),
+            }
         _srv._event_bus.publish(
             Event(
                 type=EventType.JOB_QUEUED,
-                data={"job_id": job_id, "file_name": file_name, "printer_name": printer_name},
+                data={"job_id": job.id, "file_name": file_name, "printer_name": printer_name},
                 source="mcp",
             )
         )
         return {
             "success": True,
-            "job_id": job_id,
-            "message": f"Job {job_id} submitted to queue.",
+            "job_id": job.id,
+            "submission": "queued",
+            "message": f"Job {job.id} submitted to queue.",
         }
+    except IdempotencyConflict as exc:
+        return _srv._error_dict(
+            f"Idempotency key already used by job {exc.existing_job_id!r} "
+            "with different parameters (file, printer, or priority). "
+            "Retries must repeat the original submission exactly; a new "
+            "job needs a new key.",
+            code="IDEMPOTENCY_CONFLICT",
+        )
     except Exception as exc:
         _logger.exception("Unexpected error in submit_job")
         return _srv._error_dict(

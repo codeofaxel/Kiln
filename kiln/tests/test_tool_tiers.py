@@ -21,11 +21,17 @@ from kiln.tool_tiers import (
 class TestTierSizes:
     """Verify tier sizes and the subset/superset relationships."""
 
-    def test_essential_has_16_items(self):
-        # 15 core + check_my_tier (the tier-diagnostic tool) — agent-facing
+    def test_essential_has_15_items(self):
+        # 14 core + check_my_tier (the tier-diagnostic tool) — agent-facing
         # answer to "what plan am I on?" earns its place in the smallest
         # tier because confused users on weak models still need it.
-        assert len(TIER_ESSENTIAL) == 16
+        #
+        # Was 16: fleet_status left this list when it moved to Business.
+        # A weak model's ENTIRE surface is this list, and a tool that can
+        # only answer "upgrade" for a free user is not worth 1/16 of it —
+        # printer_status is the single-printer experience and takes a
+        # printer_name, so every machine stays reachable from here.
+        assert len(TIER_ESSENTIAL) == 15
 
     def test_standard_includes_all_essential(self):
         for tool in TIER_ESSENTIAL:

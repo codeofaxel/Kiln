@@ -7,6 +7,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Stop the printer you mean, by name.** Cancel, pause and resume now take a
+  printer name, so an assistant minding two machines can stop the right one —
+  before this, those commands only ever reached your default printer, and the
+  only way to stop a second machine remotely was the hard emergency stop.
+  Naming no printer still means your default, so nothing changes if you have
+  one machine. Each machine keeps its own books too: a paused printer holds
+  its own temperatures, and a cancelled print is remembered as cancelled on
+  the machine it actually happened on.
+
+- **Clear a stuck printer error without walking over to it.** `clear_printer_error`
+  works on Klipper/Moonraker, OctoPrint, Duet, Creality and USB.
+
+- **A dropped connection can't cost you a duplicate print.** If your assistant
+  queues a print and the reply goes missing, it can now retry safely: sending
+  the same job again with the same one-time key gives back the original
+  instead of quietly adding a second copy, and Kiln says which of the two
+  happened. Jobs sent without a key behave exactly as before, and a new key is
+  still a new print. Thanks [@artiehinz](https://github.com/artiehinz) for
+  [reporting it](https://github.com/codeofaxel/Kiln/issues/112), with the queue
+  and scheduler traced well enough to reproduce.
+
 - **Kiln works with OrcaSlicer and BambuStudio now.** If one of those is the
   slicer you have, Kiln can finally use it. Kiln had listed them as supported
   for a long time while only ever being able to drive PrusaSlicer, so anyone
@@ -171,6 +192,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **In confirm mode, the action you approve is exactly the action that runs.**
+  Confirmed commands were replaying with some of their settings quietly reset
+  to defaults: an emergency stop confirmed for one printer went to all of
+  them, a cancel meant to keep the bed warm let it cool, and clearing an
+  emergency stop failed outright every time. All of it now replays exactly as
+  shown, and a test holds that to every confirmable command, including future
+  ones.
+
+- **Cancelled prints are recorded as cancelled, not successful.** Including the
+  ones Kiln stops itself after spotting a problem.
+
+- **Cancelling mid-levelling can leave a Bambu refusing prints.** It usually
+  clears itself within a minute — Kiln now says so instead of leaving you to
+  guess.
+
+- **Sending a job to your fleet works again (Business).** Handing a print to
+  the fleet, and asking Kiln which machine should take it, failed with an
+  unhelpful error on every call since April. Both work now, and the routing
+  reads the real state of your machines: what's loaded, what's already queued,
+  and how each has done with that material before.
 
 - **Your Bambu's screen shows the actual print again.** A recent change to how
   Kiln handles colours quietly stopped previews reaching the printer, so the

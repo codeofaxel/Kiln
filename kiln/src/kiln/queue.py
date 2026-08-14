@@ -69,6 +69,7 @@ class PrintJob:
     completed_at: float | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    idempotency_key: str | None = None  # caller-supplied replay guard
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
@@ -97,6 +98,37 @@ class JobNotFoundError(KeyError):
     def __init__(self, job_id: str) -> None:
         super().__init__(f"Job not found: {job_id!r}")
         self.job_id = job_id
+
+
+class IdempotencyConflict(ValueError):
+    """Raised when an idempotency key is reused with a different submission.
+
+    Same key + same (file_name, printer_name, priority) is a replay and
+    returns the original job; same key + anything different is a caller
+    bug — one key names one intent, so a mismatch is refused rather than
+    guessed at.
+    """
+
+    def __init__(self, idempotency_key: str, existing_job_id: str) -> None:
+        super().__init__(
+            f"Idempotency key {idempotency_key!r} was already used by job "
+            f"{existing_job_id!r} with different submission parameters. "
+            "Use a new key for a new job."
+        )
+        self.idempotency_key = idempotency_key
+        self.existing_job_id = existing_job_id
+
+
+@dataclass(frozen=True)
+class SubmitResult:
+    """Outcome of a queue submission.
+
+    ``replayed`` is True when an idempotency key matched an earlier
+    submission and ``job`` is that original job — nothing new was queued.
+    """
+
+    job: PrintJob
+    replayed: bool
 
 
 class InvalidStateTransition(ValueError):
@@ -195,6 +227,11 @@ class PrintQueue:
         self._lock = threading.Lock()
         self._db: sqlite3.Connection | None = None
         self._event_bus: Any | None = event_bus  # kiln.events.EventBus
+        # idempotency_key -> job_id, for jobs held in memory.  Terminal
+        # jobs dropped by _reload_from_db are still deduplicated via the
+        # DB lookup in _find_by_key_locked — a key names one intent for
+        # the lifetime of the queue database, not one process.
+        self._idem_index: dict[str, str] = {}
 
         if db_path:
             resolved = os.path.expanduser(db_path)
@@ -214,8 +251,28 @@ class PrintQueue:
                     started_at REAL,
                     completed_at REAL,
                     error TEXT,
-                    metadata TEXT DEFAULT '{}'
+                    metadata TEXT DEFAULT '{}',
+                    idempotency_key TEXT
                 )"""
+            )
+            # Additive migration for queue databases created before the
+            # idempotency_key column existed.  Idempotent: PRAGMA guards
+            # the ALTER, and the index is IF NOT EXISTS.
+            cols = {
+                row[1]
+                for row in self._db.execute("PRAGMA table_info(jobs)").fetchall()
+            }
+            if "idempotency_key" not in cols:
+                self._db.execute("ALTER TABLE jobs ADD COLUMN idempotency_key TEXT")
+            # Partial unique index: keyless jobs (the overwhelming norm)
+            # stay unconstrained; keyed jobs get cross-process dedup at
+            # the storage layer.  Deliberately NOT filtered on status —
+            # a status-filtered index would re-check uniqueness on every
+            # state transition and can collide during crash-requeue,
+            # failing inside _update_job_db where errors are swallowed.
+            self._db.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency_key
+                   ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL"""
             )
             self._db.commit()
             self._reload_from_db()
@@ -231,6 +288,7 @@ class PrintQueue:
         submitted_by: str = "unknown",
         priority: int = 0,
         metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> str:
         """Add a new job to the queue.
 
@@ -242,24 +300,180 @@ class PrintQueue:
             submitted_by: Identifier of the agent or user submitting.
             priority: Higher values are scheduled first.
             metadata: Arbitrary key-value data to attach to the job.
+            idempotency_key: Optional opaque key naming this submission
+                intent.  Replaying the same key with the same
+                ``(file_name, printer_name, priority)`` returns the
+                ORIGINAL job's ID instead of queuing a second job — the
+                guard for "the queue accepted the job but the response
+                never reached the caller".  The same key with different
+                parameters raises :class:`IdempotencyConflict`.
 
         Returns:
-            The unique job ID.
+            The unique job ID (the original job's ID when a key replays).
         """
-        job_id = uuid.uuid4().hex[:12]
-        job = PrintJob(
-            id=job_id,
-            file_name=file_name,
+        return self.submit_result(
+            file_name,
             printer_name=printer_name,
-            status=JobStatus.QUEUED,
             submitted_by=submitted_by,
             priority=priority,
-            metadata=metadata or {},
-        )
+            metadata=metadata,
+            idempotency_key=idempotency_key,
+        ).job.id
+
+    def submit_result(
+        self,
+        file_name: str,
+        printer_name: str | None = None,
+        submitted_by: str = "unknown",
+        priority: int = 0,
+        metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> SubmitResult:
+        """:meth:`submit`, returning the job and whether it was a replay.
+
+        Callers that must tell the user "queued" apart from "you already
+        queued this" (the MCP ``submit_job`` tool) use this; everything
+        else keeps the plain job-ID ``submit``.  One implementation —
+        ``submit`` is a thin wrapper over this method.
+
+        Within one process the in-memory key index decides replays and
+        is authoritative.  Across processes sharing one queue.db, the
+        unique index decides and the loser adopts the winner, which
+        leaves a sub-millisecond window: a same-process caller racing a
+        submission that another process is about to win can be handed a
+        job id whose row never lands.  Closing it would mean holding the
+        queue lock across the disk write, which would let a submission
+        delay a cancel — the worse trade, so this stays open and named.
+        """
         with self._lock:
+            if idempotency_key is not None:
+                existing = self._find_by_key_locked(idempotency_key)
+                if existing is not None:
+                    self._check_replay_matches(
+                        existing, file_name, printer_name, priority
+                    )
+                    return SubmitResult(job=existing, replayed=True)
+
+            job_id = uuid.uuid4().hex[:12]
+            job = PrintJob(
+                id=job_id,
+                file_name=file_name,
+                printer_name=printer_name,
+                status=JobStatus.QUEUED,
+                submitted_by=submitted_by,
+                priority=priority,
+                metadata=metadata or {},
+                idempotency_key=idempotency_key,
+            )
+            # Reserve in memory under the lock so a concurrent caller
+            # with the same key sees this submission before its row
+            # reaches disk — the in-process dedup is decided here.
             self._jobs[job_id] = job
-        self._persist_job(job)
-        return job_id
+            if idempotency_key is not None:
+                self._idem_index[idempotency_key] = job_id
+
+        # Persist OUTSIDE the lock.  SQLite can block for up to
+        # busy_timeout (5s) on a contended database, and this is the
+        # same lock cancel() / next_job() / pending_count() take — a
+        # submission must never be able to delay a cancellation.
+        try:
+            self._persist_job(job)
+        except sqlite3.IntegrityError:
+            # Another PROCESS sharing this queue.db won the key race:
+            # the partial unique index refused our duplicate row.  Drop
+            # our reservation and adopt the winner as a replay.
+            with self._lock:
+                self._jobs.pop(job_id, None)
+                if (
+                    idempotency_key is not None
+                    and self._idem_index.get(idempotency_key) == job_id
+                ):
+                    del self._idem_index[idempotency_key]
+                winner = (
+                    self._db_find_by_key(idempotency_key)
+                    if idempotency_key is not None
+                    else None
+                )
+            if winner is None:
+                raise
+            self._check_replay_matches(winner, file_name, printer_name, priority)
+            return SubmitResult(job=winner, replayed=True)
+        return SubmitResult(job=job, replayed=False)
+
+    def find_by_idempotency_key(self, idempotency_key: str) -> PrintJob | None:
+        """Return the job an idempotency key names, or ``None``.
+
+        Lets callers with their own pre-submit checks (the free-tier
+        queue cap) recognise a replay first, so a retry of a job that is
+        already counted against the cap is never refused by it.
+        """
+        with self._lock:
+            return self._find_by_key_locked(idempotency_key)
+
+    def _find_by_key_locked(self, idempotency_key: str) -> PrintJob | None:
+        """Resolve a key to its job (caller must hold the lock).
+
+        Memory first (live jobs, plus everything submitted this process
+        lifetime); then the database, because _reload_from_db only
+        rehydrates non-terminal jobs — a key used by a long-completed
+        job must still dedup after a restart.
+        """
+        job_id = self._idem_index.get(idempotency_key)
+        if job_id is not None and job_id in self._jobs:
+            return self._jobs[job_id]
+        return self._db_find_by_key(idempotency_key)
+
+    def _db_find_by_key(self, idempotency_key: str) -> PrintJob | None:
+        """Read a keyed job row straight from SQLite (any status)."""
+        if self._db is None:
+            return None
+        row = self._db.execute(
+            """SELECT id, file_name, printer_name, status, submitted_by,
+                      priority, created_at, started_at, completed_at, error,
+                      metadata, idempotency_key
+               FROM jobs WHERE idempotency_key = ?""",
+            (idempotency_key,),
+        ).fetchone()
+        if row is None:
+            return None
+        return PrintJob(
+            id=row[0],
+            file_name=row[1],
+            printer_name=row[2],
+            status=JobStatus(row[3]),
+            submitted_by=row[4],
+            priority=row[5],
+            created_at=row[6],
+            started_at=row[7],
+            completed_at=row[8],
+            error=row[9],
+            metadata=json.loads(row[10]) if row[10] else {},
+            idempotency_key=row[11],
+        )
+
+    @staticmethod
+    def _check_replay_matches(
+        existing: PrintJob,
+        file_name: str,
+        printer_name: str | None,
+        priority: int,
+    ) -> None:
+        """Refuse a key reuse whose canonical parameters differ.
+
+        The canonical identity of a submission is (file_name,
+        printer_name, priority).  metadata and submitted_by are
+        deliberately excluded: metadata is free-form annotation, and the
+        same intent retried from a different surface is still the same
+        intent.
+        """
+        if (
+            existing.file_name != file_name
+            or existing.printer_name != printer_name
+            or existing.priority != priority
+        ):
+            raise IdempotencyConflict(
+                existing.idempotency_key or "", existing.id
+            )
 
     def cancel(self, job_id: str) -> PrintJob:
         """Cancel a queued or running job.
@@ -535,15 +749,25 @@ class PrintQueue:
     # ------------------------------------------------------------------
 
     def _persist_job(self, job: PrintJob) -> None:
-        """Write a job to SQLite (INSERT)."""
+        """Write a new job to SQLite.
+
+        Plain INSERT, not INSERT OR REPLACE: OR REPLACE resolves a
+        unique-index collision by silently DELETING the existing row —
+        which for an idempotency-key collision would destroy the
+        original job instead of refusing the duplicate.  The
+        IntegrityError is the signal submit_result needs, so it
+        propagates; every other persistence failure stays non-fatal as
+        before (the in-memory queue keeps working).
+        """
         if self._db is None:
             return
         try:
             self._db.execute(
-                """INSERT OR REPLACE INTO jobs
+                """INSERT INTO jobs
                    (id, file_name, printer_name, status, submitted_by,
-                    priority, created_at, started_at, completed_at, error, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    priority, created_at, started_at, completed_at, error,
+                    metadata, idempotency_key)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     job.id,
                     job.file_name,
@@ -556,9 +780,12 @@ class PrintQueue:
                     job.completed_at,
                     job.error,
                     json.dumps(job.metadata),
+                    job.idempotency_key,
                 ),
             )
             self._db.commit()
+        except sqlite3.IntegrityError:
+            raise
         except Exception:
             logger.exception("Failed to persist job %s to SQLite", job.id)
 
@@ -588,7 +815,8 @@ class PrintQueue:
             return
         cursor = self._db.execute(
             """SELECT id, file_name, printer_name, status, submitted_by,
-                      priority, created_at, started_at, completed_at, error, metadata
+                      priority, created_at, started_at, completed_at, error,
+                      metadata, idempotency_key
                FROM jobs
                WHERE status IN ('queued', 'starting', 'printing', 'paused')"""
         )
@@ -610,8 +838,11 @@ class PrintQueue:
                 completed_at=row[8],
                 error=row[9],
                 metadata=json.loads(row[10]) if row[10] else {},
+                idempotency_key=row[11],
             )
             self._jobs[job.id] = job
+            if job.idempotency_key:
+                self._idem_index[job.idempotency_key] = job.id
             # Update DB to reflect the reset
             self._update_job_db(job)
             recovered += 1
