@@ -24,6 +24,8 @@ be caught, and the slow first layer must stay silent.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from kiln.printers import progress_motion as pm
@@ -540,8 +542,20 @@ def test_a_stalled_running_printer_may_still_be_resumed():
     adapter = _FakeAdapter([_state(PrinterStatus.PRINTING)])
     # The user watched it sit there for twenty-one minutes, through the same
     # adapter they are now trying to resume.
-    pm.observe_progress(adapter, _state(), _job(2, 5.0), now=0.0)
-    pm.observe_progress(adapter, _state(), _job(2, 5.0), now=21 * MINUTE)
+    #
+    # Seeded against the REAL clock, because the resume below reads it.
+    # ``resume_print`` consults the detector without passing a time, so
+    # that third observation lands at ``time.monotonic()`` — seconds since
+    # BOOT — while a hardcoded 0.0 anchor claims the freeze began at boot.
+    # The gap between them is therefore the host's uptime, not the
+    # twenty-one minutes this test is about: on a workstation up for days
+    # it clears the fifteen-minute threshold by accident, and on a fresh
+    # CI runner ~13 minutes into a suite it does not clear it at all.
+    # Same code, opposite verdicts, decided by how long the machine had
+    # been switched on.
+    now = time.monotonic()
+    pm.observe_progress(adapter, _state(), _job(2, 5.0), now=now - 21 * MINUTE)
+    pm.observe_progress(adapter, _state(), _job(2, 5.0), now=now)
 
     result = adapter.resume_print()
 
@@ -581,8 +595,12 @@ def test_force_skips_the_gate():
 def test_an_idle_printer_is_still_refused_even_with_a_stall_recorded():
     """There is no print to continue, and no progress signal changes that."""
     adapter = _FakeAdapter([_state(PrinterStatus.IDLE)])
-    pm.observe_progress(adapter, _state(), _job(2, 5.0), now=0.0)
-    pm.observe_progress(adapter, _state(), _job(2, 5.0), now=21 * MINUTE)
+    # Real-clock seeding, for the same reason as the stall case above: the
+    # recorded stall has to be a real one for "even with a stall recorded"
+    # to be the thing under test.
+    now = time.monotonic()
+    pm.observe_progress(adapter, _state(), _job(2, 5.0), now=now - 21 * MINUTE)
+    pm.observe_progress(adapter, _state(), _job(2, 5.0), now=now)
 
     result = adapter.resume_print()
     assert not adapter.impl_called

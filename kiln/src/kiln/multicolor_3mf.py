@@ -447,9 +447,14 @@ def render_plate_preview(
 
     The stage backend is declined here.  It draws the plate grid the web
     viewer draws, which reads as scenery around a model on screen and as
-    part of the model on a 2cm printer tile — and it reaches the network,
-    which emitting a file should never depend on.  OpenSCAD renders the
-    same angles locally and takes the filament colour.
+    part of the model on a 2cm printer tile.  OpenSCAD renders the same
+    angles and takes the filament colour.
+
+    The share link is declined too, and that is the half that actually
+    keeps this local: attaching one uploads the mesh, so without it every
+    slice would ship a copy of the user's model to Kiln's API and wait on
+    the reply — to fill in a URL that gets embedded nowhere and read by
+    nobody.  Emitting a file must not depend on a network.
 
     Falls back to :func:`render_plate_thumbnail` for a multi-part plate,
     which ``visualize_model`` cannot draw as one scene, and returns
@@ -473,6 +478,7 @@ def render_plate_preview(
                 angles=["isometric"],
                 color=color,
                 allow_stage=False,
+                share_link=False,
             )
             for view in result.get("views", []):
                 path = view.get("path")

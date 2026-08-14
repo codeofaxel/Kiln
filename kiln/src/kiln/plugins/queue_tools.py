@@ -28,6 +28,43 @@ _ALL_QUEUED_JOBS = 1_000_000
 # lazily, the way every function below does.
 _ON_THE_MACHINE = frozenset({"starting", "printing", "paused"})
 
+#: Pending-job cap for a free install, used when kiln-pro is not present
+#: to supply one.
+_DEFAULT_FREE_TIER_MAX_QUEUED_JOBS = 10
+
+
+def _free_tier_queue_cap() -> int:
+    """How many pending jobs a free install may hold.
+
+    Resolved through a module-level function, not inline in the caller,
+    so the cap has ONE name that exists whether or not kiln-pro is
+    installed.  Read inline, the free-tier branch was a local variable
+    inside ``submit_job`` — reachable by no test, because the only way
+    to reach it was to patch a ``kiln.licensing`` that, on a free
+    install, is not importable to patch.  The cap that nearly every
+    real user runs under was therefore the one the suite could not
+    describe.
+    """
+    try:
+        from kiln.licensing import FREE_TIER_MAX_QUEUED_JOBS
+    except ImportError:
+        return _DEFAULT_FREE_TIER_MAX_QUEUED_JOBS
+    return FREE_TIER_MAX_QUEUED_JOBS
+
+
+def _is_free_tier() -> bool:
+    """Whether this install is below Pro, and so subject to the cap.
+
+    A free install has no licensing module to ask, and nothing below
+    free to be: absence of kiln-pro IS the free tier.
+    """
+    try:
+        from kiln.licensing import LicenseTier, get_tier
+    except ImportError:
+        return True
+    current = get_tier()
+    return current is not None and current < LicenseTier.PRO
+
 
 # ---------------------------------------------------------------------------
 # Standalone functions — importable for direct calls and testing.
@@ -71,14 +108,6 @@ def submit_job(
     import kiln.server as _srv
     from kiln.queue import IdempotencyConflict
 
-    try:
-        from kiln.licensing import FREE_TIER_MAX_QUEUED_JOBS, LicenseTier, get_tier
-    except ImportError:
-        FREE_TIER_MAX_QUEUED_JOBS = 10
-        LicenseTier = None
-        def get_tier():
-            return "free"
-
     if err := _srv._check_auth("queue"):
         return err
     # A replay of an already-queued job must not be judged by the cap:
@@ -91,14 +120,10 @@ def submit_job(
         and _srv._get_queue().find_by_idempotency_key(idempotency_key) is not None
     )
     # Free-tier queue cap: limit pending jobs.
-    current_tier = get_tier()
-    _is_free = (
-        (LicenseTier is not None and current_tier is not None and current_tier < LicenseTier.PRO)
-        or LicenseTier is None  # kiln-pro not installed → free tier
-    )
-    if _is_free and not _is_replay_candidate:
+    if _is_free_tier() and not _is_replay_candidate:
         pending = _srv._get_queue().pending_count()
-        if pending >= FREE_TIER_MAX_QUEUED_JOBS:
+        free_tier_max_queued_jobs = _free_tier_queue_cap()
+        if pending >= free_tier_max_queued_jobs:
             from kiln.tiers_and_terms import (
                 ALREADY_SUBSCRIBED_LINE,
                 signin_hint_fields,
@@ -107,7 +132,7 @@ def submit_job(
             return {
                 "success": False,
                 "error": (
-                    f"Job queue is limited to {FREE_TIER_MAX_QUEUED_JOBS} pending jobs on the Free tier "
+                    f"Job queue is limited to {free_tier_max_queued_jobs} pending jobs on the Free tier "
                     f"(you have {pending}). Wait for jobs to complete, "
                     "or upgrade to Kiln Pro for unlimited queue depth with multi-printer scheduling. "
                     f"{ALREADY_SUBSCRIBED_LINE} "
@@ -115,7 +140,7 @@ def submit_job(
                 ),
                 "code": "FREE_TIER_LIMIT",
                 "pending_count": pending,
-                "max_allowed": FREE_TIER_MAX_QUEUED_JOBS,
+                "max_allowed": free_tier_max_queued_jobs,
                 "upgrade_url": "https://kiln3d.com/pricing",
                 **signin_hint_fields(),
             }

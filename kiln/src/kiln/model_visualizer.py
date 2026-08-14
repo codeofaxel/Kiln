@@ -495,6 +495,7 @@ def visualize_model(
     color: str = "",
     timeout: int = 120,
     allow_stage: bool = True,
+    share_link: bool = True,
 ) -> dict:
     """Primary 3D preview tool — renders high-quality PNGs via OpenSCAD.
 
@@ -516,9 +517,15 @@ def visualize_model(
             it draws the plate grid the web viewer draws.  Pass ``False``
             when the image is going somewhere that grid would read as
             part of the model rather than as the room around it, such as
-            a 3MF thumbnail bound for a printer's screen.  It also keeps
-            the render local: the stage reaches the network, OpenSCAD
-            does not.
+            a 3MF thumbnail bound for a printer's screen.  Controls the
+            RENDER only — see *share_link* for the upload.
+        share_link: Whether to attach a shareable viewer URL to the
+            result.  Doing so uploads the mesh, so a caller that only
+            wants pixels — anything embedding the image in a file rather
+            than handing a person a link — passes ``False`` and keeps the
+            whole call local.  ``allow_stage=False`` alone does NOT stop
+            this: the render goes local while the link upload still goes
+            out.
 
     Returns:
         Dict with ``success``, ``views`` list, ``output_dir``, and metadata.
@@ -857,6 +864,13 @@ def visualize_model(
                 )
             ),
         }
+        if not share_link:
+            # Attaching a link uploads the mesh.  A caller embedding these
+            # pixels in a file has nobody to hand a URL to, so that upload
+            # would be a network round-trip — and a copy of the user's
+            # model leaving the machine — bought for a field nothing reads.
+            return result
+
         from kiln.stage_link import attach_stage_link
 
         return attach_stage_link(result, file_path)

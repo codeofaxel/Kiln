@@ -841,6 +841,8 @@ class BambuAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
+            can_clear_error=True,
+            cancel_during_calibration_faults=True,
             # Port 6000 TLS+JPEG works on A1 / A1 Mini / P1P / P1S
             # without ffmpeg.  get_snapshot() tries port 6000 first
             # and falls back to RTSPS (X1 series, port 322) only if
@@ -1447,6 +1449,10 @@ class BambuAdapter(PrinterAdapter):
                         current_job_label=(
                             str(job_id_for_hook) if job_id_for_hook else None
                         ),
+                        # Rows opened before the identity fix live under the
+                        # family name; when this adapter is unregistered the
+                        # two names coincide and the sweep no-ops.
+                        legacy_printer_name=self.name,
                     )
                 except Exception as exc:  # pragma: no cover
                     logger.debug(
@@ -2244,6 +2250,14 @@ class BambuAdapter(PrinterAdapter):
         gcode_body = Path(abs_path).read_text(encoding="utf-8")
         stem = Path(abs_path).stem
         output_path = os.path.join(os.path.dirname(abs_path), f"{stem}.3mf")
+
+        # Nothing declared: ask the machine what is actually loaded rather
+        # than declaring the default white at a printer holding red.  A
+        # caller's own colours always win; ``None`` keeps the old default.
+        if not filament_colors and num_filaments == 1:
+            loaded = self.active_filament_color()
+            if loaded:
+                filament_colors = [loaded]
 
         settings = BambuPrintSettings(
             hotend_temp=hotend_temp,
@@ -3084,6 +3098,55 @@ class BambuAdapter(PrinterAdapter):
             message="Emergency stop triggered (M112 sent).",
         )
 
+    def clear_error(self) -> PrintResult:
+        """Acknowledge a latched ``print_error`` so the next print can start.
+
+        Bambu firmware holds ``gcode_state`` at ``failed`` with a non-zero
+        ``print_error`` after a job ends badly, and keeps reporting it until
+        something acknowledges it.  Dismissing the message on the printer's
+        own touchscreen clears the NOTIFICATION, not the reported state —
+        measured on an A1 (2026-08-13), where the screen read "ready" while
+        the push payload still carried ``print_error=50348032`` and every
+        pre-flight check refused.
+
+        The payload mirrors BambuStudio's own ``command_clean_print_error``,
+        field for field and type for type: a string ``sequence_id``, the
+        string ``subtask_id`` of the job being acknowledged, and the INTEGER
+        ``print_error`` naming which error is being cleared.  That last field
+        is the one that matters and the one an earlier attempt here omitted —
+        acknowledging an error without saying which error changed nothing at
+        all, which is what the printer did with it.
+
+        This reports only that the acknowledgement was SENT.  Firmware takes
+        a moment, so the caller re-reads state to learn whether it took.
+        """
+        with self._state_lock:
+            subtask_id = str(self._last_status.get("subtask_id") or "0")
+            try:
+                print_error = int(self._last_status.get("print_error") or 0)
+            except (TypeError, ValueError):
+                print_error = 0
+
+        self._publish_command(
+            {
+                "print": {
+                    "sequence_id": self._next_seq(),
+                    "command": "clean_print_error",
+                    "subtask_id": subtask_id,
+                    "print_error": print_error,
+                }
+            }
+        )
+        return PrintResult(
+            success=True,
+            message=(
+                "Sent the error acknowledgement. Re-read printer_status to "
+                "confirm. If the printer is still refusing prints, give it a "
+                "minute — a fault from cancelling during bed levelling often "
+                "clears on its own — and power-cycle only if it persists."
+            ),
+        )
+
     def pause_print(self) -> PrintResult:
         """Pause the currently running print job."""
         self._send_print_command("pause")
@@ -3417,12 +3480,15 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _peek_loaded_ams_trays(self) -> list[dict[str, Any]] | None:
-        """Return loaded AMS trays from cached MQTT status, without any I/O.
+        """Return loaded AMS trays from cached MQTT status.
 
-        Unlike ``get_ams_status``, this does not trigger a pushall request
-        when the cache is empty — it returns ``None`` instead.  Intended
-        for auto-routing decisions where an extra MQTT round-trip per
-        ``start_print`` call would be wasteful.
+        Unlike ``get_ams_status`` this never re-reads the AMS itself, so a
+        warm cache costs nothing.  It is NOT free on a cold one: it goes
+        through ``_get_cached_status``, which connects and, with no status
+        cached yet, publishes a pushall and sleeps up to two seconds.  A
+        caller that must not block — anything on the path of emitting a
+        file — should read ``_last_status`` directly instead, the way
+        ``active_filament_color`` does.
 
         :returns: List of loaded-tray dicts (``tray_type`` non-empty), or
             ``None`` if no AMS data is cached yet.  Empty list means AMS
@@ -3456,6 +3522,93 @@ class BambuAdapter(PrinterAdapter):
                         "tray_color": tray.get("tray_color", ""),
                     })
         return loaded
+
+    def active_filament_color(self) -> str | None:
+        """The ``#RRGGBB`` of the filament actually loaded, or ``None``.
+
+        A wrapped 3MF declares the colour it will print in, and that
+        declaration is what draws the preview on the printer's screen and
+        what the AMS mismatch check measures against.  Left to defaults it
+        declares white for everyone, so a red spool produced a white
+        preview and then a mismatch warning about a discrepancy Kiln had
+        introduced itself.
+
+        Reads the status cache DIRECTLY — never ``_get_cached_status``,
+        which connects and, on a cold cache, publishes a pushall and
+        sleeps up to two seconds.  Wrapping a file must not wait on a
+        printer, and a preview is never worth stalling a slice for, so an
+        unheard-from machine simply yields ``None`` here.
+
+        Refuses rather than guesses, returning ``None`` when the machine
+        has not said clearly: no AMS data yet, an external spool
+        (``tray_now`` 255, whose colour nothing reports), a tray with no
+        usable colour, or several loaded trays with no active one named.
+        ``None`` leaves the caller's existing default alone.
+        """
+        try:
+            with self._state_lock:
+                status = dict(self._last_status or {})
+        except Exception:  # noqa: BLE001 — telemetry never blocks a wrap
+            logger.debug("AMS colour unavailable", exc_info=True)
+            return None
+        if not status:
+            return None
+
+        ams_data = status.get("ams")
+        raw_now = None
+        if isinstance(ams_data, dict):
+            raw_now = ams_data.get("tray_now")
+            ams_data = ams_data.get("ams")
+        if raw_now is None:
+            raw_now = status.get("tray_now")
+        if not isinstance(ams_data, list):
+            return None
+
+        trays: list[dict[str, Any]] = []
+        for unit in ams_data:
+            if not isinstance(unit, dict):
+                continue
+            raw_trays = unit.get("tray")
+            if not isinstance(raw_trays, list):
+                continue
+            trays.extend(
+                {"slot": t.get("id", 0), "tray_color": t.get("tray_color", "")}
+                for t in raw_trays
+                if isinstance(t, dict) and t.get("tray_type")
+            )
+        if not trays:
+            return None
+
+        active: int | None = None
+        if raw_now is not None and str(raw_now).strip().lstrip("-").isdigit():
+            active = int(str(raw_now).strip())
+
+        # 255 is Bambu's "no tray" — an external spool, whose colour the
+        # printer does not report at all.
+        if active == 255:
+            return None
+
+        chosen: dict[str, Any] | None = None
+        if active is not None:
+            chosen = next(
+                (t for t in trays if t.get("slot") == active), None
+            )
+        if chosen is None:
+            # No active tray named.  One loaded tray is unambiguous; more
+            # than one is a question only the machine can answer.
+            if len(trays) != 1:
+                return None
+            chosen = trays[0]
+
+        # Bambu reports RRGGBBAA; the alpha is not ours to carry.
+        value = str(chosen.get("tray_color") or "").strip().lstrip("#")
+        if len(value) < 6:
+            return None
+        try:
+            int(value[:6], 16)
+        except ValueError:
+            return None
+        return "#" + value[:6].upper()
 
     def get_ams_status(self) -> dict[str, Any]:
         """Query AMS status: what's loaded in each tray.

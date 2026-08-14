@@ -351,6 +351,20 @@ def _run_slice_and_print(slicer_tools, tmp_path: Path, adapter: _FakeAdapter) ->
 
 
 class TestSliceAndPrintEnvelope:
+    @pytest.fixture(autouse=True)
+    def _skip_preview_gate(self, monkeypatch):
+        """This suite predates the preview-consent gate and is not about it.
+
+        ``slice_and_print`` now requires a preview token (the gate itself
+        is tested in test_the_user_is_actually_asked.py).  These cases
+        are about whether the two halves of the returned envelope agree
+        about a print that did start, so they take the same bypass CI
+        does rather than each carrying a token they have no opinion
+        about.  Without it every case here stops at
+        PREVIEW_NOT_CONFIRMED and never reaches the envelope.
+        """
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
     def test_the_measured_incident_no_longer_contradicts_itself(
         self, slicer_tools, tmp_path,
     ):

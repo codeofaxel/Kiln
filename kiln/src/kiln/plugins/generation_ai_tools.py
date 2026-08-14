@@ -757,10 +757,7 @@ class _GenerationAIToolsPlugin:
                     # the validation pipeline itself does its own bed-fit
                     # check via printer_id).
                     try:
-                        if printer_name:
-                            _adapter = _srv._get_registry().get(printer_name)
-                        else:
-                            _adapter = _srv._get_adapter()
+                        _adapter = _srv._resolve_adapter(printer_name)
                         _printer_info = _adapter.get_printer_info()
                         bv = getattr(_printer_info, "build_volume", None)
                         if isinstance(bv, dict) and bv:
@@ -839,10 +836,8 @@ class _GenerationAIToolsPlugin:
                 )
 
                 # Step 6: Upload (but do NOT auto-start — require explicit start_print)
-                if printer_name:
-                    adapter = _srv._get_registry().get(printer_name)
-                else:
-                    adapter = _srv._get_adapter()
+                # Same door as the control verbs: config.yaml fallback included.
+                adapter = _srv._resolve_adapter(printer_name)
 
                 upload = adapter.upload_file(slice_result.output_path)
                 file_name = upload.file_name or os.path.basename(slice_result.output_path)
@@ -877,7 +872,7 @@ class _GenerationAIToolsPlugin:
                     if block := _srv._emergency_latch_error("generate_and_print", safety_printer):
                         return block
                     # Mandatory pre-flight safety gate before starting print.
-                    pf = _srv.preflight_check()
+                    pf = _srv.preflight_check(printer_name=printer_name)
                     if not pf.get("ready", False):
                         _srv._audit(
                             "generate_and_print",
@@ -894,9 +889,23 @@ class _GenerationAIToolsPlugin:
                     # Captured before the command so the verdict can tell a
                     # reading about THIS job from the printer's last word
                     # about the previous one.
+                    # No preview gate here, deliberately: the object does
+                    # not exist until this call runs, so no token could have
+                    # been issued for it.  The standing opt-in
+                    # (KILN_AUTO_PRINT_GENERATED, off by default) IS the
+                    # consent; without it this tool uploads and makes the
+                    # caller go through start_print, which does gate.
+                    _srv._audit(
+                        "generate_and_print",
+                        "auto_printed_without_preview",
+                        details={
+                            "file": file_name,
+                            "consent": "KILN_AUTO_PRINT_GENERATED",
+                        },
+                    )
                     sent_at = time.monotonic()
                     print_result = adapter.start_print(file_name)
-                    _srv._get_heater_watchdog().notify_print_started()
+                    _srv._note_print_started(adapter)
                     print_verdict = resolve_print_start(
                         adapter, print_result, sent_at=sent_at,
                         file_name=file_name,

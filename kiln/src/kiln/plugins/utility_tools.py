@@ -587,7 +587,9 @@ class _UtilityToolsPlugin:
 
             _quick_start_base = [
                 "1. Call `printer_status` to check if a printer is connected and its current state.",
-                "2. Call `fleet_status` if managing multiple printers.",
+                "2. `printer_status` takes a printer name — use it per machine "
+                "when you have more than one (managing them together is a "
+                "Business feature).",
                 "3. Call `preflight_check` before starting any print to validate readiness.",
                 "4. Use `search_all_models` to find 3D models across marketplaces.",
                 "5. Use `slice_model` or `slice_and_print` to prepare and print files.",
@@ -769,6 +771,43 @@ class _UtilityToolsPlugin:
                     ),
                     "monitor": "printer_status, printer_snapshot, await_print_completion",
                     "queue_jobs": "submit_job → job_status → queue_summary",
+                },
+                "session_maintenance": {
+                    "why": (
+                        "Keeping the Kiln session itself healthy is agent work, "
+                        "not user work. In particular: after Kiln's code, "
+                        "config, or plugins change, restart the SERVER — do "
+                        "not tell the user to quit and reopen their client "
+                        "app. These lived only in the connect-time preamble "
+                        "for a while, which is read once and lost; an agent "
+                        "mid-session could not rediscover them, so the one "
+                        "tool that applies updates went unused while users "
+                        "were told to restart apps by hand."
+                    ),
+                    "tools": {
+                        "restart_server": (
+                            "restart_server() — hot-restart the MCP server "
+                            "in-place; the client auto-reconnects in ~1s. Use "
+                            "after code, plugin, or env/config changes."
+                        ),
+                        "kiln_health": (
+                            "kiln_health() — versions, uptime, module "
+                            "availability, safety-gate state."
+                        ),
+                        "trim_serve_processes": (
+                            "trim_serve_processes(open_sessions=N) — close "
+                            "leftover background server copies from closed "
+                            "sessions; refuses while anything is printing."
+                        ),
+                        "upgrade_kiln": (
+                            "upgrade_kiln() — update Kiln itself, then "
+                            "restart_server() to run the new code."
+                        ),
+                        "kiln_signin": (
+                            "kiln_signin() — browser sign-in for the hosted "
+                            "features; kiln_signin_poll() completes it."
+                        ),
+                    },
                 },
                 "inline_3d_stage": {
                     "what": (

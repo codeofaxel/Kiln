@@ -7,6 +7,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Point a print at the printer you mean (Business+).** Starting a print,
+  uploading a file, checking readiness and setting temperatures all take a
+  printer name now. Naming none still means your default, and each machine is
+  checked against its own limits rather than your default printer's.
+
+- **Your printer asks you before it prints.** In apps supporting MCP's
+  confirmation prompts you get a dialog your assistant can't answer for you.
+  It names the file and covers that one print. Elsewhere the previous approval
+  step is unchanged.
+
+- **Stop the printer you mean, by name (Business+).** Cancel, pause and resume
+  now take a printer name, so an assistant minding two machines can stop the
+  right one — before this, those commands only ever reached your default
+  printer, and the only way to stop a second machine remotely was the hard
+  emergency stop. Naming no printer still means your default, so nothing changes
+  if you have one machine. Each machine keeps its own books too: a paused
+  printer holds its own temperatures, and a cancelled print is remembered as
+  cancelled on the machine it actually happened on.
+
+- **Clear a stuck printer error without walking over to it.** `clear_printer_error`
+  works on Klipper/Moonraker, OctoPrint, Duet, Creality and USB.
+
 - **A dropped connection can't cost you a duplicate print.** If your assistant
   queues a print and the reply goes missing, it can now retry safely: sending
   the same job again with the same one-time key gives back the original
@@ -135,6 +157,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Every way of starting a print now asks first.** Slicing-and-printing,
+  retrying and monitored prints used to skip the approval step `start_print`
+  required. Retries only re-ask when the shape changed.
+
 - `cancel_job` has been renamed `cancel_queued_job`. It only ever removed a job
   that was still waiting in the queue line, but sitting next to `cancel_print`,
   the name suggested otherwise. This tool also used to sometimes accept a job
@@ -180,6 +206,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **Checks meant for one printer were applied to another (Business+).** With
+  two machines, one could be cleared to print by the other being idle, and a
+  failure on one could start cooling the other mid-print. Single-printer setups
+  were never affected.
+
+- **In confirm mode, the action you approve is exactly the action that runs.**
+  Confirmed commands were replaying with some of their settings quietly reset
+  to defaults: an emergency stop confirmed for one printer went to all of
+  them, a cancel meant to keep the bed warm let it cool, and clearing an
+  emergency stop failed outright every time. All of it now replays exactly as
+  shown, and a test holds that to every confirmable command, including future
+  ones.
+
+- **Cancelled prints are recorded as cancelled, not successful.** Including the
+  ones Kiln stops itself after spotting a problem.
+
+- **Cancelling mid-levelling can leave a Bambu refusing prints.** It usually
+  clears itself within a minute — Kiln now says so instead of leaving you to
+  guess.
 
 - **Sending a job to your fleet works again (Business).** Handing a print to
   the fleet, and asking Kiln which machine should take it, failed with an

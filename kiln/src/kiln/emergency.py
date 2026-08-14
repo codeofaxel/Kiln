@@ -40,6 +40,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.auto_record_hook import note_cancel_requested
 from kiln.events import Event, EventBus, EventType
 
 logger = logging.getLogger(__name__)
@@ -782,6 +783,16 @@ class EmergencyCoordinator:
                 printer_id,
                 exc,
             )
+        finally:
+            # AFTER the halt is dispatched, never before it.  Noting the
+            # cancel touches the database, and the line above is the fastest
+            # path to stopping a machine that may be on fire — nothing gets
+            # to queue in front of it for the sake of a label.  The printer
+            # then takes seconds to actually stop, so the intent is still
+            # recorded long before any terminal transition can be observed.
+            # In ``finally`` because the fallback G-code below stops the
+            # print just as surely as the hardware path would have.
+            note_cancel_requested(adapter)
 
         # Fallback: send G-code commands individually so partial
         # delivery still disables heaters even if a later command fails.
