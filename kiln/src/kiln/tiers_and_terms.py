@@ -286,6 +286,89 @@ def account_required_message(
     )
 
 
+#: Schema version of the upgrade-nudge block.  A consumer reads this FIRST and
+#: ignores a block it does not recognise, so the shape can change later without
+#: an old client rendering a half-understood dict at a user.
+UPGRADE_NUDGE_SCHEMA_VERSION = 1
+
+
+def upgrade_nudge_block(
+    *,
+    variant: str,
+    tier: str,
+    feature: str,
+    headline: str,
+    outcome_preview: str,
+    free_included: str,
+    moment: str = "resource_threshold",
+    why_this_tier: str = "",
+    unlocks: list[str] | None = None,
+    context: dict | None = None,
+    copy_version: str = "",
+) -> dict:
+    """Build the schema-1 upgrade-nudge block a surface can render as-is.
+
+    The block answers, in this order, the three things a person actually
+    wants at the moment they meet a higher tier: what they would GET
+    (*headline* + *outcome_preview*), what it is (*feature*), and what they
+    still have without paying (*free_included*).  The price comes last, as a
+    fact, in ``cta`` — value before the wall, stated once.
+
+    *moment* names WHERE the nudge fired ("resource_threshold" — the user just
+    grew past what this plan does; "unpaired_account"; and whatever a hosted
+    surface adds), so the same copy can be measured per moment rather than
+    only per feature.
+
+    ``display_text`` is the one field a surface with no room for structure can
+    print verbatim.  It is *outcome_preview*, plus a single sentence naming the
+    tier only when the preview does not already name it — so the tier appears
+    EXACTLY once.  Copy that names the tier twice reads as a pitch; copy that
+    never names it leaves a reader with no idea what to do next.  A preview
+    that already mentions the tier more than once is left alone: the caller
+    owns their sentence, and quietly rewriting it would be worse than leaving
+    it as written.
+
+    Every key is always present, so a consumer can read any of them without a
+    guard.  Fresh containers each call — these land in response payloads that
+    callers are free to mutate.
+    """
+    tier_id = str(tier or "").strip().lower() or "pro"
+    tier_name = tier_id.title()
+    preview = outcome_preview.strip()
+    if _names_tier(preview, tier_name):
+        display_text = preview
+    else:
+        display_text = f"{preview} Kiln {tier_name} includes it.".strip()
+    return {
+        "schema_version": UPGRADE_NUDGE_SCHEMA_VERSION,
+        # Derived from the variant rather than typed a second time: the two
+        # were the same string in every real block, and a hand-copied version
+        # tag drifts silently the moment the copy is rewritten.
+        "copy_version": copy_version.strip() or f"{variant}_v1",
+        "moment": moment,
+        "variant": variant,
+        "feature": feature,
+        "headline": headline,
+        "outcome_preview": preview,
+        "why_this_tier": why_this_tier,
+        "unlocks": list(unlocks or []),
+        "free_included": free_included,
+        "context": dict(context or {}),
+        "display_text": display_text,
+        "cta": {
+            "kind": "view_tier",
+            "tier": tier_id,
+            "label": f"See Kiln {tier_name}",
+            "url": "https://kiln3d.com/pricing",
+        },
+    }
+
+
+def _names_tier(text: str, tier_name: str) -> bool:
+    """True when *text* already names *tier_name* (case-insensitively)."""
+    return tier_name.lower() in (text or "").lower()
+
+
 def session_expired_message(email: str = "") -> str:
     """Person-facing copy for a sign-in that has lapsed.
 
@@ -315,10 +398,12 @@ __all__ = [
     "SIGNIN_COMMAND",
     "SUBSTITUTION_LINE",
     "TIERS_AND_TERMS",
+    "UPGRADE_NUDGE_SCHEMA_VERSION",
     "account_required_message",
     "free_allowance_phrase",
     "session_expired_message",
     "signed_out_message",
     "signin_hint_fields",
     "tier_required_message",
+    "upgrade_nudge_block",
 ]
