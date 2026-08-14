@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-13T22:24:21.086423+00:00",
+  "generated": "2026-08-14T03:22:26.388589+00:00",
   "tool_count": 414,
   "categories": {
     "product_generators": {
@@ -2576,6 +2576,15 @@
         ],
         "title": "generate_qr_decorationArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "qr_branding_v1",
+        "variant": "qr_branding",
+        "feature": "QR codes on printed products",
+        "headline": "Put a scannable QR on this product.",
+        "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
+        "free_included": "The product itself still generates without the QR."
       }
     },
     {
@@ -4602,6 +4611,15 @@
         ],
         "title": "create_design_branchArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -5955,6 +5973,15 @@
         ],
         "title": "merge_design_branchesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -6293,6 +6320,15 @@
         ],
         "title": "rebase_design_branchArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -7310,6 +7346,15 @@
         ],
         "title": "show_design_lineageArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -8082,6 +8127,15 @@
         ],
         "title": "assess_drawing_manufacturabilityArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8107,6 +8161,15 @@
         ],
         "title": "intake_engineering_drawingArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8159,6 +8222,15 @@
         ],
         "title": "manage_drawing_intakesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8190,6 +8262,15 @@
         ],
         "title": "submit_drawing_extractionArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8611,6 +8692,15 @@
         ],
         "title": "compute_iso_fitArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -9046,6 +9136,15 @@
         ],
         "title": "recommend_running_clearanceArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -9623,6 +9722,15 @@
         },
         "title": "assess_fair_reaccomplishmentArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -9795,6 +9903,15 @@
         ],
         "title": "design_hole_for_productArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -10170,6 +10287,15 @@
         ],
         "title": "manage_fair_characteristicsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10200,6 +10326,15 @@
         ],
         "title": "manage_fair_evidence_bundleArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10253,6 +10388,15 @@
         ],
         "title": "manage_fair_registryArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10662,6 +10806,15 @@
         ],
         "title": "prepopulate_fair_draftArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10799,6 +10952,15 @@
         ],
         "title": "recommend_adhesiveArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "adhesive_guidance_v1",
+        "variant": "adhesive_guidance",
+        "feature": "Adhesive and bonding guidance",
+        "headline": "Choose a bonding path for this material pair and exposure.",
+        "outcome_preview": "Kiln Pro would rank suitable bonding paths and prepare the surface-preparation and cure steps for the stated conditions.",
+        "free_included": "General bonding cautions stay available where safety requires them."
       }
     },
     {
@@ -10872,6 +11034,15 @@
         },
         "title": "recommend_holeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -11117,6 +11288,15 @@
         ],
         "title": "record_bond_outcomeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "adhesive_guidance_v1",
+        "variant": "adhesive_guidance",
+        "feature": "Adhesive and bonding guidance",
+        "headline": "Choose a bonding path for this material pair and exposure.",
+        "outcome_preview": "Kiln Pro would rank suitable bonding paths and prepare the surface-preparation and cure steps for the stated conditions.",
+        "free_included": "General bonding cautions stay available where safety requires them."
       }
     },
     {
@@ -13899,6 +14079,15 @@
         ],
         "title": "plan_fleet_material_changeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cross_machine_inventory_v1",
+        "variant": "cross_machine_inventory",
+        "feature": "Cross-machine material inventory",
+        "headline": "Answer this material question across every machine at once.",
+        "outcome_preview": "Kiln Business would compare spools and capability across the registered machines and prepare one cross-machine answer.",
+        "free_included": "The per-printer answer stays available."
       }
     },
     {
@@ -16609,6 +16798,15 @@
         ],
         "title": "add_qr_to_productArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "qr_branding_v1",
+        "variant": "qr_branding",
+        "feature": "QR codes on printed products",
+        "headline": "Put a scannable QR on this product.",
+        "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
+        "free_included": "The product itself still generates without the QR."
       }
     },
     {
@@ -17742,6 +17940,15 @@
         },
         "title": "list_approval_gatesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       }
     },
     {
@@ -17933,6 +18140,15 @@
         ],
         "title": "remove_approval_gateArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       }
     },
     {
@@ -18138,6 +18354,15 @@
         ],
         "title": "set_approval_gateArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       }
     },
     {

@@ -298,7 +298,7 @@ def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
         if cap is None or cap <= 0 or machines <= cap:
             return None
 
-        return {
+        verdict = {
             "success": False,
             "error": (
                 f"{feature} answers across all {machines} of your machines, "
@@ -311,6 +311,35 @@ def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
                 "https://kiln3d.com/pricing for fleet-wide answers."
             ),
         }
+        # Structured twin of the sentences above, for a surface that renders
+        # rather than prints.  Additive: the per-printer free path stays the
+        # first thing named, and every door that funnels here inherits the
+        # block without knowing it exists.
+        try:
+            from kiln.tiers_and_terms import upgrade_nudge_block
+
+            verdict.setdefault(
+                "upgrade_nudge",
+                upgrade_nudge_block(
+                    variant="cross_machine_inventory",
+                    tier="business",
+                    feature="Cross-machine material inventory",
+                    headline=(
+                        "Answer this material question across every machine "
+                        "at once."
+                    ),
+                    outcome_preview=(
+                        "Kiln Business would compare spools and capability "
+                        "across the registered machines and prepare one "
+                        "cross-machine answer."
+                    ),
+                    free_included="The per-printer answer stays available.",
+                    moment="resource_threshold",
+                ),
+            )
+        except Exception:  # noqa: BLE001 — the refusal matters more than chrome
+            logger.debug("inventory nudge attach skipped", exc_info=True)
+        return verdict
     except Exception:  # noqa: BLE001 — never block a user from their own data
         logger.debug("fleet-scope gate soft-passed", exc_info=True)
         return None
