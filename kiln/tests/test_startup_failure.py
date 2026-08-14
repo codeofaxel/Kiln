@@ -615,8 +615,22 @@ def _tool_text(result: object) -> str:
     recovery server that answered nothing when it had in fact answered
     correctly.  Raising on an unreadable result keeps that failure mode
     from coming back quietly.
+
+    ``call_tool`` has a second live shape: depending on which modules
+    were imported first in the session, FastMCP answers with a bare
+    ``list`` of content blocks (or a ``(blocks, raw)`` tuple) instead
+    of a ``CallToolResult``.  Under full-suite collection that shape is
+    what arrives, so a helper reading only ``.content`` failed these
+    tests whenever the whole tree ran together and passed when this
+    file ran alone — the narrow re-run reported "flake" for a
+    deterministic order dependence.  Both shapes are read; anything
+    else still raises.
     """
     content = getattr(result, "content", None)
+    if content is None and isinstance(result, tuple) and result:
+        content = result[0]
+    if content is None and isinstance(result, list):
+        content = result
     if content is None:
         raise AssertionError(
             f"call_tool returned {type(result).__name__} with no .content "
