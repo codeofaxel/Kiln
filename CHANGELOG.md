@@ -397,6 +397,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   failures showed you an error and wrote nothing down, so a bug report
   carried no trace of what actually broke.
 
+- **Previews can no longer show a different object than the one you made.**
+  Running two Kiln chats at once could cross their preview pictures — one
+  chat's object appearing in the other's preview, and sticking around in the
+  cache. Renders no longer share a workspace, and every older preview is
+  redrawn fresh.
+
 - **Previews now put every colour where it belongs.** On a plate with several
   parts, one part's colour could bleed across another in the picture. The model
   was always correct; the preview wasn't.
