@@ -10,6 +10,16 @@ helper process isn't, and the server it spawned idles forever.
 Field report: 18 accumulated servers (~0.9 GB RSS) against a single
 active session.
 
+Memory is the cheaper half of the cost.  A Bambu or Elegoo printer
+rations LAN connection slots, so a leftover server that ever touched
+the printer also holds one — and enough of them lock the user out of
+their own machine.  Field report 2026-08-14: five servers, five held
+MQTT slots, printer pingable and powered on, every call timing out
+with an error that blamed Bambu Studio.  The adapters now hand the
+slot back when idle (``KILN_BAMBU_IDLE_DISCONNECT_S``), which fixes
+the accrual at its source; this module is what makes the pile-up
+visible and names it as a cause when a connection does fail.
+
 This module is the ONE shared detector AND janitor for that
 condition.  Every surface that reports health wires through here —
 ``health_check``, ``kiln_health``, ``get_started``, ``kiln doctor``/
@@ -78,6 +88,76 @@ _DEFAULT_IDLE_HOURS = 6.0
 _TERM_GRACE_S = 2.0
 _KILL_GRACE_S = 2.0
 _EXIT_POLL_INTERVAL_S = 0.1
+
+
+# Printer families that ration LAN connection slots: a Bambu accepts only a
+# few simultaneous MQTT clients, an Elegoo only a few websockets.  For these,
+# a pile-up of servers is not merely a memory cost — each server holds a slot
+# from first use, so enough of them starve the printer and the next call times
+# out.  The symptom is indistinguishable from a powered-off printer, which is
+# why it has to be named rather than left to the user to deduce.
+_SLOT_RATIONED_TYPES = frozenset({"bambu", "elegoo"})
+
+
+def _bare_host(value: str) -> str:
+    """Reduce a configured host to the bare name lsof matches on.
+
+    Config stores a bare IP for Bambu/Elegoo but a full URL for the HTTP
+    backends, and the same normalisation has to hold for both or the scan
+    silently matches nothing.
+    """
+    return value.split("//")[-1].split("/")[0].split(":")[0].strip()
+
+
+def slot_rationed_hosts() -> list[str]:
+    """Hosts of configured printers that ration connection slots.
+
+    Deliberately cheap and side-effect-free — one env read plus one small
+    YAML parse, no adapters built and no network touched — because the
+    startup door calls this before the server is serving anything.  An
+    unreadable config answers "none": a warning that overstates the stakes on
+    every install would be its own kind of wrong.
+    """
+    hosts: list[str] = []
+    if os.environ.get("KILN_PRINTER_TYPE", "").strip().lower() in _SLOT_RATIONED_TYPES:
+        env_host = _bare_host(os.environ.get("KILN_PRINTER_HOST", ""))
+        if env_host:
+            hosts.append(env_host)
+        else:
+            # Type says it rations, but we cannot name the machine.  Recorded
+            # as an unnamed host so callers still know the stakes are higher,
+            # even though there is nothing to scan.
+            hosts.append("")
+    try:
+        from pathlib import Path
+
+        import yaml
+
+        raw = (Path.home() / ".kiln" / "config.yaml").read_text(encoding="utf-8")
+        data = yaml.safe_load(raw) or {}
+    except Exception as exc:
+        logger.debug("serve-siblings: config read for printer types failed: %s", exc)
+        return hosts
+    printers = data.get("printers")
+    entries = printers.values() if isinstance(printers, dict) else printers
+    if not isinstance(entries, (list, tuple)) and not isinstance(printers, dict):
+        return hosts
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("type", "")).strip().lower() not in _SLOT_RATIONED_TYPES:
+            continue
+        host = _bare_host(str(entry.get("host") or ""))
+        # config.yaml registers an alias per printer ("default"), so the same
+        # machine can appear twice; scan each host once.
+        if host not in hosts:
+            hosts.append(host)
+    return hosts
+
+
+def slot_rationed_printers() -> bool:
+    """True when a printer that rations connection slots is configured."""
+    return bool(slot_rationed_hosts())
 
 
 def _warn_threshold() -> int:
@@ -212,16 +292,37 @@ def check_serve_siblings() -> dict:
     threshold = _warn_threshold()
     if len(procs) >= threshold:
         # Plain English, and never a PID the reader has to handle: the
-        # offer is "Kiln cleans this up", the fallback is the one that
-        # needs no tools at all (leftovers die with their app), and
-        # neither implies urgency, because none exists — leftovers
-        # cost memory, not correctness.
+        # offer is "Kiln cleans this up" and the fallback is the one that
+        # needs no tools at all (leftovers die with their app).
+        #
+        # How urgent this is depends on what is plugged in, so the stakes
+        # sentence is not a constant.  On an HTTP-polled printer the old
+        # line held: leftovers cost memory, not correctness.  On a Bambu or
+        # an Elegoo it was FALSE — those ration LAN connection slots, each
+        # server holds one from first use, and enough of them lock the user
+        # out of their own printer.  Saying "nothing is broken" to someone
+        # whose printer had just stopped answering is what sent them to
+        # power-cycle the printer instead of running `kiln trim`
+        # (2026-08-14 field report: five servers, five held MQTT slots).
+        if slot_rationed_printers():
+            stakes = (
+                "On your printer this one does bite: Bambu and Elegoo "
+                "machines accept only a few LAN connections at a time, and "
+                "each of these copies can hold one. That is a common reason "
+                "a printer that is powered on and on the network suddenly "
+                "times out — the printer is fine, its connection slots are "
+                "just taken. No print already running is at risk."
+            )
+        else:
+            stakes = (
+                "Nothing is broken and no print is at risk — they are just "
+                "quietly using memory."
+            )
         result["warning"] = (
             f"{len(procs)} background copies of Kiln's server are running "
             f"(oldest has been up {_humanize_etime(result['oldest_age'])}). "
             f"Each open agent session normally keeps just one — the rest "
-            f"are leftovers from closed sessions, quietly using memory. "
-            f"Nothing is broken and no print is at risk. Kiln can close "
+            f"are leftovers from closed sessions. {stakes} Kiln can close "
             f"the leftovers for you whenever you like — just say so, and "
             f"it will check that nothing is printing first (tool: "
             f"trim_serve_processes; terminal: `kiln trim`). They also "
@@ -229,6 +330,129 @@ def check_serve_siblings() -> dict:
             f"apps."
         )
     return result
+
+
+def printer_connection_holders(host: str) -> dict:
+    """Name this machine's processes currently connected to *host*.
+
+    The process count alone is a proxy: a server that never touched the
+    printer holds no slot.  This asks the kernel the exact question instead —
+    which local processes have a socket open to the printer right now —
+    because that is the number that decides whether the next call gets in.
+
+    Returns::
+
+        {
+            "supported": bool,          # False = lsof unavailable, unknown
+            "holders": [{"pid", "command", "is_kiln"}, ...],
+            "kiln_count": int,          # holders that are Kiln's own servers
+        }
+
+    ``supported: False`` means "could not tell", never "none" — a diagnostic
+    that reports a clean bill of health because its tool was missing is worse
+    than one that admits it does not know.
+    """
+    unknown = {"supported": False, "holders": [], "kiln_count": 0}
+    if not host or os.name != "posix":
+        return unknown
+    try:
+        out = subprocess.run(
+            # -n/-P skip DNS and port-name lookups (slow, and irrelevant
+            # here); the @host filter keeps this to the printer's sockets.
+            ["lsof", "-nP", "-a", "-u", str(os.getuid()), "-i", f"@{host}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception as exc:
+        logger.debug("serve-siblings: lsof scan failed: %s", exc)
+        return unknown
+    # lsof exits 1 with no output when nothing matches, which is a real
+    # "zero holders" answer, not a failure.  Anything else with no header
+    # means the tool did not run as expected.
+    lines = out.stdout.splitlines()
+    if not lines:
+        return {"supported": out.returncode in (0, 1), "holders": [], "kiln_count": 0}
+
+    holders: dict[int, dict] = {}
+    for line in lines[1:]:  # skip the COMMAND/PID/... header
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            pid = int(parts[1])
+        except ValueError:
+            continue
+        if "(ESTABLISHED)" not in line:
+            continue
+        holders.setdefault(pid, {"pid": pid, "command": parts[0]})
+
+    if holders:
+        serve_pids = {p["pid"] for p in (_list_serve_processes() or [])}
+        for pid, entry in holders.items():
+            entry["is_kiln"] = pid in serve_pids
+    ordered = sorted(holders.values(), key=lambda h: h["pid"])
+    return {
+        "supported": True,
+        "holders": ordered,
+        "kiln_count": sum(1 for h in ordered if h.get("is_kiln")),
+    }
+
+
+def printer_slot_report() -> dict:
+    """Are this machine's own servers using up a printer's connection slots?
+
+    The ONE answer to that question, so the terminal (``kiln doctor``) and the
+    agent-facing health tools cannot give a user different stories about the
+    same printer.  Returns::
+
+        {
+            "checked": bool,           # False = nothing to check / cannot tell
+            "hosts": [ {host, kiln_count, total, pids}, ... ],
+            "warning": str | None,     # set when Kiln holds more than one slot
+        }
+
+    Only runs the socket scan for printers that actually ration connections,
+    so installs with an HTTP-polled printer pay nothing for it.
+
+    ``warning`` is user-facing text.  Agents seeing it set should relay it —
+    it names the one cause of a printer timeout that the user cannot guess and
+    would otherwise "fix" by power-cycling hardware that was never at fault.
+    """
+    hosts = [h for h in slot_rationed_hosts() if h]
+    if not hosts:
+        return {"checked": False, "hosts": [], "warning": None}
+
+    reports: list[dict] = []
+    checked = False
+    for host in hosts:
+        held = printer_connection_holders(host)
+        if not held["supported"]:
+            continue
+        checked = True
+        reports.append(
+            {
+                "host": host,
+                "kiln_count": held["kiln_count"],
+                "total": len(held["holders"]),
+                "pids": [h["pid"] for h in held["holders"] if h.get("is_kiln")],
+            }
+        )
+
+    crowded = [r for r in reports if r["kiln_count"] > 1]
+    warning = None
+    if crowded:
+        worst = max(crowded, key=lambda r: r["kiln_count"])
+        warning = (
+            f"{worst['kiln_count']} copies of Kiln's server are each holding a "
+            f"connection to the printer at {worst['host']}. These printers "
+            f"allow only a few connections at once, so this is a common reason "
+            f"one that is powered on and on the network still times out — the "
+            f"printer is fine, its connection slots are taken. Closing the "
+            f"leftover servers frees them (tool: trim_serve_processes; "
+            f"terminal: `kiln trim`). Power-cycling the printer will not help."
+        )
+    return {"checked": checked, "hosts": reports, "warning": warning}
 
 
 def _etime_seconds(etime: str) -> float | None:

@@ -18,6 +18,8 @@ Reference for running Kiln yourself. Covers all environment variables, Docker de
 | `KILN_BAMBU_TLS_MODE` | Bambu only | `pin` | Bambu TLS policy: `pin` (TOFU pinning), `ca` (strict CA/hostname verification), or `insecure` (legacy no cert verification) |
 | `KILN_BAMBU_TLS_FINGERPRINT` | Bambu only | `""` | Optional explicit SHA-256 certificate fingerprint pin |
 | `KILN_BAMBU_TLS_PIN_FILE` | Bambu only | `~/.kiln/bambu_tls_pins.json` | Location of persisted TOFU certificate pins |
+| `KILN_BAMBU_IDLE_DISCONNECT_S` | Bambu only | `120` | Seconds of inactivity before Kiln hands the printer's MQTT connection back. Bambu allows only a few LAN clients at once, so an idle connection is a scarce slot; `0` holds it open for the life of the process. A running print always keeps its connection |
+| `KILN_ELEGOO_IDLE_DISCONNECT_S` | Elegoo only | `120` | As above for Elegoo's SDCP websocket |
 | `KILN_PRINTER_MODEL` | No | `""` | Printer model name for auto-loading safety/slicer profiles |
 | `KILN_PRINTER` | No | `""` | Named printer from `~/.kiln/config.yaml` (CLI flag equivalent) |
 

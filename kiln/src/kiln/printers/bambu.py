@@ -78,16 +78,45 @@ _TLS_MODE_ENV = "KILN_BAMBU_TLS_MODE"
 _TLS_FINGERPRINT_ENV = "KILN_BAMBU_TLS_FINGERPRINT"
 
 # Error message for single-client MQTT/FTPS connection rejection.
+#
+# Both name Kiln's own servers first, because on a machine running more than
+# one agent session they are the likeliest culprit and the only one the user
+# has no reason to suspect.  Blaming Bambu Studio when the real holder is four
+# leftover ``kiln serve`` processes sends the user to close software they
+# already closed, and then to power-cycle a printer that was never at fault
+# (2026-08-14 field report).  ``_other_clients_hint`` appends the measured
+# count when there is one.
 _SINGLE_CLIENT_MSG = (
-    "MQTT connection rejected — another client (BambuStudio, Bambu Handy) "
-    "may be connected. Bambu printers only allow one LAN MQTT client at a "
-    "time. Close other Bambu software and retry."
+    "MQTT connection rejected — something else is already connected. "
+    "Bambu printers allow only a few LAN clients at once."
 )
 _SINGLE_CLIENT_FTPS_MSG = (
-    "FTPS TLS handshake failed — another client (BambuStudio, Bambu Handy) "
-    "may be holding the connection. Bambu printers only allow one LAN client "
-    "at a time. Close other Bambu software and retry."
+    "FTPS TLS handshake failed — something else may be holding the "
+    "connection. Bambu printers allow only a few LAN clients at once."
 )
+
+# How long an unused MQTT connection is held before it is released.
+#
+# A Bambu printer accepts only a few simultaneous LAN clients, so an idle
+# connection is not free — it is one of a handful of scarce slots.  Every MCP
+# session spawns its own ``kiln serve``, each builds its own adapter, and each
+# grabs a slot on first use and (before this) kept it for the life of the
+# process.  Hosts do not reliably reap servers when a session ends, so the
+# slots accrued to sessions that no longer exist: five leftover servers on one
+# machine starved the printer outright, and the user saw a timeout that blamed
+# Bambu Studio (2026-08-14 field report).
+#
+# Releasing when idle makes the slot follow actual use rather than process
+# lifetime.  The window only has to outlast the gap between calls that belong
+# to one burst of work — watchers poll every 15s and so never trip it — and a
+# release costs at most a reconnect on the next call.  Set
+# ``KILN_BAMBU_IDLE_DISCONNECT_S=0`` to hold the connection open forever
+# (the pre-2026-08-14 behaviour).  The machinery itself lives on
+# PrinterAdapter — Elegoo rations websockets the same way — and this adapter
+# supplies only the parts that are genuinely Bambu's: the env var, the window,
+# and what "still connected" and "mid-print" mean here.
+_DEFAULT_IDLE_DISCONNECT_S: float = 120.0
+_IDLE_DISCONNECT_ENV = "KILN_BAMBU_IDLE_DISCONNECT_S"
 
 # Backoff parameters for MQTT reconnection.
 _BACKOFF_INITIAL_DELAY: float = 1.0  # seconds
@@ -616,6 +645,12 @@ class BambuAdapter(PrinterAdapter):
         print(state.state, state.tool_temp_actual)
     """
 
+    # Opt in to PrinterAdapter's idle connection release: a Bambu rations LAN
+    # MQTT clients, so holding one while nobody is calling costs another
+    # session its access to the printer.
+    _IDLE_RELEASE_ENV = _IDLE_DISCONNECT_ENV
+    _IDLE_RELEASE_DEFAULT_S = _DEFAULT_IDLE_DISCONNECT_S
+
     def __init__(
         self,
         host: str,
@@ -684,6 +719,10 @@ class BambuAdapter(PrinterAdapter):
         self._mqtt_client: mqtt.Client | None = None
         self._mqtt_connected = threading.Event()
         self._connect_lock = threading.Lock()
+
+        # Idle-release bookkeeping (PrinterAdapter).  _ensure_mqtt — the one
+        # funnel every read and write passes through — stamps the activity.
+        self._init_idle_release()
 
         # Exponential backoff for reconnection attempts.
         self._backoff = _BackoffState()
@@ -1006,12 +1045,87 @@ class BambuAdapter(PrinterAdapter):
             self._sequence_id += 1
             return str(self._sequence_id)
 
+    def _other_clients_hint(self) -> str:
+        """Name the likely holder of the printer's LAN slots, measured.
+
+        A Bambu connection failure has two very different causes that look
+        identical from here: other Bambu software, or Kiln's own accumulated
+        servers.  Only the second is visible to us, so when it is present we
+        say so instead of leaving the user to guess — the guess they make
+        unaided is "the printer is broken", which is what sends them to
+        power-cycle a printer that was answering pings the whole time.
+
+        Prefers the socket scan, which answers the exact question ("who holds
+        a connection to THIS printer right now") rather than the proxy one
+        ("how many servers exist, any of which might").  Since our own attempt
+        is what just failed, every holder it finds is somebody else.  Falls
+        back to the process count where sockets cannot be listed, because a
+        proxy answer still beats sending the user to the wrong fix.
+
+        Returns "" when nothing can be measured, so the caller's static
+        advice stands alone rather than trailing an empty accusation.
+        """
+        try:
+            from kiln.serve_siblings import (
+                check_serve_siblings,
+                printer_connection_holders,
+            )
+
+            held = printer_connection_holders(self._host)
+            if held["supported"] and held["kiln_count"] >= 1:
+                n = held["kiln_count"]
+                return (
+                    f"\n  Measured just now: {n} other "
+                    f"{'copy' if n == 1 else 'copies'} of Kiln's own server "
+                    f"{'is' if n == 1 else 'are'} holding a connection to "
+                    f"{self._host}. That is the cause, and it is not a printer "
+                    f"fault. Close the leftovers with `kiln trim` (or ask Kiln "
+                    f"to trim them) and retry — power-cycling will not help."
+                )
+            if held["supported"]:
+                # Sockets listed fine and none of them are ours: whatever holds
+                # the printer is genuinely other software, so say nothing here
+                # and let the Bambu Studio / Handy advice below stand.
+                return ""
+            count = check_serve_siblings().get("count")
+        except Exception:
+            return ""
+        if not isinstance(count, int) or count < 2:
+            return ""
+        return (
+            f"\n  Kiln itself has {count} servers running on this machine, "
+            f"each able to hold one of those slots. That is the most likely "
+            f"cause, and it is not a printer fault. Close the leftovers with "
+            f"`kiln trim` (or ask Kiln to trim them) and retry."
+        )
+
+    def _connection_is_live(self) -> bool:
+        """True while the MQTT client is connected (idle-reaper hook)."""
+        return self._mqtt_client is not None and self._mqtt_connected.is_set()
+
+    def _print_in_flight(self) -> bool:
+        """True while the printer is mid-job, as of the last status seen.
+
+        The push stream is what turns a finished print into a recorded
+        outcome (see :meth:`_on_message`), so the slot is worth holding while
+        a job is running even if no caller has asked for anything.  Dropping
+        mid-print would move that bookkeeping onto the reconnect reconcile,
+        which by design refuses to guess a duration across an outage — the
+        print would be banked as "unknown" instead of measured.
+        """
+        with self._state_lock:
+            state = str(self._last_status.get("gcode_state", "")).lower().strip()
+        return state in _PRINT_ACTIVE_STATES
+
     def _ensure_mqtt(self) -> mqtt.Client:
         """Ensure the MQTT client is connected, creating it if needed.
 
         Respects the exponential backoff schedule.  If the backoff cooldown
         has not yet elapsed, raises :class:`PrinterError` immediately
         instead of hammering the printer with connection attempts.
+
+        Every read and write funnels through here, so this is also where
+        caller activity is stamped for the idle release.
 
         Returns:
             The connected MQTT client.
@@ -1020,6 +1134,7 @@ class BambuAdapter(PrinterAdapter):
             PrinterError: If connection fails within the timeout or the
                 adapter is in a backoff cooldown period.
         """
+        self._note_activity()
         # Fast path — no lock needed if already connected.
         if self._mqtt_client is not None and self._mqtt_connected.is_set():
             return self._mqtt_client
@@ -1082,8 +1197,10 @@ class BambuAdapter(PrinterAdapter):
                         f"no response within {self._timeout}s.\n"
                         "  Most likely something else is already connected: "
                         "Bambu printers allow only a few connections at "
-                        "once.  Close Bambu Studio, the Handy app, or "
-                        "another machine using the printer, then try "
+                        "once."
+                        + self._other_clients_hint()
+                        + "\n  Otherwise, close Bambu Studio, the Handy app, "
+                        "or another machine using the printer, then try "
                         "again.\n"
                         "  If that's not it: check the printer is powered "
                         "on and on this network, LAN Mode is on, and the "
@@ -1109,6 +1226,7 @@ class BambuAdapter(PrinterAdapter):
 
                 self._mqtt_client = client
                 self._backoff.record_success()
+                self._start_idle_reaper()
                 return client
 
             except PrinterError:
@@ -1127,7 +1245,7 @@ class BambuAdapter(PrinterAdapter):
                 )
                 if is_single_client:
                     raise PrinterError(
-                        _SINGLE_CLIENT_MSG,
+                        _SINGLE_CLIENT_MSG + self._other_clients_hint(),
                         cause=exc,
                     ) from exc
                 exc_lower = str(exc).lower()
@@ -1694,7 +1812,7 @@ class BambuAdapter(PrinterAdapter):
             )
             if is_single_client:
                 raise PrinterError(
-                    _SINGLE_CLIENT_FTPS_MSG,
+                    _SINGLE_CLIENT_FTPS_MSG + self._other_clients_hint(),
                     cause=exc,
                 ) from exc
             exc_lower = str(exc).lower()
@@ -4054,14 +4172,39 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def disconnect(self) -> None:
-        """Disconnect the MQTT client and release resources."""
-        if self._mqtt_client is not None:
-            client = self._mqtt_client
-            self._mqtt_client = None
-            self._safe_stop_client(client)
-            self._mqtt_connected.clear()
-            with self._state_lock:
-                self._connected = False
+        """Disconnect the MQTT client and release the printer's LAN slot.
+
+        Safe to call when already disconnected, and safe to call repeatedly —
+        the next operation reconnects on demand.
+
+        Takes ``_connect_lock`` so a release cannot land in the middle of a
+        connect.  Without it, a reaper firing while ``_ensure_mqtt`` was
+        between "assign ``_mqtt_client``" and "return it" would hand the
+        caller a client it had already stopped.  That was vanishingly rare at
+        the default 120s window — ``_ensure_mqtt`` stamps activity on entry
+        and finishes within its own timeout — but a short configured window
+        makes the two overlap, and a caller publishing to a stopped client is
+        a confusing failure to debug.  No deadlock: ``_ensure_mqtt`` stops
+        clients via ``_safe_stop_client`` and never re-enters here, so the
+        lock is never taken twice by one thread.
+        """
+        self._stop_idle_reaper()
+        with self._connect_lock:
+            if self._mqtt_client is not None:
+                client = self._mqtt_client
+                self._mqtt_client = None
+                self._safe_stop_client(client)
+                self._mqtt_connected.clear()
+                with self._state_lock:
+                    self._connected = False
+            # Re-arm the reconcile that settles outcome rows for prints that
+            # ended while nothing was watching.  It is a one-shot guard, and
+            # before the idle release the only disconnect was process exit, so
+            # once-per-process and once-per-connection were the same thing.
+            # They no longer are: a print that starts and finishes inside a
+            # release window is exactly the case the reconcile was written
+            # for, and leaving the flag set would skip it on reconnect.
+            self._pending_outcomes_reconciled = False
 
     def update_credentials(self, access_code: str) -> None:
         """Update the access code and force MQTT reconnection.
@@ -4074,12 +4217,9 @@ class BambuAdapter(PrinterAdapter):
         """
         self._access_code = access_code
         # Force MQTT reconnection with new credentials on next operation.
-        if self._mqtt_client is not None:
-            self._safe_stop_client(self._mqtt_client)
-            self._mqtt_client = None
-            self._mqtt_connected.clear()
-            with self._state_lock:
-                self._connected = False
+        # Via disconnect() rather than a second teardown of its own, so the
+        # release path stays one piece of code however it is reached.
+        self.disconnect()
         logger.info("Access code updated; MQTT will reconnect on next operation")
 
     # ------------------------------------------------------------------

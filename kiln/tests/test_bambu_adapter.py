@@ -7,6 +7,7 @@ MQTT and FTPS responses so the test suite runs without a real Bambu printer.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import os
 import ssl
@@ -41,6 +42,24 @@ from kiln.printers.base import (
 HOST = "192.168.1.100"
 ACCESS_CODE = "12345678"
 SERIAL = "01P00A000000001"
+
+
+def _clock_past_deadline() -> Any:
+    """A monotonic clock that leaps 100s per read, so every wait times out.
+
+    Unbounded on purpose: a finite ``side_effect`` list pins the exact NUMBER
+    of clock reads on the path under test, so adding one anywhere (the
+    idle-release activity stamp did) fails these with a bare
+    ``StopIteration`` that says nothing about the behaviour they assert.
+
+    ADVANCING, not repeating, and that part is load-bearing.  A clock stuck
+    at one value satisfies ``while now() < deadline`` forever whenever the
+    deadline is computed from a read taken at that same value — the finite
+    list used to break such a loop by raising StopIteration, so a constant
+    replacement turns a passing test into a hung suite.  Always moving
+    forward means any deadline loop terminates on its next read.
+    """
+    return itertools.count(0.0, 100.0)
 
 
 def _adapter(**kwargs: Any) -> BambuAdapter:
@@ -1558,7 +1577,7 @@ class TestBambuAdapterPrintConfirmation:
         """
         adapter_with_mqtt._last_status = {"gcode_state": "idle"}
         # Mock time.monotonic to simulate timeout.
-        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]), \
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=_clock_past_deadline()), \
                 mock.patch("kiln.printers.bambu.time.sleep"):
             result = adapter_with_mqtt.start_print("test.3mf")
         assert result.success is True
@@ -2837,7 +2856,7 @@ class TestWaitForPrintStartErrorDetection:
 
     def test_timeout_with_no_error(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0}
-        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]), \
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=_clock_past_deadline()), \
                 mock.patch("kiln.printers.bambu.time.sleep"):
             state, err = adapter_with_mqtt._wait_for_print_start()
         assert state == "timeout"
@@ -2912,7 +2931,7 @@ class TestStartPrintErrorMessages:
         even though the command had been accepted.
         """
         adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0}
-        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]), \
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=_clock_past_deadline()), \
                 mock.patch("kiln.printers.bambu.time.sleep"):
             result = adapter_with_mqtt.start_print("test.3mf")
         assert result.success is True
@@ -3399,6 +3418,13 @@ class TestDisableNozzleDetection:
 class TestMqttSingleClientErrorMessaging:
     """Tests that MQTT/FTPS connection-rejected errors surface a clear
     single-client message instead of a generic connection failure.
+
+    The message deliberately no longer opens by blaming "another client
+    (BambuStudio, Bambu Handy)".  On a machine running several agent
+    sessions the likelier holder is Kiln's own accumulated servers — the one
+    cause the user has no reason to suspect — so the text names what can
+    actually be measured and leaves the Bambu-software guess for after
+    (2026-08-14 field report).
     """
 
     def test_connection_reset_shows_single_client_message(self) -> None:
@@ -3407,7 +3433,7 @@ class TestMqttSingleClientErrorMessaging:
         with mock.patch("paho.mqtt.client.Client") as mock_mqtt_cls:
             mock_client = mock_mqtt_cls.return_value
             mock_client.connect_async.side_effect = exc
-            with pytest.raises(PrinterError, match="another client"):
+            with pytest.raises(PrinterError, match="only a few LAN clients"):
                 adapter._ensure_mqtt()
 
     def test_ssl_error_shows_single_client_message(self) -> None:
@@ -3416,7 +3442,7 @@ class TestMqttSingleClientErrorMessaging:
         with mock.patch("paho.mqtt.client.Client") as mock_mqtt_cls:
             mock_client = mock_mqtt_cls.return_value
             mock_client.connect_async.side_effect = exc
-            with pytest.raises(PrinterError, match="another client"):
+            with pytest.raises(PrinterError, match="only a few LAN clients"):
                 adapter._ensure_mqtt()
 
     def test_generic_error_preserves_original_message(self) -> None:
@@ -3435,7 +3461,7 @@ class TestMqttSingleClientErrorMessaging:
             "kiln.printers.bambu._ImplicitFTP_TLS",
         ) as mock_ftp_cls:
             mock_ftp_cls.return_value.connect.side_effect = exc
-            with pytest.raises(PrinterError, match="another client"):
+            with pytest.raises(PrinterError, match="only a few LAN clients"):
                 adapter._ftp_connect()
 
     def test_ftps_generic_error_preserves_original_message(self) -> None:

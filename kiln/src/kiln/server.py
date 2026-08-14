@@ -13825,6 +13825,38 @@ def _ensure_pro_plugins_registered() -> None:
 _SHUTDOWN_DEADLINE_S = 10.0
 
 
+def _release_printer_connections() -> None:
+    """Hand back every printer connection this process is holding.
+
+    Bambu and Elegoo printers ration LAN connection slots, so a server that
+    exits still holding one leaves the printer short until the socket times
+    out on the printer's side.  With several servers per machine — one per
+    MCP session, and hosts do not reliably reap them — that shortfall is what
+    the user meets as "the printer is on but Kiln can't reach it".
+
+    Best-effort by construction: it runs on the way out, so a failure here
+    must never be what stops the process from exiting.
+    """
+    adapters: list = []
+    if _adapter is not None:
+        adapters.append(_adapter)
+    try:
+        adapters.extend(_get_registry().list_all().values())
+    except Exception as exc:
+        logger.debug("shutdown: printer registry unavailable: %s", exc)
+    seen: set[int] = set()
+    for adapter in adapters:
+        # config.yaml registers an alias per printer ("default"), so the same
+        # adapter arrives more than once; disconnect each object once.
+        if id(adapter) in seen:
+            continue
+        seen.add(id(adapter))
+        try:
+            adapter.disconnect()
+        except Exception as exc:
+            logger.debug("shutdown: releasing %s failed: %s", adapter, exc)
+
+
 def _graceful_shutdown(
     hard_exit=os._exit, deadline_s: float = _SHUTDOWN_DEADLINE_S
 ) -> None:
@@ -13858,6 +13890,7 @@ def _graceful_shutdown(
         lambda: _get_heater_watchdog().stop(),
         lambda: _get_stream_proxy().stop(),
         lambda: _get_cloud_sync() is not None and _get_cloud_sync().stop(),
+        _release_printer_connections,
     )
     try:
         for stop in stops:
@@ -14145,6 +14178,7 @@ def _start() -> None:
                 logger.debug("Failed to stop watcher %s during atexit: %s", wid, exc)
 
     atexit.register(_stop_all_watchers)
+    atexit.register(_release_printer_connections)
 
     # One-line identity banner on stderr.  MCP owns stdout (JSON-RPC);
     # stderr is free.  Silent startup is a bug: a paid user whose CLI

@@ -819,6 +819,7 @@ The common ones:
 | `KILN_PRINTER_ACCESS_CODE` | Bambu access code |
 | `KILN_SLICER_PATH` | Explicit path to slicer binary |
 | `KILN_BAMBU_TLS_MODE` | Bambu TLS validation mode: `pin` (default), `ca`, or `insecure` |
+| `KILN_BAMBU_IDLE_DISCONNECT_S` / `KILN_ELEGOO_IDLE_DISCONNECT_S` | Seconds idle before the printer's connection slot is released (default `120`, `0` disables). These printers allow only a few clients at once |
 | `KILN_NO_UPDATE_CHECK` | Disable the version-update check |
 | `KILN_SKIP_PREVIEW_GATE` | Advanced-user bypass for preview confirmation; logged when used |
 | `KILN_MMF_API_KEY` | MyMiniFactory API key |

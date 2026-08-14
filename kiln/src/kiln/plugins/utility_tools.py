@@ -362,6 +362,18 @@ class _UtilityToolsPlugin:
                 _logger.debug("Serve-sibling check failed: %s", exc)
                 health_data["serve_processes"] = {"count": None, "warning": None}
 
+            # And whether those servers are using up the printer's connection
+            # slots — the same pile-up, measured where it actually bites.
+            try:
+                from kiln.serve_siblings import printer_slot_report
+
+                health_data["printer_connections"] = printer_slot_report()
+            except Exception as exc:
+                _logger.debug("Printer-slot check failed: %s", exc)
+                health_data["printer_connections"] = {
+                    "checked": False, "hosts": [], "warning": None,
+                }
+
             try:
                 from kiln.emboss_generator import (
                     _OPENSCAD_MIN_VERSION_YEAR,
@@ -475,6 +487,20 @@ class _UtilityToolsPlugin:
             except Exception:  # noqa: BLE001
                 serve_processes = {"count": None, "warning": None}
 
+            # Printer connection slots — whether this machine's own servers
+            # are using them up.  Reported here and not only in `kiln doctor`
+            # because an agent meets this as "the printer is unreachable" and
+            # has no other way to tell that from a powered-off machine; the
+            # terminal check is the door the user knocks on deliberately, this
+            # is the one they arrive at by accident.  Scans only when a
+            # slot-rationing printer is configured.
+            try:
+                from kiln.serve_siblings import printer_slot_report
+
+                printer_connections = printer_slot_report()
+            except Exception:  # noqa: BLE001
+                printer_connections = {"checked": False, "hosts": [], "warning": None}
+
             return {
                 "success": True,
                 "version": kiln.__version__,
@@ -488,6 +514,7 @@ class _UtilityToolsPlugin:
                 "modules": modules,
                 "safety_profile": safety_profile_info,
                 "serve_processes": serve_processes,
+                "printer_connections": printer_connections,
                 "healthy": True,
             }
 
@@ -639,10 +666,37 @@ class _UtilityToolsPlugin:
             # adds nothing to onboarding.
             _serve_pileup = None
             try:
-                from kiln.serve_siblings import check_serve_siblings
+                from kiln.serve_siblings import (
+                    check_serve_siblings,
+                    printer_slot_report,
+                )
 
                 _sibling_report = check_serve_siblings()
-                if _sibling_report.get("warning"):
+                # Slots first: a pile-up that is actively holding the printer
+                # hostage is a different message from one that is only using
+                # memory, and it can be true before the process count crosses
+                # its own warning threshold — a Bambu runs out of connections
+                # long before a laptop runs out of RAM.
+                _slot_report = printer_slot_report()
+                if _slot_report.get("warning"):
+                    _serve_pileup = {
+                        **_sibling_report,
+                        "printer_connections": _slot_report,
+                        "action": (
+                            "Tell the user now, before trying the printer "
+                            "again: leftover Kiln servers are holding this "
+                            "printer's connection slots, which is why it may "
+                            "time out or look offline while being powered on "
+                            "and on the network. Offer trim_serve_processes "
+                            "(ask how many agent sessions they have open and "
+                            "pass that as open_sessions; never ask for a PID). "
+                            "Do NOT suggest power-cycling the printer, and do "
+                            "not blame Bambu Studio or the Handy app — this is "
+                            "Kiln's own doing. No running print is at risk; the "
+                            "tool refuses while anything is printing."
+                        ),
+                    }
+                elif _sibling_report.get("warning"):
                     _serve_pileup = {
                         **_sibling_report,
                         "action": (
