@@ -766,6 +766,45 @@ class TestTemp:
         assert result.exit_code == 0
         mock_adapter.set_bed_temp.assert_called_once_with(60.0)
 
+    def test_ceiling_comes_from_the_printer_not_a_hardcoded_300(
+        self, runner, mock_adapter, config_file, monkeypatch
+    ):
+        """A PTFE-lined Ender 3 must refuse 300°C, which the old CLI allowed.
+
+        The limit used to be a literal `300` typed into this command while
+        set_temperature resolved the machine's real ceiling over MCP.  For an
+        Ender 3 that ceiling is 250, clamped to 240 for a PTFE-lined hotend —
+        so the CLI would drive it 60°C past safe.  Pinning the REFUSAL rather
+        than the number: a future profile change should move the message, not
+        reopen the hazard.
+        """
+        import kiln.server as _srv
+
+        monkeypatch.setattr(_srv, "_get_temp_limits", lambda *a, **k: (240.0, 110.0))
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3:
+            result = runner.invoke(cli, ["temp", "--tool", "300", "--json"])
+        assert result.exit_code != 0
+        assert "240" in result.output
+        mock_adapter.set_tool_temp.assert_not_called()
+
+    def test_ceiling_allows_what_a_high_temp_machine_is_rated_for(
+        self, runner, mock_adapter, config_file, monkeypatch
+    ):
+        """The same copy refused 350°C on machines rated to 500.
+
+        The false-refusal direction is cheaper than the false-permit, but it
+        was still wrong, and it is the half a factory-class printer meets.
+        """
+        import kiln.server as _srv
+
+        monkeypatch.setattr(_srv, "_get_temp_limits", lambda *a, **k: (500.0, 300.0))
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3:
+            result = runner.invoke(cli, ["temp", "--tool", "350", "--json"])
+        assert result.exit_code == 0
+        mock_adapter.set_tool_temp.assert_called_once_with(350.0)
+
 
 # ---------------------------------------------------------------------------
 # gcode

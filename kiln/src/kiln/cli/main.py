@@ -3132,9 +3132,16 @@ def emergency_clear_cmd(
 @cli.command()
 @click.option("--tool", "tool_temp", type=float, default=None, help="Set hotend temperature (°C).")
 @click.option("--bed", "bed_temp", type=float, default=None, help="Set bed temperature (°C).")
+@click.option("--printer", "printer_name", default=None, help="Target printer name (default: active printer).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def temp(ctx: click.Context, tool_temp: float | None, bed_temp: float | None, json_mode: bool) -> None:
+def temp(
+    ctx: click.Context,
+    tool_temp: float | None,
+    bed_temp: float | None,
+    printer_name: str | None,
+    json_mode: bool,
+) -> None:
     """Get or set printer temperatures.
 
     With no flags, shows current temperatures.  Pass --tool and/or --bed to
@@ -3154,12 +3161,25 @@ def temp(ctx: click.Context, tool_temp: float | None, bed_temp: float | None, js
             click.echo(format_response("success", data=data, json_mode=json_mode))
             return
 
+        # The ceilings come from the machine's own safety profile — the same
+        # resolver set_temperature uses over MCP — not from a pair of numbers
+        # typed here.  Hardcoding 300/130 was wrong in BOTH directions: it let
+        # an Ender 3 (250°C profile) be driven to 300, which is the exact
+        # unidentified-hotend hazard server.py records fixing on 2026-07-20 on
+        # its own path, and it refused a legitimate 350°C on the machines rated
+        # for it.  A false "safe" is the error direction that damages hardware,
+        # so the copy had to go rather than be corrected to a better constant.
+        from kiln.server import _get_temp_limits
+
+        max_tool, max_bed = _get_temp_limits(printer_name)
+
         results: dict[str, Any] = {}
         if tool_temp is not None:
-            if tool_temp < 0 or tool_temp > 300:
+            if tool_temp < 0 or tool_temp > max_tool:
                 click.echo(
                     format_error(
-                        f"Hotend temperature {tool_temp}°C out of safe range (0-300°C).",
+                        f"Hotend temperature {tool_temp}°C out of safe range "
+                        f"(0-{max_tool:g}°C for this printer).",
                         json_mode=json_mode,
                     )
                 )
@@ -3167,10 +3187,11 @@ def temp(ctx: click.Context, tool_temp: float | None, bed_temp: float | None, js
             adapter.set_tool_temp(tool_temp)
             results["tool_target"] = tool_temp
         if bed_temp is not None:
-            if bed_temp < 0 or bed_temp > 130:
+            if bed_temp < 0 or bed_temp > max_bed:
                 click.echo(
                     format_error(
-                        f"Bed temperature {bed_temp}°C out of safe range (0-130°C).",
+                        f"Bed temperature {bed_temp}°C out of safe range "
+                        f"(0-{max_bed:g}°C for this printer).",
                         json_mode=json_mode,
                     )
                 )
@@ -3196,6 +3217,109 @@ def temp(ctx: click.Context, tool_temp: float | None, bed_temp: float | None, js
                 json_mode=json_mode,
             )
         )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# fan / light / emergency-trip
+#
+# The three hardware controls that existed only over MCP.  They matter from a
+# terminal for the same reason pause and cancel do: when `kiln serve` is wedged
+# — common enough that serve_siblings.py exists to clean up after it — the
+# operator still has a printer in front of them.  Each delegates to the server
+# tool rather than the adapter, so the terms gate, the printer resolution and
+# the refusal shapes stay identical across both doors.
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--node", default="part", help="Fan node (part, aux, chamber).")
+@click.option("--percent", type=int, default=100, help="Fan speed, 0-100.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def fan(node: str, percent: int, json_mode: bool) -> None:
+    """Set a printer fan's speed."""
+    if percent < 0 or percent > 100:
+        click.echo(
+            format_error(
+                f"Fan speed {percent}% out of range (0-100).",
+                code="INVALID_ARGS",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    try:
+        from kiln.server import set_fan as _set_fan
+
+        result = _set_fan(node=node, percent=percent)
+        if not result.get("success", False):
+            click.echo(format_error(result.get("error", "Failed to set fan."), json_mode=json_mode))
+            sys.exit(1)
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to set fan: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--node", default="chamber_light", help="Light node (chamber_light, work_light).")
+@click.option("--mode", default="on", help="on, off, or flashing where the machine supports it.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def light(node: str, mode: str, json_mode: bool) -> None:
+    """Turn a printer light on or off."""
+    try:
+        from kiln.server import set_printer_light as _set_light
+
+        result = _set_light(node=node, mode=mode)
+        if not result.get("success", False):
+            click.echo(format_error(result.get("error", "Failed to set light."), json_mode=json_mode))
+            sys.exit(1)
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to set printer light: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.command("emergency-trip")
+@click.argument("printer_name")
+@click.option("--input", "input_name", default="external_button", help="Which input tripped.")
+@click.option("--token", default=None, help="Shared secret, when the input is configured to require one.")
+@click.option("--note", default=None, help="Optional operator note for the audit trail.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def emergency_trip_cmd(
+    printer_name: str,
+    input_name: str,
+    token: str | None,
+    note: str | None,
+    json_mode: bool,
+) -> None:
+    """Report a hardware emergency input (e.g. a physical button) as tripped."""
+    try:
+        from kiln.server import emergency_trip_input as _trip
+
+        result = _trip(
+            printer_name=printer_name,
+            input_name=input_name,
+            token=token,
+            note=note,
+        )
+        if not result.get("success", False):
+            click.echo(
+                format_error(
+                    result.get("error", "Failed to record emergency trip."),
+                    code=result.get("code"),
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to record emergency trip: {exc}", json_mode=json_mode))
         sys.exit(1)
 
 
