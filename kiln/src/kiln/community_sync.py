@@ -122,6 +122,34 @@ def network_sends_suppressed() -> bool:
         return any(os.environ.get(v) for v in ("CI", "PYTEST_CURRENT_TEST"))
 
 
+#: Fields the corpus may not have a column for yet.  A Kiln release can
+#: reach users before the cloud migration that gives their contributions
+#: somewhere to land, and PostgREST rejects the WHOLE insert over one
+#: unknown column — so these are the fields worth dropping to save the row
+#: around them.  Named as a set rather than checked one by one: the retry
+#: below used to hardcode ``geometric_signature_v2``, which meant the next
+#: optional field to ship would have needed its own copy of the same
+#: rescue, and would have been shipped without one.
+_OPTIONAL_WIRE_FIELDS = ("geometric_signature_v2", "print_error")
+
+
+def _fields_the_server_refused(
+    error_body: str, body: dict[str, Any]
+) -> list[str]:
+    """Which optional fields a rejection actually named.
+
+    PostgREST says which column it could not find ("Column 'print_error'
+    of relation 'community_prints' does not exist"), so a server missing
+    ONE new column does not cost us the others.  When the message names
+    nothing we recognise, every optional field goes — losing the row
+    entirely is the worse trade, and that is the case this whole path
+    exists to avoid.
+    """
+    present = [f for f in _OPTIONAL_WIRE_FIELDS if f in body]
+    named = [f for f in present if f in (error_body or "")]
+    return named or present
+
+
 def sync_community_print(record: dict[str, Any], send_id: str | None = None) -> bool:
     """Send a single community print record to Supabase.
 
@@ -160,11 +188,18 @@ def sync_community_print(record: dict[str, Any], send_id: str | None = None) -> 
             "failure_mode": record.get("failure_mode"),
             "print_time_seconds": record.get("print_time_seconds"),
         }
-        # Shipped only when present — like send_id, the field may only reach
-        # the wire once the cloud column exists (PostgREST rejects the whole
-        # insert on an unknown column, which would lose the outcome).
+        # Shipped only when present — like send_id, these fields may only
+        # reach the wire once the cloud column exists (PostgREST rejects the
+        # whole insert on an unknown column, which would lose the outcome).
+        # The retry below is what makes that survivable either way.
         if record.get("geometric_signature_v2"):
             body["geometric_signature_v2"] = record["geometric_signature_v2"]
+        # The raw firmware code the print tripped.  Evidence, not a verdict:
+        # ``failure_mode`` above says what Kiln concluded, this says what the
+        # machine actually reported, and only the second one can be compared
+        # across models and firmware by anybody counting them later.
+        if record.get("print_error"):
+            body["print_error"] = record["print_error"]
         prefer = "return=minimal"
         if send_id:
             body["send_id"] = send_id
@@ -192,13 +227,24 @@ def sync_community_print(record: dict[str, Any], send_id: str | None = None) -> 
         try:
             status = _post(body)
         except urllib.error.HTTPError as exc:
-            # A schema-lagged server rejects the WHOLE insert over the one
+            # A schema-lagged server rejects the WHOLE insert over one
             # unknown field (400), and a column-scoped grant would refuse it
             # (403).  Losing the outcome over an optional column is the wrong
-            # trade either way: drop the field and send the row the old server
-            # understands.  A rejection with a real cause fails again below.
-            if exc.code in (400, 403) and "geometric_signature_v2" in body:
-                body.pop("geometric_signature_v2")
+            # trade either way: drop what the server could not take and send
+            # the row it does understand.  A rejection with a real cause
+            # fails again below.
+            try:
+                detail = exc.read().decode("utf-8", "replace")
+            except Exception:  # noqa: BLE001 — body already consumed/closed
+                detail = ""
+            refused = (
+                _fields_the_server_refused(detail, body)
+                if exc.code in (400, 403)
+                else []
+            )
+            if refused:
+                for field in refused:
+                    body.pop(field, None)
                 status = _post(body)
             else:
                 raise

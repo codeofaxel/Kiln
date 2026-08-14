@@ -784,6 +784,7 @@ def reconcile_pending_outcomes(
                         printer_name=printer_name,
                         material=row.get("material_type"),
                         failure_mode=failure_mode,
+                        print_error=row_error or None,
                     )
                 except Exception:
                     _logger.debug(
