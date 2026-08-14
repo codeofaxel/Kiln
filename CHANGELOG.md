@@ -7,6 +7,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Stop the printer you mean, by name.** Cancel, pause and resume now take a
+  printer name, so an assistant minding two machines can stop the right one —
+  before this, those commands only ever reached your default printer, and the
+  only way to stop a second machine remotely was the hard emergency stop.
+  Naming no printer still means your default, so nothing changes if you have
+  one machine. Each machine keeps its own books too: a paused printer holds
+  its own temperatures, and a cancelled print is remembered as cancelled on
+  the machine it actually happened on.
+
 - **Clear a stuck printer error without walking over to it.** `clear_printer_error`
   works on Klipper/Moonraker, OctoPrint, Duet, Creality and USB.
 
@@ -183,6 +192,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **In confirm mode, the action you approve is exactly the action that runs.**
+  Confirmed commands were replaying with some of their settings quietly reset
+  to defaults: an emergency stop confirmed for one printer went to all of
+  them, a cancel meant to keep the bed warm let it cool, and clearing an
+  emergency stop failed outright every time. All of it now replays exactly as
+  shown, and a test holds that to every confirmable command, including future
+  ones.
 
 - **Cancelled prints are recorded as cancelled, not successful.** Including the
   ones Kiln stops itself after spotting a problem.
