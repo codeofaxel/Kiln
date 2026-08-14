@@ -25,6 +25,8 @@ inherits this behaviour rather than the silence.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import sqlite3
 import sys
 
@@ -189,6 +191,67 @@ class TestAStartupCrashLeavesAnExplanation:
 
         path = startup_failure.record(RuntimeError("something nobody predicted"))
         assert path is not None and path.is_file()
+
+
+class TestALockedDatabaseNamesItsHolder:
+    """"database is locked" must not be solved by guesswork with lsof.
+
+    Measured 2026-08-14: an agent cleared this lock by reading raw PIDs
+    from lsof and killing the two that looked stale.  One was the user's
+    BRIDGE, so their printer vanished from the web app for the rest of
+    the night.  Kiln writes the bridge's PID to ~/.kiln/bridge.state and
+    could have said so.
+    """
+
+    @pytest.fixture
+    def locked_error(self) -> Exception:
+        import sqlite3
+
+        return sqlite3.OperationalError("database is locked")
+
+    def test_it_is_recognised_rather_than_falling_through(
+        self, kiln_home, locked_error
+    ):
+        d = startup_failure.explain(locked_error)
+        assert d.kind == "database_locked", (
+            "a locked database fell through to the generic diagnosis"
+        )
+        assert "kiln trim" in " ".join(d.what_to_do)
+
+    def test_it_warns_against_killing_by_pid(self, kiln_home, locked_error):
+        steps = " ".join(startup_failure.explain(locked_error).what_to_do).lower()
+        assert "lsof" in steps and "bridge" in steps, (
+            "nothing warned against the kill that actually happened"
+        )
+
+    def test_a_live_bridge_is_named_by_pid(self, kiln_home, locked_error):
+        """The one holder a user must not kill is the one Kiln can name."""
+        (kiln_home / "bridge.state").write_text(
+            json.dumps({"pid": os.getpid(), "connected": True}), encoding="utf-8",
+        )
+        text = startup_failure.explain(locked_error).what_happened
+        assert f"PID {os.getpid()}" in text
+        assert "bridge" in text.lower()
+
+    def test_a_dead_or_missing_bridge_is_not_guessed_at(
+        self, kiln_home, locked_error
+    ):
+        """Silence beats a guess: naming a PID implies it is safe to judge."""
+        no_state = startup_failure.explain(locked_error).what_happened
+        assert "PID" not in no_state
+
+        # A recorded PID that is no longer running is not the holder.
+        (kiln_home / "bridge.state").write_text(
+            json.dumps({"pid": 999999999, "connected": True}), encoding="utf-8",
+        )
+        assert "PID" not in startup_failure.explain(locked_error).what_happened
+
+    def test_unreadable_bridge_state_never_breaks_the_diagnosis(
+        self, kiln_home, locked_error
+    ):
+        (kiln_home / "bridge.state").write_text("{not json", encoding="utf-8")
+        d = startup_failure.explain(locked_error)
+        assert d.kind == "database_locked"
 
 
 class TestTheGuardAroundStartup:
