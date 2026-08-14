@@ -601,6 +601,30 @@ def test_the_heater_watchdog_is_not_told_about_a_siblings_heaters(monkeypatch):
     assert notified == ["set"]
 
 
+def test_a_confirmed_upload_refuses_if_the_default_moved(monkeypatch, gcode):
+    """The user approved a machine by name, not "whatever is default now".
+
+    An unaimed token resolves the default printer twice — once when the
+    token is issued and once when it is confirmed — and a registration or
+    config edit in between moves it.  Refusing beats uploading to a
+    machine nobody was asked about.
+    """
+    garage, workshop = _two_printers(monkeypatch)
+    monkeypatch.setattr(server, "_CONFIRM_UPLOAD", True)
+
+    pending = server.upload_file(gcode)
+    assert pending["printer_name"] == "garage"
+
+    # The default moves out from under the pending token.
+    monkeypatch.setattr(server, "_get_adapter", lambda: workshop)
+
+    out = server.upload_file_confirm(pending["token"])
+
+    assert out["success"] is False
+    assert out["error"]["code"] == "PRINTER_CHANGED"
+    assert (garage.uploaded, workshop.uploaded) == ([], [])
+
+
 def test_a_token_issued_before_aiming_still_confirms(monkeypatch, gcode):
     """Tokens outlive a restart-free upgrade; a bare path must still work."""
     garage, workshop = _two_printers(monkeypatch)

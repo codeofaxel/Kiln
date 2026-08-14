@@ -193,12 +193,24 @@ def resolve_printer_model_for(printer_name: str | None) -> str | None:
     model = str(entry.get("printer_model") or "").strip() if isinstance(entry, dict) else ""
     if model:
         return model
-    logger.warning(
-        "No `printer_model` set for printer %r in %s.  Bed-fit and "
-        "temperature checks for prints aimed at it will be skipped.  Add "
-        "`printer_model: <model>` under `printers.%s` in the config file.",
-        printer_name, _CONFIG_PATH, printer_name,
-    )
+    if printer_name in printers:
+        # A printer the user configured, with the model left out: the gates
+        # really will skip for it, so say so at a level they will see.
+        logger.warning(
+            "No `printer_model` set for printer %r in %s.  Bed-fit and "
+            "temperature checks for prints aimed at it will be skipped.  Add "
+            "`printer_model: <model>` under `printers.%s` in the config file.",
+            printer_name, _CONFIG_PATH, printer_name,
+        )
+    else:
+        # A name config.yaml has never heard of — a registry alias, or a
+        # machine registered at runtime.  Callers have their own fallbacks
+        # from here, so warning that checks "will be skipped" would be
+        # telling the user about a consequence that may not happen.
+        logger.debug(
+            "config.yaml has no entry for printer %r; no model to resolve.",
+            printer_name,
+        )
     return None
 
 

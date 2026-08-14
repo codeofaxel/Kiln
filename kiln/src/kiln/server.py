@@ -1720,6 +1720,62 @@ def _note_print_started(adapter: PrinterAdapter) -> None:
         logger.debug("Heater-watchdog start notification skipped: %s", exc)
 
 
+def _event_printer_name(event: Any) -> str | None:
+    """The machine an event is about, when the event says.
+
+    Publishers put it in ``data["printer_name"]`` and repeat it in
+    ``source`` as ``"<kind>:<name>"``.  Returns ``None`` when neither
+    carries one, which callers must read as "unknown", never as "the
+    default printer".
+    """
+    try:
+        name = (getattr(event, "data", None) or {}).get("printer_name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+        source = getattr(event, "source", "") or ""
+        if ":" in source:
+            tail = source.split(":", 1)[1].strip()
+            if tail:
+                return tail
+    except Exception as exc:  # noqa: BLE001 — an odd event is not an error here
+        logger.debug("Could not read a printer name off an event: %s", exc)
+    return None
+
+
+def _on_print_ended_event(event: Any) -> None:
+    """Retire one machine's print: its watchdog, and its heater timer.
+
+    Both halves used to ignore the event entirely.  ``_stop_print_watchdog()``
+    with no name resolves to the DEFAULT printer, so a failure reported on
+    the second machine tore down the FIRST machine's watchdog and left the
+    failed one running — the live print silently loses its Layer 5 cover.
+    ``notify_print_ended()`` was worse in the same way: it told the heater
+    watchdog, which watches the default printer, that the print was over, and
+    its idle tick sets hotend and bed to 0 some minutes later.  A print
+    failing on one machine could therefore cool another machine mid-print.
+
+    ``kiln.print_recovery`` publishes PRINT_FAILED with the printer's name in
+    it, so this was reachable without anything new being wired.
+
+    An event that names no machine keeps the old default-printer behaviour;
+    a name the registry does not know is skipped rather than guessed, which
+    costs a late cooldown instead of a cold bed mid-print.
+    """
+    name = _event_printer_name(event)
+    with contextlib.suppress(Exception):
+        _stop_print_watchdog(name)
+    try:
+        adapter = _get_registry().get(name) if name else _get_adapter()
+    except Exception as exc:  # noqa: BLE001 — unknown machine: say nothing
+        logger.debug("Print-ended event named an unknown printer (%s): %s", name, exc)
+        return
+    try:
+        if _is_heater_watchdog_machine(adapter):
+            _get_heater_watchdog().notify_print_ended()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Heater-watchdog end notification skipped: %s", exc)
+
+
 def _unknown_printer_error(printer_name: str | None, verb: str) -> dict:
     """Error dict for a control verb aimed at a printer Kiln doesn't know."""
     try:
@@ -1861,10 +1917,13 @@ class _ToolRateLimiter:
 
 _tool_limiter = _ToolRateLimiter()
 
-# Pending upload confirmations, token -> (file_path, printer_name-as-passed).
+# Pending upload confirmations, token ->
+# (file_path, printer_name-as-passed, resolved-target-at-issue).
 # Only populated when KILN_CONFIRM_UPLOAD is enabled.  The target rides with
-# the token because upload_file_confirm is handed nothing else to aim by.
-_pending_uploads: dict[str, tuple[str, str | None]] = {}
+# the token because upload_file_confirm is handed nothing else to aim by, and
+# the resolved name rides along so the confirmed upload can prove it is going
+# to the machine the user was actually shown.
+_pending_uploads: dict[str, tuple[str, str | None, str]] = {}
 
 # Rate limits: {tool_name: (min_interval_ms, max_per_minute)}.
 # Read-only tools have no limits.  Physically-dangerous tools get cooldowns.
@@ -2413,13 +2472,13 @@ def _get_event_bus() -> EventBus:
         # default printer's watchdog about a print on any machine, which is
         # exactly what routing every other caller through that helper fixed.
         _event_bus.subscribe(EventType.PRINT_STARTED, lambda _e: _get_heater_watchdog().notify_print_started())
-        _event_bus.subscribe(EventType.PRINT_COMPLETED, lambda _e: _get_heater_watchdog().notify_print_ended())
-        _event_bus.subscribe(EventType.PRINT_FAILED, lambda _e: _get_heater_watchdog().notify_print_ended())
-        _event_bus.subscribe(EventType.PRINT_CANCELLED, lambda _e: _get_heater_watchdog().notify_print_ended())
-        # Layer 5: tear down the PrintWatchdog when a print ends, by any path.
-        _event_bus.subscribe(EventType.PRINT_COMPLETED, lambda _e: _stop_print_watchdog())
-        _event_bus.subscribe(EventType.PRINT_FAILED, lambda _e: _stop_print_watchdog())
-        _event_bus.subscribe(EventType.PRINT_CANCELLED, lambda _e: _stop_print_watchdog())
+        # Layer 5 teardown + the heater timer, both keyed on the machine the
+        # event names.  One handler because they are one question — which
+        # printer stopped printing — and answering it twice is how the two
+        # came to disagree.
+        _event_bus.subscribe(EventType.PRINT_COMPLETED, _on_print_ended_event)
+        _event_bus.subscribe(EventType.PRINT_FAILED, _on_print_ended_event)
+        _event_bus.subscribe(EventType.PRINT_CANCELLED, _on_print_ended_event)
         # Persistence and billing subscribers (previously wired at import time).
         _event_bus.subscribe(None, _persist_event)
         _event_bus.subscribe(EventType.JOB_COMPLETED, _billing_hook)
@@ -4414,7 +4473,7 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
             # only the token to go on, so a token that remembers just the
             # file would send a confirmed, aimed upload to the default
             # printer instead of the one the user was asked about.
-            _pending_uploads[token] = (file_path, printer_name)
+            _pending_uploads[token] = (file_path, printer_name, target_name)
             summary: dict[str, Any] = {
                 "confirmation_required": True,
                 "token": token,
@@ -4492,8 +4551,10 @@ def upload_file_confirm(token: str) -> dict:
             code="INVALID_TOKEN",
         )
     # Tokens issued before this tool could be aimed stored a bare path.
+    approved_target: str | None = None
     if isinstance(pending, tuple):
-        file_path, pending_printer = pending
+        file_path, pending_printer = pending[0], pending[1]
+        approved_target = pending[2] if len(pending) > 2 else None
     else:
         file_path, pending_printer = pending, None
     try:
@@ -4501,6 +4562,20 @@ def upload_file_confirm(token: str) -> dict:
             adapter, target_name = _resolve_control_target(pending_printer)
         except PrinterNotFoundError:
             return _unknown_printer_error(pending_printer, "upload to")
+        # The confirmation named a machine and the user approved THAT one.
+        # An unaimed token resolves the default printer twice — once when
+        # the token was issued and once here — and the default can move
+        # between the two (a registration, a config edit).  Refusing beats
+        # uploading to a machine nobody was asked about.
+        if approved_target is not None and target_name != approved_target:
+            return _error_dict(
+                f"This upload was confirmed for {approved_target!r}, but that "
+                f"name now resolves to {target_name!r}. The default printer "
+                "changed after the token was issued. Call upload_file() again "
+                "to confirm against the printer you mean.",
+                code="PRINTER_CHANGED",
+                retryable=False,
+            )
         result = adapter.upload_file(file_path)
         resp = result.to_dict()
         resp["printer_name"] = target_name
@@ -7059,7 +7134,7 @@ def preflight_check(
     """
     try:
         try:
-            adapter, _pf_target = _resolve_control_target(printer_name)
+            adapter, pf_target = _resolve_control_target(printer_name)
         except PrinterNotFoundError:
             return _unknown_printer_error(printer_name, "run pre-flight checks on")
         # Unaimed, the frozen global is what this check has always read.
@@ -7577,6 +7652,9 @@ def preflight_check(
 
         result: dict[str, Any] = {
             "success": True,
+            # A readiness verdict is about one machine; say which, so a
+            # caller on a multi-printer bench can tell whose answer this is.
+            "printer_name": pf_target,
             "ready": ready,
             "checks": checks,
             "errors": errors,

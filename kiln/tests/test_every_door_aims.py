@@ -226,6 +226,129 @@ def test_print_plate_object_aims_both_of_its_steps(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# A print ending on one machine is not news about another
+# ---------------------------------------------------------------------------
+
+
+def _ended_event(printer_name: str | None):
+    """A PRINT_FAILED event shaped like the one kiln.print_recovery sends.
+
+    With no name it carries neither ``data["printer_name"]`` nor a
+    ``"<kind>:<name>"`` source — the "names nobody" case, which has to keep
+    meaning the default printer.
+    """
+    from kiln.events import Event, EventType
+
+    if printer_name is None:
+        return Event(type=EventType.PRINT_FAILED)
+    return Event(
+        type=EventType.PRINT_FAILED,
+        data={"printer_name": printer_name},
+        source=f"recovery:{printer_name}",
+    )
+
+
+def test_a_failure_on_one_machine_leaves_the_others_watchdog_alone(monkeypatch):
+    """``kiln.print_recovery`` publishes PRINT_FAILED with a printer in it.
+
+    The handler used to drop the event and tear down the DEFAULT printer's
+    watchdog, so a failure on the second machine silently removed Layer 5
+    cover from a live print on the first — and left the failed machine's
+    own watchdog running.
+    """
+    garage, workshop = _two_printers(monkeypatch)
+    stopped: list[str | None] = []
+    monkeypatch.setattr(server, "_stop_print_watchdog", lambda name=None: stopped.append(name))
+    monkeypatch.setattr(server, "_get_heater_watchdog", lambda: _NullWatchdog)
+
+    server._on_print_ended_event(_ended_event("workshop"))
+
+    assert stopped == ["workshop"]
+
+
+def test_a_failure_elsewhere_does_not_start_the_defaults_cooldown(monkeypatch):
+    """The dangerous direction: the heater watchdog's idle tick sets hotend
+    and bed to 0.  Told a print ended when another machine's did, it would
+    start that timer against a default printer still printing."""
+    garage, workshop = _two_printers(monkeypatch)
+    ended: list[str] = []
+
+    class _Watchdog:
+        @staticmethod
+        def notify_print_ended() -> None:
+            ended.append("ended")
+
+    monkeypatch.setattr(server, "_stop_print_watchdog", lambda name=None: None)
+    monkeypatch.setattr(server, "_get_heater_watchdog", lambda: _Watchdog)
+
+    server._on_print_ended_event(_ended_event("workshop"))
+    assert ended == []
+
+    # The default printer's own ending is still its news.
+    server._on_print_ended_event(_ended_event("garage"))
+    assert ended == ["ended"]
+
+
+def test_an_event_naming_nobody_keeps_the_old_behaviour(monkeypatch):
+    """An event with no printer in it is what every publisher sent before
+    this handler could read one; it must still mean the default printer."""
+    garage, workshop = _two_printers(monkeypatch)
+    ended: list[str] = []
+
+    class _Watchdog:
+        @staticmethod
+        def notify_print_ended() -> None:
+            ended.append("ended")
+
+    monkeypatch.setattr(server, "_stop_print_watchdog", lambda name=None: None)
+    monkeypatch.setattr(server, "_get_heater_watchdog", lambda: _Watchdog)
+
+    server._on_print_ended_event(_ended_event(None))
+
+    assert ended == ["ended"]
+
+
+def test_an_unknown_machine_is_skipped_not_guessed(monkeypatch):
+    """Skipping costs a late cooldown; guessing costs a cold bed mid-print."""
+    garage, workshop = _two_printers(monkeypatch)
+    ended: list[str] = []
+
+    class _Watchdog:
+        @staticmethod
+        def notify_print_ended() -> None:
+            ended.append("ended")
+
+    monkeypatch.setattr(server, "_stop_print_watchdog", lambda name=None: None)
+    monkeypatch.setattr(server, "_get_heater_watchdog", lambda: _Watchdog)
+
+    server._on_print_ended_event(_ended_event("a-printer-that-never-existed"))
+
+    assert ended == []
+
+
+def test_the_printer_name_is_read_from_either_place():
+    from kiln.events import Event, EventType
+
+    named = Event(type=EventType.PRINT_FAILED, data={"printer_name": "workshop"})
+    assert server._event_printer_name(named) == "workshop"
+    # Publishers repeat it in source; fall back to that.
+    sourced = Event(type=EventType.PRINT_FAILED, source="recovery:garage")
+    assert server._event_printer_name(sourced) == "garage"
+    # Nothing to read is "unknown", never "the default".
+    assert server._event_printer_name(Event(type=EventType.PRINT_FAILED)) is None
+
+
+class _NullWatchdog:
+    @staticmethod
+    def notify_print_ended() -> None:
+        pass
+
+    @staticmethod
+    def notify_print_started() -> None:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
