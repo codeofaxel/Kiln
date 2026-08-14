@@ -2495,58 +2495,89 @@ class _PauseKeepAlive:
             return entry is not None and entry["thread"].is_alive()
 
     def _loop(self, key: str, stop_event: threading.Event) -> None:
-        """Re-assert targets until stopped or the printer leaves PAUSED."""
-        # Wait first — the immediate post-pause state already has the
-        # targets set by the slicer/firmware; we only need to fight the
-        # cooldown that kicks in a few minutes later.
+        """Re-assert targets until stopped or the printer leaves PAUSED.
+
+        ACT FIRST, then wait. This loop used to open with
+        ``stop_event.wait(INTERVAL)``, on the stated premise that the
+        firmware keeps the slicer's targets for the first few minutes and
+        cooldown "kicks in later" — so nothing was asserted until t=120s.
+
+        Measured on a real A1 on 2026-08-14, that premise is false. The
+        printer set a 90°C standby target in the SAME telemetry sample as the
+        pause — second one, not minute three — and the hotend fell 220°C to
+        139°C in the 114 seconds before the user resumed. The keep-alive
+        thread was alive for that entire pause and never asserted anything:
+        it was still inside its first ``wait`` when resume set the event, so
+        the loop body never ran once. Every pause shorter than the interval
+        got no protection at all, which is most of them.
+
+        The whole suite stayed green because every keep-alive test drives the
+        interval to ~0.01s, which makes an interval-shaped dead window
+        impossible to observe. The regression test for this pins the FIRST
+        assert against a LARGE interval instead.
+        """
+        if not self._reassert(key, stop_event):
+            return
         while not stop_event.wait(_PAUSE_KEEPALIVE_INTERVAL_S):
+            if not self._reassert(key, stop_event):
+                return
+
+    def _reassert(self, key: str, stop_event: threading.Event) -> bool:
+        """Push the captured targets once. ``False`` means stop looping.
+
+        Split out of :meth:`_loop` so the first assert and every later one are
+        the SAME code — a separate "do it once up front" branch would be a
+        second implementation of the only thing this class does, free to drift
+        from the one the tests exercise.
+        """
+        try:
+            from kiln.printers.base import PrinterStatus
+
+            with self._lock:
+                entry = self._entries.get(key)
+                # Replaced by a newer thread for the same machine, or
+                # stopped between the wait and the lock — either way
+                # this thread no longer speaks for the machine.
+                if entry is None or entry["stop_event"] is not stop_event:
+                    return False
+                adapter = entry["adapter"]
+                targets = dict(entry["targets"])
+
+            # Stop if the printer left PAUSED on its own (resume,
+            # cancel, error, or operator pressed buttons on the printer).
             try:
-                from kiln.printers.base import PrinterStatus
+                state = adapter.get_state()
+                if state.state != PrinterStatus.PAUSED:
+                    logger.debug(
+                        "Pause keep-alive: printer state is %s, not paused — exiting loop",
+                        state.state,
+                    )
+                    with self._lock:
+                        if self._entries.get(key) is entry:
+                            del self._entries[key]
+                    return False
+            except Exception as exc:
+                logger.debug("Pause keep-alive: state read failed (%s); continuing", exc)
 
-                with self._lock:
-                    entry = self._entries.get(key)
-                    # Replaced by a newer thread for the same machine, or
-                    # stopped between the wait and the lock — either way
-                    # this thread no longer speaks for the machine.
-                    if entry is None or entry["stop_event"] is not stop_event:
-                        return
-                    adapter = entry["adapter"]
-                    targets = dict(entry["targets"])
-
-                # Stop if the printer left PAUSED on its own (resume,
-                # cancel, error, or operator pressed buttons on the printer).
+            if targets.get("tool", 0) > 0:
                 try:
-                    state = adapter.get_state()
-                    if state.state != PrinterStatus.PAUSED:
-                        logger.debug(
-                            "Pause keep-alive: printer state is %s, not paused — exiting loop",
-                            state.state,
-                        )
-                        with self._lock:
-                            if self._entries.get(key) is entry:
-                                del self._entries[key]
-                        return
+                    adapter.set_tool_temp(targets["tool"])
                 except Exception as exc:
-                    logger.debug("Pause keep-alive: state read failed (%s); continuing", exc)
-
-                if targets.get("tool", 0) > 0:
-                    try:
-                        adapter.set_tool_temp(targets["tool"])
-                    except Exception as exc:
-                        logger.info(
-                            "Pause keep-alive: set_tool_temp(%s) failed: %s",
-                            targets["tool"], exc,
-                        )
-                if targets.get("bed", 0) > 0:
-                    try:
-                        adapter.set_bed_temp(targets["bed"])
-                    except Exception as exc:
-                        logger.info(
-                            "Pause keep-alive: set_bed_temp(%s) failed: %s",
-                            targets["bed"], exc,
-                        )
-            except Exception as exc:  # noqa: BLE001 — never let a daemon die silently
-                logger.warning("Pause keep-alive loop error (continuing): %s", exc)
+                    logger.info(
+                        "Pause keep-alive: set_tool_temp(%s) failed: %s",
+                        targets["tool"], exc,
+                    )
+            if targets.get("bed", 0) > 0:
+                try:
+                    adapter.set_bed_temp(targets["bed"])
+                except Exception as exc:
+                    logger.info(
+                        "Pause keep-alive: set_bed_temp(%s) failed: %s",
+                        targets["bed"], exc,
+                    )
+        except Exception as exc:  # noqa: BLE001 — never let a daemon die silently
+            logger.warning("Pause keep-alive loop error (continuing): %s", exc)
+        return True
 
 
 _pause_keepalive = _PauseKeepAlive()
@@ -6639,20 +6670,29 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
 
     Heater behaviour during pause varies by firmware:
 
-      - Bambu A1 / A1 mini: the firmware drops the **hotend** target
-        ~3-5 minutes into a pause regardless of slicer settings (bed
-        target survives).  An untreated 25-min pause cools the nozzle
-        from 220°C to ~90°C, which means the resume can't extrude
-        until you re-heat — and bed adhesion can fail in the meantime.
+      - Bambu A1 / A1 mini: the firmware sets a ~90°C hotend standby
+        target IMMEDIATELY on pause, regardless of slicer settings (the
+        bed target survives).  Measured 2026-08-14 on a real A1: the
+        target moved 220°C -> 90°C in the same telemetry sample as the
+        pause, and the nozzle fell to 139°C within 114 seconds — about
+        0.7°C per second.  This docstring previously said the drop came
+        "3-5 minutes into a pause", and the keep-alive was built to wait
+        two minutes before its first assert on the strength of that; the
+        measurement says the damage starts at once.  A resume onto a
+        cooled nozzle can't extrude until it re-heats — and bed adhesion
+        can fail in the meantime.
       - Bambu X1/P1 series: typically holds both targets, but a long
         idle can still trigger cooldown.
       - OctoPrint / Moonraker / Klipper: depends on firmware config;
         most hold targets across pause.
 
     To fight this, ``pause_print`` spawns a best-effort daemon thread
-    that re-asserts the pre-pause hotend + bed targets every 2 minutes
-    until the printer leaves the PAUSED state (resume, cancel, error,
-    or manual button press).  This is enabled by default.
+    that re-asserts the pre-pause hotend + bed targets immediately, and
+    then every 2 minutes until the printer leaves the PAUSED state
+    (resume, cancel, error, or manual button press).  This is enabled by
+    default.  The immediate assert is the part that matters on an A1:
+    without it, a pause shorter than the interval got no protection at
+    all, which is most pauses a person actually takes.
 
     Args:
         keep_temps: When ``True`` (default), capture the pre-pause tool

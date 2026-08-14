@@ -417,6 +417,38 @@ def test_a_pause_keeps_its_own_machine_warm_and_no_other(monkeypatch):
         server._pause_keepalive.stop(workshop)
 
 
+def test_the_keep_alive_asserts_immediately_not_one_interval_later(monkeypatch):
+    """The FIRST assert lands at once — pinned against a LARGE interval.
+
+    This is the one keep-alive property every other test in this file is
+    structurally unable to see. They all set the interval to ~0.01s, which
+    makes "when does the first assert happen?" unanswerable: at that cadence
+    every schedule looks immediate.
+
+    The loop used to open with ``stop_event.wait(INTERVAL)``, so nothing was
+    asserted until t=120s. Measured on a real A1 on 2026-08-14: paused at
+    01:40:39, resumed at 01:42:33 — 114 seconds, six seconds inside the dead
+    window. The thread was alive the whole time and never called
+    ``set_tool_temp`` once, while the firmware's own 90°C standby target pulled
+    the nozzle from 220°C to 139°C. Every pause shorter than the interval was
+    unprotected, which is most pauses a person takes.
+
+    So the interval here is deliberately LONGER than the test could ever wait.
+    If the first assert is ever scheduled rather than immediate, this fails.
+    """
+    monkeypatch.setattr(server, "_PAUSE_KEEPALIVE_INTERVAL_S", 3600.0)
+    _garage, workshop = _two_printers(monkeypatch, state=PrinterStatus.PAUSED)
+
+    server.pause_print(printer_name="workshop")
+    try:
+        assert _wait_for(lambda: len(workshop.tool_temps) >= 1), (
+            "keep-alive asserted no temperature within the wait — the first "
+            "re-assert is scheduled an interval away instead of happening now"
+        )
+    finally:
+        server._pause_keepalive.stop(workshop)
+
+
 def test_resume_stops_only_its_own_keep_alive(monkeypatch):
     """Two paused machines; resuming one must not un-warm the other."""
     garage, workshop = _two_printers(monkeypatch, state=PrinterStatus.PAUSED)
