@@ -14223,6 +14223,18 @@ def _start() -> None:
     except Exception:
         logger.debug("update nudge not installed", exc_info=True)
 
+    # The onboarding pointer, same surface and same reasoning: agents are
+    # told to call get_started() first and measurably skip it, and a
+    # session that skipped it cannot rediscover what it never saw.  One
+    # structured hint on the first result of a session that hasn't
+    # onboarded; self-suppressing the moment get_started is called.
+    try:
+        from kiln import onboarding_nudge
+
+        onboarding_nudge.install(mcp)
+    except Exception:
+        logger.debug("onboarding nudge not installed", exc_info=True)
+
 
 def main() -> None:
     """Run the Kiln MCP server.
