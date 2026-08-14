@@ -9514,6 +9514,42 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
     except Exception as exc:
         checks.append({"name": "serve_processes", "ok": True, "detail": f"check skipped: {exc}"})
 
+    # 4b. Printer connection slots — who on this machine is actually holding
+    # one.  Separate from the process count above because they answer
+    # different questions: a server that never touched the printer holds no
+    # slot, and a Bambu locks out the next caller once its few slots are
+    # taken.  Without this the symptom (a timeout) is indistinguishable from
+    # a powered-off printer, and the user power-cycles a healthy machine.
+    try:
+        from kiln.serve_siblings import printer_slot_report
+
+        _slots = printer_slot_report()
+        if not _slots["checked"]:
+            pass  # no slot-rationing printer configured, or no way to scan
+        elif _slots["warning"]:
+            _pids = ", ".join(
+                str(p) for r in _slots["hosts"] for p in r["pids"]
+            )
+            checks.append(
+                {
+                    "name": "printer_connections",
+                    "ok": False,
+                    "detail": f"{_slots['warning']} (PIDs {_pids})",
+                }
+            )
+        else:
+            _detail = ", ".join(
+                f"{r['total']} local connection(s) to {r['host']}"
+                for r in _slots["hosts"]
+            )
+            checks.append(
+                {"name": "printer_connections", "ok": True, "detail": _detail}
+            )
+    except Exception as exc:
+        checks.append(
+            {"name": "printer_connections", "ok": True, "detail": f"check skipped: {exc}"}
+        )
+
     # 5. Config / printers configured
     printer_cfg = None
     try:

@@ -8,7 +8,7 @@
 
 ### Overview
 
-Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 906 MCP capabilities and a <!-- KILN_CLI_COUNT --> 235-command CLI.
+Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 907 MCP capabilities and a <!-- KILN_CLI_COUNT --> 236-command CLI.
 
 **Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
@@ -207,7 +207,7 @@ You can still go from idea to object: design through the agent or the [web app](
 | `--json` | Output structured JSON (for agents/scripts) |
 | `--help` | Show command help |
 
-The CLI has <!-- KILN_CLI_COUNT --> 235 commands in total; this section documents the everyday core. Run `kiln --help` for the full command tree.
+The CLI has <!-- KILN_CLI_COUNT --> 236 commands in total; this section documents the everyday core. Run `kiln --help` for the full command tree.
 
 ### Commands
 
@@ -340,7 +340,7 @@ The MCP server starts via `kiln serve` or `python -m kiln serve`. The fastest se
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **<!-- KILN_MCP_TOOL_COUNT --> 899 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT --> 906 total MCP capabilities**. The everyday core is documented below by category; agents see the full, current catalog at connect time (`get_started` and `get_skill_manifest` return the complete map).
+Kiln exposes **<!-- KILN_MCP_TOOL_COUNT --> 900 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT --> 907 total MCP capabilities**. The everyday core is documented below by category; agents see the full, current catalog at connect time (`get_started` and `get_skill_manifest` return the complete map).
 
 Paid-tier tools are discoverable too: agents without a license receive a structured response naming the required tier, so they can tell you what's possible and where it lives ([pricing](https://kiln3d.com/pricing)).
 
@@ -819,6 +819,7 @@ The common ones:
 | `KILN_PRINTER_ACCESS_CODE` | Bambu access code |
 | `KILN_SLICER_PATH` | Explicit path to slicer binary |
 | `KILN_BAMBU_TLS_MODE` | Bambu TLS validation mode: `pin` (default), `ca`, or `insecure` |
+| `KILN_BAMBU_IDLE_DISCONNECT_S` / `KILN_ELEGOO_IDLE_DISCONNECT_S` | Seconds idle before the printer's connection slot is released (default `120`, `0` disables). These printers allow only a few clients at once |
 | `KILN_NO_UPDATE_CHECK` | Disable the version-update check |
 | `KILN_SKIP_PREVIEW_GATE` | Advanced-user bypass for preview confirmation; logged when used |
 | `KILN_MMF_API_KEY` | MyMiniFactory API key |

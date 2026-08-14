@@ -11,11 +11,22 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import enum
+import logging
 import os
 import re
+import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, ClassVar
+
+logger = logging.getLogger(__name__)
+
+# Guards the one-time, per-instance setup of the idle-release bookkeeping.
+# Module-level because the state it protects is what would otherwise have to
+# hold its own lock — an adapter cannot lazily create a lock to guard its own
+# lazy creation.  Contended only on an adapter's first connection.
+_IDLE_SETUP_LOCK = threading.Lock()
 
 
 def is_resume_mode_3mf(file_name: str) -> bool:
@@ -652,6 +663,199 @@ class PrinterAdapter(ABC):
             profile_id: Profile identifier (e.g. ``"ender3"``, ``"bambu_x1c"``).
         """
         self._safety_profile_id = profile_id
+
+    # -- idle connection release ----------------------------------------
+    #
+    # Some printers ration connections: a Bambu accepts only a few LAN MQTT
+    # clients, an Elegoo only a few websockets.  Kiln runs one ``kiln serve``
+    # per MCP session and hosts do not reliably reap them, so an adapter that
+    # holds its connection for the life of its process turns "sessions I once
+    # opened" into "slots the printer no longer has" — the user meets that as
+    # a printer that is powered on, pingable, and unreachable (2026-08-14).
+    #
+    # The machinery lives here, once, rather than in each push-based adapter,
+    # so the two cannot drift on the part that is subtle: when NOT to release.
+    # A backend opts in by setting the two class attributes below and
+    # overriding :meth:`_connection_is_live`.
+
+    #: Env var this backend reads for its idle window.  "" = no opt-in.
+    _IDLE_RELEASE_ENV: ClassVar[str] = ""
+    #: Seconds of caller inactivity before release.  0 = feature off.
+    _IDLE_RELEASE_DEFAULT_S: ClassVar[float] = 0.0
+    #: How often the reaper wakes to test the window (fraction of it).
+    _IDLE_POLL_DIVISOR: ClassVar[float] = 4.0
+
+    def _init_idle_release(self) -> None:
+        """Set up idle bookkeeping.  Safe to call more than once.
+
+        Adapters in this package do not chain to a base ``__init__``, so this
+        is called explicitly from each opted-in adapter's constructor — and
+        every accessor below still tolerates its absence, so a backend that
+        opts in and forgets the call degrades to "never releases" rather than
+        raising ``AttributeError`` from a printer operation.
+
+        Double-checked so the common case takes no lock: ``_note_activity``
+        runs on EVERY read and write, and ``_IDLE_SETUP_LOCK`` is shared by
+        the whole process, so locking unconditionally here would funnel every
+        printer operation on every adapter through one mutex to re-answer a
+        question settled at construction.
+        """
+        if getattr(self, "_idle_stop", None) is not None:
+            return
+        with _IDLE_SETUP_LOCK:
+            if getattr(self, "_idle_stop", None) is None:
+                self._last_activity: float = time.monotonic()
+                self._idle_reaper: threading.Thread | None = None
+                self._idle_stop: threading.Event = threading.Event()
+
+    def _note_activity(self) -> None:
+        """Stamp caller demand.  Call from the adapter's connection funnel.
+
+        Deliberately measures calls INTO the adapter, never traffic arriving
+        from the printer: a printer pushes status whether or not anyone is
+        listening, so stamping on inbound frames would keep every slot alive
+        forever — precisely the condition the release exists to end.
+        """
+        self._init_idle_release()
+        self._last_activity = time.monotonic()
+
+    def _idle_window(self) -> float:
+        """Seconds of inactivity before the connection is released.
+
+        ``0`` or negative disables the release for this adapter.  An
+        unparseable env value falls back to the default rather than failing a
+        printer operation over a malformed setting.
+        """
+        if not self._IDLE_RELEASE_ENV:
+            return 0.0
+        raw = os.environ.get(self._IDLE_RELEASE_ENV, "")
+        if not raw:
+            return self._IDLE_RELEASE_DEFAULT_S
+        try:
+            return float(raw)
+        except ValueError:
+            logger.debug(
+                "%s=%r is not a number; using the %ss default",
+                self._IDLE_RELEASE_ENV,
+                raw,
+                self._IDLE_RELEASE_DEFAULT_S,
+            )
+            return self._IDLE_RELEASE_DEFAULT_S
+
+    def _connection_is_live(self) -> bool:
+        """True while this adapter holds an open connection.
+
+        Overridden by push-based backends; the default ``False`` stops the
+        reaper immediately for anything that never opted in.
+        """
+        return False
+
+    def _print_in_flight(self) -> bool:
+        """True while the printer is mid-job, as of the last status seen.
+
+        The reaper defers to this, and the default is the safe answer for a
+        backend that cannot tell: a job might be running, so keep the
+        connection.  Overriding it is what lets an idle printer's slot go
+        back while a printing one's is held.
+        """
+        return True
+
+    def _start_idle_reaper(self) -> None:
+        """Start the thread that releases the connection once it falls idle.
+
+        Call after every successful connect.  The thread exits as soon as it
+        releases, so an idle-disconnected adapter costs no thread at all —
+        only a connected one is worth watching.
+        """
+        window = self._idle_window()
+        if window <= 0:
+            return
+        self._init_idle_release()
+        reaper = getattr(self, "_idle_reaper", None)
+        if reaper is not None and reaper.is_alive():
+            return
+        self._idle_stop.clear()
+        self._idle_reaper = threading.Thread(
+            target=self._idle_loop,
+            args=(window,),
+            name=f"kiln-idle-release-{self.name}",
+            daemon=True,
+        )
+        self._idle_reaper.start()
+
+    def _stop_idle_reaper(self) -> None:
+        """Signal the reaper to exit.  Call from ``disconnect``.
+
+        Tolerates an adapter whose idle state was never initialised, so a
+        ``disconnect`` on a half-built adapter cannot raise ``AttributeError``
+        — that path runs during shutdown and error handling, where a new
+        exception is the last thing anyone needs.
+        """
+        idle_stop = getattr(self, "_idle_stop", None)
+        if idle_stop is not None:
+            idle_stop.set()
+
+    def _idle_loop(self, window: float) -> None:
+        """Release the connection after *window* seconds with no calls.
+
+        The checks run newest-cheapest-first and are all re-read each tick,
+        so a printer that starts a job, or a caller that turns up, defers the
+        release rather than racing it.
+
+        One residual race is accepted rather than engineered away: a caller
+        can enter the adapter's funnel in the instant between the last check
+        here and ``disconnect`` taking the backend's lock, and would then hold
+        a reference to a connection that is being closed underneath it.  It
+        costs that one call a retryable connection error, it cannot happen
+        until a printer has gone a full window untouched, and closing it
+        properly would mean a release protocol spanning the reaper and every
+        backend's connect lock — more deadlock surface than the failure is
+        worth.  The final activity re-read below narrows it to microseconds.
+        """
+        interval = max(1.0, window / self._IDLE_POLL_DIVISOR)
+        while not self._idle_stop.wait(interval):
+            if not self._connection_is_live():
+                return
+            if time.monotonic() - self._last_activity < window:
+                continue
+            if self._print_in_flight():
+                # Deferred, never cancelled: reassess on the next tick so the
+                # slot goes back once the job it was serving is over.
+                continue
+            # Re-read after the state checks above, which are not free: asking
+            # a backend whether it is printing can take a lock, and a call
+            # arriving during that answer must still win.
+            if time.monotonic() - self._last_activity < window:
+                continue
+            logger.info(
+                "Releasing idle connection to %s after %.0fs unused — this "
+                "printer allows only a few clients at once, and the next "
+                "call will reconnect.",
+                getattr(self, "_host", self.name),
+                window,
+            )
+            with contextlib.suppress(Exception):
+                self.disconnect()
+            return
+
+    def disconnect(self) -> None:  # noqa: B027  (concrete no-op, not abstract)
+        """Release any persistent connection this adapter holds.
+
+        A no-op for the HTTP-polling backends, which hold nothing between
+        calls.  The push-based ones override it: Bambu's MQTT and Elegoo's
+        websocket each occupy a connection slot the printer rations, so for
+        those "still constructed" must not mean "still connected".
+
+        Defined here so callers that clean up — process exit, an idle sweep,
+        a printer being deregistered — can release whatever they were handed
+        without asking what kind of printer it is.  Implementations must be
+        idempotent and must reconnect on demand.
+
+        Deliberately concrete rather than abstract: "I hold nothing, so there
+        is nothing to release" is the correct behaviour for most backends,
+        and making it abstract would force every one of them to write that
+        sentence out as an empty override.
+        """
 
     # -- identity & feature discovery -----------------------------------
 

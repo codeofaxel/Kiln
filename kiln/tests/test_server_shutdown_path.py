@@ -138,3 +138,85 @@ class TestGracefulShutdown:
 
         sig = inspect.signature(server._graceful_shutdown)
         assert sig.parameters["hard_exit"].default is os._exit
+
+
+class _FakePrinter:
+    """An adapter that records whether its connection was handed back."""
+
+    def __init__(self, raises: bool = False) -> None:
+        self.raises = raises
+        self.disconnected = 0
+
+    def disconnect(self) -> None:
+        self.disconnected += 1
+        if self.raises:
+            raise RuntimeError("close blew up")
+
+
+class _FakeRegistry:
+    def __init__(self, adapters: dict) -> None:
+        self._adapters = adapters
+
+    def list_all(self) -> dict:
+        return self._adapters
+
+
+class TestReleasePrinterConnections:
+    """A server that exits still holding a printer's connection leaves it
+    short until the printer's own side times the socket out.  With one
+    server per MCP session that shortfall is what a user meets as "the
+    printer is on but Kiln can't reach it" (2026-08-14)."""
+
+    def _release(self, singleton=None, registry: dict | None = None) -> None:
+        with patch.object(server, "_adapter", singleton), patch.object(
+            server, "_get_registry", lambda: _FakeRegistry(registry or {})
+        ):
+            server._release_printer_connections()
+
+    def test_releases_the_default_adapter(self) -> None:
+        printer = _FakePrinter()
+        self._release(singleton=printer)
+        assert printer.disconnected == 1
+
+    def test_releases_every_registered_printer(self) -> None:
+        a, b = _FakePrinter(), _FakePrinter()
+        self._release(registry={"a": a, "b": b})
+        assert a.disconnected == 1
+        assert b.disconnected == 1
+
+    def test_an_aliased_printer_is_released_once(self) -> None:
+        """config.yaml registers an alias per printer ("default"), so the
+        same object arrives twice; closing it twice is noise at best."""
+        printer = _FakePrinter()
+        self._release(singleton=printer, registry={"default": printer, "a1": printer})
+        assert printer.disconnected == 1
+
+    def test_one_failure_does_not_strand_the_others(self) -> None:
+        bad, good = _FakePrinter(raises=True), _FakePrinter()
+        self._release(registry={"bad": bad, "good": good})
+        assert good.disconnected == 1, "a raising close skipped the next printer"
+
+    def test_unreadable_registry_still_releases_the_default(self) -> None:
+        printer = _FakePrinter()
+
+        def _boom() -> None:
+            raise RuntimeError("registry unavailable")
+
+        with patch.object(server, "_adapter", printer), patch.object(
+            server, "_get_registry", _boom
+        ):
+            server._release_printer_connections()
+        assert printer.disconnected == 1
+
+    def test_no_printers_configured_is_fine(self) -> None:
+        self._release()  # must not raise
+
+    def test_wired_into_the_signal_path(self) -> None:
+        """The SIGTERM path must release too, not just atexit — a host that
+        kills the server is the common way a session ends."""
+        released: list[str] = []
+        with patch.object(
+            server, "_release_printer_connections", lambda: released.append("yes")
+        ):
+            _run_shutdown({})
+        assert released == ["yes"]

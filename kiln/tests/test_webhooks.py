@@ -54,6 +54,24 @@ def _wait_for(predicate, *, timeout: float = _POLL_TIMEOUT, interval: float = _P
         time.sleep(interval)
 
 
+def _wait_for_deliveries(
+    manager: WebhookManager, count: int, *, timeout: float = _POLL_TIMEOUT
+) -> None:
+    """Block until *manager* has recorded at least *count* delivery records.
+
+    Waiting on the sender's call count is a lap short: ``_deliver`` appends
+    its record AFTER the retry loop ends, so the last send having returned
+    does not mean the record exists yet.  A test that waited on call_count
+    and then read ``recent_deliveries()`` was racing the worker thread
+    between those two statements, and lost about one CI run in four --
+    ``assert 0 == 1`` on a delivery that was seconds from being recorded.
+
+    Wait on the record, which is what these assertions are actually about;
+    the call count is settled by the time it lands.
+    """
+    _wait_for(lambda: len(manager.recent_deliveries()) >= count, timeout=timeout)
+
+
 def _wait_for_queue_drain(manager: WebhookManager, *, timeout: float = _POLL_TIMEOUT) -> None:
     """Wait until the manager's delivery queue is empty and processed.
 
@@ -448,7 +466,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            _wait_for(lambda: sender.call_count >= 1)
+            _wait_for_deliveries(mgr, 1)
             assert sender.call_count == 1
 
             records = mgr.recent_deliveries()
@@ -470,7 +488,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            _wait_for(lambda: sender.call_count >= 3)
+            _wait_for_deliveries(mgr, 1)
             assert sender.call_count == 3
 
             records = mgr.recent_deliveries()
@@ -492,7 +510,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            _wait_for(lambda: sender.call_count >= 3)
+            _wait_for_deliveries(mgr, 1)
             assert sender.call_count == 3
 
             records = mgr.recent_deliveries()
@@ -516,7 +534,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            _wait_for(lambda: sender.call_count >= 3)
+            _wait_for_deliveries(mgr, 1)
             assert sender.call_count == 3
 
             records = mgr.recent_deliveries()
@@ -537,7 +555,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            _wait_for(lambda: sender.call_count >= 2)
+            _wait_for_deliveries(mgr, 1)
             assert sender.call_count == 2
 
             records = mgr.recent_deliveries()
@@ -558,7 +576,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            _wait_for(lambda: sender.call_count >= 2)
+            _wait_for_deliveries(mgr, 1)
             assert sender.call_count == 2
 
             records = mgr.recent_deliveries()
@@ -670,7 +688,7 @@ class TestDeliveryHistory:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            _wait_for(lambda: sender.call_count >= 1)
+            _wait_for_deliveries(mgr, 1)
 
             records = mgr.recent_deliveries()
             assert len(records) == 1
@@ -692,9 +710,9 @@ class TestDeliveryHistory:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            _wait_for(lambda: sender.call_count >= 1)
+            _wait_for_deliveries(mgr, 1)
             bus.publish(Event(type=EventType.JOB_FAILED))
-            _wait_for(lambda: sender.call_count >= 2)
+            _wait_for_deliveries(mgr, 2)
 
             records = mgr.recent_deliveries()
             assert len(records) == 2
@@ -716,7 +734,7 @@ class TestDeliveryHistory:
         try:
             for _ in range(5):
                 bus.publish(Event(type=EventType.JOB_COMPLETED))
-            _wait_for(lambda: sender.call_count >= 5)
+            _wait_for_deliveries(mgr, 5)
 
             records = mgr.recent_deliveries(limit=2)
             assert len(records) == 2
