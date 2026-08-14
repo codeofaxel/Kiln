@@ -36,6 +36,12 @@ from types import SimpleNamespace
 
 import pytest
 
+# Imported at module scope on purpose.  Importing it inside a test would load
+# the tool plugins for the first time while the fixture below has KILN_DB_PATH
+# pointed at a throwaway database, and a plugin that registers under that never
+# registers again — which silently drops tools from the schema for every later
+# test in the run.
+import kiln.server  # noqa: F401  (registers the tool plugins)
 from kiln import auto_record_hook as hook
 from kiln.printers import progress_motion as pm
 from kiln.printers.base import PrinterState, PrinterStatus, PrintResult
