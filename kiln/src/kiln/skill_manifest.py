@@ -242,13 +242,32 @@ class SkillManifest:
 
 
 def get_version() -> str:
-    """Get the installed Kiln package version."""
-    try:
-        from importlib.metadata import version
+    """Get the running Kiln version.
 
-        return version("kiln")
-    except Exception:
-        return "unknown"
+    Delegates to :data:`kiln.__version__` rather than asking
+    ``importlib.metadata`` again, for two reasons this function learned
+    the hard way by getting both wrong.
+
+    The distribution is named ``kiln3d``; the IMPORT package is ``kiln``.
+    Asking metadata for ``"kiln"`` therefore raised
+    ``PackageNotFoundError`` on every ordinary install, and the bare
+    ``except`` turned that into the string ``"unknown"`` — which is what
+    this manifest reported to every agent that asked Kiln what it was.
+
+    And metadata is written at INSTALL time, so on an editable install
+    it keeps reporting the version that was current when ``pip install
+    -e`` last ran while the source tree moves on beneath it.  Measured
+    on 2026-08-14: ``pip show kiln-pro`` said 1.1.3 against a source
+    tree that had reached 1.3.2 — a version check answered confidently
+    and wrongly, which is worse than one that fails.
+
+    :data:`kiln.__version__` already resolves the source tree first and
+    falls back across both distribution names, so the fix is to have one
+    answer to this question instead of a second, worse copy of it.
+    """
+    from kiln import __version__
+
+    return __version__
 
 
 def get_tool_count() -> int:
