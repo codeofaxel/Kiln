@@ -329,16 +329,15 @@ def publish(printer_name: str | None = None) -> dict[str, Any]:
         # and then being refused.
         buf = io.BytesIO()
         too_large = False
-        with open(str(gcode_path), "rb") as src:
-            with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as zf:
-                while True:
-                    chunk = src.read(_GZIP_CHUNK)
-                    if not chunk:
-                        break
-                    zf.write(chunk)
-                    if buf.tell() > _MAX_GCODE_GZ_UPLOAD:
-                        too_large = True
-                        break
+        with open(str(gcode_path), "rb") as src, gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as zf:
+            while True:
+                chunk = src.read(_GZIP_CHUNK)
+                if not chunk:
+                    break
+                zf.write(chunk)
+                if buf.tell() > _MAX_GCODE_GZ_UPLOAD:
+                    too_large = True
+                    break
         gz = buf.getvalue()
         if too_large or len(gz) > _MAX_GCODE_GZ_UPLOAD:
             return {
