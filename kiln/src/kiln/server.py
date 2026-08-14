@@ -1676,6 +1676,115 @@ def _is_heater_watchdog_machine(adapter: PrinterAdapter) -> bool:
         return False
 
 
+def _watched_machines(exclude: PrinterAdapter | None = None) -> set[str]:
+    """Fingerprints of machines Kiln is currently WATCHING for the user.
+
+    Both persistent-watcher surfaces are counted together — the print
+    watchers in ``_watchers`` and the health-monitor sessions — because
+    the limit is about machines, not about which tool opened the watch.
+    Counted by machine fingerprint so one printer registered under two
+    names (the ``"default"`` alias plus its config name) is one machine.
+
+    Dead threads do not hold a slot: a watcher whose thread has exited
+    is not watching anything, and a crashed watcher permanently
+    consuming a free user's only slot would be a bug that reads as a
+    paywall.
+    """
+    from kiln.registry import machine_fingerprint
+
+    skip = ""
+    if exclude is not None:
+        with contextlib.suppress(Exception):
+            skip = machine_fingerprint(exclude)
+
+    seen: set[str] = set()
+
+    def _add(adapter: Any) -> None:
+        if adapter is None:
+            return
+        with contextlib.suppress(Exception):
+            fp = machine_fingerprint(adapter)
+            if fp and fp != skip:
+                seen.add(fp)
+
+    for watcher in list(_watchers.values()):
+        thread = getattr(watcher, "_thread", None) or getattr(watcher, "thread", None)
+        if thread is not None and not thread.is_alive():
+            continue
+        _add(getattr(watcher, "adapter", None) or getattr(watcher, "_adapter", None))
+
+    try:
+        from kiln.print_health_monitor import get_print_health_monitor
+
+        monitor = get_print_health_monitor()
+        for name in list(getattr(monitor, "_background_monitors", {})):
+            with contextlib.suppress(Exception):
+                _add(_resolve_adapter(name))
+    except Exception as exc:  # noqa: BLE001 — an unreadable monitor counts as none
+        logger.debug("Health-monitor census skipped: %s", exc)
+
+    return seen
+
+
+def _watch_capacity_error(adapter: PrinterAdapter, target_name: str) -> dict | None:
+    """Refuse a NEW persistent watch beyond the tier's machine limit.
+
+    Kiln watches what Kiln runs.  The print watchdog has always worked
+    that way — it spawns inside ``start_print`` and nowhere else, so a
+    plan that runs one printer at a time has only ever had one machine
+    watched automatically.  The explicit watchers escaped that rule and
+    let a plan for one machine keep continuous eyes on a whole farm.
+
+    Deliberately NOT limited, at any tier: LOOKING.  ``printer_status``,
+    ``monitor_print``, ``printer_snapshot`` and ``emergency_status`` are
+    one-shot and stay free and unlimited on every machine — that is how
+    a user finds out a machine is in trouble.  Nor is any stop path
+    touched: pause, cancel and emergency stop reach every machine at
+    every tier, always.  What is limited is Kiln keeping a running
+    service pointed at a machine on the user's behalf.
+
+    Re-watching a machine Kiln already watches is always allowed — it is
+    the same machine, not a new one.  Soft-passes on anything it cannot
+    prove, like every other licensing check here.
+    """
+    try:
+        from kiln.registry import machine_fingerprint
+
+        try:
+            from kiln.licensing import get_tier, max_printers_for_tier
+
+            cap = max_printers_for_tier(get_tier())
+        except Exception:
+            cap = 1  # free-tier fallback: kiln-pro absent
+        if cap is None or cap <= 0:
+            return None
+
+        already = _watched_machines()
+        if machine_fingerprint(adapter) in already:
+            return None  # already watched — not a new machine
+        if len(already) < cap:
+            return None
+
+        watching = ", ".join(sorted(already)[:3])
+        _audit("watch_capacity", "blocked", details={"printer_name": target_name})
+        return _error_dict(
+            f"Kiln already has a live watch running on {len(already)} "
+            f"machine(s) and this plan covers {cap} at a time"
+            + (f" ({watching})." if cap <= 3 else ".")
+            + f" Stop that watch to move it to {target_name!r}, or check "
+            "this machine any time with printer_status(printer_name=...), "
+            "monitor_print(...) or printer_snapshot(...) — those are free "
+            "on every machine, and so is stopping any machine. Kiln "
+            "Business watches your printers together: "
+            "https://kiln3d.com/pricing",
+            code="TIER_CONCURRENT_WATCH_LIMIT",
+            retryable=False,
+        )
+    except Exception:  # noqa: BLE001 — a licensing check never breaks a watch
+        logger.debug("Watch-capacity gate soft-passed", exc_info=True)
+        return None
+
+
 def _unknown_printer_error(printer_name: str | None, verb: str) -> dict:
     """Error dict for a control verb aimed at a printer Kiln doesn't know."""
     try:
@@ -15499,6 +15608,12 @@ def start_printer_health_monitoring(
     print job health (layer progress stalls, error codes), and active
     error detection.  Alerts are generated when anomalies are found.
 
+    Kiln keeps a live watch on as many machines at once as your plan
+    runs — one on Free and Pro.  Checking a printer yourself is not a
+    watch and is never limited: ``printer_status``, ``monitor_print``
+    and ``printer_snapshot`` answer for any machine at any tier, and so
+    does stopping one.
+
     :param printer_name: Printer to monitor.
     :param interval_seconds: Seconds between health checks (default 30).
 
@@ -15509,6 +15624,13 @@ def start_printer_health_monitoring(
         return err
 
     try:
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "monitor")
+        if block := _watch_capacity_error(adapter, target_name):
+            return block
+
         from kiln.print_health_monitor import get_print_health_monitor
 
         monitor = get_print_health_monitor()

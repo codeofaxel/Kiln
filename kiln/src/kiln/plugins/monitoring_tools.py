@@ -1007,6 +1007,17 @@ class _MonitoringToolsPlugin:
                     _srv._get_registry().get(printer_name) if printer_name else _srv._get_adapter()
                 )
 
+                # Kiln watches what Kiln runs: a live watch is a running
+                # service pointed at a machine, and a plan that runs one
+                # printer at a time keeps one watched.  Same helper the
+                # health monitor uses, so the two watcher surfaces cannot
+                # drift into two different answers.  Checking this printer
+                # by hand stays free and unlimited either way.
+                if block := _srv._watch_capacity_error(
+                    adapter, printer_name or "default",
+                ):
+                    return block
+
                 # Early exit: if printer is idle with no active job, don't start
                 initial_state = adapter.get_state()
                 initial_job = adapter.get_job()
