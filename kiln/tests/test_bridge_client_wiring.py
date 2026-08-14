@@ -113,12 +113,18 @@ def test_every_entry_point_uses_the_shared_helper():
     from kiln import bridge_client
     from kiln import server as ksrv
 
-    assert "ensure_runtime_config()" in inspect.getsource(ksrv.main)
+    # The call moved from main() into _start() when startup grew its
+    # one-try guard; the pin follows the code, not the old address —
+    # main() delegates to _start(), so the door still initialises through
+    # the shared helper.
+    assert "ensure_runtime_config()" in inspect.getsource(ksrv._start)
+    assert "_start()" in inspect.getsource(ksrv.main)
     assert "ensure_runtime_config()" in inspect.getsource(
         bridge_client._default_tool_caller
     )
-    # main() must no longer keep a private copy of the two-step.
+    # Neither half may keep a private copy of the two-step.
     assert "_reload_env_config()" not in inspect.getsource(ksrv.main)
+    assert "_reload_env_config()" not in inspect.getsource(ksrv._start)
 
 
 # ---------------------------------------------------------------------------
