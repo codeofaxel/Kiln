@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-14T05:20:54.158894+00:00",
+  "generated": "2026-08-14T23:52:53.694067+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -2614,7 +2614,7 @@
     },
     {
       "name": "paint_mesh_regions",
-      "description": "Paint mesh regions by id and write a painted 3MF.",
+      "description": "Paint mesh regions by id and write a painted 3MF. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
       "access": "free",
       "category": "decoration",

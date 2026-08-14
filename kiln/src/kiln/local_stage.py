@@ -185,6 +185,7 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
         "merge_stl",
         "mirror_mesh_model",
         "optimize_print_orientation",
+        "paint_mesh_regions",
         "optimize_template_params",
         "plan_mid_print_decoration",
         "prepare_ai_model_for_print",
