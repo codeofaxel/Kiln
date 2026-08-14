@@ -252,3 +252,62 @@ class TestPluginSurface:
 
         monitor_twin_tools.plugin.register(_FakeMcp())
         assert registered == ["publish_print_twin"]
+
+
+class TestMultiPrinterAndCaps:
+    def test_unnamed_resolves_the_most_recent_start(self, twin_dir, tmp_path):
+        """Owning two machines must not kill the twin: the unnamed ask
+        answers with the print that started last — a fact from our own
+        start_print stamps, not a guess."""
+        mesh, gcode = _make_files(tmp_path)
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_print_started("older_printer", "part.gcode")
+        # Force distinct timestamps even on a coarse clock.
+        active = json.loads((twin_dir / "active.json").read_text())
+        active["older_printer"]["started_at"] = "2020-01-01T00:00:00+00:00"
+        (twin_dir / "active.json").write_text(json.dumps(active))
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_print_started("newer_printer", "part.gcode")
+
+        rec = monitor_twin.active_twin(None)
+        assert rec is not None
+        assert rec["printer_name"] == "newer_printer"
+        # A named ask still answers only for that name.
+        assert monitor_twin.active_twin("older_printer")["printer_name"] == "older_printer"
+
+    def test_oversized_mesh_is_not_retained_but_gcode_is(
+        self, twin_dir, tmp_path, monkeypatch
+    ):
+        """A mesh past the server's own accept-cap is dead weight: it can
+        only be uploaded and refused, so it is not retained at all."""
+        monkeypatch.setattr(monitor_twin, "_MAX_MESH_BYTES", 4)
+        mesh, gcode = _make_files(tmp_path)
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_print_started("p1", "part.gcode")
+        rec = monitor_twin.active_twin("p1")
+        assert rec["gcode"] is not None
+        assert rec["mesh"] is None
+
+    def test_oversized_toolpath_refuses_before_any_upload(
+        self, twin_dir, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(monitor_twin, "_MAX_GCODE_GZ_UPLOAD", 8)
+        mesh, gcode = _make_files(tmp_path)
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_print_started("p1", "part.gcode")
+
+        from kiln import auth_session
+
+        monkeypatch.setattr(
+            auth_session,
+            "resolve_api_bearer",
+            lambda *a, **k: auth_session.ApiBearer(token="tok", state="license"),
+        )
+
+        def _no_network(*a, **k):  # pragma: no cover - the assertion IS no call
+            raise AssertionError("an oversized twin must never reach the wire")
+
+        monkeypatch.setattr("urllib.request.urlopen", _no_network)
+        out = monitor_twin.publish("p1")
+        assert out["success"] is False
+        assert out["code"] == "TWIN_TOO_LARGE"

@@ -58,11 +58,20 @@ _MAX_SLICE_ENTRIES = 8
 
 #: Retention ceilings.  Past these the twin quietly isn't retained — a
 #: pathological file must not fill the user's disk for a preview.
+#:
+#: Both mirror what the server will actually ACCEPT, deliberately.  A file
+#: retained above the server's cap can only ever be uploaded and refused,
+#: which spends the user's uplink to earn a 413.  G-code compresses ~10x,
+#: so 512 MB raw is the honest twin of the 48 MB compressed cap; the mesh
+#: is uploaded as-is, so its ceiling is the server's own, to the byte.
 _MAX_GCODE_BYTES = 512 * 1024 * 1024
-_MAX_MESH_BYTES = 128 * 1024 * 1024
+_MAX_MESH_BYTES = 64 * 1024 * 1024
 
 #: Upload ceiling for the compressed toolpath — mirrors the server's cap.
 _MAX_GCODE_GZ_UPLOAD = 48 * 1024 * 1024
+
+#: Read granularity for the streaming compressor.
+_GZIP_CHUNK = 1024 * 1024
 
 _MESH_EXTENSIONS = {".stl", ".3mf", ".obj"}
 
@@ -215,18 +224,28 @@ def note_print_started(printer_name: str, file_name: str) -> None:
 
 
 def active_twin(printer_name: str | None = None) -> dict[str, Any] | None:
-    """The retained record for ``printer_name``, or — when the ledger holds
-    exactly one printer — that one.  ``None`` when nothing is retained."""
+    """The retained record for ``printer_name``, or — unnamed — the record
+    of the print that started most recently.  ``None`` when nothing is
+    retained.
+
+    Most-recent is a fact from our own ledger, not a guess: every record
+    was stamped by the ``start_print`` chokepoint, so the newest one IS the
+    machine's latest print start.  The unnamed call exists because the
+    Monitor watches "the default printer" without knowing its registry
+    name; refusing whenever a second printer had EVER printed (the old
+    exactly-one rule) turned owning two machines into a dead twin.  When
+    the caller does name a printer, only that printer's record answers.
+    """
     active = _read_json(_ACTIVE_FILE, {})
     if not isinstance(active, dict) or not active:
         return None
     if printer_name:
         rec = active.get(_slug(printer_name))
         return rec if isinstance(rec, dict) else None
-    if len(active) == 1:
-        rec = next(iter(active.values()))
-        return rec if isinstance(rec, dict) else None
-    return None
+    records = [r for r in active.values() if isinstance(r, dict)]
+    if not records:
+        return None
+    return max(records, key=lambda r: str(r.get("started_at") or ""))
 
 
 def _default_api_url() -> str:
@@ -303,9 +322,25 @@ def publish(printer_name: str | None = None) -> dict[str, Any]:
                 ),
             }
 
-        raw = Path(str(gcode_path)).read_bytes()
-        gz = gzip.compress(raw, compresslevel=6)
-        if len(gz) > _MAX_GCODE_GZ_UPLOAD:
+        # Stream-compress: a retained toolpath can be hundreds of MB and
+        # loading it whole just to gzip it would spike RAM by that much on
+        # the user's machine.  The cap is enforced DURING compression, so
+        # an oversized file stops early instead of compressing to the end
+        # and then being refused.
+        buf = io.BytesIO()
+        too_large = False
+        with open(str(gcode_path), "rb") as src:
+            with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as zf:
+                while True:
+                    chunk = src.read(_GZIP_CHUNK)
+                    if not chunk:
+                        break
+                    zf.write(chunk)
+                    if buf.tell() > _MAX_GCODE_GZ_UPLOAD:
+                        too_large = True
+                        break
+        gz = buf.getvalue()
+        if too_large or len(gz) > _MAX_GCODE_GZ_UPLOAD:
             return {
                 "success": False,
                 "code": "TWIN_TOO_LARGE",
