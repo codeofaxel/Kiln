@@ -10,6 +10,8 @@ Covers:
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from kiln.printers.base import (
@@ -299,9 +301,18 @@ class TestPrinterCapabilities:
         assert d["supported_extensions"] == [".gcode", ".gco", ".g"]
 
     def test_to_dict_all_fields(self):
+        """``to_dict`` emits every declared capability and nothing else.
+
+        The expectation is read off the dataclass rather than repeated as
+        a literal here.  A hand-maintained key list fails on the day a
+        capability is ADDED — which is the one day the addition is
+        correct and the list is merely stale — so it reports a passing
+        change as a regression while never once catching the thing this
+        test is for: a field that stops reaching callers.
+        """
         caps = PrinterCapabilities()
         d = caps.to_dict()
-        expected_keys = {"can_upload", "can_set_temp", "can_send_gcode", "can_pause", "can_stream", "can_probe_bed", "can_update_firmware", "can_snapshot", "can_detect_filament", "device_type", "supported_extensions"}
+        expected_keys = {f.name for f in dataclasses.fields(PrinterCapabilities)}
         assert set(d.keys()) == expected_keys
 
 

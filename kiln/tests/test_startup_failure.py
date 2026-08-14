@@ -541,6 +541,27 @@ class TestEveryDoorIsGuarded:
 # ---------------------------------------------------------------------------
 
 
+def _tool_text(result: object) -> str:
+    """The text a client receives from a ``call_tool`` result.
+
+    ``call_tool`` answers with a ``CallToolResult`` carrying ``content``.
+    Iterating the result object directly yields its pydantic FIELDS, and
+    a field is not a content block, so a ``getattr(c, "text", "")`` over
+    them joins to the empty string — every ``assert x in text`` then
+    fails on absence rather than on disagreement, which reads like a
+    recovery server that answered nothing when it had in fact answered
+    correctly.  Raising on an unreadable result keeps that failure mode
+    from coming back quietly.
+    """
+    content = getattr(result, "content", None)
+    if content is None:
+        raise AssertionError(
+            f"call_tool returned {type(result).__name__} with no .content "
+            "to read — the result shape has moved."
+        )
+    return "".join(getattr(block, "text", "") for block in content)
+
+
 class TestSafeModeAnswersInTheClient:
     def test_the_recovery_server_offers_the_documented_entry_points(
         self, kiln_home, startup_error
@@ -564,7 +585,7 @@ class TestSafeModeAnswersInTheClient:
         server = startup_failure.build_safe_mode_server(diagnosis, breadcrumb)
 
         result = asyncio.run(server.call_tool("get_started", {}))
-        text = "".join(getattr(c, "text", "") for c in result)
+        text = _tool_text(result)
 
         assert "error" in text
         assert diagnosis.headline in text
@@ -579,7 +600,7 @@ class TestSafeModeAnswersInTheClient:
         server = startup_failure.build_safe_mode_server(diagnosis, None)
 
         result = asyncio.run(server.call_tool("kiln_health", {}))
-        text = "".join(getattr(c, "text", "") for c in result)
+        text = _tool_text(result)
 
         assert '"kiln_running": false' in text
         assert '"safe_mode": true' in text

@@ -113,12 +113,21 @@ def test_every_entry_point_uses_the_shared_helper():
     from kiln import bridge_client
     from kiln import server as ksrv
 
-    assert "ensure_runtime_config()" in inspect.getsource(ksrv.main)
+    # The MCP server's startup path, not just ``main`` — ``main`` is now a
+    # thin wrapper that delegates to ``_start`` so a startup exception can
+    # be caught and explained.  Reading only ``main`` asserted the helper
+    # had VANISHED the day it merely moved one frame down, which is a
+    # refactor this test should survive: the claim is that the door calls
+    # the helper, not that a particular function body mentions it.
+    startup_path = inspect.getsource(ksrv.main) + inspect.getsource(ksrv._start)
+
+    assert "ensure_runtime_config()" in startup_path
     assert "ensure_runtime_config()" in inspect.getsource(
         bridge_client._default_tool_caller
     )
-    # main() must no longer keep a private copy of the two-step.
-    assert "_reload_env_config()" not in inspect.getsource(ksrv.main)
+    # ...and no door keeps a private copy of the two-step.
+    assert "_reload_env_config()" not in startup_path
+    assert "load_dotenv" not in startup_path
 
 
 # ---------------------------------------------------------------------------

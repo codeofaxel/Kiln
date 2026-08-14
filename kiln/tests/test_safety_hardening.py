@@ -80,7 +80,7 @@ class TestGetTempLimits:
         """
         monkeypatch.setattr("kiln.server._PRINTER_MODEL", "")
         monkeypatch.setattr(
-            "kiln.server._resolve_printer_model_live", lambda: "",
+            "kiln.server._resolve_printer_model_live", lambda *_a, **_kw: "",
         )
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
@@ -92,7 +92,8 @@ class TestGetTempLimits:
         (the PTFE-safe ceiling), not 300.  Bed honors the Ender 3 profile."""
         monkeypatch.setattr("kiln.server._PRINTER_MODEL", "ender3")
         monkeypatch.setattr(
-            "kiln.server._resolve_printer_model_live", lambda: "ender3",
+            "kiln.server._resolve_printer_model_live",
+            lambda *_a, **_kw: "ender3",
         )
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
@@ -114,7 +115,7 @@ class TestGetTempLimits:
         )
         monkeypatch.setattr(
             "kiln.server._resolve_printer_model_live",
-            lambda: "nonexistent_printer_xyz",
+            lambda *_a, **_kw: "nonexistent_printer_xyz",
         )
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()

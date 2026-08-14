@@ -230,11 +230,14 @@ class TestSubmitJobTool:
         # The original job is already counted against the cap; telling
         # its retry "queue full" would be a wrong answer about a job
         # that is in the queue.
-        import kiln.licensing as lic
+        from kiln.plugins import queue_tools
         from kiln.plugins.queue_tools import submit_job
 
-        monkeypatch.setattr(lic, "get_tier", lambda: lic.LicenseTier.FREE)
-        monkeypatch.setattr(lic, "FREE_TIER_MAX_QUEUED_JOBS", 1)
+        # Patched on the plugin, not on ``kiln.licensing``: that module
+        # ships with kiln-pro, so naming it here made the free-tier cap
+        # testable only on installs that are not on the free tier.
+        monkeypatch.setattr(queue_tools, "_is_free_tier", lambda: True)
+        monkeypatch.setattr(queue_tools, "_free_tier_queue_cap", lambda: 1)
 
         first = submit_job("part.gcode", idempotency_key="k1")
         assert first["submission"] == "queued"

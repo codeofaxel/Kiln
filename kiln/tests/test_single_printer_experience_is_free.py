@@ -64,6 +64,36 @@ FLEET_TOOLS_REQUIRING_BUSINESS = [
 ]
 
 
+def _force_free_tier(monkeypatch) -> None:
+    """Put this install on the free tier, however it decides tier.
+
+    There are two licensing implementations and a test that names either
+    one directly only runs on the install that has it.  Naming the
+    private one is what broke this file in public CI: the import is
+    unconditional, so every case here errored before it could assert
+    anything, and the safety floor below went unchecked on the exact
+    install — no kiln-pro, free tier — whose floor it describes.
+
+    Where kiln-pro is absent the free tier is not a state to force, it
+    is the only state there is, so there is nothing to patch.
+    """
+    try:
+        from kiln_pro.enterprise import licensing
+    except ImportError:
+        return
+    monkeypatch.setattr(licensing, "check_tier", lambda _tier: (False, "free"))
+
+
+def _refusal_code(result: object) -> str | None:
+    """The refusal code a tool returned, if it refused."""
+    if not isinstance(result, dict):
+        return None
+    error = result.get("error")
+    if isinstance(error, dict):
+        return error.get("code")
+    return result.get("code")
+
+
 def _unwrap(name: str):
     """Resolve a tool by name, however it was registered.
 
@@ -90,9 +120,7 @@ def test_a_single_machine_can_always_be_seen_and_stopped(name, monkeypatch):
     reading decorators: a gate added by any mechanism (decorator, inline
     ``get_tier()`` comparison, a check inside the body) has to show up here.
     """
-    from kiln_pro.enterprise import licensing
-
-    monkeypatch.setattr(licensing, "check_tier", lambda tier: (False, "free"))
+    _force_free_tier(monkeypatch)
 
     fn = _unwrap(name)
     assert "printer_name" in inspect.signature(fn).parameters, (
@@ -104,14 +132,10 @@ def test_a_single_machine_can_always_be_seen_and_stopped(name, monkeypatch):
     # printer-not-found or an adapter/connection failure.  A TIER_REQUIRED
     # here means a licence just cost someone sight of a hot machine.
     result = fn(printer_name="no-such-printer-in-this-test")
-    if isinstance(result, dict):
-        code = (result.get("error") or {}).get("code") if isinstance(
-            result.get("error"), dict
-        ) else result.get("code")
-        assert code != "TIER_REQUIRED", (
-            f"{name} refused on tier at free — this is the safety floor "
-            "print_gate promises never to charge for."
-        )
+    assert _refusal_code(result) != "TIER_REQUIRED", (
+        f"{name} refused on tier at free — this is the safety floor "
+        "print_gate promises never to charge for."
+    )
 
 
 @pytest.mark.parametrize("name", FLEET_TOOLS_REQUIRING_BUSINESS)
@@ -121,23 +145,22 @@ def test_acting_on_machines_together_needs_business(name, monkeypatch):
     ``fleet_status`` is the one this was written for: it sat at Pro, whose
     printer cap is 1, while every sibling had already moved to Business.
     """
-    from kiln_pro.enterprise import licensing
-
-    seen: list[str] = []
-
-    def _check(tier):
-        seen.append(getattr(tier, "value", str(tier)))
-        return (False, "insufficient tier")
-
-    monkeypatch.setattr(licensing, "check_tier", _check)
+    _force_free_tier(monkeypatch)
 
     result = _unwrap(name)()
 
     assert isinstance(result, dict) and result.get("code") == "TIER_REQUIRED", (
         f"{name} did not refuse below its tier"
     )
-    assert seen and seen[0] in ("business", "enterprise"), (
-        f"{name} is gated at {seen[0]!r}; acting on machines together is a "
+    # Read the tier off the refusal the caller actually receives, rather
+    # than off a spy on the tier check.  Both licensing implementations
+    # name the tier in ``required_tier``, but only one of them reaches a
+    # tier check at all — the free-tier stub refuses from the decorator
+    # without consulting anything, so a spy sees nothing to report and
+    # this claim would go unverified wherever kiln-pro is not installed.
+    gated_at = str(result.get("required_tier", "")).lower()
+    assert gated_at in ("business", "enterprise"), (
+        f"{name} is gated at {gated_at!r}; acting on machines together is a "
         "Business feature. Pro's printer cap is 1, so a fleet tool sold at "
         "Pro sells a view of a fleet the tier cannot run."
     )
