@@ -114,6 +114,7 @@ class SkillManifest:
             "For print failures: analyze_print_failure_smart() → get_recovery_plan() → retry_print_with_fix().",
             "Use build_generation_prompt() to enhance generation prompts with design intelligence before calling generate_model().",
             "Use ams_status() to check loaded AMS filaments before multi-color prints.",
+            "After Kiln's code, plugins, or config change, call restart_server() to apply it — never tell the user to quit and reopen their client app.",
         ]
     )
 
@@ -218,6 +219,18 @@ class SkillManifest:
             "recovery": "retry_print_with_fix(file, fixes) — re-slice with corrections",
             "troubleshooting": "troubleshoot_print_issue(issue) — design intelligence diagnosis",
             "post_processing": "get_post_processing_guide(material) — finishing techniques",
+            "server_restart": (
+                "restart_server() — hot-restart the MCP server after code, "
+                "plugin, or config changes; the client auto-reconnects. Never "
+                "tell the user to quit and reopen their app for this."
+            ),
+            "server_health": "kiln_health() — versions, uptime, module availability, safety-gate state",
+            "server_cleanup": (
+                "trim_serve_processes(open_sessions=N) — close leftover "
+                "background server copies; refuses while anything is printing"
+            ),
+            "self_update": "upgrade_kiln() — update Kiln itself, then restart_server() to run it",
+            "sign_in": "kiln_signin() — browser sign-in for hosted features (poll with kiln_signin_poll())",
             "fleet": "fleet_status() — fleet overview and job routing (Business+; for one machine use printer_status(printer_name=...), free)",
             "cost_estimate": "estimate_cost(file) — print cost estimation",
         }

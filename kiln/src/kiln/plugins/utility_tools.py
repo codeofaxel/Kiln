@@ -772,6 +772,43 @@ class _UtilityToolsPlugin:
                     "monitor": "printer_status, printer_snapshot, await_print_completion",
                     "queue_jobs": "submit_job → job_status → queue_summary",
                 },
+                "session_maintenance": {
+                    "why": (
+                        "Keeping the Kiln session itself healthy is agent work, "
+                        "not user work. In particular: after Kiln's code, "
+                        "config, or plugins change, restart the SERVER — do "
+                        "not tell the user to quit and reopen their client "
+                        "app. These lived only in the connect-time preamble "
+                        "for a while, which is read once and lost; an agent "
+                        "mid-session could not rediscover them, so the one "
+                        "tool that applies updates went unused while users "
+                        "were told to restart apps by hand."
+                    ),
+                    "tools": {
+                        "restart_server": (
+                            "restart_server() — hot-restart the MCP server "
+                            "in-place; the client auto-reconnects in ~1s. Use "
+                            "after code, plugin, or env/config changes."
+                        ),
+                        "kiln_health": (
+                            "kiln_health() — versions, uptime, module "
+                            "availability, safety-gate state."
+                        ),
+                        "trim_serve_processes": (
+                            "trim_serve_processes(open_sessions=N) — close "
+                            "leftover background server copies from closed "
+                            "sessions; refuses while anything is printing."
+                        ),
+                        "upgrade_kiln": (
+                            "upgrade_kiln() — update Kiln itself, then "
+                            "restart_server() to run the new code."
+                        ),
+                        "kiln_signin": (
+                            "kiln_signin() — browser sign-in for the hosted "
+                            "features; kiln_signin_poll() completes it."
+                        ),
+                    },
+                },
                 "inline_3d_stage": {
                     "what": (
                         "Kiln has an interactive 3D stage — an inline panel the "
