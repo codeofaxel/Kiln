@@ -1487,6 +1487,29 @@ class TestQueueCLI:
         assert result.exit_code == 0
         assert "job-xyz-789" in result.output
 
+    def test_queue_submit_passes_idempotency_key(self, runner):
+        """kiln queue submit --idempotency-key reaches the tool door.
+
+        The retry-safety guard lives at PrintQueue.submit; every tool
+        door carries the key, and the CLI is a door too — a script
+        wrapping the CLI must be able to retry a lost reply without
+        queueing a duplicate print.
+        """
+        mock_result = {
+            "success": True,
+            "job_id": "job-idem-1",
+            "message": "Job submitted.",
+        }
+        with patch(
+            "kiln.plugins.queue_tools.submit_job", return_value=mock_result
+        ) as mock_submit:
+            result = runner.invoke(cli, [
+                "queue", "submit", "cube.gcode",
+                "--idempotency-key", "retry-key-7",
+            ])
+        assert result.exit_code == 0
+        assert mock_submit.call_args.kwargs["idempotency_key"] == "retry-key-7"
+
     def test_queue_submit_json(self, runner):
         """kiln queue submit --json returns valid JSON."""
         mock_result = {

@@ -5149,8 +5149,23 @@ def queue() -> None:
 @click.argument("file")
 @click.option("--printer", default=None, help="Target printer name (omit for auto-dispatch).")
 @click.option("--priority", default=0, type=int, help="Job priority (higher = first, default 0).")
+@click.option(
+    "--idempotency-key",
+    default=None,
+    help=(
+        "One-time key so a retried submit returns the original job "
+        "instead of queueing a duplicate (same key + same details = "
+        "same job)."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def queue_submit_cmd(file: str, printer: str | None, priority: int, json_mode: bool) -> None:
+def queue_submit_cmd(
+    file: str,
+    printer: str | None,
+    priority: int,
+    idempotency_key: str | None,
+    json_mode: bool,
+) -> None:
     """Submit a print job to the queue.
 
     FILE is the G-code file name (must already exist on the printer).
@@ -5163,6 +5178,7 @@ def queue_submit_cmd(file: str, printer: str | None, priority: int, json_mode: b
             file_name=file,
             printer_name=printer,
             priority=priority,
+            idempotency_key=idempotency_key,
         )
         if not result.get("success"):
             click.echo(
