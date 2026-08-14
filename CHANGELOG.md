@@ -17,14 +17,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   It names the file and covers that one print. Elsewhere the previous approval
   step is unchanged.
 
-- **Stop the printer you mean, by name (Business+).** Cancel, pause and resume
+- **Stop the printer you mean, by name.** Cancel, pause and resume
   now take a printer name, so an assistant minding two machines can stop the
   right one — before this, those commands only ever reached your default
   printer, and the only way to stop a second machine remotely was the hard
   emergency stop. Naming no printer still means your default, so nothing changes
-  if you have one machine. Each machine keeps its own books too: a paused
-  printer holds its own temperatures, and a cancelled print is remembered as
-  cancelled on the machine it actually happened on.
+  if you have one machine. Stopping any machine you own is free at every tier;
+  running two at once is Business. Each machine keeps its own books too: a
+  paused printer holds its own temperatures, and a cancelled print is remembered
+  as cancelled on the machine it actually happened on.
 
 - **Clear a stuck printer error without walking over to it.** `clear_printer_error`
   works on Klipper/Moonraker, OctoPrint, Duet, Creality and USB.
@@ -155,6 +156,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   that scrubbing off — and if you'd rather send only what you write, set
   `KILN_REPORT_NO_LOG=1`.
 
+- **Fans and lights from the command line.** `kiln fan` sets part, aux, or
+  chamber fans; `kiln light` switches chamber and work lights on, off, or
+  flashing; `kiln emergency-trip` names the safety input that tripped.
+
+- **`kiln temp` respects your machine's own limits.** It allowed anything up to
+  a fixed 300°C hotend and 130°C bed whatever machine you were on, so a printer
+  rated lower could be pushed past its rating from the command line and a
+  higher-rated one was refused below its own. It now reads the machine's real
+  ceiling, and takes `--printer` like the rest.
+
+- **Watch a print from the web, layer by layer.** Kiln keeps the model and
+  toolpath of prints it sliced, and can send that pair to your own account so
+  the Monitor at https://kiln3d.com/monitor shows the object being built
+  instead of a progress bar. Nothing leaves your machine unless you ask.
+
+- **Restarting the printer bridge is one command.** However it was set up to
+  run — starting with your computer, under a service manager, or in a
+  terminal — Kiln works out which and does the right thing, including the
+  awkward state where it's switched on but not actually running.
+
+- **A resent print request can't queue the job twice.** If a submission's reply
+  goes missing and your script sends it again, you get the original job back
+  instead of a second copy of the print.
+
 ### Changed
 
 - **Every way of starting a print now asks first.** Slicing-and-printing,
@@ -167,6 +192,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   that had already started and mark it cancelled while the machine kept
   printing; now it tells you the print is already running and points you at
   `cancel_print`.
+
+- **Printer status answers for the printer you name, at the detail you want.**
+  Asking about a specific machine used to fail outright; now you can name one,
+  and choose a quick reading or the full picture.
 
 - **Preview pictures now match the 3D viewer.** Kiln's stills get the same
   studio lighting as the model viewer instead of the flat grey render — in
@@ -206,6 +235,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **Upgrading no longer stops Kiln starting.** A database from an older Kiln
+  failed on the first launch after upgrading and took the server down with it.
+  And a locked database now names the program holding it instead of failing
+  generically.
+
+- **A Bambu print no longer looks rejected because the last one failed.** The
+  previous job's error code was being read as this job's refusal.
+
+- **A finished or cancelled print reads as finished or cancelled**, instead of
+  plain "idle".
+
+- **A stalled print gets noticed.** A print dead at 5% while its readings
+  claimed it was running is now caught, and a resume after a refused resume
+  works.
+
+- **A flat bottom is not an overhang.** A plain box was scored as having severe
+  overhangs — the face it stands on.
 
 - **Your printer stays reachable when you run Kiln in more than one chat.**
   Several open sessions could leave your own Bambu or Elegoo refusing to answer
