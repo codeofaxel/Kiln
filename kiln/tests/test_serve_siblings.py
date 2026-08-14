@@ -179,9 +179,18 @@ class TestCheckServeSiblings:
         """The reader may not know what a PID is and must never be
         asked to handle one.  The warning offers Kiln's own cleanup,
         keeps the no-tools fallback, and states plainly that nothing
-        is at risk so it never reads as urgent."""
+        is at risk so it never reads as urgent.
+
+        Pinned to the HTTP-printer case, because the reassurance is not
+        unconditional: on a Bambu or an Elegoo a pile-up really can hold the
+        printer, and that branch says so instead (covered in
+        test_printer_connection_slots).  Patched rather than left to the
+        environment so this asserts on a chosen branch, not on whatever
+        printer the machine running the suite happens to have."""
         monkeypatch.delenv("KILN_SERVE_SIBLING_WARN_THRESHOLD", raising=False)
-        with _fake_ps(self._procs(6)):
+        with _fake_ps(self._procs(6)), patch.object(
+            serve_siblings, "slot_rationed_printers", return_value=False
+        ):
             warning = serve_siblings.check_serve_siblings()["warning"]
         assert "Kiln can close the leftovers for you" in warning
         assert "trim_serve_processes" in warning

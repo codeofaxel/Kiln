@@ -27,8 +27,23 @@ from kiln import serve_siblings
 _MY_UID = os.getuid()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every test in this module its own HOME.
+
+    conftest relocates HOME once for the whole session, which keeps the suite
+    off the developer's real ~/.kiln — but it is still ONE directory shared by
+    every test. This module writes config.yaml, so without its own HOME it
+    leaves a Bambu configured for whatever runs next, and a module that asks
+    "is a slot-rationing printer configured?" gets a different answer
+    depending on test order. That is the exact pollution conftest's own
+    docstring warns about; it is cheap to not re-create it.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
 def _write_config(text: str) -> None:
-    """Write ~/.kiln/config.yaml under the relocated test HOME (conftest)."""
+    """Write ~/.kiln/config.yaml under this test's isolated HOME."""
     cfg = Path.home() / ".kiln"
     cfg.mkdir(parents=True, exist_ok=True)
     (cfg / "config.yaml").write_text(text, encoding="utf-8")
