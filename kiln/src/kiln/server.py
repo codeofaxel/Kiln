@@ -3766,6 +3766,33 @@ def _log_print_completion(event: Event) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _reads_as_auth_failure(message: str) -> bool:
+    """True when a printer refusal is about CREDENTIALS, not reachability.
+
+    The adapters raise one exception type for both, so the classification
+    reads the message.  Deliberately narrow: only words that name an
+    authentication problem count, and anything unmatched is treated as the
+    ordinary unreachable case — a false "offline" costs a glance at a power
+    switch, while a credentials error dressed as offline hides the actual
+    fix.
+    """
+    text = (message or "").lower()
+    return any(
+        needle in text
+        for needle in (
+            "not authorized",
+            "unauthorized",
+            "unauthorised",
+            "access code",
+            "api key",
+            "api-key",
+            "forbidden",
+            "authentication",
+            "invalid credentials",
+        )
+    )
+
+
 def _reported_printer_name(printer_name: str | None = None) -> str | None:
     """The name of the printer a status result is describing.
 
@@ -3818,6 +3845,12 @@ _LITE_PRINTER_KEYS = (
     "speed_magnitude",
     "print_error",
     "state_age_seconds",
+    # How the LAST job ended — success / failed / cancelled — on its own
+    # axis, so `idle` keeps meaning ready without also meaning finished.
+    # The web's completion card and any poller watching for an ending need
+    # it at lite cadence; it is one short string that is absent (and costs
+    # nothing) on adapters that don't report an ending.
+    "last_job_result",
 )
 
 
@@ -3900,6 +3933,28 @@ def printer_status(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
+        # A configured printer that is not answering is a STATE, not a tool
+        # failure: the readers that matter (the web Monitor, any poller)
+        # need "your printer is offline" to be a successful, structured
+        # answer they can render, distinct from "the question itself
+        # failed".  So the ordinary unreachable case returns a snapshot
+        # with connected=False and state="offline" — while a refusal that
+        # reads as authentication, and the no-printer-configured
+        # RuntimeError, stay typed errors: an offline printer and a wrong
+        # access code need different fixes, and laundering the second into
+        # the first sends someone to check a power switch for a
+        # credentials problem.
+        if isinstance(exc, PrinterError) and not _reads_as_auth_failure(str(exc)):
+            offline: dict[str, Any] = {
+                "success": True,
+                "printer": {"connected": False, "state": "offline"},
+                "job": {},
+                "offline_reason": str(exc),
+            }
+            _offline_name = _reported_printer_name(printer_name)
+            if _offline_name:
+                offline["printer_name"] = _offline_name
+            return offline
         return _error_dict(
             f"Failed to get printer status: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."
         )
