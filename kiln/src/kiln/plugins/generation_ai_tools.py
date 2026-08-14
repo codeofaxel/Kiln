@@ -889,6 +889,20 @@ class _GenerationAIToolsPlugin:
                     # Captured before the command so the verdict can tell a
                     # reading about THIS job from the printer's last word
                     # about the previous one.
+                    # No preview gate here, deliberately: the object does
+                    # not exist until this call runs, so no token could have
+                    # been issued for it.  The standing opt-in
+                    # (KILN_AUTO_PRINT_GENERATED, off by default) IS the
+                    # consent; without it this tool uploads and makes the
+                    # caller go through start_print, which does gate.
+                    _srv._audit(
+                        "generate_and_print",
+                        "auto_printed_without_preview",
+                        details={
+                            "file": file_name,
+                            "consent": "KILN_AUTO_PRINT_GENERATED",
+                        },
+                    )
                     sent_at = time.monotonic()
                     print_result = adapter.start_print(file_name)
                     _srv._note_print_started(adapter)

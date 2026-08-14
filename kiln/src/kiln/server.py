@@ -1696,6 +1696,126 @@ def _is_heater_watchdog_machine(adapter: PrinterAdapter) -> bool:
         return False
 
 
+def _preview_gate_error(
+    tool_name: str,
+    file_name: str,
+    preview_token: str | None,
+    *,
+    printer_name: str | None = None,
+    is_resume: bool = False,
+) -> dict | None:
+    """``None`` when this print may proceed; an error dict when it may not.
+
+    The rule is that a print is shown to its owner before it happens.  It
+    lived inside ``start_print`` and nowhere else, so it governed one of the
+    six commands that start prints and an agent that did not want to render
+    a preview only had to call a different one — ``slice_and_print``,
+    ``generate_and_print``, and the rest went straight to the machine.  A
+    consent rule with five ways around it is not a rule.
+
+    What it can and cannot promise is worth being honest about: the token
+    proves a preview was RENDERED for this file, not that a human ever saw
+    it.  The agent is still the one asserting consent.  Closing that half
+    needs the client to do the asking (MCP elicitation), not another server
+    check.
+
+    ``KILN_SKIP_PREVIEW_GATE=1`` still bypasses it for CI, and a resume-mode
+    print is still exempt: the print is already running and already had its
+    approval.
+    """
+    if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
+        if not is_resume:
+            logger.warning(
+                "KILN_SKIP_PREVIEW_GATE is set — skipping mandatory preview "
+                "confirmation for %s(%s).  Only do this in CI.",
+                tool_name, file_name,
+            )
+            _audit(tool_name, "preview_gate_skipped", details={"file": file_name})
+        return None
+    if is_resume:
+        return None
+    if not preview_token:
+        return _error_dict(
+            f"{tool_name} refuses to proceed without a preview confirmation. "
+            "Render a preview with visualize_model(), show it to the user, "
+            "and call issue_preview_token(file_path) to get a token. "
+            "Pass the token as preview_token=<token>. To bypass (advanced / "
+            "CI only), set KILN_SKIP_PREVIEW_GATE=1.",
+            code="PREVIEW_NOT_CONFIRMED",
+        )
+    try:
+        from kiln.preview_gate import get_preview_gate
+
+        # We can't hash a file on the printer, so the token is matched
+        # against the name it was issued for.
+        ok, reason = get_preview_gate().validate(
+            preview_token,
+            file_name,
+            printer_id=(
+                _resolve_printer_model_live(printer_name)
+                if printer_name
+                else _PRINTER_MODEL
+            ),
+        )
+        if not ok:
+            return _error_dict(
+                f"Preview token rejected: {reason}. Re-render the preview "
+                f"and issue a fresh token.",
+                code="PREVIEW_TOKEN_INVALID",
+            )
+    except Exception as exc:  # noqa: BLE001 — a broken gate must not brick printing
+        logger.warning("Preview gate validation failed: %s", exc)
+    return None
+
+
+# Slicer settings that change how the object is MADE but not what it is.
+# Deliberately an allowlist rather than a list of geometry-changing keys:
+# an incomplete allowlist asks for one confirmation nobody needed, while an
+# incomplete geometry list prints an unapproved shape.  Anything not named
+# here — including a key Kiln has never seen — counts as a change to the
+# object.
+_APPEARANCE_NEUTRAL_OVERRIDES = frozenset({
+    "temperature",
+    "first_layer_temperature",
+    "bed_temperature",
+    "first_layer_bed_temperature",
+    "fan_speed",
+    "min_fan_speed",
+    "max_fan_speed",
+    "cooling",
+    "print_speed",
+    "perimeter_speed",
+    "infill_speed",
+    "travel_speed",
+    "first_layer_speed",
+    "retract_length",
+    "retract_speed",
+    "filament_flow_ratio",
+    "extrusion_multiplier",
+})
+
+
+def _retry_changes_the_object(overrides: dict[str, Any] | None, mesh_repaired: bool) -> bool:
+    """True when a retry prints something other than what was approved.
+
+    A reprint of the same object with a hotter nozzle is the print the user
+    already said yes to.  A reprint whose mesh was auto-repaired, or whose
+    overrides move supports, orientation or scale, is a different object
+    wearing the same file name — and the approval it is leaning on was
+    given for the old one.
+
+    Unknown keys count as a change.  The cost of being wrong that way is a
+    confirmation the user did not strictly need; the cost of the other way
+    is a shape they never approved.
+    """
+    if mesh_repaired:
+        return True
+    return any(
+        str(key).strip().lower() not in _APPEARANCE_NEUTRAL_OVERRIDES
+        for key in (overrides or {})
+    )
+
+
 def _note_print_started(adapter: PrinterAdapter) -> None:
     """Tell the heater watchdog a print began — if it is watching *adapter*.
 
@@ -5057,55 +5177,14 @@ def start_print(
         return block
 
     # -- Preview confirmation gate -----------------------------------------
-    # Refuse to start a print unless the agent has demonstrated a preview
-    # was rendered and the user approved.  Bypass via
-    # KILN_SKIP_PREVIEW_GATE=1 for CI / advanced users.  Skipped for
-    # resume-mode 3MFs because the print is already in progress.
-    _skip_preview_gate = os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in (
-        "1", "true", "yes",
-    )
+    # One helper, six callers: see _preview_gate_error for why this stopped
+    # living inside this function.
     _is_resume = resume_from_paused or _is_resume_mode_3mf(file_name)
-    if not _skip_preview_gate and not _is_resume:
-        if not preview_token:
-            return _error_dict(
-                "start_print refuses to proceed without a preview confirmation. "
-                "Render a preview with visualize_model(), show it to the user, "
-                "and call issue_preview_token(file_path) to get a token. "
-                "Pass the token as preview_token=<token>. To bypass (advanced / "
-                "CI only), set KILN_SKIP_PREVIEW_GATE=1.",
-                code="PREVIEW_NOT_CONFIRMED",
-            )
-        try:
-            from kiln.preview_gate import get_preview_gate
-            # Find the local file path corresponding to this printer file
-            # name so we can validate the token against the actual bytes.
-            # We can't hash a file on the printer; match by file_name hash
-            # instead (token must have been issued with file_name as path
-            # argument or as a pre-computed hash).
-            ok, reason = get_preview_gate().validate(
-                preview_token,
-                file_name,
-                printer_id=(
-                    _resolve_printer_model_live(printer_name)
-                    if printer_name
-                    else _PRINTER_MODEL
-                ),
-            )
-            if not ok:
-                return _error_dict(
-                    f"Preview token rejected: {reason}. Re-render the preview "
-                    f"and issue a fresh token.",
-                    code="PREVIEW_TOKEN_INVALID",
-                )
-        except Exception as exc:
-            logger.warning("Preview gate validation failed: %s", exc)
-    elif _skip_preview_gate and not _is_resume:
-        logger.warning(
-            "KILN_SKIP_PREVIEW_GATE is set — skipping mandatory preview "
-            "confirmation for start_print(%s).  Only do this in CI.",
-            file_name,
-        )
-        _audit("start_print", "preview_gate_skipped", details={"file": file_name})
+    if block := _preview_gate_error(
+        "start_print", file_name, preview_token,
+        printer_name=printer_name, is_resume=_is_resume,
+    ):
+        return block
 
     # Auto-detect resume-mode 3MFs by filename.  Convention: files
     # produced by decorate_during_print / revert_mid_print are named
@@ -9080,6 +9159,16 @@ def download_and_upload(
                     pf.get("summary", "Pre-flight checks failed"),
                     code="PREFLIGHT_FAILED",
                 )
+            # No preview gate here, deliberately: the user cannot preview a
+            # marketplace file before it is downloaded, so the standing
+            # opt-in (KILN_AUTO_PRINT_MARKETPLACE, off by default) IS the
+            # consent for this path.  Recorded so the audit trail says where
+            # the approval came from instead of showing an unexplained start.
+            _audit(
+                "download_and_upload",
+                "auto_printed_without_preview",
+                details={"file": file_name, "consent": "KILN_AUTO_PRINT_MARKETPLACE"},
+            )
             sent_at = time.monotonic()
             print_res = adapter.start_print(file_name)
             _note_print_started(adapter)

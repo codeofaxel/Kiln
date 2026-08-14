@@ -48,6 +48,7 @@ class _SmartPrintToolsPlugin:
             custom_overrides: str | None = None,
             skip_diagnosis: bool = False,
             skip_validation: bool = False,
+            preview_token: str | None = None,
         ) -> dict:
             """Diagnose the last print failure and re-slice + print with fixes.
 
@@ -437,6 +438,22 @@ class _SmartPrintToolsPlugin:
                 # Captured before the command: it is what lets the verdict
                 # below tell a reading about THIS job from the printer's last
                 # word about the previous one.
+                # A reprint of the same object with a hotter nozzle is the
+                # print already approved.  One whose mesh was repaired, or
+                # whose overrides move supports/orientation/scale, is a
+                # different object leaning on the old approval.
+                _mesh_repaired = bool(
+                    (validation_summary or {}).get("repaired")
+                )
+                if _srv._retry_changes_the_object(
+                    merged_overrides, _mesh_repaired
+                ) and (
+                    block := _srv._preview_gate_error(
+                        "retry_print_with_fix", model_path, preview_token,
+                        printer_name=printer_name,
+                    )
+                ):
+                    return block
                 sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name)
             except Exception as exc:

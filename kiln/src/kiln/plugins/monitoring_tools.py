@@ -1249,6 +1249,7 @@ class _MonitoringToolsPlugin:
             first_layer_checks: int = 3,
             first_layer_interval: int = 60,
             auto_pause: bool = True,
+            preview_token: str | None = None,
         ) -> dict:
             """Start a print and automatically monitor the first layer.
 
@@ -1286,6 +1287,15 @@ class _MonitoringToolsPlugin:
             ):
                 return block
             try:
+                # The same consent rule start_print applies: this starts a
+                # print on a file already on the printer, which is the same
+                # act under a different name.
+                if block := _srv._preview_gate_error(
+                    "start_monitored_print", file_name, preview_token,
+                    printer_name=printer_name,
+                    is_resume=_srv._is_resume_mode_3mf(file_name),
+                ):
+                    return block
                 # Same door as the control verbs: config.yaml fallback included.
                 adapter = _srv._resolve_adapter(printer_name)
 

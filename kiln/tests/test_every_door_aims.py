@@ -387,3 +387,86 @@ def _isolated_registry(monkeypatch):
     monkeypatch.setattr(server, "_registry", PrinterRegistry())
     monkeypatch.setattr(server, "_tool_limiter", server._ToolRateLimiter())
     monkeypatch.setattr(server, "_TOOL_RATE_LIMITS", {})
+
+
+# ---------------------------------------------------------------------------
+# The consent rule covers every command that starts a print
+# ---------------------------------------------------------------------------
+
+
+def test_every_command_that_starts_a_print_can_carry_consent():
+    """A rule wired into one of six commands is not a rule.
+
+    ``start_print`` asked for a preview token and the other five did not, so
+    an agent that did not want to render a preview only had to call a
+    different command.  Each of these now takes the token.
+    """
+    import inspect
+
+    from kiln.plugins import monitoring_tools, slicer_tools, smart_print_tools
+
+    for mod, tool in (
+        (None, "start_print"),
+        (slicer_tools, "slice_and_print"),
+        (monitoring_tools, "start_monitored_print"),
+        (smart_print_tools, "retry_print_with_fix"),
+    ):
+        src = inspect.getsource(mod) if mod is not None else inspect.getsource(server)
+        assert f"def {tool}(" in src
+        fn_src = src[src.index(f"def {tool}(") :]
+        sig = fn_src[: fn_src.index(") -> dict:")]
+        assert "preview_token" in sig, f"{tool} cannot carry a preview token"
+
+
+def test_one_helper_owns_the_consent_rule():
+    """Six copies of a consent check is five chances to write it differently."""
+    # Exempt, named rather than silent: fulfillment confirms an order placed
+    # with an external manufacturer, not a print on a machine in the room.
+    # Different consent (money, a vendor), different semantics — it validates
+    # against an explicit rendered file and controls token consumption itself.
+    exempt = {"_preview_gate_error", "_validate_preview_confirmation"}
+    offenders: list[str] = []
+    for path in _MODULES:
+        for fn in _functions(path):
+            if fn.name in exempt:
+                continue
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Call) and _call_name(node) == "validate":
+                    seg = ast.get_source_segment(path.read_text(), node) or ""
+                    if "preview" in seg.lower():
+                        offenders.append(f"{path.name}::{fn.name}:{node.lineno}")
+    assert offenders == [], f"preview gate validated outside the helper: {offenders}"
+
+
+# ---------------------------------------------------------------------------
+# A retry is gated on whether the object changed, not on whether it retried
+# ---------------------------------------------------------------------------
+
+
+def test_a_reprint_of_the_same_object_is_not_re_asked():
+    """Hotter nozzle, same shape: this is the print already approved."""
+    assert server._retry_changes_the_object({"temperature": "215"}, False) is False
+    assert server._retry_changes_the_object({}, False) is False
+    assert server._retry_changes_the_object(None, False) is False
+
+
+def test_a_repaired_mesh_is_a_different_object():
+    assert server._retry_changes_the_object({"temperature": "215"}, True) is True
+
+
+def test_an_override_we_do_not_recognise_counts_as_a_change():
+    """The allowlist is deliberately the safe way round.
+
+    Naming the geometry-changing keys means an incomplete list prints an
+    unapproved shape.  Naming the harmless ones means an incomplete list
+    asks one extra question.
+    """
+    assert server._retry_changes_the_object({"support_material": "1"}, False) is True
+    assert server._retry_changes_the_object({"a_key_from_2027": "x"}, False) is True
+
+
+def test_the_allowlist_holds_only_appearance_neutral_settings():
+    """Guard against someone adding a geometry key to the safe list."""
+    banned = ("support", "raft", "brim", "orient", "rotate", "scale", "layer_height")
+    for key in server._APPEARANCE_NEUTRAL_OVERRIDES:
+        assert not any(b in key for b in banned), f"{key} changes the object"

@@ -1278,6 +1278,7 @@ class _SlicerToolsPlugin:
             auto_center: bool = True,
             metadata: dict | None = None,
             skip_validation: bool = False,
+            preview_token: str | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -1745,6 +1746,14 @@ class _SlicerToolsPlugin:
                 # ``sent_at`` is what lets the verdict below tell a reading
                 # about THIS command from the printer's last word about the
                 # previous job.  Capture it before the command, not after.
+                # You chose a file; Kiln chose how it sits on the plate.
+                # Validated against the INPUT model, which is what a user can
+                # actually preview before calling this.
+                if block := _srv._preview_gate_error(
+                    "slice_and_print", input_path, preview_token,
+                    printer_name=printer_name,
+                ):
+                    return block
                 sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name, **print_kwargs)
                 _srv._note_print_started(adapter)

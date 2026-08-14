@@ -24,6 +24,20 @@ import pytest
 # ---------------------------------------------------------------------------
 import kiln.printers as _printers_pkg
 
+
+@pytest.fixture(autouse=True)
+def _preview_gate_off(monkeypatch):
+    """These suites predate the preview-consent gate and are not about it.
+
+    Every command that starts a print now requires a preview token (see
+    test_every_door_aims.py, which is where the gate itself is tested).
+    These tests exercise override merging, material detection and latch
+    behaviour, so they take the same bypass CI does rather than each
+    growing a token they have no opinion about.
+    """
+    monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
+
 if not hasattr(_printers_pkg, "PrinterNotFoundError"):
     from kiln.registry import PrinterNotFoundError as _PNFE
 
