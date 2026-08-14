@@ -3133,8 +3133,9 @@ class BambuAdapter(PrinterAdapter):
             success=True,
             message=(
                 "Sent the error acknowledgement. Re-read printer_status to "
-                "confirm the printer has left its error state; if it has not, "
-                "this firmware needs a power cycle."
+                "confirm. If the printer is still refusing prints, give it a "
+                "minute — a fault from cancelling during bed levelling often "
+                "clears on its own — and power-cycle only if it persists."
             ),
         )
 

@@ -5076,7 +5076,6 @@ def cancel_print(
     expected_tool_target: float | None = None,
     expected_bed_target: float | None = None,
     expected_chamber_target: float | None = None,
-    force_immediate: bool = False,
 ) -> dict:
     """Cancel the currently running print job.
 
@@ -5112,15 +5111,7 @@ def cancel_print(
         heating via the adapter API, so this is sent as a raw M141
         command best-effort.  Pass ``None`` to skip chamber preservation.
 
-    :param force_immediate: Skip the calibration guard and send the cancel
-    straight away.  During bed levelling this printer's firmware can latch
-    a homing fault that survives until a power cycle; the guard pauses for
-    about a second first, which makes that fault transient instead.  Set
-    this when the delay matters more than the fault -- though for a machine
-    doing something alarming, ``emergency_stop`` is the instant path and
-    never waits for anything.
-
-WARNING: Cancellation is irreversible -- the print cannot be resumed
+    WARNING: Cancellation is irreversible -- the print cannot be resumed
     from where it left off UNLESS a resume-mode 3MF has been pre-staged
     (see ``decorate_during_print`` and ``revert_mid_print``).
     """
@@ -5213,9 +5204,19 @@ WARNING: Cancellation is irreversible -- the print cannot be resumed
                 "Early-cancel incident auto-capture skipped: %s", _inc_exc,
             )
 
-        # The calibration guard lives on the adapter wrap, so every door that
-        # cancels inherits it; this only forwards the caller's override.
-        result = adapter.cancel_print(skip_calibration_guard=force_immediate)
+        # Was this cancel inside the window where the firmware can fault?
+        # Read BEFORE the cancel, because afterwards the job is over and the
+        # printer no longer says where it was.
+        in_calibration = False
+        if adapter.capabilities.cancel_during_calibration_faults:
+            try:
+                from kiln.printers.base import in_calibration_window
+
+                in_calibration = in_calibration_window(None, adapter.get_job())
+            except Exception as exc:  # noqa: BLE001 — never block a cancel
+                logger.debug("cancel_print: window check skipped: %s", exc)
+
+        result = adapter.cancel_print()
         _get_heater_watchdog().notify_print_ended()
         # Layer 5: tear down the PrintWatchdog for this printer.
         _stop_print_watchdog()
@@ -5259,6 +5260,18 @@ WARNING: Cancellation is irreversible -- the print cannot be resumed
         _audit("cancel_print", "executed")
 
         out = result.to_dict()
+        if in_calibration:
+            # Measured on an A1 across six cancels in this window: every one
+            # tripped a Z-homing fault, and four of the six cleared themselves
+            # inside about a minute.  So the useful thing to say is not "you
+            # may be stuck" — it is "wait before you power-cycle", which is
+            # right two times in three.
+            out["note"] = (
+                "Cancelled while the printer was still levelling the bed. On "
+                "this printer that sometimes leaves a fault that refuses new "
+                "prints — it usually clears itself within a minute or two, so "
+                "give it a moment before power-cycling."
+            )
         if preserve_temperatures:
             out["preserved_temperatures"] = restored
             if chamber_restored is not None:
