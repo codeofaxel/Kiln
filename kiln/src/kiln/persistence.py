@@ -631,15 +631,29 @@ class KilnDB:
         """
         if self._is_postgres:
             rows = self._conn.execute(
-                "SELECT column_name FROM information_schema.columns WHERE table_name = 'print_outcomes'",
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_name = 'print_outcomes'",
             ).fetchall()
-            columns = {row[0] for row in rows}
+            types = {row[0]: row[1] for row in rows}
         else:
-            columns = {row[1] for row in self._conn.execute("PRAGMA table_info(print_outcomes)").fetchall()}
+            types = {
+                row[1]: row[2]
+                for row in self._conn.execute("PRAGMA table_info(print_outcomes)").fetchall()
+            }
+        columns = set(types)
         if "determined_by" not in columns:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN determined_by TEXT DEFAULT NULL")
         if "print_error" not in columns:
-            self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN print_error INTEGER DEFAULT NULL")
+            self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN print_error BIGINT DEFAULT NULL")
+        elif types.get("print_error") == "integer":
+            # Postgres only, and only for the few hours this column existed
+            # as int4.  SQLite's INTEGER is already 64-bit; Postgres's tops
+            # out at 2147483647, which every HMS family from 0x80 up
+            # exceeds — an insert that would fail on somebody's printer
+            # long after the code that chose the type was forgotten.
+            self._conn.execute(
+                "ALTER TABLE print_outcomes ALTER COLUMN print_error TYPE BIGINT"
+            )
         self._conn.commit()
 
     def _migrate_printer_materials(self) -> None:
@@ -948,7 +962,7 @@ class KilnDB:
                     notes           TEXT,
                     agent_id        TEXT,
                     determined_by   TEXT,
-                    print_error     INTEGER DEFAULT NULL,
+                    print_error     BIGINT DEFAULT NULL,
                     created_at      REAL NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer

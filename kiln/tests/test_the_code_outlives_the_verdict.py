@@ -367,6 +367,44 @@ def test_an_older_database_grows_the_column(tmp_path, monkeypatch):
     assert db.get_print_outcome("after-migration")["print_error"] == _Z_HOMING_FAILED
 
 
+def test_the_column_holds_the_whole_code_space(tmp_path, monkeypatch):
+    """The type has to cover codes nobody has tripped yet.
+
+    The client reads the fault family from the top byte, so a code runs to
+    0xFFFFFFFF — past the 2147483647 that Postgres's INTEGER stops at.  The
+    measured Z-homing code fits in int4 and every family from 0x80 up does
+    not, which is the kind of bug that lands months later on somebody
+    else's printer.  BIGINT covers it on both backends (SQLite's INTEGER
+    was always 64-bit; the declared type is what Postgres reads).
+    """
+    import kiln.persistence as _p
+
+    db_path = tmp_path / "wide.db"
+    monkeypatch.setenv("KILN_DB_PATH", str(db_path))
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+    db = _p.get_db()
+
+    high_family = 0xFF000001          # 4278190081 — would overflow int4
+    assert high_family > 2**31 - 1
+    db.save_print_outcome(
+        {
+            "job_id": "high-family",
+            "printer_name": "garage",
+            "outcome": "failed",
+            "print_error": high_family,
+        }
+    )
+    assert db.get_print_outcome("high-family")["print_error"] == high_family
+
+    declared = {
+        row[1]: row[2]
+        for row in sqlite3.connect(db_path)
+        .execute("PRAGMA table_info(print_outcomes)")
+        .fetchall()
+    }
+    assert declared["print_error"].upper() == "BIGINT"
+
+
 def test_the_migration_is_idempotent(tmp_path, monkeypatch):
     """It runs on every startup, against a table that already has it."""
     import kiln.persistence as _p
