@@ -5,6 +5,20 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      # httpx2 pins httpcore2 to an EXACT version (httpx2 2.10.0 requires
+      # httpcore2==2.10.0), so neither can move alone: #133 raised httpx2
+      # against a lock still holding httpcore2 2.9.1, #128 raised httpcore2
+      # against an httpx2 still demanding 2.9.1, and both died in dependency
+      # resolution before a test ran. Two PRs, each blocked by the other.
+      #
+      # Same coupling as the pydantic-core note below, opposite remedy: both
+      # of these are direct entries in requirements-lock.txt and both SHOULD
+      # move, so they are grouped into one PR rather than ignored.
+      http2-stack:
+        patterns:
+          - "httpx2"
+          - "httpcore2"
     ignore:
       # pydantic-core is not ours to move. It is a transitive dependency that
       # pydantic pins to an EXACT version (pydantic 2.13.4 requires
