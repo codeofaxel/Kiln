@@ -7817,8 +7817,15 @@ def register_printer(
 ) -> dict:
     """Register a new printer in the fleet.
 
-    Free and Pro each allow 1 printer. Fleet starts at Business (3 printers
-    included, $15/mo per additional to a cap of 50); Enterprise is uncapped.
+    Registering is free at every tier and always has been — what the fleet
+    tier sells is running printers in PARALLEL, enforced when a print
+    starts, not when a machine is added.  So owning a second printer and
+    using them one at a time is a supported setup on Free and Pro: the
+    registration succeeds and the reply notes the concurrency limit.
+
+    Free and Pro run 1 printer at a time. Fleet starts at Business (3
+    printers included, $15/mo per additional to a cap of 50); Enterprise
+    is uncapped.
 
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
