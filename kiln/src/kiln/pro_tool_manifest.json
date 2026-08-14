@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-14T00:20:23.589714+00:00",
+  "generated": "2026-08-14T01:01:16.902991+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -73,7 +73,7 @@
     },
     "design_library": {
       "label": "Design Library",
-      "pitch": "Where your designs live \u2014 create, name, categorise, archive and delete them, promote one kit piece into a standalone design with its lineage intact, and read the part passport that records who made it and how."
+      "pitch": "Where your designs live \u2014 create, name, categorise, archive and delete them, bring outside geometry in (STL, OBJ, 3MF, STEP \u2014 multi-part models keep their named parts) as first-class designs, promote one kit piece into a standalone design with its lineage intact, and read the part passport that records who made it and how."
     },
     "design_versioning": {
       "label": "Design Branching & History",
@@ -113,7 +113,7 @@
     },
     "product_intelligence": {
       "label": "Product Intelligence",
-      "pitch": "Smart product generation with proven recipes, QR codes, and batch operations."
+      "pitch": "The product-aware layer over generation \u2014 every generator's faces, color roles and emboss depths queryable so decorations land where they should, plus QR placement, text sizing, decorated one-shots, and batch generation across a whole product line."
     },
     "provenance_learning": {
       "label": "Proven Recipes",
@@ -121,11 +121,11 @@
     },
     "billing": {
       "label": "Billing & Subscription",
-      "pitch": "Self-serve Stripe Checkout, customer portal, lost-key reissue, and live license status \u2014 for agents and humans."
+      "pitch": "Self-serve Stripe Checkout, customer portal, lost-key reissue, and live license status \u2014 for agents and humans.  Plus the money guardrails an agent workflow needs: spend caps only a human confirmation can raise, per-order approvals, usage summaries, invoices, and billing alerts."
     },
     "account_management": {
       "label": "Account & Support",
-      "pitch": "Your relationship with Kiln rather than your prints \u2014 sign in and out without a terminal, set the creator credit that travels with what you publish, and report a bug or a workaround from inside an agent chat. Free for everyone; server-side moderation, prompt-injection sanitisation and rate-limiting keep the report queue clean before anything reaches the team."
+      "pitch": "Your relationship with Kiln rather than your prints \u2014 sign in and out without a terminal, set the creator credit that travels with what you publish, read and set what telemetry Kiln may collect (per category, with an opt-out), and report a bug or a workaround from inside an agent chat. Free for everyone; server-side moderation, prompt-injection sanitisation and rate-limiting keep the report queue clean before anything reaches the team."
     },
     "assembly_manuals": {
       "label": "Assembly Manuals",
@@ -176,6 +176,18 @@
   },
   "tools": [
     {
+      "name": "get_telemetry_preferences",
+      "description": "Return the per-category telemetry disclosure + opt-out state.",
+      "tier": "free",
+      "access": "free",
+      "category": "account_management",
+      "parameters": {
+        "properties": {},
+        "title": "get_telemetry_preferencesArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "report_issue",
       "description": "Report a bug or a workaround \u2014 what broke, and what fixed it.",
       "tier": "free",
@@ -215,6 +227,36 @@
           "description"
         ],
         "title": "report_issueArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_telemetry_preference",
+      "description": "Set the opt-out / acknowledged state for a telemetry category.",
+      "tier": "free",
+      "access": "free",
+      "category": "account_management",
+      "parameters": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "opted_out": {
+            "default": false,
+            "title": "Opted Out",
+            "type": "boolean"
+          },
+          "acknowledge": {
+            "default": false,
+            "title": "Acknowledge",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "category"
+        ],
+        "title": "set_telemetry_preferenceArguments",
         "type": "object"
       }
     },
@@ -2651,6 +2693,41 @@
       }
     },
     {
+      "name": "regenerate_3mf_thumbnail",
+      "description": "Swap the embedded thumbnails in a 3MF for renders of a decorated STL so the Bambu screen shows the decoration (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "three_mf_path": {
+            "title": "Three Mf Path",
+            "type": "string"
+          },
+          "decorated_stl_path": {
+            "title": "Decorated Stl Path",
+            "type": "string"
+          },
+          "output_path": {
+            "default": "",
+            "title": "Output Path",
+            "type": "string"
+          },
+          "color": {
+            "default": "#FFFFFF",
+            "title": "Color",
+            "type": "string"
+          }
+        },
+        "required": [
+          "three_mf_path",
+          "decorated_stl_path"
+        ],
+        "title": "regenerate_3mf_thumbnailArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "register_brand_asset",
       "description": "Register a logo/image as a named brand asset (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -3692,6 +3769,43 @@
       }
     },
     {
+      "name": "rebase_preset_branch",
+      "description": "Rebase a decoration preset branch. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "decoration_presets",
+      "parameters": {
+        "properties": {
+          "source_branch_id": {
+            "title": "Source Branch Id",
+            "type": "string"
+          },
+          "onto_branch_id": {
+            "title": "Onto Branch Id",
+            "type": "string"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator"
+          }
+        },
+        "required": [
+          "source_branch_id",
+          "onto_branch_id"
+        ],
+        "title": "rebase_preset_branchArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "record_decoration_preset_outcome",
       "description": "Record a print outcome against a specific preset version.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -4218,6 +4332,95 @@
           "design_id"
         ],
         "title": "get_part_passportArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "import_external_mesh",
+      "description": "Import external geometry (STL / OBJ / PLY / GLB / glTF / 3MF / STEP) as a first-class design version. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "design_library",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "mesh_path": {
+            "title": "Mesh Path",
+            "type": "string"
+          },
+          "design_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Name"
+          },
+          "source_attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Attribution"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "branch_name": {
+            "default": "main",
+            "title": "Branch Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id",
+          "mesh_path"
+        ],
+        "title": "import_external_meshArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "import_model_parts",
+      "description": "Import a MULTI-PART model with its named parts intact. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
+      "tier": "free",
+      "access": "free",
+      "category": "design_library",
+      "parameters": {
+        "properties": {
+          "model_path": {
+            "title": "Model Path",
+            "type": "string"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_path"
+        ],
+        "title": "import_model_partsArguments",
         "type": "object"
       }
     },
@@ -4862,6 +5065,31 @@
       }
     },
     {
+      "name": "cross_branch_ab_report",
+      "description": "Rank semantic features by their measured outcome impact across branches.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "design_regression",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "min_outcomes_per_branch": {
+            "default": 3,
+            "title": "Min Outcomes Per Branch",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "cross_branch_ab_reportArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "design_version_health",
       "description": "Full health report for a design across all its versions.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -5263,31 +5491,6 @@
           "body"
         ],
         "title": "add_mesh_commentArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "cross_branch_ab_report",
-      "description": "Rank semantic features by their measured outcome impact across branches.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "design_review",
-      "parameters": {
-        "properties": {
-          "design_id": {
-            "title": "Design Id",
-            "type": "string"
-          },
-          "min_outcomes_per_branch": {
-            "default": 3,
-            "title": "Min Outcomes Per Branch",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "design_id"
-        ],
-        "title": "cross_branch_ab_reportArguments",
         "type": "object"
       }
     },
@@ -6469,95 +6672,6 @@
       }
     },
     {
-      "name": "import_external_mesh",
-      "description": "Import external geometry (STL / OBJ / PLY / GLB / glTF / 3MF / STEP) as a first-class design version. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "design_id": {
-            "title": "Design Id",
-            "type": "string"
-          },
-          "mesh_path": {
-            "title": "Mesh Path",
-            "type": "string"
-          },
-          "design_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Design Name"
-          },
-          "source_attribution": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Source Attribution"
-          },
-          "notes": {
-            "default": "",
-            "title": "Notes",
-            "type": "string"
-          },
-          "branch_name": {
-            "default": "main",
-            "title": "Branch Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "design_id",
-          "mesh_path"
-        ],
-        "title": "import_external_meshArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "import_model_parts",
-      "description": "Import a MULTI-PART model with its named parts intact. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
-      "tier": "free",
-      "access": "free",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "model_path": {
-            "title": "Model Path",
-            "type": "string"
-          },
-          "output_dir": {
-            "default": "",
-            "title": "Output Dir",
-            "type": "string"
-          },
-          "design_id": {
-            "default": "",
-            "title": "Design Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_path"
-        ],
-        "title": "import_model_partsArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "list_cherry_pick_candidates",
       "description": "Enumerate the semantic modifications cherry-pickable from *source_version_id* relative to *ancestor_version_id*.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -6718,80 +6832,6 @@
           "onto_branch_id"
         ],
         "title": "rebase_design_branchArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "rebase_feature_branch",
-      "description": "Rebase a feature branch. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "source_branch_id": {
-            "title": "Source Branch Id",
-            "type": "string"
-          },
-          "onto_branch_id": {
-            "title": "Onto Branch Id",
-            "type": "string"
-          },
-          "operator": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Operator"
-          }
-        },
-        "required": [
-          "source_branch_id",
-          "onto_branch_id"
-        ],
-        "title": "rebase_feature_branchArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "rebase_preset_branch",
-      "description": "Rebase a decoration preset branch. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "source_branch_id": {
-            "title": "Source Branch Id",
-            "type": "string"
-          },
-          "onto_branch_id": {
-            "title": "Onto Branch Id",
-            "type": "string"
-          },
-          "operator": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Operator"
-          }
-        },
-        "required": [
-          "source_branch_id",
-          "onto_branch_id"
-        ],
-        "title": "rebase_preset_branchArguments",
         "type": "object"
       }
     },
@@ -7433,65 +7473,6 @@
           "question"
         ],
         "title": "answer_material_questionArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "assess_calibration_status",
-      "description": "Calibration confidence + auto-import for slicer profiles.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "engineering",
-      "parameters": {
-        "properties": {
-          "printer_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Printer Id"
-          },
-          "intended_material": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Intended Material"
-          },
-          "brief": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Brief"
-          },
-          "mode": {
-            "default": "auto",
-            "enum": [
-              "normie",
-              "engineer",
-              "auto"
-            ],
-            "title": "Mode",
-            "type": "string"
-          }
-        },
-        "title": "assess_calibration_statusArguments",
         "type": "object"
       }
     },
@@ -8534,6 +8515,43 @@
           "merged_feature_version_id"
         ],
         "title": "merge_feature_branchesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "rebase_feature_branch",
+      "description": "Rebase a feature branch. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "feature_library",
+      "parameters": {
+        "properties": {
+          "source_branch_id": {
+            "title": "Source Branch Id",
+            "type": "string"
+          },
+          "onto_branch_id": {
+            "title": "Onto Branch Id",
+            "type": "string"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator"
+          }
+        },
+        "required": [
+          "source_branch_id",
+          "onto_branch_id"
+        ],
+        "title": "rebase_feature_branchArguments",
         "type": "object"
       }
     },
@@ -11331,6 +11349,65 @@
       }
     },
     {
+      "name": "assess_calibration_status",
+      "description": "Calibration confidence + auto-import for slicer profiles.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "machine_calibration",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Id"
+          },
+          "intended_material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Intended Material"
+          },
+          "brief": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Brief"
+          },
+          "mode": {
+            "default": "auto",
+            "enum": [
+              "normie",
+              "engineer",
+              "auto"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "title": "assess_calibration_statusArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "classify_calibration_confidence",
       "description": "Deterministically classify per-field + overall calibration confidence.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -13161,41 +13238,6 @@
       }
     },
     {
-      "name": "regenerate_3mf_thumbnail",
-      "description": "Swap the embedded thumbnails in a 3MF for renders of a decorated STL so the Bambu screen shows the decoration (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "mid_print_editing",
-      "parameters": {
-        "properties": {
-          "three_mf_path": {
-            "title": "Three Mf Path",
-            "type": "string"
-          },
-          "decorated_stl_path": {
-            "title": "Decorated Stl Path",
-            "type": "string"
-          },
-          "output_path": {
-            "default": "",
-            "title": "Output Path",
-            "type": "string"
-          },
-          "color": {
-            "default": "#FFFFFF",
-            "title": "Color",
-            "type": "string"
-          }
-        },
-        "required": [
-          "three_mf_path",
-          "decorated_stl_path"
-        ],
-        "title": "regenerate_3mf_thumbnailArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "revert_mid_print",
       "description": "Undo a mid-print transform by swapping back the original resume (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -13646,18 +13688,6 @@
       }
     },
     {
-      "name": "get_telemetry_preferences",
-      "description": "Return the per-category telemetry disclosure + opt-out state.",
-      "tier": "free",
-      "access": "free",
-      "category": "nozzle_intelligence",
-      "parameters": {
-        "properties": {},
-        "title": "get_telemetry_preferencesArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "list_nozzle_states",
       "description": "List every printer with a recorded nozzle state.",
       "tier": "free",
@@ -13936,36 +13966,6 @@
           "printer_id"
         ],
         "title": "set_nozzle_stateArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "set_telemetry_preference",
-      "description": "Set the opt-out / acknowledged state for a telemetry category.",
-      "tier": "free",
-      "access": "free",
-      "category": "nozzle_intelligence",
-      "parameters": {
-        "properties": {
-          "category": {
-            "title": "Category",
-            "type": "string"
-          },
-          "opted_out": {
-            "default": false,
-            "title": "Opted Out",
-            "type": "boolean"
-          },
-          "acknowledge": {
-            "default": false,
-            "title": "Acknowledge",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "category"
-        ],
-        "title": "set_telemetry_preferenceArguments",
         "type": "object"
       }
     },
@@ -14675,43 +14675,6 @@
       }
     },
     {
-      "name": "plan_object_skip",
-      "description": "Work out which object to skip on a failing multi-object print (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "plate_objects": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Plate Objects",
-            "type": "array"
-          },
-          "failed_objects": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Failed Objects",
-            "type": "array"
-          },
-          "printer_type": {
-            "default": "",
-            "title": "Printer Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "plate_objects",
-          "failed_objects"
-        ],
-        "title": "plan_object_skipArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "record_completed_print",
       "description": "Record a completed print into the learning system.",
       "tier": "free",
@@ -15201,6 +15164,43 @@
           }
         },
         "title": "get_recovery_strategy_statsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "plan_object_skip",
+      "description": "Work out which object to skip on a failing multi-object print (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "print_recovery",
+      "parameters": {
+        "properties": {
+          "plate_objects": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Plate Objects",
+            "type": "array"
+          },
+          "failed_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Failed Objects",
+            "type": "array"
+          },
+          "printer_type": {
+            "default": "",
+            "title": "Printer Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plate_objects",
+          "failed_objects"
+        ],
+        "title": "plan_object_skipArguments",
         "type": "object"
       }
     },
