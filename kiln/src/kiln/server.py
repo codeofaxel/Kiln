@@ -68,7 +68,21 @@ from pathlib import Path
 from types import MethodType
 from typing import Any
 
-from kiln.mcp_compat import FastMCP, set_instructions
+from kiln.mcp_compat import (
+    FastMCP,
+    ask_user_to_confirm,
+    host_can_ask_the_user,
+    set_instructions,
+)
+from kiln.print_consent import (
+    SOURCE_CI_BYPASS,
+    SOURCE_ELICITED,
+    PrintConsent,
+    consent_for,
+    describe_print_request,
+    reset_consent,
+    set_consent,
+)
 
 with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
@@ -1152,11 +1166,16 @@ def _install_mcp_request_context_capture() -> None:
         convert_result: bool = False,
     ):
         token = _current_mcp_request_context.set(context)
+        consent_token = None
         try:
             if _terms_gate_blocks(name):
                 # One-time consent gate — raised so the lowlevel handler returns
                 # it to the agent as a tool error to relay (see _terms_* above).
                 raise RuntimeError(_terms_consent_message())
+            # Ask the person before a print starts.  Here rather than inside
+            # the tools because sync tools run on this event loop and could
+            # not await the answer.  Raises if they say no, before dispatch.
+            consent_token = await _obtain_print_consent(name, arguments, context)
             try:
                 result = await original_call_tool(
                     name,
@@ -1200,6 +1219,8 @@ def _install_mcp_request_context_capture() -> None:
             # handler (kiln.local_stage), where the result object is real.
             return result
         finally:
+            if consent_token is not None:
+                reset_consent(consent_token)
             _current_mcp_request_context.reset(token)
 
     tool_mgr.call_tool = MethodType(_call_tool_with_context, tool_mgr)
@@ -1696,6 +1717,93 @@ def _is_heater_watchdog_machine(adapter: PrinterAdapter) -> bool:
         return False
 
 
+#: The tools that must not start a print without a person's say-so, and the
+#: argument each one names the job with.  One structure rather than two: a
+#: separate "which tools need consent" list would be a second copy of the
+#: same fact, free to disagree with this one.
+#:
+#: Hand-written because the wrapper must know the answer BEFORE the tool
+#: runs, and pinned by ``test_every_door_aims`` on both halves — that every
+#: tool calling the gate appears here, and that the argument named still
+#: exists in that tool's signature.  A new print tool, or a renamed
+#: parameter, turns that test red instead of silently going unasked.
+_CONSENT_FILE_ARG: dict[str, str] = {
+    "start_print": "file_name",
+    "start_monitored_print": "file_name",
+    "slice_and_print": "input_path",
+    "retry_print_with_fix": "model_path",
+}
+
+
+async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: Any):
+    """Ask the person before this print starts.  Returns a reset token or None.
+
+    Runs in the tool-call wrapper rather than inside the tools because
+    FastMCP calls sync tools directly on the event loop: a sync tool that
+    blocked on an elicitation would deadlock the very loop that has to
+    deliver the answer.  The wrapper is already async and already the one
+    place every MCP call passes through.
+
+    Raises :class:`RuntimeError` when the person says no — the same way the
+    terms gate refuses, and before the tool is dispatched, so a declined
+    print is a print that never started.
+
+    Returns ``None`` when nobody could be asked, which leaves the existing
+    preview-token gate exactly as it was.  That is the honest fallback:
+    hosts without elicitation, and the REST proxy where no person is
+    attached to the call at all.
+    """
+    arg_name = _CONSENT_FILE_ARG.get(tool_name)
+    if arg_name is None or ctx is None:
+        return None
+    if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
+        return None  # one switch turns off consent prompts, as it always did
+    file_value = str(arguments.get(arg_name) or "")
+    if _is_resume_mode_3mf(file_value) or arguments.get("resume_from_paused"):
+        return None  # already running, already approved
+    try:
+        if not host_can_ask_the_user(mcp, ctx):
+            return None
+    except Exception as exc:  # noqa: BLE001 — cannot ask is not approved
+        logger.debug("Could not read host consent capability: %s", exc)
+        return None
+
+    printer_name = arguments.get("printer_name")
+    message = describe_print_request(
+        tool_name,
+        file_name=os.path.basename(file_value) or file_value,
+        printer_name=printer_name,
+        extra={
+            "material": arguments.get("material"),
+            "printer model": arguments.get("printer_id"),
+        },
+    )
+    action, detail = await ask_user_to_confirm(ctx, message)
+    if action == "accept":
+        _audit(tool_name, "consent_granted", details={"file": file_value, "by": "user"})
+        return set_consent(
+            PrintConsent(
+                tool=tool_name,
+                file_name=file_value,
+                printer_name=printer_name,
+                source=SOURCE_ELICITED,
+            )
+        )
+    if action in ("decline", "cancel"):
+        _audit(
+            tool_name,
+            "consent_refused",
+            details={"file": file_value, "action": action},
+        )
+        raise RuntimeError(
+            f"{tool_name} was not started: the print was "
+            + ("declined" if action == "decline" else "dismissed without an answer")
+            + ". Nothing was sent to the printer."
+        )
+    logger.debug("Consent could not be obtained (%s); falling back to token gate", detail)
+    return None
+
+
 def _preview_gate_error(
     tool_name: str,
     file_name: str,
@@ -1723,6 +1831,16 @@ def _preview_gate_error(
     print is still exempt: the print is already running and already had its
     approval.
     """
+    # A person was actually asked about THIS file on THIS machine and said
+    # yes.  That is the thing the token has only ever stood in for, so it
+    # ends the question rather than being checked alongside one.
+    if granted := consent_for(file_name=file_name, printer_name=printer_name):
+        _audit(
+            tool_name,
+            "preview_gate_satisfied",
+            details={"file": file_name, "consent": granted.source},
+        )
+        return None
     if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
         if not is_resume:
             logger.warning(
@@ -1730,7 +1848,11 @@ def _preview_gate_error(
                 "confirmation for %s(%s).  Only do this in CI.",
                 tool_name, file_name,
             )
-            _audit(tool_name, "preview_gate_skipped", details={"file": file_name})
+            _audit(
+                tool_name,
+                "preview_gate_skipped",
+                details={"file": file_name, "consent": SOURCE_CI_BYPASS},
+            )
         return None
     if is_resume:
         return None

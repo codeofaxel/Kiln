@@ -68,7 +68,9 @@ __all__ = [
     "FunctionResource",
     "Image",
     "MCP_SDK_MAJOR",
+    "ask_user_to_confirm",
     "client_capabilities",
+    "host_can_ask_the_user",
     "lowlevel_server",
     "set_instructions",
     "wrap_call_tool_result",
@@ -103,6 +105,84 @@ def client_capabilities(mcp: Any, ctx: Any = None) -> Any | None:
         return lowlevel_server(mcp).request_context.session.client_params.capabilities
     except Exception:  # noqa: BLE001 — "no session" is a legitimate answer
         return None
+
+
+def host_can_ask_the_user(mcp: Any, ctx: Any = None) -> bool:
+    """True when the connected host can put a question in front of a person.
+
+    MCP calls this elicitation: the SERVER asks, the CLIENT draws the
+    prompt, the human answers.  It matters here because every consent
+    Kiln has had until now was the other shape — the server hands the
+    agent a token and trusts the agent to have asked.  That proves a
+    preview was rendered, never that anyone saw it.
+
+    A host that declares nothing gets ``False`` and keeps the old
+    token-based gate.  Not every caller has a person attached: the REST
+    proxy runs tools server-side with nobody to ask, and refusing those
+    callers would break them rather than protect anyone.
+    """
+    caps = client_capabilities(mcp, ctx)
+    return getattr(caps, "elicitation", None) is not None
+
+
+async def ask_user_to_confirm(ctx: Any, message: str) -> tuple[str, str]:
+    """Ask the person a yes/no question.  Returns ``(action, detail)``.
+
+    ``action`` is one of ``"accept"``, ``"decline"``, ``"cancel"`` or
+    ``"unavailable"``.  MCP distinguishes the middle two deliberately —
+    declining is an answer, dismissing the dialog is not — and a print is
+    worth telling apart, so this does not collapse them.
+
+    ``"unavailable"`` means the question could not be put (no session, an
+    SDK that cannot elicit, a transport error).  Callers must treat it as
+    "not asked", never as "asked and approved".
+
+    Form-mode elicitation carries a message and a flat schema of
+    primitives; it cannot render the model.  So this asks a question, it
+    does not show a picture — see ``print_consent`` for how the two are
+    kept honest.
+    """
+    try:
+        from pydantic import BaseModel, Field
+    except Exception:  # noqa: BLE001 — no pydantic, no elicitation
+        return "unavailable", "pydantic_unavailable"
+
+    # Everything about this model is user-visible: hosts render the class
+    # name as the dialog title and the docstring as its description, so
+    # neither may explain the implementation to the person being asked.
+    # (Measured against a live session — the first version put "the spec
+    # allows only flat primitives" in front of the user.)
+    class StartThisPrint(BaseModel):
+        """Confirm before the printer starts."""
+
+        approved: bool = Field(
+            default=False,
+            description="Yes, start this print. No leaves the printer idle.",
+        )
+
+    try:
+        result = await ctx.elicit(message=message, schema=StartThisPrint)
+    except Exception as exc:  # noqa: BLE001 — a host that cannot answer is not an error
+        _logger.debug("Could not ask the user for confirmation: %s", exc)
+        return "unavailable", f"{type(exc).__name__}"
+
+    action = str(getattr(result, "action", "") or "").lower()
+    if action == "accept":
+        data = getattr(result, "data", None)
+        if data is None:
+            data = getattr(result, "content", None)
+        approved = getattr(data, "approved", None)
+        if approved is None and isinstance(data, dict):
+            approved = data.get("approved")
+        # An "accept" carrying approved=False is a person who opened the
+        # dialog and said no.  That is a decline, whatever the envelope
+        # calls it.
+        if bool(approved):
+            return "accept", ""
+        return "decline", "answered_no"
+    if action in ("decline", "cancel"):
+        return action, ""
+    return "unavailable", f"unexpected_action:{action or 'none'}"
 
 
 def set_instructions(mcp: Any, text: str) -> None:
