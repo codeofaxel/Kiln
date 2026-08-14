@@ -540,6 +540,13 @@ def fire_terminal_state_hook(
             f"auto-recorded on terminal state transition "
             f"({prev_lc!r} → {new_lc!r}, print_error={print_error_code})"
         ),
+        # Kept whatever the outcome word turned out to be.  The code is
+        # EVIDENCE and failure_mode is a VERDICT; only the verdict was ever
+        # wrong about a cancel, so withholding the verdict is the whole fix
+        # and discarding the evidence was never part of it.  A cancel during
+        # bed levelling trips a real Z-homing fault — the row should be able
+        # to say that happened without claiming the machine failed.
+        "print_error": print_error_code,
     }
     if file_name is not None:
         kwargs["file_name"] = file_name
@@ -708,8 +715,15 @@ def reconcile_pending_outcomes(
 
         outcome: str
         failure_mode: str | None = None
+        # The code rides with testimony, never with a shrug.  Set only on
+        # the branches where the printer's report is about THIS job; the
+        # ``unknown`` fallback below is reached precisely because it is not,
+        # and filing a code there would attach a fault to a print nobody
+        # can say it belongs to.
+        row_error: int = 0
         if state in _FINISH_STATES and (matches or lone_unlabelled):
             outcome = "success"
+            row_error = print_error_code
             note = (
                 "resolved on reconnect: printer still reported this job "
                 "finished cleanly"
@@ -717,12 +731,14 @@ def reconcile_pending_outcomes(
         elif state in _FAILED_STATES and (matches or lone_unlabelled):
             outcome = "failed"
             failure_mode = _failure_mode_from_code(print_error_code)
+            row_error = print_error_code
             note = (
                 "resolved on reconnect: printer still reported this job "
                 f"in a failed state (print_error={print_error_code})"
             )
         elif state in _CANCELLED_STATES and (matches or lone_unlabelled):
             outcome = "cancelled"
+            row_error = print_error_code
             note = (
                 "resolved on reconnect: printer still reported this job "
                 "as ended without completing"
@@ -746,6 +762,8 @@ def reconcile_pending_outcomes(
             }
             if failure_mode:
                 update["failure_mode"] = failure_mode
+            if row_error:
+                update["print_error"] = row_error
             db.save_print_outcome(update)
             resolved.append({**row, "outcome": outcome, "notes": note})
             # Federate the resolution.  Watched endings and user reports
@@ -766,6 +784,7 @@ def reconcile_pending_outcomes(
                         printer_name=printer_name,
                         material=row.get("material_type"),
                         failure_mode=failure_mode,
+                        print_error=row_error or None,
                     )
                 except Exception:
                     _logger.debug(

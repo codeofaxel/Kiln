@@ -680,6 +680,7 @@ def contribute_print_outcome(
     printer_model: str | None = None,
     material: str | None = None,
     print_time_seconds: int | None = None,
+    print_error: int | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Contribute one finished print to the community pool.
@@ -692,6 +693,13 @@ def contribute_print_outcome(
     failure mode) and is applied UNDER the fields this function owns, so no
     caller can smuggle a different outcome word or signature into the payload
     — the translation stays in one place by construction.
+
+    ``print_error`` is the raw firmware code the print tripped, and is owned
+    here for the same reason the outcome word is: it is the field a fleet
+    aggregates by, alongside model and firmware, and a corpus holding two
+    spellings of one code counts one fault as two.  A parameter rather than
+    an ``extra`` key so both contribution doors state it the same way and
+    neither can invent its own normalization.
 
     :returns: ``{"contributed": False, "reason": ...}`` when the outcome
         carries no verdict, the geometry is unknown, the user is opted out,
@@ -726,6 +734,16 @@ def contribute_print_outcome(
     signature_v2 = str(geometric_signature_v2 or "").strip()
     if signature_v2:
         record["geometric_signature_v2"] = signature_v2
+    # Normalized through the same helper the local column uses, so a code
+    # means the same thing in the corpus as it does in the row it came from.
+    # Absent when there is none: 0 is a printer saying it has no fault to
+    # name, and a corpus counting those as a fault would report one on every
+    # clean print.
+    from kiln.persistence import normalize_print_error
+
+    stored_error = normalize_print_error(print_error)
+    if stored_error is not None:
+        record["print_error"] = stored_error
     result = contribute(
         print_contribution_key(job_id, signature, printer_file_name), record
     )
