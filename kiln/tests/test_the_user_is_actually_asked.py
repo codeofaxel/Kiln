@@ -350,6 +350,137 @@ def test_the_argument_each_tool_is_asked_about_still_exists():
         assert f"{arg}:" in sig, f"{tool} has no argument named {arg!r}"
 
 
+def _innermost_owner(tree: ast.AST, node: ast.AST) -> str | None:
+    """The function a node actually sits in, not every function above it.
+
+    Plugin tools are nested inside their ``register()``, so the widest
+    enclosing function is almost never the interesting one.
+    """
+    holders = [
+        f for f in ast.walk(tree)
+        if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and f.lineno <= node.lineno <= (f.end_lineno or 0)
+    ]
+    if not holders:
+        return None
+    return min(holders, key=lambda f: (f.end_lineno or 0) - f.lineno).name
+
+
+def _preview_token_refusers() -> tuple[set[str], set[str]]:
+    """``(functions that refuse for want of a token, the tools that reach them)``.
+
+    Both halves are read out of the source rather than listed here.  The
+    refusal identifies itself — a function returning
+    ``PREVIEW_NOT_CONFIRMED`` is a gate — so a third gate written next
+    year is picked up without anyone remembering this file.  Two shapes
+    exist today and both have to work: ``start_print`` and friends call a
+    shared helper that emits the refusal, while ``fulfillment_order``
+    emits it inline and is its own gate.
+    """
+    refusers: set[str] = set()
+    for path in _MODULES:
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            for kw in node.keywords:
+                if (
+                    kw.arg == "code"
+                    and isinstance(kw.value, ast.Constant)
+                    and kw.value.value == "PREVIEW_NOT_CONFIRMED"
+                    and (owner := _innermost_owner(tree, node))
+                ):
+                    refusers.add(owner)
+
+    reachers: set[str] = set()
+    for path in _MODULES:
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else getattr(node.func, "id", "")
+            )
+            if name in refusers and (owner := _innermost_owner(tree, node)):
+                reachers.add(owner)
+    return refusers, reachers
+
+
+def _gated_tools() -> dict:
+    """``{tool name: registered tool}`` for every tool behind a preview gate."""
+    server._ensure_internal_tool_plugins_registered()
+    registered = {t.name: t for t in server.mcp._tool_manager.list_tools()}
+    refusers, reachers = _preview_token_refusers()
+
+    # A silently-empty sweep would pass every test below for ever while
+    # checking nothing, which is the failure they exist to catch.
+    assert refusers, "no preview-token gate found — the sweep is broken"
+    gated = {n: registered[n] for n in (refusers | reachers) if n in registered}
+    assert "slice_and_print" in gated, (
+        f"the sweep no longer sees a known gated tool; saw: {sorted(gated)}"
+    )
+    return gated
+
+
+def test_a_tool_that_demands_a_token_can_be_handed_one():
+    """A gate on a parameter the schema does not offer is a dead end.
+
+    The refusal names ``preview_token``, so an agent reads it and passes
+    one — and MCP drops the value on the way in, because the registered
+    schema has no such property.  The call refuses again, identically,
+    for ever.  Every part looks correct in isolation: the signature has
+    the parameter, the gate is wired, the error tells the truth about
+    what it wants.
+
+    Reported against ``slice_and_print`` on 2026-08-14.  That one turned
+    out to be a client holding a tool list captured before the parameter
+    existed rather than a defect in the tree — but nothing in the tree
+    said so, and the symptom is indistinguishable from the real thing.
+    This is the check that can tell them apart.
+
+    The tools are derived from the refusal rather than listed, because a
+    hand-maintained list is the same bug wearing a different hat.
+    """
+    missing = sorted(
+        name for name, tool in _gated_tools().items()
+        if "preview_token" not in (tool.parameters or {}).get("properties", {})
+    )
+    assert missing == [], (
+        "these tools refuse without a preview token but give no way to pass "
+        f"one — the schema has no preview_token property: {missing}"
+    )
+
+
+def test_no_preview_argument_is_lost_on_the_way_to_the_schema():
+    """The general form: what the gate reads, the door must accept.
+
+    ``preview_token`` is the parameter every refusal happens to name, so
+    checking only that name would leave the same dead end open one
+    argument over — ``fulfillment_order`` also refuses without
+    ``preview_file_path``, and a token alone can never satisfy it.  So
+    the rule is about the whole family rather than the one member that
+    was reported: every ``preview_*`` argument a gated tool accepts in
+    Python has to survive into the schema an agent is handed.
+    """
+    lost = {}
+    for name, tool in _gated_tools().items():
+        exposed = set((tool.parameters or {}).get("properties", {}))
+        accepted = {
+            p for p in inspect.signature(tool.fn).parameters
+            if p.startswith("preview_")
+        }
+        # A gated tool that takes no preview argument at all cannot ever
+        # be satisfied — the same dead end, reached from the other side.
+        assert accepted, f"{name} is preview-gated but accepts no preview_* argument"
+        if dropped := sorted(accepted - exposed):
+            lost[name] = dropped
+    assert lost == {}, (
+        f"these preview arguments exist in Python but not in the schema: {lost}"
+    )
+
+
 def test_the_consent_record_is_read_in_exactly_one_place():
     """One writer, one reader.  A second opinion on a question with one
     answer is how two callers come to disagree about who approved what."""
