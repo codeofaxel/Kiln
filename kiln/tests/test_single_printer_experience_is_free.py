@@ -38,6 +38,10 @@ from kiln import server
 #: means "free for the DEFAULT machine" — which is not the same promise.
 FREE_PER_PRINTER_TOOLS = [
     "printer_status",
+    # Deprecated in favour of printer_status(detail="lite") and kept only as
+    # a shim.  Listed because it is still a live door and a live door must
+    # not start charging — NOT as part of the recommended surface, which is
+    # why nothing user-facing points at it any more.
     "print_status_lite",
     "printer_snapshot",
     "monitor_print",

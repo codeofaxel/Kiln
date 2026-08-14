@@ -7734,10 +7734,11 @@ def fleet_status() -> dict:
     """Get live status of all fleet printers (state, temps, connection — current snapshot).
 
     The multi-machine view is a fleet feature.  For ONE printer — which is
-    the single-printer experience at every tier — use ``printer_status``,
-    ``print_status_lite``, ``printer_snapshot`` or ``monitor_print``; each
-    takes a ``printer_name`` and none of them is tier-gated, so any machine
-    you own can be inspected and stopped whatever your licence.
+    the single-printer experience at every tier — use ``printer_status``
+    (``detail="lite"`` for the cheap version), ``printer_snapshot`` or
+    ``monitor_print``; each takes a ``printer_name`` and none of them is
+    tier-gated, so any machine you own can be inspected and stopped
+    whatever your licence.
 
     For historical analytics (success rates, throughput), use ``fleet_analytics``.
     For grouping by physical location, use ``fleet_status_by_site``.
