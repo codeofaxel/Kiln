@@ -784,6 +784,20 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "print-start stat recording failed", exc_info=True
                 )
+            # Retain the sliced file for the web Monitor's layer viewer —
+            # joined to the slice ledger by the exact name this adapter was
+            # handed.  Same single-chokepoint reasoning as the counters
+            # above: every door that starts a print passes through here.
+            try:
+                from kiln.monitor_twin import note_print_started
+
+                note_print_started(self.name, file_name)
+            except Exception:  # noqa: BLE001 — the twin never affects a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "monitor-twin print-start note failed", exc_info=True
+                )
             # Nozzle wear counts at START — every print wears the nozzle,
             # success or failure, and an end-hook only sees the prints
             # something watched to completion.  No-op without kiln-pro.

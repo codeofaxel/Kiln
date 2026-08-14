@@ -310,14 +310,23 @@ def _gcode_output_is_complete(out_file: str) -> bool:
     return b"filament used" in tail
 
 
-def _record_slice(profile: str | None) -> None:
-    """Count one successful slice.
+def _record_slice(
+    profile: str | None,
+    input_abs: str | None = None,
+    out_file: str | None = None,
+) -> None:
+    """Count one successful slice, and note the pair for the monitor twin.
 
     Recorded at the two runners rather than in a tool body, because the count
     used to live in the ``slice_model`` tool alone and every other path — the
     pipelines, estimates, CLI, kiln-pro batch flows — reported zero.  Detail is
     the profile filename stem; profiles are named for printers, never for
     users' models.
+
+    The twin note rides the same chokepoint for the same reason: the web
+    Monitor's layer viewer needs the sliced toolpath of whatever ends up
+    printing, and only the slice runner reliably knows the (mesh, gcode)
+    pair — a per-tool note would cover one door and miss the pipelines.
     """
     try:
         from kiln.daily_stats import record_event
@@ -325,6 +334,13 @@ def _record_slice(profile: str | None) -> None:
         record_event("slices", detail=Path(profile).stem[:64] if profile else "unknown")
     except Exception:  # noqa: BLE001 — stats must never fail a slice
         logger.debug("slice telemetry recording failed", exc_info=True)
+    if input_abs and out_file:
+        try:
+            from kiln.monitor_twin import note_sliced
+
+            note_sliced(input_abs, out_file)
+        except Exception:  # noqa: BLE001 — the twin ledger must never fail a slice
+            logger.debug("monitor-twin slice note failed", exc_info=True)
 
 
 # The crash any Bambu Lab machine preset provokes in both forks, and the one
@@ -451,7 +467,7 @@ def _slice_with_orca(
 
         shutil.move(str(produced[0]), out_file)
 
-    _record_slice(profile)
+    _record_slice(profile, input_abs, out_file)
     message = f"Sliced {Path(input_abs).name} -> {Path(out_file).name}"
     if crashed_after_finishing:
         message += (
@@ -609,7 +625,7 @@ def slice_file(
             f"stdout: {(result.stdout or '').strip()[:200]}"
         )
 
-    _record_slice(profile)
+    _record_slice(profile, input_abs, out_file)
 
     message = f"Sliced {Path(input_abs).name} -> {Path(out_file).name}"
     if crashed_after_finishing:

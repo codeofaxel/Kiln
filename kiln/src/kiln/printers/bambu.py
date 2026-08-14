@@ -2282,6 +2282,16 @@ class BambuAdapter(PrinterAdapter):
             # never declared one, which keeps the historical A1 templates.
             printer_model=self._printer_model,
         )
+        # The printer will know this job by the WRAP's name, but the layer
+        # viewer wants the raw G-code inside — keep the two joined in the
+        # monitor-twin ledger so the print-start retention can follow the
+        # wrap back to its source.
+        try:
+            from kiln.monitor_twin import note_wrapped
+
+            note_wrapped(abs_path, result.output_path)
+        except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
+            logger.debug("monitor-twin wrap note failed", exc_info=True)
         return result.output_path
 
     # ------------------------------------------------------------------
