@@ -573,6 +573,7 @@ def record_print_outcome(
                     printer_file_name=file_name,
                     printer_model=resolved_model or printer_name,
                     material=material_type,
+                    print_error=print_error,
                     extra={
                         "settings_hash": _hl.sha256(
                             _js.dumps(settings or {}, sort_keys=True).encode(),

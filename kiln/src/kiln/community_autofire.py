@@ -309,6 +309,7 @@ def contribute_resolved_outcome(
     printer_name: str | None = None,
     material: str | None = None,
     failure_mode: str | None = None,
+    print_error: int | None = None,
 ) -> dict[str, Any]:
     """Contribute a reconciliation-resolved outcome to the community pool.
 
@@ -362,6 +363,7 @@ def contribute_resolved_outcome(
             printer_file_name=printer_file_name,
             printer_model=printer_model or printer_name,
             material=material,
+            print_error=print_error,
             extra=extra,
         )
     except Exception:
