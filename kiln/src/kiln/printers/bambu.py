@@ -2410,6 +2410,7 @@ class BambuAdapter(PrinterAdapter):
         self,
         timeout: float = 15.0,
         poll_interval: float = 1.0,
+        sent_at: float | None = None,
     ) -> tuple[str, int | None]:
         """Poll MQTT cache until printer enters a print-active state.
 
@@ -2419,13 +2420,33 @@ class BambuAdapter(PrinterAdapter):
         if no transition occurred.  *error_code* is the ``print_error``
         value if the printer reported one (often non-zero even before
         ``gcode_state`` flips to ``"failed"``), or ``None``.
+
+        *sent_at* is ``time.monotonic()` from immediately before the print
+        command went out, and it is what makes a cached reading mean
+        anything.  The cache is a push cache: between the command and the
+        printer's next frame it still describes the PREVIOUS job, error
+        code and all.  A cancelled job leaves a non-zero ``print_error``
+        sitting there, so the "error while idle means rejected" rule below
+        read the last job's failure as this job's rejection and reported a
+        failure the printer never gave — measured on an A1 (error
+        50348032 from a cancel, then a fresh start declared failed while
+        the machine was already heating).  Frames older than the command
+        are skipped rather than believed; if none arrives, the honest
+        answer is ``"timeout"``, which callers already treat as "not known
+        yet".  ``None`` keeps the old read-anything behaviour for callers
+        that have no command instant to compare against.
         """
         deadline = time.monotonic() + timeout
         last_error: int | None = None
         while time.monotonic() < deadline:
             with self._state_lock:
-                state = str(self._last_status.get("gcode_state", "")).lower()
-                raw_err = self._last_status.get("print_error")
+                stale = (
+                    sent_at is not None and self._last_state_time < sent_at
+                )
+                state = "" if stale else str(
+                    self._last_status.get("gcode_state", "")
+                ).lower()
+                raw_err = None if stale else self._last_status.get("print_error")
             if raw_err is not None:
                 with contextlib.suppress(TypeError, ValueError):
                     err_val = int(raw_err)
@@ -2912,6 +2933,13 @@ class BambuAdapter(PrinterAdapter):
         # Normalise: strip leading path components if user passes full path.
         basename = os.path.basename(file_name)
 
+        # The instant the command goes out, captured BEFORE anything is
+        # published.  Everything the push cache holds from before this is
+        # about the previous job — see _wait_for_print_start, which reads
+        # nothing older than this rather than mistaking the last job's
+        # error code for this one's rejection.
+        command_sent_at = time.monotonic()
+
         # Check if already in a print-active state (skip wait).
         with self._state_lock:
             already_active = str(self._last_status.get("gcode_state", "")).lower() in _PRINT_ACTIVE_STATES
@@ -3144,7 +3172,9 @@ class BambuAdapter(PrinterAdapter):
 
         # Wait for MQTT confirmation unless already active.
         if not already_active:
-            result_state, error_code = self._wait_for_print_start()
+            result_state, error_code = self._wait_for_print_start(
+                sent_at=command_sent_at,
+            )
             if result_state == "failed":
                 # Build a specific error message if we recognise the code.
                 err_detail = ""

@@ -92,6 +92,15 @@ def adapter_with_mqtt() -> BambuAdapter:
     adapter._mqtt_client.publish.return_value = publish_result
     # Pre-set a running state so start_print skips confirmation wait.
     adapter._last_status = {"gcode_state": "running"}
+    # Stamp that state as having arrived AFTER whatever command a test is
+    # about to send.  The push cache is only evidence about a job if the
+    # frame postdates the command (see _wait_for_print_start), and a test
+    # that pre-loads a status is describing what the printer said about
+    # THIS print — not a leftover from a previous one.  Without the stamp
+    # the default 0.0 makes every pre-loaded status read as stale, which
+    # is the behaviour the guard exists to produce and the opposite of
+    # what these fixtures mean.  Tests about staleness set their own.
+    adapter._last_state_time = float("inf")
     return adapter
 
 
@@ -2883,6 +2892,54 @@ class TestWaitForPrintStartErrorDetection:
         adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": "84033543"}
         with mock.patch("kiln.printers.bambu.time.sleep"):
             state, err = adapter_with_mqtt._wait_for_print_start(timeout=2.0)
+        assert err == 84033543
+
+    def test_the_last_job_s_error_is_not_this_job_s_rejection(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """A cancelled job leaves its error in the cache; a new start is not it.
+
+        Measured on an A1: a cancel left print_error 50348032 sitting in
+        the push cache beside a stale "idle".  The next start read both,
+        applied the "error while idle means rejected" rule, and reported a
+        failure the printer never gave — while the machine was already
+        heating for that very job.  A frame older than the command is
+        about the previous one, so it is not evidence here.
+        """
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "idle", "print_error": 50348032,
+        }
+        adapter_with_mqtt._last_state_time = 100.0  # last frame: the cancel
+        command_sent_at = 150.0                     # command went out later
+
+        with mock.patch("kiln.printers.bambu.time.sleep"), mock.patch(
+            "kiln.printers.bambu.time.monotonic",
+            side_effect=[151.0, 151.0, 200.0],
+        ):
+            state, err = adapter_with_mqtt._wait_for_print_start(
+                sent_at=command_sent_at,
+            )
+
+        assert state == "timeout", (
+            "a pre-command frame was read as this job's verdict"
+        )
+        assert err is None, "the previous job's error code leaked into this start"
+
+    def test_a_fresh_frame_after_the_command_is_still_believed(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """The freshness guard must not blind the check to real failures."""
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "failed", "print_error": 84033543,
+        }
+        adapter_with_mqtt._last_state_time = 200.0  # frame POSTDATES command
+
+        with mock.patch("kiln.printers.bambu.time.sleep"), mock.patch(
+            "kiln.printers.bambu.time.monotonic", side_effect=[151.0, 151.0, 300.0],
+        ):
+            state, err = adapter_with_mqtt._wait_for_print_start(sent_at=150.0)
+
+        assert state == "failed"
         assert err == 84033543
 
 
