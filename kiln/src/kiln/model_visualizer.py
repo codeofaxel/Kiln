@@ -79,6 +79,27 @@ _BAMBU_THUMBNAIL_MAP: list[tuple[str, str, str]] = [
 _BAMBU_PLACEHOLDER_MODEL_MAX_BYTES = 4096
 
 
+def _default_output_dir() -> str:
+    """A UNIQUE output directory for one visualize call, never shared.
+
+    The old default was one flat ``$TMPDIR/kiln_visualizations`` for
+    every caller, with output names derived from the input basename —
+    and the emboss engine names every text-decorated mesh
+    ``line_0.stl``.  Two sessions rendering different objects at once
+    each wrote ``line_0_iso.png`` to the same path, so whichever
+    finished second clobbered the first session's intermediate — and
+    the render cache then copied the WRONG object's pixels into a
+    content-keyed slot, where they were served as a cache hit forever
+    after (measured 2026-08-14: a coaster's cache entry holding a pet
+    tag that a concurrent session rendered in the same minute).  A
+    fresh subdirectory per call keeps the shared root as the one
+    discoverable, prunable location while making collision impossible.
+    """
+    root = os.path.join(tempfile.gettempdir(), "kiln_visualizations")
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    return tempfile.mkdtemp(prefix="viz_", dir=root)
+
+
 def _is_bambu_wrapped_3mf(file_path: str) -> bool:
     """Return True when the 3MF at *file_path* looks like a Bambu wrapper.
 
@@ -574,9 +595,7 @@ def visualize_model(
                 return {
                     "success": len(successful) > 0,
                     "views": colored_views,
-                    "output_dir": output_dir or os.path.join(
-                        tempfile.gettempdir(), "kiln_visualizations",
-                    ),
+                    "output_dir": output_dir or _default_output_dir(),
                     "file_path": file_path,
                     "file_type": ext,
                     # Every success envelope names its engine, or a caller
@@ -612,9 +631,7 @@ def visualize_model(
         # is exactly what the preview gate is asking to confirm.
         if _is_bambu_wrapped_3mf(file_path):
             logger.debug("3MF is Bambu-wrapped — extracting slicer thumbnails")
-            thumb_out_dir = output_dir or os.path.join(
-                tempfile.gettempdir(), "kiln_visualizations",
-            )
+            thumb_out_dir = output_dir or _default_output_dir()
             bambu_views = _extract_bambu_thumbnails(
                 file_path, thumb_out_dir, angles=angles,
             )
@@ -677,7 +694,7 @@ def visualize_model(
 
     # Output directory
     if output_dir is None:
-        output_dir = os.path.join(tempfile.gettempdir(), "kiln_visualizations")
+        output_dir = _default_output_dir()
     os.makedirs(output_dir, mode=0o700, exist_ok=True)
 
     # Compute bounding box BEFORE creating the wrapper (needs the raw STL).

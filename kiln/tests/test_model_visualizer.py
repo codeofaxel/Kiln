@@ -535,3 +535,82 @@ class TestPreviewSupersample:
         assert result["success"] is True
         imgsize_args = [a for c in captured for a in c if a.startswith("--imgsize=")]
         assert imgsize_args == ["--imgsize=800,600"], imgsize_args
+
+
+class TestDefaultOutputDirIsUnshared:
+    """Two calls may never share an intermediate, whatever the inputs are named.
+
+    The emboss engine names every text-decorated mesh ``line_0.stl``, and
+    the old default wrote ``<basename>_<angle>.png`` into ONE shared
+    directory — so concurrent sessions rendering different objects
+    clobbered each other's intermediates, and the content-keyed render
+    cache then copied the WRONG object's pixels into an honestly-keyed
+    slot (measured 2026-08-14: a coaster's cache entry holding a pet tag a
+    parallel session rendered the same minute).  The default is a fresh
+    per-call subdirectory now; only these tests stand between that and the
+    regression, because the collision needs two live sessions to show up
+    by itself.
+    """
+
+    def test_two_default_dirs_never_collide(self):
+        from kiln.model_visualizer import _default_output_dir
+
+        a, b = _default_output_dir(), _default_output_dir()
+        assert a != b
+        assert os.path.isdir(a) and os.path.isdir(b)
+        # Both stay under the one discoverable, prunable root.
+        import tempfile
+
+        root = os.path.join(tempfile.gettempdir(), "kiln_visualizations")
+        assert os.path.dirname(a) == root and os.path.dirname(b) == root
+
+    def test_same_basename_meshes_get_distinct_view_paths(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """End to end through visualize_model, no output_dir supplied."""
+        from kiln import model_visualizer
+
+        # Two different "objects" that share the emboss engine's generic
+        # basename, in separate work dirs — exactly the shipped shape.
+        dir_a = tmp_path / "make_a"
+        dir_b = tmp_path / "make_b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        mesh_a = dir_a / "line_0.stl"
+        mesh_b = dir_b / "line_0.stl"
+        one_tri = (
+            b"\x00" * 80
+            + struct.pack("<I", 1)
+            + struct.pack("<fff", 0, 0, 1)
+            + struct.pack("<fff", 0, 0, 0)
+            + struct.pack("<fff", 1, 0, 0)
+            + struct.pack("<fff", 0, 1, 0)
+            + struct.pack("<H", 0)
+        )
+        mesh_a.write_bytes(one_tri)
+        mesh_b.write_bytes(one_tri)
+
+        # The renderer itself is not under test — stub the subprocess the
+        # same way the supersample tests do, writing a marker PNG so the
+        # paths are real files.
+        def fake_run(cmd, **kwargs):
+            out = cmd[cmd.index("-o") + 1]
+            Path(out).write_bytes(b"\x89PNG fake")
+            return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+        monkeypatch.setattr(model_visualizer.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            model_visualizer, "_get_bounding_box",
+            lambda _p: model_visualizer._BoundingBoxInfo(),
+        )
+
+        va = model_visualizer.visualize_model(str(mesh_a), angles=["isometric"])
+        vb = model_visualizer.visualize_model(str(mesh_b), angles=["isometric"])
+        paths_a = {v["path"] for v in va.get("views", []) if v.get("path")}
+        paths_b = {v["path"] for v in vb.get("views", []) if v.get("path")}
+        assert paths_a and paths_b
+        assert paths_a.isdisjoint(paths_b), (
+            "same-basename meshes rendered to the same intermediate paths — "
+            "a concurrent session would clobber them and poison the "
+            "content-keyed render cache"
+        )
