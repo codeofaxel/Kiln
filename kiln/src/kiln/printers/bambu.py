@@ -841,6 +841,7 @@ class BambuAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
+            cancel_during_calibration_faults=True,
             # Port 6000 TLS+JPEG works on A1 / A1 Mini / P1P / P1S
             # without ffmpeg.  get_snapshot() tries port 6000 first
             # and falls back to RTSPS (X1 series, port 322) only if

@@ -574,3 +574,160 @@ def test_the_polled_door_sweeps_the_family_name_too(_no_db_writes, monkeypatch):
     adapter.get_state()                      # first poll after connect
 
     assert db.list_print_outcomes(printer_name="moonraker", outcome="pending") == []
+
+
+# ---------------------------------------------------------------------------
+# The levelling window — where a cancel can brick the printer
+# ---------------------------------------------------------------------------
+#
+# Four cancels on an A1 (2026-08-13), one variable at a time:
+#
+#   during levelling, no pause  -> Z-homing fault, LATCHED past 13 minutes,
+#                                  survived clean_print_error and a G28;
+#                                  only a power cycle cleared it       (x2)
+#   after levelling, no pause   -> clean: idle, last_job_result=cancelled
+#   during levelling, PAUSED    -> same fault code, but TRANSIENT: gone in
+#                                  ~15s, landing on cancelled, no power cycle
+#
+# So the pause does not prevent the fault, it makes it survivable — which is
+# the whole difference between "carry on" and "walk to the machine".
+
+
+def _tool(module, symbol):
+    fn = getattr(module, symbol)
+    return getattr(fn, "fn", getattr(fn, "callback", fn))
+
+
+def _cancelling_adapter(monkeypatch, *, layer, completion, hazard=True):
+    from unittest.mock import MagicMock
+
+    from kiln import server
+    from kiln.printers.base import (
+        JobProgress,
+        PrinterCapabilities,
+        PrinterState,
+        PrinterStatus,
+        PrintResult,
+    )
+
+    adapter = MagicMock()
+    adapter.name = "bambu"
+    adapter.capabilities = PrinterCapabilities(
+        cancel_during_calibration_faults=hazard,
+    )
+    adapter.get_state.return_value = PrinterState(
+        connected=True, state=PrinterStatus.PRINTING,
+    )
+    adapter.get_job.return_value = JobProgress(
+        file_name="bracket.3mf", current_layer=layer, completion=completion,
+    )
+    adapter.cancel_print.return_value = PrintResult(
+        success=True, message="Print cancelled.",
+    )
+    # cancel_print is rate-limited in production, and rightly so — but the
+    # limiter is process-global, so without this only the first test in a
+    # run reaches the adapter and every later one asserts against a
+    # RATE_LIMITED error dict instead of the guard.
+    lim = server._tool_limiter
+    lim._call_history.clear()
+    lim._last_call.clear()
+    lim._block_history.clear()
+    lim._cooldown_until.clear()
+
+    def _fixed_adapter():
+        return adapter
+
+    def _no_sleep(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(server, "_get_adapter", _fixed_adapter)
+    monkeypatch.setattr(server.time, "sleep", _no_sleep)
+    return server, adapter
+
+
+def test_a_cancel_during_levelling_pauses_first(monkeypatch):
+    """The guard, in the window it was measured in.
+
+    Unpaused, this exact cancel latched a Z-homing fault that outlived
+    every attempt to clear it and cost a power cycle.
+    """
+    server, adapter = _cancelling_adapter(monkeypatch, layer=0, completion=0.0)
+
+    out = _tool(server, "cancel_print")()
+
+    assert adapter.pause_print.called, "did not pause before cancelling"
+    assert adapter.cancel_print.called, "the cancel itself must still happen"
+    assert out["calibration_guard"]["paused_first"] is True
+
+
+def test_a_cancel_mid_print_does_not_pause(monkeypatch):
+    """Past the routine, an ordinary cancel is already clean.
+
+    Measured: a cancel once the job reported progress landed on idle with
+    last_job_result=cancelled and no fault at all.  Pausing there would buy
+    nothing and delay a stop the user asked for.
+    """
+    server, adapter = _cancelling_adapter(monkeypatch, layer=3, completion=42.0)
+
+    out = _tool(server, "cancel_print")()
+
+    assert not adapter.pause_print.called
+    assert adapter.cancel_print.called
+    assert "calibration_guard" not in out
+
+
+def test_the_guard_is_declared_not_assumed(monkeypatch):
+    """A backend nobody has measured does not inherit another's hazard.
+
+    The guard costs a real command sent to real hardware, so it is opt-in
+    per backend rather than applied to every printer on one brand's evidence.
+    """
+    server, adapter = _cancelling_adapter(
+        monkeypatch, layer=0, completion=0.0, hazard=False,
+    )
+
+    out = _tool(server, "cancel_print")()
+
+    assert not adapter.pause_print.called
+    assert adapter.cancel_print.called
+    assert "calibration_guard" not in out
+
+
+def test_force_immediate_skips_the_pause(monkeypatch):
+    """The escape hatch, for a caller who wants the stop out now."""
+    server, adapter = _cancelling_adapter(monkeypatch, layer=0, completion=0.0)
+
+    out = _tool(server, "cancel_print")(force_immediate=True)
+
+    assert not adapter.pause_print.called
+    assert adapter.cancel_print.called
+    assert "calibration_guard" not in out
+
+
+def test_a_failing_pause_never_blocks_the_cancel(monkeypatch):
+    """The guard is a courtesy; stopping the printer is the job.
+
+    A pause that errors must not turn a cancel into an exception — the user
+    asked for the print to stop, and that has to happen regardless.
+    """
+    server, adapter = _cancelling_adapter(monkeypatch, layer=0, completion=0.0)
+    adapter.pause_print.side_effect = RuntimeError("pause refused")
+
+    out = _tool(server, "cancel_print")()
+
+    assert adapter.cancel_print.called
+    assert out.get("success") is True
+    assert out["calibration_guard"]["paused_first"] is False
+
+
+def test_an_unknown_position_is_treated_as_the_window(monkeypatch):
+    """A printer that has not said where it is gets the cheap protection.
+
+    Guessing "mid-print" costs a power cycle and a walk to the machine;
+    guessing "levelling" costs about a second.
+    """
+    server, adapter = _cancelling_adapter(monkeypatch, layer=None, completion=None)
+
+    _tool(server, "cancel_print")()
+
+    assert adapter.pause_print.called

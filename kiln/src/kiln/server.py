@@ -5076,6 +5076,7 @@ def cancel_print(
     expected_tool_target: float | None = None,
     expected_bed_target: float | None = None,
     expected_chamber_target: float | None = None,
+    force_immediate: bool = False,
 ) -> dict:
     """Cancel the currently running print job.
 
@@ -5111,7 +5112,15 @@ def cancel_print(
         heating via the adapter API, so this is sent as a raw M141
         command best-effort.  Pass ``None`` to skip chamber preservation.
 
-    WARNING: Cancellation is irreversible -- the print cannot be resumed
+    :param force_immediate: Skip the calibration guard and send the cancel
+    straight away.  During bed levelling this printer's firmware can latch
+    a homing fault that survives until a power cycle; the guard pauses for
+    about a second first, which makes that fault transient instead.  Set
+    this when the delay matters more than the fault -- though for a machine
+    doing something alarming, ``emergency_stop`` is the instant path and
+    never waits for anything.
+
+WARNING: Cancellation is irreversible -- the print cannot be resumed
     from where it left off UNLESS a resume-mode 3MF has been pre-staged
     (see ``decorate_during_print`` and ``revert_mid_print``).
     """
@@ -5166,6 +5175,43 @@ def cancel_print(
         # auto_record_hook classify the next idle transition as a
         # cancel rather than a success, so the learning DB gets
         # ``outcome="cancelled"`` instead of a bogus ``"success"``.
+        # Cancelling mid-calibration aborts a homing move, and on some
+        # firmware that latches a fault: measured on an A1 (2026-08-13),
+        # "Z axis homing failed", after which every print was refused until
+        # the machine was power-cycled — dismissing it on the screen cleared
+        # the notice but not the reported state.  Pausing first turns the
+        # same fault transient: it self-cleared in about fifteen seconds and
+        # the job landed as "cancelled", where an unpaused cancel stayed
+        # latched past thirteen minutes.
+        #
+        # The pause costs about a second and only happens inside the window,
+        # on backends that declare the hazard.  Nothing is being extruded
+        # there, so nothing is at stake in the delay — and this never defers
+        # the cancel itself, which still goes out immediately afterwards.
+        # For a machine doing something alarming, emergency_stop is the
+        # instant path and is untouched by any of this.
+        calibration_guard: dict[str, Any] | None = None
+        if not force_immediate and adapter.capabilities.cancel_during_calibration_faults:
+            try:
+                from kiln.printers.base import in_calibration_window
+
+                if in_calibration_window(adapter.get_state(), adapter.get_job()):
+                    adapter.pause_print()
+                    # Let the pause actually land before the cancel follows;
+                    # cancelling into an unsettled pause is the same abort.
+                    time.sleep(1.5)
+                    calibration_guard = {
+                        "paused_first": True,
+                        "reason": (
+                            "Cancelled during bed levelling, which trips a "
+                            "firmware fault on this printer. Paused first so "
+                            "the fault self-clears instead of latching."
+                        ),
+                    }
+            except Exception as exc:  # noqa: BLE001 — never block a cancel
+                logger.debug("cancel_print: calibration guard skipped: %s", exc)
+                calibration_guard = {"paused_first": False, "reason": str(exc)}
+
         try:
             from kiln.auto_record_hook import note_cancel_requested
 
@@ -5248,6 +5294,10 @@ def cancel_print(
         _audit("cancel_print", "executed")
 
         out = result.to_dict()
+        if calibration_guard is not None:
+            # Disclosed, because a pause the caller did not ask for is a
+            # thing that happened to their printer.
+            out["calibration_guard"] = calibration_guard
         if preserve_temperatures:
             out["preserved_temperatures"] = restored
             if chamber_restored is not None:

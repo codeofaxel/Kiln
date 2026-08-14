@@ -373,6 +373,15 @@ class PrinterCapabilities:
     can_update_firmware: bool = False
     can_snapshot: bool = False
     can_detect_filament: bool = False
+    #: Whether cancelling DURING a calibration routine (bed levelling, Z
+    #: homing) trips a firmware fault on this backend.  Measured on an A1
+    #: (2026-08-13): a cancel mid-levelling aborts the homing move and the
+    #: firmware latches "Z axis homing failed" — every subsequent print
+    #: refused until a power cycle.  Pausing first turns that same fault
+    #: transient: it self-clears in about fifteen seconds and the job lands
+    #: as "cancelled".  Default False: a backend nobody has measured is not
+    #: assumed to share the hazard, because the guard costs a real command.
+    cancel_during_calibration_faults: bool = False
     device_type: str = "fdm_printer"
     supported_extensions: tuple[str, ...] = (".gcode", ".gco", ".g")
 
@@ -1541,6 +1550,31 @@ def outcome_printer_name(adapter: Any) -> str:
     if isinstance(registered, str) and registered:
         return registered
     return getattr(adapter, "name", "") or "printer"
+
+
+def in_calibration_window(state: Any, job: Any) -> bool:
+    """Is this printer still in its pre-extrusion routine — levelling, homing?
+
+    The discriminator is the JOB, not the machine state, because the state
+    word does not distinguish them: an A1 reports ``printing`` throughout bed
+    levelling, exactly as it does mid-part.  What separates them is that
+    nothing has been laid down yet.
+
+    Measured across four cancels on an A1 (2026-08-13).  The three that
+    faulted all read ``current_layer=0`` with ``completion=0``; the one that
+    cancelled cleanly read ``completion=1.0``.  So a job that has reported
+    ANY progress is past the routine and out of the hazard.
+
+    Unknown reads as IN the window.  A printer that has not said where it is
+    yet is most likely still starting up, and the guard this gates costs a
+    pause — cheap when unnecessary, where guessing the other way costs a
+    power cycle and a walk to the machine.
+    """
+    layer = getattr(job, "current_layer", None) if job is not None else None
+    completion = getattr(job, "completion", None) if job is not None else None
+    if isinstance(layer, (int, float)) and layer >= 1:
+        return False
+    return not (isinstance(completion, (int, float)) and completion > 0)
 
 
 def _current_job(adapter: PrinterAdapter) -> JobProgress | None:
