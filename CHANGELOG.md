@@ -207,6 +207,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Your printer stays reachable when you run Kiln in more than one chat.**
+  Several open sessions could leave your own Bambu or Elegoo refusing to answer
+  while sitting there powered on. Fixed, and a print already running is never
+  interrupted. Other printers were never affected.
+
+- **A printer that won't answer now tells you why.** The error used to point at
+  Bambu Studio or the Handy app, so people closed software they'd already closed
+  and power-cycled a printer that was fine. Kiln now names the real cause — and
+  `kiln trim` clears it when it's Kiln's own leftovers.
+
 - **Checks meant for one printer were applied to another (Business+).** With
   two machines, one could be cleared to print by the other being idle, and a
   failure on one could start cooling the other mid-print. Single-printer setups
