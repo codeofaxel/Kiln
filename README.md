@@ -45,7 +45,9 @@ pip install kiln3d
 
 ## Quick Start
 
-Three steps. Then ask your AI to make something.
+**Using Claude Desktop?** [Download `kiln.mcpb`](https://github.com/codeofaxel/Kiln/releases/latest/download/kiln.mcpb) and double-click it — Claude Desktop wires Kiln in, so you can skip steps 1 and 2 below. You'll still want OpenSCAD, and the terms have to be accepted by you rather than your AI: `uvx --from kiln3d kiln accept-terms`. The bundle starts Kiln through [`uv`](https://astral.sh/uv), so if Claude Desktop reports that the server failed to start, install uv and restart it. Updates arrive with the extension, not via `kiln self-update`.
+
+Everyone else — three steps. Then ask your AI to make something.
 
 **1. Install**
 
