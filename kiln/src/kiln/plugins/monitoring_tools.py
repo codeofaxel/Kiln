@@ -1286,12 +1286,11 @@ class _MonitoringToolsPlugin:
             ):
                 return block
             try:
-                adapter = (
-                    _srv._get_registry().get(printer_name) if printer_name else _srv._get_adapter()
-                )
+                # Same door as the control verbs: config.yaml fallback included.
+                adapter = _srv._resolve_adapter(printer_name)
 
                 # -- Automatic pre-flight safety gate (mandatory) --
-                pf = unwrap_tool_result(_srv.preflight_check())
+                pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
                 if not pf.get("ready", False):
                     _srv._audit(
                         "start_monitored_print",
@@ -1313,7 +1312,7 @@ class _MonitoringToolsPlugin:
                 # the printer's last word about the previous one.
                 sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name)
-                _srv._get_heater_watchdog().notify_print_started()
+                _srv._note_print_started(adapter)
                 _srv._audit(
                     "start_monitored_print", "print_started", details={"file": file_name}
                 )

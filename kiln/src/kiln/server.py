@@ -1696,6 +1696,30 @@ def _is_heater_watchdog_machine(adapter: PrinterAdapter) -> bool:
         return False
 
 
+def _note_print_started(adapter: PrinterAdapter) -> None:
+    """Tell the heater watchdog a print began — if it is watching *adapter*.
+
+    The one door for this notification.  Every tool that starts a print
+    used to call ``_get_heater_watchdog().notify_print_started()``
+    directly, and each of those calls was a separate chance to tell a
+    watchdog about a machine it does not watch: the watchdog is one
+    process-wide instance around the DEFAULT adapter, so a print started
+    on any other printer would mark it busy and stop its idle tick from
+    ever cooling a default printer left sitting hot.
+
+    The tools that can be aimed have accepted a ``printer_name`` for
+    longer than this guard has existed, so that was not hypothetical.
+    Routing every caller through here means the ownership rule is stated
+    once; a new start-side tool gets it by calling this instead of
+    remembering to ask.
+    """
+    try:
+        if _is_heater_watchdog_machine(adapter):
+            _get_heater_watchdog().notify_print_started()
+    except Exception as exc:  # noqa: BLE001 — never fail a start over bookkeeping
+        logger.debug("Heater-watchdog start notification skipped: %s", exc)
+
+
 def _unknown_printer_error(printer_name: str | None, verb: str) -> dict:
     """Error dict for a control verb aimed at a printer Kiln doesn't know."""
     try:
@@ -2382,6 +2406,12 @@ def _get_event_bus() -> EventBus:
     if not _event_subs_wired:
         _event_subs_wired = True
         # Heater watchdog lifecycle subscriptions (use getters to avoid circular init).
+        # NOTE: nothing in Kiln publishes PRINT_STARTED today, so this handler
+        # never runs.  If a publisher is ever added, the event must carry the
+        # machine it is about and this handler must resolve it and go through
+        # _note_print_started — an unguarded notification here would tell the
+        # default printer's watchdog about a print on any machine, which is
+        # exactly what routing every other caller through that helper fixed.
         _event_bus.subscribe(EventType.PRINT_STARTED, lambda _e: _get_heater_watchdog().notify_print_started())
         _event_bus.subscribe(EventType.PRINT_COMPLETED, lambda _e: _get_heater_watchdog().notify_print_ended())
         _event_bus.subscribe(EventType.PRINT_FAILED, lambda _e: _get_heater_watchdog().notify_print_ended())
@@ -5275,14 +5305,7 @@ def start_print(
         # the command; ``resolve_print_start`` needs it to know which it has.
         sent_at = time.monotonic()
         result = adapter.start_print(file_name, **print_kwargs)
-        # The heater watchdog is one process-wide instance built around the
-        # default adapter, so "a print started" is only its news when the
-        # default printer is the one that started.  Told about a sibling's
-        # print it would mark itself busy and stop cooling down a default
-        # printer that is sitting idle and hot — see
-        # _is_heater_watchdog_machine.
-        if _is_heater_watchdog_machine(adapter):
-            _get_heater_watchdog().notify_print_started()
+        _note_print_started(adapter)
 
         # Layer 5: spawn in-process PrintWatchdog to catch HMS codes,
         # thermal anomalies, stuck-layer conditions.  Agent-driven
@@ -8847,11 +8870,11 @@ def download_and_upload(
         if _marketplace_registry.count == 0:
             _init_marketplace_registry()
 
-        # Resolve printer adapter once
-        if printer_name:
-            adapter = _get_registry().get(printer_name)
-        else:
-            adapter = _get_adapter()
+        # Resolve printer adapter once, through the same door the control
+        # verbs use: it falls back to config.yaml and self-heals the registry,
+        # so a printer the user configured is reachable here even when the
+        # registry never cached it.
+        adapter = _resolve_adapter(printer_name)
 
         # -----------------------------------------------------------------
         # Multi-file mode: model_id without file_id
@@ -8965,7 +8988,7 @@ def download_and_upload(
             if block := _emergency_latch_error("download_and_upload", safety_printer):
                 return block
             # Mandatory pre-flight safety gate before starting print.
-            pf = unwrap_tool_result(preflight_check())
+            pf = unwrap_tool_result(preflight_check(printer_name=printer_name))
             if not pf.get("ready", False):
                 _audit(
                     "download_and_upload",
@@ -8981,7 +9004,7 @@ def download_and_upload(
                 )
             sent_at = time.monotonic()
             print_res = adapter.start_print(file_name)
-            _get_heater_watchdog().notify_print_started()
+            _note_print_started(adapter)
             print_verdict = resolve_print_start(
                 adapter, print_res, sent_at=sent_at, file_name=file_name,
             )
@@ -11155,6 +11178,7 @@ def print_plate_object(
     vibration_cali: bool = True,
     bed_type: str = "auto",
     plate_number: int = 1,
+    printer_name: str | None = None,
 ) -> dict:
     """Extract a single object from a multi-object .gcode.3mf and print it.
 
@@ -11185,6 +11209,9 @@ def print_plate_object(
     :param bed_type: Bed surface type — ``"auto"``, ``"textured_plate"``,
         ``"cool_plate"``, or ``"engineering_plate"`` (Bambu only).
     :param plate_number: Which plate to extract from (1-based, default 1).
+    :param printer_name: Which printer to print on.  Omit for the default
+        printer.  Both steps are aimed at it, so the object is uploaded to
+        and started on the same machine.
     :returns: Dict with extraction info and print start status.
     """
     if err := _check_auth("print"):
@@ -11241,7 +11268,7 @@ def print_plate_object(
 
     # Step 2: Upload
     try:
-        upload_result = upload_file(upload_path)
+        upload_result = upload_file(upload_path, printer_name=printer_name)
         if not upload_result.get("success", False):
             return {
                 "status": "upload_failed",
@@ -11270,6 +11297,7 @@ def print_plate_object(
             flow_cali=flow_cali,
             vibration_cali=vibration_cali,
             bed_type=bed_type,
+            printer_name=printer_name,
         )
     except Exception as exc:
         return _error_dict(

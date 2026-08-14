@@ -120,10 +120,11 @@ class _SmartPrintToolsPlugin:
             # 1. Resolve adapter + effective printer_id.
             # ------------------------------------------------------------------
             try:
-                if printer_name:
-                    adapter = _srv._registry.get(printer_name)
-                else:
-                    adapter = _srv._get_adapter()
+                # _srv._registry is the raw module global and is None until
+                # something calls _get_registry(); reaching through it reported
+                # a configured printer as "could not connect".  The shared door
+                # initialises the registry and falls back to config.yaml.
+                adapter = _srv._resolve_adapter(printer_name)
             except Exception as exc:
                 return _srv._error_dict(
                     f"Could not connect to printer: {exc}",
@@ -425,7 +426,7 @@ class _SmartPrintToolsPlugin:
                 "retry_print_with_fix", safety_name
             ):
                 return block
-            pf = unwrap_tool_result(_srv.preflight_check())
+            pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
             if not pf.get("ready", False):
                 return _srv._error_dict(
                     pf.get("summary", "Pre-flight checks failed"),
@@ -443,7 +444,7 @@ class _SmartPrintToolsPlugin:
                     f"Failed to start print: {exc}", code="PRINT_ERROR"
                 )
 
-            _srv._heater_watchdog.notify_print_started()
+            _srv._note_print_started(adapter)
 
             # ------------------------------------------------------------------
             # 7. Build response message.
