@@ -27,6 +27,22 @@ class TestGetStarted:
         assert result["success"] is True
 
     def test_has_required_keys(self):
+        """Every documented section is present.  Extra ones are welcome.
+
+        Presence, not exact equality, because the two failure modes are
+        not symmetric.  A section REMOVED is a real regression: agents
+        lose a documented surface and have no other way to rediscover
+        it.  A section ADDED is almost always somebody teaching agents
+        something new.  A subset check catches the first; equality
+        caught the first AND failed every instance of the second.
+
+        Which is how it actually behaved: adding ``session_maintenance``
+        turned all four CI legs red for a correct change.  A tripwire
+        that fires on every legitimate edit gets synced mechanically,
+        without being read, and an assertion nobody reads has stopped
+        defending anything.  Noticing NEW sections is review's job, not
+        a red build's.
+        """
         with patch(
             "kiln.serve_siblings.check_serve_siblings",
             return_value=_HEALTHY_SIBLINGS,
@@ -45,10 +61,15 @@ class TestGetStarted:
             "creating_models",
             "safety_tools",
             "session_recovery",
+            "session_maintenance",
             "tip",
             "openscad",
         }
-        assert expected_keys == set(result.keys())
+        missing = expected_keys - set(result.keys())
+        assert not missing, (
+            f"get_started() no longer documents {sorted(missing)} — an agent "
+            "that needed those sections has no other way to find them."
+        )
 
     def test_openscad_key_present(self):
         """openscad section is always present with at least an 'installed' or 'version' field."""
