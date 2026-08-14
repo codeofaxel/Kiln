@@ -1296,6 +1296,7 @@ class _SlicerToolsPlugin:
             auto_center: bool = True,
             metadata: dict | None = None,
             skip_validation: bool = False,
+            preview_token: str | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -1421,10 +1422,7 @@ class _SlicerToolsPlugin:
                 # material string.)
                 if material is None:
                     try:
-                        if printer_name:
-                            _adapter = _srv._get_registry().get(printer_name)
-                        else:
-                            _adapter = _srv._get_adapter()
+                        _adapter = _srv._resolve_adapter(printer_name)
                         if hasattr(_adapter, "get_ams_status"):
                             ams = _adapter.get_ams_status()
                             tray_now = str(ams.get("tray_now", "255"))
@@ -1691,7 +1689,7 @@ class _SlicerToolsPlugin:
                 safety_printer = _srv._resolve_effective_printer_name(printer_name)
                 if block := _srv._emergency_latch_error("slice_and_print", safety_printer):
                     return block
-                pf = unwrap_tool_result(_srv.preflight_check())
+                pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
                 if not pf.get("ready", False):
                     _srv._audit(
                         "slice_and_print",
@@ -1766,9 +1764,17 @@ class _SlicerToolsPlugin:
                 # ``sent_at`` is what lets the verdict below tell a reading
                 # about THIS command from the printer's last word about the
                 # previous job.  Capture it before the command, not after.
+                # You chose a file; Kiln chose how it sits on the plate.
+                # Validated against the INPUT model, which is what a user can
+                # actually preview before calling this.
+                if block := _srv._preview_gate_error(
+                    "slice_and_print", input_path, preview_token,
+                    printer_name=printer_name,
+                ):
+                    return block
                 sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name, **print_kwargs)
-                _srv._get_heater_watchdog().notify_print_started()
+                _srv._note_print_started(adapter)
 
                 base_name = os.path.basename(input_path)
                 verdict = resolve_print_start(

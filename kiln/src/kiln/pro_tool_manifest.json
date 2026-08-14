@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-11T16:59:13.665719+00:00",
-  "tool_count": 414,
+  "generated": "2026-08-13T23:12:33.072455+00:00",
+  "tool_count": 417,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -13157,6 +13157,105 @@
           "alternative_printers"
         ],
         "title": "evaluate_fleet_rerouteArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_cancel",
+      "description": "Cancel prints across the whole fleet, gracefully (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "preserve_temperatures": {
+            "default": false,
+            "title": "Preserve Temperatures",
+            "type": "boolean"
+          }
+        },
+        "title": "fleet_cancelArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_pause",
+      "description": "Pause printing across the whole fleet, gracefully (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "keep_temps": {
+            "default": true,
+            "title": "Keep Temps",
+            "type": "boolean"
+          }
+        },
+        "title": "fleet_pauseArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_resume",
+      "description": "Resume paused prints across the whole fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          }
+        },
+        "title": "fleet_resumeArguments",
         "type": "object"
       }
     },

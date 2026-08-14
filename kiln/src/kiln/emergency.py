@@ -77,6 +77,37 @@ _FDM_EMERGENCY_ACTIONS: list[str] = [
 ]
 
 
+def _register_stop_intent(printer_id: str) -> None:
+    """Tell the outcome lifecycle this printer's job is being stopped.
+
+    Filed under the LIFECYCLE name — :func:`~kiln.printers.base.
+    outcome_printer_name` of the registered adapter — not under
+    ``printer_id`` verbatim, because the two differ exactly when it
+    matters: one machine is registered as ``"default"`` AND its
+    config.yaml name, and the adapter is stamped with the latter.  An
+    intent filed under the alias is one the hook never consumes, which
+    is how a stop turns back into a recorded success.
+
+    Falls back to ``printer_id`` for a name the registry doesn't know:
+    a latch can exist for a printer that was never registered this
+    boot, and an intent under the caller's name is still better than
+    none (the hook keys the same way when it too can't resolve the
+    adapter).
+    """
+    from kiln.auto_record_hook import register_cancel_intent
+
+    lifecycle_name = printer_id
+    try:
+        from kiln.printers.base import outcome_printer_name
+        from kiln.server import _registry as registry
+
+        if registry is not None:
+            lifecycle_name = outcome_printer_name(registry.get(printer_id))
+    except Exception:  # noqa: BLE001 — resolution is best-effort
+        pass
+    register_cancel_intent(lifecycle_name)
+
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -351,6 +382,25 @@ class EmergencyCoordinator:
         printer_id = printer_id.strip()
         if not printer_id:
             raise ValueError("printer_id is required")
+
+        # File the this-job-is-ending intent BEFORE any halt is sent.  An
+        # M112 has no "cancelled" gcode_state on most firmware — the printer
+        # lands on error or idle, and an idle with no intent on record is
+        # inferred to be a natural finish, so an emergency-stopped print was
+        # written into the learning DB as a SUCCESS.  cancel_print had the
+        # identical bug and the identical fix; this is the same seam for the
+        # three doors that route through the coordinator (the emergency_stop
+        # tool, emergency_trip_input, and the CLI's estop — stop-all loops
+        # through here per printer).  Best-effort: a bookkeeping failure
+        # must never delay the halt.
+        try:
+            _register_stop_intent(printer_id)
+        except Exception:  # noqa: BLE001 — never block an e-stop
+            logger.debug(
+                "emergency: cancel-intent registration failed for %s",
+                printer_id,
+                exc_info=True,
+            )
 
         now = time.time()
         gcode_sent: list[str] = []

@@ -68,7 +68,21 @@ from pathlib import Path
 from types import MethodType
 from typing import Any
 
-from kiln.mcp_compat import FastMCP, set_instructions
+from kiln.mcp_compat import (
+    FastMCP,
+    ask_user_to_confirm,
+    host_can_ask_the_user,
+    set_instructions,
+)
+from kiln.print_consent import (
+    SOURCE_CI_BYPASS,
+    SOURCE_ELICITED,
+    PrintConsent,
+    consent_for,
+    describe_print_request,
+    reset_consent,
+    set_consent,
+)
 
 with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
@@ -1152,11 +1166,16 @@ def _install_mcp_request_context_capture() -> None:
         convert_result: bool = False,
     ):
         token = _current_mcp_request_context.set(context)
+        consent_token = None
         try:
             if _terms_gate_blocks(name):
                 # One-time consent gate — raised so the lowlevel handler returns
                 # it to the agent as a tool error to relay (see _terms_* above).
                 raise RuntimeError(_terms_consent_message())
+            # Ask the person before a print starts.  Here rather than inside
+            # the tools because sync tools run on this event loop and could
+            # not await the answer.  Raises if they say no, before dispatch.
+            consent_token = await _obtain_print_consent(name, arguments, context)
             try:
                 result = await original_call_tool(
                     name,
@@ -1200,6 +1219,8 @@ def _install_mcp_request_context_capture() -> None:
             # handler (kiln.local_stage), where the result object is real.
             return result
         finally:
+            if consent_token is not None:
+                reset_consent(consent_token)
             _current_mcp_request_context.reset(token)
 
     tool_mgr.call_tool = MethodType(_call_tool_with_context, tool_mgr)
@@ -1336,26 +1357,44 @@ def _get_adapter() -> PrinterAdapter:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_printer_model_live() -> str:
+def _resolve_printer_model_live(printer_name: str | None = None) -> str:
     """Return the current printer_id preferring the live config.yaml
     resolver over the frozen module global.  This lets safety gates
     always see the latest user config without requiring a server
     restart — and it gives them a fighting chance when the user never
     set _PRINTER_MODEL explicitly.  Returns empty string when no
     source has a value.
+
+    Pass *printer_name* from a tool that can be aimed, so the gate reads
+    the model of the machine the file is going to.  For a name that is
+    NOT the default printer the ``_PRINTER_MODEL`` fallback is skipped:
+    that global is the DEFAULT printer's model, and lending it to another
+    machine is how a bed-fit check comes to pass against a bed the file
+    never touches.  Naming the default printer explicitly resolves
+    exactly as omitting the name does.
     """
     try:
-        from kiln.printer_model_resolver import resolve_printer_model
-        live = resolve_printer_model()
+        from kiln.printer_model_resolver import resolve_printer_model_for
+        live = resolve_printer_model_for(printer_name)
         if live:
             return live
     except Exception as exc:
         logger.debug("live printer-model resolution failed: %s", exc)
+    if printer_name:
+        try:
+            if printer_name != _resolve_effective_printer_name(None):
+                return ""
+        except Exception:  # noqa: BLE001 — an unresolvable default is not this call's problem
+            return ""
     return _PRINTER_MODEL or ""
 
 
-def _get_temp_limits() -> tuple:
+def _get_temp_limits(printer_name: str | None = None) -> tuple:
     """Return ``(max_tool, max_bed)`` from the printer's safety profile.
+
+    Pass *printer_name* to read the ceilings of a machine other than the
+    default one; omitting it keeps the default-printer answer these
+    limits have always given.
 
     Resolution order (via :func:`_resolve_printer_model_live`):
       1. ``printer_model`` field in ``~/.kiln/config.yaml``
@@ -1373,13 +1412,16 @@ def _get_temp_limits() -> tuple:
     Set ``KILN_OVERRIDE_PTFE_LIMIT=1`` to disable this clamp (only do this
     if you've physically replaced the PTFE with an all-metal conversion).
     """
-    live_model = _resolve_printer_model_live()
+    live_model = _resolve_printer_model_live(printer_name)
     if live_model:
         # Temporarily rebind _PRINTER_MODEL for the PTFE clamp branch
         # below so the existing logic reads the live value.
         _resolved = live_model
     else:
-        _resolved = _PRINTER_MODEL
+        # Empty for a named non-default machine — _resolve_printer_model_live
+        # refuses to lend it the default's model, so this falls through to
+        # the unknown-printer ceiling rather than a borrowed one.
+        _resolved = _PRINTER_MODEL if not printer_name else ""
     if _resolved:
         try:
             from kiln.safety_profiles import get_profile  # noqa: E402
@@ -1615,6 +1657,383 @@ def _resolve_adapter(printer_name: str | None = None) -> PrinterAdapter:
     return adapter
 
 
+def _lifecycle_printer_name(adapter: PrinterAdapter) -> str:
+    """The name this adapter's stop-path bookkeeping is filed under.
+
+    Thin pass-through to :func:`~kiln.printers.base.outcome_printer_name`,
+    which is the one answer the outcome lifecycle already uses — the
+    cancel-intent table, the terminal-transition table, the idempotency
+    ledger and the ``printer_name`` on the outcome row.  A stop path that
+    computed its own name would file intent under a key the hook never
+    reads, which is exactly how a cancelled print came to be recorded as a
+    success (see that function's docstring).
+    """
+    from kiln.printers.base import outcome_printer_name
+
+    return outcome_printer_name(adapter)
+
+
+def _resolve_control_target(printer_name: str | None) -> tuple[PrinterAdapter, str]:
+    """Resolve ``(adapter, lifecycle_name)`` for a control verb.
+
+    The single door for the verbs that act on one machine — ``pause_print``,
+    ``resume_print``, ``cancel_print`` on the stop side, ``upload_file`` and
+    ``start_print`` on the start side: the adapter is the machine the command
+    is sent to, and the name is what every piece of bookkeeping about that
+    command — cancel intent, watchdog teardown, incident envelope, safety
+    model lookup, audit line — must be filed under.  Deriving both here, from
+    one resolution, is what stops a command being *sent* to one machine and
+    *recorded* (or *safety-checked*) against another.
+
+    ``printer_name=None`` keeps the default-printer behaviour these tools
+    had before they could be aimed.
+    """
+    adapter = _resolve_adapter(printer_name)
+    return adapter, _lifecycle_printer_name(adapter)
+
+
+def _is_heater_watchdog_machine(adapter: PrinterAdapter) -> bool:
+    """True when *adapter* is the machine the heater watchdog watches.
+
+    :class:`~kiln.heater_watchdog.HeaterWatchdog` is one process-wide
+    instance built with ``get_adapter=lambda: _get_adapter()``, so it
+    watches the default printer and nothing else.  Its idle tick checks
+    heater targets but never re-reads whether a job is running, which
+    makes ``notify_print_ended()`` a claim only the default printer's
+    caller is entitled to make.
+
+    Compared by machine fingerprint rather than by name, so the
+    ``"default"`` alias and the config.yaml name for one machine both
+    answer True.  Anything unresolvable answers False — skipping the
+    notification costs a delayed cooldown; getting it wrong cools a
+    printer mid-print.
+    """
+    try:
+        from kiln.registry import machine_fingerprint
+
+        return machine_fingerprint(adapter) == machine_fingerprint(_get_adapter())
+    except Exception as exc:  # noqa: BLE001 — no default printer, or unreachable
+        logger.debug("Heater-watchdog ownership check skipped: %s", exc)
+        return False
+
+
+#: The tools that must not start a print without a person's say-so, and the
+#: argument each one names the job with.  One structure rather than two: a
+#: separate "which tools need consent" list would be a second copy of the
+#: same fact, free to disagree with this one.
+#:
+#: Hand-written because the wrapper must know the answer BEFORE the tool
+#: runs, and pinned by ``test_every_door_aims`` on both halves — that every
+#: tool calling the gate appears here, and that the argument named still
+#: exists in that tool's signature.  A new print tool, or a renamed
+#: parameter, turns that test red instead of silently going unasked.
+_CONSENT_FILE_ARG: dict[str, str] = {
+    "start_print": "file_name",
+    "start_monitored_print": "file_name",
+    "slice_and_print": "input_path",
+    "retry_print_with_fix": "model_path",
+}
+
+
+async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: Any):
+    """Ask the person before this print starts.  Returns a reset token or None.
+
+    Runs in the tool-call wrapper rather than inside the tools because
+    FastMCP calls sync tools directly on the event loop: a sync tool that
+    blocked on an elicitation would deadlock the very loop that has to
+    deliver the answer.  The wrapper is already async and already the one
+    place every MCP call passes through.
+
+    Raises :class:`RuntimeError` when the person says no — the same way the
+    terms gate refuses, and before the tool is dispatched, so a declined
+    print is a print that never started.
+
+    Returns ``None`` when nobody could be asked, which leaves the existing
+    preview-token gate exactly as it was.  That is the honest fallback:
+    hosts without elicitation, and the REST proxy where no person is
+    attached to the call at all.
+    """
+    arg_name = _CONSENT_FILE_ARG.get(tool_name)
+    if arg_name is None or ctx is None:
+        return None
+    if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
+        return None  # one switch turns off consent prompts, as it always did
+    file_value = str(arguments.get(arg_name) or "")
+    if _is_resume_mode_3mf(file_value) or arguments.get("resume_from_paused"):
+        return None  # already running, already approved
+    try:
+        if not host_can_ask_the_user(mcp, ctx):
+            return None
+    except Exception as exc:  # noqa: BLE001 — cannot ask is not approved
+        logger.debug("Could not read host consent capability: %s", exc)
+        return None
+
+    printer_name = arguments.get("printer_name")
+    message = describe_print_request(
+        tool_name,
+        file_name=os.path.basename(file_value) or file_value,
+        printer_name=printer_name,
+        extra={
+            "material": arguments.get("material"),
+            "printer model": arguments.get("printer_id"),
+        },
+    )
+    action, detail = await ask_user_to_confirm(ctx, message)
+    if action == "accept":
+        _audit(tool_name, "consent_granted", details={"file": file_value, "by": "user"})
+        return set_consent(
+            PrintConsent(
+                tool=tool_name,
+                file_name=file_value,
+                printer_name=printer_name,
+                source=SOURCE_ELICITED,
+            )
+        )
+    if action in ("decline", "cancel"):
+        _audit(
+            tool_name,
+            "consent_refused",
+            details={"file": file_value, "action": action},
+        )
+        raise RuntimeError(
+            f"{tool_name} was not started: the print was "
+            + ("declined" if action == "decline" else "dismissed without an answer")
+            + ". Nothing was sent to the printer."
+        )
+    logger.debug("Consent could not be obtained (%s); falling back to token gate", detail)
+    return None
+
+
+def _preview_gate_error(
+    tool_name: str,
+    file_name: str,
+    preview_token: str | None,
+    *,
+    printer_name: str | None = None,
+    is_resume: bool = False,
+) -> dict | None:
+    """``None`` when this print may proceed; an error dict when it may not.
+
+    The rule is that a print is shown to its owner before it happens.  It
+    lived inside ``start_print`` and nowhere else, so it governed one of the
+    six commands that start prints and an agent that did not want to render
+    a preview only had to call a different one — ``slice_and_print``,
+    ``generate_and_print``, and the rest went straight to the machine.  A
+    consent rule with five ways around it is not a rule.
+
+    What it can and cannot promise is worth being honest about: the token
+    proves a preview was RENDERED for this file, not that a human ever saw
+    it.  The agent is still the one asserting consent.  Closing that half
+    needs the client to do the asking (MCP elicitation), not another server
+    check.
+
+    ``KILN_SKIP_PREVIEW_GATE=1`` still bypasses it for CI, and a resume-mode
+    print is still exempt: the print is already running and already had its
+    approval.
+    """
+    # A person was actually asked about THIS file on THIS machine and said
+    # yes.  That is the thing the token has only ever stood in for, so it
+    # ends the question rather than being checked alongside one.
+    if granted := consent_for(file_name=file_name, printer_name=printer_name):
+        _audit(
+            tool_name,
+            "preview_gate_satisfied",
+            details={"file": file_name, "consent": granted.source},
+        )
+        return None
+    if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
+        if not is_resume:
+            logger.warning(
+                "KILN_SKIP_PREVIEW_GATE is set — skipping mandatory preview "
+                "confirmation for %s(%s).  Only do this in CI.",
+                tool_name, file_name,
+            )
+            _audit(
+                tool_name,
+                "preview_gate_skipped",
+                details={"file": file_name, "consent": SOURCE_CI_BYPASS},
+            )
+        return None
+    if is_resume:
+        return None
+    if not preview_token:
+        return _error_dict(
+            f"{tool_name} refuses to proceed without a preview confirmation. "
+            "Render a preview with visualize_model(), show it to the user, "
+            "and call issue_preview_token(file_path) to get a token. "
+            "Pass the token as preview_token=<token>. To bypass (advanced / "
+            "CI only), set KILN_SKIP_PREVIEW_GATE=1.",
+            code="PREVIEW_NOT_CONFIRMED",
+        )
+    try:
+        from kiln.preview_gate import get_preview_gate
+
+        # We can't hash a file on the printer, so the token is matched
+        # against the name it was issued for.
+        ok, reason = get_preview_gate().validate(
+            preview_token,
+            file_name,
+            printer_id=(
+                _resolve_printer_model_live(printer_name)
+                if printer_name
+                else _PRINTER_MODEL
+            ),
+        )
+        if not ok:
+            return _error_dict(
+                f"Preview token rejected: {reason}. Re-render the preview "
+                f"and issue a fresh token.",
+                code="PREVIEW_TOKEN_INVALID",
+            )
+    except Exception as exc:  # noqa: BLE001 — a broken gate must not brick printing
+        logger.warning("Preview gate validation failed: %s", exc)
+    return None
+
+
+# Slicer settings that change how the object is MADE but not what it is.
+# Deliberately an allowlist rather than a list of geometry-changing keys:
+# an incomplete allowlist asks for one confirmation nobody needed, while an
+# incomplete geometry list prints an unapproved shape.  Anything not named
+# here — including a key Kiln has never seen — counts as a change to the
+# object.
+_APPEARANCE_NEUTRAL_OVERRIDES = frozenset({
+    "temperature",
+    "first_layer_temperature",
+    "bed_temperature",
+    "first_layer_bed_temperature",
+    "fan_speed",
+    "min_fan_speed",
+    "max_fan_speed",
+    "cooling",
+    "print_speed",
+    "perimeter_speed",
+    "infill_speed",
+    "travel_speed",
+    "first_layer_speed",
+    "retract_length",
+    "retract_speed",
+    "filament_flow_ratio",
+    "extrusion_multiplier",
+})
+
+
+def _retry_changes_the_object(overrides: dict[str, Any] | None, mesh_repaired: bool) -> bool:
+    """True when a retry prints something other than what was approved.
+
+    A reprint of the same object with a hotter nozzle is the print the user
+    already said yes to.  A reprint whose mesh was auto-repaired, or whose
+    overrides move supports, orientation or scale, is a different object
+    wearing the same file name — and the approval it is leaning on was
+    given for the old one.
+
+    Unknown keys count as a change.  The cost of being wrong that way is a
+    confirmation the user did not strictly need; the cost of the other way
+    is a shape they never approved.
+    """
+    if mesh_repaired:
+        return True
+    return any(
+        str(key).strip().lower() not in _APPEARANCE_NEUTRAL_OVERRIDES
+        for key in (overrides or {})
+    )
+
+
+def _note_print_started(adapter: PrinterAdapter) -> None:
+    """Tell the heater watchdog a print began — if it is watching *adapter*.
+
+    The one door for this notification.  Every tool that starts a print
+    used to call ``_get_heater_watchdog().notify_print_started()``
+    directly, and each of those calls was a separate chance to tell a
+    watchdog about a machine it does not watch: the watchdog is one
+    process-wide instance around the DEFAULT adapter, so a print started
+    on any other printer would mark it busy and stop its idle tick from
+    ever cooling a default printer left sitting hot.
+
+    The tools that can be aimed have accepted a ``printer_name`` for
+    longer than this guard has existed, so that was not hypothetical.
+    Routing every caller through here means the ownership rule is stated
+    once; a new start-side tool gets it by calling this instead of
+    remembering to ask.
+    """
+    try:
+        if _is_heater_watchdog_machine(adapter):
+            _get_heater_watchdog().notify_print_started()
+    except Exception as exc:  # noqa: BLE001 — never fail a start over bookkeeping
+        logger.debug("Heater-watchdog start notification skipped: %s", exc)
+
+
+def _event_printer_name(event: Any) -> str | None:
+    """The machine an event is about, when the event says.
+
+    Publishers put it in ``data["printer_name"]`` and repeat it in
+    ``source`` as ``"<kind>:<name>"``.  Returns ``None`` when neither
+    carries one, which callers must read as "unknown", never as "the
+    default printer".
+    """
+    try:
+        name = (getattr(event, "data", None) or {}).get("printer_name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+        source = getattr(event, "source", "") or ""
+        if ":" in source:
+            tail = source.split(":", 1)[1].strip()
+            if tail:
+                return tail
+    except Exception as exc:  # noqa: BLE001 — an odd event is not an error here
+        logger.debug("Could not read a printer name off an event: %s", exc)
+    return None
+
+
+def _on_print_ended_event(event: Any) -> None:
+    """Retire one machine's print: its watchdog, and its heater timer.
+
+    Both halves used to ignore the event entirely.  ``_stop_print_watchdog()``
+    with no name resolves to the DEFAULT printer, so a failure reported on
+    the second machine tore down the FIRST machine's watchdog and left the
+    failed one running — the live print silently loses its Layer 5 cover.
+    ``notify_print_ended()`` was worse in the same way: it told the heater
+    watchdog, which watches the default printer, that the print was over, and
+    its idle tick sets hotend and bed to 0 some minutes later.  A print
+    failing on one machine could therefore cool another machine mid-print.
+
+    ``kiln.print_recovery`` publishes PRINT_FAILED with the printer's name in
+    it, so this was reachable without anything new being wired.
+
+    An event that names no machine keeps the old default-printer behaviour;
+    a name the registry does not know is skipped rather than guessed, which
+    costs a late cooldown instead of a cold bed mid-print.
+    """
+    name = _event_printer_name(event)
+    with contextlib.suppress(Exception):
+        _stop_print_watchdog(name)
+    try:
+        adapter = _get_registry().get(name) if name else _get_adapter()
+    except Exception as exc:  # noqa: BLE001 — unknown machine: say nothing
+        logger.debug("Print-ended event named an unknown printer (%s): %s", name, exc)
+        return
+    try:
+        if _is_heater_watchdog_machine(adapter):
+            _get_heater_watchdog().notify_print_ended()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Heater-watchdog end notification skipped: %s", exc)
+
+
+def _unknown_printer_error(printer_name: str | None, verb: str) -> dict:
+    """Error dict for a control verb aimed at a printer Kiln doesn't know."""
+    try:
+        known = _get_registry().list_names() or sorted(_read_config_printers())
+    except Exception:  # noqa: BLE001 — the error must survive a broken registry
+        known = []
+    known_msg = f" Registered printers: {', '.join(known)}." if known else ""
+    return _error_dict(
+        f"No printer named {printer_name!r} — cannot {verb} it.{known_msg} "
+        "Omit printer_name to target the default printer, or register this "
+        "one with register_printer().",
+        code="PRINTER_NOT_FOUND",
+        retryable=False,
+    )
+
+
 def _get_emergency_latch_status(printer_name: str) -> dict[str, Any] | None:
     """Best-effort emergency latch status lookup for a printer."""
     try:
@@ -1740,9 +2159,13 @@ class _ToolRateLimiter:
 
 _tool_limiter = _ToolRateLimiter()
 
-# Pending upload confirmations (token -> file_path).
-# Only populated when KILN_CONFIRM_UPLOAD is enabled.
-_pending_uploads: dict[str, str] = {}
+# Pending upload confirmations, token ->
+# (file_path, printer_name-as-passed, resolved-target-at-issue).
+# Only populated when KILN_CONFIRM_UPLOAD is enabled.  The target rides with
+# the token because upload_file_confirm is handed nothing else to aim by, and
+# the resolved name rides along so the confirmed upload can prove it is going
+# to the machine the user was actually shown.
+_pending_uploads: dict[str, tuple[str, str | None, str]] = {}
 
 # Rate limits: {tool_name: (min_interval_ms, max_per_minute)}.
 # Read-only tools have no limits.  Physically-dangerous tools get cooldowns.
@@ -1858,74 +2281,125 @@ _CONFIRM_TOKEN_TTL: float = 300.0  # 5 minutes
 # ``_PAUSE_KEEPALIVE_INTERVAL_S`` seconds via the existing adapter API.
 #
 # Design:
-#   - One daemon thread per process.  Idempotent ``start`` so repeat
-#     pauses don't compound threads.
-#   - ``stop()`` is called from resume/cancel/error paths.
+#   - One daemon thread per PAUSED MACHINE, keyed by machine fingerprint.
+#     Idempotent ``start`` so repeat pauses don't compound threads.
+#   - ``stop(adapter)`` is called from resume/cancel/error paths.
 #   - All adapter calls are best-effort; a failed re-assert is logged
 #     once at INFO level and the loop keeps trying.
+#
+# Every entry point takes the adapter it is actually driving, and the
+# thread re-asserts on THAT adapter.  A process-wide singleton bound to
+# ``_get_adapter()`` was the earlier shape, and on two machines it meant
+# pausing the second one spawned a thread that pushed the second one's
+# targets onto the FIRST — reheating an idle printer, or fighting a
+# running print's own temperatures, for as long as the pause lasted.
 _PAUSE_KEEPALIVE_INTERVAL_S: float = 120.0  # 2 min — well under firmware idle threshold
 
 
 class _PauseKeepAlive:
-    """Daemon thread that re-asserts heater targets across long pauses.
+    """Daemon threads that re-assert heater targets across long pauses.
 
-    Singleton-ish: one instance lives in the module.  ``start`` is
-    idempotent; calling it twice while the thread is running just
-    refreshes the stored targets.  ``stop`` is fast and side-effect
-    free if the thread isn't running.
+    One instance lives in the module and holds one thread per paused
+    machine.  ``start`` is idempotent per machine; calling it twice
+    while that machine's thread is running just refreshes its stored
+    targets.  ``stop`` is fast and side-effect free if the named
+    machine has no thread.
+
+    Keyed by :func:`~kiln.registry.machine_fingerprint`, not by printer
+    name: the server registers the active printer as ``"default"`` AND
+    again under its config.yaml name, so a name key would run two
+    threads against one machine.  The fingerprint is serial- or
+    host-derived, so the two names collapse to one entry and two real
+    printers never do.
     """
 
     def __init__(self) -> None:
         import threading
         self._lock = threading.Lock()
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._targets: dict[str, float] = {}
+        # fingerprint -> {"thread", "stop_event", "targets", "adapter", "label"}
+        self._entries: dict[str, dict[str, Any]] = {}
 
-    def start(self, tool_target: float, bed_target: float) -> bool:
-        """Begin re-asserting ``tool_target`` and ``bed_target`` every 2 min.
+    @staticmethod
+    def _key(adapter: PrinterAdapter) -> str:
+        from kiln.registry import machine_fingerprint
 
-        If the thread is already running, just update the stored targets.
-        Returns ``True`` if a new thread was spawned, ``False`` if an
-        existing thread was just refreshed.
+        return machine_fingerprint(adapter)
+
+    def start(
+        self, adapter: PrinterAdapter, tool_target: float, bed_target: float,
+    ) -> bool:
+        """Begin re-asserting the targets on *adapter* every 2 min.
+
+        If a thread for this machine is already running, just update its
+        stored targets.  Returns ``True`` if a new thread was spawned,
+        ``False`` if an existing one was refreshed.
         """
         import threading
+
+        key = self._key(adapter)
+        label = _lifecycle_printer_name(adapter)
+        targets = {"tool": float(tool_target or 0.0), "bed": float(bed_target or 0.0)}
         with self._lock:
-            self._targets = {
-                "tool": float(tool_target or 0.0),
-                "bed": float(bed_target or 0.0),
-            }
-            if self._thread is not None and self._thread.is_alive():
-                return False  # Refreshed in place, no new thread.
-            self._stop_event.clear()
-            self._thread = threading.Thread(
+            entry = self._entries.get(key)
+            if entry is not None and entry["thread"].is_alive():
+                # Refreshed in place, no new thread.  The adapter is
+                # refreshed too: a lazily-rebuilt adapter for the same
+                # machine must not leave the thread holding a stale one.
+                entry["targets"] = targets
+                entry["adapter"] = adapter
+                return False
+            stop_event = threading.Event()
+            thread = threading.Thread(
                 target=self._loop,
-                name="kiln-pause-keepalive",
+                args=(key, stop_event),
+                name=f"kiln-pause-keepalive-{label}",
                 daemon=True,
             )
-            self._thread.start()
+            self._entries[key] = {
+                "thread": thread,
+                "stop_event": stop_event,
+                "targets": targets,
+                "adapter": adapter,
+                "label": label,
+            }
+            thread.start()
             return True
 
-    def stop(self) -> None:
-        """Signal the thread to exit.  Safe to call when not running."""
-        with self._lock:
-            self._stop_event.set()
-            self._thread = None
-            self._targets = {}
+    def stop(self, adapter: PrinterAdapter) -> None:
+        """Signal *adapter*'s thread to exit.  Safe when none is running.
 
-    def is_running(self) -> bool:
+        Only this machine's thread is stopped — a fleet's other pauses
+        are none of this cancel's business.
+        """
         with self._lock:
-            return self._thread is not None and self._thread.is_alive()
+            entry = self._entries.pop(self._key(adapter), None)
+        if entry is not None:
+            entry["stop_event"].set()
 
-    def _loop(self) -> None:
+    def is_running(self, adapter: PrinterAdapter) -> bool:
+        with self._lock:
+            entry = self._entries.get(self._key(adapter))
+            return entry is not None and entry["thread"].is_alive()
+
+    def _loop(self, key: str, stop_event: threading.Event) -> None:
         """Re-assert targets until stopped or the printer leaves PAUSED."""
         # Wait first — the immediate post-pause state already has the
         # targets set by the slicer/firmware; we only need to fight the
         # cooldown that kicks in a few minutes later.
-        while not self._stop_event.wait(_PAUSE_KEEPALIVE_INTERVAL_S):
+        while not stop_event.wait(_PAUSE_KEEPALIVE_INTERVAL_S):
             try:
                 from kiln.printers.base import PrinterStatus
-                adapter = _get_adapter()
+
+                with self._lock:
+                    entry = self._entries.get(key)
+                    # Replaced by a newer thread for the same machine, or
+                    # stopped between the wait and the lock — either way
+                    # this thread no longer speaks for the machine.
+                    if entry is None or entry["stop_event"] is not stop_event:
+                        return
+                    adapter = entry["adapter"]
+                    targets = dict(entry["targets"])
+
                 # Stop if the printer left PAUSED on its own (resume,
                 # cancel, error, or operator pressed buttons on the printer).
                 try:
@@ -1935,12 +2409,13 @@ class _PauseKeepAlive:
                             "Pause keep-alive: printer state is %s, not paused — exiting loop",
                             state.state,
                         )
+                        with self._lock:
+                            if self._entries.get(key) is entry:
+                                del self._entries[key]
                         return
                 except Exception as exc:
                     logger.debug("Pause keep-alive: state read failed (%s); continuing", exc)
 
-                with self._lock:
-                    targets = dict(self._targets)
                 if targets.get("tool", 0) > 0:
                     try:
                         adapter.set_tool_temp(targets["tool"])
@@ -2083,7 +2558,12 @@ def _spawn_print_watchdog(adapter: Any, file_name: str) -> None:
     """
     from kiln.print_watchdog import PrintWatchdog
 
-    printer_name = _resolve_effective_printer_name() or "default"
+    # Keyed the same way the teardown looks it up — off the adapter that
+    # is actually printing.  Both ends called ``_resolve_effective_printer_name()``
+    # before, which agreed only because neither end could name a printer:
+    # the moment cancel_print could be aimed, the default's key would have
+    # torn down the default's watchdog on a cancel meant for another machine.
+    printer_name = _lifecycle_printer_name(adapter)
 
     def _on_anomaly(flag):
         # Yellow flags report a condition; red flags report a stopped print.
@@ -2128,10 +2608,19 @@ def _spawn_print_watchdog(adapter: Any, file_name: str) -> None:
 
 
 def _stop_print_watchdog(printer_name: str | None = None) -> None:
-    """Stop the PrintWatchdog for a printer (e.g., on cancel / finish)."""
+    """Stop the PrintWatchdog for a printer (e.g., on cancel / finish).
+
+    Omitting the name means the default printer, and resolves it through
+    the same function ``_spawn_print_watchdog`` keyed on — a teardown that
+    computes the name a different way just leaks the watchdog it meant to
+    stop.
+    """
+    name = printer_name
+    if not name:
+        with contextlib.suppress(Exception):
+            name = _lifecycle_printer_name(_get_adapter())
     with _print_watchdogs_lock:
-        name = printer_name or _resolve_effective_printer_name() or "default"
-        wd = _print_watchdogs.pop(name, None)
+        wd = _print_watchdogs.pop(name or "default", None)
     if wd is not None:
         try:
             wd.stop(timeout=1.5)
@@ -2218,14 +2707,20 @@ def _get_event_bus() -> EventBus:
     if not _event_subs_wired:
         _event_subs_wired = True
         # Heater watchdog lifecycle subscriptions (use getters to avoid circular init).
+        # NOTE: nothing in Kiln publishes PRINT_STARTED today, so this handler
+        # never runs.  If a publisher is ever added, the event must carry the
+        # machine it is about and this handler must resolve it and go through
+        # _note_print_started — an unguarded notification here would tell the
+        # default printer's watchdog about a print on any machine, which is
+        # exactly what routing every other caller through that helper fixed.
         _event_bus.subscribe(EventType.PRINT_STARTED, lambda _e: _get_heater_watchdog().notify_print_started())
-        _event_bus.subscribe(EventType.PRINT_COMPLETED, lambda _e: _get_heater_watchdog().notify_print_ended())
-        _event_bus.subscribe(EventType.PRINT_FAILED, lambda _e: _get_heater_watchdog().notify_print_ended())
-        _event_bus.subscribe(EventType.PRINT_CANCELLED, lambda _e: _get_heater_watchdog().notify_print_ended())
-        # Layer 5: tear down the PrintWatchdog when a print ends, by any path.
-        _event_bus.subscribe(EventType.PRINT_COMPLETED, lambda _e: _stop_print_watchdog())
-        _event_bus.subscribe(EventType.PRINT_FAILED, lambda _e: _stop_print_watchdog())
-        _event_bus.subscribe(EventType.PRINT_CANCELLED, lambda _e: _stop_print_watchdog())
+        # Layer 5 teardown + the heater timer, both keyed on the machine the
+        # event names.  One handler because they are one question — which
+        # printer stopped printing — and answering it twice is how the two
+        # came to disagree.
+        _event_bus.subscribe(EventType.PRINT_COMPLETED, _on_print_ended_event)
+        _event_bus.subscribe(EventType.PRINT_FAILED, _on_print_ended_event)
+        _event_bus.subscribe(EventType.PRINT_CANCELLED, _on_print_ended_event)
         # Persistence and billing subscribers (previously wired at import time).
         _event_bus.subscribe(None, _persist_event)
         _event_bus.subscribe(EventType.JOB_COMPLETED, _billing_hook)
@@ -4053,7 +4548,7 @@ def printer_files() -> dict:
 
 
 @mcp.tool()
-def upload_file(file_path: str) -> dict:
+def upload_file(file_path: str, printer_name: str | None = None) -> dict:
     """Upload a local G-code file to the printer.
 
     Handles FTPS (Bambu), REST multipart upload (OctoPrint/Moonraker), and
@@ -4063,6 +4558,11 @@ def upload_file(file_path: str) -> dict:
         file_path: Absolute path to the G-code file on the local filesystem.
             The file must exist, be readable, and have a recognised extension
             (.gcode, .gco, or .g).
+        printer_name: Which printer to upload to.  Omit to upload to the
+            default printer, which is what this did before it could be
+            aimed.  The G-code dialect scan and the bed-fit gate follow the
+            named machine too, so the bytes are checked against the bed
+            they are actually going to.
 
     After a successful upload the file will appear in ``printer_files()`` and
     can be started with ``start_print()``.
@@ -4072,7 +4572,10 @@ def upload_file(file_path: str) -> dict:
     if err := _check_rate_limit("upload_file"):
         return err
     try:
-        adapter = _get_adapter()
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "upload to")
 
         # Check file exists and size before uploading
         if not os.path.isfile(file_path):
@@ -4103,17 +4606,31 @@ def upload_file(file_path: str) -> dict:
 
                 # Use dialect-aware scanning so that commands standard for
                 # the printer firmware (e.g. M500 for Bambu bed-leveling)
-                # are not falsely blocked.
+                # are not falsely blocked.  Read off the adapter that will
+                # receive the bytes rather than the default connection's
+                # frozen type, so an aimed upload is scanned in its own
+                # firmware's dialect.
+                _target_type = (getattr(adapter, "name", "") or _PRINTER_TYPE or "").lower()
                 _dialect = (
                     GCodeDialect.BAMBU
-                    if _PRINTER_TYPE == "bambu"
+                    if _target_type == "bambu"
                     else GCodeDialect.KLIPPER
-                    if _PRINTER_TYPE in ("moonraker", "creality")
+                    if _target_type in ("moonraker", "creality")
                     else GCodeDialect.GENERIC
+                )
+                # Unaimed, this keeps reading the frozen global it always
+                # read; aimed, it must not, because that global names the
+                # default machine.  (The bed-fit gate below already prefers
+                # the live resolver — the two disagreeing on the default
+                # path predates this and is left alone deliberately.)
+                _scan_model = (
+                    _resolve_printer_model_live(printer_name)
+                    if printer_name
+                    else _PRINTER_MODEL
                 )
                 scan = scan_gcode_file(
                     file_path,
-                    printer_id=_PRINTER_MODEL or None,
+                    printer_id=_scan_model or None,
                     dialect=_dialect,
                 )
                 if not scan.valid:
@@ -4144,7 +4661,11 @@ def upload_file(file_path: str) -> dict:
             )
             _ext = os.path.splitext(file_path)[1].lower()
             bed_fit_result: dict[str, Any] | None = None
-            _live_model = _resolve_printer_model_live() or _PRINTER_MODEL
+            # The bed this file is going to, not the bed of whichever
+            # printer happens to be the default one.
+            _live_model = _resolve_printer_model_live(printer_name) or (
+                "" if printer_name else _PRINTER_MODEL
+            )
             if _ext in _GCODE_EXTENSIONS:
                 bed_fit_result = validate_gcode_for_printer(
                     file_path, _live_model,
@@ -4161,6 +4682,7 @@ def upload_file(file_path: str) -> dict:
                         "bed_fit_blocked",
                         details={
                             "file": os.path.basename(file_path),
+                            "printer": target_name,
                             "error_code": code,
                             "bbox": bed_fit_result.get("bbox"),
                         },
@@ -4189,17 +4711,21 @@ def upload_file(file_path: str) -> dict:
             import hashlib
 
             token = hashlib.sha256(f"{file_path}:{file_size}".encode()).hexdigest()[:16]
-            # Store token for upload_file_confirm() to verify.
-            _pending_uploads[token] = file_path
+            # Store the target alongside the path: upload_file_confirm has
+            # only the token to go on, so a token that remembers just the
+            # file would send a confirmed, aimed upload to the default
+            # printer instead of the one the user was asked about.
+            _pending_uploads[token] = (file_path, printer_name, target_name)
             summary: dict[str, Any] = {
                 "confirmation_required": True,
                 "token": token,
                 "file_name": file_name,
+                "printer_name": target_name,
                 "file_size_bytes": file_size,
                 "message": (
                     f"Upload of {file_name} ({file_size / 1024:.1f} KB) "
-                    f"requires confirmation. Call upload_file_confirm(token='{token}') "
-                    f"to proceed."
+                    f"to {target_name} requires confirmation. Call "
+                    f"upload_file_confirm(token='{token}') to proceed."
                 ),
             }
             if scan_warnings:
@@ -4208,6 +4734,9 @@ def upload_file(file_path: str) -> dict:
 
         result = adapter.upload_file(file_path)
         resp = result.to_dict()
+        # Which machine now holds the file — start_print has to be aimed at
+        # the same one, and on a multi-printer bench that is not a given.
+        resp["printer_name"] = target_name
         if scan_warnings:
             resp["warnings"] = scan_warnings
 
@@ -4257,16 +4786,42 @@ def upload_file_confirm(token: str) -> dict:
     """
     if err := _check_auth("files"):
         return err
-    file_path = _pending_uploads.pop(token, None)
-    if file_path is None:
+    pending = _pending_uploads.pop(token, None)
+    if pending is None:
         return _error_dict(
             f"Invalid or expired upload token: {token!r}. Call upload_file() again to get a new token.",
             code="INVALID_TOKEN",
         )
+    # Tokens issued before this tool could be aimed stored a bare path.
+    approved_target: str | None = None
+    if isinstance(pending, tuple):
+        file_path, pending_printer = pending[0], pending[1]
+        approved_target = pending[2] if len(pending) > 2 else None
+    else:
+        file_path, pending_printer = pending, None
     try:
-        adapter = _get_adapter()
+        try:
+            adapter, target_name = _resolve_control_target(pending_printer)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(pending_printer, "upload to")
+        # The confirmation named a machine and the user approved THAT one.
+        # An unaimed token resolves the default printer twice — once when
+        # the token was issued and once here — and the default can move
+        # between the two (a registration, a config edit).  Refusing beats
+        # uploading to a machine nobody was asked about.
+        if approved_target is not None and target_name != approved_target:
+            return _error_dict(
+                f"This upload was confirmed for {approved_target!r}, but that "
+                f"name now resolves to {target_name!r}. The default printer "
+                "changed after the token was issued. Call upload_file() again "
+                "to confirm against the printer you mean.",
+                code="PRINTER_CHANGED",
+                retryable=False,
+            )
         result = adapter.upload_file(file_path)
-        return result.to_dict()
+        resp = result.to_dict()
+        resp["printer_name"] = target_name
+        return resp
     except FileNotFoundError as exc:
         return _error_dict(f"Failed to confirm upload: {exc}", code="FILE_NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
@@ -4620,6 +5175,7 @@ def start_print(
     resume_from_paused: bool = False,
     skip_preheat_reassert: bool = False,
     preview_token: str | None = None,
+    printer_name: str | None = None,
 ) -> dict:
     """Start printing a file already uploaded to the printer (file must exist on printer).
 
@@ -4683,6 +5239,14 @@ def start_print(
             cool-on-new-job policy will otherwise drop the bed to 0
             before the resume preamble executes.  Set ``True`` to
             disable this safety net.  Default ``False``.
+        printer_name: Which printer to start the job on.  Omit to start
+            on the default printer, which is what this did before it
+            could be aimed.  Everything the start decides — the pre-flight
+            verdict, the preview token's printer, the emergency latch,
+            the nozzle-wear consult, the watchdog that will be watching —
+            follows the named machine, so upload the file to that same
+            printer first (``upload_file(..., printer_name=...)``).
+            Listed last so existing positional calls keep their meaning.
 
     Branch on ``print_start`` — one field, three values:
 
@@ -4699,55 +5263,50 @@ def start_print(
         return err
     if err := _check_rate_limit("start_print"):
         return err
-    if conf := _check_confirmation("start_print", {"file_name": file_name}):
+    # Complete args — confirm_action replays the tool with exactly what is
+    # stored here, so anything omitted reverts to its default on the replay.
+    # With only file_name stored, a confirmed start silently dropped the
+    # plate number, AMS mapping and calibration switches it was shown with.
+    if conf := _check_confirmation(
+        "start_print",
+        {
+            "file_name": file_name,
+            "use_ams": use_ams,
+            "ams_mapping": ams_mapping,
+            "timelapse": timelapse,
+            "bed_leveling": bed_leveling,
+            "flow_cali": flow_cali,
+            "vibration_cali": vibration_cali,
+            "layer_inspect": layer_inspect,
+            "nozzle_clog_detect": nozzle_clog_detect,
+            "bed_type": bed_type,
+            "plate_number": plate_number,
+            "resume_from_paused": resume_from_paused,
+            "skip_preheat_reassert": skip_preheat_reassert,
+            "preview_token": preview_token,
+            "printer_name": printer_name,
+        },
+    ):
         return conf
-    if block := _emergency_latch_error("start_print", _resolve_effective_printer_name()):
+    # Asked about the printer being started, not about the default one, and
+    # asked BEFORE anything is built or connected — a latched printer is
+    # refused, not investigated.  This is the caller's-alias half of the
+    # check; it is asked again below under the lifecycle name, so a latch
+    # filed under either name of one machine refuses the start.
+    if block := _emergency_latch_error(
+        "start_print", _resolve_effective_printer_name(printer_name)
+    ):
         return block
 
     # -- Preview confirmation gate -----------------------------------------
-    # Refuse to start a print unless the agent has demonstrated a preview
-    # was rendered and the user approved.  Bypass via
-    # KILN_SKIP_PREVIEW_GATE=1 for CI / advanced users.  Skipped for
-    # resume-mode 3MFs because the print is already in progress.
-    _skip_preview_gate = os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in (
-        "1", "true", "yes",
-    )
+    # One helper, six callers: see _preview_gate_error for why this stopped
+    # living inside this function.
     _is_resume = resume_from_paused or _is_resume_mode_3mf(file_name)
-    if not _skip_preview_gate and not _is_resume:
-        if not preview_token:
-            return _error_dict(
-                "start_print refuses to proceed without a preview confirmation. "
-                "Render a preview with visualize_model(), show it to the user, "
-                "and call issue_preview_token(file_path) to get a token. "
-                "Pass the token as preview_token=<token>. To bypass (advanced / "
-                "CI only), set KILN_SKIP_PREVIEW_GATE=1.",
-                code="PREVIEW_NOT_CONFIRMED",
-            )
-        try:
-            from kiln.preview_gate import get_preview_gate
-            # Find the local file path corresponding to this printer file
-            # name so we can validate the token against the actual bytes.
-            # We can't hash a file on the printer; match by file_name hash
-            # instead (token must have been issued with file_name as path
-            # argument or as a pre-computed hash).
-            ok, reason = get_preview_gate().validate(
-                preview_token, file_name, printer_id=_PRINTER_MODEL,
-            )
-            if not ok:
-                return _error_dict(
-                    f"Preview token rejected: {reason}. Re-render the preview "
-                    f"and issue a fresh token.",
-                    code="PREVIEW_TOKEN_INVALID",
-                )
-        except Exception as exc:
-            logger.warning("Preview gate validation failed: %s", exc)
-    elif _skip_preview_gate and not _is_resume:
-        logger.warning(
-            "KILN_SKIP_PREVIEW_GATE is set — skipping mandatory preview "
-            "confirmation for start_print(%s).  Only do this in CI.",
-            file_name,
-        )
-        _audit("start_print", "preview_gate_skipped", details={"file": file_name})
+    if block := _preview_gate_error(
+        "start_print", file_name, preview_token,
+        printer_name=printer_name, is_resume=_is_resume,
+    ):
+        return block
 
     # Auto-detect resume-mode 3MFs by filename.  Convention: files
     # produced by decorate_during_print / revert_mid_print are named
@@ -4764,7 +5323,19 @@ def start_print(
         )
 
     try:
-        adapter = _get_adapter()
+        # One resolution for the whole start: the adapter the file is sent
+        # to, and the name every gate and every piece of bookkeeping about
+        # this start is filed under.  Inside the try, so an unconfigured or
+        # unreachable printer comes back as a structured error.
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "start a print on")
+        # The lifecycle-name half of the latch check: the alias above and
+        # the registered name can differ, and a latch under either of them
+        # is about this machine.
+        if block := _emergency_latch_error("start_print", target_name):
+            return block
 
         # Snapshot pre-start temperature targets BEFORE the cancel/start
         # so we can re-assert them after the MQTT start command kicks
@@ -4803,10 +5374,18 @@ def start_print(
                 "only be used with custom firmware or during development.",
                 file_name,
             )
-            _audit("start_print", "preflight_skipped", details={"file": file_name})
+            _audit(
+                "start_print",
+                "preflight_skipped",
+                details={"file": file_name, "printer": target_name},
+            )
         else:
             pf = unwrap_tool_result(
-                preflight_check(remote_file=file_name, accept_paused=resume_from_paused)
+                preflight_check(
+                    remote_file=file_name,
+                    accept_paused=resume_from_paused,
+                    printer_name=printer_name,
+                )
             )
             if not pf.get("ready", False):
                 # Build a detailed remediation message from individual checks
@@ -4835,6 +5414,7 @@ def start_print(
                     "preflight_failed",
                     details={
                         "file": file_name,
+                        "printer": target_name,
                         "summary": summary,
                         "failed_checks": [c.get("name") for c in failed],
                     },
@@ -4899,11 +5479,17 @@ def start_print(
             from kiln import _pro_nozzle_bridge
 
             if _pro_nozzle_bridge.available():
+                # The machine about to print, not whichever name the
+                # registry happens to list first — nozzle wear is a
+                # property of one hotend, and consulting a sibling's
+                # wear record answers for the wrong nozzle.  Same key
+                # space (the registered name) the listing used.  The
+                # registry-populated guard stays: with no registry there
+                # is no wear record to consult, and inventing a key here
+                # would start refusing prints that used to be skipped.
                 _printer_id = ""
                 if _get_registry().count > 0:
-                    _names = _get_registry().list_names()
-                    if _names:
-                        _printer_id = _names[0]
+                    _printer_id = target_name
 
                 _planned_grams = 0.0
                 _filament_material = ""
@@ -4951,6 +5537,7 @@ def start_print(
                                     "nozzle_capacity_blocked",
                                     details={
                                         "file": file_name,
+                                        "printer": target_name,
                                         "status": _nz_status,
                                         "narrative": _nozzle_verdict.get(
                                             "narrative", ""
@@ -4994,7 +5581,7 @@ def start_print(
         # the command; ``resolve_print_start`` needs it to know which it has.
         sent_at = time.monotonic()
         result = adapter.start_print(file_name, **print_kwargs)
-        _get_heater_watchdog().notify_print_started()
+        _note_print_started(adapter)
 
         # Layer 5: spawn in-process PrintWatchdog to catch HMS codes,
         # thermal anomalies, stuck-layer conditions.  Agent-driven
@@ -5010,10 +5597,10 @@ def start_print(
                 file_name, _wd_exc,
             )
 
-        # Stop any pause keep-alive thread now that the print is back
-        # under firmware control.  Safe to call when nothing's running.
+        # Stop this printer's pause keep-alive thread now that the print is
+        # back under firmware control.  Safe to call when nothing's running.
         try:
-            _pause_keepalive.stop()
+            _pause_keepalive.stop(adapter)
         except Exception as exc:
             logger.debug("start_print: keep-alive stop failed (best-effort): %s", exc)
 
@@ -5046,6 +5633,7 @@ def start_print(
             "start_print", "executed",
             details={
                 "file": file_name,
+                "printer": target_name,
                 "resume_from_paused": resume_from_paused,
                 "is_resume_3mf": is_resume_3mf,
                 **print_kwargs,
@@ -5054,6 +5642,9 @@ def start_print(
         out = resolve_print_start(
             adapter, result, sent_at=sent_at, file_name=file_name,
         ).to_dict()
+        # Say which machine took the job.  With more than one printer on the
+        # bench, "started" on its own does not tell the caller where to look.
+        out["printer_name"] = target_name
         if is_resume_3mf:
             out["resume_3mf_detected"] = True
         if reasserted is not None:
@@ -5070,8 +5661,178 @@ def start_print(
         return _error_dict(f"Unexpected error in start_print: {exc}", code="INTERNAL_ERROR")
 
 
+def _cancel_print_on(
+    adapter: PrinterAdapter,
+    target_name: str,
+    *,
+    preserve_temperatures: bool = False,
+    expected_tool_target: float | None = None,
+    expected_bed_target: float | None = None,
+    expected_chamber_target: float | None = None,
+) -> dict:
+    """Cancel the print on *adapter*, with every per-printer side effect.
+
+    THE cancel engine — the ``cancel_print`` tool and kiln-pro's fleet
+    fan-out both call this, so intent filing, keep-alive shutdown,
+    watchdog teardown and temperature restore cannot drift apart between
+    the one-printer door and the many-printer door.  Callers resolve
+    ``(adapter, target_name)`` via :func:`_resolve_control_target` and
+    own their own auth / rate-limit / confirmation policy.
+
+    Raises :class:`PrinterError` / :class:`RuntimeError` on adapter
+    failure — callers convert to their own error dicts.
+    """
+    # Snapshot pre-cancel targets so we can restore them below.
+    # Caller-supplied ``expected_*`` values take precedence over the
+    # introspected state — this is the escape hatch for the case
+    # where MQTT cache lag or firmware idle-cooldown has already
+    # zeroed out the bed target before we can read it.
+    preserved: dict[str, float] | None = None
+    if preserve_temperatures:
+        tool_t = 0.0
+        bed_t = 0.0
+        try:
+            state = adapter.get_state()
+            tool_t = float(state.tool_temp_target or 0.0)
+            bed_t = float(state.bed_temp_target or 0.0)
+        except Exception:
+            # Best-effort — fall through to caller overrides.
+            pass
+        if expected_tool_target is not None:
+            tool_t = float(expected_tool_target)
+        if expected_bed_target is not None:
+            bed_t = float(expected_bed_target)
+        preserved = {
+            "tool_target": tool_t,
+            "bed_target": bed_t,
+        }
+
+    # Stop any pause keep-alive thread BEFORE the cancel — the
+    # cancel will leave the printer in IDLE/CANCELLING and the
+    # keep-alive's get_state() check would exit anyway, but
+    # explicit shutdown avoids a possible race where set_*_temp
+    # fights the cancel-cool sequence.  Only THIS machine's thread:
+    # another printer's pause is not this cancel's business.
+    try:
+        _pause_keepalive.stop(adapter)
+    except Exception as exc:
+        logger.debug("cancel_print: keep-alive stop failed (best-effort): %s", exc)
+
+    # Bug #10: register the cancel intent BEFORE issuing the cancel
+    # command.  Bambu firmware has no "cancelled" gcode_state — a
+    # successful cancel transitions the printer to "idle", which
+    # looks identical to a natural finish.  The intent flag lets
+    # auto_record_hook classify the next idle transition as a
+    # cancel rather than a success, so the learning DB gets
+    # ``outcome="cancelled"`` instead of a bogus ``"success"``.
+    #
+    # The name comes off the adapter we are about to cancel, not off
+    # "which printer is the default" — those are the same string only
+    # on a one-machine bench.  File it under the wrong machine and the
+    # cancelled print is recorded a success while some other printer's
+    # honest finish is recorded cancelled.
+    try:
+        from kiln.auto_record_hook import register_cancel_intent
+        register_cancel_intent(target_name)
+    except Exception as exc:  # pragma: no cover — best-effort
+        logger.debug("cancel_print: register_cancel_intent failed: %s", exc)
+
+    # Layer 6: if the print is being cancelled very early (before
+    # layer 5), auto-capture an incident envelope to ~/.kiln/incidents/.
+    # That's usually a crash, nozzle issue, or user stopping a bad
+    # start — exactly when we want to preserve evidence.  Local only,
+    # no upload.
+    try:
+        _state_at_cancel = adapter.get_state()
+        _layer_at_cancel = getattr(
+            getattr(_state_at_cancel, "job", None), "current_layer", 0,
+        ) or 0
+        if _layer_at_cancel < 5:
+            from kiln import incident_recorder
+            incident_recorder.record_incident(
+                incident_type="user_cancel_pre_layer_5",
+                printer_status={
+                    "printer_name": target_name,
+                    "layer_at_cancel": _layer_at_cancel,
+                    "state": getattr(_state_at_cancel, "state", None),
+                },
+                tags=["cancel", "early", "auto"],
+            )
+    except Exception as _inc_exc:
+        logger.debug(
+            "Early-cancel incident auto-capture skipped: %s", _inc_exc,
+        )
+
+    result = adapter.cancel_print()
+
+    # The heater watchdog is a single process-wide instance bound to
+    # ``_get_adapter()`` — it only ever watches the default printer.
+    # Telling it "the print ended" after cancelling a DIFFERENT machine
+    # clears its print-active flag while the machine it watches is still
+    # printing, and its idle tick does not re-check for a running job:
+    # _HEATER_TIMEOUT_MIN later it would set that printer's hotend and
+    # bed to 0 mid-print.  So only notify when the machine we cancelled
+    # is the machine it is watching.
+    if _is_heater_watchdog_machine(adapter):
+        _get_heater_watchdog().notify_print_ended()
+
+    # Layer 5: tear down the PrintWatchdog for the printer we cancelled.
+    # Nameless, this tore down the DEFAULT printer's watchdog — blinding
+    # the machine still printing while leaving the cancelled one watched.
+    _stop_print_watchdog(target_name)
+
+    # Re-assert targets AFTER cancel so the firmware's default-cool
+    # behaviour is overridden.  Only fires when the caller asked for
+    # it AND the pre-cancel targets were non-zero (no point restoring
+    # a printer that was already idle).  Uses the adapter's split
+    # ``set_tool_temp`` / ``set_bed_temp`` methods — present on every
+    # adapter subclass (base, bambu, octoprint, moonraker, creality,
+    # serial, elegoo, prusalink).  Chamber temp (rare) is sent as raw
+    # M141 G-code since most adapters don't expose a chamber setter.
+    restored: dict[str, float] | None = None
+    chamber_restored: float | None = None
+    if preserve_temperatures and preserved is not None:
+        if preserved["tool_target"] > 0 or preserved["bed_target"] > 0:
+            try:
+                if preserved["tool_target"] > 0:
+                    adapter.set_tool_temp(preserved["tool_target"])
+                if preserved["bed_target"] > 0:
+                    adapter.set_bed_temp(preserved["bed_target"])
+                restored = preserved
+            except Exception as exc:
+                logger.warning(
+                    "cancel_print: failed to restore temperatures "
+                    "after cancel (%s): %s",
+                    preserved, exc,
+                )
+        if expected_chamber_target is not None and expected_chamber_target > 0:
+            # Best-effort — not every printer supports M141.  Bambu
+            # X1 enclosed printers and some Voron/Ratrig setups do.
+            try:
+                adapter.send_gcode([f"M141 S{int(expected_chamber_target)}"])
+                chamber_restored = float(expected_chamber_target)
+            except Exception as exc:
+                logger.info(
+                    "cancel_print: chamber temp re-assert (M141 S%s) failed (printer may not support chamber heating): %s",
+                    expected_chamber_target, exc,
+                )
+
+    _audit("cancel_print", f"executed for {target_name}")
+
+    out = result.to_dict()
+    # Say which machine stopped.  An agent driving two printers has no
+    # other way to tell from the reply that it stopped the right one.
+    out["printer_name"] = target_name
+    if preserve_temperatures:
+        out["preserved_temperatures"] = restored
+        if chamber_restored is not None:
+            out["preserved_chamber"] = chamber_restored
+    return out
+
+
 @mcp.tool()
 def cancel_print(
+    printer_name: str | None = None,
     preserve_temperatures: bool = False,
     expected_tool_target: float | None = None,
     expected_bed_target: float | None = None,
@@ -5084,6 +5845,12 @@ def cancel_print(
 
     The printer must have an active job (printing or paused).
 
+    :param printer_name: Which printer to stop.  Omit to stop the default
+        printer, which is what this did before it could be aimed.  Owning
+        more than one printer is free at every tier (only running them at
+        the same time is a fleet feature), so the second machine is a
+        supported setup on a free licence — and control of a hot machine
+        is never something a licence takes away.
     :param preserve_temperatures: When ``True``, re-asserts the pre-cancel
         hotend + bed (+ chamber, if expected_chamber_target is provided)
         targets immediately after the cancel command, so the printer
@@ -5119,134 +5886,35 @@ def cancel_print(
         return err
     if err := _check_rate_limit("cancel_print"):
         return err
-    if conf := _check_confirmation("cancel_print", {}):
+    # The confirmation stores the COMPLETE call: confirm_action replays the
+    # tool with exactly these args, so a missing key silently reverts to its
+    # default on the replay — the confirmed action differs from the one the
+    # user was shown.  (Measured: {"printer_name": ...} alone replayed a
+    # preserve_temperatures=True cancel as a plain cooling cancel.)
+    if conf := _check_confirmation(
+        "cancel_print",
+        {
+            "printer_name": printer_name,
+            "preserve_temperatures": preserve_temperatures,
+            "expected_tool_target": expected_tool_target,
+            "expected_bed_target": expected_bed_target,
+            "expected_chamber_target": expected_chamber_target,
+        },
+    ):
         return conf
     try:
-        adapter = _get_adapter()
-
-        # Snapshot pre-cancel targets so we can restore them below.
-        # Caller-supplied ``expected_*`` values take precedence over the
-        # introspected state — this is the escape hatch for the case
-        # where MQTT cache lag or firmware idle-cooldown has already
-        # zeroed out the bed target before we can read it.
-        preserved: dict[str, float] | None = None
-        if preserve_temperatures:
-            tool_t = 0.0
-            bed_t = 0.0
-            try:
-                state = adapter.get_state()
-                tool_t = float(state.tool_temp_target or 0.0)
-                bed_t = float(state.bed_temp_target or 0.0)
-            except Exception:
-                # Best-effort — fall through to caller overrides.
-                pass
-            if expected_tool_target is not None:
-                tool_t = float(expected_tool_target)
-            if expected_bed_target is not None:
-                bed_t = float(expected_bed_target)
-            preserved = {
-                "tool_target": tool_t,
-                "bed_target": bed_t,
-            }
-
-        # Stop any pause keep-alive thread BEFORE the cancel — the
-        # cancel will leave the printer in IDLE/CANCELLING and the
-        # keep-alive's get_state() check would exit anyway, but
-        # explicit shutdown avoids a possible race where set_*_temp
-        # fights the cancel-cool sequence.
         try:
-            _pause_keepalive.stop()
-        except Exception as exc:
-            logger.debug("cancel_print: keep-alive stop failed (best-effort): %s", exc)
-
-        # Bug #10: register the cancel intent BEFORE issuing the cancel
-        # command.  Bambu firmware has no "cancelled" gcode_state — a
-        # successful cancel transitions the printer to "idle", which
-        # looks identical to a natural finish.  The intent flag lets
-        # auto_record_hook classify the next idle transition as a
-        # cancel rather than a success, so the learning DB gets
-        # ``outcome="cancelled"`` instead of a bogus ``"success"``.
-        try:
-            from kiln.auto_record_hook import register_cancel_intent
-            register_cancel_intent(_resolve_effective_printer_name(None))
-        except Exception as exc:  # pragma: no cover — best-effort
-            logger.debug("cancel_print: register_cancel_intent failed: %s", exc)
-
-        # Layer 6: if the print is being cancelled very early (before
-        # layer 5), auto-capture an incident envelope to ~/.kiln/incidents/.
-        # That's usually a crash, nozzle issue, or user stopping a bad
-        # start — exactly when we want to preserve evidence.  Local only,
-        # no upload.
-        try:
-            _state_at_cancel = adapter.get_state()
-            _layer_at_cancel = getattr(
-                getattr(_state_at_cancel, "job", None), "current_layer", 0,
-            ) or 0
-            if _layer_at_cancel < 5:
-                from kiln import incident_recorder
-                incident_recorder.record_incident(
-                    incident_type="user_cancel_pre_layer_5",
-                    printer_status={
-                        "printer_name": _resolve_effective_printer_name(None),
-                        "layer_at_cancel": _layer_at_cancel,
-                        "state": getattr(_state_at_cancel, "state", None),
-                    },
-                    tags=["cancel", "early", "auto"],
-                )
-        except Exception as _inc_exc:
-            logger.debug(
-                "Early-cancel incident auto-capture skipped: %s", _inc_exc,
-            )
-
-        result = adapter.cancel_print()
-        _get_heater_watchdog().notify_print_ended()
-        # Layer 5: tear down the PrintWatchdog for this printer.
-        _stop_print_watchdog()
-
-        # Re-assert targets AFTER cancel so the firmware's default-cool
-        # behaviour is overridden.  Only fires when the caller asked for
-        # it AND the pre-cancel targets were non-zero (no point restoring
-        # a printer that was already idle).  Uses the adapter's split
-        # ``set_tool_temp`` / ``set_bed_temp`` methods — present on every
-        # adapter subclass (base, bambu, octoprint, moonraker, creality,
-        # serial, elegoo, prusalink).  Chamber temp (rare) is sent as raw
-        # M141 G-code since most adapters don't expose a chamber setter.
-        restored: dict[str, float] | None = None
-        chamber_restored: float | None = None
-        if preserve_temperatures and preserved is not None:
-            if preserved["tool_target"] > 0 or preserved["bed_target"] > 0:
-                try:
-                    if preserved["tool_target"] > 0:
-                        adapter.set_tool_temp(preserved["tool_target"])
-                    if preserved["bed_target"] > 0:
-                        adapter.set_bed_temp(preserved["bed_target"])
-                    restored = preserved
-                except Exception as exc:
-                    logger.warning(
-                        "cancel_print: failed to restore temperatures "
-                        "after cancel (%s): %s",
-                        preserved, exc,
-                    )
-            if expected_chamber_target is not None and expected_chamber_target > 0:
-                # Best-effort — not every printer supports M141.  Bambu
-                # X1 enclosed printers and some Voron/Ratrig setups do.
-                try:
-                    adapter.send_gcode([f"M141 S{int(expected_chamber_target)}"])
-                    chamber_restored = float(expected_chamber_target)
-                except Exception as exc:
-                    logger.info(
-                        "cancel_print: chamber temp re-assert (M141 S%s) failed (printer may not support chamber heating): %s",
-                        expected_chamber_target, exc,
-                    )
-
-        _audit("cancel_print", "executed")
-
-        out = result.to_dict()
-        if preserve_temperatures:
-            out["preserved_temperatures"] = restored
-            if chamber_restored is not None:
-                out["preserved_chamber"] = chamber_restored
-        return out
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "cancel a print on")
+        return _cancel_print_on(
+            adapter,
+            target_name,
+            preserve_temperatures=preserve_temperatures,
+            expected_tool_target=expected_tool_target,
+            expected_bed_target=expected_bed_target,
+            expected_chamber_target=expected_chamber_target,
+        )
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to cancel print: {exc}. Check that a print is currently active.")
     except Exception as exc:
@@ -5320,7 +5988,18 @@ def emergency_stop(
         return err
     if err := _check_rate_limit("emergency_stop"):
         return err
-    if conf := _check_confirmation("emergency_stop", {}):
+    # Complete args, not {} — confirm_action replays with what is stored
+    # here, and an empty dict replayed a stop aimed at ONE printer as
+    # emergency_stop() with printer_name=None: stop ALL printers.
+    if conf := _check_confirmation(
+        "emergency_stop",
+        {
+            "printer_name": printer_name,
+            "reason": reason,
+            "source": source,
+            "note": note,
+        },
+    ):
         return conf
     try:
         from kiln.emergency import EmergencyReason, get_emergency_coordinator
@@ -5423,9 +6102,17 @@ def clear_emergency_stop(
     """
     if err := _check_auth("print"):
         return err
+    # acknowledgement_note included: it is a REQUIRED parameter, and a
+    # stored-args dict without it made every confirmed replay die on a
+    # TypeError — in confirm mode the latch could not be cleared through
+    # this tool at all.
     if conf := _check_confirmation(
         "clear_emergency_stop",
-        {"printer_name": printer_name, "acknowledged_by": acknowledged_by},
+        {
+            "printer_name": printer_name,
+            "acknowledgement_note": acknowledgement_note,
+            "acknowledged_by": acknowledged_by,
+        },
     ):
         return conf
     if not (acknowledgement_note or "").strip():
@@ -5601,8 +6288,66 @@ def emergency_trip_input(
         return _error_dict(f"Unexpected error in emergency_trip_input: {exc}", code="INTERNAL_ERROR")
 
 
+def _pause_print_on(
+    adapter: PrinterAdapter, target_name: str, *, keep_temps: bool = True,
+) -> dict:
+    """Pause the print on *adapter* and start its keep-alive thread.
+
+    THE pause engine — shared by the ``pause_print`` tool and kiln-pro's
+    fleet fan-out, so the temperature keep-alive can never be wired into
+    one door and forgotten in the other.  Callers resolve the target via
+    :func:`_resolve_control_target` and own auth / rate-limit policy.
+
+    Raises :class:`PrinterError` / :class:`RuntimeError` on adapter
+    failure — callers convert to their own error dicts.
+    """
+    # Snapshot pre-pause targets BEFORE issuing the pause command —
+    # some firmwares clear them within seconds of the pause being
+    # accepted.
+    snapshot: dict[str, float] | None = None
+    if keep_temps:
+        try:
+            state = adapter.get_state()
+            snapshot = {
+                "tool": float(state.tool_temp_target or 0.0),
+                "bed": float(state.bed_temp_target or 0.0),
+            }
+        except Exception as exc:
+            logger.debug("pause_print: state snapshot failed (%s); keep-alive disabled", exc)
+            snapshot = None
+
+    result = adapter.pause_print()
+
+    # Start (or refresh) the keep-alive daemon.  Idempotent: if a
+    # thread is already running from a previous pause that wasn't
+    # cleanly resumed, the targets are refreshed in place.
+    keepalive_started = False
+    if keep_temps and snapshot is not None and (snapshot["tool"] > 0 or snapshot["bed"] > 0):
+        try:
+            keepalive_started = _pause_keepalive.start(
+                adapter,
+                tool_target=snapshot["tool"],
+                bed_target=snapshot["bed"],
+            )
+        except Exception as exc:
+            logger.warning("pause_print: failed to start keep-alive: %s", exc)
+
+    _audit("pause_print", f"executed for {target_name}")
+
+    out = result.to_dict()
+    out["printer_name"] = target_name
+    if keep_temps and snapshot is not None:
+        out["keep_alive"] = {
+            "active": _pause_keepalive.is_running(adapter),
+            "started_new_thread": keepalive_started,
+            "interval_seconds": _PAUSE_KEEPALIVE_INTERVAL_S,
+            "targets": snapshot,
+        }
+    return out
+
+
 @mcp.tool()
-def pause_print(keep_temps: bool = True) -> dict:
+def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dict:
     """Pause the currently running print job.
 
     Pausing lifts the nozzle and parks the head.
@@ -5631,56 +6376,24 @@ def pause_print(keep_temps: bool = True) -> dict:
             keep-alive (legacy behaviour — printer may cool during long
             pauses).  The keep-alive thread is idempotent: repeat
             pause/resume cycles do not compound threads.
+        printer_name: Which printer to pause.  Omit for the default
+            printer.  Each paused machine gets its own keep-alive thread,
+            re-asserting its own targets on its own adapter.
 
-    Use ``resume_print()`` to continue from where the print left off.
-    The keep-alive thread is automatically stopped on resume or cancel.
+    Use ``resume_print()`` to continue from where the print left off — pass
+    the same ``printer_name`` you paused with.  The keep-alive thread is
+    automatically stopped on that printer's resume or cancel.
     """
     if err := _check_auth("print"):
         return err
     if err := _check_rate_limit("pause_print"):
         return err
     try:
-        adapter = _get_adapter()
-
-        # Snapshot pre-pause targets BEFORE issuing the pause command —
-        # some firmwares clear them within seconds of the pause being
-        # accepted.
-        snapshot: dict[str, float] | None = None
-        if keep_temps:
-            try:
-                state = adapter.get_state()
-                snapshot = {
-                    "tool": float(state.tool_temp_target or 0.0),
-                    "bed": float(state.bed_temp_target or 0.0),
-                }
-            except Exception as exc:
-                logger.debug("pause_print: state snapshot failed (%s); keep-alive disabled", exc)
-                snapshot = None
-
-        result = adapter.pause_print()
-
-        # Start (or refresh) the keep-alive daemon.  Idempotent: if a
-        # thread is already running from a previous pause that wasn't
-        # cleanly resumed, the targets are refreshed in place.
-        keepalive_started = False
-        if keep_temps and snapshot is not None and (snapshot["tool"] > 0 or snapshot["bed"] > 0):
-            try:
-                keepalive_started = _pause_keepalive.start(
-                    tool_target=snapshot["tool"],
-                    bed_target=snapshot["bed"],
-                )
-            except Exception as exc:
-                logger.warning("pause_print: failed to start keep-alive: %s", exc)
-
-        out = result.to_dict()
-        if keep_temps and snapshot is not None:
-            out["keep_alive"] = {
-                "active": _pause_keepalive.is_running(),
-                "started_new_thread": keepalive_started,
-                "interval_seconds": _PAUSE_KEEPALIVE_INTERVAL_S,
-                "targets": snapshot,
-            }
-        return out
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "pause a print on")
+        return _pause_print_on(adapter, target_name, keep_temps=keep_temps)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to pause print: {exc}. Check that a print is currently active.")
     except Exception as exc:
@@ -5791,8 +6504,42 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
         return _error_dict(f"Unexpected error in skip_print_objects: {exc}", code="INTERNAL_ERROR")
 
 
+def _resume_print_on(
+    adapter: PrinterAdapter, target_name: str, *, force: bool = False,
+) -> dict:
+    """Resume the print on *adapter*, refusing a latched machine.
+
+    THE resume engine — shared by the ``resume_print`` tool and kiln-pro's
+    fleet fan-out.  The emergency-latch refusal lives HERE, not in the
+    tool wrapper, so no door that resumes a printer can skip it: restart
+    is exactly the action an e-stop latch exists to prevent.
+
+    Raises :class:`PrinterError` / :class:`RuntimeError` on adapter
+    failure — callers convert to their own error dicts.
+    """
+    # Checked under the lifecycle name — the wrapper additionally checks
+    # the caller's alias, so a latch filed under either name refuses.
+    if block := _emergency_latch_error("resume_print", target_name):
+        return block
+
+    result = adapter.resume_print(force=force)
+    # Stop this printer's pause keep-alive thread if one was running —
+    # the print is back under firmware control and re-asserting targets
+    # here would race with the resume preamble gcode.
+    try:
+        _pause_keepalive.stop(adapter)
+    except Exception as exc:
+        logger.debug("resume_print: keep-alive stop failed (best-effort): %s", exc)
+
+    _audit("resume_print", f"executed for {target_name}")
+
+    out = result.to_dict()
+    out["printer_name"] = target_name
+    return out
+
+
 @mcp.tool()
-def resume_print(force: bool = False) -> dict:
+def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
     """Resume a paused print job.
 
     The printer must currently be in a paused state.  Resuming will return
@@ -5808,24 +6555,30 @@ def resume_print(force: bool = False) -> dict:
             what Kiln reports — a printer can report ``RUNNING`` with
             perfectly fresh telemetry while standing still, and without this
             the wrong state word would leave you unable to recover the print.
+        printer_name: Which printer to resume.  Omit for the default
+            printer.  Pass the same name you paused with.
     """
     if err := _check_auth("print"):
         return err
     if err := _check_rate_limit("resume_print"):
         return err
-    if block := _emergency_latch_error("resume_print", _resolve_effective_printer_name()):
+    # Asked about the printer being resumed, not about the default one:
+    # checking the default's latch would let a latched machine be restarted
+    # by any command that named it.  Asked BEFORE anything is built or
+    # connected — a latched printer is refused, not investigated.  This is
+    # the caller's-alias half of the check; the engine re-checks under the
+    # lifecycle name, so a latch filed under either name of one machine
+    # refuses the resume.
+    if block := _emergency_latch_error(
+        "resume_print", _resolve_effective_printer_name(printer_name)
+    ):
         return block
     try:
-        adapter = _get_adapter()
-        result = adapter.resume_print(force=force)
-        # Stop the pause keep-alive thread if one was running — the print
-        # is back under firmware control and re-asserting targets here
-        # would race with the resume preamble gcode.
         try:
-            _pause_keepalive.stop()
-        except Exception as exc:
-            logger.debug("resume_print: keep-alive stop failed (best-effort): %s", exc)
-        return result.to_dict()
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "resume a print on")
+        return _resume_print_on(adapter, target_name, force=force)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to resume print: {exc}. Check that the printer is in a paused state.")
     except Exception as exc:
@@ -5837,6 +6590,7 @@ def resume_print(force: bool = False) -> dict:
 def set_temperature(
     tool_temp: float | None = None,
     bed_temp: float | None = None,
+    printer_name: str | None = None,
 ) -> dict:
     """Set the target temperature for the hotend (tool) and/or heated bed.
 
@@ -5845,6 +6599,13 @@ def set_temperature(
             the heater off.  Omit or pass ``null`` to leave unchanged.
         bed_temp: Target bed temperature in Celsius.  Pass ``0`` to turn
             the heater off.  Omit or pass ``null`` to leave unchanged.
+        printer_name: Which printer to heat.  Omit for the default printer,
+            which is what this did before it could be aimed — so asking to
+            preheat a second machine heated the default one instead.  The
+            safety ceiling follows the named machine: a printer with no
+            declared model is held to the unknown-printer limit rather than
+            to the default printer's, which may be the more permissive of
+            the two.
 
     At least one of ``tool_temp`` or ``bed_temp`` must be provided.
 
@@ -5856,22 +6617,41 @@ def set_temperature(
         return err
     if err := _check_rate_limit("set_temperature"):
         return err
-    if conf := _check_confirmation("set_temperature", {"tool_temp": tool_temp, "bed_temp": bed_temp}):
+    # Complete args — confirm_action replays the tool with exactly what is
+    # stored here, so a replay missing the name would heat the default
+    # machine after the user approved a different one.
+    if conf := _check_confirmation(
+        "set_temperature",
+        {
+            "tool_temp": tool_temp,
+            "bed_temp": bed_temp,
+            "printer_name": printer_name,
+        },
+    ):
         return conf
     if tool_temp is None and bed_temp is None:
         return _error_dict(
             "At least one of tool_temp or bed_temp must be provided.",
             code="INVALID_ARGS",
         )
-    if block := _emergency_latch_error("set_temperature", _resolve_effective_printer_name()):
-        tool_heating = tool_temp is not None and tool_temp > 0
-        bed_heating = bed_temp is not None and bed_temp > 0
-        # Allow heater-off/cooldown commands while latched.
-        if tool_heating or bed_heating:
-            return block
+    # Turning heat OFF is allowed on a latched machine; turning it ON is not.
+    _is_heating = (tool_temp is not None and tool_temp > 0) or (
+        bed_temp is not None and bed_temp > 0
+    )
+    # The caller's-alias half of the latch check, asked before anything is
+    # built; the lifecycle name is checked again once the adapter resolves.
+    if _is_heating and (
+        block := _emergency_latch_error(
+            "set_temperature", _resolve_effective_printer_name(printer_name)
+        )
+    ):
+        return block
 
     # -- Temperature safety validation (per-printer when configured) ------
-    _MAX_TOOL, _MAX_BED = _get_temp_limits()
+    # The ceiling of the machine being heated.  Resolved without an adapter
+    # and before one is built, so an over-limit request is refused on its
+    # own terms whether or not the printer answers.
+    _MAX_TOOL, _MAX_BED = _get_temp_limits(printer_name)
     if tool_temp is not None:
         if tool_temp < 0:
             return _error_dict(
@@ -5896,8 +6676,18 @@ def set_temperature(
             )
 
     try:
-        adapter = _get_adapter()
-        results: dict[str, Any] = {"success": True}
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "set the temperature on")
+        # The lifecycle-name half of the latch check: one machine can answer
+        # to two names, and a latch under either of them is about this
+        # machine's heaters.  Cooldowns stay allowed, as above.
+        if _is_heating and (
+            block := _emergency_latch_error("set_temperature", target_name)
+        ):
+            return block
+        results: dict[str, Any] = {"success": True, "printer_name": target_name}
 
         # -- Relative temperature change advisory (non-blocking) ----------
         _DELTA_WARN_TOOL = 10.0
@@ -5961,8 +6751,11 @@ def set_temperature(
         if rate_warnings:
             results["warnings"] = rate_warnings
 
-        # Notify heater watchdog when heaters are turned on.
-        if (tool_temp is not None and tool_temp > 0) or (bed_temp is not None and bed_temp > 0):
+        # Notify heater watchdog when heaters are turned on.  It is one
+        # process-wide instance around the default adapter, so a sibling's
+        # heaters are not its news: told about them it would start timing
+        # the wrong machine's idle heat.
+        if _is_heating and _is_heater_watchdog_machine(adapter):
             _get_heater_watchdog().notify_heater_set()
 
         _audit(
@@ -5971,6 +6764,7 @@ def set_temperature(
             details={
                 "tool_temp": tool_temp,
                 "bed_temp": bed_temp,
+                "printer": target_name,
             },
         )
         return results
@@ -6504,6 +7298,7 @@ def preflight_check(
     expected_material: str | None = None,
     remote_file: str | None = None,
     accept_paused: bool = False,
+    printer_name: str | None = None,
 ) -> dict:
     """Run pre-print safety checks to verify the printer is ready.
 
@@ -6529,12 +7324,24 @@ def preflight_check(
             ``start_print(resume_from_paused=True)`` for mid-print
             resume 3MFs (which start from a paused-state printer).
             Default ``False`` — only ``idle`` is accepted.
+        printer_name: Which printer to check.  Omit to check the default
+            printer, which is what this did before it could be aimed.
+            The state, the temperature ceilings and the material profile
+            all follow the named machine — a readiness verdict is about
+            one printer, and it has to be the printer that will print.
 
     Call this before ``start_print()`` to catch problems early.  The result
     includes a ``ready`` boolean and detailed per-check breakdowns.
     """
     try:
-        adapter = _get_adapter()
+        try:
+            adapter, pf_target = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "run pre-flight checks on")
+        # Unaimed, the frozen global is what this check has always read.
+        _pf_model = (
+            _resolve_printer_model_live(printer_name) if printer_name else _PRINTER_MODEL
+        )
 
         # -- Printer state checks ------------------------------------------
         state = adapter.get_state()
@@ -6586,7 +7393,7 @@ def preflight_check(
 
         # -- Temperature checks --------------------------------------------
         temp_warnings: list[str] = []
-        MAX_TOOL, MAX_BED = _get_temp_limits()
+        MAX_TOOL, MAX_BED = _get_temp_limits(printer_name)
 
         if state.tool_temp_actual is not None and state.tool_temp_actual > MAX_TOOL:
             temp_warnings.append(f"Tool temp ({state.tool_temp_actual:.1f}C) exceeds safe max ({MAX_TOOL:.0f}C)")
@@ -6663,13 +7470,13 @@ def preflight_check(
                 logger.debug("Material match check failed: %s", exc)
 
             # 2) Check against printer intelligence DB (material compatibility)
-            if _PRINTER_MODEL:
+            if _pf_model:
                 try:
-                    mat_settings = get_material_settings(_PRINTER_MODEL, expected_material)
+                    mat_settings = get_material_settings(_pf_model, expected_material)
                     if mat_settings is None:
                         msg = (
                             f"Material {expected_material.upper()} is not validated "
-                            f"for printer model '{_PRINTER_MODEL}'. "
+                            f"for printer model '{_pf_model}'. "
                             f"This material may damage the printer."
                         )
                         # Strict mode = blocking; non-strict = warning only
@@ -6689,7 +7496,7 @@ def preflight_check(
                                 "passed": True,
                                 "message": (
                                     f"{expected_material.upper()} is validated for "
-                                    f"'{_PRINTER_MODEL}' "
+                                    f"'{_pf_model}' "
                                     f"(hotend {mat_settings.hotend_temp}C, bed {mat_settings.bed_temp}C)"
                                 ),
                             }
@@ -6981,7 +7788,7 @@ def preflight_check(
 
                 resolved = resolve_filament(
                     expected_material,
-                    printer_id=_PRINTER_MODEL,
+                    printer_id=_pf_model,
                 )
                 if resolved.warnings:
                     for w in resolved.warnings:
@@ -7046,6 +7853,9 @@ def preflight_check(
 
         result: dict[str, Any] = {
             "success": True,
+            # A readiness verdict is about one machine; say which, so a
+            # caller on a multi-printer bench can tell whose answer this is.
+            "printer_name": pf_target,
             "ready": ready,
             "checks": checks,
             "errors": errors,
@@ -7116,7 +7926,14 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         return err
     if err := _check_rate_limit("send_gcode"):
         return err
-    if not dry_run and (conf := _check_confirmation("send_gcode", {"commands": commands})):
+    # dry_run is stored too (always False here — a dry run never reaches
+    # this gate) so the stored args stay the tool's complete signature and
+    # the replay is verbatim.
+    if not dry_run and (
+        conf := _check_confirmation(
+            "send_gcode", {"commands": commands, "dry_run": dry_run}
+        )
+    ):
         return conf
     if not dry_run and (block := _emergency_latch_error("send_gcode", _resolve_effective_printer_name())):
         return block
@@ -8332,11 +9149,11 @@ def download_and_upload(
         if _marketplace_registry.count == 0:
             _init_marketplace_registry()
 
-        # Resolve printer adapter once
-        if printer_name:
-            adapter = _get_registry().get(printer_name)
-        else:
-            adapter = _get_adapter()
+        # Resolve printer adapter once, through the same door the control
+        # verbs use: it falls back to config.yaml and self-heals the registry,
+        # so a printer the user configured is reachable here even when the
+        # registry never cached it.
+        adapter = _resolve_adapter(printer_name)
 
         # -----------------------------------------------------------------
         # Multi-file mode: model_id without file_id
@@ -8450,7 +9267,7 @@ def download_and_upload(
             if block := _emergency_latch_error("download_and_upload", safety_printer):
                 return block
             # Mandatory pre-flight safety gate before starting print.
-            pf = unwrap_tool_result(preflight_check())
+            pf = unwrap_tool_result(preflight_check(printer_name=printer_name))
             if not pf.get("ready", False):
                 _audit(
                     "download_and_upload",
@@ -8464,9 +9281,19 @@ def download_and_upload(
                     pf.get("summary", "Pre-flight checks failed"),
                     code="PREFLIGHT_FAILED",
                 )
+            # No preview gate here, deliberately: the user cannot preview a
+            # marketplace file before it is downloaded, so the standing
+            # opt-in (KILN_AUTO_PRINT_MARKETPLACE, off by default) IS the
+            # consent for this path.  Recorded so the audit trail says where
+            # the approval came from instead of showing an unexplained start.
+            _audit(
+                "download_and_upload",
+                "auto_printed_without_preview",
+                details={"file": file_name, "consent": "KILN_AUTO_PRINT_MARKETPLACE"},
+            )
             sent_at = time.monotonic()
             print_res = adapter.start_print(file_name)
-            _get_heater_watchdog().notify_print_started()
+            _note_print_started(adapter)
             print_verdict = resolve_print_start(
                 adapter, print_res, sent_at=sent_at, file_name=file_name,
             )
@@ -10640,6 +11467,7 @@ def print_plate_object(
     vibration_cali: bool = True,
     bed_type: str = "auto",
     plate_number: int = 1,
+    printer_name: str | None = None,
 ) -> dict:
     """Extract a single object from a multi-object .gcode.3mf and print it.
 
@@ -10670,6 +11498,9 @@ def print_plate_object(
     :param bed_type: Bed surface type — ``"auto"``, ``"textured_plate"``,
         ``"cool_plate"``, or ``"engineering_plate"`` (Bambu only).
     :param plate_number: Which plate to extract from (1-based, default 1).
+    :param printer_name: Which printer to print on.  Omit for the default
+        printer.  Both steps are aimed at it, so the object is uploaded to
+        and started on the same machine.
     :returns: Dict with extraction info and print start status.
     """
     if err := _check_auth("print"):
@@ -10726,7 +11557,7 @@ def print_plate_object(
 
     # Step 2: Upload
     try:
-        upload_result = upload_file(upload_path)
+        upload_result = upload_file(upload_path, printer_name=printer_name)
         if not upload_result.get("success", False):
             return {
                 "status": "upload_failed",
@@ -10755,6 +11586,7 @@ def print_plate_object(
             flow_cali=flow_cali,
             vibration_cali=vibration_cali,
             bed_type=bed_type,
+            printer_name=printer_name,
         )
     except Exception as exc:
         return _error_dict(

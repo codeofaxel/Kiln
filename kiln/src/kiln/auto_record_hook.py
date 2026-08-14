@@ -278,9 +278,17 @@ def _infer_outcome(
         transition.
     """
     state = new_state.lower().strip()
+    # An intent refers to the job that is ending NOW.  Every terminal
+    # transition spends it — including the ones that don't need it to
+    # classify — so an intent left over from a stop that surfaced as an
+    # error state cannot linger and flip the NEXT job's honest ending
+    # into a "cancelled".  The outcome below is never changed by this:
+    # when the firmware names the ending, the firmware's word wins.
     if state in _FAILED_STATES:
+        _HOOK_STATE.consume_cancel_intent(printer_name)
         return ("failed", _failure_mode_from_code(print_error_code))
     if state in _FINISH_STATES:
+        _HOOK_STATE.consume_cancel_intent(printer_name)
         return ("success", None)
     if state in _CANCELLED_STATES:
         # The machine said the job ended without completing.  This needs
