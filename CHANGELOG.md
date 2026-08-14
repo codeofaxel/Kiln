@@ -7,6 +7,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Point a print at the printer you mean (Business+).** Starting a print,
+  uploading a file, checking readiness and setting temperatures all take a
+  printer name now. Naming none still means your default, and each machine is
+  checked against its own limits rather than your default printer's.
+
+- **Your printer asks you before it prints.** In apps supporting MCP's
+  confirmation prompts you get a dialog your assistant can't answer for you.
+  It names the file and covers that one print. Elsewhere the previous approval
+  step is unchanged.
+
 - **Stop the printer you mean, by name.** Cancel, pause and resume now take a
   printer name, so an assistant minding two machines can stop the right one —
   before this, those commands only ever reached your default printer, and the
@@ -147,6 +157,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Every way of starting a print now asks first.** Slicing-and-printing,
+  retrying and monitored prints used to skip the approval step `start_print`
+  required. Retries only re-ask when the shape changed.
+
 - `cancel_job` has been renamed `cancel_queued_job`. It only ever removed a job
   that was still waiting in the queue line, but sitting next to `cancel_print`,
   the name suggested otherwise. This tool also used to sometimes accept a job
@@ -192,6 +206,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **Checks meant for one printer were applied to another (Business+).** With
+  two machines, one could be cleared to print by the other being idle, and a
+  failure on one could start cooling the other mid-print. Single-printer setups
+  were never affected.
 
 - **In confirm mode, the action you approve is exactly the action that runs.**
   Confirmed commands were replaying with some of their settings quietly reset
