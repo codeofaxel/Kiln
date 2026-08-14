@@ -45,7 +45,7 @@ pip install kiln3d
 
 ## Quick Start
 
-**Using Claude Desktop?** [Download `kiln.mcpb`](https://github.com/codeofaxel/Kiln/releases/latest/download/kiln.mcpb) and double-click it — Claude Desktop wires Kiln in, so you can skip steps 1 and 2 below. You'll still want OpenSCAD, and the terms have to be accepted by you rather than your AI: `uvx --from kiln3d kiln accept-terms`. The bundle starts Kiln through [`uv`](https://astral.sh/uv), so if Claude Desktop reports that the server failed to start, install uv and restart it. Updates arrive with the extension, not via `kiln self-update`.
+**Using Claude Desktop? Install Kiln in one click.** [Download `kiln.mcpb`](https://github.com/codeofaxel/Kiln/releases/latest/download/kiln.mcpb) and double-click it — Claude Desktop installs Kiln and wires it in (just Claude Desktop: steps 1 and 2 below are how Codex and every other AI app connect), so those steps aren't yours. Two things still are: OpenSCAD, and Kiln's terms — the command shows them and asks you to type your acceptance, which is why it's yours and not your AI's: `uvx --from kiln3d kiln accept-terms`. The bundle and that command both run on [`uv`](https://docs.astral.sh/uv/getting-started/installation/) — free, with a one-line install for each platform at that link. If Claude Desktop says the server failed to start, that's uv missing: install it and restart. Updates arrive with the extension, not via `kiln self-update`.
 
 Everyone else — three steps. Then ask your AI to make something.
 
@@ -85,7 +85,7 @@ Drop this into Claude Desktop, Claude Code, Codex, Cursor, or any MCP-capable ag
 
 **3. Ask** — paste a sentence like this into your agent. Kiln does the rest:
 
-> I have a Bambu A1, make me a coaster with my dog's photo on it
+> Make me a coaster with my dog's photo on it
 
 That's the whole happy path. Your AI does the designing, slicing, and printing — you never touch a CLI. OS-specific walkthrough (Windows, WSL 2, Linux) at **[kiln3d.com/install](https://kiln3d.com/install?utm_source=github&utm_medium=readme)**.
 
