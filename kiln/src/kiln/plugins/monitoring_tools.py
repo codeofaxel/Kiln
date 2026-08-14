@@ -23,6 +23,7 @@ import threading
 import time
 from typing import Any
 
+from kiln.auto_record_hook import note_cancel_requested
 from kiln.errors import HostedUnavailableError
 from kiln.events import EventType
 from kiln.print_start_verdict import resolve_print_start
@@ -372,6 +373,7 @@ class _PrintWatcher:
                         f"(cancel_at_percent={self._cancel_at_percent}%)."
                     )
                     _logger.info("[watch %s] %s", self._watch_id, cancel_msg)
+                    note_cancel_requested(adapter)
                     try:
                         adapter.cancel_print()
                     except Exception as cancel_exc:

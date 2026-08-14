@@ -327,10 +327,12 @@ from kiln.thingiverse import (
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
     TIERS_AND_TERMS,
+    UPGRADE_NUDGE_SCHEMA_VERSION,
     account_required_message,
     session_expired_message,
     signin_hint_fields,
     tier_required_message,
+    upgrade_nudge_block,
 )
 from kiln.webhooks import WebhookManager
 
@@ -5414,11 +5416,6 @@ def _cancel_print_on(
     # on a one-machine bench.  File it under the wrong machine and the
     # cancelled print is recorded a success while some other printer's
     # honest finish is recorded cancelled.
-    try:
-        from kiln.auto_record_hook import register_cancel_intent
-        register_cancel_intent(target_name)
-    except Exception as exc:  # pragma: no cover — best-effort
-        logger.debug("cancel_print: register_cancel_intent failed: %s", exc)
 
     # Layer 6: if the print is being cancelled very early (before
     # layer 5), auto-capture an incident envelope to ~/.kiln/incidents/.
@@ -5445,6 +5442,38 @@ def _cancel_print_on(
         logger.debug(
             "Early-cancel incident auto-capture skipped: %s", _inc_exc,
         )
+
+    # Was this cancel inside the window where the firmware can fault?
+    # Read BEFORE the cancel, because afterwards the job is over and the
+    # printer no longer says where it was.
+    in_calibration = False
+    try:
+        if adapter.capabilities.cancel_during_calibration_faults:
+            from kiln.printers.base import in_calibration_window
+
+            in_calibration = in_calibration_window(None, adapter.get_job())
+    except Exception as exc:  # noqa: BLE001 — never block a cancel
+        logger.debug("cancel_print: window check skipped: %s", exc)
+
+    # Filed LAST, immediately before the stop command — after every
+    # diagnostic read above.  Reading a Bambu's state feeds the outcome
+    # lifecycle, and an active-state observation CLEARS a pending intent
+    # (that clear is what lets an intent outlive a slow stop safely).  So
+    # an intent filed before those reads is an intent one of them erases:
+    # measured here, the cancel was recorded a success again, which is the
+    # exact bug the intent exists to prevent.  Still before the command,
+    # because the terminal transition can arrive the moment it lands.
+    # Keyed off the ADAPTER, not a name resolved beside it, and DURABLE:
+    # `kiln cancel` sends the stop and exits, so the ending is seen by
+    # whatever is left watching — in another process, where an in-memory
+    # flag stamped with a monotonic clock means nothing.  One helper serves
+    # every door that deliberately ends a print.
+    try:
+        from kiln.auto_record_hook import note_cancel_requested
+
+        note_cancel_requested(adapter)
+    except Exception as exc:  # pragma: no cover — best-effort
+        logger.debug("cancel_print: note_cancel_requested failed: %s", exc)
 
     result = adapter.cancel_print()
 
@@ -5506,6 +5535,18 @@ def _cancel_print_on(
     # Say which machine stopped.  An agent driving two printers has no
     # other way to tell from the reply that it stopped the right one.
     out["printer_name"] = target_name
+    if in_calibration:
+        # Measured on an A1 across six cancels in this window: every one
+        # tripped a Z-homing fault, and four of the six cleared themselves
+        # inside about a minute.  So the useful thing to say is not "you
+        # may be stuck" — it is "wait before you power-cycle", which is
+        # right two times in three.
+        out["note"] = (
+            "Cancelled while the printer was still levelling the bed. On "
+            "this printer that sometimes leaves a fault that refuses new "
+            "prints — it usually clears itself within a minute or two, so "
+            "give it a moment before power-cycling."
+        )
     if preserve_temperatures:
         out["preserved_temperatures"] = restored
         if chamber_restored is not None:
@@ -5757,6 +5798,77 @@ def emergency_status(printer_name: str | None = None, include_unlatched: bool = 
     except Exception as exc:
         logger.exception("Unexpected error in emergency_status")
         return _error_dict(f"Unexpected error in emergency_status: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def clear_printer_error(printer_name: str | None = None) -> dict:
+    """Clear a latched error on the PRINTER so it will accept prints again.
+
+    Different from ``clear_emergency_stop``, which releases Kiln's own safety
+    latch.  This one acknowledges an error the FIRMWARE is holding — the state
+    the machine itself reports — after which pre-flight checks pass again.
+
+    Reach for it when ``printer_status`` reports ``error`` and the printer's
+    own screen looks fine.  That combination is not a Kiln bug; the firmware
+    really is still reporting the fault, and on some machines dismissing the
+    on-screen message clears the notification without clearing the state.
+    Before this existed there was no way out of that from Kiln at all — only a
+    power cycle — so one bad print locked the machine out of every later one.
+
+    What it does NOT do is fix the cause.  A printer that halted for a real
+    fault will halt again the moment it retries, which is the honest outcome:
+    this reconciles Kiln with the machine, it does not overrule the machine.
+    Nothing is cleared while a print is running.
+
+    :param printer_name: Target printer.  Omit for the default printer.
+    :returns: Whether the acknowledgement was sent, plus the printer state
+        read back afterwards so the caller can see whether it took.
+
+    See also: ``printer_status()``, ``preflight_check()``, ``emergency_stop()``.
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
+
+        # Never while a print is live: the machine is mid-job, and an
+        # acknowledgement that resets a board would end it far less gracefully
+        # than cancel_print would.
+        state = adapter.get_state()
+        if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+            return _error_dict(
+                f"Not clearing anything while a print is {state.state.value}. "
+                "Use cancel_print first if you mean to stop it.",
+                code="PRINTER_BUSY",
+            )
+
+        if not adapter.capabilities.can_clear_error:
+            return _error_dict(
+                f"{adapter.name} has no known way to clear a firmware error "
+                "from Kiln. Clear it on the printer's own screen, or power-"
+                "cycle the machine.",
+                code="NOT_SUPPORTED",
+            )
+
+        result = adapter.clear_error()
+        after = adapter.get_state()
+        return {
+            "success": bool(result.success),
+            "message": result.message,
+            # Read back rather than claimed: some firmware takes a moment, so
+            # a caller that needs certainty polls printer_status again.
+            "printer_state": after.state.value,
+            "cleared": after.state is not PrinterStatus.ERROR,
+            "printer_name": _reported_printer_name(printer_name),
+        }
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found", code="NOT_FOUND")
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Could not clear the printer error: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in clear_printer_error")
+        return _error_dict(f"Unexpected error in clear_printer_error: {exc}",
+                           code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8139,6 +8251,28 @@ def register_printer(
         if fleet_note:
             result["fleet_note"] = fleet_note
             result["upgrade_url"] = "https://kiln3d.com/pricing"
+            # The same moment, in the structured shape a surface can render
+            # without parsing the sentence.  Additive only: the registration
+            # already succeeded and nothing above is rewritten.
+            result.setdefault(
+                "upgrade_nudge",
+                upgrade_nudge_block(
+                    variant="second_printer",
+                    tier="business",
+                    feature="Coordinated multi-printer queue",
+                    headline="Put both machines to work when jobs overlap.",
+                    outcome_preview=(
+                        "This printer is registered. Kiln Business would "
+                        "coordinate the queue and route concurrent work "
+                        "across the available machines."
+                    ),
+                    free_included=(
+                        "Your machines stay registered and usable one at a "
+                        "time on the current plan."
+                    ),
+                    moment="resource_threshold",
+                ),
+            )
         if persisted_path:
             result["persisted"] = True
             result["config_path"] = persisted_path
@@ -12616,6 +12750,28 @@ _PRO_TOOL_TIERS: dict[str, str] = {}
 # response is authoritative from the first real call onward.
 _PRO_TOOL_QUOTA: dict[str, dict] = {}
 
+# Static, sanitized upgrade-nudge copy per tool — what the tool would DO for
+# this user, written by the side that owns the feature and shipped in the
+# manifest.  Same reason the allowance moved here: the account wall is decided
+# LOCALLY, so the server's own words for a paid tool never reach the person who
+# hit it.  Only tools whose manifest entry carries a ``schema_version: 1``
+# block get an entry; a lookup miss means "nothing written for this tool" and
+# the refusal below says nothing extra.
+_PRO_TOOL_NUDGES: dict[str, dict] = {}
+
+# The only keys read out of a manifest nudge block.  An allowlist rather than a
+# strip: the manifest is generated by the private repo, and a field added there
+# ships NOTHING here until somebody consciously classifies it.
+_NUDGE_FIELDS = (
+    "schema_version",
+    "copy_version",
+    "variant",
+    "feature",
+    "headline",
+    "outcome_preview",
+    "free_included",
+)
+
 
 def _with_local_log_tail(kwargs: dict) -> dict:
     """Attach the redacted local log tail to a forwarded bug report.
@@ -12809,11 +12965,24 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         # This used to read "pair a Kiln account, run `python3 -m kiln pair
         # <code>`" — and a test asserted that exact string, so the worst copy
         # in the product was the one line nobody could fix by accident.
+        wall = account_required_message(
+            tool_name, tier=required_tier, allowance=allowance,
+        )
+        # Value before the wall.  A person who reached for a paid tool is at
+        # the highest-intent moment the product gets from them, and the first
+        # thing they read used to be a setup chore naming nothing they wanted.
+        # When the manifest carries copy for this tool, what it would DO for
+        # them leads, and the account sentence follows on its own line.
+        nudge = _PRO_TOOL_NUDGES.get(tool_name) or {}
+        offer = " ".join(
+            part for part in (
+                nudge.get("headline") or "",
+                nudge.get("outcome_preview") or "",
+            ) if part
+        ).strip()
         payload = {
             "status": "error",
-            "error": account_required_message(
-                tool_name, tier=required_tier, allowance=allowance,
-            ),
+            "error": f"{offer}\n{wall}" if offer else wall,
             "code": "KILN_ACCOUNT_NOT_PAIRED",
             "tool": tool_name,
             "required_tier": required_tier or "free",
@@ -12825,6 +12994,11 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         # when unknown — an absent key cannot be misread as "no allowance".
         if allowance:
             payload["quota"] = dict(allowance)
+        if nudge:
+            # A copy, stamped with the moment it fired: the module-level block
+            # is shared by every call, and mutating it here would rewrite the
+            # constant for the whole process.
+            payload["upgrade_nudge"] = {**nudge, "moment": "unpaired_account"}
         return payload
 
     # Bug reports carry local crash evidence.  This forwarder is the ONE
@@ -12958,6 +13132,18 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         quota = tool_def.get("quota")
         if isinstance(quota, dict) and quota:
             _PRO_TOOL_QUOTA[name] = quota
+        # Static upgrade copy, when the manifest carries a version of the
+        # block this build understands.  Read field by field: whatever else the
+        # generating side adds to the entry stays where it is until somebody
+        # here decides what to do with it.
+        nudge_def = tool_def.get("upgrade_nudge")
+        if (
+            isinstance(nudge_def, dict)
+            and nudge_def.get("schema_version") == UPGRADE_NUDGE_SCHEMA_VERSION
+        ):
+            _PRO_TOOL_NUDGES[name] = {
+                key: nudge_def[key] for key in _NUDGE_FIELDS if key in nudge_def
+            }
         params_schema = tool_def.get("parameters", {})
 
         # Build the stub function.  Closures capture `name` by reference,

@@ -373,6 +373,20 @@ class PrinterCapabilities:
     can_update_firmware: bool = False
     can_snapshot: bool = False
     can_detect_filament: bool = False
+    #: Whether :meth:`PrinterAdapter.clear_error` can acknowledge a latched
+    #: firmware error.  Defaults to False so a backend that has not been
+    #: taught its firmware's acknowledgement advertises the truth — a caller
+    #: offering the user a button that cannot work is worse than no button.
+    can_clear_error: bool = False
+    #: Whether cancelling DURING a calibration routine (bed levelling, Z
+    #: homing) trips a firmware fault on this backend.  Measured on an A1
+    #: (2026-08-13): a cancel mid-levelling aborts the homing move and the
+    #: firmware latches "Z axis homing failed" — every subsequent print
+    #: refused until a power cycle.  Pausing first turns that same fault
+    #: transient: it self-clears in about fifteen seconds and the job lands
+    #: as "cancelled".  Default False: a backend nobody has measured is not
+    #: assumed to share the hazard, because the guard costs a real command.
+    cancel_during_calibration_faults: bool = False
     device_type: str = "fdm_printer"
     supported_extensions: tuple[str, ...] = (".gcode", ".gco", ".g")
 
@@ -627,6 +641,7 @@ class PrinterAdapter(ABC):
             _observed_get_state._kiln_outcome_wrapped = True  # type: ignore[attr-defined]
             cls.get_state = _observed_get_state
 
+
     def set_safety_profile(self, profile_id: str) -> None:
         """Bind a printer safety profile for temperature validation.
 
@@ -789,7 +804,18 @@ class PrinterAdapter(ABC):
             # print existed and settle how it went, instead of the print
             # vanishing from history entirely.
             try:
-                from kiln.auto_record_hook import open_pending_outcome
+                from kiln.auto_record_hook import (
+                    clear_cancel_intent,
+                    open_pending_outcome,
+                )
+
+                # A cancel asked for before this print has nothing to say
+                # about this print.  Dropping it HERE is what lets the intent
+                # outlive a slow stop sequence safely: the mechanism no longer
+                # has to guess how many seconds a printer takes to stop
+                # moving, retract, park and report idle, because the event
+                # that guess was standing in for is this one, exactly.
+                clear_cancel_intent(outcome_printer_name(self))
 
                 # The material Kiln COMMANDED at start is the strongest
                 # honest source — it survives even when the outcome is
@@ -798,8 +824,15 @@ class PrinterAdapter(ABC):
                 # generic key; absent both, the record-time backfill
                 # (job metadata, live AMS on watched endings) covers it.
                 commanded_material = kwargs.get("material_type") or kwargs.get("material")
+                # Under the name every RESOLVER looks it up by.  self.name
+                # is the backend family — identical for every printer of a
+                # brand — while both reconcile doors and save_print_outcome's
+                # pending-row adoption key on outcome_printer_name.  Opened
+                # under the family name, the row could never be found again:
+                # each print left one more forever-pending row and its real
+                # ending was inserted as a second row beside it.
                 open_pending_outcome(
-                    self.name,
+                    outcome_printer_name(self),
                     file_name,
                     material_type=(
                         str(commanded_material) if commanded_material else None
@@ -1075,6 +1108,45 @@ class PrinterAdapter(ABC):
         Raises:
             PrinterError: If the e-stop command cannot be delivered.
         """
+
+    def clear_error(self) -> PrintResult:
+        """Acknowledge a latched firmware error so the printer can print again.
+
+        Deliberately NOT abstract, and it refuses by default.  A printer whose
+        error nobody knows how to clear must say so, because the alternative —
+        a default that pretends to work — is a button that reports success and
+        leaves the machine exactly as stuck as it was.  Adapters that know
+        their firmware's acknowledgement override this and set
+        :attr:`PrinterCapabilities.can_clear_error`.
+
+        This exists because a latched error is a DEAD END, not an
+        inconvenience.  Measured on an A1 (2026-08-13): a print cancelled
+        during bed levelling left the firmware reporting ``gcode_state=failed``
+        with a non-zero ``print_error``, which maps to
+        :attr:`PrinterStatus.ERROR`; the pre-flight check then refused every
+        subsequent print.  Dismissing the message on the printer's own screen
+        cleared the notification but NOT the reported state, so the machine
+        showed "ready" while Kiln — correctly — would not start a job.  There
+        was no way back through Kiln at all; only a power cycle cleared it.
+
+        The rule this restores is the one the rest of the status stack already
+        keeps: Kiln may refuse to act on what a printer reports, but it must
+        never leave the user with no way to reconcile the two.
+
+        :returns: A :class:`PrintResult` whose ``success`` says whether the
+            acknowledgement was DELIVERED, not whether the printer has since
+            gone idle — the caller re-reads state for that, and some firmware
+            takes a moment.
+        """
+        return PrintResult(
+            success=False,
+            message=(
+                f"{self.name} has no known way to clear a firmware error from "
+                "Kiln. Clear it on the printer's own screen or power-cycle it. "
+                "See scripts/adapter_conformance.yaml for what each backend "
+                "declares."
+            ),
+        )
 
     # -- calibration -----------------------------------------------------
 
@@ -1525,6 +1597,35 @@ def outcome_printer_name(adapter: Any) -> str:
     return getattr(adapter, "name", "") or "printer"
 
 
+def in_calibration_window(state: Any, job: Any) -> bool:
+    """Is this printer still in its pre-extrusion routine — levelling, homing?
+
+    The discriminator is the JOB, not the machine state, because the state
+    word does not distinguish them: an A1 reports ``printing`` throughout bed
+    levelling, exactly as it does mid-part.  What separates them is that
+    nothing has been laid down yet.
+
+    Measured across four cancels on an A1 (2026-08-13).  The three that
+    faulted all read ``current_layer=0`` with ``completion=0``; the one that
+    cancelled cleanly read ``completion=1.0``.  So a job that has reported
+    ANY progress is past the routine and out of the hazard.
+
+    Unknown reads as IN the window.  A printer that has not said where it is
+    yet is most likely still starting up, and what this gates is a sentence,
+    so an unnecessary one costs nothing.
+
+    Nothing ACTS on this.  Kiln knows the window is hazardous and does not
+    know what to do about it: pausing first was tried and, across six cancels
+    on an A1, changed nothing about whether the fault stuck.  What it gates is
+    telling the user what to expect, which is the part the evidence supports.
+    """
+    layer = getattr(job, "current_layer", None) if job is not None else None
+    completion = getattr(job, "completion", None) if job is not None else None
+    if isinstance(layer, (int, float)) and layer >= 1:
+        return False
+    return not (isinstance(completion, (int, float)) and completion > 0)
+
+
 def _current_job(adapter: PrinterAdapter) -> JobProgress | None:
     """The job the printer is (or was last) running, or ``None``.
 
@@ -1743,13 +1844,27 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
         # when there is actually a pending row to settle.
         from kiln.persistence import get_db
 
-        if get_db().list_print_outcomes(
-            printer_name=name, outcome="pending", limit=1,
-        ):
+        # The family name is where rows opened before the identity fix
+        # live; the gate must see them or the sweep never even fires.
+        family = getattr(adapter, "name", "") or ""
+        has_pending = bool(
+            get_db().list_print_outcomes(
+                printer_name=name, outcome="pending", limit=1,
+            )
+        ) or (
+            family != name
+            and bool(
+                get_db().list_print_outcomes(
+                    printer_name=family, outcome="pending", limit=1,
+                )
+            )
+        )
+        if has_pending:
             reconcile_pending_outcomes(
                 printer_name=name,
                 gcode_state=value,
                 current_job_label=_current_job_label(adapter),
+                legacy_printer_name=family or None,
             )
 
     prev = observe_state(name, value)

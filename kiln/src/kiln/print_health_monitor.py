@@ -33,6 +33,8 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, TextIO
 
+from kiln.auto_record_hook import note_cancel_requested
+
 logger = logging.getLogger(__name__)
 
 
@@ -1531,6 +1533,10 @@ class PrintHealthMonitor:
             )
             return
 
+        # Kiln is stopping this print because it judged the print to be
+        # failing. Unlabelled, that lands as a success and teaches the loop
+        # that the runs it flagged were the good ones.
+        note_cancel_requested(adapter)
         try:
             adapter.cancel_print()
         except Exception as exc:

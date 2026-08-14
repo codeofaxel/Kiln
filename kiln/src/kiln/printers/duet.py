@@ -295,6 +295,7 @@ class DuetAdapter(PrinterAdapter):
     def capabilities(self) -> PrinterCapabilities:
         """Capabilities supported by the Duet / RepRapFirmware backend."""
         return PrinterCapabilities(
+            can_clear_error=True,
             can_upload=True,
             can_set_temp=True,
             can_send_gcode=True,
@@ -1273,6 +1274,24 @@ class DuetAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
+
+    def clear_error(self) -> PrintResult:
+        """Reset the board after a halt, with ``M999``.
+
+        The recovery half of the pair Duet Web Control's emergency button
+        sends together (see :meth:`emergency_stop`, which deliberately sends
+        only the ``M112``).  Keeping them apart is the point: a stop that
+        un-latched itself would not be a stop.  This is the deliberate second
+        action that docstring promises.
+        """
+        self.send_gcode(["M999"])
+        return PrintResult(
+            success=True,
+            message=(
+                "Sent M999 to reset the board. Re-read printer_status to "
+                "confirm it came back ready."
+            ),
+        )
 
     def send_gcode(self, commands: list[str]) -> bool:
         """Send one or more G-code commands to the printer.

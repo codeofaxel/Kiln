@@ -60,7 +60,7 @@ class TestPrintJob:
         expected_keys = {
             "id", "file_name", "printer_name", "status", "submitted_by",
             "priority", "created_at", "started_at", "completed_at",
-            "error", "metadata",
+            "error", "metadata", "idempotency_key",
         }
         assert set(d.keys()) == expected_keys
 
