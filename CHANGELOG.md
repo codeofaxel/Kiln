@@ -7,6 +7,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Clear a stuck printer error without walking over to it.** `clear_printer_error`
+  works on Klipper/Moonraker, OctoPrint, Duet, Creality and USB.
+
 - **A dropped connection can't cost you a duplicate print.** If your assistant
   queues a print and the reply goes missing, it can now retry safely: sending
   the same job again with the same one-time key gives back the original
@@ -180,6 +183,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **Cancelled prints are recorded as cancelled, not successful.** Including the
+  ones Kiln stops itself after spotting a problem.
+
+- **Cancelling mid-levelling can leave a Bambu refusing prints.** It usually
+  clears itself within a minute — Kiln now says so instead of leaving you to
+  guess.
 
 - **Sending a job to your fleet works again (Business).** Handing a print to
   the fleet, and asking Kiln which machine should take it, failed with an
