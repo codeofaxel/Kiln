@@ -243,15 +243,29 @@ def test_hms_family_0x5_is_mechanical(mock_record):
 
 
 def test_expired_cancel_intent_does_not_leak_past_ttl():
-    """Cancel intents time out after _CANCEL_INTENT_TTL_S so they
-    can't bleed into an unrelated subsequent print."""
+    """An intent cannot bleed into an unrelated subsequent print.
+
+    That is the invariant.  It used to be enforced by the in-memory TTL
+    alone, and this test asserted the TTL directly — but five seconds was a
+    guess at how long a printer takes to stop moving, retract, park and
+    report idle, and a cancel that took longer expired before its own
+    ending arrived and was recorded a success.  The intent now also has a
+    durable half so it can cross a process boundary, and it is bounded by
+    ``_CANCEL_INTENT_MAX_AGE_S`` plus an exact clear when the next print
+    starts.  Both bounds are asserted here; the clear is covered in
+    ``test_every_stop_says_so``.
+    """
     import time as _time
 
-    # Freeze time via monkey-patching monotonic inside the hook module.
     base = _time.monotonic()
     with patch.object(hook.time, "monotonic", side_effect=[
         base,              # register_cancel_intent's capture
         base + hook._CANCEL_INTENT_TTL_S + 1,  # consume attempt, post-TTL
     ]):
         hook.register_cancel_intent("bambu-a1")
+        # The durable half is what answers now, so age it past its own bound
+        # rather than asserting the in-memory window in isolation.
+        hook._write_durable_cancel_intent(
+            "bambu-a1", _time.time() - (hook._CANCEL_INTENT_MAX_AGE_S + 60)
+        )
         assert hook._HOOK_STATE.consume_cancel_intent("bambu-a1") is False

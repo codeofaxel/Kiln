@@ -5076,6 +5076,7 @@ def cancel_print(
     expected_tool_target: float | None = None,
     expected_bed_target: float | None = None,
     expected_chamber_target: float | None = None,
+    force_immediate: bool = False,
 ) -> dict:
     """Cancel the currently running print job.
 
@@ -5111,7 +5112,15 @@ def cancel_print(
         heating via the adapter API, so this is sent as a raw M141
         command best-effort.  Pass ``None`` to skip chamber preservation.
 
-    WARNING: Cancellation is irreversible -- the print cannot be resumed
+    :param force_immediate: Skip the calibration guard and send the cancel
+    straight away.  During bed levelling this printer's firmware can latch
+    a homing fault that survives until a power cycle; the guard pauses for
+    about a second first, which makes that fault transient instead.  Set
+    this when the delay matters more than the fault -- though for a machine
+    doing something alarming, ``emergency_stop`` is the instant path and
+    never waits for anything.
+
+WARNING: Cancellation is irreversible -- the print cannot be resumed
     from where it left off UNLESS a resume-mode 3MF has been pre-staged
     (see ``decorate_during_print`` and ``revert_mid_print``).
     """
@@ -5167,10 +5176,16 @@ def cancel_print(
         # cancel rather than a success, so the learning DB gets
         # ``outcome="cancelled"`` instead of a bogus ``"success"``.
         try:
-            from kiln.auto_record_hook import register_cancel_intent
-            register_cancel_intent(_resolve_effective_printer_name(None))
+            from kiln.auto_record_hook import note_cancel_requested
+
+            # Keyed off the ADAPTER, not a name resolved beside it.  The name
+            # this used to pass was the registry's FIRST entry, which is the
+            # printer being cancelled only by coincidence, and the reader
+            # looked the flag up under a different name again — so the intent
+            # was filed where nothing would ever go looking for it.
+            note_cancel_requested(adapter)
         except Exception as exc:  # pragma: no cover — best-effort
-            logger.debug("cancel_print: register_cancel_intent failed: %s", exc)
+            logger.debug("cancel_print: note_cancel_requested failed: %s", exc)
 
         # Layer 6: if the print is being cancelled very early (before
         # layer 5), auto-capture an incident envelope to ~/.kiln/incidents/.
@@ -5198,7 +5213,9 @@ def cancel_print(
                 "Early-cancel incident auto-capture skipped: %s", _inc_exc,
             )
 
-        result = adapter.cancel_print()
+        # The calibration guard lives on the adapter wrap, so every door that
+        # cancels inherits it; this only forwards the caller's override.
+        result = adapter.cancel_print(skip_calibration_guard=force_immediate)
         _get_heater_watchdog().notify_print_ended()
         # Layer 5: tear down the PrintWatchdog for this printer.
         _stop_print_watchdog()

@@ -841,6 +841,7 @@ class BambuAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
+            cancel_during_calibration_faults=True,
             # Port 6000 TLS+JPEG works on A1 / A1 Mini / P1P / P1S
             # without ffmpeg.  get_snapshot() tries port 6000 first
             # and falls back to RTSPS (X1 series, port 322) only if
@@ -1447,6 +1448,10 @@ class BambuAdapter(PrinterAdapter):
                         current_job_label=(
                             str(job_id_for_hook) if job_id_for_hook else None
                         ),
+                        # Rows opened before the identity fix live under the
+                        # family name; when this adapter is unregistered the
+                        # two names coincide and the sweep no-ops.
+                        legacy_printer_name=self.name,
                     )
                 except Exception as exc:  # pragma: no cover
                     logger.debug(
@@ -3114,6 +3119,13 @@ class BambuAdapter(PrinterAdapter):
         ``can_clear_error`` stays False so nothing offers the user a button
         for this.  If a working acknowledgement is found, this method and that
         flag are the two places to change.
+
+        Kiln now reaches this state far less often: cancelling inside the
+        calibration window pauses first (see
+        :attr:`PrinterCapabilities.cancel_during_calibration_faults`), which
+        makes the same fault transient rather than latched.  This remains the
+        honest answer for the faults that arrive anyway — a real thermal or
+        motion failure is not something a pause was ever going to soften.
         """
         return PrintResult(
             success=False,
