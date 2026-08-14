@@ -5455,14 +5455,21 @@ def _cancel_print_on(
     except Exception as exc:  # noqa: BLE001 — never block a cancel
         logger.debug("cancel_print: window check skipped: %s", exc)
 
-    # Filed LAST, immediately before the stop command — after every
-    # diagnostic read above.  Reading a Bambu's state feeds the outcome
+    # THE INVARIANT, for anyone adding a stop path anywhere in Kiln: file
+    # the intent IMMEDIATELY BEFORE the command, and AFTER every read.
+    # Both halves are load-bearing and each was learned by breaking it.
+    #
+    # After every read, because reading a Bambu's state feeds the outcome
     # lifecycle, and an active-state observation CLEARS a pending intent
     # (that clear is what lets an intent outlive a slow stop safely).  So
     # an intent filed before those reads is an intent one of them erases:
     # measured here, the cancel was recorded a success again, which is the
-    # exact bug the intent exists to prevent.  Still before the command,
-    # because the terminal transition can arrive the moment it lands.
+    # exact bug the intent exists to prevent.  Before the command, because
+    # the terminal transition can arrive the moment it lands.
+    #
+    # A path that only NOTIFIES after its command (the start side's
+    # _note_print_started) is a different shape and is not bound by this;
+    # the rule binds anything filed ahead of a command it is about.
     # Keyed off the ADAPTER, not a name resolved beside it, and DURABLE:
     # `kiln cancel` sends the stop and exits, so the ending is seen by
     # whatever is left watching — in another process, where an in-memory
