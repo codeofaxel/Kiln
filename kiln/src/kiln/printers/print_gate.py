@@ -44,6 +44,8 @@ import logging
 import os
 from typing import Any
 
+from kiln.tiers_and_terms import upgrade_nudge_block
+
 _logger = logging.getLogger(__name__)
 
 # bed_fit error codes that mean "we couldn't be sure" — these SOFT-PASS.
@@ -467,7 +469,7 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
             return None
 
         others = ", ".join(sorted(busy)[:3])
-        return {
+        verdict = {
             "blocked": True,
             "reason": (
                 f"Kiln runs one printer at a time on this plan, and "
@@ -480,6 +482,32 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
             ),
             "code": "TIER_CONCURRENT_PRINT_LIMIT",
         }
+        # The structured twin of the two sentences above, for a surface that
+        # renders rather than prints.  Additive: the verdict, the waiting path
+        # and every safety behaviour are untouched, and this fires ONLY on the
+        # tier refusal — never on a physical block, and never on the control
+        # paths, which do not reach this function at all.
+        verdict.setdefault(
+            "upgrade_nudge",
+            upgrade_nudge_block(
+                variant="concurrent_queue",
+                tier="business",
+                feature="Coordinated multi-printer queue",
+                headline=(
+                    "Coordinate this job with the printer that is already "
+                    "running."
+                ),
+                outcome_preview=(
+                    "Kiln Business would route the queue across the available "
+                    "machines and start eligible work in parallel."
+                ),
+                free_included=(
+                    "The job has not started; wait and run it next."
+                ),
+                moment="resource_threshold",
+            ),
+        )
+        return verdict
     except Exception:  # noqa: BLE001 — a licensing check never breaks a print
         _logger.debug("concurrent-fleet gate soft-passed", exc_info=True)
         return None
