@@ -37,7 +37,9 @@ from types import SimpleNamespace
 import pytest
 
 from kiln import auto_record_hook as hook
+from kiln.printers import base
 from kiln.printers import progress_motion as pm
+from kiln.printers.base import PrinterState, PrinterStatus, PrintResult
 from kiln.registry import PrinterRegistry
 
 
@@ -509,7 +511,6 @@ def test_the_polled_door_sweeps_the_family_name_too(_no_db_writes, monkeypatch):
         PrinterAdapter,
         PrinterCapabilities,
         PrinterState,
-        PrinterStatus,
         PrintResult,
         UploadResult,
     )
@@ -593,56 +594,38 @@ def test_the_polled_door_sweeps_the_family_name_too(_no_db_writes, monkeypatch):
 # the whole difference between "carry on" and "walk to the machine".
 
 
-def _tool(module, symbol):
-    fn = getattr(module, symbol)
-    return getattr(fn, "fn", getattr(fn, "callback", fn))
+def _guarded_bambu(monkeypatch, *, layer, completion, hazard=True):
+    """A real BambuAdapter, so the guard under test is the shipped wrap."""
+    from kiln.printers.bambu import BambuAdapter
+    from kiln.printers.base import JobProgress, PrinterCapabilities
 
-
-def _cancelling_adapter(monkeypatch, *, layer, completion, hazard=True):
-    from unittest.mock import MagicMock
-
-    from kiln import server
-    from kiln.printers.base import (
-        JobProgress,
-        PrinterCapabilities,
-        PrinterState,
-        PrinterStatus,
-        PrintResult,
+    monkeypatch.setattr(BambuAdapter, "_ensure_mqtt", lambda self: None)
+    adapter = BambuAdapter(
+        host="192.0.2.20", access_code="00000000", serial="00M09A000000000",
     )
-
-    adapter = MagicMock()
-    adapter.name = "bambu"
-    adapter.capabilities = PrinterCapabilities(
-        cancel_during_calibration_faults=hazard,
+    calls: list[str] = []
+    monkeypatch.setattr(
+        BambuAdapter, "capabilities",
+        property(lambda self: PrinterCapabilities(
+            cancel_during_calibration_faults=hazard,
+        )),
     )
-    adapter.get_state.return_value = PrinterState(
-        connected=True, state=PrinterStatus.PRINTING,
+    monkeypatch.setattr(
+        BambuAdapter, "get_job",
+        lambda self: JobProgress(
+            file_name="bracket.3mf", current_layer=layer, completion=completion,
+        ),
     )
-    adapter.get_job.return_value = JobProgress(
-        file_name="bracket.3mf", current_layer=layer, completion=completion,
+    monkeypatch.setattr(
+        BambuAdapter, "pause_print",
+        lambda self: calls.append("pause") or PrintResult(success=True, message="paused"),
     )
-    adapter.cancel_print.return_value = PrintResult(
-        success=True, message="Print cancelled.",
+    monkeypatch.setattr(
+        BambuAdapter, "_send_print_command",
+        lambda self, cmd: calls.append(f"cmd:{cmd}"),
     )
-    # cancel_print is rate-limited in production, and rightly so — but the
-    # limiter is process-global, so without this only the first test in a
-    # run reaches the adapter and every later one asserts against a
-    # RATE_LIMITED error dict instead of the guard.
-    lim = server._tool_limiter
-    lim._call_history.clear()
-    lim._last_call.clear()
-    lim._block_history.clear()
-    lim._cooldown_until.clear()
-
-    def _fixed_adapter():
-        return adapter
-
-    def _no_sleep(*_a, **_k):
-        return None
-
-    monkeypatch.setattr(server, "_get_adapter", _fixed_adapter)
-    monkeypatch.setattr(server.time, "sleep", _no_sleep)
-    return server, adapter
+    monkeypatch.setattr(base, "_CALIBRATION_PAUSE_SETTLE_S", 0.0)
+    return adapter, calls
 
 
 def test_a_cancel_during_levelling_pauses_first(monkeypatch):
@@ -651,13 +634,11 @@ def test_a_cancel_during_levelling_pauses_first(monkeypatch):
     Unpaused, this exact cancel latched a Z-homing fault that outlived
     every attempt to clear it and cost a power cycle.
     """
-    server, adapter = _cancelling_adapter(monkeypatch, layer=0, completion=0.0)
+    adapter, calls = _guarded_bambu(monkeypatch, layer=0, completion=0.0)
 
-    out = _tool(server, "cancel_print")()
+    adapter.cancel_print()
 
-    assert adapter.pause_print.called, "did not pause before cancelling"
-    assert adapter.cancel_print.called, "the cancel itself must still happen"
-    assert out["calibration_guard"]["paused_first"] is True
+    assert calls == ["pause", "cmd:stop"], f"expected pause then stop, got {calls}"
 
 
 def test_a_cancel_mid_print_does_not_pause(monkeypatch):
@@ -667,13 +648,11 @@ def test_a_cancel_mid_print_does_not_pause(monkeypatch):
     last_job_result=cancelled and no fault at all.  Pausing there would buy
     nothing and delay a stop the user asked for.
     """
-    server, adapter = _cancelling_adapter(monkeypatch, layer=3, completion=42.0)
+    adapter, calls = _guarded_bambu(monkeypatch, layer=3, completion=42.0)
 
-    out = _tool(server, "cancel_print")()
+    adapter.cancel_print()
 
-    assert not adapter.pause_print.called
-    assert adapter.cancel_print.called
-    assert "calibration_guard" not in out
+    assert calls == ["cmd:stop"], f"paused when it should not have: {calls}"
 
 
 def test_the_guard_is_declared_not_assumed(monkeypatch):
@@ -682,26 +661,22 @@ def test_the_guard_is_declared_not_assumed(monkeypatch):
     The guard costs a real command sent to real hardware, so it is opt-in
     per backend rather than applied to every printer on one brand's evidence.
     """
-    server, adapter = _cancelling_adapter(
+    adapter, calls = _guarded_bambu(
         monkeypatch, layer=0, completion=0.0, hazard=False,
     )
 
-    out = _tool(server, "cancel_print")()
+    adapter.cancel_print()
 
-    assert not adapter.pause_print.called
-    assert adapter.cancel_print.called
-    assert "calibration_guard" not in out
+    assert calls == ["cmd:stop"]
 
 
 def test_force_immediate_skips_the_pause(monkeypatch):
     """The escape hatch, for a caller who wants the stop out now."""
-    server, adapter = _cancelling_adapter(monkeypatch, layer=0, completion=0.0)
+    adapter, calls = _guarded_bambu(monkeypatch, layer=0, completion=0.0)
 
-    out = _tool(server, "cancel_print")(force_immediate=True)
+    adapter.cancel_print(skip_calibration_guard=True)
 
-    assert not adapter.pause_print.called
-    assert adapter.cancel_print.called
-    assert "calibration_guard" not in out
+    assert calls == ["cmd:stop"]
 
 
 def test_a_failing_pause_never_blocks_the_cancel(monkeypatch):
@@ -710,14 +685,19 @@ def test_a_failing_pause_never_blocks_the_cancel(monkeypatch):
     A pause that errors must not turn a cancel into an exception — the user
     asked for the print to stop, and that has to happen regardless.
     """
-    server, adapter = _cancelling_adapter(monkeypatch, layer=0, completion=0.0)
-    adapter.pause_print.side_effect = RuntimeError("pause refused")
+    from kiln.printers.bambu import BambuAdapter
 
-    out = _tool(server, "cancel_print")()
+    adapter, calls = _guarded_bambu(monkeypatch, layer=0, completion=0.0)
 
-    assert adapter.cancel_print.called
-    assert out.get("success") is True
-    assert out["calibration_guard"]["paused_first"] is False
+    def _refuse(self):
+        raise RuntimeError("pause refused")
+
+    monkeypatch.setattr(BambuAdapter, "pause_print", _refuse)
+
+    result = adapter.cancel_print()
+
+    assert calls == ["cmd:stop"], "a failed pause must not stop the cancel"
+    assert result.success is True
 
 
 def test_an_unknown_position_is_treated_as_the_window(monkeypatch):
@@ -726,8 +706,49 @@ def test_an_unknown_position_is_treated_as_the_window(monkeypatch):
     Guessing "mid-print" costs a power cycle and a walk to the machine;
     guessing "levelling" costs about a second.
     """
-    server, adapter = _cancelling_adapter(monkeypatch, layer=None, completion=None)
+    adapter, calls = _guarded_bambu(monkeypatch, layer=None, completion=None)
 
-    _tool(server, "cancel_print")()
+    adapter.cancel_print()
 
-    assert adapter.pause_print.called
+    assert calls == ["pause", "cmd:stop"]
+
+
+def test_every_cancelling_door_inherits_the_guard():
+    """The guard belongs to the ADAPTER, not to one tool.
+
+    Four places cancel: the MCP tool, ``kiln cancel``, the health monitor's
+    auto-cancel and watch_print's cancel-at-percent.  Three of them call the
+    adapter directly, so a guard carried only by the tool left every one of
+    them able to latch the fault — the same one-door shape this file's other
+    half exists to close.  Wrapping cancel_print in __init_subclass__ is what
+    makes the door you happen to use irrelevant.
+    """
+    import inspect
+
+    from kiln.printers.base import PrinterAdapter
+
+    source = inspect.getsource(PrinterAdapter.__init_subclass__)
+    assert "_kiln_calibration_guarded" in source, (
+        "cancel_print is no longer wrapped, so only whichever door carries "
+        "its own guard is protected"
+    )
+
+
+def test_the_shipped_adapters_are_all_wrapped():
+    """Including the ones nobody thought about when the wrap was written."""
+    import importlib
+
+    for module, cls_name in [
+        ("kiln.printers.bambu", "BambuAdapter"),
+        ("kiln.printers.moonraker", "MoonrakerAdapter"),
+        ("kiln.printers.octoprint", "OctoPrintAdapter"),
+        ("kiln.printers.duet", "DuetAdapter"),
+        ("kiln.printers.prusalink", "PrusaLinkAdapter"),
+        ("kiln.printers.elegoo", "ElegooAdapter"),
+        ("kiln.printers.creality", "CrealityAdapter"),
+        ("kiln.printers.serial_adapter", "SerialPrinterAdapter"),
+    ]:
+        cls = getattr(importlib.import_module(module), cls_name)
+        assert getattr(cls.cancel_print, "_kiln_calibration_guarded", False), (
+            f"{cls_name}.cancel_print is not wrapped"
+        )

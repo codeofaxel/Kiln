@@ -636,6 +636,37 @@ class PrinterAdapter(ABC):
             _observed_get_state._kiln_outcome_wrapped = True  # type: ignore[attr-defined]
             cls.get_state = _observed_get_state
 
+        # ------------------------------------------------------------------
+        # Calibration guard: pause before cancelling inside the window where
+        # stopping breaks the printer.  Wrapped HERE, not at the tool, because
+        # the tool is one of four doors that cancel — the CLI, the health
+        # monitor's auto-cancel and watch_print's cancel-at-percent all call
+        # the adapter directly, and a guard only the tool carried would leave
+        # every one of them able to brick the machine.  Same shape as the two
+        # wraps above: a new adapter inherits it without knowing it exists.
+        # ------------------------------------------------------------------
+        cancel_original = cls.__dict__.get("cancel_print")
+        if cancel_original is not None and not getattr(
+            cancel_original, "_kiln_calibration_guarded", False
+        ):
+            import functools
+
+            @functools.wraps(cancel_original)
+            def _guarded_cancel_print(self, *, skip_calibration_guard: bool = False):
+                if not skip_calibration_guard:
+                    try:
+                        _pause_before_calibration_cancel(self)
+                    except Exception:  # noqa: BLE001 — never block a cancel
+                        import logging as _logging
+
+                        _logging.getLogger(__name__).debug(
+                            "calibration guard skipped", exc_info=True
+                        )
+                return cancel_original(self)
+
+            _guarded_cancel_print._kiln_calibration_guarded = True  # type: ignore[attr-defined]
+            cls.cancel_print = _guarded_cancel_print
+
     def set_safety_profile(self, profile_id: str) -> None:
         """Bind a printer safety profile for temperature validation.
 
@@ -1552,6 +1583,15 @@ def outcome_printer_name(adapter: Any) -> str:
     return getattr(adapter, "name", "") or "printer"
 
 
+#: How long to let a pause land before the cancel follows it.
+#:
+#: Long enough for the firmware to actually enter PAUSED — cancelling into an
+#: unsettled pause aborts the same move the pause was meant to finish — and
+#: short enough that nobody experiences it as the stop being ignored.  Nothing
+#: is being extruded in this window, so the second costs only time.
+_CALIBRATION_PAUSE_SETTLE_S: float = 1.5
+
+
 def in_calibration_window(state: Any, job: Any) -> bool:
     """Is this printer still in its pre-extrusion routine — levelling, homing?
 
@@ -1575,6 +1615,41 @@ def in_calibration_window(state: Any, job: Any) -> bool:
     if isinstance(layer, (int, float)) and layer >= 1:
         return False
     return not (isinstance(completion, (int, float)) and completion > 0)
+
+
+def _pause_before_calibration_cancel(adapter: Any) -> bool:
+    """Pause, briefly, when cancelling would abort a calibration move.
+
+    Measured on an A1 (2026-08-13).  Cancelling during bed levelling kills a
+    homing move and the firmware latches "Z axis homing failed": that state
+    outlived thirteen minutes, a ``clean_print_error``, and a ``G28`` that
+    physically homed the machine, and only a power cycle released it.  The
+    same cancel with a pause in front of it produces the same fault code and
+    it CLEARS ITSELF in about fifteen seconds, landing on ``cancelled``.
+
+    The pause does not prevent the fault.  It makes it survivable, which is
+    the whole distance between carrying on and walking over to the printer.
+
+    Only for backends that DECLARE the hazard, and only inside the window —
+    everywhere else this returns immediately, having asked the adapter
+    nothing.  Never raises: the guard is a courtesy, and stopping the printer
+    is the job.
+
+    :returns: Whether a pause was actually issued.
+    """
+    caps = getattr(adapter, "capabilities", None)
+    if not getattr(caps, "cancel_during_calibration_faults", False):
+        return False
+    if not in_calibration_window(None, adapter.get_job()):
+        return False
+
+    adapter.pause_print()
+    # Let the pause land before the cancel follows it; cancelling into an
+    # unsettled pause is the same aborted move.
+    import time as _time
+
+    _time.sleep(_CALIBRATION_PAUSE_SETTLE_S)
+    return True
 
 
 def _current_job(adapter: PrinterAdapter) -> JobProgress | None:
