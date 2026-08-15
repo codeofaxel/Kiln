@@ -55,9 +55,12 @@ def _recording_suppressed() -> bool:
     if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules:
         return True
     try:
-        from kiln.heartbeat import _is_ci_environment
+        from kiln.heartbeat import _is_ephemeral_runner, _is_hosted_multitenant
 
-        return _is_ci_environment()
+        # CI, a container, or the hosted server: none of them is a user
+        # whose counters mean anything, and all three have shipped
+        # phantom rows.  One predicate, shared with the send side.
+        return _is_ephemeral_runner() or _is_hosted_multitenant()
     except Exception:
         return any(os.environ.get(v) for v in ("CI", "PYTEST_CURRENT_TEST"))
 
