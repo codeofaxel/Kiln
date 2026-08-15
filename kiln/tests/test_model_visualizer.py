@@ -564,11 +564,13 @@ class TestDefaultOutputDirIsUnshared:
         root = os.path.join(tempfile.gettempdir(), "kiln_visualizations")
         assert os.path.dirname(a) == root and os.path.dirname(b) == root
 
-    def test_same_basename_meshes_get_distinct_view_paths(
-        self, tmp_path: Path, monkeypatch
-    ):
-        """End to end through visualize_model, no output_dir supplied."""
-        from kiln import model_visualizer
+    def test_same_basename_meshes_get_distinct_view_paths(self, tmp_path: Path):
+        """End to end through visualize_model, no output_dir supplied.
+
+        Stubs OpenSCAD the way the supersample tests do — the renderer
+        is not what's under test, and CI has no OpenSCAD binary.
+        """
+        from PIL import Image
 
         # Two different "objects" that share the emboss engine's generic
         # basename, in separate work dirs — exactly the shipped shape.
@@ -590,25 +592,26 @@ class TestDefaultOutputDirIsUnshared:
         mesh_a.write_bytes(one_tri)
         mesh_b.write_bytes(one_tri)
 
-        # The renderer itself is not under test — stub the subprocess the
-        # same way the supersample tests do, writing a marker PNG so the
-        # paths are real files.
-        def fake_run(cmd, **kwargs):
-            out = cmd[cmd.index("-o") + 1]
-            Path(out).write_bytes(b"\x89PNG fake")
-            return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+        def mock_run(cmd, **kwargs):
+            w = h = 100
+            for arg in cmd:
+                if arg.startswith("--imgsize="):
+                    w, h = (int(x) for x in arg.split("=", 1)[1].split(","))
+            for i, arg in enumerate(cmd):
+                if arg == "-o" and i + 1 < len(cmd) and cmd[i + 1].endswith(".png"):
+                    Image.new("RGB", (w, h), (170, 170, 170)).save(cmd[i + 1])
+            mock = MagicMock()
+            mock.returncode = 0
+            return mock
 
-        monkeypatch.setattr(model_visualizer.subprocess, "run", fake_run)
-        monkeypatch.setattr(
-            model_visualizer, "_get_bounding_box",
-            lambda _p: model_visualizer._BoundingBoxInfo(),
-        )
+        with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
+             patch("subprocess.run", side_effect=mock_run):
+            va = visualize_model(str(mesh_a), angles=["isometric"])
+            vb = visualize_model(str(mesh_b), angles=["isometric"])
 
-        va = model_visualizer.visualize_model(str(mesh_a), angles=["isometric"])
-        vb = model_visualizer.visualize_model(str(mesh_b), angles=["isometric"])
         paths_a = {v["path"] for v in va.get("views", []) if v.get("path")}
         paths_b = {v["path"] for v in vb.get("views", []) if v.get("path")}
-        assert paths_a and paths_b
+        assert paths_a and paths_b, (va, vb)
         assert paths_a.isdisjoint(paths_b), (
             "same-basename meshes rendered to the same intermediate paths — "
             "a concurrent session would clobber them and poison the "
