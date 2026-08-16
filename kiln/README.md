@@ -5,7 +5,7 @@
 <!-- kiln-highlights: 1.4.0
 * any design exports as a real CAD file (STEP) a machine shop can open
 * the web Monitor at kiln3d.com/monitor shows your print being built layer by layer
-* click-to-paint in the browser turns clicks on your model into a printable 3MF with the colours built in
+* click-to-paint at kiln3d.com/create turns clicks on your model into a printable 3MF with the colours built in
 kiln-highlights:end -->
 <!-- The block above is machine-read, not rendered: installed Kilns parse it
      out of the PyPI JSON description so their update nudge can say what the
