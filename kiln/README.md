@@ -2,6 +2,18 @@
 
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 
+<!-- kiln-highlights: 1.4.0
+* any design exports as a real CAD file (STEP) a machine shop can open
+* the web Monitor at kiln3d.com/monitor shows your print being built layer by layer
+* click-to-paint in the browser turns clicks on your model into a printable 3MF with the colours built in
+kiln-highlights:end -->
+<!-- The block above is machine-read, not rendered: installed Kilns parse it
+     out of the PyPI JSON description so their update nudge can say what the
+     newest release adds (kiln/src/kiln/version_check.py). Update it each
+     release, wording identical to kiln-pro's version_highlights.py ledger
+     (its posture gate reconciles the two). -->
+
+
 **Describe it or draw it. Kiln makes it real.**
 
 Kiln turns a conversation with an AI agent into a printed object. One install, any printer, start to finish — design, slice, queue, monitor, and fulfill 3D print jobs through a unified MCP (Model Context Protocol) server and CLI.

@@ -58,6 +58,13 @@ _AGENT_NOTE = (
     "command."
 )
 
+# Appended when the release published what it's worth updating FOR — the
+# offer should lead with the gain, not the procedure.
+_HIGHLIGHTS_NOTE = (
+    "Lead with what's new: mention an item or two from 'highlights' when "
+    "you offer, so the user hears what they gain."
+)
+
 # One attach per process.  Module-level on purpose: the nudge's whole
 # contract is "once per session", and a server process IS a session.
 _attached = False
@@ -115,7 +122,10 @@ def _attach(inner: Any, ctx: Any, name: str | None) -> None:
             _attached = True  # get_started/kiln_health already said it
             return
 
-        sc[RESULT_KEY] = {**info, "note": _AGENT_NOTE}
+        note = _AGENT_NOTE
+        if info.get("highlights"):
+            note = f"{_AGENT_NOTE} {_HIGHLIGHTS_NOTE}"
+        sc[RESULT_KEY] = {**info, "note": note}
         inner.structuredContent = sc
         _attached = True
 
