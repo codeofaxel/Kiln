@@ -5,6 +5,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **When Kiln asks you to update, it says what you'd get.** Update prompts
+  used to give you the version number and nothing else. Now they name two or
+  three of the things the new release adds, so you can decide whether it's
+  worth doing right now instead of taking it on faith.
+
 ## [1.4.0] - 2026-08-14
 
 ### Added
