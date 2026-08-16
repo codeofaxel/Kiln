@@ -12,6 +12,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   three of the things the new release adds, so you can decide whether it's
   worth doing right now instead of taking it on faith.
 
+### Fixed
+
+- **Designs no longer fail at random on macOS.** OpenSCAD sometimes crashes as
+  it starts up, before it's read your model; Kiln now retries it instead of
+  handing you an unexplained failure.
+
 ## [1.4.0] - 2026-08-14
 
 ### Added
