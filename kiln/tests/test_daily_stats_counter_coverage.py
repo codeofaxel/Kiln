@@ -380,7 +380,7 @@ class TestRecordingSuppression:
         """Engine-level counting means ordinary tests constantly fire
         recorders; under a CI/test env those writes must die before the
         real per-user file (one adapter-suite run queued 47 phantom
-        prints for the founder dashboard)."""
+        prints for the usage dashboard)."""
         the_path = tmp_path / "daily_stats.json"
         monkeypatch.setattr(daily_stats, "_DEFAULT_STATS_PATH", the_path)
         monkeypatch.setattr(daily_stats, "_STATS_PATH", the_path)

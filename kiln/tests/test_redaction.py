@@ -195,7 +195,7 @@ class TestReadLogTail:
 class TestGeometryFailuresAreLogged:
     """A crashed geometry subprocess must leave a durable log record.
 
-    Measured 2026-08-03: the live founder log had 356 tracebacks and
+    Measured 2026-08-03: the live production log had 356 tracebacks and
     ZERO 'OpenSCAD failed' lines, because the failure branches wrote
     the error into the returned dict only.
     """
