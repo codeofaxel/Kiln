@@ -4,7 +4,7 @@
 ``record_print_outcome``, an explicit "log how this print went" action.
 Its only automatic caller is the terminal-state hook, and that hook is
 wired into the Bambu adapter alone — so a Prusa, Klipper, or OctoPrint
-owner could print every day and report zero prints forever.  The founder
+owner could print every day and report zero prints forever.  The usage
 dashboard read that as "nobody but one Bambu user prints".
 
 The count now happens where every adapter and every entry point meets:

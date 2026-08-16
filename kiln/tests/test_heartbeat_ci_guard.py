@@ -3,7 +3,7 @@
 Background: every CI job (GitHub Actions, etc.) gets a fresh ``$HOME``,
 so ``~/.kiln/installation_id`` is regenerated on every invocation.  If
 the heartbeat fires from CI, each job creates a new "install" — the
-founder dashboard ended up showing 462 active installs in 30 days when
+usage dashboard ended up showing 462 active installs in 30 days when
 the real number was ~4, with the rest being CI runners.  The guard
 short-circuits ``_send_heartbeat`` and ``send_heartbeat_async`` when
 any well-known CI / build / test env var is set.
@@ -66,7 +66,7 @@ class TestContainerIsNotAnInstall:
 
     Measured 2026-08-15: a linux row with zero printers, ``pro_installed``
     false, ``prints_today=5`` and a tool call literally named ``test``
-    reached production — and was the ONLY content in the founder
+    reached production — and was the ONLY content in the usage
     dashboard's paywall-demand panel, so an empty funnel read as real
     customer demand.  A container does not inherit the runner's ``CI``
     variables, so the env list could not see it; each run also mints a

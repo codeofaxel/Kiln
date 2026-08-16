@@ -99,7 +99,7 @@ def _is_container() -> bool:
 
     Measured 2026-08-15: one linux row, zero printers, ``pro_installed``
     false, carrying ``prints_today=5`` and a tool call literally named
-    ``test`` — the only content in the founder dashboard's paywall-demand
+    ``test`` — the only content in the usage dashboard's paywall-demand
     panel, which therefore read as real customer demand.  The CI env
     guard could not see it because a container does not inherit the
     runner's ``CI`` variables.

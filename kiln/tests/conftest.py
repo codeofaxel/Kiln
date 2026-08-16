@@ -953,7 +953,7 @@ def _isolate_daily_stats(tmp_path, monkeypatch):
     ``slicer.slice_file``, the tool-dispatch hook) — so ordinary tests
     exercise them constantly.  Without isolation a suite run pollutes the
     developer's real counters and the next heartbeat ships phantom
-    activity to the founder dashboard (2026-07-26: 47 phantom prints from
+    activity to the usage dashboard (2026-07-26: 47 phantom prints from
     one adapter-suite run).  ``daily_stats._recording_suppressed`` is the
     belt (no writes under CI env at the default path); this is the
     suspenders, and it also means a test that wants to ASSERT on counters

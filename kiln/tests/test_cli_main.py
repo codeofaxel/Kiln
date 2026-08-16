@@ -1290,7 +1290,7 @@ class TestLicenseCommands:
 
         _env = {
             "KILN_LICENSE_SIGNING_SECRET": _secret,
-            "KILN_LICENSE_KEY": "",  # prevent env founder key from leaking in
+            "KILN_LICENSE_KEY": "",  # prevent a real env license key from leaking in
         }
         with patch.dict("os.environ", _env, clear=False):
             mgr = LicenseManager(
