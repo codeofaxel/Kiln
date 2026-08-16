@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kiln.emboss_generator import _openscad_version_year, get_openscad_version
+from kiln.openscad_runner import run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
 
 logger = logging.getLogger(__name__)
@@ -323,10 +324,11 @@ def _compile_scad_for_bbox(scad_path: str) -> str | None:
     fd, tmp_stl = tempfile.mkstemp(suffix=".stl", prefix="kiln_bbox_")
     os.close(fd)
     try:
-        result = subprocess.run(
+        result = run_openscad(
             [openscad, "--export-format", "binstl", "-o", tmp_stl, scad_path],
-            capture_output=True,
             timeout=30,
+            text=False,
+            output_path=tmp_stl,
         )
         if result.returncode == 0 and os.path.getsize(tmp_stl) > 84:
             return tmp_stl
@@ -785,8 +787,8 @@ def visualize_model(
             logger.debug("Rendering %s view: %s", label, " ".join(cmd))
 
             try:
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=timeout,
+                result = run_openscad(
+                    cmd, timeout=timeout, output_path=png_path,
                 )
             except subprocess.TimeoutExpired:
                 # Logged, not just returned: the returned dict dies with

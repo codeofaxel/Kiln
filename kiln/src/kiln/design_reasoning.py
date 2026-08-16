@@ -1887,8 +1887,6 @@ def _apply_gusset(
         x, y, z = location_mm
 
         # Generate gusset as a right-triangle prism via OpenSCAD code
-        import subprocess
-
         scad_code = f"""
 // Triangular gusset rib
 translate([{x - gusset_thickness / 2}, {y}, {bbox['min_z']}])
@@ -1906,11 +1904,13 @@ polygon(points=[
         from kiln.generation.openscad import _find_openscad as _find
 
         binary = _find()
-        subprocess.run(
+        from kiln.openscad_runner import run_openscad
+
+        run_openscad(
             [binary, "-o", gusset_stl, scad_path],
-            capture_output=True,
             timeout=30,
-            check=False,
+            text=False,
+            output_path=gusset_stl,
         )
 
         if not Path(gusset_stl).is_file() or Path(gusset_stl).stat().st_size < 100:
@@ -2248,6 +2248,7 @@ def optimize_template_params(
     # Try to find OpenSCAD
     try:
         from kiln.generation.openscad import _find_openscad
+        from kiln.openscad_runner import run_openscad
 
         openscad_binary = _find_openscad()
     except Exception as exc:
@@ -2261,8 +2262,6 @@ def optimize_template_params(
     best_params: dict[str, Any] = {}
     best_stl = ""
     all_scores: list[dict[str, Any]] = []
-
-    import subprocess
 
     for idx, combo in enumerate(all_combos):
         params = dict(zip(param_names, combo, strict=False))
@@ -2293,11 +2292,11 @@ def optimize_template_params(
 
         # Compile to STL
         try:
-            proc = subprocess.run(
+            proc = run_openscad(
                 [openscad_binary, "-o", stl_path, scad_path],
-                capture_output=True,
                 timeout=30,
-                check=False,
+                text=False,
+                output_path=stl_path,
             )
             if proc.returncode != 0 or not Path(stl_path).is_file():
                 continue

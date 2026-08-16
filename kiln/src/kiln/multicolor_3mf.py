@@ -273,9 +273,8 @@ def _generate_thumbnail_openscad(
     if not stl_paths:
         return None
     try:
-        import subprocess
-
         from kiln.generation.openscad import OpenSCADProvider
+        from kiln.openscad_runner import run_openscad
 
         provider = OpenSCADProvider()
         binary = provider._binary
@@ -319,9 +318,7 @@ def _generate_thumbnail_openscad(
                 "--colorscheme", "DeepOcean",
                 scad_path,
             ]
-            subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30,
-            )
+            run_openscad(cmd, timeout=30, output_path=png_path)
             if os.path.isfile(png_path) and os.path.getsize(png_path) > 0:
                 if ss > 1:
                     downscale_png(png_path, width, height)
