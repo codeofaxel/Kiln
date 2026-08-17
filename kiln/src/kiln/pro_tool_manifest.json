@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-14T23:52:53.694067+00:00",
+  "generated": "2026-08-17T22:51:34.894774+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -1650,6 +1650,15 @@
         },
         "title": "cloud_backup_configureArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -1675,6 +1684,15 @@
         ],
         "title": "cloud_clone_designArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -1725,6 +1743,15 @@
         ],
         "title": "cloud_list_remote_branchesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -1811,6 +1838,15 @@
         ],
         "title": "cloud_pull_branchArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -1983,6 +2019,15 @@
         ],
         "title": "cloud_push_branchArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -2262,6 +2307,15 @@
         ],
         "title": "cloud_remote_addArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -2274,6 +2328,15 @@
         "properties": {},
         "title": "cloud_remote_listArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -2336,6 +2399,15 @@
         "properties": {},
         "title": "cloud_sync_devicesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -2354,6 +2426,15 @@
         },
         "title": "cloud_sync_historyArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -2379,6 +2460,15 @@
         ],
         "title": "cloud_sync_resolve_conflictArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -3484,6 +3574,15 @@
         ],
         "title": "add_mesh_commentArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_comments_v1",
+        "variant": "design_comments",
+        "feature": "Notes anchored to the part",
+        "headline": "Pin this note to the part it is about.",
+        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
+        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -3661,6 +3760,15 @@
         ],
         "title": "apply_decoration_presetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -3850,6 +3958,15 @@
         ],
         "title": "best_design_versionArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -3882,6 +3999,15 @@
         ],
         "title": "bisect_badArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "version_bisect_v1",
+        "variant": "version_bisect",
+        "feature": "Finding the version that broke it",
+        "headline": "Find the version where this broke.",
+        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
+        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -3902,6 +4028,15 @@
         ],
         "title": "bisect_currentArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "version_bisect_v1",
+        "variant": "version_bisect",
+        "feature": "Finding the version that broke it",
+        "headline": "Find the version where this broke.",
+        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
+        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -3922,6 +4057,15 @@
         ],
         "title": "bisect_endArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "version_bisect_v1",
+        "variant": "version_bisect",
+        "feature": "Finding the version that broke it",
+        "headline": "Find the version where this broke.",
+        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
+        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -3954,6 +4098,15 @@
         ],
         "title": "bisect_goodArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "version_bisect_v1",
+        "variant": "version_bisect",
+        "feature": "Finding the version that broke it",
+        "headline": "Find the version where this broke.",
+        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
+        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -3986,6 +4139,15 @@
         ],
         "title": "bisect_skipArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "version_bisect_v1",
+        "variant": "version_bisect",
+        "feature": "Finding the version that broke it",
+        "headline": "Find the version where this broke.",
+        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
+        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -4045,6 +4207,15 @@
         ],
         "title": "bisect_startArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "version_bisect_v1",
+        "variant": "version_bisect",
+        "feature": "Finding the version that broke it",
+        "headline": "Find the version where this broke.",
+        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
+        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -4244,6 +4415,15 @@
         ],
         "title": "compare_branchesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -4279,6 +4459,15 @@
         ],
         "title": "compare_design_versionsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -4453,6 +4642,15 @@
         ],
         "title": "create_decoration_presetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -4549,6 +4747,15 @@
         ],
         "title": "create_designArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -4985,6 +5192,15 @@
         ],
         "title": "get_comment_threadArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_comments_v1",
+        "variant": "design_comments",
+        "feature": "Notes anchored to the part",
+        "headline": "Pin this note to the part it is about.",
+        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
+        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -5022,6 +5238,15 @@
         },
         "title": "get_decoration_presetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5042,6 +5267,15 @@
         ],
         "title": "get_designArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5067,6 +5301,15 @@
         ],
         "title": "get_design_ancestryArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -5087,6 +5330,15 @@
         ],
         "title": "get_design_pull_requestArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_review_v1",
+        "variant": "design_review",
+        "feature": "Reviewable design changes",
+        "headline": "Propose this change and review it before it merges.",
+        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
+        "free_included": "The design itself stays yours to edit and download."
       }
     },
     {
@@ -5107,6 +5359,15 @@
         ],
         "title": "get_featureArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5379,6 +5640,15 @@
         },
         "title": "list_bisect_sessionsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "version_bisect_v1",
+        "variant": "version_bisect",
+        "feature": "Finding the version that broke it",
+        "headline": "Find the version where this broke.",
+        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
+        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -5484,6 +5754,15 @@
         },
         "title": "list_decoration_preset_releasesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "signed_release_v1",
+        "variant": "signed_release",
+        "feature": "Signed releases",
+        "headline": "Keep this design's releases signed and checkable.",
+        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
+        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -5539,6 +5818,15 @@
         },
         "title": "list_decoration_presetsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5569,6 +5857,15 @@
         ],
         "title": "list_design_branchesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -5606,6 +5903,15 @@
         },
         "title": "list_design_pull_requestsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_review_v1",
+        "variant": "design_review",
+        "feature": "Reviewable design changes",
+        "headline": "Propose this change and review it before it merges.",
+        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
+        "free_included": "The design itself stays yours to edit and download."
       }
     },
     {
@@ -5631,6 +5937,15 @@
         ],
         "title": "list_design_releasesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "signed_release_v1",
+        "variant": "signed_release",
+        "feature": "Signed releases",
+        "headline": "Keep this design's releases signed and checkable.",
+        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
+        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -5659,6 +5974,15 @@
         },
         "title": "list_designsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5751,6 +6075,15 @@
         },
         "title": "list_feature_releasesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "signed_release_v1",
+        "variant": "signed_release",
+        "feature": "Signed releases",
+        "headline": "Keep this design's releases signed and checkable.",
+        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
+        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -5806,6 +6139,15 @@
         },
         "title": "list_featuresArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5836,6 +6178,15 @@
         ],
         "title": "list_mesh_commentsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_comments_v1",
+        "variant": "design_comments",
+        "feature": "Notes anchored to the part",
+        "headline": "Pin this note to the part it is about.",
+        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
+        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -6177,6 +6528,15 @@
         ],
         "title": "propose_design_changeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_review_v1",
+        "variant": "design_review",
+        "feature": "Reviewable design changes",
+        "headline": "Propose this change and review it before it merges.",
+        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
+        "free_included": "The design itself stays yours to edit and download."
       }
     },
     {
@@ -6846,6 +7206,15 @@
         ],
         "title": "reopen_comment_threadArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_comments_v1",
+        "variant": "design_comments",
+        "feature": "Notes anchored to the part",
+        "headline": "Pin this note to the part it is about.",
+        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
+        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -6883,6 +7252,15 @@
         ],
         "title": "reply_to_commentArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_comments_v1",
+        "variant": "design_comments",
+        "feature": "Notes anchored to the part",
+        "headline": "Pin this note to the part it is about.",
+        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
+        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -6915,6 +7293,15 @@
         ],
         "title": "resolve_comment_threadArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_comments_v1",
+        "variant": "design_comments",
+        "feature": "Notes anchored to the part",
+        "headline": "Pin this note to the part it is about.",
+        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
+        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -7129,6 +7516,15 @@
         ],
         "title": "review_design_pull_requestArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_review_v1",
+        "variant": "design_review",
+        "feature": "Reviewable design changes",
+        "headline": "Propose this change and review it before it merges.",
+        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
+        "free_included": "The design itself stays yours to edit and download."
       }
     },
     {
@@ -7262,6 +7658,15 @@
         ],
         "title": "save_featureArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -7320,6 +7725,15 @@
         ],
         "title": "show_branch_historyArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -7450,6 +7864,15 @@
         ],
         "title": "sign_decoration_preset_releaseArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "signed_release_v1",
+        "variant": "signed_release",
+        "feature": "Signed releases",
+        "headline": "Keep this design's releases signed and checkable.",
+        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
+        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -7634,6 +8057,15 @@
         ],
         "title": "sign_design_releaseArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "signed_release_v1",
+        "variant": "signed_release",
+        "feature": "Signed releases",
+        "headline": "Keep this design's releases signed and checkable.",
+        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
+        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -7688,6 +8120,15 @@
         ],
         "title": "sign_feature_releaseArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "signed_release_v1",
+        "variant": "signed_release",
+        "feature": "Signed releases",
+        "headline": "Keep this design's releases signed and checkable.",
+        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
+        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -7855,6 +8296,15 @@
         ],
         "title": "verify_decoration_preset_releaseArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "signed_release_v1",
+        "variant": "signed_release",
+        "feature": "Signed releases",
+        "headline": "Keep this design's releases signed and checkable.",
+        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
+        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -7919,6 +8369,15 @@
         },
         "title": "verify_design_releaseArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "signed_release_v1",
+        "variant": "signed_release",
+        "feature": "Signed releases",
+        "headline": "Keep this design's releases signed and checkable.",
+        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
+        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -7973,6 +8432,15 @@
         },
         "title": "verify_feature_releaseArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "signed_release_v1",
+        "variant": "signed_release",
+        "feature": "Signed releases",
+        "headline": "Keep this design's releases signed and checkable.",
+        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
+        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -8058,6 +8526,15 @@
         ],
         "title": "visualize_branch_treeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -8437,6 +8914,15 @@
         },
         "title": "analyze_frame_bracingArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "structural_design_v1",
+        "variant": "structural_design",
+        "feature": "Load-bearing design verdicts",
+        "headline": "Size this part for the load it has to carry.",
+        "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
+        "free_included": "General design guidance and safety cautions stay available at every tier."
       }
     },
     {
@@ -8525,6 +9011,15 @@
         },
         "title": "apply_calibration_recommendationsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -8584,6 +9079,15 @@
         },
         "title": "assess_calibration_statusArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -8812,6 +9316,15 @@
         ],
         "title": "design_for_loadArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "structural_design_v1",
+        "variant": "structural_design",
+        "feature": "Load-bearing design verdicts",
+        "headline": "Size this part for the load it has to carry.",
+        "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
+        "free_included": "General design guidance and safety cautions stay available at every tier."
       }
     },
     {
@@ -8855,6 +9368,15 @@
         },
         "title": "explain_calibration_for_designArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -8880,6 +9402,15 @@
         ],
         "title": "get_calibration_freshnessArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -8898,6 +9429,15 @@
         },
         "title": "get_calibration_health_recommendationsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -8988,6 +9528,15 @@
         ],
         "title": "import_third_party_calibrationArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -9059,6 +9608,15 @@
         ],
         "title": "query_per_machine_offsetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -9189,6 +9747,15 @@
         ],
         "title": "record_calibration_correctionArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -9219,6 +9786,15 @@
         ],
         "title": "request_calibration_test_printArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -10111,6 +10687,15 @@
         ],
         "title": "ingest_material_datasheetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "material_datasheets_v1",
+        "variant": "material_datasheets",
+        "feature": "Supplier datasheet ingestion",
+        "headline": "Turn this supplier datasheet into a material Kiln can plan with.",
+        "outcome_preview": "Kiln Business would verify the quoted datasheet values, build a structured material profile, and keep it in your ingested-materials library.",
+        "free_included": "The built-in material catalog stays available."
       }
     },
     {
@@ -10139,6 +10724,15 @@
         },
         "title": "list_ingested_materialsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "material_datasheets_v1",
+        "variant": "material_datasheets",
+        "feature": "Supplier datasheet ingestion",
+        "headline": "Turn this supplier datasheet into a material Kiln can plan with.",
+        "outcome_preview": "Kiln Business would verify the quoted datasheet values, build a structured material profile, and keep it in your ingested-materials library.",
+        "free_included": "The built-in material catalog stays available."
       }
     },
     {
@@ -10871,6 +11465,15 @@
         },
         "title": "read_material_datasheetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "material_datasheets_v1",
+        "variant": "material_datasheets",
+        "feature": "Supplier datasheet ingestion",
+        "headline": "Turn this supplier datasheet into a material Kiln can plan with.",
+        "outcome_preview": "Kiln Business would verify the quoted datasheet values, build a structured material profile, and keep it in your ingested-materials library.",
+        "free_included": "The built-in material catalog stays available."
       }
     },
     {
@@ -11095,6 +11698,15 @@
         },
         "title": "recommend_joint_strategyArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "structural_design_v1",
+        "variant": "structural_design",
+        "feature": "Load-bearing design verdicts",
+        "headline": "Size this part for the load it has to carry.",
+        "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
+        "free_included": "General design guidance and safety cautions stay available at every tier."
       }
     },
     {
@@ -13226,6 +13838,15 @@
         ],
         "title": "check_nozzle_capacity_for_printArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -13745,6 +14366,15 @@
         ],
         "title": "get_auto_tuned_settingsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "learned_settings_v1",
+        "variant": "learned_settings",
+        "feature": "Settings learned from your prints",
+        "headline": "Start this print with the settings your history earned.",
+        "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
+        "free_included": "Slicing and printing with standard settings stay available."
       }
     },
     {
@@ -13795,6 +14425,15 @@
         ],
         "title": "get_maintenance_predictionArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -13863,6 +14502,15 @@
         },
         "title": "get_my_nozzle_wear_patternsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -13918,6 +14566,15 @@
         ],
         "title": "get_optimal_settingsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "learned_settings_v1",
+        "variant": "learned_settings",
+        "feature": "Settings learned from your prints",
+        "headline": "Start this print with the settings your history earned.",
+        "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
+        "free_included": "Slicing and printing with standard settings stay available."
       }
     },
     {
@@ -13953,6 +14610,15 @@
         ],
         "title": "get_print_confidenceArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "learned_settings_v1",
+        "variant": "learned_settings",
+        "feature": "Settings learned from your prints",
+        "headline": "Start this print with the settings your history earned.",
+        "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
+        "free_included": "Slicing and printing with standard settings stay available."
       }
     },
     {
@@ -13993,6 +14659,15 @@
         ],
         "title": "get_print_learning_summaryArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "learned_settings_v1",
+        "variant": "learned_settings",
+        "feature": "Settings learned from your prints",
+        "headline": "Start this print with the settings your history earned.",
+        "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
+        "free_included": "Slicing and printing with standard settings stay available."
       }
     },
     {
@@ -14205,6 +14880,15 @@
         ],
         "title": "nozzle_drift_attributionArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -14237,6 +14921,15 @@
         ],
         "title": "nozzle_wear_statusArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -14625,6 +15318,15 @@
         ],
         "title": "predict_print_failure_riskArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "learned_settings_v1",
+        "variant": "learned_settings",
+        "feature": "Settings learned from your prints",
+        "headline": "Start this print with the settings your history earned.",
+        "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
+        "free_included": "Slicing and printing with standard settings stay available."
       }
     },
     {
@@ -14917,6 +15619,15 @@
         ],
         "title": "record_nozzle_replacementArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -17558,6 +18269,15 @@
         ],
         "title": "add_org_memberArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17600,6 +18320,15 @@
         ],
         "title": "add_team_memberArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17654,6 +18383,15 @@
         ],
         "title": "apply_role_templateArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17696,6 +18434,15 @@
         ],
         "title": "assign_artifact_to_orgArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17761,6 +18508,15 @@
         ],
         "title": "create_orgArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17820,6 +18576,15 @@
         ],
         "title": "create_teamArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -18006,6 +18771,15 @@
         ],
         "title": "grant_scopeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -18277,6 +19051,15 @@
         ],
         "title": "remove_org_memberArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -18302,6 +19085,15 @@
         ],
         "title": "remove_team_memberArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -18381,6 +19173,15 @@
         ],
         "title": "revoke_scopeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -18536,6 +19337,15 @@
         ],
         "title": "setup_teamArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -18571,6 +19381,15 @@
         ],
         "title": "transfer_artifact_between_orgsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
