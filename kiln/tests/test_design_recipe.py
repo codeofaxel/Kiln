@@ -206,6 +206,26 @@ class TestSaveLoad:
         with pytest.raises(FileNotFoundError):
             load_recipe("/nonexistent/file.json")
 
+    def test_load_accepts_design_directory(self, tmp_path):
+        """The dir/file asymmetry regression: ``save_recipe`` takes the
+        design DIRECTORY, and three sibling tools handed that same
+        directory to ``load_recipe`` and died with IsADirectoryError on
+        every call.  The engine now resolves a directory to the recipe
+        inside it, so no caller can get the shape wrong again."""
+        recipe = _sample_recipe()
+        save_recipe(recipe, str(tmp_path))
+
+        loaded = load_recipe(str(tmp_path))
+        assert loaded.name == recipe.name
+        assert len(loaded.parts) == 2
+
+    def test_load_directory_without_recipe_raises_not_found(self, tmp_path):
+        """An empty directory is an absence, not an IsADirectoryError —
+        the caller sees the same FileNotFoundError contract as a missing
+        file, with the directory named."""
+        with pytest.raises(FileNotFoundError, match="No .kiln_recipe.json"):
+            load_recipe(str(tmp_path))
+
     def test_load_invalid_json_raises(self, tmp_path):
         bad_file = tmp_path / ".kiln_recipe.json"
         bad_file.write_text("not json{{{")

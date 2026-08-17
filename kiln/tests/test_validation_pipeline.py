@@ -2178,6 +2178,81 @@ class TestInlineSTLScaleTruncated:
 
 
 # ---------------------------------------------------------------------------
+# Tests — _apply_scale routes through the real rescale engine
+# ---------------------------------------------------------------------------
+
+
+class TestApplyScaleEnginePath:
+    """The primary scale path is the shared ``rescale_stl`` engine.
+
+    Regression for the dead import this replaced: ``from kiln.server
+    import rescale_model`` stopped resolving when the tool moved into a
+    plugin, so every ``_apply_scale`` call silently fell through to the
+    binary-only inline scaler.  These tests pin the engine path by making
+    the fallback unavailable — a re-dead import goes red here, it cannot
+    hide behind the fallback again.
+    """
+
+    def test_engine_path_scales_without_the_fallback(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """With the inline fallback disabled, scaling still works — proof
+        the primary import resolves and the engine really ran."""
+        import kiln.plugins._validation_pipeline_internals as internals
+
+        stl = tmp_path / "box.stl"
+        header = b"\x00" * 80
+        tri = struct.pack(
+            "<12f", 0, 0, 1, 0, 0, 0, 10.0, 0, 0, 0, 10.0, 0,
+        ) + b"\x00\x00"
+        stl.write_bytes(header + struct.pack("<I", 1) + tri)
+
+        def _boom(*_a, **_k):
+            raise AssertionError("fallback must not run — engine path is primary")
+
+        monkeypatch.setattr(internals, "_inline_stl_scale", _boom)
+        scaled_path, factor = internals._apply_scale(str(stl), 2.0)
+
+        assert scaled_path is not None and Path(scaled_path).exists()
+        assert factor == 2.0
+        # The copy contract: the caller's original is never mutated.
+        assert scaled_path != str(stl)
+        original = stl.read_bytes()
+        assert struct.unpack_from("<f", original, 80 + 4 + 12 + 12)[0] == 10.0
+        # And the copy really is scaled: engine writes binary STL.
+        scaled = Path(scaled_path).read_bytes()
+        count = struct.unpack("<I", scaled[80:84])[0]
+        assert count == 1
+        xs = [
+            struct.unpack_from("<9f", scaled, 84 + 12)[i]
+            for i in (0, 3, 6)
+        ]
+        assert abs(max(xs) - 20.0) < 1e-4
+
+    def test_ascii_stl_now_scales(self, tmp_path: Path) -> None:
+        """ASCII STL could never scale before — the inline fallback is
+        binary-only, and the dead primary import meant ASCII input always
+        returned (None, 0.0).  The engine parses both formats."""
+        import kiln.plugins._validation_pipeline_internals as internals
+
+        stl = tmp_path / "ascii.stl"
+        stl.write_text(
+            "solid box\n"
+            "  facet normal 0 0 1\n"
+            "    outer loop\n"
+            "      vertex 0 0 0\n"
+            "      vertex 10 0 0\n"
+            "      vertex 0 10 0\n"
+            "    endloop\n"
+            "  endfacet\n"
+            "endsolid box\n"
+        )
+        scaled_path, factor = internals._apply_scale(str(stl), 2.0)
+        assert scaled_path is not None and Path(scaled_path).exists()
+        assert factor == 2.0
+
+
+# ---------------------------------------------------------------------------
 # Tests — scale_check fires for small inline-parsed model
 # ---------------------------------------------------------------------------
 

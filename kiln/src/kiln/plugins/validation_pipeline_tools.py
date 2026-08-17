@@ -91,6 +91,9 @@ from kiln.plugins._validation_pipeline_internals import (
     _max_dim_mm as _max_dim_mm,
 )
 from kiln.plugins._validation_pipeline_internals import (
+    _scaled_copy_path as _scaled_copy_path,
+)
+from kiln.plugins._validation_pipeline_internals import (
     _PipelineReport as _PipelineReport,
 )
 from kiln.plugins._validation_pipeline_internals import (
@@ -553,17 +556,26 @@ class _ValidationPipelinePlugin:
             if scale_factor > 0 and abs(scale_factor - 1.0) > 0.01:
                 scaled_path: str | None = None
 
-                # Try rescale_model from server
+                # The shared rescale engine — the same one the
+                # ``rescale_model`` tool wraps, imported directly because a
+                # registered tool is not an importable function (the old
+                # ``from kiln.server import rescale_model`` stopped resolving
+                # when the tool moved into a plugin, so this path silently
+                # fell through to the binary-only inline scaler on every call).
                 try:
-                    from kiln.server import rescale_model as _rescale
+                    from kiln.generation.validation import rescale_stl as _rescale
 
-                    result = _rescale(input_path, scale_factor=scale_factor)
+                    result = _rescale(
+                        input_path,
+                        scale_factor=scale_factor,
+                        output_path=_scaled_copy_path(input_path),
+                    )
                     sp = result.get("path", "")
                     if sp and Path(sp).exists():
                         scaled_path = sp
                 except Exception:
                     _logger.debug(
-                        "rescale_model unavailable for prepare_ai_model",
+                        "rescale_stl failed for prepare_ai_model",
                         exc_info=True,
                     )
 

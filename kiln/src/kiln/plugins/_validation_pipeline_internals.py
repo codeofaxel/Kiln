@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from kiln.support_assessment import MATERIAL_ALIASES as _MATERIAL_ALIASES
-from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
 
@@ -450,6 +449,15 @@ def _inline_stl_scale(stl_path: str, scale_factor: float) -> str:
     return out_path
 
 
+def _scaled_copy_path(stl_path: str) -> str:
+    """A fresh temp path for a rescaled copy — same convention as the
+    inline scaler, so both writers keep the never-mutate-the-original
+    contract with one spelling of the output location."""
+    fd, out_path = tempfile.mkstemp(suffix=Path(stl_path).suffix or ".stl", prefix="kiln_autoscale_")
+    os.close(fd)
+    return out_path
+
+
 @dataclass(frozen=True)
 class _UnitVerdict:
     """What a model's measured size says about the units it was written in.
@@ -651,22 +659,24 @@ def _auto_scale_if_needed(
 
 
 def _apply_scale(stl_path: str, scale_factor: float) -> tuple[str | None, float]:
-    """Write a rescaled copy of *stl_path*, preferring the mesh tool."""
-    # NOTE: ``rescale_model`` moved to ``plugins/mesh_tools.py`` and is now a
-    # registered tool rather than an importable function, so this import has
-    # not resolved for some time and every call lands on the inline scaler
-    # below.  Left in place deliberately: the fallback is correct and
-    # exercised, and re-plumbing the tool call belongs with the sibling
-    # ``slice_model`` repair rather than inside a units fix.
+    """Write a rescaled copy of *stl_path* via the shared rescale engine."""
+    # ``rescale_stl`` is the engine the ``rescale_model`` tool wraps —
+    # imported directly because a registered tool is not an importable
+    # function.  (This used to try ``from kiln.server import rescale_model``,
+    # which stopped resolving when the tool moved into a plugin, so every
+    # call silently landed on the binary-only inline scaler below.)  The
+    # engine handles ASCII and binary STL; an explicit ``output_path`` keeps
+    # the write-a-copy contract — the caller's original is never mutated.
     try:
-        from kiln.server import rescale_model
+        from kiln.generation.validation import rescale_stl
 
-        result = unwrap_tool_result(rescale_model(stl_path, scale_factor=scale_factor))
+        out = _scaled_copy_path(stl_path)
+        result = rescale_stl(stl_path, scale_factor=scale_factor, output_path=out)
         scaled_path = result.get("path", "")
         if scaled_path and Path(scaled_path).exists():
             return scaled_path, scale_factor
     except Exception:
-        _logger.debug("rescale_model unavailable, using inline STL scaler", exc_info=True)
+        _logger.debug("rescale_stl failed, using inline STL scaler", exc_info=True)
 
     try:
         return _inline_stl_scale(stl_path, scale_factor), scale_factor
