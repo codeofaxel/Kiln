@@ -164,11 +164,46 @@ def orch(mock_db: MagicMock, monkeypatch: pytest.MonkeyPatch) -> ProxyOrchestrat
 
 
 class TestLicenseValidation:
-    def test_valid_key_returns_correct_tier(self, orch: ProxyOrchestrator):
+    """The tier of the KEY PRESENTED — never the tier of the host answering.
+
+    Two deliberate security changes moved under these tests and left two of
+    them asserting the old contract:
+
+    * an unsigned bearer is no longer a licence at all (``verify_license_key``
+      gates every path, so an invented string cannot mint an identity), and
+    * the tier now comes from the key's SIGNATURE-VERIFIED claims rather than
+      ``LicenseManager.get_tier()``, which resolves the local OAuth session
+      first — correct on a personal install, wrong on a server answering
+      about somebody else's key.
+
+    The two failing tests mocked ``get_tier`` and asserted the result
+    followed it, i.e. they pinned exactly the behaviour that was removed.
+    Making them green against ``get_tier`` would have restored the defect,
+    so they are rewritten to the real contract and the security property is
+    now asserted directly rather than left implied.
+    """
+
+    @staticmethod
+    def _verified(tier: str = "pro"):
+        """Patch the signature check to accept a key carrying *tier*.
+
+        Targets ``kiln_pro.enterprise.licensing`` — the module the function
+        is DEFINED in — because ``validate_license`` imports it at call time,
+        so patching the proxy module's namespace would miss.
+        """
+        return patch(
+            "kiln_pro.enterprise.licensing.verify_license_key",
+            return_value={"tier": tier, "jti": "test-jti"},
+        )
+
+    def test_valid_key_returns_the_tier_it_was_signed_with(
+        self, orch: ProxyOrchestrator,
+    ):
         mock_info = LicenseInfo(tier=LicenseTier.PRO)
-        with patch("kiln.fulfillment.proxy_server.LicenseManager") as MockMgr:
+        with self._verified("pro"), patch(
+            "kiln.fulfillment.proxy_server.LicenseManager"
+        ) as MockMgr:
             instance = MockMgr.return_value
-            instance.get_tier.return_value = LicenseTier.PRO
             instance.get_info.return_value = mock_info
 
             result = orch.validate_license("kiln_pro_abc123")
@@ -176,6 +211,44 @@ class TestLicenseValidation:
         assert result["tier"] == "pro"
         assert result["valid"] is True
         assert "info" in result
+
+    def test_the_hosts_own_session_never_leaks_into_a_strangers_key(
+        self, orch: ProxyOrchestrator,
+    ):
+        """THE REGRESSION (measured 2026-08-14).
+
+        A pro key resolved as ENTERPRISE on a host carrying an operator's
+        ``kiln login`` session, because the session outranked the key that
+        was actually presented.  Here the key says pro and the host says
+        enterprise; the answer must be the key's.
+        """
+        mock_info = LicenseInfo(tier=LicenseTier.PRO)
+        with self._verified("pro"), patch(
+            "kiln.fulfillment.proxy_server.LicenseManager"
+        ) as MockMgr:
+            instance = MockMgr.return_value
+            instance.get_tier.return_value = LicenseTier.ENTERPRISE
+            instance.get_info.return_value = mock_info
+
+            result = orch.validate_license("kiln_pro_abc123")
+
+        assert result["tier"] == "pro", (
+            "the host's own session must not upgrade a stranger's key"
+        )
+
+    def test_an_unsigned_bearer_is_not_a_licence(self, orch: ProxyOrchestrator):
+        """No patching: a made-up string must not resolve to a paid tier.
+
+        ``LicenseInfo.is_valid`` only asks "is it past its expiry?", and a
+        licence with no expiry is never expired — so it answers True for
+        every garbage string.  The signature check is what stops an invented
+        bearer minting an identity.
+        """
+        result = orch.validate_license("kiln_pro_totally_made_up")
+
+        assert result["valid"] is False
+        assert result["tier"] == "free"
+        assert "signature" in result["error"].lower()
 
     def test_invalid_key_returns_valid_false(self, orch: ProxyOrchestrator):
         with patch("kiln.fulfillment.proxy_server.LicenseManager") as MockMgr:
@@ -198,14 +271,23 @@ class TestLicenseValidation:
         assert result["valid"] is False
         assert result["tier"] == "free"
 
-    def test_expired_key_returns_valid_false(self, orch: ProxyOrchestrator):
+    def test_an_expired_key_is_invalid_but_keeps_its_own_tier(
+        self, orch: ProxyOrchestrator,
+    ):
+        """Expiry and tier are separate answers, and both stay the key's.
+
+        Reporting the real tier alongside ``valid: False`` is what lets a
+        caller say "your Pro licence lapsed" instead of the uselessly vague
+        "you are on free".
+        """
         mock_info = MagicMock(spec=LicenseInfo)
         mock_info.is_valid = False
         mock_info.to_dict.return_value = {"tier": "pro", "is_valid": False}
 
-        with patch("kiln.fulfillment.proxy_server.LicenseManager") as MockMgr:
+        with self._verified("pro"), patch(
+            "kiln.fulfillment.proxy_server.LicenseManager"
+        ) as MockMgr:
             instance = MockMgr.return_value
-            instance.get_tier.return_value = LicenseTier.PRO
             instance.get_info.return_value = mock_info
 
             result = orch.validate_license("kiln_pro_expired")
