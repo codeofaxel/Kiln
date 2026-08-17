@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-17T22:51:34.894774+00:00",
+  "generated": "2026-08-17T23:11:59.947294+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -3574,15 +3574,6 @@
         ],
         "title": "add_mesh_commentArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "design_comments_v1",
-        "variant": "design_comments",
-        "feature": "Notes anchored to the part",
-        "headline": "Pin this note to the part it is about.",
-        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
-        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -3999,15 +3990,6 @@
         ],
         "title": "bisect_badArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "version_bisect_v1",
-        "variant": "version_bisect",
-        "feature": "Finding the version that broke it",
-        "headline": "Find the version where this broke.",
-        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
-        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -4028,15 +4010,6 @@
         ],
         "title": "bisect_currentArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "version_bisect_v1",
-        "variant": "version_bisect",
-        "feature": "Finding the version that broke it",
-        "headline": "Find the version where this broke.",
-        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
-        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -4057,15 +4030,6 @@
         ],
         "title": "bisect_endArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "version_bisect_v1",
-        "variant": "version_bisect",
-        "feature": "Finding the version that broke it",
-        "headline": "Find the version where this broke.",
-        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
-        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -4098,15 +4062,6 @@
         ],
         "title": "bisect_goodArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "version_bisect_v1",
-        "variant": "version_bisect",
-        "feature": "Finding the version that broke it",
-        "headline": "Find the version where this broke.",
-        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
-        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -4139,15 +4094,6 @@
         ],
         "title": "bisect_skipArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "version_bisect_v1",
-        "variant": "version_bisect",
-        "feature": "Finding the version that broke it",
-        "headline": "Find the version where this broke.",
-        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
-        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -4207,15 +4153,6 @@
         ],
         "title": "bisect_startArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "version_bisect_v1",
-        "variant": "version_bisect",
-        "feature": "Finding the version that broke it",
-        "headline": "Find the version where this broke.",
-        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
-        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -5192,15 +5129,6 @@
         ],
         "title": "get_comment_threadArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "design_comments_v1",
-        "variant": "design_comments",
-        "feature": "Notes anchored to the part",
-        "headline": "Pin this note to the part it is about.",
-        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
-        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -5640,15 +5568,6 @@
         },
         "title": "list_bisect_sessionsArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "version_bisect_v1",
-        "variant": "version_bisect",
-        "feature": "Finding the version that broke it",
-        "headline": "Find the version where this broke.",
-        "outcome_preview": "Kiln Pro would walk this design's saved versions, halve the range with each answer, and name the version where the problem first appeared.",
-        "free_included": "Saving, listing, and rolling back versions stays free \u2014 the search across them is what this adds."
       }
     },
     {
@@ -5754,15 +5673,6 @@
         },
         "title": "list_decoration_preset_releasesArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "signed_release_v1",
-        "variant": "signed_release",
-        "feature": "Signed releases",
-        "headline": "Keep this design's releases signed and checkable.",
-        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
-        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -5937,15 +5847,6 @@
         ],
         "title": "list_design_releasesArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "signed_release_v1",
-        "variant": "signed_release",
-        "feature": "Signed releases",
-        "headline": "Keep this design's releases signed and checkable.",
-        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
-        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -6075,15 +5976,6 @@
         },
         "title": "list_feature_releasesArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "signed_release_v1",
-        "variant": "signed_release",
-        "feature": "Signed releases",
-        "headline": "Keep this design's releases signed and checkable.",
-        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
-        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -6178,15 +6070,6 @@
         ],
         "title": "list_mesh_commentsArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "design_comments_v1",
-        "variant": "design_comments",
-        "feature": "Notes anchored to the part",
-        "headline": "Pin this note to the part it is about.",
-        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
-        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -7206,15 +7089,6 @@
         ],
         "title": "reopen_comment_threadArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "design_comments_v1",
-        "variant": "design_comments",
-        "feature": "Notes anchored to the part",
-        "headline": "Pin this note to the part it is about.",
-        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
-        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -7252,15 +7126,6 @@
         ],
         "title": "reply_to_commentArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "design_comments_v1",
-        "variant": "design_comments",
-        "feature": "Notes anchored to the part",
-        "headline": "Pin this note to the part it is about.",
-        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
-        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -7293,15 +7158,6 @@
         ],
         "title": "resolve_comment_threadArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "design_comments_v1",
-        "variant": "design_comments",
-        "feature": "Notes anchored to the part",
-        "headline": "Pin this note to the part it is about.",
-        "outcome_preview": "Kiln Pro would anchor this note to the face, edge, or region you mean, keep it with that version, and track the replies until someone marks the thread resolved.",
-        "free_included": "The notes you write when you save a version stay free and travel with it."
       }
     },
     {
@@ -7864,15 +7720,6 @@
         ],
         "title": "sign_decoration_preset_releaseArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "signed_release_v1",
-        "variant": "signed_release",
-        "feature": "Signed releases",
-        "headline": "Keep this design's releases signed and checkable.",
-        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
-        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -8057,15 +7904,6 @@
         ],
         "title": "sign_design_releaseArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "signed_release_v1",
-        "variant": "signed_release",
-        "feature": "Signed releases",
-        "headline": "Keep this design's releases signed and checkable.",
-        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
-        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -8120,15 +7958,6 @@
         ],
         "title": "sign_feature_releaseArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "signed_release_v1",
-        "variant": "signed_release",
-        "feature": "Signed releases",
-        "headline": "Keep this design's releases signed and checkable.",
-        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
-        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -8296,15 +8125,6 @@
         ],
         "title": "verify_decoration_preset_releaseArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "signed_release_v1",
-        "variant": "signed_release",
-        "feature": "Signed releases",
-        "headline": "Keep this design's releases signed and checkable.",
-        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
-        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -8369,15 +8189,6 @@
         },
         "title": "verify_design_releaseArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "signed_release_v1",
-        "variant": "signed_release",
-        "feature": "Signed releases",
-        "headline": "Keep this design's releases signed and checkable.",
-        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
-        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
@@ -8432,15 +8243,6 @@
         },
         "title": "verify_feature_releaseArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "signed_release_v1",
-        "variant": "signed_release",
-        "feature": "Signed releases",
-        "headline": "Keep this design's releases signed and checkable.",
-        "outcome_preview": "Kiln Pro would sign this version into a named release \u2014 exact bytes, ancestry, and signing key recorded \u2014 and re-check any release you hold against that signature.",
-        "free_included": "Making and sharing the file stays free, and anyone you send a signed release to can check it without an account."
       }
     },
     {
