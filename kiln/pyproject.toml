@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kiln3d"
 version = "1.4.0"
-description = "MCP server + CLI that gives AI agents safe access to 3D printers (Bambu Lab, Creality, Prusa Link, Elegoo, Moonraker/Klipper, OctoPrint, Duet, USB) — 908 MCP capabilities for AI-driven print workflows"
+description = "MCP server + CLI that gives AI agents safe access to 3D printers (Bambu Lab, Creality, Prusa Link, Elegoo, Moonraker/Klipper, OctoPrint, Duet, USB) — 907 MCP capabilities for AI-driven print workflows"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
 requires-python = ">=3.10"

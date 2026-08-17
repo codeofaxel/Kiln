@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-14T23:52:53.694067+00:00",
-  "tool_count": 417,
+  "generated": "2026-08-17T18:54:38.317017+00:00",
+  "tool_count": 416,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3220,36 +3220,6 @@
           "recipe_path"
         ],
         "title": "rebuild_designArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "smart_redesign",
-      "description": "Interpret a natural language instruction and modify the design (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "design_modification",
-      "parameters": {
-        "properties": {
-          "recipe_path": {
-            "title": "Recipe Path",
-            "type": "string"
-          },
-          "instruction": {
-            "title": "Instruction",
-            "type": "string"
-          },
-          "brief_id": {
-            "default": "",
-            "title": "Brief Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "recipe_path",
-          "instruction"
-        ],
-        "title": "smart_redesignArguments",
         "type": "object"
       }
     },
