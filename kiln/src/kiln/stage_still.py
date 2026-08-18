@@ -288,33 +288,43 @@ def _build_harness(
     )
 
 
+#: Every flag a headless still launch needs that does not depend on the shot.
+#: Exported because anything else that drives the same browser -- a test, a
+#: sibling harness -- must launch it the SAME way, and the only way to
+#: guarantee that is to read this list rather than retype it.  A hand copy is
+#: how the keychain flag below came to be missing from one caller and present
+#: in the other: two lists claiming to describe one launch, free to disagree.
+STILL_BROWSER_FLAGS: tuple[str, ...] = (
+    "--headless",
+    "--hide-scrollbars",
+    # WebGL in CLI screenshot mode needs the software rasterizer
+    # spelled out; without these the stage gets no GL context at all.
+    "--use-angle=swiftshader",
+    "--enable-unsafe-swiftshader",
+    "--no-first-run",
+    # The throwaway --user-data-dir has no encryption key, so Chrome reaches
+    # for the OS keyring to mint one.  A headless run has no keyring session
+    # to reach, so macOS throws a modal "a keychain cannot be found to store
+    # Chrome" at whoever is sitting at the machine -- once per still, in
+    # front of a user who never asked for a browser.  A disposable
+    # screenshot has nothing worth encrypting, so it stays out entirely.
+    "--use-mock-keychain",
+    "--disable-extensions",
+    "--disable-crash-reporter",
+    "--mute-audio",
+)
+
+
 def _shoot(browser: Path, harness_path: Path, png_path: str,
            width: int, height: int, profile_dir: Path) -> bool:
     """One headless screenshot.  True only for exit 0 + a written file."""
     cmd = [
         str(browser),
-        "--headless",
+        *STILL_BROWSER_FLAGS,
         f"--screenshot={png_path}",
         f"--window-size={width},{height}",
         f"--virtual-time-budget={_VIRTUAL_TIME_MS}",
-        "--hide-scrollbars",
-        # WebGL in CLI screenshot mode needs the software rasterizer
-        # spelled out; without these the stage gets no GL context at all.
-        "--use-angle=swiftshader",
-        "--enable-unsafe-swiftshader",
         f"--user-data-dir={profile_dir}",
-        "--no-first-run",
-        # The throwaway profile above has no encryption key, so Chrome
-        # reaches for the OS keyring to mint one.  A headless run has no
-        # keyring session to reach, so macOS throws a modal "a keychain
-        # cannot be found to store Chrome" at whoever is sitting at the
-        # machine -- once per still, in front of a user who never asked
-        # for a browser.  A disposable screenshot has nothing worth
-        # encrypting, so it stays out of the real keyring entirely.
-        "--use-mock-keychain",
-        "--disable-extensions",
-        "--disable-crash-reporter",
-        "--mute-audio",
         f"file://{harness_path}",
     ]
     try:
