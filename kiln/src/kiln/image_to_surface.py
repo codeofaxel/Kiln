@@ -162,31 +162,69 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
 # Image loading: Pillow first, then pure-Python PNG, then sips/convert for JPEG
 # ---------------------------------------------------------------------------
 
+# Opaque pixels this close to white are invisible against a white field —
+# the same tolerance _flatten_field uses to call a tone "the field".
+_ALPHA_INK_DEADBAND = 16
+# Below this visible fraction, the alpha-defined artwork is effectively
+# erased by a white flatten, so the alpha channel is the only place the
+# mark exists.
+_ALPHA_INK_MIN_VISIBLE = 0.05
+
+
 def _flatten_alpha_on_white(img):
-    """Composite transparency onto white BEFORE any grayscale convert.
+    """Resolve transparency BEFORE any grayscale convert.
 
     ``convert("L")`` silently drops the alpha channel, so a transparent
     surround decodes as BLACK — the far end of the height scale from the
     empty field it visually is.  A brand logo ships as an opaque mark on
     a transparent surround; decoded as black, the surround displaces the
-    surface across the mark's whole bounding box.  White is the field
-    convention everywhere this pipeline touches pixels (the pure-Python
-    PNG decoder blends against white, the rembg step composites onto
-    white, SVG rasterization flattens onto white), so transparent must
-    read as white here too.  Covers every Pillow mode that can carry
-    transparency: RGBA, LA, PA, and palette images with a transparency
-    table.
-    """
-    from PIL import Image
+    surface across the mark's whole bounding box.
 
-    if img.mode in ("RGBA", "LA", "PA") or (
-        img.mode == "P" and "transparency" in img.info
-    ):
-        rgba = img.convert("RGBA")
-        bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
-        bg.paste(rgba, mask=rgba.split()[3])
+    Two cases, decided by what survives the flatten:
+
+    * Normally, composite onto WHITE — the field convention everywhere
+      this pipeline touches pixels (the pure-Python PNG decoder blends
+      against white, the rembg step composites onto white, ImageMagick
+      SVG rasterization flattens onto white).  A transparent surround
+      then behaves exactly like the same artwork on white paper.
+    * When essentially NONE of the alpha-defined content would survive
+      against white (a white or near-white logo on a transparent
+      surround — the light variant every brand kit ships), the alpha
+      channel is the only place the mark exists, so the alpha coverage
+      IS the ink: synthesize black ink on a white field from it.  Ink
+      colour never changes carve geometry, so this is the same deboss
+      the dark variant of the mark produces.
+
+    Covers every way a Pillow image can carry transparency: RGBA, LA
+    and PA modes, plus palette/grayscale/RGB images with a transparency
+    table (``info["transparency"]`` — honored by ``convert("RGBA")``).
+    """
+    from PIL import Image, ImageChops
+
+    has_alpha = img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
+    if not has_alpha:
+        return img
+
+    rgba = img.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+    bg.paste(rgba, mask=alpha)
+
+    a_hist = alpha.histogram()
+    opaque = sum(a_hist[128:])
+    transparent = sum(a_hist[:128])
+    if opaque == 0 or transparent == 0:
+        # Fully transparent (nothing to rescue) or fully opaque (nothing
+        # to flatten) — the plain composite is already the whole story.
         return bg
-    return img
+
+    opaque_mask = alpha.point(lambda a: 255 if a >= 128 else 0)
+    lum_hist = bg.convert("L").histogram(opaque_mask)
+    visible = sum(lum_hist[: 256 - _ALPHA_INK_DEADBAND])
+    if visible / opaque >= _ALPHA_INK_MIN_VISIBLE:
+        return bg
+
+    return ImageChops.invert(alpha)
 
 
 def _open_grayscale(image_path: str, *, exif_transpose: bool = False):

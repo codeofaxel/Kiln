@@ -906,3 +906,44 @@ def _write_cube_stl(path: str, size: float) -> None:
                 f.write(f"vertex {v[idx][0]} {v[idx][1]} {v[idx][2]}\n")
             f.write("endloop\nendfacet\n")
         f.write("endsolid cube\n")
+
+
+class TestWhiteInkTransparency:
+    """The light variant of a brand mark: white ink, transparent surround.
+
+    Flattened onto white it is invisible, so before the alpha-as-ink
+    fallback the trace door raised ValueError and the heightmap fallback
+    produced a blank part.  The mark's geometry lives in the alpha
+    channel, and ink colour never changes carve geometry — the white
+    variant must trace exactly like the dark variant.
+    """
+
+    def _logo(self, tmp_path, fill):
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGBA", (400, 300), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        d.rectangle([120, 90, 280, 120], fill=fill)
+        d.rectangle([170, 120, 230, 220], fill=fill)
+        p = tmp_path / f"logo_{fill[0]}.png"
+        img.save(p)
+        return str(p)
+
+    def test_white_ink_is_bilevel(self, tmp_path):
+        from kiln.mark_geometry import is_bilevel_image
+
+        assert is_bilevel_image(self._logo(tmp_path, (255, 255, 255, 255)))
+
+    def test_white_ink_traces_like_dark_ink(self, tmp_path):
+        from kiln.mark_geometry import trace_image_to_mark
+
+        white = trace_image_to_mark(self._logo(tmp_path, (255, 255, 255, 255)))
+        dark = trace_image_to_mark(self._logo(tmp_path, (0, 0, 0, 255)))
+        assert white is not None and not white.is_empty
+        assert dark is not None and not dark.is_empty
+        # Same alpha coverage -> same traced geometry, whatever the colour.
+        assert white.width == pytest.approx(dark.width, rel=0.02)
+        assert white.height == pytest.approx(dark.height, rel=0.02)
+        assert sum(len(g) for g in white.groups) == sum(
+            len(g) for g in dark.groups
+        )

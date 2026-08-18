@@ -174,7 +174,7 @@ def test_missing_background_removal_still_masks(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("invert", [False, True], ids=["emboss", "deboss"])
-@pytest.mark.parametrize("source", ["opaque", "transparent"])
+@pytest.mark.parametrize("source", ["opaque", "transparent", "transparent-white-ink"])
 def test_a_mark_carves_only_its_own_ink(tmp_path, source, invert):
     """A logo must not sit in a pool: only the artwork displaces the surface.
 
@@ -189,7 +189,11 @@ def test_a_mark_carves_only_its_own_ink(tmp_path, source, invert):
     and the mark stood untouched — a sunken box around the logo (~94% carve
     fraction against ~4% ink).  The transparent cases pin the alpha half:
     a dropped alpha channel decodes the surround as ink and carves the
-    mark's whole bounding box.
+    mark's whole bounding box.  The white-ink case pins the vanishing-mark
+    fallback: a white logo on a transparent surround (the light variant
+    every brand kit ships) is invisible against a white flatten, so the
+    alpha coverage must be taken as the ink — ink colour never changes
+    carve geometry.
     """
     from PIL import Image, ImageDraw
 
@@ -201,10 +205,14 @@ def test_a_mark_carves_only_its_own_ink(tmp_path, source, invert):
         d.rectangle([170, 120, 230, 220], fill=0)
         ink = sum(1 for v in img.getdata() if v < 128) / (size[0] * size[1])
     else:
+        fill = (
+            (255, 255, 255, 255) if source == "transparent-white-ink"
+            else (0, 0, 0, 255)
+        )
         img = Image.new("RGBA", size, (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        d.rectangle([120, 90, 280, 120], fill=(0, 0, 0, 255))
-        d.rectangle([170, 120, 230, 220], fill=(0, 0, 0, 255))
+        d.rectangle([120, 90, 280, 120], fill=fill)
+        d.rectangle([170, 120, 230, 220], fill=fill)
         ink = sum(1 for p in img.getdata() if p[3] > 128) / (size[0] * size[1])
     src = tmp_path / "mark.png"
     img.save(src)

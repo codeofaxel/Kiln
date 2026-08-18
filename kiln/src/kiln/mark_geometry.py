@@ -989,16 +989,22 @@ def _otsu_threshold(hist: list[int]) -> int:
 
 
 def _load_flattened_grayscale(image_path: str, max_dim: int):
-    """Open → EXIF-orient → composite alpha on white → grayscale → bound size."""
+    """Open → EXIF-orient → resolve transparency → grayscale → bound size.
+
+    Transparency goes through the one shared resolver
+    (:func:`kiln.image_to_surface._flatten_alpha_on_white`) so the trace
+    door and the heightmap door cannot drift apart: both composite onto
+    white, and both fall back to alpha-as-ink when a white or near-white
+    mark on a transparent surround would otherwise vanish entirely.  This
+    module used to carry its own inline copy of the composite, which is
+    exactly how the two doors diverge.
+    """
     from PIL import Image, ImageOps
 
+    from kiln.image_to_surface import _flatten_alpha_on_white
+
     img = ImageOps.exif_transpose(Image.open(image_path))
-    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-        rgba = img.convert("RGBA")
-        bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
-        bg.paste(rgba, mask=rgba.split()[3])
-        img = bg
-    img = img.convert("L")
+    img = _flatten_alpha_on_white(img).convert("L")
     if max(img.size) > max_dim:
         img.thumbnail((max_dim, max_dim), Image.LANCZOS)
     return img

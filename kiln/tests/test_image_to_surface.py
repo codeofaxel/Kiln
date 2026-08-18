@@ -398,3 +398,71 @@ class TestAlphaFlattening:
         rows, w, h = _load_image_as_grayscale(str(p))
         assert rows[0][0] == 77
         assert rows[-1][-1] == 77
+
+    def test_grayscale_trns_transparency_reads_as_white(self, tmp_path):
+        """An L-mode PNG can mark a tone transparent via tRNS — no alpha band."""
+        from PIL import Image
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        p = tmp_path / "l_trns.png"
+        Image.new("L", (20, 20), 0).save(p, transparency=0)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255
+
+    def test_rgb_trns_transparency_reads_as_white(self, tmp_path):
+        from PIL import Image
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("RGB", (20, 20), (0, 255, 0))
+        for y in range(8, 12):
+            for x in range(8, 12):
+                img.putpixel((x, y), (40, 40, 40))
+        p = tmp_path / "rgb_trns.png"
+        img.save(p, transparency=(0, 255, 0))
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255
+        assert rows[10][10] == 40
+
+    def test_white_ink_on_transparency_survives_as_alpha_ink(self, tmp_path):
+        """A white mark on a transparent surround must not vanish.
+
+        Flattening onto white erases it — the alpha channel is the only
+        place that mark exists, so the alpha coverage becomes the ink.
+        """
+        from PIL import Image, ImageDraw
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("RGBA", (60, 60), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rectangle(
+            [20, 20, 40, 40], fill=(255, 255, 255, 255)
+        )
+        p = tmp_path / "white_ink.png"
+        img.save(p)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255, "surround must stay empty field"
+        assert rows[30][30] == 0, (
+            "the white mark vanished — the alpha-as-ink fallback is gone"
+        )
+
+    def test_dark_ink_on_transparency_keeps_its_tones(self, tmp_path):
+        """Visible ink keeps the plain white flatten — tones preserved."""
+        from PIL import Image, ImageDraw
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("RGBA", (60, 60), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rectangle(
+            [20, 20, 40, 40], fill=(128, 128, 128, 255)
+        )
+        p = tmp_path / "gray_ink.png"
+        img.save(p)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255
+        assert rows[30][30] == 128, "mid-tone ink must keep its tone"
