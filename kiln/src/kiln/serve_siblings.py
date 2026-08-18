@@ -510,7 +510,14 @@ def printing_now() -> dict:
             continue
         seen.add(id(adapter))
         try:
-            state = adapter.get_state().state
+            from kiln.printers.engagement import internal_read
+
+            # This answers "is anything actually printing?" before trimming
+            # sibling servers, so a refusal must never be able to disguise a
+            # RUNNING machine as unknown.  Kiln is asking about its own
+            # hardware here; nobody is commanding a printer.
+            with internal_read():
+                state = adapter.get_state().state
             value = getattr(state, "value", str(state))
             if value in _ACTIVE_PRINT_STATES:
                 active.append(f"{name} ({value})")

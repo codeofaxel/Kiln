@@ -106,7 +106,13 @@ def collect_routing_candidates(
 
         status = "unknown"
         try:
-            state = adapter.get_state()
+            from kiln.printers.engagement import internal_read
+
+            # Kiln surveying its own candidates.  Without this a machine the
+            # single-printer rule declines to command reads as "offline",
+            # which is a wrong fact about the user's hardware, not a refusal.
+            with internal_read():
+                state = adapter.get_state()
             raw_state = getattr(state, "state", None)
             status = str(getattr(raw_state, "value", raw_state or "unknown")).lower()
         except Exception:

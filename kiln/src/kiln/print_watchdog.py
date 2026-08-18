@@ -479,7 +479,14 @@ class PrintWatchdog:
             return None
 
         try:
-            state = self._adapter.get_state()
+            from kiln.printers.engagement import internal_read
+
+            # Kiln's own polling of a machine it is already responsible for, not a
+            # person commanding a printer.  Exempt so a background loop can never
+            # spin on a refusal — a health check that errors every tick is worse
+            # than one that does not run.
+            with internal_read():
+                state = self._adapter.get_state()
         except Exception:
             logger.exception("PrintWatchdog: get_state() failed; skipping tick")
             return None

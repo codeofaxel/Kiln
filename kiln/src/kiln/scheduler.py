@@ -389,8 +389,16 @@ class JobScheduler:
                     continue
 
                 adapter = self._registry.get(printer_name)
-                state = adapter.get_state()
-                job_progress = adapter.get_job()
+                # The scheduler watching jobs IT dispatched, to record how
+                # they ended.  Exempt for a sharper reason than the other
+                # internal reads: a refusal here would not surface as an
+                # error, it would quietly stop outcomes being recorded, and
+                # a learning loop that goes dark reports nothing at all.
+                from kiln.printers.engagement import internal_read
+
+                with internal_read():
+                    state = adapter.get_state()
+                    job_progress = adapter.get_job()
 
                 if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
                     self._seen_printing.add(job_id)
