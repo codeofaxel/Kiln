@@ -254,6 +254,27 @@ class _PrinterManagementToolsPlugin:
                     }
 
                 adapter = _srv._get_registry().get(printer_name)
+
+                # Handing a machine back means Kiln stops watching it, so any
+                # live watch on it ends HERE rather than discovering the
+                # change on its next poll.  The watcher copes with that race
+                # on its own, but a background thread finding out by being
+                # refused is a worse way to end something the user asked to
+                # end.
+                stopped_watches = []
+                try:
+                    from kiln.printers.engagement import machine_id
+
+                    target = machine_id(adapter)
+                    for watch_id, watcher in list(_srv._watchers.items()):
+                        watched = getattr(watcher, "_adapter", None)
+                        if watched is not None and machine_id(watched) == target:
+                            _srv._watchers.pop(watch_id, None)
+                            watcher.stop()
+                            stopped_watches.append(watch_id)
+                except Exception:
+                    _logger.debug("could not stop watches on hand-back", exc_info=True)
+
                 report = hand_back(adapter)
                 if not report.get("released"):
                     return _srv._error_dict(
@@ -272,6 +293,7 @@ class _PrinterManagementToolsPlugin:
                 return {
                     "success": True,
                     "printer": name,
+                    "stopped_watches": stopped_watches,
                     "message": (
                         f"Kiln has stepped off {name}. The print carries on exactly "
                         f"as it was, and Kiln is free for another printer. {consequence}"

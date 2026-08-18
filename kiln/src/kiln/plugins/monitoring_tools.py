@@ -31,6 +31,9 @@ from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
 
+# Raised when Kiln is asked to command a machine it is not driving.
+from kiln.printers.base import PrinterEngagementError  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Timelapse frame store — ~/.kiln/timelapses/<watch_id>/
 # ---------------------------------------------------------------------------
@@ -707,6 +710,28 @@ class _PrintWatcher:
                 # Wait using the stop event so stop() can wake us
                 self._stop_event.wait(self._poll_interval)
 
+        except PrinterEngagementError as exc:
+            # Kiln was handed this machine back, or moved to another one,
+            # while this watch was still running.  That is the user getting
+            # what they asked for, not a fault: the watch ENDS, and it says
+            # so.  Reporting it as an error would put a red result in front
+            # of someone for doing the exact thing the refusal told them to.
+            _logger.info(
+                "watch %s ended: Kiln no longer holds this printer", self._watch_id,
+            )
+            self._finish(
+                {
+                    "success": True,
+                    "watch_id": self._watch_id,
+                    "outcome": "handed_back",
+                    "detail": str(exc),
+                    "elapsed_seconds": round(time.time() - self._start_time, 1),
+                    "progress_log": list(self._progress_log[-20:]),
+                    "snapshots": list(self._snapshots),
+                    "snapshot_failures": self._snapshot_failures,
+                }
+            )
+            return
         except Exception as exc:
             _logger.exception("Error in print watcher %s", self._watch_id)
             self._finish(

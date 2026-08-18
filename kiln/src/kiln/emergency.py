@@ -200,6 +200,27 @@ class SafetyInterlock:
 # ---------------------------------------------------------------------------
 
 
+
+def _engagement_refusal() -> type[BaseException]:
+    """The tier-refusal exception type, or a class that can never be raised.
+
+    Imported lazily and defensively: emergency handling must not acquire a
+    hard dependency on the licensing layer, and a build where that type is
+    unavailable has to degrade to "no special case" rather than break the
+    stop path.
+    """
+    try:
+        from kiln.printers.base import PrinterEngagementError
+
+        return PrinterEngagementError
+    except Exception:  # noqa: BLE001
+
+        class _Never(BaseException):
+            pass
+
+        return _Never
+
+
 class EmergencyCoordinator:
     """Central coordinator for emergency stops and safety interlocks.
 
@@ -398,6 +419,37 @@ class EmergencyCoordinator:
         # Attempt to send emergency G-code via the printer adapter.
         try:
             gcode_sent, actions = self._send_emergency_gcode(printer_id)
+        except _engagement_refusal() as exc:
+            # NOT a delivery failure.  Kiln declined to command a machine it
+            # is not driving, so nothing was sent and the printer is still
+            # doing exactly what it was doing.  That is the opposite of the
+            # indeterminate case below, and it must not take the same path:
+            # latching this printer would tell the operator a running machine
+            # is halted, and would then block starting prints on a printer
+            # that never stopped.
+            #
+            # So this returns WITHOUT latching, WITHOUT adding to
+            # _stopped_printers, and without emitting a stop event, carrying
+            # the refusal's own wording -- which names the machine's own
+            # controls -- so the person reading a fleet-stop report can see
+            # exactly which machines they still have to deal with themselves.
+            logger.warning(
+                "EMERGENCY STOP NOT SENT: printer=%s is not the machine Kiln "
+                "is working with; it was NOT stopped",
+                printer_id,
+            )
+            record = EmergencyRecord(
+                printer_id=printer_id,
+                success=False,
+                reason=reason,
+                timestamp=now,
+                actions_taken=[],
+                gcode_sent=[],
+                error=f"Not stopped by Kiln: {exc}",
+            )
+            with self._lock:
+                self._stop_history.append(record)
+            return record
         except Exception as exc:
             # Even if G-code delivery fails, we still record the stop
             # and mark the printer as stopped — the physical state is

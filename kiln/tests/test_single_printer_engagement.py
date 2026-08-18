@@ -535,3 +535,93 @@ class TestCopyIsWrittenForWhoIsReadingIt:
         engagement.check_command(a, "pause_print")  # spends A's return
         spent = engagement.hand_back(a)
         assert spent["returns_left"] == 0
+
+
+class TestAFleetStopNeverLiesAboutWhatItStopped:
+    """The sharpest edge in the whole rule.
+
+    A fleet-wide stop loops every known printer and calls the same adapter
+    methods the engagement gate guards.  The coordinator catches delivery
+    failures and latches the printer anyway, which is right for a real
+    failure -- the machine's state is unknown, so treat it as halted.  A
+    tier refusal is the opposite situation: nothing was sent, and the
+    machine is definitely still running.  Taking the same path would tell
+    an operator a running printer was halted, and would then block starting
+    prints on a printer that never stopped.
+    """
+
+    @staticmethod
+    def _coordinator():
+        from kiln.emergency import EmergencyCoordinator
+
+        return EmergencyCoordinator()
+
+    def test_a_refused_machine_is_not_recorded_as_stopped(self):
+        from kiln.printers.base import PrinterEngagementError
+
+        coord = self._coordinator()
+        refusal = PrinterEngagementError(
+            {
+                "reason": "Kiln is working with a1 right now.",
+                "code": "TIER_SINGLE_PRINTER_LIMIT",
+                "suggestions": ["To stop this printer right now, use its own controls."],
+            }
+        )
+
+        def _send(printer_id):
+            if printer_id == "garage":
+                raise refusal
+            return ([], [])
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(coord, "_send_emergency_gcode", _send)
+            stopped = coord.emergency_stop("a1")
+            refused = coord.emergency_stop("garage")
+
+        assert stopped.success is True
+        assert refused.success is False
+        # The machine Kiln drives really is latched.
+        assert "a1" in coord._stopped_printers
+        # The one it refused is NOT, because it never stopped.
+        assert "garage" not in coord._stopped_printers, (
+            "a printer Kiln declined to command must never be recorded as "
+            "halted — the operator would read a running machine as stopped"
+        )
+
+    def test_the_refusal_reaches_the_report_with_its_own_words(self):
+        """So a fleet-stop report names what the operator still has to do."""
+        from kiln.printers.base import PrinterEngagementError
+
+        coord = self._coordinator()
+
+        def _send(printer_id):
+            raise PrinterEngagementError(
+                {"reason": "Kiln is working with a1 right now.", "code": "X"}
+            )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(coord, "_send_emergency_gcode", _send)
+            record = coord.emergency_stop("garage")
+
+        assert "Not stopped by Kiln" in (record.error or "")
+        assert "a1" in (record.error or "")
+        assert record.actions_taken == []
+        assert record.gcode_sent == []
+
+    def test_a_real_delivery_failure_still_latches(self):
+        """The safe behaviour for the indeterminate case is unchanged."""
+        coord = self._coordinator()
+
+        def _send(printer_id):
+            raise RuntimeError("printer unplugged mid-stop")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(coord, "_send_emergency_gcode", _send)
+            record = coord.emergency_stop("a1")
+
+        assert record.success is False
+        assert "G-code delivery failed" in (record.error or "")
+        assert "a1" in coord._stopped_printers, (
+            "an attempted stop that failed leaves the machine in an unknown "
+            "state, which must still be treated as halted"
+        )
