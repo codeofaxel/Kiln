@@ -11,13 +11,16 @@ slicer / OpenSCAD.
 
 from __future__ import annotations
 
-import os
+import re
 import shutil
 import struct
+import zipfile
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from kiln.design_rebuild import normalize_color
 from kiln.design_recipe import (
     DesignPart,
     DesignRecipe,
@@ -25,7 +28,6 @@ from kiln.design_recipe import (
     load_recipe,
     save_recipe,
 )
-from kiln.design_rebuild import normalize_color
 
 
 def _load(design_dir: Path | str) -> DesignRecipe:
@@ -34,9 +36,26 @@ def _load(design_dir: Path | str) -> DesignRecipe:
     return load_recipe(recipe_file)
 
 
+def _envelope(result: Any) -> dict[str, Any]:
+    """Unwrap the MCP ``[Image, dict]`` autofire shape to the dict.
+
+    The tool returns a LIST in production — an inline preview plus the
+    payload — and a bare dict under pytest, where ``git_render_tools``
+    swaps in a stub renderer.  Asserting on the raw return therefore
+    passes for an environment reason rather than a contract one, so every
+    test here goes through this and is correct in both shapes.
+    """
+    if isinstance(result, list):
+        return next(x for x in result if isinstance(x, dict))
+    return result
+
+
 @pytest.fixture
 def tools() -> dict[str, Any]:
-    """Register the rebuild plugin against a fake MCP; yield {name -> fn}."""
+    """Register the rebuild plugin against a fake MCP; yield {name -> fn}.
+
+    Each tool is wrapped so callers always receive the payload dict.
+    """
     from kiln.plugins.design_rebuild_tools import plugin
 
     captured: dict[str, Any] = {}
@@ -50,7 +69,10 @@ def tools() -> dict[str, Any]:
             return deco
 
     plugin.register(_Mcp())
-    return captured
+    return {
+        name: (lambda f: lambda **kw: _envelope(f(**kw)))(fn)
+        for name, fn in captured.items()
+    }
 
 
 def _slicer_available() -> bool:
@@ -214,10 +236,17 @@ class TestFreeForEveryone:
                      "requires_tier", "LicenseTier"):
             assert gate not in src, f"rebuild_design regained a {gate} gate"
 
-    def test_runs_with_kiln_pro_absent(self, tools, tmp_path, monkeypatch) -> None:
+    @needs_slicer
+    def test_rebuild_succeeds_with_kiln_pro_absent(
+        self, tools, tmp_path, monkeypatch,
+    ) -> None:
         """A free user has no kiln-pro on disk at all.  The preview wiring
-        is an optional import; losing it must cost the preview, never the
-        rebuild."""
+        is an optional import; losing it must cost the preview and nothing
+        else.
+
+        This drives a SUCCESSFUL rebuild rather than a refusal: the
+        optional import sits on the success path, so a test that stops at
+        RECIPE_NOT_FOUND never reaches the line it claims to cover."""
         import builtins
 
         real_import = builtins.__import__
@@ -227,9 +256,33 @@ class TestFreeForEveryone:
                 raise ImportError("kiln_pro not installed")
             return real_import(name, *a, **kw)
 
+        d = _make_mesh_recipe(tmp_path, 1)
         monkeypatch.setattr(builtins, "__import__", _no_pro)
-        r = tools["rebuild_design"](recipe_path=str(tmp_path / "nope"))
-        assert r["code"] == "RECIPE_NOT_FOUND"
+        r = tools["rebuild_design"](recipe_path=str(d))
+        assert r["status"] == "success", r
+        assert _artifact_of(r), r
+
+
+class TestPreviewWiring:
+    """The preview rides on an optional import inside ``except ImportError``,
+    which is exactly the shape that loses a feature in silence."""
+
+    def test_envelope_unwraps_both_shapes(self) -> None:
+        payload = {"status": "success"}
+        assert _envelope(payload) is payload
+        assert _envelope(["<image>", payload]) is payload
+
+    def test_the_preview_import_contract_still_resolves(self) -> None:
+        """If kiln-pro renames either name, the tool keeps working and
+        quietly stops previewing — no error, no failing test, just a
+        feature gone.  This is the tripwire for that."""
+        pytest.importorskip("kiln_pro")
+        from kiln_pro.plugins.git_render_tools import (  # noqa: F401
+            _DEFAULT_STL_KEYS,
+            attach_inspect_bundle,
+        )
+
+        assert "output_3mf" in _DEFAULT_STL_KEYS
 
 
 class TestRefusals:
@@ -383,9 +436,6 @@ class TestBriefPassthrough:
 # suite cannot import kiln-pro, where the shared parsers live.  Keep the
 # two in step when either changes.
 # ---------------------------------------------------------------------------
-
-import re
-import zipfile
 
 _G_MOVE = re.compile(r"^G[01]\b")
 _X_WORD = re.compile(r"\bX(-?\d+(?:\.\d+)?)")

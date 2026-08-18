@@ -15,14 +15,6 @@ from typing import Any
 
 _logger = logging.getLogger(__name__)
 
-# The parametric mode's re-derived mesh rides on ``compiled_stl``, which the
-# default preview keys do not know.  Without it, a rebuild on a machine with
-# no Bambu adapter previews NOTHING at the exact moment the user changed the
-# geometry.  Prepended, so a wrapped 3MF still previews in mesh mode.
-_PREVIEW_KEYS: tuple[str, ...] = (
-    "compiled_stl", "output_stl", "stl_path", "output_path", "output_3mf",
-    "mesh_path",
-)
 
 
 class _DesignRebuildPlugin:
@@ -89,10 +81,20 @@ class _DesignRebuildPlugin:
             apply_brief_to_recipe(recipe_path, brief_id)
             result = rebuild_design_from_recipe(recipe_path)
             try:
-                from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+                from kiln_pro.plugins.git_render_tools import (
+                    _DEFAULT_STL_KEYS,
+                    attach_inspect_bundle,
+                )
 
+                # The parametric mode's re-derived mesh rides on
+                # ``compiled_stl``, which the default keys do not know —
+                # without it a rebuild on a machine with no Bambu adapter
+                # previews NOTHING at the moment the user changed geometry.
+                # Prepended to the real default list rather than a copy of
+                # it, so the two cannot drift.
                 return attach_inspect_bundle(
-                    result, level="quick", stl_keys=_PREVIEW_KEYS,
+                    result, level="quick",
+                    stl_keys=("compiled_stl", *_DEFAULT_STL_KEYS),
                 )
             except ImportError:
                 return result
