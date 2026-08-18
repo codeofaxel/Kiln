@@ -625,10 +625,13 @@ def prepare_image_for_emboss(
         Maximum pixel count on the longest edge (default 200).
     invert : bool
         If True, flip light/dark (switch between deboss and emboss).
-        Ignored when the image is detected as a mark on a clean field:
-        a mark's heightmap is polarity-free (the mark displaces, the
-        field stays flush) and the caller's emboss/deboss choice is
-        carried by the geometry side, not the pixel values.
+        Note the downstream contract: ``generate_emboss_scad`` inverts
+        the DAT again (``_invert_dat_heightmap``) because it expects RAW
+        LUMINANCE here — dark ink near 0, light field near 1.  A deboss
+        caller passes ``invert=True`` to put ``_flatten_field``'s output
+        back into that convention, so the ink ends up tall and gets
+        subtracted.  Do not "simplify" this into a single flip without
+        measuring the compiled STL: the two inversions are a pair.
     edge_enhance : bool
         If True, apply a sharpening kernel for crisper edges.
     mask : str
@@ -674,15 +677,6 @@ def prepare_image_for_emboss(
         )
         style = "default"
         edge_enhance = False
-        # _flatten_field output is polarity-free: it maps DISTANCE from the
-        # field tone to displacement, so the mark displaces and the field
-        # stays flush in both modes (the SCAD side sets emboss-vs-deboss
-        # direction with a signed Z scale).  Callers pass invert=True to
-        # mean "deboss — dark ink carves"; applying that flip AFTER the
-        # flatten displaced the entire field at full depth with the mark
-        # left standing, so every logo deboss wore a sunken box around
-        # the artwork.
-        invert = False
 
     # Apply style-specific preprocessing
     if style == "photo":
@@ -1069,28 +1063,20 @@ def prepare_image_for_emboss(
         # carve goes to zero at the artwork's own edges because the field
         # maps to zero, not because a boundary was drawn around it.
         rows = _flatten_field(rows, w, h)
-
-    if edge_enhance:
-        rows = _sharpen(rows, w, h)
-
-    if invert:
-        rows = _invert(rows)
-
-    if not _mark_mode and mask != "none":
+    elif mask != "none":
         # A photo has content everywhere, so SOME boundary must exist; the
         # right one matches the PRODUCT (the proven coin look: a deliberate
         # inset pool), never the photo's own rectangle.  Enforced here in
         # heightmap space as the belt: whatever a style did or skipped
         # upstream — including a style that degraded because an optional
         # dependency was missing — the boundary below is the one that ships.
-        #
-        # Applied AFTER the invert, and that order is load-bearing: invert
-        # is a statement about the image's luminance polarity, the mask is
-        # a statement about the part's geometry.  With the mask first, a
-        # deboss (invert=True) flipped the masked-out zeros to full depth
-        # and carved everything OUTSIDE the shape — the sunken photo frame,
-        # back through the other polarity.
         rows = _mask_rows(rows, w, h, mask, style)
+
+    if edge_enhance:
+        rows = _sharpen(rows, w, h)
+
+    if invert:
+        rows = _invert(rows)
 
     # OpenSCAD surface() reads rows bottom-to-top; images are top-to-bottom.
     # flip_rows=True corrects this so the heightmap orientation matches the image.

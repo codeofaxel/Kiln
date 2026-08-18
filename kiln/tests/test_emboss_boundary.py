@@ -15,17 +15,24 @@ The invariant here is deliberately style-agnostic and dependency-agnostic:
 whatever the style, and whatever optional dependency is missing, the
 heightmap's border must be at the no-carve level.
 
-It is also invert-agnostic, and that axis is load-bearing: the production
-deboss door passes ``invert=True`` (see the decorate_surface image branch),
-and this suite originally ran only the default ``invert=False`` — so the
-border invariant was green at a parameter value the real door never uses,
-while every logo AND photo deboss shipped the frame (caught on a render,
-2026-08-18).  Two orderings caused it: ``_invert`` ran after
-``_flatten_field`` (whose output is polarity-free), and after ``_mask_rows``
-(whose zeros are geometry, not luminance).  Both flips turned "flush" into
-"full depth".  Transparency is the third axis: ``convert("L")`` drops the
-alpha channel, decoding a transparent surround as black, so the fixtures
-below cover opaque and transparent sources alike.
+Transparency is the second axis these fixtures cover: ``convert("L")``
+drops the alpha channel, decoding a transparent surround as BLACK — which
+this pipeline reads as content, so a logo carved its whole bounding box
+(2026-08-18).  The surround is composited before any grayscale convert,
+so an opaque and a transparent source behave identically here.
+
+**Polarity is deliberately NOT parametrized, and that is a finding, not
+an omission.**  The values in this DAT are RAW LUMINANCE — dark ink near
+0, light field near 1 — because ``generate_emboss_scad`` inverts the file
+again on the way out (``_invert_dat_heightmap``) to make the ink tall.
+The two inversions are a PAIR.  A ``invert=True`` variant of the
+assertions below therefore looks obviously wrong (the field reads 1.0,
+not 0.0) while being exactly right, and "fixing" that reading breaks the
+compiled STL: the carve stops following the ink and fills the whole scale
+box.  Measured, 2026-08-18, by compiling both ways.  The end-to-end proof
+that the ink is what actually gets cut lives in kiln-pro's
+``tests/test_decal_offset_fidelity.py``, which parses the compiled STL —
+the only level where this question can be answered honestly.
 """
 
 from __future__ import annotations
@@ -93,44 +100,40 @@ def _border_values(dat_path: str) -> list[float]:
     return top + bottom + left + right
 
 
-@pytest.mark.parametrize("invert", [False, True], ids=["emboss", "deboss"])
 @pytest.mark.parametrize("source", ["opaque", "transparent"])
 @pytest.mark.parametrize("style", ["coin", "photo", "stencil", "default"])
 @pytest.mark.parametrize("mask", ["auto", "circle", "rectangle", "rounded_rectangle"])
-def test_emboss_never_carves_the_image_rectangle(tmp_path, style, mask, source, invert):
-    """No style, no mask choice, no polarity, no alpha may leave the border carving."""
+def test_emboss_never_carves_the_image_rectangle(tmp_path, style, mask, source):
+    """No style, no mask choice and no alpha may leave the border carving."""
     if source == "opaque":
         src = _mark_on_white(tmp_path / "mark.png")
     else:
         src = _mark_on_transparent(tmp_path / "mark_alpha.png")
-    out = tmp_path / f"out_{style}_{mask}_{source}_{invert}"
+    out = tmp_path / f"out_{style}_{mask}_{source}"
     out.mkdir()
 
     hm = prepare_image_for_emboss(
         str(src), str(out), max_resolution=120, style=style, mask=mask,
-        invert=invert,
     )
     border = _border_values(hm["dat_path"])
 
     assert border, "heightmap had no rows"
     worst = max(border)
     assert worst == pytest.approx(0.0, abs=1e-6), (
-        f"style={style!r} mask={mask!r} source={source!r} invert={invert!r}: "
-        f"the heightmap border carves (max {worst:.3f} of full depth), so "
-        "the source image's rectangle is cut into the part as a sunken frame"
+        f"style={style!r} mask={mask!r} source={source!r}: the heightmap "
+        f"border carves (max {worst:.3f} of full depth), so the source "
+        "image's rectangle is cut into the part as a sunken frame"
     )
 
 
-@pytest.mark.parametrize("invert", [False, True], ids=["emboss", "deboss"])
-def test_photo_content_still_carves_inside_the_shape(tmp_path, invert):
-    """The guarantee must not flatten the artwork itself — in either polarity."""
+def test_photo_content_still_carves_inside_the_shape(tmp_path):
+    """The guarantee must not flatten the artwork itself."""
     src = _photo_like(tmp_path / "photo.png")
-    out = tmp_path / f"out_{invert}"
+    out = tmp_path / "out"
     out.mkdir()
 
     hm = prepare_image_for_emboss(
         str(src), str(out), max_resolution=120, style="coin", mask="circle",
-        invert=invert,
     )
     rows = [
         [float(v) for v in line.split()]
@@ -173,9 +176,8 @@ def test_missing_background_removal_still_masks(tmp_path, monkeypatch):
     )
 
 
-@pytest.mark.parametrize("invert", [False, True], ids=["emboss", "deboss"])
 @pytest.mark.parametrize("source", ["opaque", "transparent", "transparent-white-ink"])
-def test_a_mark_carves_only_its_own_ink(tmp_path, source, invert):
+def test_a_mark_carves_only_its_own_ink(tmp_path, source):
     """A logo must not sit in a pool: only the artwork displaces the surface.
 
     The carve fraction must track the artwork's ink coverage, not the area
@@ -183,17 +185,13 @@ def test_a_mark_carves_only_its_own_ink(tmp_path, source, invert):
     the field, and the field of a logo is empty space that belongs to the
     part's own surface.
 
-    The deboss cases replay the shipped defect directly: ``invert=True`` is
-    what decorate_surface passes for ``mode="deboss"``, and before the fix
-    the flip ran after ``_flatten_field``, so the FIELD carved at full depth
-    and the mark stood untouched — a sunken box around the logo (~94% carve
-    fraction against ~4% ink).  The transparent cases pin the alpha half:
-    a dropped alpha channel decodes the surround as ink and carves the
-    mark's whole bounding box.  The white-ink case pins the vanishing-mark
-    fallback: a white logo on a transparent surround (the light variant
-    every brand kit ships) is invisible against a white flatten, so the
-    alpha coverage must be taken as the ink — ink colour never changes
-    carve geometry.
+    The transparent case pins the alpha half: a dropped alpha channel
+    decodes the surround as ink, so the mark's whole bounding box counts
+    as artwork.  The white-ink case pins the vanishing-mark fallback: a
+    white logo on a transparent surround (the light variant every brand
+    kit ships) is invisible against a white flatten, so the alpha
+    coverage must be taken as the ink — ink colour never changes carve
+    geometry.
     """
     from PIL import Image, ImageDraw
 
@@ -221,7 +219,6 @@ def test_a_mark_carves_only_its_own_ink(tmp_path, source, invert):
 
     hm = prepare_image_for_emboss(
         str(src), str(out), max_resolution=120, style="coin", mask="auto",
-        invert=invert,
     )
     rows = [
         [float(v) for v in line.split()]
@@ -231,9 +228,9 @@ def test_a_mark_carves_only_its_own_ink(tmp_path, source, invert):
     vals = [v for r in rows for v in r]
     carve = sum(1 for v in vals if v > 0.3) / len(vals)
     assert carve == pytest.approx(ink, abs=0.05), (
-        f"source={source!r} invert={invert!r}: carve fraction {carve:.3f} vs "
-        f"ink coverage {ink:.3f} — the engine is carving a pool around the "
-        "mark, not just the mark"
+        f"source={source!r}: carve fraction {carve:.3f} vs ink coverage "
+        f"{ink:.3f} — the engine is carving a pool around the mark, not "
+        "just the mark"
     )
 
 
