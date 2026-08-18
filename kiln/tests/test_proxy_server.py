@@ -4,7 +4,9 @@ Covers:
 - License validation (valid key, invalid key, empty key)
 - Material listing delegation and error propagation
 - Quote handling with fee calculation and server-side quote caching
-- Order handling (quote token validation, free tier limits, fee charging,
+- Quote handling payment readiness (fee notice, and the
+  PAYMENT_METHOD_REQUIRED refusal that replaced the retired item cap)
+- Order handling (quote token validation, uncapped volume, fee charging,
   auto-refund on failure, ownership validation)
 - Order cancellation delegation
 - Order status delegation
@@ -124,9 +126,21 @@ def _seed_quote_cache(
 
 @pytest.fixture()
 def mock_db() -> MagicMock:
-    """Mock KilnDB instance."""
+    """Mock KilnDB instance.
+
+    The billing counters return real integers rather than bare
+    ``MagicMock``s.  The ledger does arithmetic on what they return
+    (``orders_so_far < allowance``), so a MagicMock does not fail where
+    it is configured -- it fails several layers down, inside kiln-pro,
+    as a ``TypeError`` that names neither the counter nor the test.
+    Zero is the honest default: a user with no orders yet this month.
+    """
     db = MagicMock()
     db._conn = MagicMock()
+    db.billing_charges_this_month.return_value = 0
+    db.billing_charges_this_month_for_user.return_value = 0
+    db.billing_charge_items_this_month.return_value = 0
+    db.billing_charge_items_this_month_for_user.return_value = 0
     return db
 
 
@@ -370,6 +384,70 @@ class TestHandleQuote:
         assert "quote_token" in result
         assert len(result["quote_token"]) == 32  # uuid4 hex
 
+    def test_past_allowance_without_card_refused_at_quote_time(
+        self,
+        orch: ProxyOrchestrator,
+        mock_provider: MagicMock,
+        mock_payment_mgr: MagicMock,
+    ):
+        """The blocking refusal that replaced the retired item cap.
+
+        Past the fee-free allowance every order carries a real charge, so
+        a caller with no saved card is refused at QUOTE time -- before
+        any provider work, and never at order time after a successful
+        quote taught them to expect success.  The Stripe-hosted setup URL
+        rides in the refusal so the fix is one click, not a support ticket.
+        """
+        orch._payment_mgr = mock_payment_mgr
+        mock_payment_mgr.has_payment_method.return_value = False
+        mock_payment_mgr.get_setup_url.return_value = "https://checkout.stripe.com/c/setup_123"
+
+        with patch.object(
+            orch._ledger, "network_jobs_this_month_for_user", return_value=3
+        ), patch(
+            "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+            return_value=mock_provider,
+        ):
+            with pytest.raises(FulfillmentError) as exc_info:
+                orch.handle_quote(
+                    "craftcloud",
+                    "/tmp/model.stl",
+                    QuoteRequest(file_path="/tmp/model.stl", material_id="pla"),
+                    user_email="user@test.com",
+                )
+
+        assert exc_info.value.code == "PAYMENT_METHOD_REQUIRED"
+        assert (
+            exc_info.value.details["setup_url"]
+            == "https://checkout.stripe.com/c/setup_123"
+        )
+        # Refused BEFORE the provider was asked to price anything.
+        mock_provider.get_quote.assert_not_called()
+
+    def test_last_free_order_is_flagged_at_quote_time(
+        self,
+        orch: ProxyOrchestrator,
+        mock_provider: MagicMock,
+    ):
+        """The final fee-free order says so, so the first fee is not a surprise."""
+        mock_provider.get_quote.return_value = _quote()
+        fee = _fee_calc()
+
+        with patch.object(
+            orch._ledger, "network_jobs_this_month_for_user", return_value=2
+        ), patch(
+            "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+            return_value=mock_provider,
+        ), patch.object(orch._ledger, "calculate_fee", return_value=fee):
+            result = orch.handle_quote(
+                "craftcloud",
+                "/tmp/model.stl",
+                QuoteRequest(file_path="/tmp/model.stl", material_id="pla"),
+                user_email="user@test.com",
+            )
+
+        assert "last fee-free order" in result["fee_notice"]
+
     def test_quote_cached_server_side(
         self,
         orch: ProxyOrchestrator,
@@ -501,11 +579,38 @@ class TestHandleOrder:
                 quote_token=token,
             )
 
-    def test_free_tier_limit_enforcement(self, orch: ProxyOrchestrator):
+    def test_free_tier_volume_is_unlimited(
+        self,
+        orch: ProxyOrchestrator,
+        mock_provider: MagicMock,
+    ):
+        """Volume is uncapped at every tier -- past orders do not block.
+
+        Replaces the old ``FREE_TIER_LIMIT`` item-cap tests.  That cap was
+        retired in favour of unlimited volume with a fee-free monthly
+        allowance, so a free-tier user well past the old 3-item ceiling
+        must still be able to order.  The blocking refusal now lives at
+        quote time and is ``PAYMENT_METHOD_REQUIRED`` -- see
+        ``TestHandleQuote`` below.
+        """
         token = _seed_quote_cache(orch, "token-free")
-        with patch.object(orch._ledger, "network_items_this_month_for_user", return_value=3), \
-             pytest.raises(FulfillmentError, match="Free tier limit reached"):
-            orch.handle_order(
+        mock_provider.place_order.return_value = _order_result()
+        fee = _fee_calc()
+
+        with patch.object(
+            orch._ledger, "network_jobs_this_month_for_user", return_value=99
+        ), patch.object(orch._ledger, "calculate_fee", return_value=fee), \
+             patch.object(
+                 orch._ledger,
+                 "calculate_and_record_fee",
+                 return_value=(fee, "charge-1"),
+             ), \
+             patch.object(orch, "_tag_charge_with_user"), \
+             patch(
+                 "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+                 return_value=mock_provider,
+             ):
+            result = orch.handle_order(
                 "craftcloud",
                 OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
@@ -513,7 +618,9 @@ class TestHandleOrder:
                 quote_token=token,
             )
 
-    def test_free_tier_allows_under_limit(
+        assert result["order"]["order_id"] == "o-456"
+
+    def test_free_tier_orders_within_allowance(
         self,
         orch: ProxyOrchestrator,
         mock_provider: MagicMock,
@@ -522,7 +629,7 @@ class TestHandleOrder:
         mock_provider.place_order.return_value = _order_result()
         fee = _fee_calc()
 
-        with patch.object(orch._ledger, "network_items_this_month_for_user", return_value=2), \
+        with patch.object(orch._ledger, "network_jobs_this_month_for_user", return_value=2), \
              patch.object(orch._ledger, "calculate_fee", return_value=fee), \
              patch.object(
                  orch._ledger,
@@ -544,20 +651,44 @@ class TestHandleOrder:
 
         assert result["order"]["order_id"] == "o-456"
 
-    def test_free_tier_blocks_order_quantity_over_remaining_items(self, orch: ProxyOrchestrator):
-        token = _seed_quote_cache(orch, "token-over-items", item_count=2)
-        with patch.object(orch._ledger, "network_items_this_month_for_user", return_value=2):
-            with pytest.raises(FulfillmentError, match="fulfillment items") as exc_info:
-                orch.handle_order(
-                    "craftcloud",
-                    OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
-                    user_email="user@test.com",
-                    user_tier=LicenseTier.FREE,
-                    quote_token=token,
-                )
-            assert exc_info.value.code == "FREE_TIER_LIMIT"
+    def test_multi_item_order_is_not_capped(
+        self,
+        orch: ProxyOrchestrator,
+        mock_provider: MagicMock,
+    ):
+        """A multi-item order is no longer measured against an item ceiling.
 
-    def test_business_tier_bypasses_limit(
+        The retired cap counted ITEMS, so a 2-item order could be refused
+        for overrunning the remainder.  The allowance now counts ORDERS
+        (Terms §6.1), which is what stopped a single multi-part order
+        consuming a whole month's fee-free allowance.
+        """
+        token = _seed_quote_cache(orch, "token-multi-item", item_count=2)
+        mock_provider.place_order.return_value = _order_result()
+        fee = _fee_calc()
+
+        with patch.object(orch._ledger, "calculate_fee", return_value=fee), \
+             patch.object(
+                 orch._ledger,
+                 "calculate_and_record_fee",
+                 return_value=(fee, "charge-1"),
+             ), \
+             patch.object(orch, "_tag_charge_with_user"), \
+             patch(
+                 "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+                 return_value=mock_provider,
+             ):
+            result = orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
+                user_email="user@test.com",
+                user_tier=LicenseTier.FREE,
+                quote_token=token,
+            )
+
+        assert result["order"]["order_id"] == "o-456"
+
+    def test_business_tier_orders_normally(
         self,
         orch: ProxyOrchestrator,
         mock_provider: MagicMock,
@@ -611,7 +742,13 @@ class TestHandleOrder:
                 quote_token=token,
             )
 
-        mock_payment_mgr.charge_fee.assert_called_once_with("q-123", fee)
+        # ``user_email`` is part of the contract, not incidental: it routes
+        # the charge to the CALLER's saved card.  On the shared hosted
+        # server a charge without it bills whatever card the process
+        # holds, which is the cross-tenant billing bug class.
+        mock_payment_mgr.charge_fee.assert_called_once_with(
+            "q-123", fee, user_email="user@test.com"
+        )
         assert result["order"]["order_id"] == "o-456"
         assert result["kiln_fee"]["fee_amount"] == 5.0
 
@@ -754,18 +891,38 @@ class TestHandleOrder:
                 quote_token=token,
             )
 
-    def test_pro_tier_subject_to_limit(self, orch: ProxyOrchestrator):
+    def test_pro_tier_volume_is_unlimited(
+        self,
+        orch: ProxyOrchestrator,
+        mock_provider: MagicMock,
+    ):
+        """Pro carries no volume ceiling either -- the fee schedule is tier-flat."""
         token = _seed_quote_cache(orch, "token-pro")
-        with patch.object(orch._ledger, "network_items_this_month_for_user", return_value=3):
-            with pytest.raises(FulfillmentError, match="Free tier limit reached") as exc_info:
-                orch.handle_order(
-                    "craftcloud",
-                    OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
-                    user_email="user@test.com",
-                    user_tier=LicenseTier.PRO,
-                    quote_token=token,
-                )
-            assert exc_info.value.code == "FREE_TIER_LIMIT"
+        mock_provider.place_order.return_value = _order_result()
+        fee = _fee_calc()
+
+        with patch.object(
+            orch._ledger, "network_jobs_this_month_for_user", return_value=99
+        ), patch.object(orch._ledger, "calculate_fee", return_value=fee), \
+             patch.object(
+                 orch._ledger,
+                 "calculate_and_record_fee",
+                 return_value=(fee, "charge-1"),
+             ), \
+             patch.object(orch, "_tag_charge_with_user"), \
+             patch(
+                 "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+                 return_value=mock_provider,
+             ):
+            result = orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
+                user_email="user@test.com",
+                user_tier=LicenseTier.PRO,
+                quote_token=token,
+            )
+
+        assert result["order"]["order_id"] == "o-456"
 
     def test_uses_cached_price_not_client_supplied(
         self,
