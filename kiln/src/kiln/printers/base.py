@@ -2046,13 +2046,10 @@ def _ending_was_watched(
     # is minutes old dates the transition we just "saw", by exactly the same
     # amount and for the same reason.  Absent age means the caller learned
     # this from the printer on this call, which is current by construction.
-    if (
+    return not (
         isinstance(state_age_seconds, (int, float))
         and state_age_seconds > STALE_STATE_WARN_AGE
-    ):
-        return False
-
-    return True
+    )
 
 
 def _credible_hours(elapsed_seconds: Any) -> float | None:

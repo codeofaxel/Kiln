@@ -39,7 +39,7 @@ Bambu ``get_state()`` is answered from the push cache, so polling straight
 through an MQTT outage keeps that clock warm while nothing is watching.  Nor
 can it ask when the printer last SPOKE, because a partial frame carries no run
 state, so one landing ahead of the reconnect dump makes an hour-old ending
-look a second old.  The last section holds every half of that.
+look a second old.  The second-door section holds every half of that.
 """
 
 from __future__ import annotations
