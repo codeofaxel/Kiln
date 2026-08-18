@@ -461,18 +461,74 @@ def _consume_return(adapter: Any, machine: str) -> bool:
 
 
 
-def _claim_if_running(adapter: Any, machine: str) -> None:
-    """Take the free slot for *adapter*, if it is actually running a print."""
-    try:
-        from kiln.printers.base import PrinterStatus
+def observe(adapter: Any, action: str, result: Any) -> None:
+    """Learn from a command that already ran, without asking anything twice.
 
-        with internal_read():
-            if adapter.get_state().state not in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+    Two jobs, both paid for by results the caller already has:
+
+    * **Claim the free slot.**  If Kiln is driving nothing and this machine
+      turns out to be printing, it becomes the machine Kiln works with.
+      Without this, handing a machine back would empty the slot and leave
+      EVERY machine commandable -- the rule paying for its own escape hatch:
+      hand back, then drive the whole bench.  An idle machine claims
+      nothing; there is no job to be busy with, so asking about one costs
+      nothing and holds nothing.
+    * **Fill in the job identity.**  A claim made from a status reply knows
+      the machine is printing but not WHICH print.  The next ``get_job`` on
+      that machine supplies it for free, so the engagement sharpens itself
+      rather than spending a round trip to start out sharp.
+
+    Measured before it was written this way: claiming inside the gate cost a
+    second ``get_state`` and a ``get_job`` on the first status call of every
+    engagement.  Never raises.
+    """
+    try:
+        if action not in ("get_state", "get_job") or _in_internal_read():
+            return
+        # Asked before anything is read from disk, deliberately: a caller
+        # whose tier runs several machines is never gated, so it must not
+        # pay a file read on every status poll to find that out.  The same
+        # ordering as ``check_command``.
+        if _multi_machine_tier():
+            return
+        machine = machine_id(adapter)
+        if not machine:
+            return
+        engagement = current()
+
+        if engagement is None:
+            if action != "get_state":
                 return
-            job = adapter.get_job()
-        engage(adapter, job, reason="commanded")
-    except Exception:  # noqa: BLE001 — claiming is bookkeeping, never a blocker
-        logger.debug("could not claim the free slot", exc_info=True)
+            from kiln.printers.base import PrinterStatus
+
+            if getattr(result, "state", None) not in (
+                PrinterStatus.PRINTING,
+                PrinterStatus.PAUSED,
+            ):
+                return
+            engage(adapter, None, reason="commanded")
+            return
+
+        if (
+            action == "get_job"
+            and engagement.machine == machine
+            and engagement.job is None
+        ):
+            identity = resolve_job_identity(result)
+            if identity is not None:
+                store = _read_store()
+                current_record = Engagement.from_dict(store.get("engaged"))
+                if current_record is not None and current_record.machine == machine:
+                    store["engaged"] = Engagement(
+                        machine=current_record.machine,
+                        label=current_record.label,
+                        job=identity,
+                        since=current_record.since,
+                        reason=current_record.reason,
+                    ).to_dict()
+                    _write_store(store)
+    except Exception:  # noqa: BLE001 — bookkeeping never breaks a command
+        logger.debug("engagement observation failed", exc_info=True)
 
 
 
@@ -492,16 +548,10 @@ def check_command(adapter: Any, action: str) -> dict[str, Any] | None:
         machine = machine_id(adapter)
         engagement = current()
         if engagement is None:
-            # Nothing is engaged, so the machine being asked about becomes the
-            # one Kiln is working with -- but only if it has a live print to
-            # hold.  Without this, handing a machine back would empty the slot
-            # and leave EVERY machine commandable, which is the rule paying
-            # for its own escape hatch: hand back, then drive the whole bench.
-            #
-            # An idle machine claims nothing.  There is no job to be busy with,
-            # so asking about one costs a user nothing and holds nothing.
-            if machine:
-                _claim_if_running(adapter, machine)
+            # Nothing is engaged.  The machine being asked about becomes the
+            # one Kiln works with, but that is decided in ``observe`` AFTER
+            # the command runs, from its own answer -- asking the printer here
+            # would make every first status call pay for a second round trip.
             return None
 
         if not machine or machine == engagement.machine:
