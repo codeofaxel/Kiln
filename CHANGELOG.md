@@ -18,6 +18,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   it starts up, before it's read your model; Kiln now retries it instead of
   handing you an unexplained failure.
 
+- **Preview renders no longer ask for your keychain password.** On macOS,
+  generating a preview could pop up a system dialog asking to store a password
+  for Chrome — a browser you never opened. It doesn't anymore.
+
 ## [1.4.0] - 2026-08-14
 
 ### Added
