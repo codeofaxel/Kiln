@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Running several printers at once is a Kiln Business feature, and that now
+  properly applies to every printer command.** `hand_back_printer` moves Kiln
+  between machines without touching a running print.
+
 - **When Kiln asks you to update, it says what you'd get.** Update prompts
   used to give you the version number and nothing else. Now they name two or
   three of the things the new release adds, so you can decide whether it's
