@@ -11,8 +11,11 @@ Two modes, and which one runs is a property of the recipe, not a flag:
   applied to the source and the geometry is RECOMPILED.  This is the whole
   point of keeping the source: to make a part bigger you change the
   parameter and re-derive, so a 3mm wall stays 3mm and an M3 clearance
-  hole still fits an M3 screw.  Scaling the mesh instead would give you a
-  3.6mm wall and a hole no screw fits — the same object, quietly ruined.
+  hole stays an M3 clearance hole.  Scaling the mesh instead scales every
+  feature with the body — a 3mm wall becomes 3.6mm, and a 3.4mm clearance
+  hole becomes 4.08mm, which no longer holds an M3 screw the way it was
+  dimensioned to (scale down instead and the screw stops fitting at all).
+  Either way the fits are gone: the same object, quietly ruined.
 * **Mesh** — no source, so the geometry on disk IS the design and the
   recorded meshes are re-sliced exactly as they are.
 

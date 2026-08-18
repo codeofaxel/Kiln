@@ -44,8 +44,10 @@ class _DesignRebuildPlugin:
               holes come out exactly as designed.  To resize a parametric
               design, change the parameter — with ``update_scad_parameter``
               on the source, or on the recipe's parameters — and rebuild.
-              Never scale the mesh instead: 20% larger turns a 3mm wall into
-              3.6mm and leaves an M3 clearance hole that fits nothing.
+              Never scale the mesh instead: it scales every feature with
+              the body, so a 3mm wall becomes 3.6mm and a 3.4mm M3
+              clearance hole becomes 4.08mm — no longer the fit it was
+              dimensioned for.
             - **Mesh** (no source): the recorded part meshes are re-sliced
               exactly as they are.  A geometry change needs a mesh edit first
               (``rescale_model``, ``thicken_mesh_walls``, ...), then a rebuild.
