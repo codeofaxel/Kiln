@@ -3885,8 +3885,6 @@ _LITE_PRINTER_KEYS = (
 )
 
 
-@mcp.tool()
-
 def _engagement_machine(adapter: Any) -> str:
     """This adapter's machine id, or "" — never raises into a status read."""
     try:
@@ -3897,6 +3895,7 @@ def _engagement_machine(adapter: Any) -> str:
         return ""
 
 
+@mcp.tool()
 def printer_status(
     printer_name: str | None = None,
     detail: str = "full",

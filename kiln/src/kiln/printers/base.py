@@ -588,12 +588,18 @@ def _make_engagement_gated(action: str, original):
 
     @functools.wraps(original)
     def _gated(self, *args, **kwargs):
-        from kiln.printers.engagement import check_command
+        from kiln.printers.engagement import check_command, observe
 
         verdict = check_command(self, action)
         if verdict is not None:
             raise PrinterEngagementError(verdict)
-        return original(self, *args, **kwargs)
+        result = original(self, *args, **kwargs)
+        # Learn from the answer the command already produced.  Claiming the
+        # free slot from here rather than from the gate is what keeps the
+        # rule free: asking the printer up front cost a second round trip on
+        # the first status call of every engagement.
+        observe(self, action, result)
+        return result
 
     _gated._kiln_engagement_wrapped = True  # type: ignore[attr-defined]
     return _gated
@@ -1066,10 +1072,13 @@ class PrinterAdapter(ABC):
             # is excluded above -- it continues a print that already has an
             # engagement, and re-recording it would reset the return budget.
             try:
-                from kiln.printers.engagement import engage, internal_read
+                from kiln.printers.engagement import engage
 
-                with internal_read():
-                    engage(self, self.get_job(), reason="started")
+                # Recorded WITHOUT asking the printer which job this is: a
+                # status call right after a start is an extra round trip on
+                # the one path that must stay lean, and the identity arrives
+                # for free on the next get_job (engagement.observe fills it).
+                engage(self, None, reason="started")
             except Exception:  # noqa: BLE001 — bookkeeping never blocks a print
                 import logging as _logging
 

@@ -1063,10 +1063,13 @@ class _MonitoringToolsPlugin:
                 # slot rule can check rather than a vague association with a
                 # printer that merely happens to be busy.
                 try:
-                    from kiln.printers.engagement import engage, internal_read
+                    from kiln.printers.engagement import engage
 
-                    with internal_read():
-                        engage(adapter, adapter.get_job(), reason="watching")
+                    # No extra get_job here: the watcher is about to poll the
+                    # printer anyway, and engagement.observe fills the job
+                    # identity in from that.  Asking now would consume a
+                    # reading the watch loop is already paying for.
+                    engage(adapter, None, reason="watching")
                 except Exception:  # noqa: BLE001 — never break a watch
                     _logger.debug("watch engagement not recorded", exc_info=True)
 
