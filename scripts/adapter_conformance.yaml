@@ -9,6 +9,15 @@
 #   deferred         a real gap, not yet closed — needs `why` and ISO `by`
 #   delegates_to     (whole adapter) forwards to another adapter's objects
 #
+# Each adapter also documents `duration_semantics` — what its
+# JobProgress.print_time_seconds means after a print ends: `frozen` (the
+# printer's own job clock, stopped at the ending — a late read is still
+# correct), `stopwatch` (a Kiln-side timer nothing stops — a late read
+# inflates), or `none` (no job clock at all).  The runtime authority is
+# the adapter's _DURATION_SEMANTICS ClassVar — this file is not shipped
+# in the pip package — and the two are pinned in lockstep by
+# kiln/tests/test_print_duration_capture.py.
+#
 # `not_in_protocol` is a claim about the PROTOCOL, not about our effort.
 # When the honest answer is "nobody has checked yet", the row is deferred —
 # an unverified not_in_protocol is how a real gap becomes permanent.
@@ -18,6 +27,7 @@ adapters:
   # ---------------------------------------------------------------- bambu
   # The reference implementation: MQTT push cache, richest state block.
   bambu:
+    duration_semantics: stopwatch  # Kiln-side stopwatch (job_elapsed_seconds); a late read keeps counting
     fields:
       PrinterState.connected: provided
       PrinterState.state: provided
@@ -46,6 +56,7 @@ adapters:
 
   # ------------------------------------------------------------- creality
   creality:
+    duration_semantics: frozen  # forwards to Moonraker's print_duration, frozen at the ending
     delegates_to: moonraker-or-octoprint-by-model
     why: >-
       Pure wrapper. get_state/get_job/_start_print_impl all forward to
@@ -55,6 +66,7 @@ adapters:
   # ----------------------------------------------------------------- duet
   # Fresh-pull over HTTP (/rr_model, or /rr_status on RRF2).
   duet:
+    duration_semantics: frozen  # job duration is RRF's own clock, frozen at the ending
     fields:
       PrinterState.connected: provided
       PrinterState.state: provided
@@ -93,6 +105,7 @@ adapters:
   # --------------------------------------------------------------- elegoo
   # Cache-backed (SDCP over websocket); stamps its own state vintage.
   elegoo:
+    duration_semantics: frozen  # CurrentTicks is the printer's own clock, frozen at the ending
     fields:
       PrinterState.connected: provided
       PrinterState.state: provided
@@ -123,6 +136,7 @@ adapters:
 
   # ------------------------------------------------------------ moonraker
   moonraker:
+    duration_semantics: frozen  # print_stats.print_duration is Klipper's own clock, frozen at the ending
     fields:
       PrinterState.connected: provided
       PrinterState.state: provided
@@ -155,6 +169,7 @@ adapters:
 
   # ------------------------------------------------------------ octoprint
   octoprint:
+    duration_semantics: frozen  # progress.printTime is OctoPrint's own clock, frozen at the ending
     fields:
       PrinterState.connected: provided
       PrinterState.state: provided
@@ -192,6 +207,7 @@ adapters:
   # ------------------------------------------------------------ prusalink
   # Fresh-pull over HTTP (/api/v1/status) on every call.
   prusalink:
+    duration_semantics: frozen  # time_printing is the printer's own clock, frozen at the ending
     fields:
       PrinterState.connected: provided
       PrinterState.state: provided
@@ -225,6 +241,7 @@ adapters:
   # Direct USB/serial. Asks the firmware on every call; the firmware
   # answers with very little.
   serial_adapter:
+    duration_semantics: none  # no job clock at all; hours are unknowable rather than zero
     fields:
       PrinterState.connected: provided
       PrinterState.state: provided

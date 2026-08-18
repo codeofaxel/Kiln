@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import urlparse, urlunparse
 
 import requests
@@ -694,6 +694,12 @@ class CrealityAdapter(PrinterAdapter):
     This adapter gives Kiln a Creality-branded entry point while delegating
     the hardware operations to the existing Moonraker adapter.
     """
+
+    # get_job forwards to the Moonraker backend, whose print_duration is
+    # Klipper's own job clock, frozen at the ending.  Declared here rather
+    # than inherited because the lifecycle wrap runs on THIS class (the
+    # backend is delegated) and the default would wrongly read stopwatch.
+    _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
     def __init__(
         self,

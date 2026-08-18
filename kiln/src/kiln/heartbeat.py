@@ -452,6 +452,15 @@ def _send_heartbeat() -> None:
             # crashed the usage dashboard's tool-usage tile the first time
             # anything tried to read it (kiln-pro migration 095, 2026-07-09).
             "p_details": {
+                # The late subset of prints_hours_known — durations learned
+                # from a frozen printer clock after the ending, not by
+                # watching it (watched = known − reported).  Inside
+                # p_details rather than a p_* field of its own because
+                # record_heartbeat's server-side signature is fixed: an
+                # unknown p_* argument errors the whole heartbeat.
+                "prints_hours_reported": stats.get(
+                    "prints_hours_reported", 0
+                ),
                 "texture_names": stats.get("texture_names", {}),
                 "decoration_types": stats.get("decoration_types", {}),
                 "slicer_profiles": stats.get("slicer_profiles", {}),

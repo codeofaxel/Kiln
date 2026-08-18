@@ -35,7 +35,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import paho.mqtt.client as mqtt
 
@@ -659,6 +659,10 @@ class BambuAdapter(PrinterAdapter):
         state = adapter.get_state()
         print(state.state, state.tool_temp_actual)
     """
+
+    # Elapsed comes from job_elapsed_seconds — a Kiln-side stopwatch nothing
+    # stops on its own — so a late reading keeps counting and must be refused.
+    _DURATION_SEMANTICS: ClassVar[str] = "stopwatch"
 
     # Opt in to PrinterAdapter's idle connection release: a Bambu rations LAN
     # MQTT clients, so holding one while nobody is calling costs another
@@ -1555,6 +1559,7 @@ class BambuAdapter(PrinterAdapter):
                             elapsed_seconds=elapsed_seconds,
                             state_age_seconds=0.0,
                             observation_gap_seconds=push_gap_seconds,
+                            duration_semantics=self._DURATION_SEMANTICS,
                         )
                 except Exception as exc:  # pragma: no cover
                     logger.debug(

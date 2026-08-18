@@ -17,7 +17,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import quote
 
 import requests
@@ -594,6 +594,10 @@ class MoonrakerAdapter(PrinterAdapter):
         state = adapter.get_state()
         print(state.state, state.tool_temp_actual)
     """
+
+    # print_stats.print_duration is Klipper's own job clock, frozen at the
+    # ending — a late reading is merely late and still correct.
+    _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
     def __init__(
         self,

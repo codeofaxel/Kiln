@@ -751,6 +751,29 @@ class PrinterAdapter(ABC):
         """
         self._safety_profile_id = profile_id
 
+    # -- print-duration semantics ----------------------------------------
+    #
+    # What this backend's ``JobProgress.print_time_seconds`` means AFTER the
+    # print ends — the fact that decides whether a late reading can be
+    # trusted (see ``_record_print_duration``):
+    #
+    #   "frozen"     the printer reports its own job clock and freezes it at
+    #                the ending, so a late read is merely late and still
+    #                correct;
+    #   "stopwatch"  the number is a Kiln-side stopwatch nothing stops on
+    #                its own, so a late read keeps counting and inflates;
+    #   "none"       the backend has no job clock at all (direct USB), so
+    #                its hours are unknowable rather than zero.
+    #
+    # The default is the STRICT one on purpose: an adapter that never
+    # declares is treated as a stopwatch, whose late readings are refused —
+    # forgetting to declare can cost real hours, never invent them.  Every
+    # concrete adapter declares explicitly (pinned by
+    # test_print_duration_capture, alongside the documentation copy in
+    # scripts/adapter_conformance.yaml — which is NOT shipped in the pip
+    # package, which is why runtime reads this attribute and not that file).
+    _DURATION_SEMANTICS: ClassVar[str] = "stopwatch"
+
     # -- idle connection release ----------------------------------------
     #
     # Some printers ration connections: a Bambu accepts only a few LAN MQTT
@@ -2056,8 +2079,9 @@ def _record_print_duration(
     elapsed_seconds: Any,
     state_age_seconds: float | None,
     observation_gap_seconds: float | None,
+    duration_semantics: str,
 ) -> None:
-    """Bank this print's duration — but only if Kiln really WATCHED it end.
+    """Bank this print's duration — if this reading can be TRUSTED.
 
     ``print_hours`` means the printer was RUNNING, not that parts shipped: a
     print cancelled at ten minutes really did run for ten minutes, and this
@@ -2077,12 +2101,24 @@ def _record_print_duration(
       reads ~91.  Monotonic and plausible, so it would never look wrong — it
       would just quietly inflate every Bambu install's total.
 
-    One rule covers both, and it is the rule the design asks for: a duration
-    is recorded only when this ending was WATCHED — the two checks
-    :func:`_ending_was_watched` holds.  Anything else is finding out
-    afterwards, and an honest absence beats a confident wrong number.
-    ``prints - prints_hours_known`` is what makes that absence visible
-    instead of reading as zero hours printed.
+    *duration_semantics* — the adapter's own ``_DURATION_SEMANTICS``
+    declaration — is which family this reading came from, and it decides
+    what a late one is worth:
+
+    * an ending :func:`_ending_was_watched` banks on every backend, exactly
+      as before;
+    * an ending noticed LATE banks only when the reading is ``"frozen"`` —
+      the printer's own clock stopped with the print, so late is merely
+      late — and is tagged ``reported`` so the daily total says how much of
+      itself arrived that way (``prints_hours_reported``, the late subset
+      of ``prints_hours_known``);
+    * a late ``"stopwatch"`` reading still banks NOTHING, because it kept
+      counting after the ending and would quietly inflate; ``"none"`` never
+      has a number to offer in the first place.
+
+    Anything refused stays an honest absence rather than a confident wrong
+    number — ``prints - prints_hours_known`` is what makes that absence
+    visible instead of reading as zero hours printed.
 
     TWO DOORS reach an ending, and this is the only place the rule lives.
     Each measures *observation_gap_seconds* — how long since we last had
@@ -2115,10 +2151,16 @@ def _record_print_duration(
     if hours is None:
         return
 
-    if not _ending_was_watched(
+    watched = _ending_was_watched(
         observation_gap_seconds=observation_gap_seconds,
         state_age_seconds=state_age_seconds,
-    ):
+    )
+    # A late reading is only worth banking when the printer's own clock
+    # froze with the print.  Comparing against "frozen" — never against
+    # "stopwatch" — is the fail-safe direction: an adapter that forgot to
+    # declare inherits the strict default and its late readings are
+    # refused, which can cost real hours but never invent them.
+    if not watched and duration_semantics != "frozen":
         return
 
     from kiln.daily_stats import record_print_hours_for_job
@@ -2134,7 +2176,7 @@ def _record_print_duration(
     # keys on the hook's ``job_id``.  Bank under a second spelling of the same
     # print and nothing collapses them; the hours row and the outcome row also
     # stop naming the same job.
-    record_print_hours_for_job(job_label, hours)
+    record_print_hours_for_job(job_label, hours, reported=not watched)
 
 
 def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> None:
@@ -2254,6 +2296,7 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
                 elapsed_seconds=getattr(job, "print_time_seconds", None),
                 state_age_seconds=getattr(state, "state_age_seconds", None),
                 observation_gap_seconds=read_gap_seconds,
+                duration_semantics=adapter._DURATION_SEMANTICS,
             )
         # Stop the elapsed clock: the job it was measuring is over.  This is
         # the first caller ``forget_job_start`` has ever had, and without it

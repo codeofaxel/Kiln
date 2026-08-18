@@ -38,7 +38,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import requests
 
@@ -349,6 +349,10 @@ class ElegooAdapter(PrinterAdapter):
         state = adapter.get_state()
         print(state.state, state.tool_temp_actual)
     """
+
+    # CurrentTicks is the printer's own job clock, frozen at the ending —
+    # a late reading is merely late and still correct.
+    _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
     # Opt in to PrinterAdapter's idle connection release: SDCP printers
     # ration websocket clients, so holding one while nobody is calling costs

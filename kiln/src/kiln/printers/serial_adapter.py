@@ -21,7 +21,7 @@ import os
 import re
 import threading
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 from kiln.printers.base import (
     FirmwareComponent,
@@ -106,6 +106,10 @@ class SerialPrinterAdapter(PrinterAdapter):
         state = adapter.get_state()
         print(state.state, state.tool_temp_actual)
     """
+
+    # M27 reports SD-card byte progress, never a job clock — this backend's
+    # hours are unknowable rather than zero (see adapter_conformance.yaml).
+    _DURATION_SEMANTICS: ClassVar[str] = "none"
 
     def __init__(
         self,
