@@ -70,7 +70,7 @@ def tools() -> dict[str, Any]:
 
     plugin.register(_Mcp())
     return {
-        name: (lambda f: lambda **kw: _envelope(f(**kw)))(fn)
+        name: (lambda f: lambda *a, **kw: _envelope(f(*a, **kw)))(fn)
         for name, fn in captured.items()
     }
 

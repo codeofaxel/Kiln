@@ -58,9 +58,10 @@ class _DesignRebuildPlugin:
             registered and the merged G-code otherwise (send that with
             ``upload_file``); ``wrapped`` says which one you got.
 
-            AGENT DISPLAY CONTRACT: on success this returns a rendered
-            preview of the rebuilt design. Display the image inline to the
-            user — do not summarize it in text or drop it silently.
+            When the render pipeline is available this also returns an
+            inline preview of the rebuilt design; display that image to the
+            user rather than summarizing it. The rebuild itself never
+            depends on it.
 
             Example: rebuild_design("prints/bracket/")
 
