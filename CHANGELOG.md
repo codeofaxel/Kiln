@@ -34,6 +34,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   up a keychain dialog for Chrome — a browser you never opened — and bounce a
   second Chrome icon into your Dock. Neither happens now.
 
+- **A logo with a see-through background now carves just the mark.** Kiln was
+  reading the empty space around the artwork as solid ink, so it cut the logo's
+  whole rectangle into the part as a sunken frame. White logos came out blank.
+  Now fixed.
+
 ## [1.4.0] - 2026-08-14
 
 ### Added
