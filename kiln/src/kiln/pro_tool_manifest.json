@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-17T23:11:59.947294+00:00",
-  "tool_count": 417,
+  "generated": "2026-08-18T03:08:47.158668+00:00",
+  "tool_count": 415,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3285,61 +3285,6 @@
           "new_color"
         ],
         "title": "change_part_colorArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "rebuild_design",
-      "description": "Re-execute the full build pipeline from a saved recipe (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "design_modification",
-      "parameters": {
-        "properties": {
-          "recipe_path": {
-            "title": "Recipe Path",
-            "type": "string"
-          },
-          "brief_id": {
-            "default": "",
-            "title": "Brief Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "recipe_path"
-        ],
-        "title": "rebuild_designArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "smart_redesign",
-      "description": "Interpret a natural language instruction and modify the design (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "design_modification",
-      "parameters": {
-        "properties": {
-          "recipe_path": {
-            "title": "Recipe Path",
-            "type": "string"
-          },
-          "instruction": {
-            "title": "Instruction",
-            "type": "string"
-          },
-          "brief_id": {
-            "default": "",
-            "title": "Brief Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "recipe_path",
-          "instruction"
-        ],
-        "title": "smart_redesignArguments",
         "type": "object"
       }
     },
