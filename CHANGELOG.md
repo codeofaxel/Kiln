@@ -18,6 +18,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Slicing for a Bambu now names the file to upload.** It produced two
+  files and pointed at the one Bambu printers can't start from, so the
+  upload was refused a few steps later. Kiln now names the right one.
+
 - **Designs no longer fail at random on macOS.** OpenSCAD sometimes crashes as
   it starts up, before it's read your model; Kiln now retries it instead of
   handing you an unexplained failure.
