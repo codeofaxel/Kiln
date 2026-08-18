@@ -711,3 +711,26 @@ class TestOwningPrintersIsStillFree:
         assert engagement.check_command(b, "pause_print") is not None
         with pytest.raises(PrinterEngagementError):
             b.pause_print()
+
+
+class TestTheRefusalNamesThingsProperly:
+    """It says the machine's name, and says it the way the user wrote it."""
+
+    def test_the_refused_machine_is_named_not_called_this_printer(self, two_printers):
+        a, b = two_printers
+        _engage(a, "a1")
+        verdict = engagement.check_command(b, "pause_print")
+        assert "garage" in verdict["reason"].lower()
+        assert "this printer" not in verdict["reason"].lower()
+
+    @pytest.mark.parametrize(
+        ("given", "expected"),
+        [("garage", "Garage"), ("MK4S", "MK4S"), ("X1C", "X1C"), ("a1", "A1"), ("", "")],
+    )
+    def test_a_printer_name_is_never_rewritten(self, given, expected):
+        """str.capitalize would render MK4S as "Mk4s".
+
+        Silently restyling the name someone gave their own machine is not a
+        detail — it is the product telling them they named it wrong.
+        """
+        assert engagement._starts_sentence(given) == expected

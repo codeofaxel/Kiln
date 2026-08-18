@@ -564,7 +564,7 @@ def check_command(adapter: Any, action: str) -> dict[str, Any] | None:
         if _consume_return(adapter, machine):
             return None
 
-        return _refusal(engagement, action, machine)
+        return _refusal(engagement, action, machine, adapter)
     except Exception:  # noqa: BLE001 — a licensing rule never breaks a printer
         logger.debug("engagement check soft-passed", exc_info=True)
         return None
@@ -612,17 +612,37 @@ def _plan_phrase() -> str:
     return _PLAN_NAMES.get(_tier_name(), "on your plan")
 
 
-def _refusal(engagement: Engagement, action: str, machine: str) -> dict[str, Any]:
+
+def _starts_sentence(name: str) -> str:
+    """*name* with its first letter raised, and NOTHING else touched.
+
+    ``str.capitalize`` lowercases the remainder, which would render a
+    printer the user called "MK4S" as "Mk4s" and "X1C" as "X1c".  A rule
+    that quietly rewrites the name someone gave their own machine has no
+    business being in a refusal message.
+    """
+    return name[:1].upper() + name[1:] if name else name
+
+
+def _refusal(
+    engagement: Engagement, action: str, machine: str, adapter: Any = None,
+) -> dict[str, Any]:
     from kiln.tiers_and_terms import upgrade_nudge_block
 
     other = engagement.label
     store = _read_store()
     spent = _returns_used(store, machine) >= _RETURNS_PER_JOB
-    this_one = "this printer"
+    # Name the machine being refused.  "this printer" is what a user reads
+    # when nobody bothered to look up what they call it, and it lands badly
+    # in a sentence that names the OTHER machine three words later.
     handbacks = store.get("handbacks")
     entry = handbacks.get(machine) if isinstance(handbacks, dict) else None
+    this_one = ""
     if isinstance(entry, dict) and entry.get("label"):
         this_one = str(entry["label"])
+    if not this_one and adapter is not None:
+        this_one = _label_for(adapter)
+    this_one = this_one or "that printer"
 
     # A subscriber must not be handed copy written for someone who has not
     # paid.  Same rule, named against the plan they actually hold.
@@ -653,12 +673,13 @@ def _refusal(engagement: Engagement, action: str, machine: str) -> dict[str, Any
         )
     elif action in _CONTROL_ACTIONS:
         free_included = (
-            f"{this_one}'s own controls work as always, and you keep full control of {other}. "
+            f"{_starts_sentence(this_one)}'s own controls work as always, and you keep "
+            f"full control of {other}. "
             f"To move Kiln over, hand {other} back with hand_back_printer."
         )
     else:  # status reads
         free_included = (
-            f"{this_one} still shows its own status on the printer. "
+            f"{_starts_sentence(this_one)} still shows its own status on the printer. "
             f"To point Kiln at it instead, hand {other} back with hand_back_printer."
         )
 
