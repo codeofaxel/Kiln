@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Previews look like the real thing on every computer.** Preview images now
+  use the same studio look as the web app — print bed, lighting, shadow. That
+  used to need a browser on your machine; it's built in now.
+
 - **Running several printers at once is a Kiln Business feature, and that now
   properly applies to every printer command.** `hand_back_printer` moves Kiln
   between machines without touching a running print.
@@ -22,13 +26,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   files and pointed at the one Bambu printers can't start from, so the
   upload was refused a few steps later. Kiln now names the right one.
 
-- **Designs no longer fail at random on macOS.** OpenSCAD sometimes crashes as
-  it starts up, before it's read your model; Kiln now retries it instead of
-  handing you an unexplained failure.
+- **Designs and slices no longer fail at random on macOS.** OpenSCAD and
+  PrusaSlicer sometimes crash on startup, before reading your model. Kiln
+  retries instead of failing.
 
-- **Preview renders no longer ask for your keychain password.** On macOS,
-  generating a preview could pop up a system dialog asking to store a password
-  for Chrome — a browser you never opened. It doesn't anymore.
+- **Preview renders no longer take over your desktop on macOS.** They could pop
+  up a keychain dialog for Chrome — a browser you never opened — and bounce a
+  second Chrome icon into your Dock. Neither happens now.
 
 ## [1.4.0] - 2026-08-14
 
