@@ -545,7 +545,7 @@ def progress_stall_note(
 # ``print_time_seconds`` for every print it ingests.
 
 
-def _normalize_job_label(label: Any) -> str | None:
+def normalize_job_label(label: Any) -> str | None:
     """Compare-able form of a job name: basename, no extension, lower case.
 
     The two sides never spell it identically — a print is started as
@@ -560,6 +560,11 @@ def _normalize_job_label(label: Any) -> str | None:
     while "." in text[1:]:
         text = text.rsplit(".", 1)[0]
     return text.lower() or None
+
+
+# Historical private spelling, kept so this module's own call sites and any
+# out-of-tree caller keep working.  One normalizer, two names, never two rules.
+_normalize_job_label = normalize_job_label
 
 
 def note_job_start(adapter: Any, job_label: Any, *, at: float | None = None) -> None:

@@ -288,6 +288,13 @@ class JobProgress:
     # Extended layer tracking (populated by adapters that support it).
     current_layer: int | None = None
     total_layers: int | None = None
+    # The BACKEND's own id for this job, when it issues one that is really
+    # unique -- Prusa Link's ``job.id`` is the same handle its pause/resume/
+    # cancel endpoints take.  Left None by every backend that issues nothing
+    # (Moonraker, OctoPrint, Duet, Elegoo) and by Bambu, whose task_id /
+    # subtask_id are the literal "0" on every LAN print.  Consumers must not
+    # invent one here: ``kiln.printers.job_identity`` owns the fallback.
+    job_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
@@ -295,7 +302,7 @@ class JobProgress:
         Extended fields that are ``None`` are omitted for compactness.
         """
         data = asdict(self)
-        for key in ("current_layer", "total_layers"):
+        for key in ("current_layer", "total_layers", "job_id"):
             if data.get(key) is None:
                 data.pop(key, None)
         return data

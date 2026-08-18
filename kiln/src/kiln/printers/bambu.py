@@ -616,6 +616,21 @@ class _ImplicitFTP_TLS(ftplib.FTP_TLS):
 # ---------------------------------------------------------------------------
 
 
+def _first_real_job_id(*candidates: Any) -> str | None:
+    """First candidate that is an actual id, or None if they are all placeholders.
+
+    Delegates the judgement to ``job_identity`` so "what counts as an id" is
+    decided in exactly one place for every backend.
+    """
+    from kiln.printers.job_identity import clean_native_id
+
+    for candidate in candidates:
+        cleaned = clean_native_id(candidate)
+        if cleaned is not None:
+            return cleaned
+    return None
+
+
 class BambuAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by Bambu Lab MQTT + FTPS.
 
@@ -2053,6 +2068,16 @@ class BambuAdapter(PrinterAdapter):
             with contextlib.suppress(TypeError, ValueError):
                 total_layers = int(total_layer_num)
 
+        # Bambu reports task_id / subtask_id, and on a LAN print both are the
+        # literal "0" -- Kiln publishes them that way itself in
+        # ``_start_print_impl``, the convention for a job with no cloud
+        # project behind it.  Pass them through the sentinel filter rather
+        # than trusting or ignoring them: a cloud-initiated job that does
+        # carry a real id gets to use it, and "0" resolves to no id at all.
+        native_job_id = _first_real_job_id(
+            status.get("task_id"), status.get("subtask_id"),
+        )
+
         return JobProgress(
             file_name=file_name if file_name else None,
             completion=completion,
@@ -2060,6 +2085,7 @@ class BambuAdapter(PrinterAdapter):
             print_time_left_seconds=print_time_left_seconds,
             current_layer=current_layer,
             total_layers=total_layers,
+            job_id=native_job_id,
         )
 
     def list_files(self) -> list[PrinterFile]:

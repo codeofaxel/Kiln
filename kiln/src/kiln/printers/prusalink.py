@@ -790,8 +790,13 @@ class PrusaLinkAdapter(PrinterAdapter):
         if time_remaining is not None:
             print_time_left_seconds = int(time_remaining)
 
+        # ``job.id`` is the server-assigned handle DELETE/pause/resume already
+        # take -- it is in this very payload, so surfacing it costs no request.
+        job_id = job.get("id")
+
         return JobProgress(
             file_name=None,  # Prusa Link doesn't include filename in status
+            job_id=str(job_id) if job_id is not None else None,
             completion=completion,
             print_time_seconds=print_time_seconds,
             print_time_left_seconds=print_time_left_seconds,
