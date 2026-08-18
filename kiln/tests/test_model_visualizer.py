@@ -26,6 +26,21 @@ from kiln.model_visualizer import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _openscad_look_only(monkeypatch: pytest.MonkeyPatch):
+    """These tests exercise the OpenSCAD loop and assert on its argv.
+
+    The stage-look backends (photograph and software paint) sit ahead of
+    that loop and would happily satisfy a render without ever shelling
+    OpenSCAD -- the paint backend needs nothing but numpy, so unlike the
+    browser path there is no environmental reason it would decline here.
+    Opting the whole family out keeps every assertion below about the
+    code it was written to test.  Stage-look behaviour has its own
+    files: test_stage_still.py and test_stage_paint.py.
+    """
+    monkeypatch.setenv("KILN_NO_STAGE_STILLS", "1")
+
+
 @pytest.fixture
 def tmp_stl(tmp_path: Path) -> Path:
     """Create a minimal valid binary STL with 1 triangle."""

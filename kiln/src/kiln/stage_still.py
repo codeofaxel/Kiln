@@ -467,6 +467,11 @@ def try_render_stage_views(
         shot_w, shot_h = width * ss, height * ss
 
         stem = Path(file_path).stem
+        # The front door pre-creates output_dir; a direct caller may not,
+        # and a missing directory here fails as a silent per-view decline
+        # that reads like a browser problem (it cost two misdiagnoses in
+        # one afternoon).  Same line stage_paint carries.
+        os.makedirs(output_dir, mode=0o700, exist_ok=True)
         views: list[dict] = []
         tmp = Path(tempfile.mkdtemp(prefix="kiln_stage_still_"))
         try:

@@ -738,15 +738,19 @@ def visualize_model(
         views: list[dict] = []
         stem = Path(file_path).stem
 
-        # Stage-look backend: photograph the same three.js stage the web
-        # viewer and inline conversation viewer render, when this machine
-        # can (a chromium-family browser + a still-capable cached stage
-        # document — see kiln.stage_still).  Any miss falls through to
-        # the OpenSCAD loop below unchanged, which also remains the only
-        # renderer for caller-specified colors (the stage ignores them)
-        # and for machines with no browser.  All-or-nothing per result:
-        # one preview never mixes two looks.
+        # Stage-look backends, in order of fidelity.  First the photograph:
+        # the same three.js stage the web viewer and inline conversation
+        # viewer render, when this machine can shoot it (a chromium-family
+        # browser + a still-capable cached stage document — see
+        # kiln.stage_still).  Then the software painter: the same stage —
+        # backdrop, plate, light rig, framing — rasterized with numpy/PIL
+        # (kiln.stage_paint), which is what a machine with no usable
+        # browser gets, macOS with plain Chrome included (auto-discovery
+        # deliberately never launches a .app browser there — Dock icon).
+        # Any miss falls through to the OpenSCAD loop below unchanged.
+        # All-or-nothing per result: one preview never mixes looks.
         used_stage = False
+        stage_renderer = None
         from kiln.stage_still import try_render_stage_views
 
         stage_views = try_render_stage_views(
@@ -758,6 +762,22 @@ def visualize_model(
             height=height,
             color=color,
         ) if allow_stage else None
+        if stage_views:
+            stage_renderer = "stage"
+        elif allow_stage:
+            from kiln.stage_paint import try_paint_stage_views
+
+            stage_views = try_paint_stage_views(
+                file_path,
+                selected,
+                angle_rotations,
+                output_dir=output_dir,
+                width=width,
+                height=height,
+                color=color,
+            )
+            if stage_views:
+                stage_renderer = "stage_paint"
         if stage_views:
             views = stage_views
             used_stage = True
@@ -870,7 +890,7 @@ def visualize_model(
             # Which engine produced the pixels — "stage" is the browser
             # photograph of the shared three.js stage, "openscad" the
             # canonical fallback.  Agents and tests branch on this.
-            "renderer": "stage" if used_stage else "openscad",
+            "renderer": stage_renderer if used_stage else "openscad",
             "rendered": len(successful),
             "failed": len(failed),
             "message": (

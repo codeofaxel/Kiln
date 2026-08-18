@@ -519,10 +519,18 @@ def test_no_color_requested_leaves_the_config_colorless(
 def test_visualize_model_falls_back_when_stage_declines(
     cube_stl: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The photograph declining no longer means OpenSCAD -- the software
+    painter is next in the chain, and it needs nothing this machine
+    lacks.  OpenSCAD is reached only when the whole family is out."""
     monkeypatch.setattr(stage_still, "try_render_stage_views", lambda *a, **k: None)
 
     from kiln.model_visualizer import visualize_model
 
     result = visualize_model(cube_stl, angles=["isometric"], output_dir=str(tmp_path))
+    if result.get("success"):
+        assert result["renderer"] == "stage_paint"
+
+    monkeypatch.setenv("KILN_NO_STAGE_STILLS", "1")
+    result = visualize_model(cube_stl, angles=["isometric"], output_dir=str(tmp_path / "o"))
     if result.get("success"):
         assert result["renderer"] == "openscad"
