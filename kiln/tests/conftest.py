@@ -974,7 +974,7 @@ def _isolate_daily_stats(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_printer_engagement(tmp_path, monkeypatch):
+def _isolate_printer_engagement(tmp_path_factory, monkeypatch):
     """Give every test its own engagement record, never the developer's.
 
     ``printers.engagement`` writes ``~/.kiln/printer_engagement.json`` from
@@ -994,8 +994,11 @@ def _isolate_printer_engagement(tmp_path, monkeypatch):
         yield
         return
 
-    home = tmp_path / "kiln_home"
-    home.mkdir(parents=True, exist_ok=True)
+    # tmp_path_factory, NOT tmp_path: the per-test tmp_path doubles as a
+    # scratch ROOT for other subsystems, and a directory left in it is
+    # something else's data.  Creating "kiln_home" there made
+    # list_incidents count it as a fourth incident.
+    home = tmp_path_factory.mktemp("kiln_engagement_home")
     monkeypatch.setattr(engagement, "_kiln_dir", lambda: home)
     engagement._verify_cache.clear()
     yield
