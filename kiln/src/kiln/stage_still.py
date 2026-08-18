@@ -304,6 +304,14 @@ def _shoot(browser: Path, harness_path: Path, png_path: str,
         "--enable-unsafe-swiftshader",
         f"--user-data-dir={profile_dir}",
         "--no-first-run",
+        # The throwaway profile above has no encryption key, so Chrome
+        # reaches for the OS keyring to mint one.  A headless run has no
+        # keyring session to reach, so macOS throws a modal "a keychain
+        # cannot be found to store Chrome" at whoever is sitting at the
+        # machine -- once per still, in front of a user who never asked
+        # for a browser.  A disposable screenshot has nothing worth
+        # encrypting, so it stays out of the real keyring entirely.
+        "--use-mock-keychain",
         "--disable-extensions",
         "--disable-crash-reporter",
         "--mute-audio",
