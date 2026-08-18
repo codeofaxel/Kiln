@@ -428,10 +428,24 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
     used to live while the CLI and config.yaml loaded printers uncapped
     (2026-07-27).
 
-    Deliberately NOT gated: registering, listing, or *watching* printers,
-    and every safety and control path — status, pause, cancel, emergency
-    stop work on every machine at every tier, always.  A licensing rule
-    must never cost a user visibility or control of a hot machine.
+    This function is the START half.  The commands that operate a machine
+    ALREADY running — status, pause, resume, cancel, temperatures,
+    emergency stop — are sibling adapter methods that never pass through
+    here, so gating only this one sold a machine's worth of parallelism
+    while leaving every other way to drive a second machine open.  The
+    other half lives in ``kiln.printers.engagement``, which records the one
+    machine Kiln is driving and is consulted by all of them.
+
+    Deliberately NOT gated anywhere: registering, listing and discovering
+    printers.  Owning machines is free at every tier and always has been;
+    what the fleet tier sells is running them at the same time.
+
+    The engaged machine keeps everything, emergency stop included, and the
+    engagement is releasable, so a user can always hand a machine back and
+    move Kiln to another one.  Kiln is not the safety system it once
+    claimed to be here: thermal runaway protection lives in the printer's
+    own firmware, the machine has its own controls, and a refusal on a
+    machine Kiln is not driving says so and points at them.
 
     Soft-passes on anything it cannot prove: unknown tier, unreachable
     peers, any error.  A network hiccup must never block a print.
@@ -527,13 +541,19 @@ def _peer_states(registry: Any, this_machine: str) -> dict[str, Any]:
     """State of every registered machine EXCEPT this one, aliases collapsed."""
     from kiln.registry import machine_fingerprint
 
+    from kiln.printers.engagement import internal_read
+
     out: dict[str, Any] = {}
     for name in registry.list_machines():
         try:
             peer = registry.get(name)
             if this_machine and machine_fingerprint(peer) == this_machine:
                 continue
-            out[name] = peer.get_state().state
+            # Kiln asking about its own peers, not a user commanding one --
+            # without this the engagement gate would refuse the very reads
+            # this gate is made of, then read the refusal as an answer.
+            with internal_read():
+                out[name] = peer.get_state().state
         except Exception:
             continue  # unreachable peer reads as not-busy, never blocks
     return out

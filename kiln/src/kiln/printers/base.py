@@ -82,6 +82,20 @@ class PrinterError(Exception):
         self.cause = cause
 
 
+class PrinterEngagementError(PrinterError):
+    """Refused because Kiln is already working with a different machine.
+
+    A subclass of :class:`PrinterError` on purpose: every caller already
+    handles that, so the refusal reaches a user as a message rather than a
+    traceback, on every surface, without one of them being updated first.
+    ``verdict`` carries the structured form for surfaces that render.
+    """
+
+    def __init__(self, verdict: dict, *, cause: Exception | None = None) -> None:
+        super().__init__(str(verdict.get("reason") or "Kiln is working with another printer."), cause=cause)
+        self.verdict = verdict
+
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -567,6 +581,54 @@ class PrinterInfo:
 # ---------------------------------------------------------------------------
 
 
+
+def _make_engagement_gated(action: str, original):
+    """Wrap *original* so it consults the single-printer engagement first."""
+    import functools
+
+    @functools.wraps(original)
+    def _gated(self, *args, **kwargs):
+        from kiln.printers.engagement import check_command
+
+        verdict = check_command(self, action)
+        if verdict is not None:
+            raise PrinterEngagementError(verdict)
+        return original(self, *args, **kwargs)
+
+    _gated._kiln_engagement_wrapped = True  # type: ignore[attr-defined]
+    return _gated
+
+
+def _install_engagement_gate(cls: type, *, own_methods_only: bool) -> None:
+    """Gate every printer-directed command on *cls*.
+
+    ``own_methods_only`` is the load-bearing argument.  The base class is
+    wrapped once with it False, so an adapter that INHERITS a control method
+    is gated by that.  Each subclass is then wrapped with it True, so only a
+    method the subclass really overrides gets its own wrapper.
+
+    The distinction is not tidiness.  Writing a wrapper into every subclass's
+    ``__dict__`` would make each adapter LOOK like it overrides the base
+    template, and several adapters are pinned by tests asserting they do not
+    (``"resume_print" not in DuetAdapter.__dict__``) precisely because
+    overriding one is how the base safety gate gets bypassed.  Gating must not
+    cost the suite its ability to see that.
+    """
+    from kiln.printers.engagement import GATED_ACTIONS
+
+    for action in sorted(GATED_ACTIONS):
+        original = cls.__dict__.get(action) if own_methods_only else getattr(cls, action, None)
+        if original is None or not callable(original):
+            continue
+        if getattr(original, "_kiln_engagement_wrapped", False):
+            continue
+        if getattr(original, "__isabstractmethod__", False):
+            # Wrapping an abstract method would return a concrete function and
+            # quietly switch OFF the ABC check that forces every adapter to
+            # implement it.  The subclass that implements it gets gated instead.
+            continue
+        setattr(cls, action, _make_engagement_gated(action, original))
+
 class PrinterAdapter(ABC):
     """Abstract base for all printer backend adapters.
 
@@ -658,6 +720,18 @@ class PrinterAdapter(ABC):
 
             _observed_get_state._kiln_outcome_wrapped = True  # type: ignore[attr-defined]
             cls.get_state = _observed_get_state
+
+        # ------------------------------------------------------------------
+        # Single-printer engagement: every printer-directed command asks
+        # whether Kiln is already working with a DIFFERENT machine.  Same
+        # engine-not-instance shape as the two wraps above, and the same
+        # reason -- the tier rule used to live only on start_print, so the
+        # eight sibling commands that actually operate a second machine were
+        # never asked.  Resolved with getattr rather than cls.__dict__ so an
+        # adapter that INHERITS a control method is gated too: reading only
+        # the subclass's own dict is exactly how a door gets missed.
+        # ------------------------------------------------------------------
+        _install_engagement_gate(cls, own_methods_only=True)
 
 
     def set_safety_profile(self, profile_id: str) -> None:
@@ -984,6 +1058,23 @@ class PrinterAdapter(ABC):
 
                 _logging.getLogger(__name__).debug(
                     "job-start stamp failed", exc_info=True
+                )
+
+            # Kiln started this print, so Kiln is now driving this machine.
+            # Anchored to the same moment and for the same reason: it is the
+            # one event Kiln causes and therefore cannot miss.  A resume 3MF
+            # is excluded above -- it continues a print that already has an
+            # engagement, and re-recording it would reset the return budget.
+            try:
+                from kiln.printers.engagement import engage, internal_read
+
+                with internal_read():
+                    engage(self, self.get_job(), reason="started")
+            except Exception:  # noqa: BLE001 — bookkeeping never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "engagement not recorded", exc_info=True
                 )
             try:
                 from kiln.daily_stats import record_print_start
@@ -1745,6 +1836,13 @@ DeviceAdapter = PrinterAdapter
 # Outcome-lifecycle feed (called from the get_state wrap installed in
 # PrinterAdapter.__init_subclass__)
 # ---------------------------------------------------------------------------
+
+
+# The base class's own concrete control methods, gated once.  Every adapter
+# that INHERITS one is covered by this; an adapter that overrides one is
+# covered by __init_subclass__.  Abstract methods are skipped there, so the
+# implementing subclass is what gets wrapped.
+_install_engagement_gate(PrinterAdapter, own_methods_only=False)
 
 
 def delegate_outcome_lifecycle(backend: PrinterAdapter) -> None:

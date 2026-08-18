@@ -974,6 +974,35 @@ def _isolate_daily_stats(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_printer_engagement(tmp_path, monkeypatch):
+    """Give every test its own engagement record, never the developer's.
+
+    ``printers.engagement`` writes ``~/.kiln/printer_engagement.json`` from
+    ``start_print``, which ordinary adapter tests call constantly.  Without
+    isolation a suite run leaves a real engagement on disk naming a fake
+    printer, and the next real command on the developer's machine is refused
+    by a rule pointing at a machine that never existed.  Same class as
+    ``_isolate_daily_stats`` above, with a sharper failure: this one does not
+    merely pollute a number, it locks a person out of their own printer.
+
+    The per-test path also resets the in-process verification cache, so one
+    test's engaged peer cannot answer for the next test's.
+    """
+    try:
+        from kiln.printers import engagement
+    except ImportError:  # pragma: no cover — module absent
+        yield
+        return
+
+    home = tmp_path / "kiln_home"
+    home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(engagement, "_kiln_dir", lambda: home)
+    engagement._verify_cache.clear()
+    yield
+    engagement._verify_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_real_pypi_check(monkeypatch):
     """Keep the update check off the network, for the whole suite.
 

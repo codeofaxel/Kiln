@@ -1057,6 +1057,19 @@ class _MonitoringToolsPlugin:
                 _srv._watchers[watch_id] = watcher
                 watcher.start()
 
+                # Watching a print the user started by hand is the OTHER way
+                # Kiln comes to be driving a machine.  Recorded here, at the
+                # moment a watch really begins, so "monitoring" is a state the
+                # slot rule can check rather than a vague association with a
+                # printer that merely happens to be busy.
+                try:
+                    from kiln.printers.engagement import engage, internal_read
+
+                    with internal_read():
+                        engage(adapter, adapter.get_job(), reason="watching")
+                except Exception:  # noqa: BLE001 — never break a watch
+                    _logger.debug("watch engagement not recorded", exc_info=True)
+
                 resp: dict[str, Any] = {
                     "success": True,
                     "watch_id": watch_id,
@@ -1252,6 +1265,20 @@ class _MonitoringToolsPlugin:
                     code="NOT_FOUND",
                 )
             result = watcher.stop()
+
+            # Stopping the watch is the user saying they will take it from
+            # here, so it hands the machine back rather than leaving Kiln
+            # recorded as driving something it is no longer looking at.
+            try:
+                from kiln.printers.engagement import current, hand_back
+
+                engaged = current()
+                if engaged is not None and engaged.reason == "watching":
+                    peer = _srv._get_registry().get(engaged.label)
+                    hand_back(peer)
+            except Exception:  # noqa: BLE001 — never break a stop
+                _logger.debug("watch hand-back failed", exc_info=True)
+
             return {"success": True, **result}
 
         @mcp.tool()
