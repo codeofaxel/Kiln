@@ -734,3 +734,37 @@ class TestTheRefusalNamesThingsProperly:
         detail — it is the product telling them they named it wrong.
         """
         assert engagement._starts_sentence(given) == expected
+
+
+class TestOnePrinterNeverStallsAnother:
+    """A command aimed at one machine must not wait on a different one.
+
+    The check reaches across to the engaged printer, so a peer that has
+    gone quiet — unplugged, asleep, a dead lease — would otherwise hold
+    the user's command open for as long as that adapter's transport takes
+    to give up, which for some backends is minutes.
+    """
+
+    def test_a_silent_engaged_peer_does_not_hold_the_command(self, two_printers, monkeypatch):
+        import time as _time
+
+        a, b = two_printers
+        _engage(a, "a1")
+
+        def _hang():
+            _time.sleep(30)  # far longer than the bound
+
+        a.get_state = _hang
+        engagement._verify_cache.clear()
+        monkeypatch.setattr(engagement, "_PEER_VERIFY_TIMEOUT_S", 0.2)
+
+        started = _time.monotonic()
+        verdict = engagement.check_command(b, "pause_print")
+        elapsed = _time.monotonic() - started
+
+        assert elapsed < 5, f"the command waited {elapsed:.1f}s on another printer"
+        # Unproven means released, the same as every other uncertainty here.
+        assert verdict is None
+
+    def test_the_bound_is_short_enough_to_be_worth_having(self):
+        assert engagement._PEER_VERIFY_TIMEOUT_S <= 10.0

@@ -376,6 +376,59 @@ def _peer_for(machine: str) -> Any | None:
     return None
 
 
+
+# A command aimed at one printer must never wait on a DIFFERENT printer.
+# The verification below reaches across to the engaged machine, so a peer
+# that has gone quiet -- unplugged, asleep, a dead DHCP lease -- would
+# otherwise stall the command in front of the user for as long as that
+# adapter's own transport takes to give up, which for some is minutes.
+_PEER_VERIFY_TIMEOUT_S = 5.0
+
+
+def _ask_peer_bounded(peer: Any, engagement: Engagement) -> bool:
+    """Is *peer* still running the print that justified the hold?
+
+    Bounded, and a timeout answers ``False`` -- the same as every other
+    thing this module cannot prove, so a silent printer releases the slot
+    instead of freezing a command meant for another machine.
+    """
+    answer: list[bool] = []
+
+    def _ask() -> None:
+        from kiln.printers.base import PrinterStatus
+
+        try:
+            with internal_read():
+                state = peer.get_state()
+                if state.state not in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+                    return
+                if engagement.job is None:
+                    answer.append(True)
+                    return
+                answer.append(
+                    same_job(engagement.job, resolve_job_identity(peer.get_job()))
+                )
+        except Exception:  # noqa: BLE001
+            return
+
+    # A DAEMON thread joined with a timeout, deliberately, not a pool.
+    # ThreadPoolExecutor's context manager shuts down with wait=True, so
+    # leaving the block joins the worker anyway and the timeout buys
+    # nothing -- measured at the full 30 s on a stalled peer before this
+    # was written this way.  A daemon thread that outlives the answer is
+    # harmless: it holds no lock, writes nothing, and cannot keep the
+    # process alive at exit.
+    worker = threading.Thread(
+        target=_ask, name="kiln-engagement-peer-check", daemon=True,
+    )
+    worker.start()
+    worker.join(_PEER_VERIFY_TIMEOUT_S)
+    if worker.is_alive():
+        logger.debug("engaged peer did not answer in time; releasing the slot")
+        return False
+    return bool(answer and answer[0])
+
+
 def _still_engaged(engagement: Engagement, *, now: float | None = None) -> bool:
     """Whether the engaged machine is still running the print that justified it.
 
@@ -393,17 +446,7 @@ def _still_engaged(engagement: Engagement, *, now: float | None = None) -> bool:
     try:
         peer = _peer_for(engagement.machine)
         if peer is not None:
-            from kiln.printers.base import PrinterStatus
-
-            with internal_read():
-                state = peer.get_state()
-                if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
-                    if engagement.job is None:
-                        verdict = True
-                    else:
-                        verdict = same_job(
-                            engagement.job, resolve_job_identity(peer.get_job()),
-                        )
+            verdict = _ask_peer_bounded(peer, engagement)
     except Exception:  # noqa: BLE001
         logger.debug("could not verify the engaged machine; releasing", exc_info=True)
         verdict = False
