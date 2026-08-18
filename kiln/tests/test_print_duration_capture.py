@@ -23,7 +23,7 @@ Its MQTT callback (``bambu._on_message``) fires the terminal hook itself and
 calls ``observe_state`` while doing so — the same shared state the wrap reads
 — so the push CONSUMES the transition and the wrap's next poll finds prev ==
 terminal and no edge at all.  The push site therefore calls the same
-``_record_watched_duration``, under the same job id it just gave the hook, and
+``_record_print_duration``, under the same job id it just gave the hook, and
 the two doors dedupe against each other through that id.
 
 What differs between the doors is the one measurement neither can borrow: how

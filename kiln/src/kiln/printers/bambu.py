@@ -52,7 +52,7 @@ from kiln.printers.base import (
     PrinterStatus,
     PrintResult,
     UploadResult,
-    _record_watched_duration,
+    _record_print_duration,
     outcome_printer_name,
 )
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
@@ -1550,7 +1550,7 @@ class BambuAdapter(PrinterAdapter):
                         # long ago we happened to notice.  That reading is
                         # monotonic and plausible and nothing downstream could
                         # ever flag it, which is exactly why it is refused.
-                        _record_watched_duration(
+                        _record_print_duration(
                             job_label=str(job_id_for_hook),
                             elapsed_seconds=elapsed_seconds,
                             state_age_seconds=0.0,

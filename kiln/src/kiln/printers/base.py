@@ -1994,7 +1994,63 @@ def _current_job_label(adapter: PrinterAdapter) -> str | None:
 _MAX_CREDIBLE_PRINT_HOURS: float = 168.0
 
 
-def _record_watched_duration(
+def _ending_was_watched(
+    *,
+    observation_gap_seconds: float | None,
+    state_age_seconds: float | None,
+) -> bool:
+    """Did Kiln really SEE this ending, or merely find out afterwards?
+
+    True only when both halves of "watched" hold: the last time we had
+    current knowledge of this printer was recent, and the reading itself is
+    the present tense rather than a stale cache.  The two doors that reach
+    an ending each measure *observation_gap_seconds* the only way they
+    honestly can (see :func:`_record_print_duration`); neither decides for
+    itself what counts as watched — the thresholds live here, once.
+    """
+    from kiln.printers.progress_motion import WATCHED_ENDING_MAX_GAP_S
+
+    # Was our last current knowledge recent enough for "we saw it end" to be
+    # true?  Unknown — a first read, or a printer that has never spoken to
+    # this process — counts as no: it never watched anything.
+    if (
+        observation_gap_seconds is None
+        or observation_gap_seconds > WATCHED_ENDING_MAX_GAP_S
+    ):
+        return False
+
+    # And is the reading itself the present tense?  A push-cache answer that
+    # is minutes old dates the transition we just "saw", by exactly the same
+    # amount and for the same reason.  Absent age means the caller learned
+    # this from the printer on this call, which is current by construction.
+    if (
+        isinstance(state_age_seconds, (int, float))
+        and state_age_seconds > STALE_STATE_WARN_AGE
+    ):
+        return False
+
+    return True
+
+
+def _credible_hours(elapsed_seconds: Any) -> float | None:
+    """*elapsed_seconds* as hours, or ``None`` when no number can be banked.
+
+    Refuses a missing or non-positive reading — a printer with no clock to
+    report (direct USB: M27 gives SD-card byte progress, not time) falls out
+    here and stays honestly unknown, as
+    :file:`scripts/adapter_conformance.yaml` already declares — and anything
+    past :data:`_MAX_CREDIBLE_PRINT_HOURS`, the absurdity floor documented
+    on the constant itself.
+    """
+    if not isinstance(elapsed_seconds, (int, float)) or elapsed_seconds <= 0:
+        return None
+    hours = float(elapsed_seconds) / 3600.0
+    if hours > _MAX_CREDIBLE_PRINT_HOURS:
+        return None
+    return hours
+
+
+def _record_print_duration(
     *,
     job_label: str,
     elapsed_seconds: Any,
@@ -2022,12 +2078,11 @@ def _record_watched_duration(
       would just quietly inflate every Bambu install's total.
 
     One rule covers both, and it is the rule the design asks for: a duration
-    is recorded only when this ending was WATCHED — the last time we had
-    current knowledge of this printer was recent, and the reading itself is
-    not a stale cache.  Anything else is finding out afterwards, and an honest
-    absence beats a confident wrong number.  ``prints - prints_hours_known``
-    is what makes that absence visible instead of reading as zero hours
-    printed.
+    is recorded only when this ending was WATCHED — the two checks
+    :func:`_ending_was_watched` holds.  Anything else is finding out
+    afterwards, and an honest absence beats a confident wrong number.
+    ``prints - prints_hours_known`` is what makes that absence visible
+    instead of reading as zero hours printed.
 
     TWO DOORS reach an ending, and this is the only place the rule lives.
     Each measures *observation_gap_seconds* — how long since we last had
@@ -2051,41 +2106,19 @@ def _record_watched_duration(
     dump, whose ``prev`` predates the outage, sail through this guard carrying
     the whole outage in its elapsed.
 
-    All three are the same quantity, so the thresholds below apply unchanged to
+    All three are the same quantity, so the thresholds apply unchanged to
     either door, and neither decides for itself what counts as watched.
-
-    A printer with no clock to report (direct USB: M27 gives SD-card byte
-    progress, not time) falls out at the first check and stays honestly
-    unknown, as :file:`scripts/adapter_conformance.yaml` already declares.
 
     Never raises — this runs inside a status read and inside an MQTT callback.
     """
-    if not isinstance(elapsed_seconds, (int, float)) or elapsed_seconds <= 0:
+    hours = _credible_hours(elapsed_seconds)
+    if hours is None:
         return
 
-    from kiln.printers.progress_motion import WATCHED_ENDING_MAX_GAP_S
-
-    # Was our last current knowledge recent enough for "we saw it end" to be
-    # true?  Unknown — a first read, or a printer that has never spoken to
-    # this process — counts as no: it never watched anything.
-    if (
-        observation_gap_seconds is None
-        or observation_gap_seconds > WATCHED_ENDING_MAX_GAP_S
+    if not _ending_was_watched(
+        observation_gap_seconds=observation_gap_seconds,
+        state_age_seconds=state_age_seconds,
     ):
-        return
-
-    # And is the reading itself the present tense?  A push-cache answer that
-    # is minutes old dates the transition we just "saw", by exactly the same
-    # amount and for the same reason.  Absent age means the caller learned
-    # this from the printer on this call, which is current by construction.
-    if (
-        isinstance(state_age_seconds, (int, float))
-        and state_age_seconds > STALE_STATE_WARN_AGE
-    ):
-        return
-
-    hours = float(elapsed_seconds) / 3600.0
-    if hours > _MAX_CREDIBLE_PRINT_HOURS:
         return
 
     from kiln.daily_stats import record_print_hours_for_job
@@ -2214,7 +2247,7 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
                 job_id=label,
                 file_name=label,
             )
-            _record_watched_duration(
+            _record_print_duration(
                 # The id this door just gave the hook, so the hours row and
                 # the outcome row name one job.
                 job_label=label,
