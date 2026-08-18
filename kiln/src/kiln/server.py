@@ -3886,6 +3886,17 @@ _LITE_PRINTER_KEYS = (
 
 
 @mcp.tool()
+
+def _engagement_machine(adapter: Any) -> str:
+    """This adapter's machine id, or "" — never raises into a status read."""
+    try:
+        from kiln.printers.engagement import machine_id
+
+        return machine_id(adapter)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def printer_status(
     printer_name: str | None = None,
     detail: str = "full",
@@ -3959,6 +3970,23 @@ def printer_status(
         motion_note = progress_stall_note(adapter, state, job)
         if motion_note:
             response["stall_warning"] = motion_note
+        # Which machine Kiln is working with, shown where someone already
+        # looks.  A rule you can only discover by bumping into a refusal is
+        # indistinguishable from a fault; this makes it answerable before
+        # anything is refused.
+        try:
+            from kiln.printers.engagement import current as _engagement
+
+            engaged = _engagement()
+            if engaged is not None:
+                response["kiln_is_working_with"] = {
+                    "printer": engaged.label,
+                    "this_one": engaged.machine == _engagement_machine(adapter),
+                    "since": engaged.since,
+                }
+        except Exception:  # noqa: BLE001 — never break a status read
+            logger.debug("engagement note unavailable", exc_info=True)
+
         from kiln.safety_gap_warning import attach_safety_warning
         return attach_safety_warning(response)
     except PrinterNotFoundError:

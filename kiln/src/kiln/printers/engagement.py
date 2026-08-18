@@ -598,9 +598,18 @@ def _tier_name() -> str:
         return "free"
 
 
+_PLAN_NAMES = {"pro": "on Kiln Pro", "free": "on the free plan"}
+
+
 def _plan_phrase() -> str:
-    """How to refer to the caller's plan without selling to someone who paid."""
-    return "on your plan" if _tier_name() != "free" else "on the free plan"
+    """Name the plan the caller actually holds.
+
+    A Pro subscriber reading "on the free plan" is being told they did not
+    pay, by the product they pay for.  Naming their own plan keeps the
+    sentence a fact rather than a sales pitch aimed at the wrong person;
+    the tier that LIFTS the rule is named once, separately, by the nudge.
+    """
+    return _PLAN_NAMES.get(_tier_name(), "on your plan")
 
 
 def _refusal(engagement: Engagement, action: str, machine: str) -> dict[str, Any]:
@@ -615,13 +624,19 @@ def _refusal(engagement: Engagement, action: str, machine: str) -> dict[str, Any
     if isinstance(entry, dict) and entry.get("label"):
         this_one = str(entry["label"])
 
+    # A subscriber must not be handed copy written for someone who has not
+    # paid.  Same rule, named against the plan they actually hold.
+    plan = _plan_phrase()
     if spent:
         headline = (
             f"Kiln has already come back to {this_one} once during this print, "
             f"and is working with {other} now."
         )
     else:
-        headline = f"Kiln is working with {other} right now, and with one printer at a time."
+        headline = (
+            f"Kiln is working with {other} right now, and with one printer at "
+            f"a time {plan}."
+        )
 
     not_watching = f"Kiln is not watching {this_one}. Nothing here is keeping an eye on it."
 

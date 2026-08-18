@@ -340,3 +340,198 @@ class TestTheAdapterChokepoint:
                 "send_gcode",
             }
         )
+
+
+class TestThroughTheRealAdapterMethods:
+    """The wrapper, not the verdict function.
+
+    Everything above calls ``check_command`` directly, which tests the
+    reasoning and not the wiring.  These go through the actual adapter
+    methods, because the wiring is where a rule like this historically
+    fails: the gate existed on start_print and every sibling method walked
+    past it for months.
+    """
+
+    @staticmethod
+    def _adapter_class():
+        from kiln.printers.base import (
+            PrinterAdapter,
+            PrinterCapabilities,
+            PrinterState,
+            PrinterStatus,
+            PrintResult,
+        )
+
+        class _Real(PrinterAdapter):
+            def __init__(self, serial, state=PrinterStatus.PRINTING, job="bracket.gcode"):
+                self.serial = serial
+                self.host = ""
+                self._state = state
+                self._job = job
+                self.state_calls = 0
+
+            @property
+            def name(self):
+                return "probe"
+
+            @property
+            def capabilities(self):
+                return PrinterCapabilities()
+
+            def get_state(self):
+                self.state_calls += 1
+                return PrinterState(connected=True, state=self._state)
+
+            def get_job(self):
+                return JobProgress(file_name=self._job, print_time_seconds=60)
+
+            def list_files(self):
+                return []
+
+            def upload_file(self, path):
+                return None
+
+            def delete_file(self, path):
+                return True
+
+            def _start_print_impl(self, file_name, **kwargs):
+                return PrintResult(success=True, message="")
+
+            def _resume_print_impl(self):
+                return PrintResult(success=True, message="")
+
+            def cancel_print(self):
+                return PrintResult(success=True, message="")
+
+            def pause_print(self):
+                return PrintResult(success=True, message="")
+
+            def emergency_stop(self):
+                return PrintResult(success=True, message="")
+
+            def send_gcode(self, commands):
+                return True
+
+            def set_bed_temp(self, target):
+                return True
+
+            def set_tool_temp(self, target):
+                return True
+
+        return _Real
+
+    def test_the_gate_actually_fires_through_a_real_method(self, monkeypatch):
+        cls = self._adapter_class()
+        a, b = cls("AAA111"), cls("BBB222")
+        registry = PrinterRegistry()
+        registry.register("a1", a)
+        registry.register("garage", b)
+        monkeypatch.setattr("kiln.registry.get_registry", lambda: registry)
+
+        a.get_state()  # claims the free slot for A
+        assert engagement.current() is not None
+
+        with pytest.raises(PrinterEngagementError) as caught:
+            b.pause_print()
+        assert caught.value.verdict["code"] == "TIER_SINGLE_PRINTER_LIMIT"
+
+    def test_handing_back_does_not_open_the_whole_bench(self, monkeypatch):
+        """The escape hatch must not be the bypass.
+
+        Hand back, and the next machine commanded becomes Kiln's -- otherwise
+        a user empties the slot on purpose and drives every printer they own
+        with nothing engaged, which is the fleet experience for free.
+        """
+        cls = self._adapter_class()
+        a, b = cls("AAA111"), cls("BBB222", job="gasket.gcode")
+        registry = PrinterRegistry()
+        registry.register("a1", a)
+        registry.register("garage", b)
+        monkeypatch.setattr("kiln.registry.get_registry", lambda: registry)
+
+        a.get_state()
+        engagement.hand_back(a)
+        assert engagement.current() is None
+
+        b.get_state()  # B is printing, so B becomes the machine Kiln works with
+        assert engagement.current() is not None
+        with pytest.raises(PrinterEngagementError):
+            a.pause_print()
+
+    def test_an_idle_machine_claims_nothing(self, monkeypatch):
+        from kiln.printers.base import PrinterStatus
+
+        cls = self._adapter_class()
+        idle = cls("CCC333", state=PrinterStatus.IDLE)
+        registry = PrinterRegistry()
+        registry.register("spare", idle)
+        monkeypatch.setattr("kiln.registry.get_registry", lambda: registry)
+
+        idle.get_state()
+        assert engagement.current() is None
+
+    def test_the_gate_costs_no_extra_round_trips(self, monkeypatch):
+        """Measured, because the first version cost one per engagement.
+
+        Claiming from inside the gate meant the first status call on every
+        engagement asked the printer twice.  The claim reads the answer the
+        command already returned instead.
+        """
+        cls = self._adapter_class()
+        a = cls("AAA111")
+        registry = PrinterRegistry()
+        registry.register("a1", a)
+        monkeypatch.setattr("kiln.registry.get_registry", lambda: registry)
+
+        for _ in range(10):
+            a.get_state()
+        assert a.state_calls == 10
+
+
+class TestCopyIsWrittenForWhoIsReadingIt:
+    """A refusal is the only part of this most people will ever read."""
+
+    def test_a_free_caller_is_told_it_is_the_free_plan(self, two_printers, monkeypatch):
+        a, b = two_printers
+        monkeypatch.setattr(engagement, "_tier_name", lambda: "free")
+        _engage(a, "a1")
+        verdict = engagement.check_command(b, "pause_print")
+        assert "on the free plan" in verdict["reason"]
+
+    def test_a_paying_caller_is_not_told_they_are_on_the_free_plan(
+        self, two_printers, monkeypatch,
+    ):
+        """Pro is capped here too, and reads the same refusal.
+
+        Telling a subscriber they are "on the free plan" is the product they
+        pay for informing them they did not pay.
+        """
+        a, b = two_printers
+        monkeypatch.setattr(engagement, "_tier_name", lambda: "pro")
+        _engage(a, "a1")
+        verdict = engagement.check_command(b, "pause_print")
+        assert "free plan" not in verdict["reason"]
+        assert "Kiln Pro" in verdict["reason"]
+
+    def test_the_upgrade_line_still_names_business_once_for_either(
+        self, two_printers, monkeypatch,
+    ):
+        a, b = two_printers
+        for tier in ("free", "pro"):
+            monkeypatch.setattr(engagement, "_tier_name", lambda t=tier: t)
+            _engage(a, "a1")
+            verdict = engagement.check_command(b, "pause_print")
+            text = verdict["upgrade_nudge"]["display_text"]
+            assert text.lower().count("business") == 1, (tier, text)
+
+    def test_handing_back_reports_whether_a_return_is_left(self, two_printers):
+        """The consequence is stated at the moment of the release."""
+        a, b = two_printers
+        _engage(a, "a1")
+        first = engagement.hand_back(a)
+        assert first["returns_left"] == 1
+
+        _engage(b, "garage")
+        engagement.check_command(a, "pause_print")  # spends A's return
+        spent = engagement.hand_back(a)
+        assert spent["returns_left"] == 0

@@ -260,14 +260,23 @@ class _PrinterManagementToolsPlugin:
                         report.get("reason", "Nothing to hand back."),
                         code="NOT_ENGAGED",
                     )
+                name = report.get("printer", printer_name)
+                left = report.get("returns_left", 0)
+                # State the consequence HERE, not when they discover it.
+                consequence = (
+                    f"Kiln can come back to this print once if you need it to."
+                    if left
+                    else f"Kiln has already come back to this print once, so it "
+                    f"will stay with the next printer until this one finishes."
+                )
                 return {
                     "success": True,
-                    "printer": report.get("printer", printer_name),
+                    "printer": name,
                     "message": (
-                        f"Kiln has stepped off {report.get('printer', printer_name)}. "
-                        f"The print carries on; Kiln can work with another printer now."
+                        f"Kiln has stepped off {name}. The print carries on exactly "
+                        f"as it was, and Kiln is free for another printer. {consequence}"
                     ),
-                    "returns_left": report.get("returns_left", 0),
+                    "returns_left": left,
                 }
             except Exception as exc:
                 _logger.exception("Error in hand_back_printer")
