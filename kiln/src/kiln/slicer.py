@@ -31,9 +31,11 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -352,6 +354,91 @@ def _record_slice(
 # fine.  So it is upstream and profile-specific, not a Kiln argv or preset bug.
 _ORCA_SIGSEGV_RETURNCODES = frozenset({-11, 139})
 
+# The macOS locale-race startup crash, slicer spelling.  The same libc race
+# kiln.openscad_runner retries for OpenSCAD kills PrusaSlicer too: seven
+# crash reports on one machine 2026-08-11..2026-08-17, every one SIGTRAP
+# with libc's "loc->decimal_point is NULL" guard, every one 0.06-0.13s
+# after launch -- dead before the model mattered.  Same shape, same
+# remedy, same honesty about the bounds: the crash is upstream
+# (macOS 26.5 libc + a multithreaded process touching the locale during
+# startup), a retry is a lottery re-draw, and a crash that lands OUTSIDE
+# the startup window is a real answer about real geometry and is not
+# retried.  SIGSEGV/SIGBUS ride along because the OpenSCAD twin showed
+# one underlying race spelling itself as either a libc guard trap or a
+# wild read, depending on where the torn pointer lands.
+_SLIC3R_STARTUP_CRASH_RETURNCODES = frozenset({
+    -int(signal.SIGTRAP), -int(signal.SIGSEGV), -int(signal.SIGBUS),
+})
+
+# The Orca dialect keeps SIGSEGV out of its retry set on purpose: -11 on
+# that path is the deterministic Bambu-preset crash above, a real verdict
+# with a real message, and retrying it would crash the same way twice
+# more just to say the same thing later (the openscad_runner rule about
+# not retrying real answers).  The locale race has not been captured on
+# an Orca binary; TRAP/BUS are covered so that if it ever is, the user
+# gets the re-draw instead of the failure.
+_ORCA_STARTUP_CRASH_RETURNCODES = frozenset({
+    -int(signal.SIGTRAP), -int(signal.SIGBUS),
+})
+
+#: A crash later than this is blamed on the model, not on startup.  The
+#: observed crashes die in the first ~0.1s; ten seconds is far past any
+#: plausible startup and far short of real slicing work on a big model.
+_STARTUP_CRASH_WINDOW_S = 10.0
+
+#: Total launches, so two re-draws after a first startup crash.
+_SLICE_ATTEMPTS = 3
+
+
+def _run_slicer_with_startup_retry(
+    cmd: list[str],
+    *,
+    timeout: int,
+    retryable_returncodes: frozenset[int],
+    remove_partial_output,
+    output_is_complete,
+) -> subprocess.CompletedProcess:
+    """Launch a slicer, re-drawing the startup-crash lottery when it hits.
+
+    One loop for both CLI dialects so the retry rule cannot drift between
+    them.  A retry fires only when ALL of these hold: the death was one of
+    *retryable_returncodes*, it happened inside the startup window, the
+    output is NOT already complete (a signal death after a complete write
+    is the salvage case, owned by the caller), and an attempt remains.
+    *remove_partial_output* runs between attempts so a half-written file
+    from a crashed run can never pose as the next run's result.
+    """
+    result: subprocess.CompletedProcess | None = None
+    for attempt in range(1, _SLICE_ATTEMPTS + 1):
+        started = time.monotonic()
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            remove_partial_output()
+            raise SlicerError(
+                f"Slicing timed out after {timeout}s. The model may be too complex "
+                f"or the slicer is hanging."
+            ) from None
+        except OSError as exc:
+            raise SlicerError(f"Failed to run slicer: {exc}") from exc
+        elapsed = time.monotonic() - started
+        if (
+            attempt < _SLICE_ATTEMPTS
+            and result.returncode in retryable_returncodes
+            and elapsed < _STARTUP_CRASH_WINDOW_S
+            and not output_is_complete()
+        ):
+            logger.warning(
+                "Slicer died of signal %d %.2fs after launch (the startup "
+                "crash lottery) -- relaunching, attempt %d of %d",
+                -result.returncode, elapsed, attempt + 1, _SLICE_ATTEMPTS,
+            )
+            remove_partial_output()
+            continue
+        break
+    assert result is not None
+    return result
+
 
 def _slice_with_orca(
     slicer: SlicerInfo,
@@ -409,15 +496,22 @@ def _slice_with_orca(
 
         logger.info("Slicing (Orca dialect): %s", " ".join(cmd))
 
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            raise SlicerError(
-                f"Slicing timed out after {timeout}s. The model may be too complex "
-                f"or the slicer is hanging."
-            ) from None
-        except OSError as exc:
-            raise SlicerError(f"Failed to run slicer: {exc}") from exc
+        def _latest_gcode_complete() -> bool:
+            done = sorted(Path(work_dir).glob("*.gcode"), key=lambda p: p.stat().st_mtime)
+            return bool(done) and _gcode_output_is_complete(str(done[-1]))
+
+        def _drop_partial_gcode() -> None:
+            for stale in Path(work_dir).glob("*.gcode"):
+                with contextlib.suppress(OSError):
+                    stale.unlink()
+
+        result = _run_slicer_with_startup_retry(
+            cmd,
+            timeout=timeout,
+            retryable_returncodes=_ORCA_STARTUP_CRASH_RETURNCODES,
+            remove_partial_output=_drop_partial_gcode,
+            output_is_complete=_latest_gcode_complete,
+        )
 
         produced = sorted(Path(work_dir).glob("*.gcode"), key=lambda p: p.stat().st_mtime)
 
@@ -591,23 +685,17 @@ def slice_file(
 
     logger.info("Slicing: %s", " ".join(cmd))
 
-    # Run
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        # Clean up partial output on timeout
+    def _drop_partial_out_file() -> None:
         with contextlib.suppress(OSError):
             os.unlink(out_file)
-        raise SlicerError(
-            f"Slicing timed out after {timeout}s. The model may be too complex or the slicer is hanging."
-        ) from None
-    except OSError as exc:
-        raise SlicerError(f"Failed to run slicer: {exc}") from exc
+
+    result = _run_slicer_with_startup_retry(
+        cmd,
+        timeout=timeout,
+        retryable_returncodes=_SLIC3R_STARTUP_CRASH_RETURNCODES,
+        remove_partial_output=_drop_partial_out_file,
+        output_is_complete=lambda: _gcode_output_is_complete(out_file),
+    )
 
     crashed_after_finishing = (
         result.returncode != 0
