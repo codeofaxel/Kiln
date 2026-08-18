@@ -255,6 +255,56 @@ def test_opt_out_env_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     assert find_browser() is None
 
 
+def _seed_playwright_cache(home: Path) -> tuple[Path, Path]:
+    """A fake Playwright cache holding both binary kinds.
+
+    Returns ``(headless_shell, chromium_app_binary)``, both executable.
+    """
+    cache = home / "Library" / "Caches" / "ms-playwright"
+    shell = cache / "chromium_headless_shell-1000" / "chrome-headless-shell-mac-arm64" / "chrome-headless-shell"
+    app = cache / "chromium-1000" / "chrome-mac-arm64" / "Chromium.app" / "Contents" / "MacOS" / "Chromium"
+    for binary in (shell, app):
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_text("#!/bin/sh\nexit 0\n")
+        binary.chmod(0o755)
+    return shell, app
+
+
+def test_macos_auto_discovery_never_offers_an_app_bundle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """On macOS, only headless-shell is auto-picked -- never a ``.app``.
+
+    A ``.app``-bundled Chromium launched headlessly puts a second browser
+    icon in the user's Dock, and the headless-mode flag does not prevent
+    it (measured 2026-08-18: bare ``--headless`` and ``--headless=new``
+    both bounce it).  So the picker, not the flags, is the fix -- and this
+    pins it: even with a full Chromium sitting IN the Playwright cache,
+    macOS discovery must not offer it.
+    """
+    shell, app = _seed_playwright_cache(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(stage_still, "_MAC_DOCK", True)
+    candidates = stage_still._browser_candidates()
+    assert shell in candidates
+    assert app not in candidates
+    assert not any(".app" in p.parts or p.suffix == ".app" or ".app" in str(p) for p in candidates), candidates
+
+
+def test_non_macos_auto_discovery_still_offers_the_wider_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Linux has no Dock; the wider candidate chain must survive there."""
+    shell, app = _seed_playwright_cache(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(stage_still, "_MAC_DOCK", False)
+    candidates = stage_still._browser_candidates()
+    assert shell in candidates
+    assert app in candidates
+    # headless-shell still outranks the full browser.
+    assert candidates.index(shell) < candidates.index(app)
+
+
 def test_explicit_override_that_is_wrong_does_not_scan_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

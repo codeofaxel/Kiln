@@ -19,8 +19,11 @@ Everything here is best-effort and silent.  The OpenSCAD renderer in
 backend runs only when EVERY precondition holds:
 
 * a chromium-family binary is discoverable (``KILN_STAGE_BROWSER``
-  override, the Playwright browser caches, a system Chrome/Chromium/
-  Edge/Brave, or PATH) — never downloaded, never required;
+  override, else Playwright's chrome-headless-shell; on non-macOS also
+  Playwright's Chromium, a system Chrome/Chromium/Edge/Brave, or PATH —
+  on macOS a full ``.app`` browser is never auto-picked, because
+  launching one headlessly bounces a Dock icon; see
+  ``_browser_candidates``) — never downloaded, never required;
 * the cached stage document (``kiln.stage_cache``) is present AND
   still-capable (carries the ``__KILN_STILL__`` still-mode block — an
   older cached document simply means OpenSCAD until the next refresh);
@@ -59,6 +62,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -120,20 +124,53 @@ _MIN_STDDEV = 15.0
 _MIN_BYTES_PER_25_PX = 1  # floor = (width * height) // 25 bytes
 
 
+#: Whether auto-discovery must avoid ``.app``-bundled browsers (macOS).
+#: Module-level so tests can exercise both branches without faking
+#: ``sys.platform`` process-wide.
+_MAC_DOCK = sys.platform == "darwin"
+
+
 def _browser_candidates() -> list[Path]:
     """Chromium-family binaries this machine might have, best first.
 
     Playwright caches lead (headless-shell is purpose-built and has no
-    profile/UI baggage), newest build first; system browsers follow;
-    PATH lookups last.  Nothing is ever downloaded.
+    profile/UI baggage), newest build first.  Nothing is ever downloaded.
+
+    ON macOS, AUTO-DISCOVERY OFFERS headless-shell ONLY -- never a full
+    ``.app`` browser.  Launching a ``.app``-bundled Chromium headlessly
+    puts a second browser icon in the user's Dock for the life of the
+    process, and no flag prevents it.  Measured 2026-08-18 on macOS
+    26.5.2 with Chrome 151, ten launches: bare ``--headless`` and
+    ``--headless=new`` both register with LaunchServices and both bounce
+    the Dock icon (confirmed by a human watching the Dock), even though
+    ``lsappinfo`` types the entry ``BackgroundOnly``.  The mode flag was
+    the tidy story and it is not the mechanism; the bundle is.
+    chrome-headless-shell carries no app bundle and no GUI code, so it
+    is the one binary that provably never touches the Dock -- which is
+    why Google ships it as a separate binary at all.  A machine with
+    Chrome but no Playwright cache therefore gets the OpenSCAD look
+    rather than a render that spams the Dock; anyone who wants stage
+    stills through a full browser anyway can say so explicitly with
+    ``KILN_STAGE_BROWSER``, which is honored unchanged.
+
+    Elsewhere (Linux: no Dock, and the PATH binaries are bare
+    executables) the wider search stays: Playwright's Chromium, system
+    installs, then PATH.
     """
     out: list[Path] = []
-    for cache in (
+    caches = (
         Path.home() / "Library" / "Caches" / "ms-playwright",
         Path.home() / ".cache" / "ms-playwright",
-    ):
+    )
+    for cache in caches:
+        out.extend(sorted(
+            cache.glob("chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell"),
+            reverse=True,
+        ))
+    if _MAC_DOCK:
+        return out
+    for cache in caches:
         for pattern in (
-            "chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell",
             "chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium",
             "chromium-*/chrome-linux/chrome",
         ):
@@ -295,6 +332,11 @@ def _build_harness(
 #: how the keychain flag below came to be missing from one caller and present
 #: in the other: two lists claiming to describe one launch, free to disagree.
 STILL_BROWSER_FLAGS: tuple[str, ...] = (
+    # Deliberately NOT "--headless=new": the mode spelling was measured to
+    # make no difference to the macOS Dock-icon problem (see
+    # _browser_candidates), and on current Chrome the two spellings select
+    # the same mode anyway.  Bare --headless is the one every
+    # chromium-family binary accepts, chrome-headless-shell included.
     "--headless",
     "--hide-scrollbars",
     # WebGL in CLI screenshot mode needs the software rasterizer
