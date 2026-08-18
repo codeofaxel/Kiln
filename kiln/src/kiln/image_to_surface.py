@@ -162,6 +162,51 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
 # Image loading: Pillow first, then pure-Python PNG, then sips/convert for JPEG
 # ---------------------------------------------------------------------------
 
+def _flatten_alpha_on_white(img):
+    """Composite transparency onto white BEFORE any grayscale convert.
+
+    ``convert("L")`` silently drops the alpha channel, so a transparent
+    surround decodes as BLACK — the far end of the height scale from the
+    empty field it visually is.  A brand logo ships as an opaque mark on
+    a transparent surround; decoded as black, the surround displaces the
+    surface across the mark's whole bounding box.  White is the field
+    convention everywhere this pipeline touches pixels (the pure-Python
+    PNG decoder blends against white, the rembg step composites onto
+    white, SVG rasterization flattens onto white), so transparent must
+    read as white here too.  Covers every Pillow mode that can carry
+    transparency: RGBA, LA, PA, and palette images with a transparency
+    table.
+    """
+    from PIL import Image
+
+    if img.mode in ("RGBA", "LA", "PA") or (
+        img.mode == "P" and "transparency" in img.info
+    ):
+        rgba = img.convert("RGBA")
+        bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        bg.paste(rgba, mask=rgba.split()[3])
+        return bg
+    return img
+
+
+def _open_grayscale(image_path: str, *, exif_transpose: bool = False):
+    """The one way any door in this module opens an image as grayscale.
+
+    Every style block used to call ``Image.open(path).convert("L")``
+    itself, and each of those bare calls was an alpha-dropping door.
+    Routing them all through here is what keeps the next style block
+    from reintroducing the transparent-surround carve.
+    """
+    from PIL import Image
+
+    img = Image.open(image_path)
+    if exif_transpose:
+        from PIL import ImageOps
+
+        img = ImageOps.exif_transpose(img)
+    return _flatten_alpha_on_white(img).convert("L")
+
+
 def _load_image_as_grayscale(image_path: str) -> tuple[list[list[int]], int, int]:
     """Load an image and return (rows_of_grayscale, width, height).
 
@@ -180,15 +225,7 @@ def _load_image_as_grayscale(image_path: str) -> tuple[list[list[int]], int, int
 
     # Strategy 1: Try Pillow
     try:
-        from PIL import Image  # type: ignore[import-untyped]
-
-        img = Image.open(abs_path)
-        if img.mode == "RGBA" or img.mode == "PA":
-            # Composite onto white background
-            bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
-            bg.paste(img, mask=img.split()[3])
-            img = bg
-        img = img.convert("L")
+        img = _open_grayscale(abs_path)
         w, h = img.size
         pixels = list(img.getdata())
         rows = [pixels[i * w : (i + 1) * w] for i in range(h)]
@@ -550,6 +587,10 @@ def prepare_image_for_emboss(
         Maximum pixel count on the longest edge (default 200).
     invert : bool
         If True, flip light/dark (switch between deboss and emboss).
+        Ignored when the image is detected as a mark on a clean field:
+        a mark's heightmap is polarity-free (the mark displaces, the
+        field stays flush) and the caller's emboss/deboss choice is
+        carried by the geometry side, not the pixel values.
     edge_enhance : bool
         If True, apply a sharpening kernel for crisper edges.
     mask : str
@@ -595,6 +636,15 @@ def prepare_image_for_emboss(
         )
         style = "default"
         edge_enhance = False
+        # _flatten_field output is polarity-free: it maps DISTANCE from the
+        # field tone to displacement, so the mark displaces and the field
+        # stays flush in both modes (the SCAD side sets emboss-vs-deboss
+        # direction with a signed Z scale).  Callers pass invert=True to
+        # mean "deboss — dark ink carves"; applying that flip AFTER the
+        # flatten displaced the entire field at full depth with the mark
+        # left standing, so every logo deboss wore a sunken box around
+        # the artwork.
+        invert = False
 
     # Apply style-specific preprocessing
     if style == "photo":
@@ -602,8 +652,8 @@ def prepare_image_for_emboss(
         # High contrast + gaussian blur + 3-level posterize.
         # Produces clean depth tiers that FDM printers resolve well.
         try:
-            from PIL import Image, ImageEnhance, ImageFilter
-            img = Image.open(image_path).convert('L')
+            from PIL import ImageEnhance, ImageFilter
+            img = _open_grayscale(image_path)
             # Resize to target resolution first
             # (handled below, so we process at original res)
             img = ImageEnhance.Contrast(img).enhance(2.5)
@@ -627,8 +677,8 @@ def prepare_image_for_emboss(
         # Bold binary silhouette — high contrast, two levels only.
         # Good for simple subjects against clean backgrounds.
         try:
-            from PIL import Image, ImageEnhance, ImageFilter
-            img = Image.open(image_path).convert('L')
+            from PIL import ImageEnhance, ImageFilter
+            img = _open_grayscale(image_path)
             img = ImageEnhance.Contrast(img).enhance(2.0)
             img = img.point(lambda p: 255 if p > 140 else 0)
             img = img.filter(ImageFilter.MedianFilter(size=5))
@@ -648,8 +698,8 @@ def prepare_image_for_emboss(
         # No posterization, maximum tonal range.
         # Inverts by default (thin = bright when backlit).
         try:
-            from PIL import Image, ImageEnhance, ImageFilter
-            img = Image.open(image_path).convert('L')
+            from PIL import ImageEnhance, ImageFilter
+            img = _open_grayscale(image_path)
             img = ImageEnhance.Contrast(img).enhance(1.5)
             img = img.filter(ImageFilter.GaussianBlur(radius=1))
             preprocessed = os.path.join(output_dir, "preprocessed_lithophane.png")
@@ -673,7 +723,7 @@ def prepare_image_for_emboss(
         try:
             from PIL import Image, ImageFilter, ImageOps
 
-            img = ImageOps.exif_transpose(Image.open(image_path)).convert("L")
+            img = _open_grayscale(image_path, exif_transpose=True)
 
             # Step 1: EXIF-aware open + transpose
             # Step 2: Background removal via rembg (if available)
@@ -807,7 +857,7 @@ def prepare_image_for_emboss(
         try:
             from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
-            img = Image.open(image_path).convert("L")
+            img = _open_grayscale(image_path)
             img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
             # Equalize to pull detail from dark areas
             eq = ImageOps.equalize(img)
@@ -858,7 +908,7 @@ def prepare_image_for_emboss(
         try:
             from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
-            img = Image.open(image_path).convert("L")
+            img = _open_grayscale(image_path)
             img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
             # Base: posterized for volume
             eq = ImageOps.equalize(img)
@@ -900,7 +950,7 @@ def prepare_image_for_emboss(
         try:
             from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
-            img = Image.open(image_path).convert("L")
+            img = _open_grayscale(image_path)
             sz = max_resolution
             img = ImageOps.fit(img, (sz, sz), method=Image.LANCZOS)
             # Relief: 5-level posterize + subtle edge enhancement
@@ -981,20 +1031,28 @@ def prepare_image_for_emboss(
         # carve goes to zero at the artwork's own edges because the field
         # maps to zero, not because a boundary was drawn around it.
         rows = _flatten_field(rows, w, h)
-    elif mask != "none":
-        # A photo has content everywhere, so SOME boundary must exist; the
-        # right one matches the PRODUCT (the proven coin look: a deliberate
-        # inset pool), never the photo's own rectangle.  Enforced here in
-        # heightmap space as the belt: whatever a style did or skipped
-        # upstream — including a style that degraded because an optional
-        # dependency was missing — the boundary below is the one that ships.
-        rows = _mask_rows(rows, w, h, mask, style)
 
     if edge_enhance:
         rows = _sharpen(rows, w, h)
 
     if invert:
         rows = _invert(rows)
+
+    if not _mark_mode and mask != "none":
+        # A photo has content everywhere, so SOME boundary must exist; the
+        # right one matches the PRODUCT (the proven coin look: a deliberate
+        # inset pool), never the photo's own rectangle.  Enforced here in
+        # heightmap space as the belt: whatever a style did or skipped
+        # upstream — including a style that degraded because an optional
+        # dependency was missing — the boundary below is the one that ships.
+        #
+        # Applied AFTER the invert, and that order is load-bearing: invert
+        # is a statement about the image's luminance polarity, the mask is
+        # a statement about the part's geometry.  With the mask first, a
+        # deboss (invert=True) flipped the masked-out zeros to full depth
+        # and carved everything OUTSIDE the shape — the sunken photo frame,
+        # back through the other polarity.
+        rows = _mask_rows(rows, w, h, mask, style)
 
     # OpenSCAD surface() reads rows bottom-to-top; images are top-to-bottom.
     # flip_rows=True corrects this so the heightmap orientation matches the image.
