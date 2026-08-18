@@ -4781,9 +4781,22 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
     serial file transfer automatically.
 
     Args:
-        file_path: Absolute path to the G-code file on the local filesystem.
-            The file must exist, be readable, and have a recognised extension
-            (.gcode, .gco, or .g).
+        file_path: Absolute path to the print file on the local filesystem.
+            The file must exist and be readable.  Accepted extensions follow
+            the TARGET PRINTER, not one fixed list — ``printer_status()``
+            reports them per machine, and a Bambu declares ``.3mf`` FIRST
+            because that is the only thing it will start a print from.
+            Bare ``.gcode`` / ``.gco`` / ``.g`` is right for OctoPrint,
+            Moonraker, PrusaLink and Duet; on a Bambu it has no start block
+            and is refused by the homing gate below.
+
+            When ``slice_model`` produced the file, upload the path it names
+            in ``recommended_upload_path`` and do not choose between its
+            outputs by hand — it already knows the printer.  (This docstring
+            used to say the extension had to be ``.gcode``, ``.gco`` or
+            ``.g``, which is narrower than this function's own behaviour and
+            sent at least one caller to the one file its printer could not
+            print.)
         printer_name: Which printer to upload to.  Omit to upload to the
             default printer, which is what this did before it could be
             aimed.  The G-code dialect scan and the bed-fit gate follow the
