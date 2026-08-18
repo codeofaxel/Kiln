@@ -37,6 +37,26 @@ os.environ["HOME"] = _TEST_HOME
 os.environ.pop("KILN_PRINTER_HOST", None)  # no real printer leaks in either
 os.environ.pop("KILN_PRINTER_TYPE", None)
 
+# Same class of bug as the HOME move above, one store it doesn't reach:
+# kiln.stage_cache keeps an in-process memo that, once set, is never
+# re-read from disk for the rest of the process (see its ``document()``
+# docstring).  The first test in a worker that calls visualize_model()
+# with the default allow_stage=True finds no cache under the fresh
+# _TEST_HOME, which is correct -- but that miss also fires
+# stage_cache.warm(), a background thread doing a REAL HTTP fetch against
+# production api.kiln3d.com.  On a machine with network access that
+# fetch usually wins the race against the rest of a multi-minute suite
+# run, so the memo goes warm partway through and every LATER test in
+# that worker silently gets a real stage-photograph render instead of
+# whatever visualize_model()/OpenSCAD path it thought it was exercising
+# -- order- and timing-dependent, invisible unless a test happens to
+# assert on OpenSCAD's own invocation. Disabling the fetch (not
+# find_browser()'s KILN_NO_STAGE_STILLS, which test_stage_still.py's
+# happy-path tests need live for their own KILN_STAGE_BROWSER override)
+# leaves _stage_document() returning None all suite long unless a test
+# opts back in via KILN_STAGE_DOC, same as it already does when offline.
+os.environ["KILN_NO_STAGE_FETCH"] = "1"
+
 # ---------------------------------------------------------------------------
 # Monkey-patch FastMCP to accept unknown kwargs (like ``description``)
 # so that ``import kiln.server`` succeeds at collection time.
