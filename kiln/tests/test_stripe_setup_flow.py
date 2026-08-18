@@ -134,18 +134,63 @@ class TestPollSetupIntent:
 
 
 class TestCreateSetupUrlStoresPendingId:
+    """The card form is a Stripe-hosted Checkout Session, not a raw SetupIntent.
+
+    ``create_setup_url`` mints a Checkout Session in ``mode="setup"`` so the
+    card number never transits or rests on a Kiln surface.  The session
+    carries the SetupIntent id, which is what ``poll_setup_intent`` later
+    confirms against -- so the mock has to be a session, not an intent.
+    """
+
     def test_stores_setup_intent_id(self):
         mock_stripe = _build_mock_stripe()
-        mock_stripe.SetupIntent.create.return_value = MagicMock(
-            id="seti_stored", client_secret="secret_val"
+        mock_stripe.checkout.Session.create.return_value = MagicMock(
+            id="cs_test_123",
+            setup_intent="seti_stored",
+            url="https://checkout.stripe.com/c/pay/cs_test_123",
         )
 
         p = _make_provider()
         assert p._pending_setup_intent_id is None
         with patch.dict(sys.modules, {"stripe": mock_stripe}):
-            p.create_setup_url()
+            url = p.create_setup_url()
 
         assert p._pending_setup_intent_id == "seti_stored"
+        assert p._pending_setup_session_id == "cs_test_123"
+        assert url == "https://checkout.stripe.com/c/pay/cs_test_123"
+        # mode="setup" is what attaches the card for off_session reuse --
+        # fulfillment fees charge without the user present.
+        assert mock_stripe.checkout.Session.create.call_args.kwargs["mode"] == "setup"
+
+    def test_recovers_intent_id_from_session_when_absent(self):
+        """A session may not expose its SetupIntent at creation time.
+
+        When it doesn't, the id is recovered from the session on first
+        poll rather than the setup being silently unconfirmable.
+        """
+        mock_stripe = _build_mock_stripe()
+        mock_stripe.checkout.Session.create.return_value = MagicMock(
+            id="cs_test_456",
+            setup_intent=None,
+            url="https://checkout.stripe.com/c/pay/cs_test_456",
+        )
+        mock_stripe.checkout.Session.retrieve.return_value = MagicMock(
+            setup_intent="seti_recovered"
+        )
+        si = MagicMock()
+        si.status = "succeeded"
+        si.payment_method = "pm_recovered"
+        mock_stripe.SetupIntent.retrieve.return_value = si
+
+        p = _make_provider()
+        with patch.dict(sys.modules, {"stripe": mock_stripe}):
+            p.create_setup_url()
+            assert p._pending_setup_intent_id is None
+            result = p.poll_setup_intent()
+
+        assert result == "pm_recovered"
+        assert p._pending_setup_intent_id == "seti_recovered"
+        mock_stripe.checkout.Session.retrieve.assert_called_once_with("cs_test_456")
 
 
 # ---------------------------------------------------------------------------
