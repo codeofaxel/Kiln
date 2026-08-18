@@ -768,3 +768,67 @@ class TestOnePrinterNeverStallsAnother:
 
     def test_the_bound_is_short_enough_to_be_worth_having(self):
         assert engagement._PEER_VERIFY_TIMEOUT_S <= 10.0
+
+
+class TestTheRecordDoesNotGrowForever:
+    """A store that only ever accumulates is a slow leak with a sharp edge."""
+
+    def test_hand_backs_for_unregistered_printers_are_forgotten(self, two_printers):
+        a, b = two_printers
+        _engage(a, "a1")
+        engagement.hand_back(a)
+        assert engagement.machine_id(a) in engagement._read_store()["handbacks"]
+
+        # The user unregisters that printer; only the other one remains.
+        registry = PrinterRegistry()
+        registry.register("garage", b)
+        import kiln.registry as reg_mod
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(reg_mod, "get_registry", lambda: registry)
+            _engage(b, "garage")
+            engagement.hand_back(b)
+            handbacks = engagement._read_store().get("handbacks", {})
+
+        assert engagement.machine_id(a) not in handbacks, (
+            "a printer that is gone must not keep a record — the next machine "
+            "with that fingerprint would inherit a spent return"
+        )
+
+    def test_an_unreadable_registry_keeps_everything(self, two_printers):
+        """Never prune on a guess: not knowing is not the same as absent."""
+        a, b = two_printers
+        _engage(a, "a1")
+        engagement.hand_back(a)
+        store = engagement._read_store()
+
+        import kiln.registry as reg_mod
+
+        def _boom():
+            raise RuntimeError("registry unavailable")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(reg_mod, "get_registry", _boom)
+            assert engagement._forget_unknown_machines(store) is False
+        assert engagement.machine_id(a) in store["handbacks"]
+
+
+class TestItSpeaksEnglishNotSchema:
+    def test_every_stored_reason_has_a_human_form(self):
+        """A phrase, not a token.
+
+        The check is that it reads as a sentence — several words, and not
+        the bare stored value. "Kiln started this print" legitimately
+        contains "started"; what must never reach a person is "commanded"
+        on its own.
+        """
+        for reason in ("started", "watching", "commanded", "returned"):
+            phrase = engagement.reason_in_english(reason)
+            assert phrase != reason, f"{reason!r} reached a person as-is"
+            assert len(phrase.split()) >= 4, f"{reason!r} -> {phrase!r} is not a sentence"
+            assert phrase[0].isupper() or phrase.startswith("you"), phrase
+
+    def test_an_unknown_reason_still_reads_as_a_sentence(self):
+        assert engagement.reason_in_english("something_new") == (
+            "Kiln is working with this printer"
+        )

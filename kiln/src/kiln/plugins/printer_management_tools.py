@@ -232,7 +232,11 @@ class _PrinterManagementToolsPlugin:
                 return err
 
             try:
-                from kiln.printers.engagement import current, hand_back
+                from kiln.printers.engagement import (
+                    current,
+                    hand_back,
+                    reason_in_english,
+                )
 
                 engagement = current()
                 if printer_name is None:
@@ -246,7 +250,7 @@ class _PrinterManagementToolsPlugin:
                         "success": True,
                         "engaged_with": engagement.label,
                         "since": engagement.since,
-                        "because": engagement.reason,
+                        "because": reason_in_english(engagement.reason),
                         "message": (
                             f"Kiln is working with {engagement.label}. "
                             f"Hand it back to move Kiln to another printer."

@@ -174,6 +174,22 @@ class Engagement:
         )
 
 
+
+# How each engagement reason reads to a person.  The stored values are the
+# code's vocabulary and have to stay stable; these are what a user sees.
+_REASON_IN_ENGLISH = {
+    "started": "Kiln started this print",
+    "watching": "Kiln is watching this print for you",
+    "commanded": "you asked Kiln to work with this printer",
+    "returned": "Kiln came back to this print",
+}
+
+
+def reason_in_english(reason: str) -> str:
+    """Plain-English form of an engagement reason, for a user-facing surface."""
+    return _REASON_IN_ENGLISH.get(reason, "Kiln is working with this printer")
+
+
 def machine_id(adapter: Any) -> str:
     """Durable identity for the machine behind *adapter*, or ``""``.
 
@@ -269,6 +285,7 @@ def hand_back(adapter: Any) -> dict[str, Any]:
             }
         _record_hand_back(store, engagement)
         store["engaged"] = None
+        _forget_unknown_machines(store)
         _write_store(store)
         _verify_cache.pop(engagement.machine, None)
         return {
@@ -279,6 +296,36 @@ def hand_back(adapter: Any) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         logger.debug("hand-back failed", exc_info=True)
         return {"released": False, "reason": "Could not update the printer record."}
+
+
+def _forget_unknown_machines(store: dict[str, Any]) -> bool:
+    """Drop hand-back records for printers that are no longer registered.
+
+    Without this the record only ever grows: unregister a printer and its
+    entry outlives it forever, and worse, whatever machine later presents
+    the same fingerprint inherits a spent return it never used.
+    """
+    handbacks = store.get("handbacks")
+    if not isinstance(handbacks, dict) or not handbacks:
+        return False
+    try:
+        from kiln.registry import get_registry, machine_fingerprint
+
+        registry = get_registry()
+        live = set()
+        for name in registry.list_machines():
+            try:
+                live.add(machine_fingerprint(registry.get(name)))
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        return False  # cannot tell who is registered: keep everything
+    if not live:
+        return False  # an empty registry proves nothing about what exists
+    stale = [m for m in handbacks if m not in live]
+    for machine in stale:
+        handbacks.pop(machine, None)
+    return bool(stale)
 
 
 def _returns_used(store: dict[str, Any], machine: str) -> int:
