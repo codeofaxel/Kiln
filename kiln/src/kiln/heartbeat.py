@@ -387,6 +387,28 @@ def _is_pro_installed() -> bool:
         return False
 
 
+def _bridge_running() -> bool | None:
+    """Whether a persistent bridge is running on this machine, or ``None``.
+
+    This is the one field that says whether print hours can ever recover on
+    their own: the duration watchdog dies with the MCP server process, so an
+    install with no bridge loses every ending its chat session outlives —
+    and without this we cannot tell how common that is.
+
+    The pidfile check is machine-level, not process-level, so a heartbeat
+    from a short-lived server still reports the long-lived bridge beside it.
+    Lazy import with its own guard: bridge_commands pulls CLI dependencies,
+    and a missing one must read as "could not determine" (``None``), never
+    as "no bridge" — an honest absence, same as the counters.
+    """
+    try:
+        from kiln.cli.bridge_commands import _anything_running
+
+        return _anything_running()
+    except Exception:
+        return None
+
+
 def _send_heartbeat() -> None:
     """Send a single heartbeat to Supabase."""
     global _sent_on  # noqa: PLW0603
@@ -461,6 +483,11 @@ def _send_heartbeat() -> None:
                 "prints_hours_reported": stats.get(
                     "prints_hours_reported", 0
                 ),
+                # Whether a persistent bridge runs on this machine (None =
+                # could not determine).  Reported because it decides whether
+                # the install can ever notice endings its chat sessions
+                # outlive — the reason prints_hours_reported exists.
+                "bridge_running": _bridge_running(),
                 "texture_names": stats.get("texture_names", {}),
                 "decoration_types": stats.get("decoration_types", {}),
                 "slicer_profiles": stats.get("slicer_profiles", {}),
