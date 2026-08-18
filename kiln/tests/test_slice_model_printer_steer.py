@@ -41,19 +41,24 @@ def _fake_slice_response(threemf: str, gcode: str) -> dict:
 
 
 def test_the_steer_names_the_wrapped_file_not_the_raw_gcode(tmp_path):
-    """The recommendation must be the 3MF — the only startable file."""
-    from kiln.plugins import slicer_tools  # noqa: F401  (import guard)
+    """The recommendation must be the 3MF — the only startable file.
+
+    Calls the REAL production helper, not a mirror of it: an earlier
+    version of this test rebuilt the steer by hand on a fake dict, so
+    deleting the block from slicer_tools left every test here green.
+    """
+    from kiln.plugins.slicer_tools import _steer_to_wrapped_upload
 
     threemf = str(tmp_path / "part.gcode.3mf")
     gcode = str(tmp_path / "part.gcode")
 
     resp = _fake_slice_response(threemf, gcode)
-    # Mirror the production block: steer, and correct the prose.
-    resp["recommended_upload_path"] = threemf
-    resp["message"] = f"{resp['message']} Upload {os.path.basename(threemf)}."
+    _steer_to_wrapped_upload(resp, threemf, "bambu_a1")
 
     assert resp["recommended_upload_path"] == threemf
     assert resp["recommended_upload_path"] != resp["raw_gcode_path"]
+    assert "bambu_a1" in resp["recommended_upload_reason"]
+    assert "raw_gcode_note" in resp
 
 
 def test_the_message_agrees_with_the_recommended_file():
@@ -62,13 +67,18 @@ def test_the_message_agrees_with_the_recommended_file():
     Before the fix the message named the raw gcode while output_path
     named the 3MF.  Both were 'correct'; together they misdirected.
     """
+    from kiln.plugins.slicer_tools import _steer_to_wrapped_upload
+
     threemf = "/tmp/part.gcode.3mf"
     resp = _fake_slice_response(threemf, "/tmp/part.gcode")
-    resp["recommended_upload_path"] = threemf
-    resp["message"] = f"{resp['message']} Upload {os.path.basename(threemf)}."
+    _steer_to_wrapped_upload(resp, threemf, None)
 
     assert os.path.basename(threemf) in resp["message"], (
         "the message must name the file the caller should actually upload"
+    )
+    assert resp["message"].endswith(f"Upload {os.path.basename(threemf)}."), (
+        "the steer must be the LAST sentence — the prose before it still "
+        "names the raw gcode (built in kiln.slicer before the wrap exists)"
     )
 
 

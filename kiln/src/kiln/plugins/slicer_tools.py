@@ -337,6 +337,41 @@ def _auto_wrap_bambu_3mf(
         return (None, f"Bambu auto-wrap failed: {exc}")
 
 
+def _steer_to_wrapped_upload(
+    response: dict,
+    threemf_path: str,
+    effective_printer_id: str | None,
+) -> None:
+    """STEER, don't just validate — name the file the printer can print.
+
+    This tool was TOLD the target printer, so it must not hand back two
+    files and let the caller guess: on a Bambu the raw gcode carries no
+    start block, so uploading it is refused three steps later by the
+    homing gate (incident #0 class).  ``output_path`` already points at
+    the 3MF, but the human-readable message is built back in
+    ``kiln.slicer`` BEFORE the wrap exists and still names the gcode —
+    so the prose and the field disagreed, and prose is what an agent
+    reads.  Measured 2026-08-17: an agent holding both files picked the
+    unprintable one, because the message and ``upload_file``'s docstring
+    both pointed at it.
+    """
+    response["recommended_upload_path"] = threemf_path
+    response["recommended_upload_reason"] = (
+        f"{effective_printer_id or 'This printer'} starts prints "
+        f"from a .3mf project file; the raw .gcode has no start "
+        f"block (no G28 homing) and will be refused at upload."
+    )
+    response["raw_gcode_note"] = (
+        "Kept for inspection and for printers that take bare "
+        "gcode — NOT for this printer."
+    )
+    wrapped_name = os.path.basename(threemf_path)
+    response["message"] = (
+        f"{response.get('message', 'Sliced')} "
+        f"Upload {wrapped_name}."
+    ).strip()
+
+
 def _maybe_auto_assembly_manual(metadata: dict) -> dict | None:
     """Optional plugin hook: route ``slice_and_print`` metadata through
     kiln-pro's assembly-manual generator if it's installed.
@@ -933,34 +968,9 @@ class _SlicerToolsPlugin:
                         response.setdefault("warnings", []).append(warning)
 
                 if threemf_path:
-                    # STEER, don't just validate.  This tool was TOLD the
-                    # target printer, so it must not hand back two files
-                    # and let the caller guess: on a Bambu the raw gcode
-                    # carries no start block, so uploading it is refused
-                    # three steps later by the homing gate (incident #0
-                    # class).  `output_path` already points at the 3MF,
-                    # but the human-readable message is built back in
-                    # kiln.slicer BEFORE the wrap exists and still names
-                    # the gcode — so the prose and the field disagreed,
-                    # and prose is what an agent reads.  Measured
-                    # 2026-08-17: an agent holding both files picked the
-                    # unprintable one, because the message and
-                    # upload_file's docstring both pointed at it.
-                    response["recommended_upload_path"] = threemf_path
-                    response["recommended_upload_reason"] = (
-                        f"{effective_printer_id or 'This printer'} starts prints "
-                        f"from a .3mf project file; the raw .gcode has no start "
-                        f"block (no G28 homing) and will be refused at upload."
+                    _steer_to_wrapped_upload(
+                        response, threemf_path, effective_printer_id,
                     )
-                    response["raw_gcode_note"] = (
-                        "Kept for inspection and for printers that take bare "
-                        "gcode — NOT for this printer."
-                    )
-                    _wrapped_name = os.path.basename(threemf_path)
-                    response["message"] = (
-                        f"{response.get('message', 'Sliced')} "
-                        f"Upload {_wrapped_name}."
-                    ).strip()
 
                 # Surface the bed-fit result so callers can see if we
                 # auto-centered + the translation applied.
