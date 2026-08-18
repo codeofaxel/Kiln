@@ -327,9 +327,26 @@ class PrinterRegistry:
         max_workers = min(len(printers), 20)
         results: list[_T] = []
 
+        # Kiln enumerating its OWN registry, not a user commanding a printer.
+        # Owning machines is free at every tier, so listing them and reading
+        # their state must never be refused by the single-printer rule --
+        # otherwise a person with two printers sees the second one as an
+        # error and concludes Kiln lost their hardware.
+        #
+        # The marker has to be set INSIDE the worker: it is thread-local by
+        # design (so one caller's internal read cannot excuse another
+        # thread's user command), and these run on a pool, so setting it
+        # around the submit would leave every worker unmarked.
+        def _query_as_kiln(name: str, adapter: PrinterAdapter) -> _T:
+            from kiln.printers.engagement import internal_read
+
+            with internal_read():
+                return query_fn(name, adapter)
+
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             future_to_name = {
-                pool.submit(query_fn, name, adapter): (name, adapter) for name, adapter in printers.items()
+                pool.submit(_query_as_kiln, name, adapter): (name, adapter)
+                for name, adapter in printers.items()
             }
             for future in as_completed(future_to_name, timeout=_FLEET_QUERY_TIMEOUT + 5):
                 name, adapter = future_to_name[future]

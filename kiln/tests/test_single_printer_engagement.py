@@ -342,6 +342,84 @@ class TestTheAdapterChokepoint:
         )
 
 
+def _real_adapter_class():
+    """A genuine PrinterAdapter subclass, for tests that need the WRAPPER.
+
+    This distinction matters more than it looks.  The gate is installed by
+    ``__init_subclass__``, so a plain stand-in that merely LOOKS like an
+    adapter is never wrapped, and every call sails past the rule untouched.
+    A test written against such a stand-in passes whether the gate works or
+    not — which is exactly what happened to the registry tests below: the
+    exemption they were meant to prove was switched off and the result did
+    not move.
+    """
+    from kiln.printers.base import (
+        PrinterAdapter,
+        PrinterCapabilities,
+        PrinterState,
+        PrinterStatus,
+        PrintResult,
+    )
+
+    class _Real(PrinterAdapter):
+        def __init__(self, serial, state=PrinterStatus.PRINTING, job="bracket.gcode"):
+            self.serial = serial
+            self.host = ""
+            self._state = state
+            self._job = job
+            self.state_calls = 0
+
+        @property
+        def name(self):
+            return "probe"
+
+        @property
+        def capabilities(self):
+            return PrinterCapabilities()
+
+        def get_state(self):
+            self.state_calls += 1
+            return PrinterState(connected=True, state=self._state)
+
+        def get_job(self):
+            return JobProgress(file_name=self._job, print_time_seconds=60)
+
+        def list_files(self):
+            return []
+
+        def upload_file(self, path):
+            return None
+
+        def delete_file(self, path):
+            return True
+
+        def _start_print_impl(self, file_name, **kwargs):
+            return PrintResult(success=True, message="")
+
+        def _resume_print_impl(self):
+            return PrintResult(success=True, message="")
+
+        def cancel_print(self):
+            return PrintResult(success=True, message="")
+
+        def pause_print(self):
+            return PrintResult(success=True, message="")
+
+        def emergency_stop(self):
+            return PrintResult(success=True, message="")
+
+        def send_gcode(self, commands):
+            return True
+
+        def set_bed_temp(self, target):
+            return True
+
+        def set_tool_temp(self, target):
+            return True
+
+    return _Real
+
+
 class TestThroughTheRealAdapterMethods:
     """The wrapper, not the verdict function.
 
@@ -354,71 +432,7 @@ class TestThroughTheRealAdapterMethods:
 
     @staticmethod
     def _adapter_class():
-        from kiln.printers.base import (
-            PrinterAdapter,
-            PrinterCapabilities,
-            PrinterState,
-            PrinterStatus,
-            PrintResult,
-        )
-
-        class _Real(PrinterAdapter):
-            def __init__(self, serial, state=PrinterStatus.PRINTING, job="bracket.gcode"):
-                self.serial = serial
-                self.host = ""
-                self._state = state
-                self._job = job
-                self.state_calls = 0
-
-            @property
-            def name(self):
-                return "probe"
-
-            @property
-            def capabilities(self):
-                return PrinterCapabilities()
-
-            def get_state(self):
-                self.state_calls += 1
-                return PrinterState(connected=True, state=self._state)
-
-            def get_job(self):
-                return JobProgress(file_name=self._job, print_time_seconds=60)
-
-            def list_files(self):
-                return []
-
-            def upload_file(self, path):
-                return None
-
-            def delete_file(self, path):
-                return True
-
-            def _start_print_impl(self, file_name, **kwargs):
-                return PrintResult(success=True, message="")
-
-            def _resume_print_impl(self):
-                return PrintResult(success=True, message="")
-
-            def cancel_print(self):
-                return PrintResult(success=True, message="")
-
-            def pause_print(self):
-                return PrintResult(success=True, message="")
-
-            def emergency_stop(self):
-                return PrintResult(success=True, message="")
-
-            def send_gcode(self, commands):
-                return True
-
-            def set_bed_temp(self, target):
-                return True
-
-            def set_tool_temp(self, target):
-                return True
-
-        return _Real
+        return _real_adapter_class()
 
     def test_the_gate_actually_fires_through_a_real_method(self, monkeypatch):
         cls = self._adapter_class()
@@ -625,3 +639,75 @@ class TestAFleetStopNeverLiesAboutWhatItStopped:
             "an attempted stop that failed leaves the machine in an unknown "
             "state, which must still be treated as halted"
         )
+
+
+class TestOwningPrintersIsStillFree:
+    """The floor the rule must never cross.
+
+    Kiln enumerates its own registry to build the printer listing, to find
+    idle machines, and to answer status queries — all by calling get_state
+    on every printer at once, on a thread pool.  That is Kiln asking about
+    its own hardware, not a person commanding a machine.  If the rule
+    refused those, someone with two printers would open the listing, see
+    the second one as an error, and conclude Kiln had lost their hardware.
+
+    These use a REAL PrinterAdapter subclass on purpose.  The gate is
+    installed by ``__init_subclass__``, so a look-alike stand-in is never
+    wrapped and the test would pass with the exemption switched off — which
+    is precisely how the first version of this class fooled itself.
+    """
+
+    @staticmethod
+    def _two_registered(monkeypatch, second_state=None):
+        from kiln.printers.base import PrinterStatus
+
+        cls = _real_adapter_class()
+        a = cls("AAA111")
+        b = cls("BBB222", state=second_state or PrinterStatus.PRINTING, job="gasket.gcode")
+        registry = PrinterRegistry()
+        registry.register("a1", a)
+        registry.register("garage", b)
+        monkeypatch.setattr("kiln.registry.get_registry", lambda: registry)
+        engagement.engage(a, a.get_job(), reason="started", label="a1")
+        engagement._verify_cache.clear()
+        return a, b, registry
+
+    def test_the_gate_really_is_in_the_path_for_these_adapters(self, monkeypatch):
+        """Guard against the whole class passing for the wrong reason."""
+        a, b, _ = self._two_registered(monkeypatch)
+        with pytest.raises(PrinterEngagementError):
+            b.get_state()
+
+    def test_the_fleet_listing_shows_every_printer_while_engaged(self, monkeypatch):
+        a, b, registry = self._two_registered(monkeypatch)
+        listing = registry.get_fleet_status()
+        assert sorted(e["name"] for e in listing) == ["a1", "garage"], listing
+        for entry in listing:
+            assert entry.get("connected") is True, (
+                f"{entry['name']} came back disconnected — the rule refused "
+                f"Kiln's own registry read, which is not a user command"
+            )
+
+    def test_idle_lookup_still_sees_other_machines(self, monkeypatch):
+        from kiln.printers.base import PrinterStatus
+
+        a, b, registry = self._two_registered(monkeypatch, second_state=PrinterStatus.IDLE)
+        assert registry.get_idle_printers() == ["garage"]
+
+    def test_status_lookup_still_sees_other_machines(self, monkeypatch):
+        from kiln.printers.base import PrinterStatus
+
+        a, b, registry = self._two_registered(monkeypatch)
+        assert registry.get_printers_by_status(PrinterStatus.PRINTING) == ["a1", "garage"]
+
+    def test_the_marker_does_not_leak_to_a_real_command(self, monkeypatch):
+        """An internal read must not excuse the next user command.
+
+        The exemption is thread-local and scoped to its block, so a listing
+        that just ran cannot leave the gate open behind it.
+        """
+        a, b, registry = self._two_registered(monkeypatch)
+        registry.get_fleet_status()
+        assert engagement.check_command(b, "pause_print") is not None
+        with pytest.raises(PrinterEngagementError):
+            b.pause_print()
