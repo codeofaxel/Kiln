@@ -2,10 +2,10 @@
 
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 
-<!-- kiln-highlights: 1.4.0
-* any design exports as a real CAD file (STEP) a machine shop can open
-* the web Monitor at kiln3d.com/monitor shows your print being built layer by layer
-* click-to-paint at kiln3d.com/create turns clicks on your model into a printable 3MF with the colours built in
+<!-- kiln-highlights: 1.4.1
+* preview images get the web app's studio look on every computer, with the print bed and lighting built in
+* fixed a bug so preview renders no longer bring annoying popups to your screen
+* designs and slices retry a crashed helper tool instead of failing at random
 kiln-highlights:end -->
 <!-- The block above is machine-read, not rendered: installed Kilns parse it
      out of the PyPI JSON description so their update nudge can say what the

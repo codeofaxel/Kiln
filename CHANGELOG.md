@@ -5,6 +5,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-08-18
+
+### Added
+
+- **Rebuild a saved design in one step.** `rebuild_design` re-runs a design's
+  saved build recipe: parametric designs re-derive from their OpenSCAD source
+  and parameters, imported models re-slice their saved parts. It replaces
+  `smart_redesign`, which is retired.
+
 ### Changed
 
 - **Previews look like the real thing on every computer.** Preview images now
