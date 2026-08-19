@@ -4,7 +4,7 @@
 
 <!-- kiln-highlights: 1.4.1.1
 * preview images get the web app's studio look on every computer, with the print bed and lighting built in
-* a full set of preview angles arrives in about six seconds instead of nearly a minute
+* a full set of preview angles arrives in seconds
 * fixed a bug so preview renders no longer bring annoying popups to your screen
 kiln-highlights:end -->
 <!-- The block above is machine-read, not rendered: installed Kilns parse it
