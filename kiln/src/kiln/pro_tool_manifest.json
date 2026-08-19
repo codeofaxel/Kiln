@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-18T03:08:47.158668+00:00",
+  "generated": "2026-08-19T23:54:34.049873+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -17935,7 +17935,7 @@
     },
     {
       "name": "report_issue",
-      "description": "Report a bug or a workaround \u2014 what broke, and what fixed it.",
+      "description": "Tell the Kiln team something \u2014 a bug, an idea, printer details, or a question.",
       "tier": "free",
       "access": "free",
       "category": "support",
