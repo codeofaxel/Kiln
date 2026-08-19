@@ -668,19 +668,6 @@ def visualize_model(
                 file_path,
             )
 
-    try:
-        openscad = _find_openscad()
-    except FileNotFoundError as exc:
-        return {"success": False, "error": str(exc), "code": "OPENSCAD_NOT_FOUND"}
-
-    # Detect version once for manifold flag — safe to fail
-    _use_manifold = False
-    try:
-        _ver = get_openscad_version(openscad)
-        _use_manifold = _openscad_version_year(_ver) >= 2024
-    except Exception:  # noqa: BLE001
-        pass
-
     # Select angles
     if angles:
         angle_set = {a.lower() for a in angles}
@@ -784,6 +771,24 @@ def visualize_model(
 
         # Nothing left to draw when the stage already produced every view.
         openscad_views = [] if used_stage else selected
+
+        # OpenSCAD is resolved only when a view still needs it: a mesh
+        # served entirely by the stage backends never touches it, so a
+        # machine with no OpenSCAD still gets its preview.
+        openscad = None
+        _use_manifold = False
+        if openscad_views:
+            try:
+                openscad = _find_openscad()
+            except FileNotFoundError as exc:
+                return {"success": False, "error": str(exc), "code": "OPENSCAD_NOT_FOUND"}
+            # Detect version once for manifold flag — safe to fail
+            try:
+                _ver = get_openscad_version(openscad)
+                _use_manifold = _openscad_version_year(_ver) >= 2024
+            except Exception:  # noqa: BLE001
+                pass
+
         for label, description in openscad_views:
             rx, ry, rz = angle_rotations[label]
             # Model is now centered at origin via translate in the wrapper,

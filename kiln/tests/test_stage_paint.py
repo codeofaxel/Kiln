@@ -252,6 +252,45 @@ def test_front_door_uses_the_painter_when_the_photograph_declines(
     assert r["success"] is True
     assert r["renderer"] == "stage_paint"
 
+
+def test_a_mesh_preview_needs_no_openscad_when_the_stage_serves(
+    tiny_stl: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OpenSCAD is resolved only for views the stage did not draw.
+
+    The front door used to refuse with OPENSCAD_NOT_FOUND before trying
+    either stage backend, so a machine with the painter's deps but no
+    OpenSCAD got nothing at all — the exact machine the painter exists
+    for (CI reproduced it on every run).  A mesh served entirely by the
+    stage must never touch OpenSCAD; a pure-SCAD input, which no stage
+    backend can read, must still get the honest refusal.
+    """
+    from kiln import model_visualizer as mv
+    from kiln import stage_still
+
+    monkeypatch.setattr(stage_still, "try_render_stage_views", lambda *a, **k: None)
+
+    def _no_openscad() -> str:
+        raise FileNotFoundError("OpenSCAD not found (simulated)")
+
+    monkeypatch.setattr(mv, "_find_openscad", _no_openscad)
+
+    r = mv.visualize_model(
+        tiny_stl, angles=["isometric"], output_dir=str(tmp_path / "o"),
+        share_link=False,
+    )
+    assert r["success"] is True
+    assert r["renderer"] == "stage_paint"
+
+    scad = tmp_path / "cube.scad"
+    scad.write_text("cube([10, 10, 10]);")
+    r2 = mv.visualize_model(
+        str(scad), angles=["isometric"], output_dir=str(tmp_path / "o2"),
+        share_link=False,
+    )
+    assert r2["success"] is False
+    assert r2["code"] == "OPENSCAD_NOT_FOUND"
+
 # ---------------------------------------------------------------------------
 # The close-camera plate, and the orientation the photograph pinned
 # ---------------------------------------------------------------------------
