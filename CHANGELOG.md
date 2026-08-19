@@ -5,6 +5,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.4.1.1] - 2026-08-19
+
+### Fixed
+
+- **Previews really do get the studio look now.** 1.4.1 said preview images
+  would use the web app's studio look on any computer. On most installs they
+  didn't: one of the pieces Kiln needs to draw them wasn't part of the
+  install, so previews quietly fell back to the plain look with nothing said.
+  It's included now, and preview images come out sharper too.
+
+- **Preview pictures show up in seconds instead of a minute.** Every angle
+  of a preview used to be photographed separately, starting from scratch
+  each time: three angles took about 52 seconds. The whole set is now shot
+  in one pass, about 6 seconds. Kiln also watches the clock while it works:
+  if the photographed version would take too long, a faster painter with the
+  same studio look finishes the job, so a preview no longer runs past the
+  time the app you use Kiln from is willing to wait.
+
+- **An expired web sign-in no longer wastes your time.** When your sign-in
+  to kiln3d.com had gone stale, steps that upload your model for the web 3D
+  view kept re-uploading it and getting refused, over and over, inside one
+  call. Kiln now takes the first refusal as its answer and skips the rest;
+  sign in again and uploads work like normal.
+
 ## [1.4.1] - 2026-08-18
 
 ### Added

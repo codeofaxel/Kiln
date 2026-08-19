@@ -2,10 +2,10 @@
 
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 
-<!-- kiln-highlights: 1.4.1
+<!-- kiln-highlights: 1.4.1.1
 * preview images get the web app's studio look on every computer, with the print bed and lighting built in
+* a full set of preview angles arrives in about six seconds instead of nearly a minute
 * fixed a bug so preview renders no longer bring annoying popups to your screen
-* designs and slices retry a crashed helper tool instead of failing at random
 kiln-highlights:end -->
 <!-- The block above is machine-read, not rendered: installed Kilns parse it
      out of the PyPI JSON description so their update nudge can say what the
