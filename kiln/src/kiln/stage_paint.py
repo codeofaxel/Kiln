@@ -13,8 +13,13 @@ nothing with the product's calibrated stage.
 
 This module paints the SAME stage — the ``#1A222D`` backdrop, the print
 bed with its 10 mm grid and ember centre-cross, the contact shadow, the
-four-light rig — with numpy and Pillow, both of which Kiln already
-depends on.  It is not a new look; every constant below is transcribed
+four-light rig — with numpy and Pillow, both of which are core Kiln
+dependencies.  Pillow became one FOR this module: it shipped believing
+that was already true, and it was not.  On 1.4.1 a default
+``pip install kiln3d`` carried no Pillow, so ``_deps()`` returned None,
+this painter declined, and the preview fell back to the OpenSCAD look
+with nothing said — the module was inert for every user who installed
+the documented way.  It is not a new look; every constant below is transcribed
 from the one authority, ``mesh_viewer.html`` (the document the browser
 path photographs), with the transcription source noted inline.  When the
 stage document changes its rig, this module must follow — the constants

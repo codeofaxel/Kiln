@@ -350,3 +350,34 @@ def test_plate_orientation_matches_the_photograph(tmp_path: Path, probe: str) ->
     np.add.at(h, (ys // 40, xs // 40), 1)
     j, i = np.unravel_index(h.argmax(), h.shape)
     assert i * 40 < 400, f"stamp cluster at x~{i*40}: plate orientation flipped"
+
+
+def test_every_dependency_the_painter_needs_is_a_core_dependency() -> None:
+    """The painter's soft imports must be declared, or it is inert on install.
+
+    ``_deps()`` returns None when any of numpy, Pillow or trimesh is missing,
+    and declining is silent by design -- the caller just gets the OpenSCAD
+    look.  So an undeclared dependency does not fail anywhere; the feature
+    simply never runs, for everyone who installed the documented way.
+
+    That shipped: on 1.4.1 Pillow was only in the ``emboss`` extra, so a clean
+    ``pip install kiln3d`` rendered ``renderer="openscad"`` and installing
+    Pillow alone flipped the same call to ``renderer="stage_paint"``.  numpy
+    and trimesh had each been promoted to core for this identical reason.
+    """
+    import re
+
+    pyproject = (
+        Path(__file__).resolve().parents[1] / "pyproject.toml"
+    ).read_text(encoding="utf-8")
+    block = re.search(r"(?ms)^dependencies\s*=\s*\[(.*?)^\]", pyproject)
+    assert block, "could not find the dependencies array in kiln/pyproject.toml"
+    declared = block.group(1).lower()
+
+    for dist in ("numpy", "pillow", "trimesh"):
+        assert re.search(rf'"{dist}[><=]', declared), (
+            f"kiln.stage_paint imports {dist} but it is not a core dependency. "
+            "The painter declines SILENTLY when an import is missing, so this "
+            "does not fail a test anywhere -- it just makes the studio-look "
+            "preview inert on a default install."
+        )
