@@ -24,6 +24,27 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 scripts/check_public_language.py --range "$BASE_SHA..$HEAD_SHA"
 
+  # Every other job here installs from requirements-lock.txt, which carries
+  # the full transitive set — so a package Kiln imports at runtime but does
+  # not DECLARE is present in all of them and missing only for real users.
+  # This job is the one that installs the way a user does: no lock file, no
+  # extras, empty HOME, then it RUNS the core capabilities and checks which
+  # engine served them.  v1.4.1 shipped the studio-look renderer inert for
+  # everyone who installed the documented way because nothing asked that.
+  clean-install:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Core capabilities work on a default install
+        run: python3 scripts/audit_clean_install.py
+
   test:
     runs-on: ubuntu-latest
     strategy:

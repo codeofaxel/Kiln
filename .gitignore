@@ -80,6 +80,13 @@ scripts/*
 # each backend really provides and why anything is absent.
 !scripts/audit_adapter_conformance.py
 !scripts/adapter_conformance.yaml
+# …and for the clean-install capability gate, which ci.yml runs as its own
+# job.  Every other check installs from requirements-lock.txt, so a package
+# Kiln imports but never declares is present in all of them and missing only
+# for real users; this one installs the way a user does and asserts the
+# capabilities actually RUN.  v1.4.1 shipped the studio-look renderer inert
+# for that reason.  It must be tracked or the CI job it backs cannot run.
+!scripts/audit_clean_install.py
 
 # Internal working docs (backed up via iCloud)
 .dev
