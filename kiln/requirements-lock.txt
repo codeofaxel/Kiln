@@ -52,7 +52,7 @@ requests==2.34.2
 responses==0.26.2
 rich==15.0.0
 rpds-py==0.30.0
-sse-starlette==3.4.6
+sse-starlette==3.4.8
 starlette==1.6.0
 tomli==2.4.1
 trimesh==4.12.2
