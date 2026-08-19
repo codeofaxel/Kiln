@@ -909,3 +909,160 @@ def test_which_platforms_have_a_supervising_login_service(monkeypatch):
     for platform in ("darwin", "linux", "win32"):
         monkeypatch.setattr(_sys, "platform", platform)
         assert bcmd._os_supervises_the_bridge() is False, platform
+
+
+# --- first-run onboarding (enable = the paste's last line) ------------------
+
+
+from kiln.cli.bridge_commands import (  # noqa: E402
+    _credential_prompts,
+    _discovered_host,
+    _discovered_line,
+    _offer_first_printer,
+    _slicer_note,
+    _suggest_printer_name,
+)
+from kiln.discovery import DiscoveredPrinter  # noqa: E402
+
+
+def _found(**kw) -> DiscoveredPrinter:
+    base = dict(host="192.168.1.23", port=7125, printer_type="moonraker", name="Creality K1C")
+    base.update(kw)
+    return DiscoveredPrinter(**base)
+
+
+def test_suggest_printer_name_slugs_the_advertised_name():
+    assert _suggest_printer_name("Creality K1C", "moonraker") == "creality-k1c"
+    assert _suggest_printer_name("", "moonraker") == "moonraker"
+    assert _suggest_printer_name("...", "octoprint") == "octoprint"
+
+
+def test_discovered_host_keeps_real_ports_and_bares_bambu():
+    assert _discovered_host(_found()) == "192.168.1.23:7125"
+    assert _discovered_host(_found(port=80)) == "192.168.1.23"
+    # Bambu speaks MQTT on its own fixed port — whatever port discovery saw,
+    # the saved host must stay bare or the adapter would dial the wrong thing.
+    assert _discovered_host(_found(printer_type="bambu", port=990)) == "192.168.1.23"
+
+
+def test_discovered_line_prefers_the_advertised_name():
+    assert _discovered_line(_found()) == "Creality K1C — 192.168.1.23:7125 (moonraker)"
+    assert _discovered_line(_found(name="", port=80)) == "moonraker — 192.168.1.23 (moonraker)"
+
+
+def test_onboarding_skips_when_a_printer_already_exists(monkeypatch):
+    import kiln.cli.config as cfg
+    import kiln.cli.discovery as disc
+
+    monkeypatch.setattr(cfg, "list_printers", lambda **kw: [{"name": "k1c"}])
+    monkeypatch.setattr(
+        disc, "discover_printers", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("scanned"))
+    )
+    _offer_first_printer()  # must not scan, prompt, or raise
+
+
+def test_onboarding_skips_without_a_tty(monkeypatch):
+    import kiln.cli.config as cfg
+    import kiln.cli.discovery as disc
+
+    monkeypatch.setattr(cfg, "list_printers", lambda **kw: [])
+    monkeypatch.setattr(bcmd, "_onboarding_interactive", lambda: False)
+    monkeypatch.setattr(
+        disc, "discover_printers", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("scanned"))
+    )
+    _offer_first_printer()  # windowless deep-link relaunch: quiet no-op
+
+
+def test_onboarding_saves_the_one_found_printer(monkeypatch, capsys):
+    import click as _click
+
+    import kiln.cli.config as cfg
+    import kiln.cli.discovery as disc
+    import kiln.cli.printer_model_prompt as pmp
+
+    saved = {}
+
+    def fake_save(name, ptype, host, **kw):
+        saved.update({"name": name, "type": ptype, "host": host, **kw})
+        return "/tmp/config.yaml"
+
+    monkeypatch.setattr(cfg, "list_printers", lambda **kw: [])
+    monkeypatch.setattr(cfg, "save_printer", fake_save)
+    monkeypatch.setattr(bcmd, "_onboarding_interactive", lambda: True)
+    monkeypatch.setattr(disc, "discover_printers", lambda *a, **kw: [_found()])
+    monkeypatch.setattr(pmp, "prompt_for_printer_model", lambda *a, **kw: "k1c")
+    monkeypatch.setattr(_click, "confirm", lambda *a, **kw: True)
+
+    _offer_first_printer()
+
+    assert saved == {
+        "name": "creality-k1c",
+        "type": "moonraker",
+        "host": "192.168.1.23:7125",
+        "printer_model": "k1c",
+    }
+    assert "Saved ✓" in capsys.readouterr().out
+
+
+def test_onboarding_empty_scan_points_at_the_manual_path(monkeypatch, capsys):
+    import kiln.cli.config as cfg
+    import kiln.cli.discovery as disc
+
+    monkeypatch.setattr(cfg, "list_printers", lambda **kw: [])
+    monkeypatch.setattr(bcmd, "_onboarding_interactive", lambda: True)
+    monkeypatch.setattr(disc, "discover_printers", lambda *a, **kw: [])
+
+    _offer_first_printer()
+
+    out = capsys.readouterr().out
+    assert "kiln auth" in out  # the manual door is named, not implied
+    assert "Turning the bridge on anyway" in out  # never a dead end
+
+
+def test_credential_prompts_ask_only_what_the_backend_needs(monkeypatch):
+    import click as _click
+
+    # Moonraker/Creality: nothing to ask.
+    assert _credential_prompts("moonraker", "") == {}
+    assert _credential_prompts("creality", "") == {}
+
+    # Bambu: access code + serial (discovery's serial offered as the default).
+    answers = iter(["12345678", "0309CA123456789"])
+    monkeypatch.setattr(_click, "prompt", lambda *a, **kw: next(answers))
+    assert _credential_prompts("bambu", "0309CA123456789") == {
+        "access_code": "12345678",
+        "serial": "0309CA123456789",
+    }
+
+
+def test_slicer_note_speaks_only_when_the_slicer_is_missing(monkeypatch, capsys):
+    import kiln.slicer as slicer_mod
+
+    def missing(*a, **kw):
+        raise slicer_mod.SlicerNotFoundError("none")
+
+    monkeypatch.setattr(slicer_mod, "find_slicer", missing)
+    _slicer_note()
+    out = capsys.readouterr().out
+    assert "printing needs a slicer" in out
+    assert "Windows" in out  # the hint covers every platform the paste targets
+
+    monkeypatch.setattr(slicer_mod, "find_slicer", lambda *a, **kw: object())
+    _slicer_note()
+    assert capsys.readouterr().out == ""
+
+
+def test_enable_runs_onboarding_before_the_service_and_notes_the_slicer(monkeypatch):
+    calls = []
+    monkeypatch.setattr(bcmd, "_preflight", lambda: calls.append("preflight"))
+    monkeypatch.setattr(bcmd, "_offer_first_printer", lambda: calls.append("printer"))
+    monkeypatch.setattr(bcmd, "_stop_process", lambda: calls.append("stop"))
+    monkeypatch.setattr(bcmd, "_install_service", lambda: (calls.append("service"), (True, ""))[1])
+    monkeypatch.setattr(bcmd, "_await_connected", lambda: True)
+    monkeypatch.setattr(bcmd, "_slicer_note", lambda: calls.append("slicer"))
+    monkeypatch.setattr(bcmd.sys, "platform", "darwin")
+
+    result = CliRunner().invoke(bridge, ["enable"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == ["preflight", "printer", "stop", "service", "slicer"]

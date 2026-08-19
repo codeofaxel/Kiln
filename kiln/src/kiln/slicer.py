@@ -85,8 +85,9 @@ _MACOS_PATHS: list[str] = (
 # only copy of the sentence.
 _INSTALL_SLICER = (
     "Kiln slices with PrusaSlicer, OrcaSlicer or BambuStudio:\n"
-    "  Linux/WSL: apt install prusa-slicer  (or download from prusaslicer.org)\n"
+    "  Windows: install OrcaSlicer or PrusaSlicer from orcaslicer.com / prusaslicer.org\n"
     "  macOS: brew install --cask prusaslicer  (or orcaslicer)\n"
+    "  Linux/WSL: apt install prusa-slicer  (or download from prusaslicer.org)\n"
     "Or set KILN_SLICER_PATH to any of their binaries."
 )
 

@@ -702,6 +702,201 @@ def _preflight() -> None:
 
 
 # ---------------------------------------------------------------------------
+# First-run onboarding — the paste from kiln3d.com ends in `kiln bridge
+# enable`, so this command is where a brand-new machine becomes a working
+# print path.  Everything here reuses the engines that already exist
+# (discovery, config, the model prompt, slicer detection); this file only
+# sequences them and keeps quiet when there is nothing to do.
+# ---------------------------------------------------------------------------
+
+_MANUAL_SETUP_HINT = (
+    "  Connect it by hand any time:\n"
+    "    kiln discover                              (find its address)\n"
+    "    kiln auth -n myprinter -h <address> --type <octoprint|moonraker|creality|bambu|...>"
+)
+
+
+def _onboarding_interactive() -> bool:
+    """True when a human is at both ends — the only time we may prompt.
+
+    The Windows ``kiln://`` relaunch is windowless and scripted runs have
+    nobody to answer, so everything in this section becomes a no-op there:
+    the bridge still turns on, and the printer can be connected later.
+    """
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except Exception:
+        return False
+
+
+def _suggest_printer_name(display_name: str, printer_type: str) -> str:
+    """A config-friendly slug from whatever the network called the machine."""
+    import re as _re
+
+    base = _re.sub(r"[^a-z0-9]+", "-", (display_name or "").lower()).strip("-")
+    return base or printer_type
+
+
+def _discovered_line(found: object) -> str:
+    """One picker row: the advertised name when there is one, address always."""
+    label = (getattr(found, "name", "") or "").strip() or found.printer_type
+    port = getattr(found, "port", 0) or 0
+    address = found.host if port in (0, 80) else f"{found.host}:{port}"
+    return f"{label} — {address} ({found.printer_type})"
+
+
+def _discovered_host(found: object) -> str:
+    """The host string ``save_printer`` wants for this discovery result.
+
+    HTTP backends keep their discovered port (Moonraker answers on 7125,
+    4408, or 80 depending on the machine); Bambu and Elegoo speak
+    MQTT/SDCP on fixed ports their adapters own, so they get the bare
+    address — ``_normalize_host`` strips any scheme for them anyway.
+    """
+    if found.printer_type in ("bambu", "elegoo"):
+        return found.host
+    port = getattr(found, "port", 0) or 0
+    return found.host if port in (0, 80) else f"{found.host}:{port}"
+
+
+def _credential_prompts(printer_type: str, discovered_serial: str) -> dict:
+    """Ask only for what this backend actually needs, nothing else."""
+    extras: dict = {}
+    if printer_type == "octoprint":
+        extras["api_key"] = click.prompt(
+            "  OctoPrint API key (OctoPrint → Settings → API)", default="", show_default=False
+        ).strip() or None
+    elif printer_type == "prusalink":
+        extras["api_key"] = click.prompt(
+            "  PrusaLink password (printer screen → Settings → Network)",
+            default="", show_default=False,
+        ).strip() or None
+    elif printer_type == "duet":
+        extras["api_key"] = click.prompt(
+            "  Machine password (Enter if you never set one)", default="", show_default=False
+        ).strip() or None
+    elif printer_type == "bambu":
+        extras["access_code"] = click.prompt(
+            "  LAN access code (printer screen → Settings → WLAN)", default="", show_default=False
+        ).strip() or None
+        serial = click.prompt(
+            "  Serial number", default=discovered_serial or "", show_default=bool(discovered_serial)
+        ).strip()
+        extras["serial"] = serial or None
+    elif printer_type == "elegoo" and discovered_serial:
+        extras["serial"] = discovered_serial
+    return extras
+
+
+def _offer_first_printer() -> None:
+    """When no printer is saved yet, find one on the network and save it.
+
+    This is the difference between "the bridge is on" and "the Print button
+    works": the web's ``slice_and_print`` targets the active printer, so a
+    bridge with an empty config connects fine and then has nothing to drive.
+    Interactive terminals only; every exit path leaves enable free to finish.
+    """
+    try:
+        from kiln.cli.config import list_printers
+
+        if list_printers():
+            return
+    except Exception:
+        return  # unreadable config is not this step's fight
+    if not _onboarding_interactive():
+        return
+
+    from kiln.cli.discovery import discover_printers
+
+    click.echo()
+    click.echo(click.style("  No printer connected yet — let's find yours.", bold=True))
+    click.echo("  Scanning your network (up to ~12 seconds)…")
+    try:
+        found = [p for p in discover_printers() if p.printer_type != "unknown"]
+    except Exception:
+        found = []
+
+    if not found:
+        click.echo("  Nothing answered. The printer may be off, asleep, or on a different Wi-Fi.")
+        click.echo(_MANUAL_SETUP_HINT)
+        click.echo("  Turning the bridge on anyway — connect the printer whenever you like.")
+        return
+
+    click.echo()
+    if len(found) == 1:
+        click.echo(f"  Found: {_discovered_line(found[0])}")
+        if not click.confirm("  Use this printer?", default=True):
+            click.echo(_MANUAL_SETUP_HINT)
+            return
+        chosen = found[0]
+    else:
+        click.echo("  Found on your network:")
+        for i, p in enumerate(found, 1):
+            click.echo(f"    {i}. {_discovered_line(p)}")
+        raw = click.prompt(
+            "  Which one is yours? (number, or Enter to skip)", default="", show_default=False
+        ).strip()
+        if not raw.isdigit() or not (1 <= int(raw) <= len(found)):
+            click.echo(_MANUAL_SETUP_HINT)
+            return
+        chosen = found[int(raw) - 1]
+
+    extras = _credential_prompts(chosen.printer_type, getattr(chosen, "serial", "") or "")
+
+    # The model key turns on the safety stack (bed-fit, temperature limits);
+    # skippable so a shy answer never strands the setup, and the prompt itself
+    # says what skipping costs.
+    from kiln.cli.printer_model_prompt import prompt_for_printer_model
+
+    serial_hint = extras.get("serial") or getattr(chosen, "serial", "") or None
+    model = prompt_for_printer_model(chosen.printer_type, serial_hint, allow_skip=True)
+
+    from kiln.cli.config import save_printer
+
+    name = _suggest_printer_name(getattr(chosen, "name", ""), chosen.printer_type)
+    try:
+        save_printer(
+            name,
+            chosen.printer_type,
+            _discovered_host(chosen),
+            printer_model=model,
+            **extras,
+        )
+    except Exception as exc:
+        click.echo(click.style(f"  Couldn't save that printer: {exc}", fg="yellow"))
+        click.echo(_MANUAL_SETUP_HINT)
+        return
+    click.echo(
+        click.style("  Saved ✓", fg="green")
+        + f" — '{name}' is your active printer."
+    )
+
+
+def _slicer_note() -> None:
+    """One honest line when printing would fail for want of a slicer.
+
+    The bridge slices on this machine before it prints, so a missing slicer
+    is the next wall the user would hit — after walking away believing setup
+    was done.  Saying it now, with the fix, is the whole feature.  Never
+    fatal: the bridge does more than print, and the note must not be able to
+    break enable.
+    """
+    try:
+        from kiln.slicer import SlicerNotFoundError, find_slicer
+
+        find_slicer()
+    except SlicerNotFoundError:
+        from kiln.slicer import _INSTALL_SLICER
+
+        click.echo(click.style("  One more thing — printing needs a slicer.", fg="yellow"))
+        for line in _INSTALL_SLICER.splitlines():
+            click.echo(f"  {line}")
+        click.echo("  Install one and you're done — nothing to re-run.")
+    except Exception:  # noqa: BLE001 — a broken probe must not break enable
+        return
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
@@ -755,6 +950,7 @@ def _enable_bridge() -> None:
     command would, not a second, drifting copy of the logic.
     """
     _preflight()
+    _offer_first_printer()
     _stop_process()  # fold any manual run into the managed one — never two bridges
     ok, detail = _install_service()
     if not ok:
@@ -776,12 +972,19 @@ def _enable_bridge() -> None:
         click.echo("  Connected ✓ — prints from kiln3d.com now reach this machine's printers.")
     else:
         click.echo("  Connecting… confirm with: kiln bridge status")
+    _slicer_note()
     click.echo("  Turn it off any time: kiln bridge disable")
 
 
 @bridge.command()
 def enable() -> None:
-    """Turn the bridge on for good — start now and on every login."""
+    """Turn the bridge on for good — start now and on every login.
+
+    On a machine with no printer saved yet, this is also the first-run walk:
+    it scans the network for your printer, saves the one you pick, and points
+    out a missing slicer — so the paste from kiln3d.com ends in one command
+    and a working print path, not a bridge with nothing to drive.
+    """
     _enable_bridge()
 
 
@@ -854,6 +1057,7 @@ def start() -> None:
         click.echo("Bridge is already running.  See: kiln bridge status")
         return
     _preflight()
+    _offer_first_printer()
     pid = _spawn_supervised_bridge()
     if _await_connected():
         click.echo(click.style("Bridge on ✓", fg="green") + f" (pid {pid}) — connected.")
