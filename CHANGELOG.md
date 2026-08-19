@@ -7,6 +7,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [1.4.1.1] - 2026-08-19
 
+### Added
+
+- **Connecting a printer to the web app now walks itself.** On a machine with
+  no printer saved yet, `kiln bridge enable` scans your network, offers the
+  printer it finds, asks only the details that printer needs, and saves it as
+  your active one. It also says up front if you still need a slicer, instead
+  of letting the first print fail. One paste from kiln3d.com now ends at a
+  working print path.
+
 ### Fixed
 
 - **Previews really do get the studio look now.** 1.4.1 said preview images
