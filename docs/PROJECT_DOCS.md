@@ -69,6 +69,8 @@ The full, always-current list of printer models Kiln ships a tuned profile for l
 
 The core loop — design, validate, slice, print, monitor — is free and open source. Kiln Pro, Business, and Enterprise add depth on top: decoration and versioning, per-printer calibration and learning, production drawings, team workflows, and compliance features. See [kiln3d.com/pricing](https://kiln3d.com/pricing) for what each tier includes.
 
+Kiln works with one printer at a time below the Business tier: registering and listing any number of machines is free, and `hand_back_printer` moves Kiln between them without touching a running print. Driving several printers in parallel — including fleet-wide commands — is a Business feature.
+
 ---
 
 ## Getting Started
@@ -442,6 +444,7 @@ Deeper material intelligence — drying schedules per filament, chemical-exposur
 | `design_advisor` | `prompt`, `printer_model` | Recommends approach, material, and constraints |
 | `analyze_design_requirements` | `requirements`, `material` | Functional-requirements analysis |
 | `iterate_design` | `prompt`, `max_iterations` | Closed-loop generate → validate → improve |
+| `rebuild_design` | `recipe_path` | Re-runs a saved design's build recipe: parametric designs re-derive from their OpenSCAD source, mesh designs re-slice their recorded parts |
 | `generate_model` | `prompt`, `provider`, `format` | Generation job (opt-in cloud providers) |
 | `generate_and_print` | `prompt`, `printer_name` | Full pipeline: generate → validate → slice → print |
 | `validate_openscad_code` | `code` | Compile-check with structured errors |
@@ -874,4 +877,4 @@ Kiln's paid tiers ship through the private `kiln-pro` companion package ([kiln3d
 
 *Kiln is a project of Hadron Labs Inc.*
 
-<!-- DOCS_REVIEWED_FOR: 1.4.0 -->
+<!-- DOCS_REVIEWED_FOR: 1.4.1 -->
