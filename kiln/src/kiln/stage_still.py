@@ -95,6 +95,24 @@ _STILL_MARKER = "__KILN_STILL__"
 #: against a stage that cannot honour it declines to OpenSCAD.
 _STILL_COLOR_MARKER = "STILL.color"
 
+#: Capability sniff for the batch still mode, same pattern as the colour
+#: marker above: the cached stage document either carries the pose-grid
+#: driver or it predates it, and a document that predates it gets the
+#: per-angle loop it has always understood.
+_STILL_POSES_MARKER = "STILL.poses"
+
+#: The stage document's hidden brand rail leaves this many CSS pixels of
+#: page background under the canvas in still mode — part of every still's
+#: composition (the software painter replicates the same strip).  The
+#: batch grid's tiles each include it, so a cropped tile is byte-for-byte
+#: the composition of a single-shot still.
+_STILL_RAIL_PX = 56
+
+#: Tiles per grid row in batch mode.  Three keeps a six-angle set at a
+#: window SwiftShader is comfortable rasterising (4800x2400 at the
+#: default supersample) rather than one enormous strip.
+_STILL_GRID_COLS = 3
+
 #: Payload caps for a LOCAL render.  The inline-conversation caps
 #: (80k triangles) exist to protect chat transport and model context;
 #: a headless browser on this machine has neither constraint.  Meshes
@@ -308,17 +326,27 @@ def _build_harness(
     az_deg: float,
     el_deg: float,
     color: str | None = None,
+    poses: list[dict] | None = None,
+    grid: dict | None = None,
 ) -> str | None:
     """The stage document with this view's still config baked in.
 
     Data-only injection: the config script lands immediately after
     ``<body>`` so it exists before the stage script runs.  Every
     behaviour it triggers lives in the stage document itself.
+
+    With *poses* and *grid*, one harness carries EVERY angle: the
+    document renders each pose off one model build and lays the shots
+    out as a zero-gap grid this engine crops back apart — one browser
+    launch for the whole set instead of one per angle.
     """
     if document.count("<body>") != 1:
         logger.debug("stage stills: document has no unique <body> anchor")
         return None
     still: dict = {"payload": payload, "az_deg": az_deg, "el_deg": el_deg}
+    if poses and grid:
+        still["poses"] = poses
+        still["grid"] = grid
     if color:
         still["color"] = color
     # JSON inside a <script> block: json.dumps does NOT escape "</script>",
@@ -419,6 +447,103 @@ def _shoot(browser: Path, harness_path: Path, png_path: str,
                 proc.wait(5)
 
 
+
+
+def _shoot_batch(
+    browser: Path,
+    document: str,
+    payload: dict,
+    selected: list[tuple[str, str]],
+    rotations: dict[str, tuple[float, float, float]],
+    *,
+    output_dir: str,
+    stem: str,
+    shot_w: int,
+    shot_h: int,
+    ss: int,
+    width: int,
+    height: int,
+    color: str | None,
+    tmp: Path,
+    profile_dir: Path,
+) -> list[dict] | None:
+    """Every angle from ONE browser launch, or ``None`` to fall back.
+
+    The document renders each pose off a single model build and lays the
+    shots out as a zero-gap grid; this side shoots the grid once and
+    crops the tiles back apart.  Measured 2026-08-19: the per-angle loop
+    paid a full browser launch + document load + three.js parse per
+    angle (~17s cold, ~6s warm each); the grid pays it once.
+
+    Every guard the single-shot path applies to a still applies to a
+    TILE here — the blank-frame check runs per crop, and any miss
+    declines the whole batch (the caller falls back to the per-angle
+    loop or the painter, never to a partial set).
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return None  # cropping is PIL work; the loop path needs none
+
+    from kiln.preview_render import downscale_png
+
+    poses = []
+    for label, _description in selected:
+        rx, _ry, rz = rotations[label]
+        az_deg, el_deg = _openscad_rotation_to_orbit(rx, rz)
+        poses.append({"az_deg": az_deg, "el_deg": el_deg})
+
+    cols = min(_STILL_GRID_COLS, len(selected))
+    rows = -(-len(selected) // cols)
+    grid = {"tile_w": shot_w, "tile_h": shot_h, "cols": cols}
+    harness = _build_harness(
+        document, payload, poses[0]["az_deg"], poses[0]["el_deg"],
+        color=color.strip() if color else None, poses=poses, grid=grid,
+    )
+    if harness is None:
+        return None
+    harness_path = tmp / "still_batch.html"
+    harness_path.write_text(harness, encoding="utf-8")
+
+    grid_png = str(tmp / "still_grid.png")
+    if not _shoot(browser, harness_path, grid_png,
+                  cols * shot_w, rows * shot_h, profile_dir):
+        return None
+
+    try:
+        with Image.open(grid_png) as sheet:
+            # A browser that clamped the window (or a document that never
+            # composed its grid) yields the wrong sheet — reject it whole
+            # rather than crop garbage into per-angle files.
+            if sheet.size != (cols * shot_w, rows * shot_h):
+                logger.debug(
+                    "stage stills: grid sheet is %s, expected %s — falling back",
+                    sheet.size, (cols * shot_w, rows * shot_h),
+                )
+                return None
+            views: list[dict] = []
+            for i, (label, description) in enumerate(selected):
+                x = (i % cols) * shot_w
+                y = (i // cols) * shot_h
+                tile = sheet.crop((x, y, x + shot_w, y + shot_h))
+                png_path = os.path.join(output_dir, f"{stem}_{label}.png")
+                tile.save(png_path)
+                if not _frame_ok(png_path, shot_w, shot_h):
+                    logger.debug(
+                        "stage stills: blank tile for %s — falling back", label
+                    )
+                    return None
+                if ss > 1:
+                    downscale_png(png_path, width, height)
+                views.append(
+                    {"angle": label, "description": description, "path": png_path}
+                )
+            return views
+    except Exception as exc:  # noqa: BLE001 — a bad sheet is a fallback, not a crash
+        logger.debug("stage stills: grid crop failed: %s", exc)
+        return None
+
+
 def try_render_stage_views(
     file_path: str,
     selected: list[tuple[str, str]],
@@ -505,6 +630,28 @@ def try_render_stage_views(
         try:
             profile_dir = tmp / "profile"
             profile_dir.mkdir()
+
+            # Batch path: one browser launch for the whole set.  Gated on
+            # the cached document carrying the pose-grid driver — an older
+            # document gets the per-angle loop it has always understood.
+            if len(selected) > 1 and _STILL_POSES_MARKER in document:
+                batched = _shoot_batch(
+                    browser, document, payload, selected, rotations,
+                    output_dir=output_dir, stem=stem,
+                    shot_w=shot_w, shot_h=shot_h, ss=ss,
+                    width=width, height=height,
+                    color=color, tmp=tmp, profile_dir=profile_dir,
+                )
+                if batched is not None:
+                    return batched
+                logger.debug("stage stills: batch shot declined — per-angle loop")
+                if deadline is not None and time.monotonic() > deadline:
+                    logger.debug(
+                        "stage stills: set budget spent by the batch attempt "
+                        "— declining to the painter"
+                    )
+                    return None
+
             for label, description in selected:
                 if deadline is not None and time.monotonic() > deadline:
                     logger.debug(

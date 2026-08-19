@@ -582,3 +582,162 @@ def test_a_zero_budget_disables_the_deadline(
         output_dir=str(out), width=64, height=64,
     )
     assert views is not None and len(views) == 2
+
+
+# ---------------------------------------------------------------------------
+# Batch mode — one browser launch for the whole set
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def batch_stage_doc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A stage document that carries the pose-grid driver."""
+    doc = tmp_path / "stage_batch.html"
+    doc.write_text(
+        "<!doctype html><html><head></head><body>"
+        "<p>stage __KILN_STILL__ reads STILL.color and STILL.poses</p>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KILN_STAGE_DOC", str(doc))
+    return doc
+
+
+@pytest.fixture()
+def grid_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A fake browser that honours --window-size and tints each tile.
+
+    Tiles get distinct means (still textured enough for the stddev
+    guard), so a crop test can prove the engine cut the RIGHT rectangles
+    rather than merely producing N files.
+    """
+    script = _make_fake_browser(
+        tmp_path,
+        f"""
+        # Stdlib-only: this script runs under whatever `python3` resolves
+        # to, which need not have Pillow — a PIL import here dies silently
+        # (stderr is discarded) and reads as a mysterious batch decline.
+        import random, struct, sys, zlib
+        out = [a for a in sys.argv if a.startswith("--screenshot=")][0].split("=", 1)[1]
+        size = [a for a in sys.argv if a.startswith("--window-size=")][0].split("=", 1)[1]
+        w, h = (int(x) for x in size.split(","))
+        rng = random.Random(7)
+        half_w = w // 2  # two tiles side by side; tile index = x half
+        raw = bytearray()
+        for y in range(h):
+            raw.append(0)  # filter: none
+            for x in range(w):
+                base = 40 + 120 * (x // half_w)
+                raw.append(min(255, base + rng.randrange(60)))
+        def chunk(tag, data):
+            body = tag + data
+            return struct.pack(">I", len(data)) + body + struct.pack(
+                ">I", zlib.crc32(body) & 0xFFFFFFFF)
+        png = (b"\\x89PNG\\r\\n\\x1a\\n"
+               + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 0, 0, 0, 0))
+               + chunk(b"IDAT", zlib.compress(bytes(raw)))
+               + chunk(b"IEND", b""))
+        open(out, "wb").write(png)
+        page = [a for a in sys.argv if a.startswith("file://")][0]
+        body = open(page[len("file://"):]).read()
+        with open({str(tmp_path / "seen_harnesses.txt")!r}, "a") as f:
+            f.write(body + "\\n===HARNESS===\\n")
+        """,
+    )
+    monkeypatch.setenv("KILN_STAGE_BROWSER", str(script))
+    return script
+
+
+def test_batch_mode_shoots_once_and_crops_every_tile(
+    cube_stl: str, batch_stage_doc: Path, grid_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A poses-capable document gets ONE launch for the whole set."""
+    from PIL import Image
+
+    out = tmp_path / "out"
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(out), width=64, height=64,
+    )
+    assert views is not None
+    assert [v["angle"] for v in views] == ["isometric", "front"]
+    harnesses = [
+        h for h in
+        (tmp_path / "seen_harnesses.txt").read_text().split("===HARNESS===")
+        if h.strip()
+    ]
+    assert len(harnesses) == 1, "batch mode still launched per angle"
+    assert '"poses"' in harnesses[0] and '"grid"' in harnesses[0]
+    # The crops must be the RIGHT rectangles: tile i's mean tracks the
+    # fake browser's per-tile tint, so a mis-cropped sheet reads wrong.
+    means = []
+    for v in views:
+        with Image.open(v["path"]) as im:
+            assert im.size == (64, 64)
+            means.append(sum(im.convert("L").getdata()) / (64 * 64))
+    assert means[1] > means[0] + 20, (
+        f"tile means {means} do not step with the sheet's tints — "
+        "the crop rectangles are wrong"
+    )
+
+
+def test_a_document_without_the_poses_marker_gets_the_loop(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+) -> None:
+    """An older cached stage document keeps the per-angle path."""
+    out = tmp_path / "out"
+    out.mkdir()
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(out), width=64, height=64,
+    )
+    assert views is not None
+    harnesses = [
+        h for h in
+        (tmp_path / "seen_harnesses.txt").read_text().split("===HARNESS===")
+        if h.strip()
+    ]
+    assert len(harnesses) == 2, "the pre-poses document must loop per angle"
+
+
+def test_a_wrong_size_sheet_falls_back_to_the_loop(
+    cube_stl: str, batch_stage_doc: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clamped window or un-composed grid must never be cropped.
+
+    The fake ignores --window-size (the single-still fixture's shape), so
+    the sheet is the wrong size: the batch declines and the loop serves —
+    the failure costs one extra launch, never a garbage set.
+    """
+    png = tmp_path / "frame.png"
+    png.write_bytes(_textured_png_bytes())
+    script = _make_fake_browser(
+        tmp_path,
+        f"""
+        import shutil, sys
+        out = [a for a in sys.argv if a.startswith("--screenshot=")][0]
+        shutil.copy({str(png)!r}, out.split("=", 1)[1])
+        page = [a for a in sys.argv if a.startswith("file://")][0]
+        body = open(page[len("file://"):]).read()
+        with open({str(tmp_path / "seen_harnesses.txt")!r}, "a") as f:
+            f.write(body + "\\n===HARNESS===\\n")
+        """,
+    )
+    monkeypatch.setenv("KILN_STAGE_BROWSER", str(script))
+    out = tmp_path / "out"
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(out), width=64, height=64,
+    )
+    assert views is not None, "the loop fallback must still deliver the set"
+    harnesses = [
+        h for h in
+        (tmp_path / "seen_harnesses.txt").read_text().split("===HARNESS===")
+        if h.strip()
+    ]
+    assert len(harnesses) == 3, (
+        "expected 1 declined batch attempt + 2 loop shots, "
+        f"saw {len(harnesses)} launches"
+    )
