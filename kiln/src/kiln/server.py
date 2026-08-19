@@ -902,7 +902,9 @@ def _build_instructions() -> str:
     parts.append(
         "SERVER: Call `restart_server()` to hot-restart the Kiln MCP server "
         "without closing the client app. Use after plugin updates, env var "
-        "changes, or code edits. The client auto-reconnects in ~1 second."
+        "changes, or code edits. The client auto-reconnects in ~1 second. "
+        "Read the result's `relaunch` field before trusting a restart to "
+        "pick up synced code: only \"wrapper\" re-runs launcher logic."
     )
 
     # --- Multi-color ---
@@ -9250,14 +9252,75 @@ def activate_license(key: str) -> dict:
 # health_check — moved to plugins/utility_tools.py
 
 
+#: Set by a launcher script to its own absolute path, so a restart can
+#: re-enter the LAUNCHER rather than re-exec python around it.  Whatever
+#: the launcher does before serving — syncing runtime clones, healing
+#: editable-install metadata — is exactly what someone restarting "to
+#: pick up changes" believes they are getting.
+_SERVE_WRAPPER_ENV = "KILN_SERVE_WRAPPER"
+
+
+def _restart_exec_target(env: dict) -> tuple[list[str], str, str]:
+    """The argv a restart should exec, plus how to describe it.
+
+    Returns ``(argv, relaunch, note)`` where *relaunch* is the machine
+    verdict (``"wrapper"`` or ``"in-place"``) and *note* is the human
+    sentence for the tool result.  Three cases, each spoken plainly:
+
+    * a launcher announced itself via ``KILN_SERVE_WRAPPER`` and the
+      file is runnable → re-enter it, sync and all;
+    * the variable names a file that is missing or not executable →
+      fall back in place, SAYING the launcher went missing — silence
+      here would be the stale-restart bug wearing a new coat;
+    * no launcher → the plain install's honest restart: a fresh process
+      over however this interpreter resolves ``kiln``.
+    """
+    wrapper = (env.get(_SERVE_WRAPPER_ENV) or "").strip()
+    if wrapper:
+        if os.path.isfile(wrapper) and os.access(wrapper, os.X_OK):
+            return (
+                [wrapper],
+                "wrapper",
+                f"relaunching via {wrapper}, so its code sync runs",
+            )
+        return (
+            [sys.executable, "-m", "kiln", "serve"],
+            "in-place",
+            (
+                f"re-executing in place — {_SERVE_WRAPPER_ENV} names "
+                f"{wrapper!r} but it is missing or not executable, so no "
+                "launcher logic (code sync included) will run"
+            ),
+        )
+    return (
+        [sys.executable, "-m", "kiln", "serve"],
+        "in-place",
+        (
+            "re-executing in place; code freshness is whatever this "
+            "interpreter resolves, no launcher logic runs"
+        ),
+    )
+
+
 @mcp.tool()
 def restart_server(clean_env: bool = True) -> dict:
-    """Restart the Kiln MCP server process in-place.
+    """Restart the Kiln MCP server process.
 
     Replaces the current process with a fresh instance using
     ``os.execve``.  The MCP client (Claude Code, etc.) should detect
-    the connection drop and automatically reconnect, picking up any
-    code changes made since the last startup.
+    the connection drop and automatically reconnect.
+
+    WHAT A RESTART REFRESHES depends on how this server was launched,
+    and the result says which happened.  A launcher script that
+    exported ``KILN_SERVE_WRAPPER`` is re-entered whole, so whatever
+    that script does before serving — syncing code, healing installs —
+    runs again.  Without it the restart re-execs ``python -m kiln
+    serve`` in place: a fresh process over however this interpreter
+    resolves ``kiln``, which picks up edits to those files but runs no
+    launcher logic.  (Measured 2026-08-19: an operator launcher synced
+    two runtime clones on every start, and a restart through this tool
+    silently skipped the sync — the served code was two revisions
+    stale while the restart reported success.)
 
     Use after installing or updating kiln-pro plugins, changing
     environment variables, or modifying server code — avoids the
@@ -9280,6 +9343,7 @@ def restart_server(clean_env: bool = True) -> dict:
     import threading
 
     new_env = os.environ.copy()
+    argv, relaunch, relaunch_note = _restart_exec_target(new_env)
     stripped: list[str] = []
     if clean_env:
         # Only strip when config.yaml has a printer — otherwise the env
@@ -9321,16 +9385,17 @@ def restart_server(clean_env: bool = True) -> dict:
                 drained,
             )
         _flush_restart_stdio()
-        # ``serve`` is the only subcommand that runs the MCP server; without
-        # it ``python -m kiln`` just prints help and exits, which makes the
-        # MCP host think the child died and spawn a fresh one with its own
-        # (ghost-laden) environment — defeating ``clean_env`` entirely.
-        os.execve(
-            sys.executable, [sys.executable, "-m", "kiln", "serve"], new_env
-        )
+        # The target came from _restart_exec_target: the launcher wrapper
+        # when one announced itself (its pre-serve work — code sync, install
+        # healing — runs again), else ``python -m kiln serve``.  ``serve``
+        # matters on that fallback: without it ``python -m kiln`` prints
+        # help and exits, the MCP host thinks the child died, and it spawns
+        # a fresh one with its own (ghost-laden) environment — defeating
+        # ``clean_env`` entirely.
+        os.execve(argv[0], argv, new_env)
 
     threading.Thread(target=_do_restart, daemon=True).start()
-    msg = "Kiln server restarting in ~0.3s."
+    msg = f"Kiln server restarting in ~0.3s — {relaunch_note}."
     if stripped:
         msg += (
             f" Stripped {len(stripped)} stale KILN_PRINTER_* env var(s) so "
@@ -9339,6 +9404,11 @@ def restart_server(clean_env: bool = True) -> dict:
     msg += " MCP connection will drop and the client should auto-reconnect."
     return {
         "success": True,
+        # "wrapper" or "in-place" — a caller deciding whether this restart
+        # refreshed synced code must read THIS, not assume; an in-place
+        # re-exec runs no launcher logic (the 2026-08-19 stale-verification
+        # near-miss).
+        "relaunch": relaunch,
         "stripped_env_vars": sorted(stripped),
         "message": msg,
     }
