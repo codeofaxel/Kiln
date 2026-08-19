@@ -21,6 +21,7 @@ test is marked ``slow`` and calls the real fetch directly.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -446,13 +447,17 @@ class TestReadmeHighlightsBlock:
     """
 
     def _readme_and_version(self):
-        import tomllib
-
+        # Read the version the way test_version.py does rather than with
+        # tomllib: that module arrived in 3.11 and kiln supports 3.10, so
+        # importing it here took the whole 3.10 CI job down while every
+        # other interpreter stayed green.
         root = Path(__file__).resolve().parents[1]
-        version = tomllib.loads((root / "pyproject.toml").read_text())["project"][
-            "version"
-        ]
-        return (root / "README.md").read_text(encoding="utf-8"), version
+        match = re.search(
+            r'(?m)^\s*version\s*=\s*"([^"]+)"\s*$',
+            (root / "pyproject.toml").read_text(encoding="utf-8"),
+        )
+        assert match, "could not find version in kiln/pyproject.toml"
+        return (root / "README.md").read_text(encoding="utf-8"), match.group(1)
 
     def test_block_exists_for_current_version_and_parses(self):
         readme, version = self._readme_and_version()
