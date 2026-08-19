@@ -249,6 +249,27 @@ def enabled() -> bool:
     }
 
 
+def inline_geometry_enabled() -> bool:
+    """Whether geometry rides the RESULT, or only the token does.
+
+    Default ON — the lean alternative (token-only result; the panel
+    lazy-fetches through the host's ``tools/call`` proxy) depends on the
+    host declaring ``serverTools``, which the server cannot see at attach
+    time.  Measured 2026-08-19 on the host most installs run: the inline
+    payload (~1.9 MB base64 in structuredContent) is ALSO surfaced to the
+    agent as tool-result text, truncating at the client's output cap and
+    spending ~25k tokens of the agent's context per stamped make on
+    geometry the agent cannot read.  ``KILN_STAGE_INLINE_GEOMETRY=0`` is
+    the experiment lever: flip it, and if the panel's lazy fetch works on
+    that host, the lean result should become the default there.
+    """
+    return (os.environ.get("KILN_STAGE_INLINE_GEOMETRY") or "").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+
+
 def diagnostics_enabled() -> bool:
     return (os.environ.get(_DIAGNOSTICS_ENV) or "").strip().lower() in {
         "1",
@@ -722,7 +743,7 @@ def _install_result_hook(mcp: Any) -> bool:
             sc["artifact"] = artifact
             attaching = host_renders_apps(mcp, ctx)
             _log_signal_once(mcp, attaching, ctx)
-            if attaching and _tool_opens_stage(mcp, name):
+            if attaching and _tool_opens_stage(mcp, name) and inline_geometry_enabled():
                 payload = _inline_payload(token)
                 if payload is not None:
                     # A STEP import's analytic truth rides the payload so

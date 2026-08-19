@@ -534,3 +534,51 @@ def test_visualize_model_falls_back_when_stage_declines(
     result = visualize_model(cube_stl, angles=["isometric"], output_dir=str(tmp_path / "o"))
     if result.get("success"):
         assert result["renderer"] == "openscad"
+
+
+def test_the_set_budget_declines_to_the_painter(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A photograph set that outruns its wall-clock budget declines WHOLE.
+
+    Each angle is its own browser launch + document load + three.js parse
+    (~17 s cold, measured 2026-08-19), and MCP clients bound the tool call
+    at ~60 s — so a 3-4 angle autofire could photograph its way into a
+    client timeout the server never notices: the user sees a failure, the
+    finished artifact never reaches them.  Overrunning the budget returns
+    None (all-or-nothing, same contract as every other decline) so the
+    painter serves every angle at ~2.6 s/angle instead.
+    """
+    calls: list[str] = []
+    real_shoot = stage_still._shoot
+    base = stage_still.time.monotonic()
+
+    def slow_shoot(browser, harness, png, w, h, profile):
+        calls.append(str(harness))
+        # Simulate one slow angle without waiting: spend the whole budget.
+        monkeypatch.setattr(stage_still.time, "monotonic", lambda: base + 10_000)
+        return real_shoot(browser, harness, png, w, h, profile)
+
+    monkeypatch.setattr(stage_still, "_shoot", slow_shoot)
+    out = tmp_path / "out"
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(out), width=64, height=64,
+    )
+    assert views is None, "an over-budget set must decline, never ship partial"
+    assert len(calls) == 1, "the budget check runs BEFORE each shot"
+
+
+def test_a_zero_budget_disables_the_deadline(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 0.0)
+    out = tmp_path / "out"
+    out.mkdir()
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(out), width=64, height=64,
+    )
+    assert views is not None and len(views) == 2

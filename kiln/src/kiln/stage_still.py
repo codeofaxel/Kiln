@@ -112,6 +112,21 @@ _VIRTUAL_TIME_MS = 9_000
 #: and a hung browser must never hang a preview call.
 _VIEW_TIMEOUT_S = 60
 
+#: Wall-clock budget for the whole photograph SET, not one view.  MCP
+#: clients bound the tool CALL (~60 s observed 2026-08-19), and each
+#: angle here is its own browser launch + document load + three.js
+#: parse — ~17 s cold, ~6 s warm per angle, measured on a small mesh —
+#: so a multi-angle autofire could spend the client's entire budget
+#: photographing and time out a call the server then completes anyway:
+#: the user sees a failure, the artifact never reaches them.  Spending
+#: past this budget declines the SET (all-or-nothing) and the software
+#: painter, ~2.6 s/angle at calibrated visual parity, takes every
+#: angle.  Env-tunable; 0 disables.  Chosen so the worst case — budget
+#: spent, plus the one in-flight angle, plus the painter's full set —
+#: still lands inside the client budget with room for the caller's own
+#: work around the render.
+_STILL_SET_BUDGET_S = float(os.environ.get("KILN_STAGE_STILL_BUDGET_S", "20") or 0)
+
 #: Blank-frame guard threshold, measured as the LARGEST per-channel
 #: standard deviation — never luminance.  Calibrated against real
 #: captures (2026-08-10): an empty stage measures 9.7, a grey part
@@ -473,11 +488,31 @@ def try_render_stage_views(
         # one afternoon).  Same line stage_paint carries.
         os.makedirs(output_dir, mode=0o700, exist_ok=True)
         views: list[dict] = []
+        # The photograph runs inside a live tool call, and MCP clients
+        # enforce a request budget of their own (~60 s observed).  Each
+        # angle is a full browser launch + document load + three.js parse
+        # — measured 2026-08-19 at ~17 s/angle cold and ~6 s warm on a
+        # tiny mesh — so a 3-4 angle autofire can spend the client's whole
+        # budget photographing while the painter delivers the same
+        # calibrated look at ~2.6 s/angle.  The budget is checked BEFORE
+        # each shot: overrunning it declines the whole set (the
+        # all-or-nothing contract above), and the painter takes every
+        # angle.  A budget of 0 disables the check.
+        deadline = (
+            time.monotonic() + _STILL_SET_BUDGET_S if _STILL_SET_BUDGET_S else None
+        )
         tmp = Path(tempfile.mkdtemp(prefix="kiln_stage_still_"))
         try:
             profile_dir = tmp / "profile"
             profile_dir.mkdir()
             for label, description in selected:
+                if deadline is not None and time.monotonic() > deadline:
+                    logger.debug(
+                        "stage stills: set budget (%.0fs) spent after %d/%d "
+                        "angle(s) — declining to the painter",
+                        _STILL_SET_BUDGET_S, len(views), len(selected),
+                    )
+                    return None
                 rx, _ry, rz = rotations[label]
                 az_deg, el_deg = _openscad_rotation_to_orbit(rx, rz)
                 harness = _build_harness(
