@@ -91,9 +91,6 @@ from kiln.plugins._validation_pipeline_internals import (
     _max_dim_mm as _max_dim_mm,
 )
 from kiln.plugins._validation_pipeline_internals import (
-    _scaled_copy_path as _scaled_copy_path,
-)
-from kiln.plugins._validation_pipeline_internals import (
     _PipelineReport as _PipelineReport,
 )
 from kiln.plugins._validation_pipeline_internals import (
@@ -101,6 +98,9 @@ from kiln.plugins._validation_pipeline_internals import (
 )
 from kiln.plugins._validation_pipeline_internals import (
     _sanitize_summary_detail as _sanitize_summary_detail,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _scaled_copy_path as _scaled_copy_path,
 )
 from kiln.plugins._validation_pipeline_internals import (
     _step_auto_scale as _step_auto_scale,

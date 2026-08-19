@@ -146,16 +146,16 @@ _METALNESS = 0.05  # MeshPhysicalMaterial metalness, transcribed
 _LIGHT_SCALES = (0.601, 1.970, 0.234, 0.234)
 
 
-def _srgb_to_linear(c: "np.ndarray") -> "np.ndarray":  # noqa: F821
+def _srgb_to_linear(c: np.ndarray) -> np.ndarray:  # noqa: F821
     return _np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
 
 
-def _linear_to_srgb(c: "np.ndarray") -> "np.ndarray":  # noqa: F821
+def _linear_to_srgb(c: np.ndarray) -> np.ndarray:  # noqa: F821
     c = _np.clip(c, 0.0, 1.0)
     return _np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055)
 
 
-def _aces(x: "np.ndarray") -> "np.ndarray":  # noqa: F821
+def _aces(x: np.ndarray) -> np.ndarray:  # noqa: F821
     """Narkowicz's ACES filmic fit — the curve three.js applies."""
     return _np.clip((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0)
 
@@ -168,8 +168,8 @@ def _deps():
     global _np
     try:
         import numpy as np
-        from PIL import Image, ImageDraw, ImageFont  # noqa: F401
         import trimesh  # noqa: F401
+        from PIL import Image, ImageDraw, ImageFont  # noqa: F401
     except ImportError as exc:
         logger.debug("stage paint unavailable: %s", exc)
         return None
@@ -278,7 +278,9 @@ def _shade(albedo_lin, normals, view):
 
     nv = _np.clip((normals * view).sum(axis=1), 1e-4, None)
     color = _np.full((len(normals), 3), _AMBIENT)
-    for (direction, light_rgb, intensity), scale in zip(_LIGHTS, _LIGHT_SCALES):
+    for (direction, light_rgb, intensity), scale in zip(
+        _LIGHTS, _LIGHT_SCALES, strict=True
+    ):
         intensity = intensity * scale
         ldir = _np.asarray(direction, dtype=_np.float64)
         ldir = ldir / _np.linalg.norm(ldir)

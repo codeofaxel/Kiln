@@ -289,10 +289,10 @@ class _PrinterManagementToolsPlugin:
                 left = report.get("returns_left", 0)
                 # State the consequence HERE, not when they discover it.
                 consequence = (
-                    f"Kiln can come back to this print once if you need it to."
+                    "Kiln can come back to this print once if you need it to."
                     if left
-                    else f"Kiln has already come back to this print once, so it "
-                    f"will stay with the next printer until this one finishes."
+                    else "Kiln has already come back to this print once, so it "
+                    "will stay with the next printer until this one finishes."
                 )
                 return {
                     "success": True,

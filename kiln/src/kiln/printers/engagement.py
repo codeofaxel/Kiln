@@ -52,9 +52,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from kiln.printers.job_identity import JobIdentity
+from kiln.printers.job_identity import JobIdentity, same_job
 from kiln.printers.job_identity import resolve as resolve_job_identity
-from kiln.printers.job_identity import same_job
 
 logger = logging.getLogger(__name__)
 

@@ -539,9 +539,8 @@ def _machine_id(adapter: Any) -> str:
 
 def _peer_states(registry: Any, this_machine: str) -> dict[str, Any]:
     """State of every registered machine EXCEPT this one, aliases collapsed."""
-    from kiln.registry import machine_fingerprint
-
     from kiln.printers.engagement import internal_read
+    from kiln.registry import machine_fingerprint
 
     out: dict[str, Any] = {}
     for name in registry.list_machines():
