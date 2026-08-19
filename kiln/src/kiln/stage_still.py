@@ -98,15 +98,11 @@ _STILL_COLOR_MARKER = "STILL.color"
 #: Capability sniff for the batch still mode, same pattern as the colour
 #: marker above: the cached stage document either carries the pose-grid
 #: driver or it predates it, and a document that predates it gets the
-#: per-angle loop it has always understood.
+#: per-angle loop it has always understood.  Tile composition is entirely
+#: the DOCUMENT's business — it lays each tile out as canvas over its own
+#: 56px rail strip, so a cropped tile is byte-for-byte a single-shot
+#: still; this side only cuts rectangles of ``tile_w x tile_h``.
 _STILL_POSES_MARKER = "STILL.poses"
-
-#: The stage document's hidden brand rail leaves this many CSS pixels of
-#: page background under the canvas in still mode — part of every still's
-#: composition (the software painter replicates the same strip).  The
-#: batch grid's tiles each include it, so a cropped tile is byte-for-byte
-#: the composition of a single-shot still.
-_STILL_RAIL_PX = 56
 
 #: Tiles per grid row in batch mode.  Three keeps a six-angle set at a
 #: window SwiftShader is comfortable rasterising (4800x2400 at the
@@ -401,8 +397,16 @@ STILL_BROWSER_FLAGS: tuple[str, ...] = (
 
 
 def _shoot(browser: Path, harness_path: Path, png_path: str,
-           width: int, height: int, profile_dir: Path) -> bool:
-    """One headless screenshot.  True only for exit 0 + a written file."""
+           width: int, height: int, profile_dir: Path,
+           timeout_s: float = _VIEW_TIMEOUT_S) -> bool:
+    """One headless screenshot.  True only for exit 0 + a written file.
+
+    *timeout_s* is the file-poll ceiling for THIS shot.  The batch path
+    tightens it to the set budget: its one launch IS the whole set, so a
+    browser hung past the budget must fail here rather than spend the
+    per-view ceiling and hand the painter a bill the client call cannot
+    pay.
+    """
     cmd = [
         str(browser),
         *STILL_BROWSER_FLAGS,
@@ -426,7 +430,7 @@ def _shoot(browser: Path, harness_path: Path, png_path: str,
     # forever).  So poll for a written-and-stable file, and kill the
     # browser once it exists; waiting for exit would turn every view
     # into a full timeout on the most common browser there is.
-    deadline = time.monotonic() + _VIEW_TIMEOUT_S
+    deadline = time.monotonic() + timeout_s
     last_size = -1
     try:
         while time.monotonic() < deadline:
@@ -445,8 +449,6 @@ def _shoot(browser: Path, harness_path: Path, png_path: str,
             proc.kill()
             with contextlib.suppress(Exception):
                 proc.wait(5)
-
-
 
 
 def _shoot_batch(
@@ -506,8 +508,17 @@ def _shoot_batch(
     harness_path.write_text(harness, encoding="utf-8")
 
     grid_png = str(tmp / "still_grid.png")
+    # One launch is the whole set, so its poll ceiling is the SET budget
+    # (when one is set), never the roomier per-view ceiling: a browser
+    # hung past the budget must decline while the painter can still fit
+    # inside the client's request window.
+    shot_timeout = (
+        min(_VIEW_TIMEOUT_S, _STILL_SET_BUDGET_S)
+        if _STILL_SET_BUDGET_S else _VIEW_TIMEOUT_S
+    )
     if not _shoot(browser, harness_path, grid_png,
-                  cols * shot_w, rows * shot_h, profile_dir):
+                  cols * shot_w, rows * shot_h, profile_dir,
+                  timeout_s=shot_timeout):
         return None
 
     try:
