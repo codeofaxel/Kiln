@@ -381,3 +381,71 @@ def test_every_dependency_the_painter_needs_is_a_core_dependency() -> None:
             "does not fail a test anywhere -- it just makes the studio-look "
             "preview inert on a default install."
         )
+
+
+# ---------------------------------------------------------------------------
+# Card knobs — plate=False / letterbox=False (library-thumbnail surfaces)
+# ---------------------------------------------------------------------------
+
+
+def test_plate_off_paints_no_bed(probe: str, tmp_path: Path) -> None:
+    """``plate=False`` removes the bed entirely — grid lines, ember cross,
+    stamp, and the contact shadow its texture carries — so everything
+    outside the part's silhouette is the bare backdrop.  With the plate on,
+    grid lines break the backdrop all over the lower half; without it, the
+    off-model region must be uniform."""
+    with_plate = _img(_render(probe, tmp_path, plate=True, letterbox=False))
+    out2 = tmp_path / "o2"
+    no_plate = np.asarray(
+        Image.open(
+            try_paint_stage_views(
+                probe, _SEL, _ISO,
+                output_dir=str(out2), width=800, height=600,
+                plate=False, letterbox=False,
+            )[0]["path"]
+        ).convert("RGB"),
+        float,
+    )
+    def off_model_variation(a: np.ndarray) -> float:
+        # Everything darker than the model: backdrop + plate region.
+        grey = a.mean(axis=2)
+        region = a[grey < 90]
+        return float(region.std(axis=0).max())
+
+    assert off_model_variation(no_plate) < off_model_variation(with_plate)
+    # And absolutely: the bed-less ground is flat backdrop (gradient-free
+    # within a couple of counts), which no grid line survives.
+    grey = no_plate.mean(axis=2)
+    ground = no_plate[grey < 90]
+    assert ground.std(axis=0).max() < 3.0, "plate chrome leaked into ground"
+
+
+def test_letterbox_off_fills_the_full_height(probe: str, tmp_path: Path) -> None:
+    """``letterbox=False`` hands back the footer rows: the bottom strip is
+    no longer reserved flat page background, so content (the plate under
+    the default look) reaches the bottom edge."""
+    a = _img(_render(probe, tmp_path, letterbox=False))
+    assert a.shape[:2] == (600, 800)
+    strip = a[-24:, :, :]
+    # Under the default (plate on) look the plate's grid reaches the
+    # bottom rows — the strip is NOT uniformly flat page background.
+    assert (np.abs(strip - np.array(_BG)).sum(axis=2) > 10).any(), (
+        "letterbox=False still reserved a flat footer strip"
+    )
+
+
+def test_card_knobs_default_on_keeps_the_stage_contract(
+    probe: str, tmp_path: Path
+) -> None:
+    """No caller passes the knobs → byte-identical to the pre-knob look
+    (the calibration pins above run knobless, but pin the default
+    explicitly so a default flip can't hide behind them)."""
+    a = _render(probe, tmp_path)
+    out2 = tmp_path / "explicit"
+    b = try_paint_stage_views(
+        probe, _SEL, _ISO, output_dir=str(out2), width=800, height=600,
+        plate=True, letterbox=True,
+    )
+    assert (
+        Path(a[0]["path"]).read_bytes() == Path(b[0]["path"]).read_bytes()
+    )

@@ -647,6 +647,8 @@ def try_paint_stage_views(
     width: int,
     height: int,
     color: str | None = None,
+    plate: bool = True,
+    letterbox: bool = True,
 ) -> list[dict] | None:
     """Paint every requested view in the stage look, or ``None``.
 
@@ -654,6 +656,16 @@ def try_paint_stage_views(
     verbatim: ``None`` — never a partial list, never an exception — means
     "run the next backend"; the caller's angle machinery rides through
     unchanged; a non-hex *color* declines rather than guessing.
+
+    ``plate=False`` omits the print bed (grid, ember cross, stamp, and the
+    contact shadow baked into its texture) so the part floats on the bare
+    backdrop; ``letterbox=False`` omits the footer strip the live stage
+    reserves for its own UI.  Both default True — the full stage look.
+    They exist for surfaces that show the OBJECT rather than the print
+    setup (library card thumbnails), where bed chrome at tile size reads
+    as noise.  ``_paint_view`` already treats a ``None`` plate texture as
+    "no plate", so the off switch is the absence of the texture, not a
+    second code path.
     """
     try:
         if os.environ.get(_OPT_OUT_ENV, "").strip():
@@ -698,7 +710,11 @@ def try_paint_stage_views(
         stem = Path(file_path).stem
         os.makedirs(output_dir, mode=0o700, exist_ok=True)
 
-        plate_tex_np = _np.asarray(_plate_texture(footprint), dtype=_np.uint8)
+        plate_tex_np = (
+            _np.asarray(_plate_texture(footprint), dtype=_np.uint8)
+            if plate
+            else None
+        )
 
         views: list[dict] = []
         for label, description in selected:
@@ -717,7 +733,7 @@ def try_paint_stage_views(
             # resolution so the two backends stay geometrically
             # interchangeable at any knob setting.
             full_h = height * ss_int
-            strip = round(_FOOTER_PX * ss_int / ss)
+            strip = round(_FOOTER_PX * ss_int / ss) if letterbox else 0
             canvas_h = full_h - strip
             if canvas_h < 32:  # degenerate request: skip the letterbox
                 canvas_h = full_h
