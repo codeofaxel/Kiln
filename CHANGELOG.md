@@ -5,6 +5,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Tell the Kiln team something.** A new Support page in the web app takes
+  bugs, ideas, printers you want supported, and questions — or just say it to
+  your agent, which can send any of them for you. A person reads every one, and
+  you can ask to be emailed when yours is fixed.
+
 ## [1.4.1.1] - 2026-08-19
 
 ### Added
