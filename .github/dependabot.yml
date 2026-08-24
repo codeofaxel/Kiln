@@ -19,6 +19,20 @@ updates:
         patterns:
           - "httpx2"
           - "httpcore2"
+      # Routine lockfile movement, batched into one PR and one CI run. Listed
+      # after http2-stack so that coupled pair still gets its own PR: a
+      # dependency joins the first group whose patterns match it.
+      #
+      # Majors are deliberately excluded and keep arriving one per PR. A major
+      # is the bump that needs to be read on its own -- trimesh 4 -> 5 (#125)
+      # dropped two Python versions and changed two behaviours; that does not
+      # belong in a batch whose whole premise is "these are boring".
+      lockfile-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     ignore:
       # pydantic-core is not ours to move. It is a transitive dependency that
       # pydantic pins to an EXACT version (pydantic 2.13.4 requires
@@ -46,9 +60,23 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      lockfile-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
