@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import _vec
+from kiln.openscad_runner import crashed_on_startup, run_openscad
 
 _logger = logging.getLogger(__name__)
 
@@ -67,12 +68,7 @@ def _detect_openscad_version(binary: str) -> str:
     failure.  Result is not cached here — callers manage the cache.
     """
     try:
-        result = subprocess.run(
-            [binary, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        result = run_openscad([binary, "--version"], timeout=10)
         # OpenSCAD prints e.g. "OpenSCAD version 2024.12.19" to stderr
         output = result.stderr.strip() or result.stdout.strip()
         match = re.search(r"(\d{4}\.\d+(?:\.\d+)?)", output)
@@ -90,12 +86,13 @@ def _probe_openscad_runs(path: str) -> tuple[bool, str | None]:
         return cached
 
     try:
-        result = subprocess.run(
-            [path, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+        # The retry matters more here than anywhere else, because this
+        # verdict is CACHED for the life of the process.  A startup
+        # segfault on --version would be filed as "this binary cannot
+        # execute", and from then on Kiln tells the user OpenSCAD is
+        # broken or missing — one unlucky launch poisoning every emboss
+        # for the rest of the session.
+        result = run_openscad([path, "--version"], timeout=5)
     except subprocess.TimeoutExpired:
         probed = (False, "openscad --version timed out after 5s")
         _openscad_probe_cache[path] = probed
@@ -492,11 +489,10 @@ def measure_text_block_mm(
                     f"OpenSCAD not found for text probe: {exc}"
                 ) from exc
             try:
-                proc = subprocess.run(
+                proc = run_openscad(
                     [openscad, "-o", stl, scad],
-                    capture_output=True,
-                    text=True,
                     timeout=60,
+                    output_path=stl,
                 )
             except (subprocess.TimeoutExpired, OSError) as exc:
                 raise TextMeasureError(
@@ -1503,12 +1499,7 @@ def compile_embossed_model(
     cmd = _build_cmd(with_manifold=use_manifold)
     start = time.monotonic()
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        result = run_openscad(cmd, timeout=timeout, output_path=output_path)
         elapsed = time.monotonic() - start
     except subprocess.TimeoutExpired:
         elapsed = time.monotonic() - start
@@ -1525,16 +1516,22 @@ def compile_embossed_model(
     # Auto-fallback: if Manifold compile failed, retry with CGAL backend.
     if result.returncode != 0 and use_manifold:
         global _manifold_benchmarked  # noqa: PLW0603
-        _logger.warning("Manifold compile failed, retrying with CGAL backend")
+        # Don't blame Manifold for a crash that happened before OpenSCAD
+        # chose a backend: run_openscad has already exhausted its retries
+        # by this point, so a still-crashed process reached here without
+        # Manifold having done anything.  CGAL is still worth a try — it
+        # is one more launch, and one more roll of the startup dice.
+        if crashed_on_startup(result):
+            _logger.warning(
+                "OpenSCAD crashed during startup, not in Manifold — trying the "
+                "CGAL backend as one more attempt."
+            )
+        else:
+            _logger.warning("Manifold compile failed, retrying with CGAL backend")
         cgal_cmd = _build_cmd(with_manifold=False)
         start = time.monotonic()
         try:
-            result = subprocess.run(
-                cgal_cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+            result = run_openscad(cgal_cmd, timeout=timeout, output_path=output_path)
             elapsed = time.monotonic() - start
         except subprocess.TimeoutExpired:
             elapsed = time.monotonic() - start

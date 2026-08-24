@@ -2,6 +2,18 @@
 
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 
+<!-- kiln-highlights: 1.4.1.1
+* preview images get the web app's studio look on every computer, with the print bed and lighting built in
+* a full set of preview angles arrives in seconds
+* fixed a bug so preview renders no longer bring annoying popups to your screen
+kiln-highlights:end -->
+<!-- The block above is machine-read, not rendered: installed Kilns parse it
+     out of the PyPI JSON description so their update nudge can say what the
+     newest release adds (kiln/src/kiln/version_check.py). Update it each
+     release, wording identical to kiln-pro's version_highlights.py ledger
+     (its posture gate reconciles the two). -->
+
+
 **Describe it or draw it. Kiln makes it real.**
 
 Kiln turns a conversation with an AI agent into a printed object. One install, any printer, start to finish — design, slice, queue, monitor, and fulfill 3D print jobs through a unified MCP (Model Context Protocol) server and CLI.
@@ -110,11 +122,11 @@ The full searchable list of **60 tuned printer profiles across 15 brands** is at
 
 ## Features
 
-- **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 903 MCP capabilities** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
-- **<!-- KILN_CLI_COUNT:OLD --> 235 CLI commands** with `--json` output for agent consumption
+- **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 908 MCP capabilities** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
+- **<!-- KILN_CLI_COUNT:OLD --> 239 CLI commands** with `--json` output for agent consumption
 - **Multi-printer fleet** management with job queue and background scheduler
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)
-- **Slicer integration** — PrusaSlicer and OrcaSlicer with auto-detection
+- **Slicer integration** — PrusaSlicer, OrcaSlicer, and BambuStudio with auto-detection
 - **Text-to-model generation** — Meshy AI, Tripo3D, Stability AI, OpenSCAD with auto-discovery registry
 - **Printability analysis** — overhang detection, thin wall analysis, auto-orientation, support estimation, failure prediction, quality scorecard
 - **Mesh operations** — mirror, hollow, center, scale-to-fit, merge, split, simplify, repair, non-manifold analysis — all pure Python, no external mesh libraries

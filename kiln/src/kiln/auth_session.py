@@ -248,6 +248,20 @@ def resolve_session_bearer(
 
     refresh_token = str(stored.get("refresh_token") or "").strip()
     if not refresh_token:
+        # A refresh the server REJECTED earlier is a settled verdict, not
+        # a retriable condition — the rejection handler below strips the
+        # dead refresh token and stamps the file, and this branch honours
+        # the stamp so no later caller re-pays the doomed exchange.
+        # Without it, every long-lived caller (the bridge daemon resolves
+        # the bearer on every reconnect) re-POSTed the same dead token
+        # indefinitely: production logs showed the loop running for
+        # minutes at a time, 401 after 401 (2026-08-20).  Only a fresh
+        # ``kiln signin`` / ``kiln pair`` — which writes a new token file
+        # with no stamp — clears it.
+        if stored.get("refresh_rejected_at"):
+            return SessionBearer(
+                token="", state="needs_signin", detail=_signin_hint(stored)
+            )
         # A session written by a pre-refresh client, or pairing flows
         # that mint no refresh token: nothing to exchange.  Hand the
         # stored token to the server anyway — it is the final judge.
@@ -290,7 +304,33 @@ def resolve_session_bearer(
 
         if status in (400, 401):
             # The refresh token itself was rejected: rotated away,
-            # revoked, or expired server-side.  Not recoverable here.
+            # revoked, or expired server-side.  Not recoverable here —
+            # and not recoverable NEXT time either, so persist the
+            # verdict: drop the dead refresh token and stamp the file.
+            # Subsequent resolves short-circuit to ``needs_signin`` with
+            # no network call (see the stamp check above); a new
+            # sign-in writes a fresh file and everything recovers.
+            # Email and the rest of the record stay, so the sign-in
+            # hint keeps its context — including the (near-expiry)
+            # access token, whose presence is what routes later
+            # resolves through the stamp check rather than the plainer
+            # ``signed_out`` branch.
+            merged = dict(stored)
+            merged.pop("refresh_token", None)
+            merged["refresh_rejected_at"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+            )
+            try:
+                _write_tokens(merged)
+            except OSError:
+                # Unpersistable verdict: the loop this exists to stop
+                # survives on this machine.  Say so once, loudly.
+                logger.warning(
+                    "auth_session: refresh was rejected but %s could not "
+                    "be updated — callers will keep re-attempting the "
+                    "exchange until `kiln signin` rewrites it.",
+                    _tokens_path(),
+                )
             return SessionBearer(
                 token="", state="needs_signin", detail=_signin_hint(stored)
             )

@@ -162,6 +162,89 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
 # Image loading: Pillow first, then pure-Python PNG, then sips/convert for JPEG
 # ---------------------------------------------------------------------------
 
+# Opaque pixels this close to white are invisible against a white field —
+# the same tolerance _flatten_field uses to call a tone "the field".
+_ALPHA_INK_DEADBAND = 16
+# Below this visible fraction, the alpha-defined artwork is effectively
+# erased by a white flatten, so the alpha channel is the only place the
+# mark exists.
+_ALPHA_INK_MIN_VISIBLE = 0.05
+
+
+def _flatten_alpha_on_white(img):
+    """Resolve transparency BEFORE any grayscale convert.
+
+    ``convert("L")`` silently drops the alpha channel, so a transparent
+    surround decodes as BLACK — the far end of the height scale from the
+    empty field it visually is.  A brand logo ships as an opaque mark on
+    a transparent surround; decoded as black, the surround displaces the
+    surface across the mark's whole bounding box.
+
+    Two cases, decided by what survives the flatten:
+
+    * Normally, composite onto WHITE — the field convention everywhere
+      this pipeline touches pixels (the pure-Python PNG decoder blends
+      against white, the rembg step composites onto white, ImageMagick
+      SVG rasterization flattens onto white).  A transparent surround
+      then behaves exactly like the same artwork on white paper.
+    * When essentially NONE of the alpha-defined content would survive
+      against white (a white or near-white logo on a transparent
+      surround — the light variant every brand kit ships), the alpha
+      channel is the only place the mark exists, so the alpha coverage
+      IS the ink: synthesize black ink on a white field from it.  Ink
+      colour never changes carve geometry, so this is the same deboss
+      the dark variant of the mark produces.
+
+    Covers every way a Pillow image can carry transparency: RGBA, LA
+    and PA modes, plus palette/grayscale/RGB images with a transparency
+    table (``info["transparency"]`` — honored by ``convert("RGBA")``).
+    """
+    from PIL import Image, ImageChops
+
+    has_alpha = img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
+    if not has_alpha:
+        return img
+
+    rgba = img.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+    bg.paste(rgba, mask=alpha)
+
+    a_hist = alpha.histogram()
+    opaque = sum(a_hist[128:])
+    transparent = sum(a_hist[:128])
+    if opaque == 0 or transparent == 0:
+        # Fully transparent (nothing to rescue) or fully opaque (nothing
+        # to flatten) — the plain composite is already the whole story.
+        return bg
+
+    opaque_mask = alpha.point(lambda a: 255 if a >= 128 else 0)
+    lum_hist = bg.convert("L").histogram(opaque_mask)
+    visible = sum(lum_hist[: 256 - _ALPHA_INK_DEADBAND])
+    if visible / opaque >= _ALPHA_INK_MIN_VISIBLE:
+        return bg
+
+    return ImageChops.invert(alpha)
+
+
+def _open_grayscale(image_path: str, *, exif_transpose: bool = False):
+    """The one way any door in this module opens an image as grayscale.
+
+    Every style block used to call ``Image.open(path).convert("L")``
+    itself, and each of those bare calls was an alpha-dropping door.
+    Routing them all through here is what keeps the next style block
+    from reintroducing the transparent-surround carve.
+    """
+    from PIL import Image
+
+    img = Image.open(image_path)
+    if exif_transpose:
+        from PIL import ImageOps
+
+        img = ImageOps.exif_transpose(img)
+    return _flatten_alpha_on_white(img).convert("L")
+
+
 def _load_image_as_grayscale(image_path: str) -> tuple[list[list[int]], int, int]:
     """Load an image and return (rows_of_grayscale, width, height).
 
@@ -180,15 +263,7 @@ def _load_image_as_grayscale(image_path: str) -> tuple[list[list[int]], int, int
 
     # Strategy 1: Try Pillow
     try:
-        from PIL import Image  # type: ignore[import-untyped]
-
-        img = Image.open(abs_path)
-        if img.mode == "RGBA" or img.mode == "PA":
-            # Composite onto white background
-            bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
-            bg.paste(img, mask=img.split()[3])
-            img = bg
-        img = img.convert("L")
+        img = _open_grayscale(abs_path)
         w, h = img.size
         pixels = list(img.getdata())
         rows = [pixels[i * w : (i + 1) * w] for i in range(h)]
@@ -550,6 +625,13 @@ def prepare_image_for_emboss(
         Maximum pixel count on the longest edge (default 200).
     invert : bool
         If True, flip light/dark (switch between deboss and emboss).
+        Note the downstream contract: ``generate_emboss_scad`` inverts
+        the DAT again (``_invert_dat_heightmap``) because it expects RAW
+        LUMINANCE here — dark ink near 0, light field near 1.  A deboss
+        caller passes ``invert=True`` to put ``_flatten_field``'s output
+        back into that convention, so the ink ends up tall and gets
+        subtracted.  Do not "simplify" this into a single flip without
+        measuring the compiled STL: the two inversions are a pair.
     edge_enhance : bool
         If True, apply a sharpening kernel for crisper edges.
     mask : str
@@ -602,8 +684,8 @@ def prepare_image_for_emboss(
         # High contrast + gaussian blur + 3-level posterize.
         # Produces clean depth tiers that FDM printers resolve well.
         try:
-            from PIL import Image, ImageEnhance, ImageFilter
-            img = Image.open(image_path).convert('L')
+            from PIL import ImageEnhance, ImageFilter
+            img = _open_grayscale(image_path)
             # Resize to target resolution first
             # (handled below, so we process at original res)
             img = ImageEnhance.Contrast(img).enhance(2.5)
@@ -627,8 +709,8 @@ def prepare_image_for_emboss(
         # Bold binary silhouette — high contrast, two levels only.
         # Good for simple subjects against clean backgrounds.
         try:
-            from PIL import Image, ImageEnhance, ImageFilter
-            img = Image.open(image_path).convert('L')
+            from PIL import ImageEnhance, ImageFilter
+            img = _open_grayscale(image_path)
             img = ImageEnhance.Contrast(img).enhance(2.0)
             img = img.point(lambda p: 255 if p > 140 else 0)
             img = img.filter(ImageFilter.MedianFilter(size=5))
@@ -648,8 +730,8 @@ def prepare_image_for_emboss(
         # No posterization, maximum tonal range.
         # Inverts by default (thin = bright when backlit).
         try:
-            from PIL import Image, ImageEnhance, ImageFilter
-            img = Image.open(image_path).convert('L')
+            from PIL import ImageEnhance, ImageFilter
+            img = _open_grayscale(image_path)
             img = ImageEnhance.Contrast(img).enhance(1.5)
             img = img.filter(ImageFilter.GaussianBlur(radius=1))
             preprocessed = os.path.join(output_dir, "preprocessed_lithophane.png")
@@ -673,7 +755,7 @@ def prepare_image_for_emboss(
         try:
             from PIL import Image, ImageFilter, ImageOps
 
-            img = ImageOps.exif_transpose(Image.open(image_path)).convert("L")
+            img = _open_grayscale(image_path, exif_transpose=True)
 
             # Step 1: EXIF-aware open + transpose
             # Step 2: Background removal via rembg (if available)
@@ -807,7 +889,7 @@ def prepare_image_for_emboss(
         try:
             from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
-            img = Image.open(image_path).convert("L")
+            img = _open_grayscale(image_path)
             img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
             # Equalize to pull detail from dark areas
             eq = ImageOps.equalize(img)
@@ -858,7 +940,7 @@ def prepare_image_for_emboss(
         try:
             from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
-            img = Image.open(image_path).convert("L")
+            img = _open_grayscale(image_path)
             img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
             # Base: posterized for volume
             eq = ImageOps.equalize(img)
@@ -900,7 +982,7 @@ def prepare_image_for_emboss(
         try:
             from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
-            img = Image.open(image_path).convert("L")
+            img = _open_grayscale(image_path)
             sz = max_resolution
             img = ImageOps.fit(img, (sz, sz), method=Image.LANCZOS)
             # Relief: 5-level posterize + subtle edge enhancement

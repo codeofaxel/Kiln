@@ -31,6 +31,7 @@ from kiln.generation.base import (
     GenerationResult,
     GenerationStatus,
 )
+from kiln.openscad_runner import run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
 
 logger = logging.getLogger(__name__)
@@ -134,10 +135,11 @@ def _supports_library_flag(binary: str) -> bool:
     if binary in _openscad_L_flag_cache:
         return _openscad_L_flag_cache[binary]
     try:
-        result = subprocess.run(
-            [binary, "--help"],
-            capture_output=True, text=True, timeout=10,
-        )
+        # Through the shared runner like every other launch: this probe
+        # caches its answer per binary, so a startup crash here would
+        # cache "no -L support" for the rest of the process and quietly
+        # drop the bundled BOSL2/MCAD libraries from every later compile.
+        result = run_openscad([binary, "--help"], timeout=10)
         supported = "-L" in result.stdout or "-L" in result.stderr
     except Exception:
         supported = False
@@ -380,12 +382,11 @@ class OpenSCADProvider(GenerationProvider):
             work_dir = tempfile.mkdtemp(prefix="kiln_scad_")
             try:
                 try:
-                    result = subprocess.run(
+                    result = run_openscad(
                         cmd,
-                        capture_output=True,
-                        text=True,
                         timeout=self._timeout,
                         cwd=work_dir,
+                        output_path=out_path,
                     )
                 except subprocess.TimeoutExpired:
                     # Logged, not just stored on the job: the job record
@@ -616,12 +617,11 @@ class OpenSCADProvider(GenerationProvider):
 
         work_dir = tempfile.mkdtemp(prefix="kiln_preview_")
         try:
-            result = subprocess.run(
+            result = run_openscad(
                 cmd,
-                capture_output=True,
-                text=True,
                 timeout=60,
                 cwd=work_dir,
+                output_path=output_path,
             )
         except subprocess.TimeoutExpired:
             raise GenerationError(
@@ -688,10 +688,13 @@ class OpenSCADProvider(GenerationProvider):
             cmd.append(scad_path)
 
             try:
-                result = subprocess.run(
+                # No output_path: this compiles to a throwaway file purely
+                # to read stderr, so "wrote something" says nothing about
+                # whether the validation actually ran.  A crash here must
+                # always retry — reporting a startup segfault as a verdict
+                # on the user's syntax is the worst answer available.
+                result = run_openscad(
                     cmd,
-                    capture_output=True,
-                    text=True,
                     timeout=30,
                     cwd=tempfile.gettempdir(),
                 )
@@ -785,12 +788,11 @@ class OpenSCADProvider(GenerationProvider):
             logger.info("OpenSCAD boolean: %s", " ".join(cmd))
 
             try:
-                result = subprocess.run(
+                result = run_openscad(
                     cmd,
-                    capture_output=True,
-                    text=True,
                     timeout=self._timeout,
                     cwd=work_dir,
+                    output_path=output_path,
                 )
             except subprocess.TimeoutExpired:
                 raise GenerationError(
@@ -1113,11 +1115,10 @@ def compose_from_primitives(
         fh.write(scad_code)
 
     try:
-        result = subprocess.run(
+        result = run_openscad(
             [binary, "-o", output_path, scad_path],
-            capture_output=True,
-            text=True,
             timeout=120,
+            output_path=output_path,
         )
         if result.returncode != 0:
             raise GenerationError(

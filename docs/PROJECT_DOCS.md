@@ -8,7 +8,7 @@
 
 ### Overview
 
-Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 903 MCP capabilities and a <!-- KILN_CLI_COUNT --> 235-command CLI.
+Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 908 MCP capabilities and a <!-- KILN_CLI_COUNT --> 239-command CLI.
 
 **Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
@@ -37,7 +37,7 @@ All three modes use the same MCP tools and CLI commands. No printer and no insta
 
 The short version of the capability map. Everything below is reachable through the same MCP tools and CLI.
 
-- **Design.** Describe a part in plain language and Kiln designs it — no external AI service or API key required — then previews it and iterates with you. The preview includes an interactive 3D stage on every install: inline in apps that support panels, or a browser link to the same stage everywhere else. Where Kiln knows which printer is yours, the stage stands the model on that machine's actual bed and says when a part outgrows it. Common items (coasters, keychains, trays, nameplates, and more) route to dedicated generators. Parametric templates, STEP/STL import, and opt-in cloud generation providers round out the ways a design can start. A multi-part model can be imported with its named parts intact and turned into a buildable kit: the largest printable scale, proof the pieces physically fit, and plate-by-plate packing.
+- **Design.** Describe a part in plain language and Kiln designs it — no external AI service or API key required — then previews it and iterates with you. The preview includes an interactive 3D stage on every install: inline in apps that support panels, or a browser link to the same stage everywhere else. Where Kiln knows which printer is yours, the stage stands the model on that machine's actual bed and says when a part outgrows it. Common items (coasters, keychains, trays, nameplates, and more) route to dedicated generators. Parametric templates, STEP/STL import, and opt-in cloud generation providers round out the ways a design can start. Any Kiln design can leave as a real CAD file too — `export_step` emits a clean STEP a machine shop can open and measure, free like STL and 3MF. A multi-part model can be imported with its named parts intact and turned into a buildable kit: the largest printable scale, proof the pieces physically fit, and plate-by-plate packing.
 - **See it in 3D.** Models render from every angle before printing, and on the hosted connection you can turn a design over interactively — inline in AI apps that support embedded panels, or through a shareable link.
 - **Validate before you print.** Every model can be checked for printability before it reaches a printer: overhangs, thin walls, bridging, bed adhesion, support needs, warping risk, and more — scored, graded, and paired with concrete fixes. Parts that physically can't succeed (too big for the plate, a material your hotend can't melt) are caught up front, free.
 - **Print and monitor.** Slice with your installed slicer, print on any supported printer, and monitor with camera snapshots, progress, temperatures, and health checks. Failed prints get diagnosis, guided recovery, and — on supported setups — resume from the layer where the print stopped.
@@ -68,6 +68,8 @@ The full, always-current list of printer models Kiln ships a tuned profile for l
 ### Tiers
 
 The core loop — design, validate, slice, print, monitor — is free and open source. Kiln Pro, Business, and Enterprise add depth on top: decoration and versioning, per-printer calibration and learning, production drawings, team workflows, and compliance features. See [kiln3d.com/pricing](https://kiln3d.com/pricing) for what each tier includes.
+
+Kiln works with one printer at a time below the Business tier: registering and listing any number of machines is free, and `hand_back_printer` moves Kiln between them without touching a running print. Driving several printers in parallel — including fleet-wide commands — is a Business feature.
 
 ---
 
@@ -179,7 +181,7 @@ kiln wait                      # Block until complete
 kiln slice benchy.stl --print-after
 ```
 
-Auto-detects PrusaSlicer or OrcaSlicer, slices to G-code, uploads, and starts printing.
+Auto-detects PrusaSlicer, OrcaSlicer, or BambuStudio, slices to G-code, uploads, and starts printing.
 
 ### Make Something From Scratch
 
@@ -207,7 +209,7 @@ You can still go from idea to object: design through the agent or the [web app](
 | `--json` | Output structured JSON (for agents/scripts) |
 | `--help` | Show command help |
 
-The CLI has <!-- KILN_CLI_COUNT --> 235 commands in total; this section documents the everyday core. Run `kiln --help` for the full command tree.
+The CLI has <!-- KILN_CLI_COUNT --> 239 commands in total; this section documents the everyday core. Run `kiln --help` for the full command tree.
 
 ### Commands
 
@@ -249,8 +251,9 @@ Cancel the active print job.
 #### `kiln pause` / `kiln resume`
 Pause or resume the active print.
 
-#### `kiln temp [--tool N] [--bed N]`
-Get current temperatures, or set targets. Without flags, returns current temps.
+#### `kiln temp [--tool N] [--bed N] [--printer NAME]`
+Get current temperatures, or set targets. Without flags, returns current
+temps. Targets are held to the named machine's own limits.
 
 #### `kiln gcode <commands>...`
 Send raw G-code commands to the printer. Commands are validated for safety before sending.
@@ -340,7 +343,7 @@ The MCP server starts via `kiln serve` or `python -m kiln serve`. The fastest se
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **<!-- KILN_MCP_TOOL_COUNT --> 896 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT --> 903 total MCP capabilities**. The everyday core is documented below by category; agents see the full, current catalog at connect time (`get_started` and `get_skill_manifest` return the complete map).
+Kiln exposes **<!-- KILN_MCP_TOOL_COUNT --> 901 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT --> 908 total MCP capabilities**. The everyday core is documented below by category; agents see the full, current catalog at connect time (`get_started` and `get_skill_manifest` return the complete map).
 
 Paid-tier tools are discoverable too: agents without a license receive a structured response naming the required tier, so they can tell you what's possible and where it lives ([pricing](https://kiln3d.com/pricing)).
 
@@ -380,6 +383,7 @@ Paid-tier tools are discoverable too: agents without a license receive a structu
 | `printer_snapshot` | `save_path` | Image bytes or base64 |
 | `monitor_print` | `printer_name`, `include_snapshot` | Standardized print status report (progress, temps, speed, camera) |
 | `watch_print` | `printer_name`, `snapshot_interval`, ... | Background watcher with periodic snapshots |
+| `publish_print_twin` | `printer_name` | Publish the retained (mesh, G-code) pair of a print Kiln sliced to your own account, so the kiln3d.com Monitor can show the object layer by layer; nothing uploads unless you ask |
 | `check_print_health` | `printer_name` | Temperature-drift and health assessment |
 | `multi_copy_print` | `model_path`, `copies`, `spacing_mm` | Arrange N copies on plate, slice, and print |
 
@@ -392,7 +396,7 @@ Paid-tier tools are discoverable too: agents without a license receive a structu
 | `submit_job` | `filename`, `printer`, `priority` | Job ID (routes to the best printer when unspecified) |
 | `job_status` | `job_id` | Job state and progress |
 | `queue_summary` | — | Queue overview |
-| `cancel_job` | `job_id` | Confirmation |
+| `cancel_queued_job` | `job_id` | Removes a job still waiting in the queue; a running print is refused and pointed at `cancel_print` |
 | `cancel_queued_jobs` | `printer_name?`, `dry_run` | Bulk-cancel waiting jobs, with preview — never touches a running print |
 
 #### Model Discovery
@@ -440,10 +444,12 @@ Deeper material intelligence — drying schedules per filament, chemical-exposur
 | `design_advisor` | `prompt`, `printer_model` | Recommends approach, material, and constraints |
 | `analyze_design_requirements` | `requirements`, `material` | Functional-requirements analysis |
 | `iterate_design` | `prompt`, `max_iterations` | Closed-loop generate → validate → improve |
+| `rebuild_design` | `recipe_path` | Re-runs a saved design's build recipe: parametric designs re-derive from their OpenSCAD source, mesh designs re-slice their recorded parts |
 | `generate_model` | `prompt`, `provider`, `format` | Generation job (opt-in cloud providers) |
 | `generate_and_print` | `prompt`, `printer_name` | Full pipeline: generate → validate → slice → print |
 | `validate_openscad_code` | `code` | Compile-check with structured errors |
 | `import_step_file` | `file_path` | STEP import to printable mesh |
+| `export_step` | `design_id` | A Kiln design as a real CAD STEP file — one clean solid a machine shop can open and measure; designs that can't honestly be CAD (photo reliefs, wrapped text) are refused with the reason |
 | `compose_part_from_primitives` | parts spec | Build a part from geometric primitives |
 
 Design intelligence queries — material recommendations for a duty, printer design capabilities, template design rules, environment compatibility, structural load estimates, post-processing guides, and print-issue troubleshooting — are available as individual tools (`recommend_design_material`, `get_printer_design_capabilities`, `troubleshoot_print_issue`, and friends).
@@ -725,6 +731,8 @@ New print starts require a preview-confirmation step:
 
 Confirmations are single-use, short-lived, and bound to the file and printer, so an agent can never quietly start a print you haven't seen. `KILN_SKIP_PREVIEW_GATE=1` is the explicit advanced-user bypass and is logged whenever used.
 
+In MCP apps that support confirmation prompts, the approval is a dialog the app shows you directly — your assistant cannot answer it for you. It names the file and covers that one print. Every way of starting a print asks: slicing-and-printing, retries, and monitored prints all pass through the same approval step, and a retry only re-asks when the shape changed.
+
 ### G-code Validation
 
 `validate_gcode()` screens commands before they reach hardware:
@@ -819,6 +827,7 @@ The common ones:
 | `KILN_PRINTER_ACCESS_CODE` | Bambu access code |
 | `KILN_SLICER_PATH` | Explicit path to slicer binary |
 | `KILN_BAMBU_TLS_MODE` | Bambu TLS validation mode: `pin` (default), `ca`, or `insecure` |
+| `KILN_BAMBU_IDLE_DISCONNECT_S` / `KILN_ELEGOO_IDLE_DISCONNECT_S` | Seconds idle before the printer's connection slot is released (default `120`, `0` disables). These printers allow only a few clients at once |
 | `KILN_NO_UPDATE_CHECK` | Disable the version-update check |
 | `KILN_SKIP_PREVIEW_GATE` | Advanced-user bypass for preview confirmation; logged when used |
 | `KILN_MMF_API_KEY` | MyMiniFactory API key |
@@ -868,4 +877,4 @@ Kiln's paid tiers ship through the private `kiln-pro` companion package ([kiln3d
 
 *Kiln is a project of Hadron Labs Inc.*
 
-<!-- DOCS_REVIEWED_FOR: 1.3.2 -->
+<!-- DOCS_REVIEWED_FOR: 1.4.1.1 -->

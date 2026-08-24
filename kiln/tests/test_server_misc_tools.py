@@ -593,6 +593,26 @@ class TestSavePrintCheckpoint:
 class TestStartPrinterHealthMonitoring:
     """Tests for start_printer_health_monitoring()."""
 
+    @pytest.fixture(autouse=True)
+    def _the_printer_exists(self, monkeypatch):
+        """Let 'ender3' resolve to a machine.
+
+        The tool resolves and capacity-checks the printer before it
+        reaches the monitor at all, so without this every case here
+        stopped at PRINTER_NOT_FOUND.  ``test_error`` went on passing
+        anyway — it asserts only ``success is False``, which an unknown
+        printer satisfies as readily as the failure it means to
+        describe — so the suite reported a working monitor error path
+        that had not been executed since the resolution step landed.
+        """
+        monkeypatch.setattr(
+            "kiln.server._resolve_control_target",
+            lambda name: (MagicMock(), name),
+        )
+        monkeypatch.setattr(
+            "kiln.server._watch_capacity_error", lambda *_a, **_kw: None
+        )
+
     @patch("kiln.print_health_monitor.get_print_health_monitor")
     def test_happy_path(self, mock_mon):
         from kiln.server import start_printer_health_monitoring
@@ -611,6 +631,9 @@ class TestStartPrinterHealthMonitoring:
         result = start_printer_health_monitoring(printer_name="ender3")
 
         assert result["success"] is False
+        # Specifically the monitor's failure, not a printer that was
+        # never found.
+        assert result["error"]["code"] == "MONITORING_ERROR"
 
 
 # ---------------------------------------------------------------------------

@@ -82,6 +82,39 @@ class TestAttach:
         assert r.structuredContent["success"] is True
         assert stages == ["shown_tool_result"]
 
+    def test_highlights_ride_along_and_the_note_says_to_lead_with_them(
+        self, monkeypatch
+    ):
+        _offer_available(monkeypatch)
+        _recorded(monkeypatch)
+        monkeypatch.setattr(
+            "kiln.version_check.check_for_update",
+            lambda *a, **k: {
+                "available": True,
+                "current": "1.1.9",
+                "latest": "1.3.2",
+                "command": "pip install --upgrade kiln3d",
+                "summary": "Kiln 1.3.2 is available",
+                "offer": "Want me to update Kiln for you now?",
+                "action": "upgrade_kiln",
+                "highlights": ["designs export as real CAD files"],
+            },
+        )
+        r = _Result(structured={"success": True})
+        update_nudge._attach(r, None, "list_designs")
+        block = r.structuredContent[update_nudge.RESULT_KEY]
+        assert block["highlights"] == ["designs export as real CAD files"]
+        assert "Lead with what's new" in block["note"]
+
+    def test_no_highlights_keeps_the_plain_note(self, monkeypatch):
+        _offer_available(monkeypatch)
+        _recorded(monkeypatch)
+        r = _Result(structured={"success": True})
+        update_nudge._attach(r, None, "list_designs")
+        block = r.structuredContent[update_nudge.RESULT_KEY]
+        assert "highlights" not in block
+        assert "Lead with what's new" not in block["note"]
+
     def test_only_once_per_session(self, monkeypatch):
         _offer_available(monkeypatch)
         stages = _recorded(monkeypatch)

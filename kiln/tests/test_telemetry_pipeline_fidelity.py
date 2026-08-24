@@ -107,8 +107,33 @@ def test_every_counter_field_the_dashboard_reads_is_in_the_payload(pipeline):
     heartbeat._send_heartbeat()
 
     payload = sent[0]
-    for counter in daily_stats._VALID_EVENTS:
+    # record_heartbeat's server-side signature is fixed — an unknown p_*
+    # argument errors the whole heartbeat — so counters added after that
+    # signature froze ride inside p_details instead of as p_*_today fields.
+    # Either way they must LEAVE the machine, which is what this pins.
+    in_details = {"prints_hours_reported"}
+    for counter in daily_stats._VALID_EVENTS - in_details:
         assert f"p_{counter}_today" in payload, (
             f"{counter} is recorded locally but never transmitted"
         )
+    for counter in in_details:
+        assert counter in payload["p_details"], (
+            f"{counter} is recorded locally but never transmitted"
+        )
     assert "previous_day" in payload["p_details"]
+
+
+def test_bridge_running_ships_in_the_payload(pipeline):
+    """The field that says whether print hours can recover on their own.
+
+    The duration watchdog dies with the MCP server process; only an
+    install running the persistent bridge keeps watching after the chat
+    window closes.  Without this field, production cannot say which case
+    dominates.  True/False when the pidfile check answered; None means
+    "could not determine" — never a guess in either direction.
+    """
+    sent = pipeline
+    heartbeat._send_heartbeat()
+
+    assert "bridge_running" in sent[0]["p_details"]
+    assert sent[0]["p_details"]["bridge_running"] in (True, False, None)

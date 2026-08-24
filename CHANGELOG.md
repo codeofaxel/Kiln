@@ -7,6 +7,121 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Tell the Kiln team something.** A new Support page in the web app takes
+  bugs, ideas, printers you want supported, and questions — or just say it to
+  your agent, which can send any of them for you. A person reads every one, and
+  you can ask to be emailed when yours is fixed.
+
+## [1.4.1.1] - 2026-08-19
+
+### Added
+
+- **Connecting a printer to the web app now walks itself.** On a machine with
+  no printer saved yet, `kiln bridge enable` scans your network, offers the
+  printer it finds, asks only the details that printer needs, and saves it as
+  your active one. It also says up front if you still need a slicer, instead
+  of letting the first print fail. One paste from kiln3d.com now ends at a
+  working print path.
+
+### Fixed
+
+- **Previews really do get the studio look now.** 1.4.1 said preview images
+  would use the web app's studio look on any computer. On most installs they
+  didn't: one of the pieces Kiln needs to draw them wasn't part of the
+  install, so previews quietly fell back to the plain look with nothing said.
+  It's included now, and preview images come out sharper too.
+
+- **Preview pictures show up in seconds.** A full set of angles could take
+  long enough to run past the time your app is willing to wait, and come
+  back with nothing. The whole set now comes back in seconds, and Kiln keeps
+  an eye on the clock so a preview finishes inside that window instead of
+  being lost.
+
+- **An expired web sign-in no longer wastes your time.** When your sign-in
+  to kiln3d.com had gone stale, steps that upload your model for the web 3D
+  view kept re-uploading it and getting refused, over and over, inside one
+  call. Kiln now takes the first refusal as its answer and skips the rest;
+  sign in again and uploads work like normal.
+
+## [1.4.1] - 2026-08-18
+
+### Added
+
+- **Rebuild a saved design in one step.** `rebuild_design` re-runs a design's
+  saved build recipe: parametric designs re-derive from their OpenSCAD source
+  and parameters, imported models re-slice their saved parts. It replaces
+  `smart_redesign`, which is retired.
+
+### Changed
+
+- **Previews look like the real thing on every computer.** Preview images now
+  use the same studio look as the web app — print bed, lighting, shadow. That
+  used to need a browser on your machine; it's built in now.
+
+- **Running several printers at once is a Kiln Business feature, and that now
+  properly applies to every printer command.** `hand_back_printer` moves Kiln
+  between machines without touching a running print.
+
+- **When Kiln asks you to update, it says what you'd get.** Update prompts
+  used to give you the version number and nothing else. Now they name two or
+  three of the things the new release adds, so you can decide whether it's
+  worth doing right now instead of taking it on faith.
+
+### Fixed
+
+- **Slicing for a Bambu now names the file to upload.** It produced two
+  files and pointed at the one Bambu printers can't start from, so the
+  upload was refused a few steps later. Kiln now names the right one.
+
+- **Designs and slices no longer fail at random on macOS.** OpenSCAD and
+  PrusaSlicer sometimes crash on startup, before reading your model. Kiln
+  retries instead of failing.
+
+- **Preview renders no longer take over your desktop on macOS.** They could pop
+  up a keychain dialog for Chrome — a browser you never opened — and bounce a
+  second Chrome icon into your Dock. Neither happens now.
+
+- **A logo with a see-through background now carves just the mark.** Kiln was
+  reading the empty space around the artwork as solid ink, so it cut the logo's
+  whole rectangle into the part as a sunken frame. White logos came out blank.
+  Now fixed.
+
+## [1.4.0] - 2026-08-14
+
+### Added
+
+- **Point a print at the printer you mean (Business+).** Starting a print,
+  uploading a file, checking readiness and setting temperatures all take a
+  printer name now. Naming none still means your default, and each machine is
+  checked against its own limits rather than your default printer's.
+
+- **Your printer asks you before it prints.** In apps supporting MCP's
+  confirmation prompts you get a dialog your assistant can't answer for you.
+  It names the file and covers that one print. Elsewhere the previous approval
+  step is unchanged.
+
+- **Stop the printer you mean, by name.** Cancel, pause and resume
+  now take a printer name, so an assistant minding two machines can stop the
+  right one — before this, those commands only ever reached your default
+  printer, and the only way to stop a second machine remotely was the hard
+  emergency stop. Naming no printer still means your default, so nothing changes
+  if you have one machine. Stopping any machine you own is free at every tier;
+  running two at once is Business. Each machine keeps its own books too: a
+  paused printer holds its own temperatures, and a cancelled print is remembered
+  as cancelled on the machine it actually happened on.
+
+- **Clear a stuck printer error without walking over to it.** `clear_printer_error`
+  works on Klipper/Moonraker, OctoPrint, Duet, Creality and USB.
+
+- **A dropped connection can't cost you a duplicate print.** If your assistant
+  queues a print and the reply goes missing, it can now retry safely: sending
+  the same job again with the same one-time key gives back the original
+  instead of quietly adding a second copy, and Kiln says which of the two
+  happened. Jobs sent without a key behave exactly as before, and a new key is
+  still a new print. Thanks [@artiehinz](https://github.com/artiehinz) for
+  [reporting it](https://github.com/codeofaxel/Kiln/issues/112), with the queue
+  and scheduler traced well enough to reproduce.
+
 - **Kiln works with OrcaSlicer and BambuStudio now.** If one of those is the
   slicer you have, Kiln can finally use it. Kiln had listed them as supported
   for a long time while only ever being able to drive PrusaSlicer, so anyone
@@ -124,7 +239,35 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   that scrubbing off — and if you'd rather send only what you write, set
   `KILN_REPORT_NO_LOG=1`.
 
+- **Fans and lights from the command line.** `kiln fan` sets part, aux, or
+  chamber fans; `kiln light` switches chamber and work lights on, off, or
+  flashing; `kiln emergency-trip` names the safety input that tripped.
+
+- **`kiln temp` respects your machine's own limits.** It allowed anything up to
+  a fixed 300°C hotend and 130°C bed whatever machine you were on, so a printer
+  rated lower could be pushed past its rating from the command line and a
+  higher-rated one was refused below its own. It now reads the machine's real
+  ceiling, and takes `--printer` like the rest.
+
+- **Watch a print from the web, layer by layer.** Kiln keeps the model and
+  toolpath of prints it sliced, and can send that pair to your own account so
+  the Monitor at https://kiln3d.com/monitor shows the object being built
+  instead of a progress bar. Nothing leaves your machine unless you ask.
+
+- **Restarting the printer bridge is one command.** However it was set up to
+  run — starting with your computer, under a service manager, or in a
+  terminal — Kiln works out which and does the right thing, including the
+  awkward state where it's switched on but not actually running.
+
+- **A resent print request can't queue the job twice.** If a submission's reply
+  goes missing and your script sends it again, you get the original job back
+  instead of a second copy of the print.
+
 ### Changed
+
+- **Every way of starting a print now asks first.** Slicing-and-printing,
+  retrying and monitored prints used to skip the approval step `start_print`
+  required. Retries only re-ask when the shape changed.
 
 - `cancel_job` has been renamed `cancel_queued_job`. It only ever removed a job
   that was still waiting in the queue line, but sitting next to `cancel_print`,
@@ -132,6 +275,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   that had already started and mark it cancelled while the machine kept
   printing; now it tells you the print is already running and points you at
   `cancel_print`.
+
+- **Printer status answers for the printer you name, at the detail you want.**
+  Asking about a specific machine used to fail outright; now you can name one,
+  and choose a quick reading or the full picture.
 
 - **Preview pictures now match the 3D viewer.** Kiln's stills get the same
   studio lighting as the model viewer instead of the flat grey render — in
@@ -171,6 +318,60 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **Upgrading no longer stops Kiln starting.** A database from an older Kiln
+  failed on the first launch after upgrading and took the server down with it.
+  And a locked database now names the program holding it instead of failing
+  generically.
+
+- **A Bambu print no longer looks rejected because the last one failed.** The
+  previous job's error code was being read as this job's refusal.
+
+- **A finished or cancelled print reads as finished or cancelled**, instead of
+  plain "idle".
+
+- **A stalled print gets noticed.** A print dead at 5% while its readings
+  claimed it was running is now caught, and a resume after a refused resume
+  works.
+
+- **A flat bottom is not an overhang.** A plain box was scored as having severe
+  overhangs — the face it stands on.
+
+- **Your printer stays reachable when you run Kiln in more than one chat.**
+  Several open sessions could leave your own Bambu or Elegoo refusing to answer
+  while sitting there powered on. Fixed, and a print already running is never
+  interrupted. Other printers were never affected.
+
+- **A printer that won't answer now tells you why.** The error used to point at
+  Bambu Studio or the Handy app, so people closed software they'd already closed
+  and power-cycled a printer that was fine. Kiln now names the real cause — and
+  `kiln trim` clears it when it's Kiln's own leftovers.
+
+- **Checks meant for one printer were applied to another (Business+).** With
+  two machines, one could be cleared to print by the other being idle, and a
+  failure on one could start cooling the other mid-print. Single-printer setups
+  were never affected.
+
+- **In confirm mode, the action you approve is exactly the action that runs.**
+  Confirmed commands were replaying with some of their settings quietly reset
+  to defaults: an emergency stop confirmed for one printer went to all of
+  them, a cancel meant to keep the bed warm let it cool, and clearing an
+  emergency stop failed outright every time. All of it now replays exactly as
+  shown, and a test holds that to every confirmable command, including future
+  ones.
+
+- **Cancelled prints are recorded as cancelled, not successful.** Including the
+  ones Kiln stops itself after spotting a problem.
+
+- **Cancelling mid-levelling can leave a Bambu refusing prints.** It usually
+  clears itself within a minute — Kiln now says so instead of leaving you to
+  guess.
+
+- **Sending a job to your fleet works again (Business).** Handing a print to
+  the fleet, and asking Kiln which machine should take it, failed with an
+  unhelpful error on every call since April. Both work now, and the routing
+  reads the real state of your machines: what's loaded, what's already queued,
+  and how each has done with that material before.
 
 - **Your Bambu's screen shows the actual print again.** A recent change to how
   Kiln handles colours quietly stopped previews reaching the printer, so the
@@ -276,6 +477,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **A crash in the 3D geometry engine now leaves a record.** OpenSCAD
   failures showed you an error and wrote nothing down, so a bug report
   carried no trace of what actually broke.
+
+- **Previews can no longer show a different object than the one you made.**
+  Running two Kiln chats at once could cross their preview pictures — one
+  chat's object appearing in the other's preview, and sticking around in the
+  cache. Renders no longer share a workspace, and every older preview is
+  redrawn fresh.
 
 - **Previews now put every colour where it belongs.** On a plate with several
   parts, one part's colour could bleed across another in the picture. The model

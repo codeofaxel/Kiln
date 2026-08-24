@@ -137,7 +137,12 @@ def _reading_after_command(adapter: Any, sent_at: float) -> tuple[str | None, di
     a reading older than the command is about the previous job.
     """
     try:
-        state = adapter.get_state()
+        from kiln.printers.engagement import internal_read
+
+        # Kiln corroborating the command it just sent, on the machine it just
+        # sent it to.  Its own follow-up read, never a user command.
+        with internal_read():
+            state = adapter.get_state()
     except Exception as exc:  # noqa: BLE001 - any transport failure is "no reading"
         return None, {"corroboration": "unavailable", "detail": str(exc)}
 

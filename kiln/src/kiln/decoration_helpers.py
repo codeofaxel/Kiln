@@ -58,6 +58,7 @@ import subprocess
 import tempfile
 from typing import Any
 
+from kiln.openscad_runner import run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
 
 # Public surface — what callers (kiln-pro plugins, REST API, agents)
@@ -192,9 +193,7 @@ def _render_post_flip_preview(
     ]
 
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=60,
-        )
+        result = run_openscad(cmd, timeout=60, output_path=png_path)
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         _logger.debug("post-flip preview: render subprocess failed: %s", exc)
         return None

@@ -37,6 +37,26 @@ os.environ["HOME"] = _TEST_HOME
 os.environ.pop("KILN_PRINTER_HOST", None)  # no real printer leaks in either
 os.environ.pop("KILN_PRINTER_TYPE", None)
 
+# Same class of bug as the HOME move above, one store it doesn't reach:
+# kiln.stage_cache keeps an in-process memo that, once set, is never
+# re-read from disk for the rest of the process (see its ``document()``
+# docstring).  The first test in a worker that calls visualize_model()
+# with the default allow_stage=True finds no cache under the fresh
+# _TEST_HOME, which is correct -- but that miss also fires
+# stage_cache.warm(), a background thread doing a REAL HTTP fetch against
+# production api.kiln3d.com.  On a machine with network access that
+# fetch usually wins the race against the rest of a multi-minute suite
+# run, so the memo goes warm partway through and every LATER test in
+# that worker silently gets a real stage-photograph render instead of
+# whatever visualize_model()/OpenSCAD path it thought it was exercising
+# -- order- and timing-dependent, invisible unless a test happens to
+# assert on OpenSCAD's own invocation. Disabling the fetch (not
+# find_browser()'s KILN_NO_STAGE_STILLS, which test_stage_still.py's
+# happy-path tests need live for their own KILN_STAGE_BROWSER override)
+# leaves _stage_document() returning None all suite long unless a test
+# opts back in via KILN_STAGE_DOC, same as it already does when offline.
+os.environ["KILN_NO_STAGE_FETCH"] = "1"
+
 # ---------------------------------------------------------------------------
 # Monkey-patch FastMCP to accept unknown kwargs (like ``description``)
 # so that ``import kiln.server`` succeeds at collection time.
@@ -953,7 +973,7 @@ def _isolate_daily_stats(tmp_path, monkeypatch):
     ``slicer.slice_file``, the tool-dispatch hook) — so ordinary tests
     exercise them constantly.  Without isolation a suite run pollutes the
     developer's real counters and the next heartbeat ships phantom
-    activity to the founder dashboard (2026-07-26: 47 phantom prints from
+    activity to the usage dashboard (2026-07-26: 47 phantom prints from
     one adapter-suite run).  ``daily_stats._recording_suppressed`` is the
     belt (no writes under CI env at the default path); this is the
     suspenders, and it also means a test that wants to ASSERT on counters
@@ -971,6 +991,38 @@ def _isolate_daily_stats(tmp_path, monkeypatch):
 
     monkeypatch.setattr(daily_stats, "_STATS_PATH", tmp_path / "daily_stats.json")
     yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_printer_engagement(tmp_path_factory, monkeypatch):
+    """Give every test its own engagement record, never the developer's.
+
+    ``printers.engagement`` writes ``~/.kiln/printer_engagement.json`` from
+    ``start_print``, which ordinary adapter tests call constantly.  Without
+    isolation a suite run leaves a real engagement on disk naming a fake
+    printer, and the next real command on the developer's machine is refused
+    by a rule pointing at a machine that never existed.  Same class as
+    ``_isolate_daily_stats`` above, with a sharper failure: this one does not
+    merely pollute a number, it locks a person out of their own printer.
+
+    The per-test path also resets the in-process verification cache, so one
+    test's engaged peer cannot answer for the next test's.
+    """
+    try:
+        from kiln.printers import engagement
+    except ImportError:  # pragma: no cover — module absent
+        yield
+        return
+
+    # tmp_path_factory, NOT tmp_path: the per-test tmp_path doubles as a
+    # scratch ROOT for other subsystems, and a directory left in it is
+    # something else's data.  Creating "kiln_home" there made
+    # list_incidents count it as a fourth incident.
+    home = tmp_path_factory.mktemp("kiln_engagement_home")
+    monkeypatch.setattr(engagement, "_kiln_dir", lambda: home)
+    engagement._verify_cache.clear()
+    yield
+    engagement._verify_cache.clear()
 
 
 @pytest.fixture(autouse=True)

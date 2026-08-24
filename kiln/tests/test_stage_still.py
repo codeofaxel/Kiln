@@ -255,6 +255,56 @@ def test_opt_out_env_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     assert find_browser() is None
 
 
+def _seed_playwright_cache(home: Path) -> tuple[Path, Path]:
+    """A fake Playwright cache holding both binary kinds.
+
+    Returns ``(headless_shell, chromium_app_binary)``, both executable.
+    """
+    cache = home / "Library" / "Caches" / "ms-playwright"
+    shell = cache / "chromium_headless_shell-1000" / "chrome-headless-shell-mac-arm64" / "chrome-headless-shell"
+    app = cache / "chromium-1000" / "chrome-mac-arm64" / "Chromium.app" / "Contents" / "MacOS" / "Chromium"
+    for binary in (shell, app):
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_text("#!/bin/sh\nexit 0\n")
+        binary.chmod(0o755)
+    return shell, app
+
+
+def test_macos_auto_discovery_never_offers_an_app_bundle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """On macOS, only headless-shell is auto-picked -- never a ``.app``.
+
+    A ``.app``-bundled Chromium launched headlessly puts a second browser
+    icon in the user's Dock, and the headless-mode flag does not prevent
+    it (measured 2026-08-18: bare ``--headless`` and ``--headless=new``
+    both bounce it).  So the picker, not the flags, is the fix -- and this
+    pins it: even with a full Chromium sitting IN the Playwright cache,
+    macOS discovery must not offer it.
+    """
+    shell, app = _seed_playwright_cache(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(stage_still, "_MAC_DOCK", True)
+    candidates = stage_still._browser_candidates()
+    assert shell in candidates
+    assert app not in candidates
+    assert not any(".app" in p.parts or p.suffix == ".app" or ".app" in str(p) for p in candidates), candidates
+
+
+def test_non_macos_auto_discovery_still_offers_the_wider_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Linux has no Dock; the wider candidate chain must survive there."""
+    shell, app = _seed_playwright_cache(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(stage_still, "_MAC_DOCK", False)
+    candidates = stage_still._browser_candidates()
+    assert shell in candidates
+    assert app in candidates
+    # headless-shell still outranks the full browser.
+    assert candidates.index(shell) < candidates.index(app)
+
+
 def test_explicit_override_that_is_wrong_does_not_scan_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -469,10 +519,225 @@ def test_no_color_requested_leaves_the_config_colorless(
 def test_visualize_model_falls_back_when_stage_declines(
     cube_stl: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The photograph declining no longer means OpenSCAD -- the software
+    painter is next in the chain, and it needs nothing this machine
+    lacks.  OpenSCAD is reached only when the whole family is out."""
     monkeypatch.setattr(stage_still, "try_render_stage_views", lambda *a, **k: None)
 
     from kiln.model_visualizer import visualize_model
 
     result = visualize_model(cube_stl, angles=["isometric"], output_dir=str(tmp_path))
     if result.get("success"):
+        assert result["renderer"] == "stage_paint"
+
+    monkeypatch.setenv("KILN_NO_STAGE_STILLS", "1")
+    result = visualize_model(cube_stl, angles=["isometric"], output_dir=str(tmp_path / "o"))
+    if result.get("success"):
         assert result["renderer"] == "openscad"
+
+
+def test_the_set_budget_declines_to_the_painter(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A photograph set that outruns its wall-clock budget declines WHOLE.
+
+    Each angle is its own browser launch + document load + three.js parse
+    (~17 s cold, measured 2026-08-19), and MCP clients bound the tool call
+    at ~60 s — so a 3-4 angle autofire could photograph its way into a
+    client timeout the server never notices: the user sees a failure, the
+    finished artifact never reaches them.  Overrunning the budget returns
+    None (all-or-nothing, same contract as every other decline) so the
+    painter serves every angle at ~2.6 s/angle instead.
+    """
+    calls: list[str] = []
+    real_shoot = stage_still._shoot
+    base = stage_still.time.monotonic()
+
+    def slow_shoot(browser, harness, png, w, h, profile):
+        calls.append(str(harness))
+        # Simulate one slow angle without waiting: spend the whole budget.
+        monkeypatch.setattr(stage_still.time, "monotonic", lambda: base + 10_000)
+        return real_shoot(browser, harness, png, w, h, profile)
+
+    monkeypatch.setattr(stage_still, "_shoot", slow_shoot)
+    out = tmp_path / "out"
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(out), width=64, height=64,
+    )
+    assert views is None, "an over-budget set must decline, never ship partial"
+    assert len(calls) == 1, "the budget check runs BEFORE each shot"
+
+
+def test_a_zero_budget_disables_the_deadline(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 0.0)
+    out = tmp_path / "out"
+    out.mkdir()
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(out), width=64, height=64,
+    )
+    assert views is not None and len(views) == 2
+
+
+# ---------------------------------------------------------------------------
+# Batch mode — one browser launch for the whole set
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def batch_stage_doc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A stage document that carries the pose-grid driver."""
+    doc = tmp_path / "stage_batch.html"
+    doc.write_text(
+        "<!doctype html><html><head></head><body>"
+        "<p>stage __KILN_STILL__ reads STILL.color and STILL.poses</p>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KILN_STAGE_DOC", str(doc))
+    return doc
+
+
+@pytest.fixture()
+def grid_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A fake browser that honours --window-size and tints each tile.
+
+    Tiles get distinct means (still textured enough for the stddev
+    guard), so a crop test can prove the engine cut the RIGHT rectangles
+    rather than merely producing N files.
+    """
+    script = _make_fake_browser(
+        tmp_path,
+        f"""
+        # Stdlib-only: this script runs under whatever `python3` resolves
+        # to, which need not have Pillow — a PIL import here dies silently
+        # (stderr is discarded) and reads as a mysterious batch decline.
+        import random, struct, sys, zlib
+        out = [a for a in sys.argv if a.startswith("--screenshot=")][0].split("=", 1)[1]
+        size = [a for a in sys.argv if a.startswith("--window-size=")][0].split("=", 1)[1]
+        w, h = (int(x) for x in size.split(","))
+        rng = random.Random(7)
+        half_w = w // 2  # two tiles side by side; tile index = x half
+        raw = bytearray()
+        for y in range(h):
+            raw.append(0)  # filter: none
+            for x in range(w):
+                base = 40 + 120 * (x // half_w)
+                raw.append(min(255, base + rng.randrange(60)))
+        def chunk(tag, data):
+            body = tag + data
+            return struct.pack(">I", len(data)) + body + struct.pack(
+                ">I", zlib.crc32(body) & 0xFFFFFFFF)
+        png = (b"\\x89PNG\\r\\n\\x1a\\n"
+               + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 0, 0, 0, 0))
+               + chunk(b"IDAT", zlib.compress(bytes(raw)))
+               + chunk(b"IEND", b""))
+        open(out, "wb").write(png)
+        page = [a for a in sys.argv if a.startswith("file://")][0]
+        body = open(page[len("file://"):]).read()
+        with open({str(tmp_path / "seen_harnesses.txt")!r}, "a") as f:
+            f.write(body + "\\n===HARNESS===\\n")
+        """,
+    )
+    monkeypatch.setenv("KILN_STAGE_BROWSER", str(script))
+    return script
+
+
+def test_batch_mode_shoots_once_and_crops_every_tile(
+    cube_stl: str, batch_stage_doc: Path, grid_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A poses-capable document gets ONE launch for the whole set."""
+    from PIL import Image
+
+    out = tmp_path / "out"
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(out), width=64, height=64,
+    )
+    assert views is not None
+    assert [v["angle"] for v in views] == ["isometric", "front"]
+    harnesses = [
+        h for h in
+        (tmp_path / "seen_harnesses.txt").read_text().split("===HARNESS===")
+        if h.strip()
+    ]
+    assert len(harnesses) == 1, "batch mode still launched per angle"
+    assert '"poses"' in harnesses[0] and '"grid"' in harnesses[0]
+    # The crops must be the RIGHT rectangles: tile i's mean tracks the
+    # fake browser's per-tile tint, so a mis-cropped sheet reads wrong.
+    means = []
+    for v in views:
+        with Image.open(v["path"]) as im:
+            assert im.size == (64, 64)
+            means.append(sum(im.convert("L").getdata()) / (64 * 64))
+    assert means[1] > means[0] + 20, (
+        f"tile means {means} do not step with the sheet's tints — "
+        "the crop rectangles are wrong"
+    )
+
+
+def test_a_document_without_the_poses_marker_gets_the_loop(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+) -> None:
+    """An older cached stage document keeps the per-angle path."""
+    out = tmp_path / "out"
+    out.mkdir()
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(out), width=64, height=64,
+    )
+    assert views is not None
+    harnesses = [
+        h for h in
+        (tmp_path / "seen_harnesses.txt").read_text().split("===HARNESS===")
+        if h.strip()
+    ]
+    assert len(harnesses) == 2, "the pre-poses document must loop per angle"
+
+
+def test_a_wrong_size_sheet_falls_back_to_the_loop(
+    cube_stl: str, batch_stage_doc: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clamped window or un-composed grid must never be cropped.
+
+    The fake ignores --window-size (the single-still fixture's shape), so
+    the sheet is the wrong size: the batch declines and the loop serves —
+    the failure costs one extra launch, never a garbage set.
+    """
+    png = tmp_path / "frame.png"
+    png.write_bytes(_textured_png_bytes())
+    script = _make_fake_browser(
+        tmp_path,
+        f"""
+        import shutil, sys
+        out = [a for a in sys.argv if a.startswith("--screenshot=")][0]
+        shutil.copy({str(png)!r}, out.split("=", 1)[1])
+        page = [a for a in sys.argv if a.startswith("file://")][0]
+        body = open(page[len("file://"):]).read()
+        with open({str(tmp_path / "seen_harnesses.txt")!r}, "a") as f:
+            f.write(body + "\\n===HARNESS===\\n")
+        """,
+    )
+    monkeypatch.setenv("KILN_STAGE_BROWSER", str(script))
+    out = tmp_path / "out"
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(out), width=64, height=64,
+    )
+    assert views is not None, "the loop fallback must still deliver the set"
+    harnesses = [
+        h for h in
+        (tmp_path / "seen_harnesses.txt").read_text().split("===HARNESS===")
+        if h.strip()
+    ]
+    assert len(harnesses) == 3, (
+        "expected 1 declined batch attempt + 2 loop shots, "
+        f"saw {len(harnesses)} launches"
+    )

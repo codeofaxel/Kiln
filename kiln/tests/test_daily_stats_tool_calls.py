@@ -94,7 +94,7 @@ class TestHeartbeatShipsToolCalls:
         # p_details ships as a plain object, not a pre-serialized string —
         # the outer json.dumps() already encodes it once.  Double-encoding
         # here used to store a jsonb string scalar server-side instead of
-        # an object, silently breaking the founder dashboard's ingest.
+        # an object, silently breaking the usage dashboard's ingest.
         details = captured["body"]["p_details"]
         assert isinstance(details, dict)
         shipped = details["tool_calls"]

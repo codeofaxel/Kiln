@@ -12,18 +12,22 @@ through: the ``get_state`` wrap → ``_feed_outcome_lifecycle`` → the same
 terminal transition that already records the outcome, reading the elapsed
 from the ``get_job()`` call that was being made there anyway.
 
-The constraint is the design, not a limitation of it.  A duration is banked
-ONLY when the ending was watched; a partial or late observation records
-NOTHING, because a confidently wrong number is worse than an honest absence
-and ``prints - prints_hours_known`` is what makes that absence visible.
-These tests hold that line against the two ways it silently breaks.
+The constraint is the design, not a limitation of it.  A watched ending is
+banked on every backend.  A LATE observation banks only when the adapter
+declares its clock ``"frozen"`` — the printer's own job timer stopped with
+the print, so late is merely late — and is tagged ``prints_hours_reported``
+so the total says how much of itself arrived that way.  A late reading from
+a ``"stopwatch"`` clock (Bambu's — nothing stops it) still records NOTHING,
+because a confidently wrong number is worse than an honest absence and
+``prints - prints_hours_known`` is what makes that absence visible.  These
+tests hold that line against the ways it silently breaks.
 
 Bambu reaches that ending by a SECOND door, and it is wired to the same rule.
 Its MQTT callback (``bambu._on_message``) fires the terminal hook itself and
 calls ``observe_state`` while doing so — the same shared state the wrap reads
 — so the push CONSUMES the transition and the wrap's next poll finds prev ==
 terminal and no edge at all.  The push site therefore calls the same
-``_record_watched_duration``, under the same job id it just gave the hook, and
+``_record_print_duration``, under the same job id it just gave the hook, and
 the two doors dedupe against each other through that id.
 
 What differs between the doors is the one measurement neither can borrow: how
@@ -35,7 +39,7 @@ Bambu ``get_state()`` is answered from the push cache, so polling straight
 through an MQTT outage keeps that clock warm while nothing is watching.  Nor
 can it ask when the printer last SPOKE, because a partial frame carries no run
 state, so one landing ahead of the reconnect dump makes an hour-old ending
-look a second old.  The last section holds every half of that.
+look a second old.  The second-door section holds every half of that.
 """
 
 from __future__ import annotations
@@ -775,3 +779,165 @@ def test_the_push_door_never_raises_into_the_mqtt_callback(monkeypatch):
     # exactly this reason — a failed ledger write must not also hand the next
     # print a clock that has been running since this one started.
     assert pm.job_elapsed_seconds(adapter, "bracket.3mf") is None
+
+
+# ---------------------------------------------------------------------------
+# Frozen clocks — a late reading is merely late
+# ---------------------------------------------------------------------------
+#
+# base.py's asymmetry, now acted on: a printer-reported duration (Moonraker,
+# OctoPrint, PrusaLink, Duet, Elegoo) FREEZES at the ending, so a late read
+# is still correct and discarding it was the reason production banked 0.0
+# hours from every unwatched ending.  An adapter opts in by declaring
+# ``_DURATION_SEMANTICS = "frozen"``; the default stays the strict
+# "stopwatch", so an adapter that forgets to declare can never inflate.
+
+
+class _FrozenAdapter(_Adapter):
+    """Declares what the real HTTP-polled adapters declare."""
+
+    _DURATION_SEMANTICS = "frozen"
+
+
+def _reported() -> int:
+    return daily_stats.get_daily_stats()["prints_hours_reported"]
+
+
+def test_a_frozen_adapter_banks_a_late_ending_as_reported():
+    """The fix itself: the clock froze with the print, so late is merely late."""
+    adapter = _FrozenAdapter()
+    adapter.elapsed_seconds = 1800
+
+    adapter.get_state()
+    _rewind_last_look(adapter, pm.WATCHED_ENDING_MAX_GAP_S + 1)
+    adapter.finish()
+    adapter.get_state()
+
+    assert _hours() == (0.5, 1)
+    # Tagged as learned-late, so the daily total can say how much of itself
+    # arrived that way: watched = known − reported.
+    assert _reported() == 1
+
+
+def test_a_frozen_adapter_banks_a_stale_reading_as_reported():
+    """A cached answer dates the OBSERVATION, not a frozen clock's value."""
+    adapter = _FrozenAdapter()
+    adapter.elapsed_seconds = 1800
+    adapter.state_age_seconds = 600.0
+
+    _watch_to_the_end(adapter)
+
+    assert _hours() == (0.5, 1)
+    assert _reported() == 1
+
+
+def test_a_frozen_watched_ending_is_banked_as_watched_not_reported():
+    """The tag means "learned late", never "came from a frozen printer"."""
+    adapter = _FrozenAdapter()
+    adapter.elapsed_seconds = 1800
+
+    _watch_to_the_end(adapter)
+
+    assert _hours() == (0.5, 1)
+    assert _reported() == 0
+
+
+def test_the_reported_path_refuses_an_absurd_duration():
+    """The credibility cap guards both doors into the ledger."""
+    adapter = _FrozenAdapter()
+    adapter.elapsed_seconds = 200 * 3600
+
+    adapter.get_state()
+    _rewind_last_look(adapter, pm.WATCHED_ENDING_MAX_GAP_S + 1)
+    adapter.finish()
+    adapter.get_state()
+
+    assert _hours() == (0.0, 0)
+    assert _reported() == 0
+
+
+def test_an_undeclared_adapter_inherits_the_strict_default():
+    """Forgetting to declare must cost hours, never invent them.
+
+    ``_Adapter`` deliberately declares nothing, so this whole file's
+    "late banks NOTHING" tests double as proof of the default; this one
+    pins the default's VALUE so a future relaxation cannot arrive as a
+    one-line change to the base class.
+    """
+    assert PrinterAdapter._DURATION_SEMANTICS == "stopwatch"
+    assert "_DURATION_SEMANTICS" not in vars(_Adapter)
+
+    adapter = _Adapter()
+    adapter.elapsed_seconds = 1800
+    adapter.get_state()
+    _rewind_last_look(adapter, pm.WATCHED_ENDING_MAX_GAP_S + 1)
+    adapter.finish()
+    adapter.get_state()
+
+    assert _hours() == (0.0, 0)
+
+
+def _shipped_adapters() -> dict[str, type]:
+    """Every concrete adapter, keyed by its module stem (the YAML's key)."""
+    from kiln.printers.bambu import BambuAdapter
+    from kiln.printers.creality import CrealityAdapter
+    from kiln.printers.duet import DuetAdapter
+    from kiln.printers.elegoo import ElegooAdapter
+    from kiln.printers.moonraker import MoonrakerAdapter
+    from kiln.printers.octoprint import OctoPrintAdapter
+    from kiln.printers.prusalink import PrusaLinkAdapter
+    from kiln.printers.serial_adapter import SerialPrinterAdapter
+
+    return {
+        "bambu": BambuAdapter,
+        "creality": CrealityAdapter,
+        "duet": DuetAdapter,
+        "elegoo": ElegooAdapter,
+        "moonraker": MoonrakerAdapter,
+        "octoprint": OctoPrintAdapter,
+        "prusalink": PrusaLinkAdapter,
+        "serial_adapter": SerialPrinterAdapter,
+    }
+
+
+def test_every_shipped_adapter_declares_its_semantics_explicitly():
+    """Inheriting the default is a missing decision, not a made one.
+
+    The default exists so an UNSHIPPED adapter cannot inflate; a shipped
+    one must say which family its clock belongs to, in its own class body,
+    where the person adding the ninth backend will be looking.
+    """
+    for stem, cls in _shipped_adapters().items():
+        declared = vars(cls).get("_DURATION_SEMANTICS")
+        assert declared in {"stopwatch", "frozen", "none"}, (
+            f"{stem}: _DURATION_SEMANTICS must be declared on the class "
+            f"itself, not inherited (got {declared!r})"
+        )
+
+
+def test_the_conformance_yaml_mirrors_the_declared_semantics():
+    """The YAML is documentation; the ClassVar is what runs.
+
+    scripts/adapter_conformance.yaml is not shipped in the pip package, so
+    runtime code cannot read it — but it is where humans audit the adapter
+    contract, so the two must not be allowed to disagree.
+    """
+    import pathlib
+
+    import yaml
+
+    ledger_path = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "adapter_conformance.yaml"
+    )
+    ledger = yaml.safe_load(ledger_path.read_text(encoding="utf-8"))
+    rows = ledger["adapters"]
+
+    for stem, cls in _shipped_adapters().items():
+        assert stem in rows, f"{stem} missing from adapter_conformance.yaml"
+        documented = rows[stem].get("duration_semantics")
+        assert documented == cls._DURATION_SEMANTICS, (
+            f"{stem}: adapter_conformance.yaml says {documented!r} but the "
+            f"class declares {cls._DURATION_SEMANTICS!r}"
+        )

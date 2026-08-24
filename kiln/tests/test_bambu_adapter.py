@@ -7,6 +7,7 @@ MQTT and FTPS responses so the test suite runs without a real Bambu printer.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import os
 import ssl
@@ -43,6 +44,24 @@ ACCESS_CODE = "12345678"
 SERIAL = "01P00A000000001"
 
 
+def _clock_past_deadline() -> Any:
+    """A monotonic clock that leaps 100s per read, so every wait times out.
+
+    Unbounded on purpose: a finite ``side_effect`` list pins the exact NUMBER
+    of clock reads on the path under test, so adding one anywhere (the
+    idle-release activity stamp did) fails these with a bare
+    ``StopIteration`` that says nothing about the behaviour they assert.
+
+    ADVANCING, not repeating, and that part is load-bearing.  A clock stuck
+    at one value satisfies ``while now() < deadline`` forever whenever the
+    deadline is computed from a read taken at that same value — the finite
+    list used to break such a loop by raising StopIteration, so a constant
+    replacement turns a passing test into a hung suite.  Always moving
+    forward means any deadline loop terminates on its next read.
+    """
+    return itertools.count(0.0, 100.0)
+
+
 def _adapter(**kwargs: Any) -> BambuAdapter:
     """Create a :class:`BambuAdapter` with sensible test defaults."""
     defaults: dict[str, Any] = {
@@ -73,6 +92,15 @@ def adapter_with_mqtt() -> BambuAdapter:
     adapter._mqtt_client.publish.return_value = publish_result
     # Pre-set a running state so start_print skips confirmation wait.
     adapter._last_status = {"gcode_state": "running"}
+    # Stamp that state as having arrived AFTER whatever command a test is
+    # about to send.  The push cache is only evidence about a job if the
+    # frame postdates the command (see _wait_for_print_start), and a test
+    # that pre-loads a status is describing what the printer said about
+    # THIS print — not a leftover from a previous one.  Without the stamp
+    # the default 0.0 makes every pre-loaded status read as stale, which
+    # is the behaviour the guard exists to produce and the opposite of
+    # what these fixtures mean.  Tests about staleness set their own.
+    adapter._last_state_time = float("inf")
     return adapter
 
 
@@ -1558,7 +1586,7 @@ class TestBambuAdapterPrintConfirmation:
         """
         adapter_with_mqtt._last_status = {"gcode_state": "idle"}
         # Mock time.monotonic to simulate timeout.
-        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]), \
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=_clock_past_deadline()), \
                 mock.patch("kiln.printers.bambu.time.sleep"):
             result = adapter_with_mqtt.start_print("test.3mf")
         assert result.success is True
@@ -1901,6 +1929,106 @@ class TestBambuAdapterAMSStatus:
         }
         adapter._last_state_time = time.monotonic()
         return adapter
+
+    def _adapter_with_tray_now(
+        self, ams_data: list[dict[str, Any]], tray_now: str
+    ) -> BambuAdapter:
+        adapter = self._adapter_with_ams(ams_data)
+        adapter._last_status["tray_now"] = tray_now
+        return adapter
+
+    def test_the_active_tray_names_the_colour_that_gets_declared(self) -> None:
+        """A red spool must not produce a white preview.
+
+        The wrap declares the colour it prints in, and that declaration
+        draws the printer's thumbnail and feeds the AMS mismatch check.
+        Left to defaults it said white for everyone, so Kiln drew a white
+        preview at a printer holding red and then warned about the
+        discrepancy it had introduced itself.
+        """
+        adapter = self._adapter_with_tray_now(
+            [
+                {
+                    "id": 0,
+                    "tray": [
+                        {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF"},
+                        {"id": 1, "tray_type": "PLA", "tray_color": "0000FFFF"},
+                    ],
+                }
+            ],
+            tray_now="1",
+        )
+        # Slot 1 is loaded, so the blue one — not the first in the list.
+        assert adapter.active_filament_color() == "#0000FF"
+
+    def test_a_lone_loaded_tray_needs_no_active_slot(self) -> None:
+        adapter = self._adapter_with_tray_now(
+            [{"id": 0, "tray": [
+                {"id": 0, "tray_type": "PLA", "tray_color": "1A2B3CFF"},
+            ]}],
+            tray_now="",
+        )
+        assert adapter.active_filament_color() == "#1A2B3C"
+
+    def test_an_external_spool_declares_nothing(self) -> None:
+        """255 is "no tray" — nothing reports that spool's colour."""
+        adapter = self._adapter_with_tray_now(
+            [{"id": 0, "tray": [
+                {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF"},
+            ]}],
+            tray_now="255",
+        )
+        assert adapter.active_filament_color() is None
+
+    def test_several_trays_with_no_active_one_refuses_to_guess(self) -> None:
+        """Picking the first would state a colour the machine never did."""
+        adapter = self._adapter_with_tray_now(
+            [{"id": 0, "tray": [
+                {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF"},
+                {"id": 1, "tray_type": "PLA", "tray_color": "0000FFFF"},
+            ]}],
+            tray_now="",
+        )
+        assert adapter.active_filament_color() is None
+
+    def test_an_unusable_tray_colour_declares_nothing(self) -> None:
+        for bad in ("", "zzz", "FF"):
+            adapter = self._adapter_with_tray_now(
+                [{"id": 0, "tray": [
+                    {"id": 0, "tray_type": "PLA", "tray_color": bad},
+                ]}],
+                tray_now="0",
+            )
+            assert adapter.active_filament_color() is None, f"accepted {bad!r}"
+
+    def test_no_ams_data_declares_nothing(self) -> None:
+        adapter = _adapter()
+        adapter._last_status = {}
+        assert adapter.active_filament_color() is None
+
+    def test_a_cold_cache_never_talks_to_the_printer(self) -> None:
+        """Emitting a file must not wait on a machine.
+
+        The obvious way to read the AMS goes through
+        ``_get_cached_status``, which connects and — with nothing cached
+        yet — publishes a pushall and sleeps up to two seconds.  On the
+        slice path that is a stall bought for a preview colour, so this
+        reads the cache directly and gives up instead.
+
+        Asserts the calls were never MADE rather than letting them raise:
+        this method swallows exceptions by design, so a raising stub gets
+        caught and the test passes against the very bug it targets.
+        """
+        adapter = _adapter()
+        adapter._last_status = {}
+        with mock.patch.object(adapter, "_ensure_mqtt") as ensure, \
+             mock.patch.object(adapter, "_get_cached_status") as cached, \
+             mock.patch("time.sleep") as slept:
+            assert adapter.active_filament_color() is None
+
+        ensure.assert_not_called()
+        cached.assert_not_called()
+        slept.assert_not_called()
 
     def test_ams_status_single_unit_four_trays(self) -> None:
         adapter = self._adapter_with_ams([
@@ -2737,7 +2865,7 @@ class TestWaitForPrintStartErrorDetection:
 
     def test_timeout_with_no_error(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0}
-        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]), \
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=_clock_past_deadline()), \
                 mock.patch("kiln.printers.bambu.time.sleep"):
             state, err = adapter_with_mqtt._wait_for_print_start()
         assert state == "timeout"
@@ -2764,6 +2892,54 @@ class TestWaitForPrintStartErrorDetection:
         adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": "84033543"}
         with mock.patch("kiln.printers.bambu.time.sleep"):
             state, err = adapter_with_mqtt._wait_for_print_start(timeout=2.0)
+        assert err == 84033543
+
+    def test_the_last_job_s_error_is_not_this_job_s_rejection(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """A cancelled job leaves its error in the cache; a new start is not it.
+
+        Measured on an A1: a cancel left print_error 50348032 sitting in
+        the push cache beside a stale "idle".  The next start read both,
+        applied the "error while idle means rejected" rule, and reported a
+        failure the printer never gave — while the machine was already
+        heating for that very job.  A frame older than the command is
+        about the previous one, so it is not evidence here.
+        """
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "idle", "print_error": 50348032,
+        }
+        adapter_with_mqtt._last_state_time = 100.0  # last frame: the cancel
+        command_sent_at = 150.0                     # command went out later
+
+        with mock.patch("kiln.printers.bambu.time.sleep"), mock.patch(
+            "kiln.printers.bambu.time.monotonic",
+            side_effect=[151.0, 151.0, 200.0],
+        ):
+            state, err = adapter_with_mqtt._wait_for_print_start(
+                sent_at=command_sent_at,
+            )
+
+        assert state == "timeout", (
+            "a pre-command frame was read as this job's verdict"
+        )
+        assert err is None, "the previous job's error code leaked into this start"
+
+    def test_a_fresh_frame_after_the_command_is_still_believed(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """The freshness guard must not blind the check to real failures."""
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "failed", "print_error": 84033543,
+        }
+        adapter_with_mqtt._last_state_time = 200.0  # frame POSTDATES command
+
+        with mock.patch("kiln.printers.bambu.time.sleep"), mock.patch(
+            "kiln.printers.bambu.time.monotonic", side_effect=[151.0, 151.0, 300.0],
+        ):
+            state, err = adapter_with_mqtt._wait_for_print_start(sent_at=150.0)
+
+        assert state == "failed"
         assert err == 84033543
 
 
@@ -2812,7 +2988,7 @@ class TestStartPrintErrorMessages:
         even though the command had been accepted.
         """
         adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0}
-        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]), \
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=_clock_past_deadline()), \
                 mock.patch("kiln.printers.bambu.time.sleep"):
             result = adapter_with_mqtt.start_print("test.3mf")
         assert result.success is True
@@ -3299,6 +3475,13 @@ class TestDisableNozzleDetection:
 class TestMqttSingleClientErrorMessaging:
     """Tests that MQTT/FTPS connection-rejected errors surface a clear
     single-client message instead of a generic connection failure.
+
+    The message deliberately no longer opens by blaming "another client
+    (BambuStudio, Bambu Handy)".  On a machine running several agent
+    sessions the likelier holder is Kiln's own accumulated servers — the one
+    cause the user has no reason to suspect — so the text names what can
+    actually be measured and leaves the Bambu-software guess for after
+    (2026-08-14 field report).
     """
 
     def test_connection_reset_shows_single_client_message(self) -> None:
@@ -3307,7 +3490,7 @@ class TestMqttSingleClientErrorMessaging:
         with mock.patch("paho.mqtt.client.Client") as mock_mqtt_cls:
             mock_client = mock_mqtt_cls.return_value
             mock_client.connect_async.side_effect = exc
-            with pytest.raises(PrinterError, match="another client"):
+            with pytest.raises(PrinterError, match="only a few LAN clients"):
                 adapter._ensure_mqtt()
 
     def test_ssl_error_shows_single_client_message(self) -> None:
@@ -3316,7 +3499,7 @@ class TestMqttSingleClientErrorMessaging:
         with mock.patch("paho.mqtt.client.Client") as mock_mqtt_cls:
             mock_client = mock_mqtt_cls.return_value
             mock_client.connect_async.side_effect = exc
-            with pytest.raises(PrinterError, match="another client"):
+            with pytest.raises(PrinterError, match="only a few LAN clients"):
                 adapter._ensure_mqtt()
 
     def test_generic_error_preserves_original_message(self) -> None:
@@ -3335,7 +3518,7 @@ class TestMqttSingleClientErrorMessaging:
             "kiln.printers.bambu._ImplicitFTP_TLS",
         ) as mock_ftp_cls:
             mock_ftp_cls.return_value.connect.side_effect = exc
-            with pytest.raises(PrinterError, match="another client"):
+            with pytest.raises(PrinterError, match="only a few LAN clients"):
                 adapter._ftp_connect()
 
     def test_ftps_generic_error_preserves_original_message(self) -> None:

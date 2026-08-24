@@ -1350,6 +1350,38 @@ class TestThumbnailsReachTheArchive:
             "the archive declares no filament colour — a colour was invented"
         )
 
+    def test_building_a_preview_never_uploads_the_model(self, tmp_path):
+        """Slicing is local, and drawing its preview must not change that.
+
+        ``visualize_model`` attaches a shareable viewer URL by uploading
+        the mesh to Kiln's API.  That is right for a preview handed to a
+        person and wrong for one embedded in a file: routing thumbnails
+        through it quietly put a copy of the user's model on the network
+        during every slice, and made an offline machine wait on a reply,
+        to fill a field this path never reads.
+
+        Declining the stage backend does NOT prevent it — the render goes
+        local while the upload still goes out — so this asserts on the
+        upload itself rather than on the renderer.
+        """
+        import kiln.stage_link as stage_link
+
+        uploads: list[str] = []
+        with patch.object(
+            stage_link,
+            "stage_link_for",
+            side_effect=lambda p, *a, **k: uploads.append(str(p)),
+        ):
+            build_bambu_3mf(
+                MINIMAL_GCODE_BODY,
+                str(tmp_path / "local.3mf"),
+                stl_paths=[self._stl(tmp_path)],
+            )
+
+        assert not uploads, (
+            f"the mesh was uploaded while building a thumbnail: {uploads}"
+        )
+
     def test_thumbnail_failure_is_logged_not_swallowed(self, tmp_path, caplog):
         """A broken render still ships the print — and still says so.
 
@@ -1361,7 +1393,7 @@ class TestThumbnailsReachTheArchive:
         out = str(tmp_path / "out.3mf")
 
         with caplog.at_level(logging.WARNING), patch(
-            "kiln.multicolor_3mf.render_plate_thumbnail",
+            "kiln.printers.bambu_3mf._render_plate_preview",
             side_effect=RuntimeError("renderer exploded"),
         ):
             repackage_gcode_as_bambu_3mf(
@@ -1375,6 +1407,35 @@ class TestThumbnailsReachTheArchive:
         # And the failure is on the record, with the traceback.
         assert "renderer exploded" in caplog.text
         assert "RuntimeError" in caplog.text
+
+    def test_a_dead_primary_renderer_falls_back_instead_of_giving_up(
+        self, tmp_path, caplog
+    ):
+        """Losing the good renderer costs quality, never the preview.
+
+        Previews come from ``visualize_model`` so the printer's screen
+        shows the same picture of the part as everywhere else in Kiln.
+        When that cannot run, a plainer render still beats the blank tile
+        this whole area exists to prevent — so the fallback is load-
+        bearing, and it says out loud that it was used.
+        """
+        gcode = tmp_path / "ready.gcode"
+        gcode.write_text("; already-bambu gcode\n")
+        out = str(tmp_path / "fallback.3mf")
+
+        with caplog.at_level(logging.WARNING), patch(
+            "kiln.model_visualizer.visualize_model",
+            side_effect=RuntimeError("no openscad here"),
+        ):
+            repackage_gcode_as_bambu_3mf(
+                str(gcode), out, stl_paths=[self._stl(tmp_path)],
+            )
+
+        with zipfile.ZipFile(out) as zf:
+            plate = zf.read("Metadata/plate_1.png")
+        assert plate.startswith(b"\x89PNG\r\n\x1a\n")
+        assert len(plate) > 1000
+        assert "no openscad here" in caplog.text
 
 
 class TestThumbnailInputsForModel:

@@ -35,7 +35,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import paho.mqtt.client as mqtt
 
@@ -52,7 +52,7 @@ from kiln.printers.base import (
     PrinterStatus,
     PrintResult,
     UploadResult,
-    _record_watched_duration,
+    _record_print_duration,
     outcome_printer_name,
 )
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
@@ -78,16 +78,45 @@ _TLS_MODE_ENV = "KILN_BAMBU_TLS_MODE"
 _TLS_FINGERPRINT_ENV = "KILN_BAMBU_TLS_FINGERPRINT"
 
 # Error message for single-client MQTT/FTPS connection rejection.
+#
+# Both name Kiln's own servers first, because on a machine running more than
+# one agent session they are the likeliest culprit and the only one the user
+# has no reason to suspect.  Blaming Bambu Studio when the real holder is four
+# leftover ``kiln serve`` processes sends the user to close software they
+# already closed, and then to power-cycle a printer that was never at fault
+# (2026-08-14 field report).  ``_other_clients_hint`` appends the measured
+# count when there is one.
 _SINGLE_CLIENT_MSG = (
-    "MQTT connection rejected — another client (BambuStudio, Bambu Handy) "
-    "may be connected. Bambu printers only allow one LAN MQTT client at a "
-    "time. Close other Bambu software and retry."
+    "MQTT connection rejected — something else is already connected. "
+    "Bambu printers allow only a few LAN clients at once."
 )
 _SINGLE_CLIENT_FTPS_MSG = (
-    "FTPS TLS handshake failed — another client (BambuStudio, Bambu Handy) "
-    "may be holding the connection. Bambu printers only allow one LAN client "
-    "at a time. Close other Bambu software and retry."
+    "FTPS TLS handshake failed — something else may be holding the "
+    "connection. Bambu printers allow only a few LAN clients at once."
 )
+
+# How long an unused MQTT connection is held before it is released.
+#
+# A Bambu printer accepts only a few simultaneous LAN clients, so an idle
+# connection is not free — it is one of a handful of scarce slots.  Every MCP
+# session spawns its own ``kiln serve``, each builds its own adapter, and each
+# grabs a slot on first use and (before this) kept it for the life of the
+# process.  Hosts do not reliably reap servers when a session ends, so the
+# slots accrued to sessions that no longer exist: five leftover servers on one
+# machine starved the printer outright, and the user saw a timeout that blamed
+# Bambu Studio (2026-08-14 field report).
+#
+# Releasing when idle makes the slot follow actual use rather than process
+# lifetime.  The window only has to outlast the gap between calls that belong
+# to one burst of work — watchers poll every 15s and so never trip it — and a
+# release costs at most a reconnect on the next call.  Set
+# ``KILN_BAMBU_IDLE_DISCONNECT_S=0`` to hold the connection open forever
+# (the pre-2026-08-14 behaviour).  The machinery itself lives on
+# PrinterAdapter — Elegoo rations websockets the same way — and this adapter
+# supplies only the parts that are genuinely Bambu's: the env var, the window,
+# and what "still connected" and "mid-print" mean here.
+_DEFAULT_IDLE_DISCONNECT_S: float = 120.0
+_IDLE_DISCONNECT_ENV = "KILN_BAMBU_IDLE_DISCONNECT_S"
 
 # Backoff parameters for MQTT reconnection.
 _BACKOFF_INITIAL_DELAY: float = 1.0  # seconds
@@ -587,6 +616,21 @@ class _ImplicitFTP_TLS(ftplib.FTP_TLS):
 # ---------------------------------------------------------------------------
 
 
+def _first_real_job_id(*candidates: Any) -> str | None:
+    """First candidate that is an actual id, or None if they are all placeholders.
+
+    Delegates the judgement to ``job_identity`` so "what counts as an id" is
+    decided in exactly one place for every backend.
+    """
+    from kiln.printers.job_identity import clean_native_id
+
+    for candidate in candidates:
+        cleaned = clean_native_id(candidate)
+        if cleaned is not None:
+            return cleaned
+    return None
+
+
 class BambuAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by Bambu Lab MQTT + FTPS.
 
@@ -615,6 +659,16 @@ class BambuAdapter(PrinterAdapter):
         state = adapter.get_state()
         print(state.state, state.tool_temp_actual)
     """
+
+    # Elapsed comes from job_elapsed_seconds — a Kiln-side stopwatch nothing
+    # stops on its own — so a late reading keeps counting and must be refused.
+    _DURATION_SEMANTICS: ClassVar[str] = "stopwatch"
+
+    # Opt in to PrinterAdapter's idle connection release: a Bambu rations LAN
+    # MQTT clients, so holding one while nobody is calling costs another
+    # session its access to the printer.
+    _IDLE_RELEASE_ENV = _IDLE_DISCONNECT_ENV
+    _IDLE_RELEASE_DEFAULT_S = _DEFAULT_IDLE_DISCONNECT_S
 
     def __init__(
         self,
@@ -684,6 +738,10 @@ class BambuAdapter(PrinterAdapter):
         self._mqtt_client: mqtt.Client | None = None
         self._mqtt_connected = threading.Event()
         self._connect_lock = threading.Lock()
+
+        # Idle-release bookkeeping (PrinterAdapter).  _ensure_mqtt — the one
+        # funnel every read and write passes through — stamps the activity.
+        self._init_idle_release()
 
         # Exponential backoff for reconnection attempts.
         self._backoff = _BackoffState()
@@ -841,6 +899,8 @@ class BambuAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
+            can_clear_error=True,
+            cancel_during_calibration_faults=True,
             # Port 6000 TLS+JPEG works on A1 / A1 Mini / P1P / P1S
             # without ffmpeg.  get_snapshot() tries port 6000 first
             # and falls back to RTSPS (X1 series, port 322) only if
@@ -1004,12 +1064,87 @@ class BambuAdapter(PrinterAdapter):
             self._sequence_id += 1
             return str(self._sequence_id)
 
+    def _other_clients_hint(self) -> str:
+        """Name the likely holder of the printer's LAN slots, measured.
+
+        A Bambu connection failure has two very different causes that look
+        identical from here: other Bambu software, or Kiln's own accumulated
+        servers.  Only the second is visible to us, so when it is present we
+        say so instead of leaving the user to guess — the guess they make
+        unaided is "the printer is broken", which is what sends them to
+        power-cycle a printer that was answering pings the whole time.
+
+        Prefers the socket scan, which answers the exact question ("who holds
+        a connection to THIS printer right now") rather than the proxy one
+        ("how many servers exist, any of which might").  Since our own attempt
+        is what just failed, every holder it finds is somebody else.  Falls
+        back to the process count where sockets cannot be listed, because a
+        proxy answer still beats sending the user to the wrong fix.
+
+        Returns "" when nothing can be measured, so the caller's static
+        advice stands alone rather than trailing an empty accusation.
+        """
+        try:
+            from kiln.serve_siblings import (
+                check_serve_siblings,
+                printer_connection_holders,
+            )
+
+            held = printer_connection_holders(self._host)
+            if held["supported"] and held["kiln_count"] >= 1:
+                n = held["kiln_count"]
+                return (
+                    f"\n  Measured just now: {n} other "
+                    f"{'copy' if n == 1 else 'copies'} of Kiln's own server "
+                    f"{'is' if n == 1 else 'are'} holding a connection to "
+                    f"{self._host}. That is the cause, and it is not a printer "
+                    f"fault. Close the leftovers with `kiln trim` (or ask Kiln "
+                    f"to trim them) and retry — power-cycling will not help."
+                )
+            if held["supported"]:
+                # Sockets listed fine and none of them are ours: whatever holds
+                # the printer is genuinely other software, so say nothing here
+                # and let the Bambu Studio / Handy advice below stand.
+                return ""
+            count = check_serve_siblings().get("count")
+        except Exception:
+            return ""
+        if not isinstance(count, int) or count < 2:
+            return ""
+        return (
+            f"\n  Kiln itself has {count} servers running on this machine, "
+            f"each able to hold one of those slots. That is the most likely "
+            f"cause, and it is not a printer fault. Close the leftovers with "
+            f"`kiln trim` (or ask Kiln to trim them) and retry."
+        )
+
+    def _connection_is_live(self) -> bool:
+        """True while the MQTT client is connected (idle-reaper hook)."""
+        return self._mqtt_client is not None and self._mqtt_connected.is_set()
+
+    def _print_in_flight(self) -> bool:
+        """True while the printer is mid-job, as of the last status seen.
+
+        The push stream is what turns a finished print into a recorded
+        outcome (see :meth:`_on_message`), so the slot is worth holding while
+        a job is running even if no caller has asked for anything.  Dropping
+        mid-print would move that bookkeeping onto the reconnect reconcile,
+        which by design refuses to guess a duration across an outage — the
+        print would be banked as "unknown" instead of measured.
+        """
+        with self._state_lock:
+            state = str(self._last_status.get("gcode_state", "")).lower().strip()
+        return state in _PRINT_ACTIVE_STATES
+
     def _ensure_mqtt(self) -> mqtt.Client:
         """Ensure the MQTT client is connected, creating it if needed.
 
         Respects the exponential backoff schedule.  If the backoff cooldown
         has not yet elapsed, raises :class:`PrinterError` immediately
         instead of hammering the printer with connection attempts.
+
+        Every read and write funnels through here, so this is also where
+        caller activity is stamped for the idle release.
 
         Returns:
             The connected MQTT client.
@@ -1018,6 +1153,7 @@ class BambuAdapter(PrinterAdapter):
             PrinterError: If connection fails within the timeout or the
                 adapter is in a backoff cooldown period.
         """
+        self._note_activity()
         # Fast path — no lock needed if already connected.
         if self._mqtt_client is not None and self._mqtt_connected.is_set():
             return self._mqtt_client
@@ -1080,8 +1216,10 @@ class BambuAdapter(PrinterAdapter):
                         f"no response within {self._timeout}s.\n"
                         "  Most likely something else is already connected: "
                         "Bambu printers allow only a few connections at "
-                        "once.  Close Bambu Studio, the Handy app, or "
-                        "another machine using the printer, then try "
+                        "once."
+                        + self._other_clients_hint()
+                        + "\n  Otherwise, close Bambu Studio, the Handy app, "
+                        "or another machine using the printer, then try "
                         "again.\n"
                         "  If that's not it: check the printer is powered "
                         "on and on this network, LAN Mode is on, and the "
@@ -1107,6 +1245,7 @@ class BambuAdapter(PrinterAdapter):
 
                 self._mqtt_client = client
                 self._backoff.record_success()
+                self._start_idle_reaper()
                 return client
 
             except PrinterError:
@@ -1125,7 +1264,7 @@ class BambuAdapter(PrinterAdapter):
                 )
                 if is_single_client:
                     raise PrinterError(
-                        _SINGLE_CLIENT_MSG,
+                        _SINGLE_CLIENT_MSG + self._other_clients_hint(),
                         cause=exc,
                     ) from exc
                 exc_lower = str(exc).lower()
@@ -1415,11 +1554,12 @@ class BambuAdapter(PrinterAdapter):
                         # long ago we happened to notice.  That reading is
                         # monotonic and plausible and nothing downstream could
                         # ever flag it, which is exactly why it is refused.
-                        _record_watched_duration(
+                        _record_print_duration(
                             job_label=str(job_id_for_hook),
                             elapsed_seconds=elapsed_seconds,
                             state_age_seconds=0.0,
                             observation_gap_seconds=push_gap_seconds,
+                            duration_semantics=self._DURATION_SEMANTICS,
                         )
                 except Exception as exc:  # pragma: no cover
                     logger.debug(
@@ -1447,6 +1587,10 @@ class BambuAdapter(PrinterAdapter):
                         current_job_label=(
                             str(job_id_for_hook) if job_id_for_hook else None
                         ),
+                        # Rows opened before the identity fix live under the
+                        # family name; when this adapter is unregistered the
+                        # two names coincide and the sweep no-ops.
+                        legacy_printer_name=self.name,
                     )
                 except Exception as exc:  # pragma: no cover
                     logger.debug(
@@ -1688,7 +1832,7 @@ class BambuAdapter(PrinterAdapter):
             )
             if is_single_client:
                 raise PrinterError(
-                    _SINGLE_CLIENT_FTPS_MSG,
+                    _SINGLE_CLIENT_FTPS_MSG + self._other_clients_hint(),
                     cause=exc,
                 ) from exc
             exc_lower = str(exc).lower()
@@ -1929,6 +2073,16 @@ class BambuAdapter(PrinterAdapter):
             with contextlib.suppress(TypeError, ValueError):
                 total_layers = int(total_layer_num)
 
+        # Bambu reports task_id / subtask_id, and on a LAN print both are the
+        # literal "0" -- Kiln publishes them that way itself in
+        # ``_start_print_impl``, the convention for a job with no cloud
+        # project behind it.  Pass them through the sentinel filter rather
+        # than trusting or ignoring them: a cloud-initiated job that does
+        # carry a real id gets to use it, and "0" resolves to no id at all.
+        native_job_id = _first_real_job_id(
+            status.get("task_id"), status.get("subtask_id"),
+        )
+
         return JobProgress(
             file_name=file_name if file_name else None,
             completion=completion,
@@ -1936,6 +2090,7 @@ class BambuAdapter(PrinterAdapter):
             print_time_left_seconds=print_time_left_seconds,
             current_layer=current_layer,
             total_layers=total_layers,
+            job_id=native_job_id,
         )
 
     def list_files(self) -> list[PrinterFile]:
@@ -2245,6 +2400,14 @@ class BambuAdapter(PrinterAdapter):
         stem = Path(abs_path).stem
         output_path = os.path.join(os.path.dirname(abs_path), f"{stem}.3mf")
 
+        # Nothing declared: ask the machine what is actually loaded rather
+        # than declaring the default white at a printer holding red.  A
+        # caller's own colours always win; ``None`` keeps the old default.
+        if not filament_colors and num_filaments == 1:
+            loaded = self.active_filament_color()
+            if loaded:
+                filament_colors = [loaded]
+
         settings = BambuPrintSettings(
             hotend_temp=hotend_temp,
             bed_temp=bed_temp,
@@ -2268,6 +2431,16 @@ class BambuAdapter(PrinterAdapter):
             # never declared one, which keeps the historical A1 templates.
             printer_model=self._printer_model,
         )
+        # The printer will know this job by the WRAP's name, but the layer
+        # viewer wants the raw G-code inside — keep the two joined in the
+        # monitor-twin ledger so the print-start retention can follow the
+        # wrap back to its source.
+        try:
+            from kiln.monitor_twin import note_wrapped
+
+            note_wrapped(abs_path, result.output_path)
+        except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
+            logger.debug("monitor-twin wrap note failed", exc_info=True)
         return result.output_path
 
     # ------------------------------------------------------------------
@@ -2278,6 +2451,7 @@ class BambuAdapter(PrinterAdapter):
         self,
         timeout: float = 15.0,
         poll_interval: float = 1.0,
+        sent_at: float | None = None,
     ) -> tuple[str, int | None]:
         """Poll MQTT cache until printer enters a print-active state.
 
@@ -2287,13 +2461,33 @@ class BambuAdapter(PrinterAdapter):
         if no transition occurred.  *error_code* is the ``print_error``
         value if the printer reported one (often non-zero even before
         ``gcode_state`` flips to ``"failed"``), or ``None``.
+
+        *sent_at* is ``time.monotonic()` from immediately before the print
+        command went out, and it is what makes a cached reading mean
+        anything.  The cache is a push cache: between the command and the
+        printer's next frame it still describes the PREVIOUS job, error
+        code and all.  A cancelled job leaves a non-zero ``print_error``
+        sitting there, so the "error while idle means rejected" rule below
+        read the last job's failure as this job's rejection and reported a
+        failure the printer never gave — measured on an A1 (error
+        50348032 from a cancel, then a fresh start declared failed while
+        the machine was already heating).  Frames older than the command
+        are skipped rather than believed; if none arrives, the honest
+        answer is ``"timeout"``, which callers already treat as "not known
+        yet".  ``None`` keeps the old read-anything behaviour for callers
+        that have no command instant to compare against.
         """
         deadline = time.monotonic() + timeout
         last_error: int | None = None
         while time.monotonic() < deadline:
             with self._state_lock:
-                state = str(self._last_status.get("gcode_state", "")).lower()
-                raw_err = self._last_status.get("print_error")
+                stale = (
+                    sent_at is not None and self._last_state_time < sent_at
+                )
+                state = "" if stale else str(
+                    self._last_status.get("gcode_state", "")
+                ).lower()
+                raw_err = None if stale else self._last_status.get("print_error")
             if raw_err is not None:
                 with contextlib.suppress(TypeError, ValueError):
                     err_val = int(raw_err)
@@ -2780,6 +2974,13 @@ class BambuAdapter(PrinterAdapter):
         # Normalise: strip leading path components if user passes full path.
         basename = os.path.basename(file_name)
 
+        # The instant the command goes out, captured BEFORE anything is
+        # published.  Everything the push cache holds from before this is
+        # about the previous job — see _wait_for_print_start, which reads
+        # nothing older than this rather than mistaking the last job's
+        # error code for this one's rejection.
+        command_sent_at = time.monotonic()
+
         # Check if already in a print-active state (skip wait).
         with self._state_lock:
             already_active = str(self._last_status.get("gcode_state", "")).lower() in _PRINT_ACTIVE_STATES
@@ -3012,7 +3213,9 @@ class BambuAdapter(PrinterAdapter):
 
         # Wait for MQTT confirmation unless already active.
         if not already_active:
-            result_state, error_code = self._wait_for_print_start()
+            result_state, error_code = self._wait_for_print_start(
+                sent_at=command_sent_at,
+            )
             if result_state == "failed":
                 # Build a specific error message if we recognise the code.
                 err_detail = ""
@@ -3082,6 +3285,55 @@ class BambuAdapter(PrinterAdapter):
         return PrintResult(
             success=True,
             message="Emergency stop triggered (M112 sent).",
+        )
+
+    def clear_error(self) -> PrintResult:
+        """Acknowledge a latched ``print_error`` so the next print can start.
+
+        Bambu firmware holds ``gcode_state`` at ``failed`` with a non-zero
+        ``print_error`` after a job ends badly, and keeps reporting it until
+        something acknowledges it.  Dismissing the message on the printer's
+        own touchscreen clears the NOTIFICATION, not the reported state —
+        measured on an A1 (2026-08-13), where the screen read "ready" while
+        the push payload still carried ``print_error=50348032`` and every
+        pre-flight check refused.
+
+        The payload mirrors BambuStudio's own ``command_clean_print_error``,
+        field for field and type for type: a string ``sequence_id``, the
+        string ``subtask_id`` of the job being acknowledged, and the INTEGER
+        ``print_error`` naming which error is being cleared.  That last field
+        is the one that matters and the one an earlier attempt here omitted —
+        acknowledging an error without saying which error changed nothing at
+        all, which is what the printer did with it.
+
+        This reports only that the acknowledgement was SENT.  Firmware takes
+        a moment, so the caller re-reads state to learn whether it took.
+        """
+        with self._state_lock:
+            subtask_id = str(self._last_status.get("subtask_id") or "0")
+            try:
+                print_error = int(self._last_status.get("print_error") or 0)
+            except (TypeError, ValueError):
+                print_error = 0
+
+        self._publish_command(
+            {
+                "print": {
+                    "sequence_id": self._next_seq(),
+                    "command": "clean_print_error",
+                    "subtask_id": subtask_id,
+                    "print_error": print_error,
+                }
+            }
+        )
+        return PrintResult(
+            success=True,
+            message=(
+                "Sent the error acknowledgement. Re-read printer_status to "
+                "confirm. If the printer is still refusing prints, give it a "
+                "minute — a fault from cancelling during bed levelling often "
+                "clears on its own — and power-cycle only if it persists."
+            ),
         )
 
     def pause_print(self) -> PrintResult:
@@ -3417,12 +3669,15 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _peek_loaded_ams_trays(self) -> list[dict[str, Any]] | None:
-        """Return loaded AMS trays from cached MQTT status, without any I/O.
+        """Return loaded AMS trays from cached MQTT status.
 
-        Unlike ``get_ams_status``, this does not trigger a pushall request
-        when the cache is empty — it returns ``None`` instead.  Intended
-        for auto-routing decisions where an extra MQTT round-trip per
-        ``start_print`` call would be wasteful.
+        Unlike ``get_ams_status`` this never re-reads the AMS itself, so a
+        warm cache costs nothing.  It is NOT free on a cold one: it goes
+        through ``_get_cached_status``, which connects and, with no status
+        cached yet, publishes a pushall and sleeps up to two seconds.  A
+        caller that must not block — anything on the path of emitting a
+        file — should read ``_last_status`` directly instead, the way
+        ``active_filament_color`` does.
 
         :returns: List of loaded-tray dicts (``tray_type`` non-empty), or
             ``None`` if no AMS data is cached yet.  Empty list means AMS
@@ -3456,6 +3711,93 @@ class BambuAdapter(PrinterAdapter):
                         "tray_color": tray.get("tray_color", ""),
                     })
         return loaded
+
+    def active_filament_color(self) -> str | None:
+        """The ``#RRGGBB`` of the filament actually loaded, or ``None``.
+
+        A wrapped 3MF declares the colour it will print in, and that
+        declaration is what draws the preview on the printer's screen and
+        what the AMS mismatch check measures against.  Left to defaults it
+        declares white for everyone, so a red spool produced a white
+        preview and then a mismatch warning about a discrepancy Kiln had
+        introduced itself.
+
+        Reads the status cache DIRECTLY — never ``_get_cached_status``,
+        which connects and, on a cold cache, publishes a pushall and
+        sleeps up to two seconds.  Wrapping a file must not wait on a
+        printer, and a preview is never worth stalling a slice for, so an
+        unheard-from machine simply yields ``None`` here.
+
+        Refuses rather than guesses, returning ``None`` when the machine
+        has not said clearly: no AMS data yet, an external spool
+        (``tray_now`` 255, whose colour nothing reports), a tray with no
+        usable colour, or several loaded trays with no active one named.
+        ``None`` leaves the caller's existing default alone.
+        """
+        try:
+            with self._state_lock:
+                status = dict(self._last_status or {})
+        except Exception:  # noqa: BLE001 — telemetry never blocks a wrap
+            logger.debug("AMS colour unavailable", exc_info=True)
+            return None
+        if not status:
+            return None
+
+        ams_data = status.get("ams")
+        raw_now = None
+        if isinstance(ams_data, dict):
+            raw_now = ams_data.get("tray_now")
+            ams_data = ams_data.get("ams")
+        if raw_now is None:
+            raw_now = status.get("tray_now")
+        if not isinstance(ams_data, list):
+            return None
+
+        trays: list[dict[str, Any]] = []
+        for unit in ams_data:
+            if not isinstance(unit, dict):
+                continue
+            raw_trays = unit.get("tray")
+            if not isinstance(raw_trays, list):
+                continue
+            trays.extend(
+                {"slot": t.get("id", 0), "tray_color": t.get("tray_color", "")}
+                for t in raw_trays
+                if isinstance(t, dict) and t.get("tray_type")
+            )
+        if not trays:
+            return None
+
+        active: int | None = None
+        if raw_now is not None and str(raw_now).strip().lstrip("-").isdigit():
+            active = int(str(raw_now).strip())
+
+        # 255 is Bambu's "no tray" — an external spool, whose colour the
+        # printer does not report at all.
+        if active == 255:
+            return None
+
+        chosen: dict[str, Any] | None = None
+        if active is not None:
+            chosen = next(
+                (t for t in trays if t.get("slot") == active), None
+            )
+        if chosen is None:
+            # No active tray named.  One loaded tray is unambiguous; more
+            # than one is a question only the machine can answer.
+            if len(trays) != 1:
+                return None
+            chosen = trays[0]
+
+        # Bambu reports RRGGBBAA; the alpha is not ours to carry.
+        value = str(chosen.get("tray_color") or "").strip().lstrip("#")
+        if len(value) < 6:
+            return None
+        try:
+            int(value[:6], 16)
+        except ValueError:
+            return None
+        return "#" + value[:6].upper()
 
     def get_ams_status(self) -> dict[str, Any]:
         """Query AMS status: what's loaded in each tray.
@@ -3901,14 +4243,39 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def disconnect(self) -> None:
-        """Disconnect the MQTT client and release resources."""
-        if self._mqtt_client is not None:
-            client = self._mqtt_client
-            self._mqtt_client = None
-            self._safe_stop_client(client)
-            self._mqtt_connected.clear()
-            with self._state_lock:
-                self._connected = False
+        """Disconnect the MQTT client and release the printer's LAN slot.
+
+        Safe to call when already disconnected, and safe to call repeatedly —
+        the next operation reconnects on demand.
+
+        Takes ``_connect_lock`` so a release cannot land in the middle of a
+        connect.  Without it, a reaper firing while ``_ensure_mqtt`` was
+        between "assign ``_mqtt_client``" and "return it" would hand the
+        caller a client it had already stopped.  That was vanishingly rare at
+        the default 120s window — ``_ensure_mqtt`` stamps activity on entry
+        and finishes within its own timeout — but a short configured window
+        makes the two overlap, and a caller publishing to a stopped client is
+        a confusing failure to debug.  No deadlock: ``_ensure_mqtt`` stops
+        clients via ``_safe_stop_client`` and never re-enters here, so the
+        lock is never taken twice by one thread.
+        """
+        self._stop_idle_reaper()
+        with self._connect_lock:
+            if self._mqtt_client is not None:
+                client = self._mqtt_client
+                self._mqtt_client = None
+                self._safe_stop_client(client)
+                self._mqtt_connected.clear()
+                with self._state_lock:
+                    self._connected = False
+            # Re-arm the reconcile that settles outcome rows for prints that
+            # ended while nothing was watching.  It is a one-shot guard, and
+            # before the idle release the only disconnect was process exit, so
+            # once-per-process and once-per-connection were the same thing.
+            # They no longer are: a print that starts and finishes inside a
+            # release window is exactly the case the reconcile was written
+            # for, and leaving the flag set would skip it on reconnect.
+            self._pending_outcomes_reconciled = False
 
     def update_credentials(self, access_code: str) -> None:
         """Update the access code and force MQTT reconnection.
@@ -3921,12 +4288,9 @@ class BambuAdapter(PrinterAdapter):
         """
         self._access_code = access_code
         # Force MQTT reconnection with new credentials on next operation.
-        if self._mqtt_client is not None:
-            self._safe_stop_client(self._mqtt_client)
-            self._mqtt_client = None
-            self._mqtt_connected.clear()
-            with self._state_lock:
-                self._connected = False
+        # Via disconnect() rather than a second teardown of its own, so the
+        # release path stays one piece of code however it is reached.
+        self.disconnect()
         logger.info("Access code updated; MQTT will reconnect on next operation")
 
     # ------------------------------------------------------------------

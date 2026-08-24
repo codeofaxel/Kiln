@@ -21,7 +21,7 @@ import os
 import re
 import threading
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 from kiln.printers.base import (
     FirmwareComponent,
@@ -107,6 +107,10 @@ class SerialPrinterAdapter(PrinterAdapter):
         print(state.state, state.tool_temp_actual)
     """
 
+    # M27 reports SD-card byte progress, never a job clock — this backend's
+    # hours are unknowable rather than zero (see adapter_conformance.yaml).
+    _DURATION_SEMANTICS: ClassVar[str] = "none"
+
     def __init__(
         self,
         port: str,
@@ -161,6 +165,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     def capabilities(self) -> PrinterCapabilities:
         """Capabilities supported by a serial/USB printer."""
         return PrinterCapabilities(
+            can_clear_error=True,
             can_upload=True,
             can_set_temp=True,
             can_send_gcode=True,
@@ -969,6 +974,27 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
+
+    def clear_error(self) -> PrintResult:
+        """Restart Marlin after a kill, with ``M999``.
+
+        Marlin latches after ``M112`` or a thermal runaway and answers nothing
+        else until it is restarted.  ``M999`` is that restart, and it is the
+        same instruction Kiln's own troubleshooting guidance already gives —
+        this makes it something Kiln can DO rather than something it tells the
+        user to type.
+
+        A fault that is still present will latch again immediately, which is
+        the honest outcome: this clears the LATCH, never the cause.
+        """
+        self.send_gcode(["M999"])
+        return PrintResult(
+            success=True,
+            message=(
+                "Sent M999 to restart the firmware. Re-read printer_status to "
+                "confirm it came back ready."
+            ),
+        )
 
     def send_gcode(self, commands: list[str]) -> bool:
         """Send one or more G-code commands to the printer.

@@ -33,6 +33,8 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, TextIO
 
+from kiln.auto_record_hook import note_cancel_requested
+
 logger = logging.getLogger(__name__)
 
 
@@ -537,7 +539,14 @@ class PrintHealthMonitor:
 
         registry = _get_registry()
         adapter = registry.get(printer_name)
-        state = adapter.get_state()
+        from kiln.printers.engagement import internal_read
+
+        # Kiln's own polling of a machine it is already responsible for, not a
+        # person commanding a printer.  Exempt so a background loop can never
+        # spin on a refusal — a health check that errors every tick is worse
+        # than one that does not run.
+        with internal_read():
+            state = adapter.get_state()
 
         # --- Hotend temperature stability ---
         if state.tool_temp_actual is not None and state.tool_temp_target is not None:
@@ -1114,7 +1123,14 @@ class PrintHealthMonitor:
         # defensive — any failure during the state probe falls back
         # to "unknown, attempt pause."
         try:
-            state = adapter.get_state()
+            from kiln.printers.engagement import internal_read
+
+            # Kiln's own polling of a machine it is already responsible for, not a
+            # person commanding a printer.  Exempt so a background loop can never
+            # spin on a refusal — a health check that errors every tick is worse
+            # than one that does not run.
+            with internal_read():
+                state = adapter.get_state()
             already_paused = bool(getattr(state, "is_paused", False))
         except Exception as exc:
             already_paused = False
@@ -1531,6 +1547,10 @@ class PrintHealthMonitor:
             )
             return
 
+        # Kiln is stopping this print because it judged the print to be
+        # failing. Unlabelled, that lands as a success and teaches the loop
+        # that the runs it flagged were the good ones.
+        note_cancel_requested(adapter)
         try:
             adapter.cancel_print()
         except Exception as exc:
@@ -1589,7 +1609,14 @@ class PrintHealthMonitor:
             adapter = registry.get(printer_name)
 
             # Some adapters expose filament_detected via get_state metadata
-            state = adapter.get_state()
+            from kiln.printers.engagement import internal_read
+
+            # Kiln's own polling of a machine it is already responsible for, not a
+            # person commanding a printer.  Exempt so a background loop can never
+            # spin on a refusal — a health check that errors every tick is worse
+            # than one that does not run.
+            with internal_read():
+                state = adapter.get_state()
             state_dict = state.to_dict()
             filament_detected = state_dict.get("filament_detected")
             if filament_detected is None:
@@ -1623,7 +1650,14 @@ class PrintHealthMonitor:
 
             registry = get_printer_registry()
             adapter = registry.get(printer_name)
-            state = adapter.get_state()
+            from kiln.printers.engagement import internal_read
+
+            # Kiln's own polling of a machine it is already responsible for, not a
+            # person commanding a printer.  Exempt so a background loop can never
+            # spin on a refusal — a health check that errors every tick is worse
+            # than one that does not run.
+            with internal_read():
+                state = adapter.get_state()
             state_dict = state.to_dict()
             power_watts = state_dict.get("power_watts")
             if power_watts is None:

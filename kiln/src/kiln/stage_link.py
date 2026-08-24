@@ -58,6 +58,11 @@ _TIMEOUT_S = 20.0
 #: unrelated artifact never gets uploaded looking for a link.
 _MESH_SUFFIXES = frozenset({".stl", ".3mf", ".obj"})
 
+#: The one bearer value the server refused with 401/403 this process.
+#: Compared by VALUE: a fresh sign-in mints a different token and uploads
+#: again; the same stale token skips the upload it already paid for once.
+_REFUSED_BEARER: str | None = None
+
 #: sha256 -> (viewer_url, expires_at_epoch).  Bounded; oldest evicted first.
 _cache: dict[str, tuple[str, float]] = {}
 _CACHE_MAX = 64
@@ -148,6 +153,8 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     unhappy.  None of those are worth interrupting a caller over: the
     preview image the caller already has is the floor.
     """
+    global _REFUSED_BEARER
+
     if (os.environ.get(_OPT_OUT_ENV) or "").strip().lower() in {"1", "true", "yes"}:
         return None
 
@@ -187,6 +194,14 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     if not token:
         # Signed out.  Nothing to scope a link to; not a failure.
         return None
+    if token == _REFUSED_BEARER:
+        # The server already refused THIS bearer this process (expired or
+        # revoked session).  Without this memory every render re-uploaded
+        # the full mesh just to collect the same 401 — measured 2026-08-19:
+        # four multi-megabyte uploads refused inside one decorate call,
+        # each spending upload time inside a live tool request.  A fresh
+        # sign-in mints a different token and clears the skip by value.
+        return None
 
     try:
         import httpx
@@ -208,6 +223,13 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
         logger.debug("stage link unavailable: %s", exc)
         return None
 
+    if resp.status_code in (401, 403):
+        # An auth refusal is a property of the BEARER, not of this mesh —
+        # remember it so the next render skips the upload instead of
+        # paying for the same refusal again.
+        _REFUSED_BEARER = token
+        logger.debug("stage link refused: HTTP %s (bearer remembered)", resp.status_code)
+        return None
     if resp.status_code != 200:
         logger.debug("stage link refused: HTTP %s", resp.status_code)
         return None

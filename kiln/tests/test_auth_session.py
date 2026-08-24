@@ -176,7 +176,7 @@ class TestRefreshExchange:
 
 
 class TestRejectedRefresh:
-    def test_401_needs_signin_and_file_left_intact(self, auth_home, monkeypatch):
+    def test_401_needs_signin_and_verdict_persisted(self, auth_home, monkeypatch):
         _write_session(auth_home, access_token=_jwt(time.time() - 10))
         monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (401, {}))
 
@@ -187,8 +187,57 @@ class TestRejectedRefresh:
         assert "expired" in result.detail
         # Person-facing copy: no command syntax here (see the signed_out case).
         assert "`" not in result.detail, "no command syntax in user-facing copy"
-        # Never destructive: the file (and its email/tier context) stays.
-        assert (auth_home / ".kiln" / "auth_tokens.json").exists()
+        # Never destructive of CONTEXT: the file (email/tier) stays for the
+        # sign-in hint — but the rejection is now a persisted verdict: the
+        # dead refresh token is dropped and the file stamped, so no later
+        # caller re-pays the doomed exchange.
+        stored = json.loads(
+            (auth_home / ".kiln" / "auth_tokens.json").read_text()
+        )
+        assert stored.get("email") == "user@example.com"
+        assert "refresh_token" not in stored
+        assert stored.get("refresh_rejected_at")
+
+    def test_rejection_is_terminal_no_network_on_later_resolves(
+        self, auth_home, monkeypatch
+    ):
+        """The 2026-08-20 production loop: the bridge daemon resolved the
+        bearer on every reconnect, and every resolve re-POSTed the same
+        server-rejected refresh token — 401s every few seconds,
+        indefinitely.  After one rejection, later resolves must answer
+        from the persisted verdict with ZERO network."""
+        _write_session(auth_home, access_token=_jwt(time.time() - 10))
+        calls = []
+
+        def rejecting_post(rt):
+            calls.append(rt)
+            return 401, {}
+
+        monkeypatch.setattr(auth_session, "_post_refresh", rejecting_post)
+        assert resolve_session_bearer().state == "needs_signin"
+        assert len(calls) == 1
+
+        # Every subsequent resolve: same verdict, no network at all.
+        _no_network(monkeypatch)
+        for _ in range(3):
+            again = resolve_session_bearer()
+            assert again.state == "needs_signin"
+            assert "user@example.com" in again.detail
+
+    def test_fresh_signin_clears_the_rejection_verdict(
+        self, auth_home, monkeypatch
+    ):
+        _write_session(auth_home, access_token=_jwt(time.time() - 10))
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (401, {}))
+        assert resolve_session_bearer().state == "needs_signin"
+
+        # ``kiln signin`` / ``kiln pair`` write a brand-new token file —
+        # no stamp survives, and resolution is healthy again.
+        _write_session(auth_home)
+        _no_network(monkeypatch)
+        healthy = resolve_session_bearer()
+        assert healthy.state == "live"
+        assert healthy.token
 
     def test_convenience_getter_returns_empty_string(
         self, auth_home, monkeypatch

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kiln3d"
-version = "1.3.2"
-description = "MCP server + CLI that gives AI agents safe access to 3D printers (Bambu Lab, Creality, Prusa Link, Elegoo, Moonraker/Klipper, OctoPrint, Duet, USB) — 903 MCP capabilities for AI-driven print workflows"
+version = "1.4.1.1"
+description = "MCP server + CLI that gives AI agents safe access to 3D printers (Bambu Lab, Creality, Prusa Link, Elegoo, Moonraker/Klipper, OctoPrint, Duet, USB) — 908 MCP capabilities for AI-driven print workflows"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
 requires-python = ">=3.10"
@@ -73,6 +73,18 @@ dependencies = [
     # it.  4.1 MB on disk, and its one requirement is the numpy above, so the
     # marginal cost of the correct behaviour is small.
     "trimesh>=4.0",
+    # Pillow paints the software stage (``kiln.stage_paint``), which is what
+    # a machine with no usable browser gets — every install that is not this
+    # laptop, in practice.  Promoted for the same reason as the two above and
+    # with the same failure it fixes: without it ``_deps()`` returns None, the
+    # painter declines silently, and the preview drops to the OpenSCAD look
+    # with nothing said.  Measured in a clean venv on 1.4.1: a default
+    # `pip install kiln3d` rendered `renderer="openscad"`, and installing
+    # Pillow alone flipped the same call to `renderer="stage_paint"`.  It is
+    # also what supersamples the OpenSCAD path (``effective_supersample``
+    # degrades to 1 without it), so a default install was losing the
+    # anti-aliasing too.
+    "Pillow>=9.0",
     # httpx and python-dotenv are imported by kiln itself (the 3D stage's
     # document fetch in ``stage_cache``/``stage_link``; the .env loading in
     # ``server.main`` and the CLI) but until mcp 2.0 they were never declared
@@ -131,7 +143,7 @@ dev = [
     # production never runs a boolean.  Undeclared, it passed on any
     # machine that happened to have it and failed in CI, which reads as a
     # renderer bug rather than a missing package.
-    "manifold3d>=2.5",
+    "manifold3d>=3.5.2",
 ]
 
 [project.scripts]

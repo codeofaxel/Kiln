@@ -28,6 +28,7 @@ from typing import Any
 
 import click
 
+from kiln.auto_record_hook import note_cancel_requested
 from kiln.print_start_verdict import resolve_print_start
 from kiln.printer_backends import (
     DEFAULT_SERIAL_BAUDRATE,
@@ -86,37 +87,26 @@ from kiln.cli.output import (
     format_status,
 )
 from kiln.cli.spend_caps_commands import register_spend_caps_cli
+from kiln.materials import MATERIAL_TEMPS, normalise_material_type
+from kiln.routing_candidates import (
+    adapter_supports_extension,
+    collect_routing_candidates,
+)
 
 logger = logging.getLogger(__name__)
 
 _MATERIAL_CHOICES: tuple[str, ...] = ("PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC")
-_MATERIAL_TEMPS: dict[str, tuple[int, int, int, int]] = {
-    "PLA": (200, 210, 60, 60),
-    "PETG": (240, 245, 80, 80),
-    "ABS": (250, 255, 100, 100),
-    "TPU": (225, 230, 50, 50),
-    "ASA": (250, 255, 100, 100),
-    "NYLON": (260, 265, 70, 70),
-    "PC": (280, 285, 110, 110),
-}
+# Material temps and name normalisation moved to kiln.materials, and
+# candidate building to kiln.routing_candidates, so the route_print_job
+# tool can reach the same code without importing the CLI.  Aliased back
+# under their original private names: this module's call sites and the
+# tests that patch them are unchanged.
+_MATERIAL_TEMPS = MATERIAL_TEMPS
+_normalise_material_type = normalise_material_type
+_adapter_supports_extension = adapter_supports_extension
+_collect_routing_candidates = collect_routing_candidates
 _SUPPORT_MODE_CHOICES: tuple[str, ...] = ("off", "auto", "minimal", "aggressive")
 _INGEST_EXTENSIONS: tuple[str, ...] = (".gcode", ".gco", ".g", ".3mf")
-
-
-def _normalise_material_type(raw: str | None) -> str | None:
-    """Normalize material names to canonical keys used by temp defaults."""
-    if not raw:
-        return None
-    value = raw.strip().upper()
-    aliases = {
-        "PA": "NYLON",
-        "PA6": "NYLON",
-        "PA12": "NYLON",
-    }
-    value = aliases.get(value, value)
-    if value in _MATERIAL_TEMPS:
-        return value
-    return None
 
 
 def _material_profile_overrides(material: str) -> dict[str, str]:
@@ -524,20 +514,6 @@ def _get_adapter_from_ctx(ctx: click.Context):
     return _make_adapter(cfg)
 
 
-def _adapter_supports_extension(adapter: Any, extension: str) -> bool:
-    """Return True if the adapter advertises support for the file extension."""
-    ext = extension.lower().strip()
-    if not ext:
-        return True
-    try:
-        capabilities = getattr(adapter, "capabilities", None)
-        supported = getattr(capabilities, "supported_extensions", None)
-        if not supported:
-            return True
-        return ext in {str(v).lower() for v in supported}
-    except Exception:
-        return True
-
 
 def _list_configured_printer_names() -> list[str]:
     """Return configured printer names in stable order."""
@@ -574,101 +550,6 @@ def _load_fleet_adapters(printer_filter: str | None = None) -> tuple[dict[str, A
             errors.append(f"{name}: {exc}")
     return adapters, errors
 
-
-def _collect_routing_candidates(
-    *,
-    adapters: dict[str, Any],
-    material: str,
-    pending_counts: dict[str, int] | None = None,
-    file_extension: str | None = None,
-) -> list[dict[str, Any]]:
-    """Build JobRouter candidate dictionaries from configured adapters."""
-    from kiln.persistence import get_db
-
-    pending = pending_counts or {}
-    file_ext = (file_extension or "").lower().strip()
-    candidates: list[dict[str, Any]] = []
-
-    try:
-        from kiln.materials import MaterialTracker
-
-        tracker = MaterialTracker(db=get_db())
-    except Exception:
-        tracker = None
-
-    db = None
-    try:
-        db = get_db()
-    except Exception:
-        db = None
-
-    for name, adapter in adapters.items():
-        if file_ext and not _adapter_supports_extension(adapter, file_ext):
-            continue
-
-        status = "unknown"
-        try:
-            state = adapter.get_state()
-            raw_state = getattr(state, "state", None)
-            status = str(getattr(raw_state, "value", raw_state or "unknown")).lower()
-        except Exception:
-            status = "offline"
-
-        supported_materials: list[str] = []
-        if tracker is not None:
-            try:
-                loaded = tracker.get_material(name, tool_index=0)
-                loaded_material = _normalise_material_type(getattr(loaded, "material_type", None))
-                if loaded_material:
-                    supported_materials = [loaded_material]
-            except Exception:
-                supported_materials = []
-
-        success_rate: float | None = None
-        if db is not None:
-            try:
-                insights = db.get_printer_learning_insights(name)
-                raw_rate = insights.get("success_rate")
-                if raw_rate is not None:
-                    success_rate = float(raw_rate)
-            except Exception:
-                success_rate = None
-
-        queue_depth = max(0, int(pending.get(name, 0)))
-        estimated_wait_s = float(queue_depth * 1800)
-        if status in {"printing", "busy", "paused", "cancelling"}:
-            estimated_wait_s = max(estimated_wait_s, 1800.0)
-
-        candidates.append(
-            {
-                "printer_id": name,
-                "printer_model": name,
-                "status": status,
-                "queue_depth": queue_depth,
-                "supported_materials": supported_materials,
-                "success_rate": success_rate,
-                "estimated_wait_s": estimated_wait_s,
-                "print_speed_factor": 1.0,
-            }
-        )
-
-    # Keep at least one candidate path for normal .gcode flows.
-    if not candidates and file_ext in {".gcode", ".gco", ".g"}:
-        for name in adapters:
-            candidates.append(
-                {
-                    "printer_id": name,
-                    "printer_model": name,
-                    "status": "unknown",
-                    "queue_depth": max(0, int(pending.get(name, 0))),
-                    "supported_materials": [],
-                    "success_rate": None,
-                    "estimated_wait_s": float(max(0, int(pending.get(name, 0))) * 1800),
-                    "print_speed_factor": 1.0,
-                }
-            )
-
-    return candidates
 
 
 def _route_printer_for_job(
@@ -2917,6 +2798,11 @@ def cancel(ctx: click.Context, json_mode: bool) -> None:
     """Cancel the current print job."""
     try:
         adapter = _get_adapter_from_ctx(ctx)
+        # This process sends the stop and exits; the ending is seen by
+        # whatever is watching the printer, usually the running server. The
+        # intent has to be durable to survive that gap, and note_cancel_
+        # requested is what makes it so -- so this reads like the others.
+        note_cancel_requested(adapter)
         result = adapter.cancel_print()
         click.echo(format_action("cancel", result.to_dict(), json_mode=json_mode))
     except click.ClickException:
@@ -3246,9 +3132,16 @@ def emergency_clear_cmd(
 @cli.command()
 @click.option("--tool", "tool_temp", type=float, default=None, help="Set hotend temperature (°C).")
 @click.option("--bed", "bed_temp", type=float, default=None, help="Set bed temperature (°C).")
+@click.option("--printer", "printer_name", default=None, help="Target printer name (default: active printer).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def temp(ctx: click.Context, tool_temp: float | None, bed_temp: float | None, json_mode: bool) -> None:
+def temp(
+    ctx: click.Context,
+    tool_temp: float | None,
+    bed_temp: float | None,
+    printer_name: str | None,
+    json_mode: bool,
+) -> None:
     """Get or set printer temperatures.
 
     With no flags, shows current temperatures.  Pass --tool and/or --bed to
@@ -3268,12 +3161,25 @@ def temp(ctx: click.Context, tool_temp: float | None, bed_temp: float | None, js
             click.echo(format_response("success", data=data, json_mode=json_mode))
             return
 
+        # The ceilings come from the machine's own safety profile — the same
+        # resolver set_temperature uses over MCP — not from a pair of numbers
+        # typed here.  Hardcoding 300/130 was wrong in BOTH directions: it let
+        # an Ender 3 (250°C profile) be driven to 300, which is the exact
+        # unidentified-hotend hazard server.py records fixing on 2026-07-20 on
+        # its own path, and it refused a legitimate 350°C on the machines rated
+        # for it.  A false "safe" is the error direction that damages hardware,
+        # so the copy had to go rather than be corrected to a better constant.
+        from kiln.server import _get_temp_limits
+
+        max_tool, max_bed = _get_temp_limits(printer_name)
+
         results: dict[str, Any] = {}
         if tool_temp is not None:
-            if tool_temp < 0 or tool_temp > 300:
+            if tool_temp < 0 or tool_temp > max_tool:
                 click.echo(
                     format_error(
-                        f"Hotend temperature {tool_temp}°C out of safe range (0-300°C).",
+                        f"Hotend temperature {tool_temp}°C out of safe range "
+                        f"(0-{max_tool:g}°C for this printer).",
                         json_mode=json_mode,
                     )
                 )
@@ -3281,10 +3187,11 @@ def temp(ctx: click.Context, tool_temp: float | None, bed_temp: float | None, js
             adapter.set_tool_temp(tool_temp)
             results["tool_target"] = tool_temp
         if bed_temp is not None:
-            if bed_temp < 0 or bed_temp > 130:
+            if bed_temp < 0 or bed_temp > max_bed:
                 click.echo(
                     format_error(
-                        f"Bed temperature {bed_temp}°C out of safe range (0-130°C).",
+                        f"Bed temperature {bed_temp}°C out of safe range "
+                        f"(0-{max_bed:g}°C for this printer).",
                         json_mode=json_mode,
                     )
                 )
@@ -3310,6 +3217,109 @@ def temp(ctx: click.Context, tool_temp: float | None, bed_temp: float | None, js
                 json_mode=json_mode,
             )
         )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# fan / light / emergency-trip
+#
+# The three hardware controls that existed only over MCP.  They matter from a
+# terminal for the same reason pause and cancel do: when `kiln serve` is wedged
+# — common enough that serve_siblings.py exists to clean up after it — the
+# operator still has a printer in front of them.  Each delegates to the server
+# tool rather than the adapter, so the terms gate, the printer resolution and
+# the refusal shapes stay identical across both doors.
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--node", default="part", help="Fan node (part, aux, chamber).")
+@click.option("--percent", type=int, default=100, help="Fan speed, 0-100.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def fan(node: str, percent: int, json_mode: bool) -> None:
+    """Set a printer fan's speed."""
+    if percent < 0 or percent > 100:
+        click.echo(
+            format_error(
+                f"Fan speed {percent}% out of range (0-100).",
+                code="INVALID_ARGS",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    try:
+        from kiln.server import set_fan as _set_fan
+
+        result = _set_fan(node=node, percent=percent)
+        if not result.get("success", False):
+            click.echo(format_error(result.get("error", "Failed to set fan."), json_mode=json_mode))
+            sys.exit(1)
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to set fan: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--node", default="chamber_light", help="Light node (chamber_light, work_light).")
+@click.option("--mode", default="on", help="on, off, or flashing where the machine supports it.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def light(node: str, mode: str, json_mode: bool) -> None:
+    """Turn a printer light on or off."""
+    try:
+        from kiln.server import set_printer_light as _set_light
+
+        result = _set_light(node=node, mode=mode)
+        if not result.get("success", False):
+            click.echo(format_error(result.get("error", "Failed to set light."), json_mode=json_mode))
+            sys.exit(1)
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to set printer light: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.command("emergency-trip")
+@click.argument("printer_name")
+@click.option("--input", "input_name", default="external_button", help="Which input tripped.")
+@click.option("--token", default=None, help="Shared secret, when the input is configured to require one.")
+@click.option("--note", default=None, help="Optional operator note for the audit trail.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def emergency_trip_cmd(
+    printer_name: str,
+    input_name: str,
+    token: str | None,
+    note: str | None,
+    json_mode: bool,
+) -> None:
+    """Report a hardware emergency input (e.g. a physical button) as tripped."""
+    try:
+        from kiln.server import emergency_trip_input as _trip
+
+        result = _trip(
+            printer_name=printer_name,
+            input_name=input_name,
+            token=token,
+            note=note,
+        )
+        if not result.get("success", False):
+            click.echo(
+                format_error(
+                    result.get("error", "Failed to record emergency trip."),
+                    code=result.get("code"),
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to record emergency trip: {exc}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -5139,8 +5149,23 @@ def queue() -> None:
 @click.argument("file")
 @click.option("--printer", default=None, help="Target printer name (omit for auto-dispatch).")
 @click.option("--priority", default=0, type=int, help="Job priority (higher = first, default 0).")
+@click.option(
+    "--idempotency-key",
+    default=None,
+    help=(
+        "One-time key so a retried submit returns the original job "
+        "instead of queueing a duplicate (same key + same details = "
+        "same job)."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def queue_submit_cmd(file: str, printer: str | None, priority: int, json_mode: bool) -> None:
+def queue_submit_cmd(
+    file: str,
+    printer: str | None,
+    priority: int,
+    idempotency_key: str | None,
+    json_mode: bool,
+) -> None:
     """Submit a print job to the queue.
 
     FILE is the G-code file name (must already exist on the printer).
@@ -5153,6 +5178,7 @@ def queue_submit_cmd(file: str, printer: str | None, priority: int, json_mode: b
             file_name=file,
             printer_name=printer,
             priority=priority,
+            idempotency_key=idempotency_key,
         )
         if not result.get("success"):
             click.echo(
@@ -9627,6 +9653,42 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
             )
     except Exception as exc:
         checks.append({"name": "serve_processes", "ok": True, "detail": f"check skipped: {exc}"})
+
+    # 4b. Printer connection slots — who on this machine is actually holding
+    # one.  Separate from the process count above because they answer
+    # different questions: a server that never touched the printer holds no
+    # slot, and a Bambu locks out the next caller once its few slots are
+    # taken.  Without this the symptom (a timeout) is indistinguishable from
+    # a powered-off printer, and the user power-cycles a healthy machine.
+    try:
+        from kiln.serve_siblings import printer_slot_report
+
+        _slots = printer_slot_report()
+        if not _slots["checked"]:
+            pass  # no slot-rationing printer configured, or no way to scan
+        elif _slots["warning"]:
+            _pids = ", ".join(
+                str(p) for r in _slots["hosts"] for p in r["pids"]
+            )
+            checks.append(
+                {
+                    "name": "printer_connections",
+                    "ok": False,
+                    "detail": f"{_slots['warning']} (PIDs {_pids})",
+                }
+            )
+        else:
+            _detail = ", ".join(
+                f"{r['total']} local connection(s) to {r['host']}"
+                for r in _slots["hosts"]
+            )
+            checks.append(
+                {"name": "printer_connections", "ok": True, "detail": _detail}
+            )
+    except Exception as exc:
+        checks.append(
+            {"name": "printer_connections", "ok": True, "detail": f"check skipped: {exc}"}
+        )
 
     # 5. Config / printers configured
     printer_cfg = None

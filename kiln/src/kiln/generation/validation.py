@@ -1620,13 +1620,23 @@ def export_3mf(
                  Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" />
 </Relationships>"""
 
-    # Generate thumbnail (best-effort).
+    # Generate thumbnail (best-effort).  Same canonical-preview door the
+    # Bambu wraps use — this call once handed a list of PATHS to a
+    # function that takes parsed geometry, raised on every export, and a
+    # bare ``except Exception: pass`` kept it quiet.  No colour is
+    # declared in this bare geometric export, so the render is neutral —
+    # never an invented colour.
     thumbnail_data: bytes | None = None
     try:
-        from kiln.multicolor_3mf import _generate_thumbnail
-        thumbnail_data = _generate_thumbnail([file_path])
-    except Exception:
-        pass
+        from kiln.multicolor_3mf import render_plate_preview
+        thumbnail_data = render_plate_preview([file_path])
+    except Exception:  # noqa: BLE001 — a preview never blocks the export
+        logger.warning(
+            "Thumbnail generation failed for %s — the 3MF ships without a "
+            "preview.",
+            file_path,
+            exc_info=True,
+        )
 
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml", content_types)

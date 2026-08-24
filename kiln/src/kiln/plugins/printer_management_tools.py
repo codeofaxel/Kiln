@@ -25,6 +25,7 @@ class _PrinterManagementToolsPlugin:
         - untrust_printer
         - acquire_printer_lock
         - release_printer_lock
+        - hand_back_printer
     """
 
     @property
@@ -195,6 +196,119 @@ class _PrinterManagementToolsPlugin:
             except Exception as exc:
                 _logger.exception("Error in acquire_printer_lock")
                 return _srv._error_dict(f"Failed to acquire printer lock: {exc}", code="LOCK_ERROR")
+
+        # ------------------------------------------------------------------
+        # hand_back_printer
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def hand_back_printer(printer_name: str | None = None) -> dict:
+            """Tell Kiln you are taking a printer from here, so it can move on.
+
+            Below the fleet tier Kiln works with one printer at a time: the
+            machine it started a print on, or one it is watching for you.
+            This hands that machine back — you keep the print, Kiln stops
+            being the one driving it, and its attention is free for another
+            printer.
+
+            Nothing is cancelled and nothing is paused.  The print carries on
+            exactly as it was; this only changes which machine Kiln considers
+            itself responsible for.
+
+            Called with no arguments it reports which printer Kiln is working
+            with, without changing anything, so you can always find out where
+            its attention is before moving it.
+
+            One thing worth knowing before you do it: Kiln will come back to
+            this print once if you need it to, and after that it stays with
+            whatever machine it moved to until this print finishes.  Going
+            back and forth between two running printers is what the fleet
+            tier is for.
+
+            Args:
+                printer_name: Printer to hand back.  Omit to report only.
+            """
+            if err := _srv._check_auth("write"):
+                return err
+
+            try:
+                from kiln.printers.engagement import (
+                    current,
+                    hand_back,
+                    reason_in_english,
+                )
+
+                engagement = current()
+                if printer_name is None:
+                    if engagement is None:
+                        return {
+                            "success": True,
+                            "engaged_with": None,
+                            "message": "Kiln is not working with a printer right now.",
+                        }
+                    return {
+                        "success": True,
+                        "engaged_with": engagement.label,
+                        "since": engagement.since,
+                        "because": reason_in_english(engagement.reason),
+                        "message": (
+                            f"Kiln is working with {engagement.label}. "
+                            f"Hand it back to move Kiln to another printer."
+                        ),
+                    }
+
+                adapter = _srv._get_registry().get(printer_name)
+
+                # Handing a machine back means Kiln stops watching it, so any
+                # live watch on it ends HERE rather than discovering the
+                # change on its next poll.  The watcher copes with that race
+                # on its own, but a background thread finding out by being
+                # refused is a worse way to end something the user asked to
+                # end.
+                stopped_watches = []
+                try:
+                    from kiln.printers.engagement import machine_id
+
+                    target = machine_id(adapter)
+                    for watch_id, watcher in list(_srv._watchers.items()):
+                        watched = getattr(watcher, "_adapter", None)
+                        if watched is not None and machine_id(watched) == target:
+                            _srv._watchers.pop(watch_id, None)
+                            watcher.stop()
+                            stopped_watches.append(watch_id)
+                except Exception:
+                    _logger.debug("could not stop watches on hand-back", exc_info=True)
+
+                report = hand_back(adapter)
+                if not report.get("released"):
+                    return _srv._error_dict(
+                        report.get("reason", "Nothing to hand back."),
+                        code="NOT_ENGAGED",
+                    )
+                name = report.get("printer", printer_name)
+                left = report.get("returns_left", 0)
+                # State the consequence HERE, not when they discover it.
+                consequence = (
+                    "Kiln can come back to this print once if you need it to."
+                    if left
+                    else "Kiln has already come back to this print once, so it "
+                    "will stay with the next printer until this one finishes."
+                )
+                return {
+                    "success": True,
+                    "printer": name,
+                    "stopped_watches": stopped_watches,
+                    "message": (
+                        f"Kiln has stepped off {name}. The print carries on exactly "
+                        f"as it was, and Kiln is free for another printer. {consequence}"
+                    ),
+                    "returns_left": left,
+                }
+            except Exception as exc:
+                _logger.exception("Error in hand_back_printer")
+                return _srv._error_dict(
+                    f"Failed to hand back printer: {exc}", code="INTERNAL_ERROR",
+                )
 
         # ------------------------------------------------------------------
         # release_printer_lock

@@ -319,3 +319,150 @@ class TestFlipRows:
         with open(r2["dat_path"]) as f:
             d2 = f.read()
         assert d1 == d2
+
+
+class TestAlphaFlattening:
+    """Transparency must decode as empty field (white), never as ink (black).
+
+    ``convert("L")`` silently drops the alpha channel, and a dropped alpha
+    decodes a transparent surround as black — which the emboss pipeline
+    reads as maximum displacement.  Every Pillow mode that can carry
+    transparency goes through ``_flatten_alpha_on_white``; these tests pin
+    each mode at the loader, where every door in the module meets it.
+    """
+
+    def _corners(self, rows):
+        return [rows[0][0], rows[0][-1], rows[-1][0], rows[-1][-1]]
+
+    def test_rgba_transparent_surround_reads_as_white(self, tmp_path):
+        from PIL import Image, ImageDraw
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("RGBA", (60, 60), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rectangle(
+            [15, 15, 45, 45], outline=(0, 0, 0, 255), width=4
+        )
+        p = tmp_path / "rgba.png"
+        img.save(p)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert self._corners(rows) == [255, 255, 255, 255]
+        assert min(rows[30]) == 0  # the ink itself still reads as ink
+
+    def test_la_mode_transparent_surround_reads_as_white(self, tmp_path):
+        from PIL import Image, ImageDraw
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("LA", (60, 60), (0, 0))
+        ImageDraw.Draw(img).rectangle(
+            [15, 15, 45, 45], outline=(0, 255), width=4
+        )
+        p = tmp_path / "la.png"
+        img.save(p)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert self._corners(rows) == [255, 255, 255, 255]
+
+    def test_palette_transparency_reads_as_white(self, tmp_path):
+        from PIL import Image, ImageDraw
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        rgba = Image.new("RGBA", (60, 60), (0, 0, 0, 0))
+        ImageDraw.Draw(rgba).rectangle(
+            [15, 15, 45, 45], outline=(0, 0, 0, 255), width=4
+        )
+        p = tmp_path / "palette.png"
+        rgba.convert("P").save(p)
+
+        # The saved file must actually carry palette transparency for this
+        # test to test anything.
+        reopened = Image.open(p)
+        assert reopened.mode == "P"
+        assert "transparency" in reopened.info
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert self._corners(rows) == [255, 255, 255, 255]
+
+    def test_opaque_image_is_untouched(self, tmp_path):
+        from PIL import Image
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("L", (20, 20), 77)
+        p = tmp_path / "opaque.png"
+        img.save(p)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 77
+        assert rows[-1][-1] == 77
+
+    def test_grayscale_trns_transparency_reads_as_white(self, tmp_path):
+        """An L-mode PNG can mark a tone transparent via tRNS — no alpha band."""
+        from PIL import Image
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        p = tmp_path / "l_trns.png"
+        Image.new("L", (20, 20), 0).save(p, transparency=0)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255
+
+    def test_rgb_trns_transparency_reads_as_white(self, tmp_path):
+        from PIL import Image
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("RGB", (20, 20), (0, 255, 0))
+        for y in range(8, 12):
+            for x in range(8, 12):
+                img.putpixel((x, y), (40, 40, 40))
+        p = tmp_path / "rgb_trns.png"
+        img.save(p, transparency=(0, 255, 0))
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255
+        assert rows[10][10] == 40
+
+    def test_white_ink_on_transparency_survives_as_alpha_ink(self, tmp_path):
+        """A white mark on a transparent surround must not vanish.
+
+        Flattening onto white erases it — the alpha channel is the only
+        place that mark exists, so the alpha coverage becomes the ink.
+        """
+        from PIL import Image, ImageDraw
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("RGBA", (60, 60), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rectangle(
+            [20, 20, 40, 40], fill=(255, 255, 255, 255)
+        )
+        p = tmp_path / "white_ink.png"
+        img.save(p)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255, "surround must stay empty field"
+        assert rows[30][30] == 0, (
+            "the white mark vanished — the alpha-as-ink fallback is gone"
+        )
+
+    def test_dark_ink_on_transparency_keeps_its_tones(self, tmp_path):
+        """Visible ink keeps the plain white flatten — tones preserved."""
+        from PIL import Image, ImageDraw
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("RGBA", (60, 60), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rectangle(
+            [20, 20, 40, 40], fill=(128, 128, 128, 255)
+        )
+        p = tmp_path / "gray_ink.png"
+        img.save(p)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255
+        assert rows[30][30] == 128, "mid-tone ink must keep its tone"

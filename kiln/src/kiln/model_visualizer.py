@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kiln.emboss_generator import _openscad_version_year, get_openscad_version
+from kiln.openscad_runner import run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,27 @@ _BAMBU_THUMBNAIL_MAP: list[tuple[str, str, str]] = [
 # of KB of XML.  The Bambu wrapper's placeholder is ~1-2 KB.  Anything
 # below this threshold triggers the embedded-thumbnail path.
 _BAMBU_PLACEHOLDER_MODEL_MAX_BYTES = 4096
+
+
+def _default_output_dir() -> str:
+    """A UNIQUE output directory for one visualize call, never shared.
+
+    The old default was one flat ``$TMPDIR/kiln_visualizations`` for
+    every caller, with output names derived from the input basename —
+    and the emboss engine names every text-decorated mesh
+    ``line_0.stl``.  Two sessions rendering different objects at once
+    each wrote ``line_0_iso.png`` to the same path, so whichever
+    finished second clobbered the first session's intermediate — and
+    the render cache then copied the WRONG object's pixels into a
+    content-keyed slot, where they were served as a cache hit forever
+    after (measured 2026-08-14: a coaster's cache entry holding a pet
+    tag that a concurrent session rendered in the same minute).  A
+    fresh subdirectory per call keeps the shared root as the one
+    discoverable, prunable location while making collision impossible.
+    """
+    root = os.path.join(tempfile.gettempdir(), "kiln_visualizations")
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    return tempfile.mkdtemp(prefix="viz_", dir=root)
 
 
 def _is_bambu_wrapped_3mf(file_path: str) -> bool:
@@ -302,10 +324,11 @@ def _compile_scad_for_bbox(scad_path: str) -> str | None:
     fd, tmp_stl = tempfile.mkstemp(suffix=".stl", prefix="kiln_bbox_")
     os.close(fd)
     try:
-        result = subprocess.run(
+        result = run_openscad(
             [openscad, "--export-format", "binstl", "-o", tmp_stl, scad_path],
-            capture_output=True,
             timeout=30,
+            text=False,
+            output_path=tmp_stl,
         )
         if result.returncode == 0 and os.path.getsize(tmp_stl) > 84:
             return tmp_stl
@@ -494,6 +517,8 @@ def visualize_model(
     angles: list[str] | None = None,
     color: str = "",
     timeout: int = 120,
+    allow_stage: bool = True,
+    share_link: bool = True,
 ) -> dict:
     """Primary 3D preview tool — renders high-quality PNGs via OpenSCAD.
 
@@ -510,6 +535,20 @@ def visualize_model(
         angles: Subset of angle labels to render (e.g. ["top", "bottom"]).
             Defaults to all 6 standard angles.
         timeout: Max seconds per OpenSCAD render.
+        allow_stage: Whether the three.js stage may serve this render.
+            The stage is the right look for a preview a person is shown —
+            it draws the plate grid the web viewer draws.  Pass ``False``
+            when the image is going somewhere that grid would read as
+            part of the model rather than as the room around it, such as
+            a 3MF thumbnail bound for a printer's screen.  Controls the
+            RENDER only — see *share_link* for the upload.
+        share_link: Whether to attach a shareable viewer URL to the
+            result.  Doing so uploads the mesh, so a caller that only
+            wants pixels — anything embedding the image in a file rather
+            than handing a person a link — passes ``False`` and keeps the
+            whole call local.  ``allow_stage=False`` alone does NOT stop
+            this: the render goes local while the link upload still goes
+            out.
 
     Returns:
         Dict with ``success``, ``views`` list, ``output_dir``, and metadata.
@@ -558,9 +597,7 @@ def visualize_model(
                 return {
                     "success": len(successful) > 0,
                     "views": colored_views,
-                    "output_dir": output_dir or os.path.join(
-                        tempfile.gettempdir(), "kiln_visualizations",
-                    ),
+                    "output_dir": output_dir or _default_output_dir(),
                     "file_path": file_path,
                     "file_type": ext,
                     # Every success envelope names its engine, or a caller
@@ -596,9 +633,7 @@ def visualize_model(
         # is exactly what the preview gate is asking to confirm.
         if _is_bambu_wrapped_3mf(file_path):
             logger.debug("3MF is Bambu-wrapped — extracting slicer thumbnails")
-            thumb_out_dir = output_dir or os.path.join(
-                tempfile.gettempdir(), "kiln_visualizations",
-            )
+            thumb_out_dir = output_dir or _default_output_dir()
             bambu_views = _extract_bambu_thumbnails(
                 file_path, thumb_out_dir, angles=angles,
             )
@@ -633,19 +668,6 @@ def visualize_model(
                 file_path,
             )
 
-    try:
-        openscad = _find_openscad()
-    except FileNotFoundError as exc:
-        return {"success": False, "error": str(exc), "code": "OPENSCAD_NOT_FOUND"}
-
-    # Detect version once for manifold flag — safe to fail
-    _use_manifold = False
-    try:
-        _ver = get_openscad_version(openscad)
-        _use_manifold = _openscad_version_year(_ver) >= 2024
-    except Exception:  # noqa: BLE001
-        pass
-
     # Select angles
     if angles:
         angle_set = {a.lower() for a in angles}
@@ -661,7 +683,7 @@ def visualize_model(
 
     # Output directory
     if output_dir is None:
-        output_dir = os.path.join(tempfile.gettempdir(), "kiln_visualizations")
+        output_dir = _default_output_dir()
     os.makedirs(output_dir, mode=0o700, exist_ok=True)
 
     # Compute bounding box BEFORE creating the wrapper (needs the raw STL).
@@ -703,15 +725,19 @@ def visualize_model(
         views: list[dict] = []
         stem = Path(file_path).stem
 
-        # Stage-look backend: photograph the same three.js stage the web
-        # viewer and inline conversation viewer render, when this machine
-        # can (a chromium-family browser + a still-capable cached stage
-        # document — see kiln.stage_still).  Any miss falls through to
-        # the OpenSCAD loop below unchanged, which also remains the only
-        # renderer for caller-specified colors (the stage ignores them)
-        # and for machines with no browser.  All-or-nothing per result:
-        # one preview never mixes two looks.
+        # Stage-look backends, in order of fidelity.  First the photograph:
+        # the same three.js stage the web viewer and inline conversation
+        # viewer render, when this machine can shoot it (a chromium-family
+        # browser + a still-capable cached stage document — see
+        # kiln.stage_still).  Then the software painter: the same stage —
+        # backdrop, plate, light rig, framing — rasterized with numpy/PIL
+        # (kiln.stage_paint), which is what a machine with no usable
+        # browser gets, macOS with plain Chrome included (auto-discovery
+        # deliberately never launches a .app browser there — Dock icon).
+        # Any miss falls through to the OpenSCAD loop below unchanged.
+        # All-or-nothing per result: one preview never mixes looks.
         used_stage = False
+        stage_renderer = None
         from kiln.stage_still import try_render_stage_views
 
         stage_views = try_render_stage_views(
@@ -722,13 +748,47 @@ def visualize_model(
             width=width,
             height=height,
             color=color,
-        )
+        ) if allow_stage else None
+        if stage_views:
+            stage_renderer = "stage"
+        elif allow_stage:
+            from kiln.stage_paint import try_paint_stage_views
+
+            stage_views = try_paint_stage_views(
+                file_path,
+                selected,
+                angle_rotations,
+                output_dir=output_dir,
+                width=width,
+                height=height,
+                color=color,
+            )
+            if stage_views:
+                stage_renderer = "stage_paint"
         if stage_views:
             views = stage_views
             used_stage = True
 
         # Nothing left to draw when the stage already produced every view.
         openscad_views = [] if used_stage else selected
+
+        # OpenSCAD is resolved only when a view still needs it: a mesh
+        # served entirely by the stage backends never touches it, so a
+        # machine with no OpenSCAD still gets its preview.
+        openscad = None
+        _use_manifold = False
+        if openscad_views:
+            try:
+                openscad = _find_openscad()
+            except FileNotFoundError as exc:
+                return {"success": False, "error": str(exc), "code": "OPENSCAD_NOT_FOUND"}
+            # Detect version once for manifold flag — safe to fail
+            try:
+                _ver = get_openscad_version(openscad)
+                _use_manifold = _openscad_version_year(_ver) >= 2024
+            except Exception:  # noqa: BLE001
+                pass
+
         for label, description in openscad_views:
             rx, ry, rz = angle_rotations[label]
             # Model is now centered at origin via translate in the wrapper,
@@ -752,8 +812,8 @@ def visualize_model(
             logger.debug("Rendering %s view: %s", label, " ".join(cmd))
 
             try:
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=timeout,
+                result = run_openscad(
+                    cmd, timeout=timeout, output_path=png_path,
                 )
             except subprocess.TimeoutExpired:
                 # Logged, not just returned: the returned dict dies with
@@ -835,7 +895,7 @@ def visualize_model(
             # Which engine produced the pixels — "stage" is the browser
             # photograph of the shared three.js stage, "openscad" the
             # canonical fallback.  Agents and tests branch on this.
-            "renderer": "stage" if used_stage else "openscad",
+            "renderer": stage_renderer if used_stage else "openscad",
             "rendered": len(successful),
             "failed": len(failed),
             "message": (
@@ -848,6 +908,13 @@ def visualize_model(
                 )
             ),
         }
+        if not share_link:
+            # Attaching a link uploads the mesh.  A caller embedding these
+            # pixels in a file has nobody to hand a URL to, so that upload
+            # would be a network round-trip — and a copy of the user's
+            # model leaving the machine — bought for a field nothing reads.
+            return result
+
         from kiln.stage_link import attach_stage_link
 
         return attach_stage_link(result, file_path)

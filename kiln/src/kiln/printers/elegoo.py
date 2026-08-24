@@ -38,7 +38,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import requests
 
@@ -140,6 +140,29 @@ _PRINT_STATUS_MAP: dict[int, PrinterStatus] = {
     13: PrinterStatus.PRINTING,  # actively printing
     20: PrinterStatus.BUSY,      # resuming
 }
+
+# Statuses that mean "a job is in flight, keep the socket".  Consulted by the
+# idle connection release (see PrinterAdapter._print_in_flight).
+#
+# A status code that parses but is NOT in the map above counts as releasable,
+# which deliberately departs from the base class's "cannot tell, so hold"
+# default.  Two reasons, both specific to this backend: the map's own note
+# says it is the TERMINAL codes that are unmapped, so "unknown" here most
+# often means a print that has just ended — exactly when the slot should go
+# back; and unlike Bambu, nothing in this adapter turns a push into recorded
+# bookkeeping, so a release that happens a little early costs a reconnect and
+# nothing else.  A status that cannot be parsed at all is a different thing
+# and does hold, because that is genuine ignorance rather than a known gap.
+_ACTIVE_PRINT_STATUSES: frozenset[PrinterStatus] = frozenset(
+    {PrinterStatus.PRINTING, PrinterStatus.PAUSED, PrinterStatus.BUSY}
+)
+
+# Idle connection release.  Elegoo's SDCP websocket is as rationed as Bambu's
+# MQTT — the printer accepts only a few clients — so the same window applies:
+# long enough that a 15s watcher poll never trips it, short enough that a
+# session the user closed hours ago is not still holding the printer.
+_DEFAULT_IDLE_DISCONNECT_S: float = 120.0
+_IDLE_DISCONNECT_ENV = "KILN_ELEGOO_IDLE_DISCONNECT_S"
 
 # SDCP_PRINT_CAUSE_* codes that should feed the kiln-pro nozzle
 # wear cross-check.  These appear on the wire as the integer
@@ -327,6 +350,16 @@ class ElegooAdapter(PrinterAdapter):
         print(state.state, state.tool_temp_actual)
     """
 
+    # CurrentTicks is the printer's own job clock, frozen at the ending —
+    # a late reading is merely late and still correct.
+    _DURATION_SEMANTICS: ClassVar[str] = "frozen"
+
+    # Opt in to PrinterAdapter's idle connection release: SDCP printers
+    # ration websocket clients, so holding one while nobody is calling costs
+    # another session its access to the printer.
+    _IDLE_RELEASE_ENV = _IDLE_DISCONNECT_ENV
+    _IDLE_RELEASE_DEFAULT_S = _DEFAULT_IDLE_DISCONNECT_S
+
     def __init__(
         self,
         host: str,
@@ -363,6 +396,38 @@ class ElegooAdapter(PrinterAdapter):
 
         # Exponential backoff for reconnection attempts.
         self._backoff = _BackoffState()
+
+        # Idle-release bookkeeping (PrinterAdapter).  _ensure_ws — the one
+        # funnel every read and write passes through — stamps the activity.
+        self._init_idle_release()
+
+    # -- idle connection release --------------------------------------------
+
+    def _connection_is_live(self) -> bool:
+        """True while the websocket is open (idle-reaper hook)."""
+        with self._ws_lock:
+            return self._ws is not None and self._connected
+
+    def _print_in_flight(self) -> bool:
+        """True while the printer is mid-job, as of the last status seen.
+
+        Holding the socket through a running print keeps the listener thread
+        fed, so progress stays live for anything watching.  An idle printer's
+        slot is the one worth handing back.
+        """
+        with self._state_lock:
+            status = dict(self._last_status)
+        raw = status.get("CurrentStatus", status.get("Status", 0))
+        # SDCP V3 (e.g. Centauri Carbon) reports CurrentStatus as a list.
+        if isinstance(raw, list):
+            raw = raw[0] if raw else 0
+        try:
+            code = int(raw)
+        except (TypeError, ValueError):
+            # Unreadable status is not evidence the printer is idle, and the
+            # base class's default answer for "cannot tell" is to hold.
+            return True
+        return _PRINT_STATUS_MAP.get(code) in _ACTIVE_PRINT_STATUSES
 
     # -- PrinterAdapter identity properties ---------------------------------
 
@@ -465,9 +530,13 @@ class ElegooAdapter(PrinterAdapter):
         Returns:
             The connected WebSocket instance.
 
+        Every read and write funnels through here, so this is also where
+        caller activity is stamped for the idle release.
+
         Raises:
             PrinterError: If connection fails or we're in backoff cooldown.
         """
+        self._note_activity()
         with self._ws_lock:
             if self._ws is not None and self._connected:
                 return self._ws
@@ -511,6 +580,10 @@ class ElegooAdapter(PrinterAdapter):
                         name=f"elegoo-ws-{self._host}",
                     )
                     self._listener_thread.start()
+
+                # Watch for the socket falling idle so the printer gets its
+                # connection slot back (PrinterAdapter._idle_loop).
+                self._start_idle_reaper()
 
                 # Auto-discover mainboard ID if not provided.
                 if not self._mainboard_id:
@@ -1492,8 +1565,14 @@ class ElegooAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def disconnect(self) -> None:
-        """Disconnect the WebSocket and stop background threads."""
+        """Disconnect the WebSocket, releasing the printer's client slot.
+
+        Safe to call when already disconnected, and safe to call repeatedly:
+        ``_ensure_ws`` clears ``_stop_event`` and restarts the listener, so
+        the next operation reconnects on demand.
+        """
         self._stop_event.set()
+        self._stop_idle_reaper()
         with self._ws_lock:
             if self._ws is not None:
                 try:

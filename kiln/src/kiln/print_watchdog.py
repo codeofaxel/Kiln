@@ -43,6 +43,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.auto_record_hook import note_cancel_requested
+
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
@@ -477,7 +479,14 @@ class PrintWatchdog:
             return None
 
         try:
-            state = self._adapter.get_state()
+            from kiln.printers.engagement import internal_read
+
+            # Kiln's own polling of a machine it is already responsible for, not a
+            # person commanding a printer.  Exempt so a background loop can never
+            # spin on a refusal — a health check that errors every tick is worse
+            # than one that does not run.
+            with internal_read():
+                state = self._adapter.get_state()
         except Exception:
             logger.exception("PrintWatchdog: get_state() failed; skipping tick")
             return None
@@ -723,6 +732,24 @@ class PrintWatchdog:
         with self._lock:
             self.anomaly_triggered = True
 
+        # This door bypasses the EmergencyCoordinator (it holds the adapter
+        # and halts it directly, which is the point — no lookups between a
+        # red flag and the M112), so it files its own this-job-is-ending
+        # intent.  Without one, the idle the printer lands on after the halt
+        # reads as a natural finish and a watchdog-stopped print is recorded
+        # a SUCCESS — the exact print the learning DB most needs to know
+        # went wrong.  Filed before the halt: the terminal transition can
+        # arrive the moment the command lands.
+        try:
+            from kiln.auto_record_hook import register_cancel_intent
+            from kiln.printers.base import outcome_printer_name
+
+            register_cancel_intent(outcome_printer_name(self._adapter))
+        except Exception:  # noqa: BLE001 — never delay the halt
+            logger.debug(
+                "PrintWatchdog: cancel-intent registration failed", exc_info=True
+            )
+
         # Emergency stop — isolated try/except so a failed e-stop still
         # fires the callback and sets the latch.
         try:
@@ -730,6 +757,14 @@ class PrintWatchdog:
             logger.error("PrintWatchdog: emergency_stop() dispatched")
         except Exception:
             logger.exception("PrintWatchdog: emergency_stop() FAILED")
+        finally:
+            # An e-stop ends the print as surely as a cancel does, and it is
+            # the ending we are most certain was not a clean finish.  Noted
+            # AFTER the halt is dispatched: this touches the database, and
+            # nothing queues in front of stopping the machine.  In
+            # ``finally`` so a failed e-stop still records why the print
+            # ended — that is the case worth learning from.
+            note_cancel_requested(self._adapter)
 
         # Recording stays above the e-stop and dispatch stays below it, so a
         # red flag's ordering is exactly what it has always been.

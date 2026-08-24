@@ -26,6 +26,21 @@ from kiln.model_visualizer import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _openscad_look_only(monkeypatch: pytest.MonkeyPatch):
+    """These tests exercise the OpenSCAD loop and assert on its argv.
+
+    The stage-look backends (photograph and software paint) sit ahead of
+    that loop and would happily satisfy a render without ever shelling
+    OpenSCAD -- the paint backend needs nothing but numpy, so unlike the
+    browser path there is no environmental reason it would decline here.
+    Opting the whole family out keeps every assertion below about the
+    code it was written to test.  Stage-look behaviour has its own
+    files: test_stage_still.py and test_stage_paint.py.
+    """
+    monkeypatch.setenv("KILN_NO_STAGE_STILLS", "1")
+
+
 @pytest.fixture
 def tmp_stl(tmp_path: Path) -> Path:
     """Create a minimal valid binary STL with 1 triangle."""
@@ -535,3 +550,85 @@ class TestPreviewSupersample:
         assert result["success"] is True
         imgsize_args = [a for c in captured for a in c if a.startswith("--imgsize=")]
         assert imgsize_args == ["--imgsize=800,600"], imgsize_args
+
+
+class TestDefaultOutputDirIsUnshared:
+    """Two calls may never share an intermediate, whatever the inputs are named.
+
+    The emboss engine names every text-decorated mesh ``line_0.stl``, and
+    the old default wrote ``<basename>_<angle>.png`` into ONE shared
+    directory — so concurrent sessions rendering different objects
+    clobbered each other's intermediates, and the content-keyed render
+    cache then copied the WRONG object's pixels into an honestly-keyed
+    slot (measured 2026-08-14: a coaster's cache entry holding a pet tag a
+    parallel session rendered the same minute).  The default is a fresh
+    per-call subdirectory now; only these tests stand between that and the
+    regression, because the collision needs two live sessions to show up
+    by itself.
+    """
+
+    def test_two_default_dirs_never_collide(self):
+        from kiln.model_visualizer import _default_output_dir
+
+        a, b = _default_output_dir(), _default_output_dir()
+        assert a != b
+        assert os.path.isdir(a) and os.path.isdir(b)
+        # Both stay under the one discoverable, prunable root.
+        import tempfile
+
+        root = os.path.join(tempfile.gettempdir(), "kiln_visualizations")
+        assert os.path.dirname(a) == root and os.path.dirname(b) == root
+
+    def test_same_basename_meshes_get_distinct_view_paths(self, tmp_path: Path):
+        """End to end through visualize_model, no output_dir supplied.
+
+        Stubs OpenSCAD the way the supersample tests do — the renderer
+        is not what's under test, and CI has no OpenSCAD binary.
+        """
+        from PIL import Image
+
+        # Two different "objects" that share the emboss engine's generic
+        # basename, in separate work dirs — exactly the shipped shape.
+        dir_a = tmp_path / "make_a"
+        dir_b = tmp_path / "make_b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        mesh_a = dir_a / "line_0.stl"
+        mesh_b = dir_b / "line_0.stl"
+        one_tri = (
+            b"\x00" * 80
+            + struct.pack("<I", 1)
+            + struct.pack("<fff", 0, 0, 1)
+            + struct.pack("<fff", 0, 0, 0)
+            + struct.pack("<fff", 1, 0, 0)
+            + struct.pack("<fff", 0, 1, 0)
+            + struct.pack("<H", 0)
+        )
+        mesh_a.write_bytes(one_tri)
+        mesh_b.write_bytes(one_tri)
+
+        def mock_run(cmd, **kwargs):
+            w = h = 100
+            for arg in cmd:
+                if arg.startswith("--imgsize="):
+                    w, h = (int(x) for x in arg.split("=", 1)[1].split(","))
+            for i, arg in enumerate(cmd):
+                if arg == "-o" and i + 1 < len(cmd) and cmd[i + 1].endswith(".png"):
+                    Image.new("RGB", (w, h), (170, 170, 170)).save(cmd[i + 1])
+            mock = MagicMock()
+            mock.returncode = 0
+            return mock
+
+        with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
+             patch("subprocess.run", side_effect=mock_run):
+            va = visualize_model(str(mesh_a), angles=["isometric"])
+            vb = visualize_model(str(mesh_b), angles=["isometric"])
+
+        paths_a = {v["path"] for v in va.get("views", []) if v.get("path")}
+        paths_b = {v["path"] for v in vb.get("views", []) if v.get("path")}
+        assert paths_a and paths_b, (va, vb)
+        assert paths_a.isdisjoint(paths_b), (
+            "same-basename meshes rendered to the same intermediate paths — "
+            "a concurrent session would clobber them and poison the "
+            "content-keyed render cache"
+        )

@@ -279,11 +279,29 @@ def _auto_wrap_bambu_3mf(
         stl_paths, source_3mf = thumbnail_inputs_for_model(stl_path)
 
         gcode_body = _Path(gcode_path).read_text(encoding="utf-8")
+        # This door builds its own settings rather than going through the
+        # adapter, so it has to ask the machine what colour is loaded the
+        # same way the adapter does — otherwise the everyday slice keeps
+        # declaring white at a printer holding red, drawing a white
+        # preview and then warning about the mismatch it just created.
+        # Best-effort and cached-only: an unreachable printer costs the
+        # colour, never the wrap.
+        _loaded_color: str | None = None
+        try:
+            import kiln.server as _s
+
+            _adapter = _s._get_adapter()
+            if hasattr(_adapter, "active_filament_color"):
+                _loaded_color = _adapter.active_filament_color()
+        except Exception as exc:  # noqa: BLE001
+            _logger.debug("Filament colour unavailable for wrap: %s", exc)
+
         settings = BambuPrintSettings(
             model_name=_Path(gcode_path).stem,
             # Temps default to PLA; the PrusaSlicer gcode body already
             # contains M104/M190 with the correct values from the
             # profile, so these are only used for metadata fields.
+            filament_colors=[_loaded_color] if _loaded_color else None,
         )
         wrap = build_bambu_3mf(
             gcode_body,
@@ -317,6 +335,41 @@ def _auto_wrap_bambu_3mf(
     except Exception as exc:  # noqa: BLE001
         _logger.warning("Bambu auto-wrap failed: %s — leaving as raw gcode", exc)
         return (None, f"Bambu auto-wrap failed: {exc}")
+
+
+def _steer_to_wrapped_upload(
+    response: dict,
+    threemf_path: str,
+    effective_printer_id: str | None,
+) -> None:
+    """STEER, don't just validate — name the file the printer can print.
+
+    This tool was TOLD the target printer, so it must not hand back two
+    files and let the caller guess: on a Bambu the raw gcode carries no
+    start block, so uploading it is refused three steps later by the
+    homing gate (incident #0 class).  ``output_path`` already points at
+    the 3MF, but the human-readable message is built back in
+    ``kiln.slicer`` BEFORE the wrap exists and still names the gcode —
+    so the prose and the field disagreed, and prose is what an agent
+    reads.  Measured 2026-08-17: an agent holding both files picked the
+    unprintable one, because the message and ``upload_file``'s docstring
+    both pointed at it.
+    """
+    response["recommended_upload_path"] = threemf_path
+    response["recommended_upload_reason"] = (
+        f"{effective_printer_id or 'This printer'} starts prints "
+        f"from a .3mf project file; the raw .gcode has no start "
+        f"block (no G28 homing) and will be refused at upload."
+    )
+    response["raw_gcode_note"] = (
+        "Kept for inspection and for printers that take bare "
+        "gcode — NOT for this printer."
+    )
+    wrapped_name = os.path.basename(threemf_path)
+    response["message"] = (
+        f"{response.get('message', 'Sliced')} "
+        f"Upload {wrapped_name}."
+    ).strip()
 
 
 def _maybe_auto_assembly_manual(metadata: dict) -> dict | None:
@@ -914,6 +967,11 @@ class _SlicerToolsPlugin:
                     if warning:
                         response.setdefault("warnings", []).append(warning)
 
+                if threemf_path:
+                    _steer_to_wrapped_upload(
+                        response, threemf_path, effective_printer_id,
+                    )
+
                 # Surface the bed-fit result so callers can see if we
                 # auto-centered + the translation applied.
                 if gate_info.get("gate") != "skipped_no_printer":
@@ -1278,6 +1336,7 @@ class _SlicerToolsPlugin:
             auto_center: bool = True,
             metadata: dict | None = None,
             skip_validation: bool = False,
+            preview_token: str | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -1403,10 +1462,7 @@ class _SlicerToolsPlugin:
                 # material string.)
                 if material is None:
                     try:
-                        if printer_name:
-                            _adapter = _srv._get_registry().get(printer_name)
-                        else:
-                            _adapter = _srv._get_adapter()
+                        _adapter = _srv._resolve_adapter(printer_name)
                         if hasattr(_adapter, "get_ams_status"):
                             ams = _adapter.get_ams_status()
                             tray_now = str(ams.get("tray_now", "255"))
@@ -1673,7 +1729,7 @@ class _SlicerToolsPlugin:
                 safety_printer = _srv._resolve_effective_printer_name(printer_name)
                 if block := _srv._emergency_latch_error("slice_and_print", safety_printer):
                     return block
-                pf = unwrap_tool_result(_srv.preflight_check())
+                pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
                 if not pf.get("ready", False):
                     _srv._audit(
                         "slice_and_print",
@@ -1748,9 +1804,17 @@ class _SlicerToolsPlugin:
                 # ``sent_at`` is what lets the verdict below tell a reading
                 # about THIS command from the printer's last word about the
                 # previous job.  Capture it before the command, not after.
+                # You chose a file; Kiln chose how it sits on the plate.
+                # Validated against the INPUT model, which is what a user can
+                # actually preview before calling this.
+                if block := _srv._preview_gate_error(
+                    "slice_and_print", input_path, preview_token,
+                    printer_name=printer_name,
+                ):
+                    return block
                 sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name, **print_kwargs)
-                _srv._get_heater_watchdog().notify_print_started()
+                _srv._note_print_started(adapter)
 
                 base_name = os.path.basename(input_path)
                 verdict = resolve_print_start(

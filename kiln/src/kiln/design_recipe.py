@@ -204,12 +204,26 @@ def save_recipe(recipe: DesignRecipe, directory: str) -> str:
 
 
 def load_recipe(path: str) -> DesignRecipe:
-    """Deserialize a recipe from *path*.
+    """Deserialize a recipe from *path* — a recipe file OR a design directory.
 
-    :raises FileNotFoundError: If *path* does not exist.
+    ``save_recipe`` takes the design *directory* while this took only the
+    file inside it, and that asymmetry made every caller a coin-flip: three
+    sibling tools handed the directory here and raised ``IsADirectoryError``
+    on every call.  Accepting both shapes at the engine ends the class — a
+    directory resolves to its ``.kiln_recipe.json``.
+
+    :raises FileNotFoundError: If *path* does not exist, or is a directory
+        with no ``.kiln_recipe.json`` inside it.
     :raises json.JSONDecodeError: If the file is not valid JSON.
     :raises KeyError: If required fields are missing.
     """
+    if os.path.isdir(path):
+        candidate = os.path.join(path, _RECIPE_FILENAME)
+        if not os.path.isfile(candidate):
+            raise FileNotFoundError(
+                f"No {_RECIPE_FILENAME} in directory: {path}"
+            )
+        path = candidate
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
     return DesignRecipe.from_dict(data)

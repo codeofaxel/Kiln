@@ -269,10 +269,14 @@ class TestGateNeverTouchesSafety:
             _adapter(), "transformed_resume_ab12.3mf", {},
         ) is None
 
-    def test_control_paths_do_not_route_through_the_gate(self):
-        """Status, pause, cancel and emergency stop must work on every
-        machine at every tier.  They are separate adapter methods and never
-        call start_print — this pins that they stay that way."""
+    def test_control_paths_still_bypass_the_print_start_gate(self):
+        """A control command must never run the PRINT-START gate.
+
+        This half of the original assertion is unchanged and still matters:
+        pausing a running print must not be re-judged for bed fit, hotend
+        ceiling or concurrency-at-start.  What changed is the other half —
+        see the test below.
+        """
         import inspect
 
         from kiln.printers.base import PrinterAdapter
@@ -283,9 +287,66 @@ class TestGateNeverTouchesSafety:
         ):
             src = inspect.getsource(getattr(PrinterAdapter, method))
             assert "run_adapter_gate" not in src, (
-                f"{method} must never be tier-gated — it is how a user "
-                f"retains control of a hot machine"
+                f"{method} must never run the print-start gate — its checks "
+                f"are about starting a job, not operating a running one"
             )
+
+    def test_control_paths_consult_the_single_printer_engagement(self):
+        """Below the fleet tier, Kiln works with one machine at a time.
+
+        This test used to assert the opposite: that control paths were never
+        tier-gated at all, on the reasoning that a licensing rule must never
+        cost a user control of a hot machine.  That was overruled
+        deliberately on 2026-08-17, and the reasoning is recorded so it is
+        not quietly reversed by whoever reads this next.
+
+        Kiln is not the safety system.  Thermal runaway protection lives in
+        the printer's own firmware and the machine has its own controls and
+        power switch.  And Kiln does not refuse to STOP for free what it
+        never agreed to START for free: below the fleet tier it drives one
+        machine, so it is one machine it takes responsibility for.  The
+        floors that remain are pinned by the two tests after this one.
+
+        Asserted behaviourally rather than by reading source: ``functools.
+        wraps`` sets ``__wrapped__``, so ``inspect.getsource`` follows a
+        wrapper straight back to the original and would report the gate
+        missing while it is installed and working.
+        """
+        from kiln.printers.base import PrinterAdapter
+        from kiln.printers.engagement import GATED_ACTIONS
+
+        for action in sorted(GATED_ACTIONS):
+            method = getattr(PrinterAdapter, action, None)
+            if method is None or getattr(method, "__isabstractmethod__", False):
+                # Abstract here; the implementing adapter carries the wrapper.
+                continue
+            assert getattr(method, "_kiln_engagement_wrapped", False), (
+                f"{action} is not gated — every printer-directed command has "
+                f"to ask which machine Kiln is working with, or the rule only "
+                f"covers whichever doors somebody remembered"
+            )
+
+    def test_the_machine_kiln_drives_keeps_every_command(self):
+        """The floor: nothing is ever taken away on the engaged machine."""
+        from kiln.printers.engagement import GATED_ACTIONS, check_command, engage
+
+        adapter = _adapter(serial="AAA111", state=PrinterStatus.PRINTING)
+        engage(adapter, None, reason="started", label="a1")
+        for action in sorted(GATED_ACTIONS):
+            assert check_command(adapter, action) is None, action
+
+    def test_an_unknown_tier_never_costs_anyone_a_command(self):
+        """Soft-pass is the whole posture: prove it, or allow it."""
+        from kiln.printers import engagement
+
+        adapter = _adapter(serial="AAA111", state=PrinterStatus.PRINTING)
+        engagement.engage(adapter, None, reason="started", label="a1")
+        other = _adapter(serial="BBB222", state=PrinterStatus.PRINTING)
+        # kiln-pro absent is the common install, and it reads as "unknown".
+        assert engagement._multi_machine_tier() is False
+        # ...but an unreachable engaged peer still releases rather than blocks.
+        engagement._verify_cache.clear()
+        assert engagement.check_command(other, "emergency_stop") is None
 
 
 class TestPossessionIsFree:

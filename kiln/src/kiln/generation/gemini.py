@@ -53,6 +53,7 @@ from kiln.generation.base import (
     GenerationStatus,
 )
 from kiln.generation.visual_verify import VerificationResult, VisualVerifier
+from kiln.openscad_runner import run_openscad
 
 logger = logging.getLogger(__name__)
 
@@ -1075,12 +1076,11 @@ class GeminiDeepThinkProvider(GenerationProvider):
             work_dir = tempfile.mkdtemp(prefix="kiln_gemini_scad_")
             try:
                 try:
-                    result = subprocess.run(
+                    result = run_openscad(
                         cmd,
-                        capture_output=True,
-                        text=True,
                         timeout=self._compile_timeout,
                         cwd=work_dir,
+                        output_path=out_path,
                     )
                 except subprocess.TimeoutExpired:
                     job = GenerationJob(

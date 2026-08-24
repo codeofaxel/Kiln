@@ -19,8 +19,11 @@ Everything here is best-effort and silent.  The OpenSCAD renderer in
 backend runs only when EVERY precondition holds:
 
 * a chromium-family binary is discoverable (``KILN_STAGE_BROWSER``
-  override, the Playwright browser caches, a system Chrome/Chromium/
-  Edge/Brave, or PATH) — never downloaded, never required;
+  override, else Playwright's chrome-headless-shell; on non-macOS also
+  Playwright's Chromium, a system Chrome/Chromium/Edge/Brave, or PATH —
+  on macOS a full ``.app`` browser is never auto-picked, because
+  launching one headlessly bounces a Dock icon; see
+  ``_browser_candidates``) — never downloaded, never required;
 * the cached stage document (``kiln.stage_cache``) is present AND
   still-capable (carries the ``__KILN_STILL__`` still-mode block — an
   older cached document simply means OpenSCAD until the next refresh);
@@ -59,6 +62,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -91,6 +95,20 @@ _STILL_MARKER = "__KILN_STILL__"
 #: against a stage that cannot honour it declines to OpenSCAD.
 _STILL_COLOR_MARKER = "STILL.color"
 
+#: Capability sniff for the batch still mode, same pattern as the colour
+#: marker above: the cached stage document either carries the pose-grid
+#: driver or it predates it, and a document that predates it gets the
+#: per-angle loop it has always understood.  Tile composition is entirely
+#: the DOCUMENT's business — it lays each tile out as canvas over its own
+#: 56px rail strip, so a cropped tile is byte-for-byte a single-shot
+#: still; this side only cuts rectangles of ``tile_w x tile_h``.
+_STILL_POSES_MARKER = "STILL.poses"
+
+#: Tiles per grid row in batch mode.  Three keeps a six-angle set at a
+#: window SwiftShader is comfortable rasterising (4800x2400 at the
+#: default supersample) rather than one enormous strip.
+_STILL_GRID_COLS = 3
+
 #: Payload caps for a LOCAL render.  The inline-conversation caps
 #: (80k triangles) exist to protect chat transport and model context;
 #: a headless browser on this machine has neither constraint.  Meshes
@@ -108,6 +126,21 @@ _VIRTUAL_TIME_MS = 9_000
 #: and a hung browser must never hang a preview call.
 _VIEW_TIMEOUT_S = 60
 
+#: Wall-clock budget for the whole photograph SET, not one view.  MCP
+#: clients bound the tool CALL (~60 s observed 2026-08-19), and each
+#: angle here is its own browser launch + document load + three.js
+#: parse — ~17 s cold, ~6 s warm per angle, measured on a small mesh —
+#: so a multi-angle autofire could spend the client's entire budget
+#: photographing and time out a call the server then completes anyway:
+#: the user sees a failure, the artifact never reaches them.  Spending
+#: past this budget declines the SET (all-or-nothing) and the software
+#: painter, ~2.6 s/angle at calibrated visual parity, takes every
+#: angle.  Env-tunable; 0 disables.  Chosen so the worst case — budget
+#: spent, plus the one in-flight angle, plus the painter's full set —
+#: still lands inside the client budget with room for the caller's own
+#: work around the render.
+_STILL_SET_BUDGET_S = float(os.environ.get("KILN_STAGE_STILL_BUDGET_S", "20") or 0)
+
 #: Blank-frame guard threshold, measured as the LARGEST per-channel
 #: standard deviation — never luminance.  Calibrated against real
 #: captures (2026-08-10): an empty stage measures 9.7, a grey part
@@ -120,20 +153,53 @@ _MIN_STDDEV = 15.0
 _MIN_BYTES_PER_25_PX = 1  # floor = (width * height) // 25 bytes
 
 
+#: Whether auto-discovery must avoid ``.app``-bundled browsers (macOS).
+#: Module-level so tests can exercise both branches without faking
+#: ``sys.platform`` process-wide.
+_MAC_DOCK = sys.platform == "darwin"
+
+
 def _browser_candidates() -> list[Path]:
     """Chromium-family binaries this machine might have, best first.
 
     Playwright caches lead (headless-shell is purpose-built and has no
-    profile/UI baggage), newest build first; system browsers follow;
-    PATH lookups last.  Nothing is ever downloaded.
+    profile/UI baggage), newest build first.  Nothing is ever downloaded.
+
+    ON macOS, AUTO-DISCOVERY OFFERS headless-shell ONLY -- never a full
+    ``.app`` browser.  Launching a ``.app``-bundled Chromium headlessly
+    puts a second browser icon in the user's Dock for the life of the
+    process, and no flag prevents it.  Measured 2026-08-18 on macOS
+    26.5.2 with Chrome 151, ten launches: bare ``--headless`` and
+    ``--headless=new`` both register with LaunchServices and both bounce
+    the Dock icon (confirmed by a human watching the Dock), even though
+    ``lsappinfo`` types the entry ``BackgroundOnly``.  The mode flag was
+    the tidy story and it is not the mechanism; the bundle is.
+    chrome-headless-shell carries no app bundle and no GUI code, so it
+    is the one binary that provably never touches the Dock -- which is
+    why Google ships it as a separate binary at all.  A machine with
+    Chrome but no Playwright cache therefore gets the OpenSCAD look
+    rather than a render that spams the Dock; anyone who wants stage
+    stills through a full browser anyway can say so explicitly with
+    ``KILN_STAGE_BROWSER``, which is honored unchanged.
+
+    Elsewhere (Linux: no Dock, and the PATH binaries are bare
+    executables) the wider search stays: Playwright's Chromium, system
+    installs, then PATH.
     """
     out: list[Path] = []
-    for cache in (
+    caches = (
         Path.home() / "Library" / "Caches" / "ms-playwright",
         Path.home() / ".cache" / "ms-playwright",
-    ):
+    )
+    for cache in caches:
+        out.extend(sorted(
+            cache.glob("chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell"),
+            reverse=True,
+        ))
+    if _MAC_DOCK:
+        return out
+    for cache in caches:
         for pattern in (
-            "chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell",
             "chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium",
             "chromium-*/chrome-linux/chrome",
         ):
@@ -256,17 +322,27 @@ def _build_harness(
     az_deg: float,
     el_deg: float,
     color: str | None = None,
+    poses: list[dict] | None = None,
+    grid: dict | None = None,
 ) -> str | None:
     """The stage document with this view's still config baked in.
 
     Data-only injection: the config script lands immediately after
     ``<body>`` so it exists before the stage script runs.  Every
     behaviour it triggers lives in the stage document itself.
+
+    With *poses* and *grid*, one harness carries EVERY angle: the
+    document renders each pose off one model build and lays the shots
+    out as a zero-gap grid this engine crops back apart — one browser
+    launch for the whole set instead of one per angle.
     """
     if document.count("<body>") != 1:
         logger.debug("stage stills: document has no unique <body> anchor")
         return None
     still: dict = {"payload": payload, "az_deg": az_deg, "el_deg": el_deg}
+    if poses and grid:
+        still["poses"] = poses
+        still["grid"] = grid
     if color:
         still["color"] = color
     # JSON inside a <script> block: json.dumps does NOT escape "</script>",
@@ -288,25 +364,56 @@ def _build_harness(
     )
 
 
+#: Every flag a headless still launch needs that does not depend on the shot.
+#: Exported because anything else that drives the same browser -- a test, a
+#: sibling harness -- must launch it the SAME way, and the only way to
+#: guarantee that is to read this list rather than retype it.  A hand copy is
+#: how the keychain flag below came to be missing from one caller and present
+#: in the other: two lists claiming to describe one launch, free to disagree.
+STILL_BROWSER_FLAGS: tuple[str, ...] = (
+    # Deliberately NOT "--headless=new": the mode spelling was measured to
+    # make no difference to the macOS Dock-icon problem (see
+    # _browser_candidates), and on current Chrome the two spellings select
+    # the same mode anyway.  Bare --headless is the one every
+    # chromium-family binary accepts, chrome-headless-shell included.
+    "--headless",
+    "--hide-scrollbars",
+    # WebGL in CLI screenshot mode needs the software rasterizer
+    # spelled out; without these the stage gets no GL context at all.
+    "--use-angle=swiftshader",
+    "--enable-unsafe-swiftshader",
+    "--no-first-run",
+    # The throwaway --user-data-dir has no encryption key, so Chrome reaches
+    # for the OS keyring to mint one.  A headless run has no keyring session
+    # to reach, so macOS throws a modal "a keychain cannot be found to store
+    # Chrome" at whoever is sitting at the machine -- once per still, in
+    # front of a user who never asked for a browser.  A disposable
+    # screenshot has nothing worth encrypting, so it stays out entirely.
+    "--use-mock-keychain",
+    "--disable-extensions",
+    "--disable-crash-reporter",
+    "--mute-audio",
+)
+
+
 def _shoot(browser: Path, harness_path: Path, png_path: str,
-           width: int, height: int, profile_dir: Path) -> bool:
-    """One headless screenshot.  True only for exit 0 + a written file."""
+           width: int, height: int, profile_dir: Path,
+           timeout_s: float = _VIEW_TIMEOUT_S) -> bool:
+    """One headless screenshot.  True only for exit 0 + a written file.
+
+    *timeout_s* is the file-poll ceiling for THIS shot.  The batch path
+    tightens it to the set budget: its one launch IS the whole set, so a
+    browser hung past the budget must fail here rather than spend the
+    per-view ceiling and hand the painter a bill the client call cannot
+    pay.
+    """
     cmd = [
         str(browser),
-        "--headless",
+        *STILL_BROWSER_FLAGS,
         f"--screenshot={png_path}",
         f"--window-size={width},{height}",
         f"--virtual-time-budget={_VIRTUAL_TIME_MS}",
-        "--hide-scrollbars",
-        # WebGL in CLI screenshot mode needs the software rasterizer
-        # spelled out; without these the stage gets no GL context at all.
-        "--use-angle=swiftshader",
-        "--enable-unsafe-swiftshader",
         f"--user-data-dir={profile_dir}",
-        "--no-first-run",
-        "--disable-extensions",
-        "--disable-crash-reporter",
-        "--mute-audio",
         f"file://{harness_path}",
     ]
     try:
@@ -323,7 +430,7 @@ def _shoot(browser: Path, harness_path: Path, png_path: str,
     # forever).  So poll for a written-and-stable file, and kill the
     # browser once it exists; waiting for exit would turn every view
     # into a full timeout on the most common browser there is.
-    deadline = time.monotonic() + _VIEW_TIMEOUT_S
+    deadline = time.monotonic() + timeout_s
     last_size = -1
     try:
         while time.monotonic() < deadline:
@@ -342,6 +449,110 @@ def _shoot(browser: Path, harness_path: Path, png_path: str,
             proc.kill()
             with contextlib.suppress(Exception):
                 proc.wait(5)
+
+
+def _shoot_batch(
+    browser: Path,
+    document: str,
+    payload: dict,
+    selected: list[tuple[str, str]],
+    rotations: dict[str, tuple[float, float, float]],
+    *,
+    output_dir: str,
+    stem: str,
+    shot_w: int,
+    shot_h: int,
+    ss: int,
+    width: int,
+    height: int,
+    color: str | None,
+    tmp: Path,
+    profile_dir: Path,
+) -> list[dict] | None:
+    """Every angle from ONE browser launch, or ``None`` to fall back.
+
+    The document renders each pose off a single model build and lays the
+    shots out as a zero-gap grid; this side shoots the grid once and
+    crops the tiles back apart.  Measured 2026-08-19: the per-angle loop
+    paid a full browser launch + document load + three.js parse per
+    angle (~17s cold, ~6s warm each); the grid pays it once.
+
+    Every guard the single-shot path applies to a still applies to a
+    TILE here — the blank-frame check runs per crop, and any miss
+    declines the whole batch (the caller falls back to the per-angle
+    loop or the painter, never to a partial set).
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return None  # cropping is PIL work; the loop path needs none
+
+    from kiln.preview_render import downscale_png
+
+    poses = []
+    for label, _description in selected:
+        rx, _ry, rz = rotations[label]
+        az_deg, el_deg = _openscad_rotation_to_orbit(rx, rz)
+        poses.append({"az_deg": az_deg, "el_deg": el_deg})
+
+    cols = min(_STILL_GRID_COLS, len(selected))
+    rows = -(-len(selected) // cols)
+    grid = {"tile_w": shot_w, "tile_h": shot_h, "cols": cols}
+    harness = _build_harness(
+        document, payload, poses[0]["az_deg"], poses[0]["el_deg"],
+        color=color.strip() if color else None, poses=poses, grid=grid,
+    )
+    if harness is None:
+        return None
+    harness_path = tmp / "still_batch.html"
+    harness_path.write_text(harness, encoding="utf-8")
+
+    grid_png = str(tmp / "still_grid.png")
+    # One launch is the whole set, so its poll ceiling is the SET budget
+    # (when one is set), never the roomier per-view ceiling: a browser
+    # hung past the budget must decline while the painter can still fit
+    # inside the client's request window.
+    shot_timeout = (
+        min(_VIEW_TIMEOUT_S, _STILL_SET_BUDGET_S)
+        if _STILL_SET_BUDGET_S else _VIEW_TIMEOUT_S
+    )
+    if not _shoot(browser, harness_path, grid_png,
+                  cols * shot_w, rows * shot_h, profile_dir,
+                  timeout_s=shot_timeout):
+        return None
+
+    try:
+        with Image.open(grid_png) as sheet:
+            # A browser that clamped the window (or a document that never
+            # composed its grid) yields the wrong sheet — reject it whole
+            # rather than crop garbage into per-angle files.
+            if sheet.size != (cols * shot_w, rows * shot_h):
+                logger.debug(
+                    "stage stills: grid sheet is %s, expected %s — falling back",
+                    sheet.size, (cols * shot_w, rows * shot_h),
+                )
+                return None
+            views: list[dict] = []
+            for i, (label, description) in enumerate(selected):
+                x = (i % cols) * shot_w
+                y = (i // cols) * shot_h
+                tile = sheet.crop((x, y, x + shot_w, y + shot_h))
+                png_path = os.path.join(output_dir, f"{stem}_{label}.png")
+                tile.save(png_path)
+                if not _frame_ok(png_path, shot_w, shot_h):
+                    logger.debug(
+                        "stage stills: blank tile for %s — falling back", label
+                    )
+                    return None
+                if ss > 1:
+                    downscale_png(png_path, width, height)
+                views.append(
+                    {"angle": label, "description": description, "path": png_path}
+                )
+            return views
+    except Exception as exc:  # noqa: BLE001 — a bad sheet is a fallback, not a crash
+        logger.debug("stage stills: grid crop failed: %s", exc)
+        return None
 
 
 def try_render_stage_views(
@@ -407,12 +618,59 @@ def try_render_stage_views(
         shot_w, shot_h = width * ss, height * ss
 
         stem = Path(file_path).stem
+        # The front door pre-creates output_dir; a direct caller may not,
+        # and a missing directory here fails as a silent per-view decline
+        # that reads like a browser problem (it cost two misdiagnoses in
+        # one afternoon).  Same line stage_paint carries.
+        os.makedirs(output_dir, mode=0o700, exist_ok=True)
         views: list[dict] = []
+        # The photograph runs inside a live tool call, and MCP clients
+        # enforce a request budget of their own (~60 s observed).  Each
+        # angle is a full browser launch + document load + three.js parse
+        # — measured 2026-08-19 at ~17 s/angle cold and ~6 s warm on a
+        # tiny mesh — so a 3-4 angle autofire can spend the client's whole
+        # budget photographing while the painter delivers the same
+        # calibrated look at ~2.6 s/angle.  The budget is checked BEFORE
+        # each shot: overrunning it declines the whole set (the
+        # all-or-nothing contract above), and the painter takes every
+        # angle.  A budget of 0 disables the check.
+        deadline = (
+            time.monotonic() + _STILL_SET_BUDGET_S if _STILL_SET_BUDGET_S else None
+        )
         tmp = Path(tempfile.mkdtemp(prefix="kiln_stage_still_"))
         try:
             profile_dir = tmp / "profile"
             profile_dir.mkdir()
+
+            # Batch path: one browser launch for the whole set.  Gated on
+            # the cached document carrying the pose-grid driver — an older
+            # document gets the per-angle loop it has always understood.
+            if len(selected) > 1 and _STILL_POSES_MARKER in document:
+                batched = _shoot_batch(
+                    browser, document, payload, selected, rotations,
+                    output_dir=output_dir, stem=stem,
+                    shot_w=shot_w, shot_h=shot_h, ss=ss,
+                    width=width, height=height,
+                    color=color, tmp=tmp, profile_dir=profile_dir,
+                )
+                if batched is not None:
+                    return batched
+                logger.debug("stage stills: batch shot declined — per-angle loop")
+                if deadline is not None and time.monotonic() > deadline:
+                    logger.debug(
+                        "stage stills: set budget spent by the batch attempt "
+                        "— declining to the painter"
+                    )
+                    return None
+
             for label, description in selected:
+                if deadline is not None and time.monotonic() > deadline:
+                    logger.debug(
+                        "stage stills: set budget (%.0fs) spent after %d/%d "
+                        "angle(s) — declining to the painter",
+                        _STILL_SET_BUDGET_S, len(views), len(selected),
+                    )
+                    return None
                 rx, _ry, rz = rotations[label]
                 az_deg, el_deg = _openscad_rotation_to_orbit(rx, rz)
                 harness = _build_harness(

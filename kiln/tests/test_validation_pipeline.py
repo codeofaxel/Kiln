@@ -1709,24 +1709,225 @@ def _make_normal_size_stl(
 class TestPrepareAiModelAutoScale:
     """Auto-scaling: tiny models get scaled up, normal models left alone."""
 
-    def test_tiny_model_auto_scaled_to_reasonable_size(self, tmp_path: Path) -> None:
-        """Model < 10mm triggers auto-scale — test the scaling helper directly."""
+    def test_a_metre_export_is_corrected_by_exactly_one_thousand(
+        self, tmp_path: Path,
+    ) -> None:
+        """A 30mm part written in metres reads as 0.03 and must come back 30.
+
+        The factor is the assertion.  Its predecessor asserted only
+        ``factor > 1.0``, which the scale-to-80mm rule satisfied while
+        returning 2667x — a passing test for a wrong number.
+        """
         from kiln.plugins.validation_pipeline_tools import _auto_scale_if_needed
 
-        stl = _make_tiny_binary_stl(tmp_path, max_dim_mm=1.9)
-
-        # Simulate what validate_and_prepare would return for inline-parsed dims
+        stl = _make_tiny_binary_stl(tmp_path, max_dim_mm=0.03)
         model_info = {
             "triangles": 2000,
-            "dimensions_mm": {"width_mm": 0.76, "depth_mm": 0.76, "height_mm": 1.9},
-            "bounding_box_volume_cm3": 0.001,
+            "dimensions_mm": {"width_mm": 0.01, "depth_mm": 0.01, "height_mm": 0.03},
         }
 
         scaled_path, factor = _auto_scale_if_needed(stl, model_info)
 
-        assert factor > 1.0, f"Expected scale factor > 1.0, got {factor}"
-        assert scaled_path is not None, "Scaled STL should have been created"
-        assert Path(scaled_path).exists(), "Scaled STL file should exist on disk"
+        assert factor == 1000.0, f"metres → mm is exactly 1000x, got {factor}"
+        assert scaled_path is not None and Path(scaled_path).exists()
+
+    def test_the_auto_correct_band_is_narrow_and_that_is_deliberate(self) -> None:
+        """A 200mm part in metres reads 0.2 — and 0.2 is genuinely ambiguous.
+
+        Metres (200mm), centimetres (2mm) and inches (5.08mm) are all real
+        printable answers, so the honest move is to ask.  Auto-correction
+        therefore only covers metre exports of parts under ~39mm, where
+        every other unit falls below the 1mm printable floor.  That is a
+        deliberate trade of coverage for never being silently wrong, and it
+        is pinned here so shrinking it is a decision rather than a drift.
+        """
+        from kiln.plugins.validation_pipeline_tools import _unit_verdict
+
+        assert _unit_verdict(0.03).status == "corrected"
+        assert _unit_verdict(0.039).status == "corrected"
+        assert _unit_verdict(0.2).status == "ambiguous"
+
+        asked = _unit_verdict(0.2).describe()
+        assert "meters → 200mm" in asked
+        assert "inches → 5.08mm" in asked
+
+    def test_a_small_real_part_is_left_exactly_as_it_is(self, tmp_path: Path) -> None:
+        """THE REGRESSION: an 8mm gear is a real part, not a unit error.
+
+        The old rule scaled anything under 10mm with >1000 triangles to a
+        fixed 80mm 'reasonable figurine size', so a detailed 8mm part came
+        back 10x too big with a passing check beside it.
+        """
+        from kiln.plugins.validation_pipeline_tools import _auto_scale_if_needed
+
+        stl = _make_tiny_binary_stl(tmp_path, max_dim_mm=8.0)
+        model_info = {
+            "triangles": 20000,
+            "dimensions_mm": {"width_mm": 8.0, "depth_mm": 8.0, "height_mm": 3.0},
+        }
+
+        scaled_path, factor = _auto_scale_if_needed(stl, model_info)
+
+        assert scaled_path is None and factor == 0.0, (
+            "an 8mm part is printable and must not be rescaled"
+        )
+
+    def test_a_large_real_part_is_not_mistaken_for_microns(
+        self, tmp_path: Path,
+    ) -> None:
+        """A 600mm part fits three machines in Kiln's own catalog.
+
+        The old rule shrank anything over 500mm by 0.001, so a 600mm part
+        came back 0.6mm — and 500mm is half the largest build volume Kiln
+        ships (Elegoo OrangeStorm Giga, 1000mm).
+        """
+        from kiln.plugins.validation_pipeline_tools import _auto_scale_if_needed
+
+        stl = _make_tiny_binary_stl(tmp_path, max_dim_mm=600.0)
+        model_info = {
+            "triangles": 20000,
+            "dimensions_mm": {"width_mm": 600.0, "depth_mm": 300.0, "height_mm": 200.0},
+        }
+
+        scaled_path, factor = _auto_scale_if_needed(stl, model_info)
+
+        assert scaled_path is None and factor == 0.0
+
+    def test_a_simple_metre_export_is_corrected_too(self, tmp_path: Path) -> None:
+        """A 12-triangle cube in metres was permanently broken before.
+
+        The old triangle guard (>1000) existed to protect simple small
+        parts, and did it by refusing to correct any simple model at all.
+        """
+        from kiln.plugins.validation_pipeline_tools import _auto_scale_if_needed
+
+        stl = _make_tiny_binary_stl(tmp_path, max_dim_mm=0.03)
+        model_info = {
+            "triangles": 12,
+            "dimensions_mm": {"width_mm": 0.03, "depth_mm": 0.03, "height_mm": 0.03},
+        }
+
+        _, factor = _auto_scale_if_needed(stl, model_info)
+
+        assert factor == 1000.0
+
+    def test_an_ambiguous_size_is_never_guessed_at(self, tmp_path: Path) -> None:
+        """0.5 could be metres (500mm), centimetres (5mm) or inches (12.7mm).
+
+        Nothing distinguishes them, so nothing is changed — a silently
+        wrong size reaches the printer looking exactly like a right one.
+        """
+        from kiln.plugins.validation_pipeline_tools import _auto_scale_if_needed, _unit_verdict
+
+        stl = _make_tiny_binary_stl(tmp_path, max_dim_mm=0.5)
+        model_info = {
+            "triangles": 5000,
+            "dimensions_mm": {"width_mm": 0.5, "depth_mm": 0.5, "height_mm": 0.5},
+        }
+
+        scaled_path, factor = _auto_scale_if_needed(stl, model_info)
+        assert scaled_path is None and factor == 0.0
+
+        verdict = _unit_verdict(0.5)
+        assert verdict.status == "ambiguous"
+        assert len(verdict.candidates) > 1
+        assert "rescale_model" in verdict.describe()
+
+    def test_a_size_no_unit_explains_is_reported_not_invented(self) -> None:
+        """4 billion mm is not a unit error, and pretending otherwise hides it."""
+        from kiln.plugins.validation_pipeline_tools import _unit_verdict
+
+        verdict = _unit_verdict(4_000_000_000.0)
+
+        assert verdict.status == "unexplained"
+        assert verdict.candidates == ()
+        assert "check the export" in verdict.describe()
+
+    def test_a_correction_only_ever_uses_a_real_conversion(self) -> None:
+        """Sweep: no input may produce a factor that is not a real unit."""
+        from kiln.plugins._validation_pipeline_internals import _UNIT_CONVERSIONS
+        from kiln.plugins.validation_pipeline_tools import _unit_verdict
+
+        real = {factor for _, factor in _UNIT_CONVERSIONS}
+        probes = [10.0 ** e for e in range(-9, 10)]
+        probes += [0.25, 0.5, 1.9, 8.0, 25.4, 600.0, 999.0, 1001.0]
+
+        for max_dim in probes:
+            verdict = _unit_verdict(max_dim)
+            if verdict.corrected:
+                assert verdict.factor in real, (
+                    f"{max_dim}mm produced invented factor {verdict.factor}"
+                )
+                landed = max_dim * verdict.factor
+                assert 1.0 <= landed <= 1000.0, (
+                    f"{max_dim}mm 'corrected' to an unprintable {landed}mm"
+                )
+
+    def test_an_oversize_model_is_never_shrunk_on_a_guess(
+        self, tmp_path: Path,
+    ) -> None:
+        """1500mm has TWO real explanations, so neither is acted on.
+
+        A microns export (really a 1.5mm part) and a model genuinely bigger
+        than any machine, headed for split_mesh_to_fit, read identically.
+        Below the 1mm floor no real object exists, so an enlargement acts on
+        the only possible reading — but auto-shrinking everything over
+        1000mm would repeat the 500mm-microns mistake with a better
+        threshold.  Both readings are offered; nothing is rescaled.
+        """
+        from kiln.plugins.validation_pipeline_tools import _auto_scale_if_needed, _unit_verdict
+
+        verdict = _unit_verdict(1500.0)
+        assert verdict.status == "oversize"
+        assert verdict.candidates == (("microns", 0.001),)
+        told = verdict.describe()
+        assert "rescale_model" in told and "split_mesh_to_fit" in told
+
+        stl = _make_tiny_binary_stl(tmp_path, max_dim_mm=1500.0)
+        model_info = {
+            "triangles": 20000,
+            "dimensions_mm": {"width_mm": 1500.0, "depth_mm": 800.0, "height_mm": 400.0},
+        }
+        scaled_path, factor = _auto_scale_if_needed(stl, model_info)
+        assert scaled_path is None and factor == 0.0
+
+    def test_a_microns_export_gets_its_factor_named_not_applied(self) -> None:
+        """A 50000-unit scan (50mm in microns) is told the exact fix."""
+        from kiln.plugins.validation_pipeline_tools import _unit_verdict
+
+        verdict = _unit_verdict(50000.0)
+
+        assert verdict.status == "oversize"
+        assert "x0.001" in verdict.describe()
+        assert "50mm" in verdict.describe()
+
+    def test_a_corrected_diagnosis_on_a_3mf_is_said_not_swallowed(self) -> None:
+        """The format must not decide whether the user is told.
+
+        Only binary STL can be rewritten inline, so a metre-export 3MF gets
+        no rescale — but its size is still unprintable and the diagnosis
+        still holds, so it must come out as a unit_check warning naming the
+        factor, not silence.
+        """
+        from kiln.plugins._validation_pipeline_internals import (
+            _PipelineReport,
+            _step_auto_scale,
+        )
+
+        report = _PipelineReport(
+            input_path="model.3mf",
+            model_info={"dimensions_mm": {"x": 0.01, "y": 0.01, "z": 0.03}},
+        )
+
+        path, auto_scaled = _step_auto_scale(report, "model.3mf", ".3mf")
+
+        assert path == "model.3mf" and auto_scaled is False
+        warnings = [c for c in report.checks if c.name == "unit_check"]
+        assert len(warnings) == 1
+        assert warnings[0].passed is False
+        assert "x1000" in warnings[0].details
+        assert "not rescaled" in warnings[0].details
+        assert report.recommendations and "x1000" in report.recommendations[0]
 
     def test_normal_size_model_not_scaled(self, tmp_path: Path) -> None:
         """Model already at correct size gets no scaling."""
@@ -1977,6 +2178,81 @@ class TestInlineSTLScaleTruncated:
 
 
 # ---------------------------------------------------------------------------
+# Tests — _apply_scale routes through the real rescale engine
+# ---------------------------------------------------------------------------
+
+
+class TestApplyScaleEnginePath:
+    """The primary scale path is the shared ``rescale_stl`` engine.
+
+    Regression for the dead import this replaced: ``from kiln.server
+    import rescale_model`` stopped resolving when the tool moved into a
+    plugin, so every ``_apply_scale`` call silently fell through to the
+    binary-only inline scaler.  These tests pin the engine path by making
+    the fallback unavailable — a re-dead import goes red here, it cannot
+    hide behind the fallback again.
+    """
+
+    def test_engine_path_scales_without_the_fallback(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """With the inline fallback disabled, scaling still works — proof
+        the primary import resolves and the engine really ran."""
+        import kiln.plugins._validation_pipeline_internals as internals
+
+        stl = tmp_path / "box.stl"
+        header = b"\x00" * 80
+        tri = struct.pack(
+            "<12f", 0, 0, 1, 0, 0, 0, 10.0, 0, 0, 0, 10.0, 0,
+        ) + b"\x00\x00"
+        stl.write_bytes(header + struct.pack("<I", 1) + tri)
+
+        def _boom(*_a, **_k):
+            raise AssertionError("fallback must not run — engine path is primary")
+
+        monkeypatch.setattr(internals, "_inline_stl_scale", _boom)
+        scaled_path, factor = internals._apply_scale(str(stl), 2.0)
+
+        assert scaled_path is not None and Path(scaled_path).exists()
+        assert factor == 2.0
+        # The copy contract: the caller's original is never mutated.
+        assert scaled_path != str(stl)
+        original = stl.read_bytes()
+        assert struct.unpack_from("<f", original, 80 + 4 + 12 + 12)[0] == 10.0
+        # And the copy really is scaled: engine writes binary STL.
+        scaled = Path(scaled_path).read_bytes()
+        count = struct.unpack("<I", scaled[80:84])[0]
+        assert count == 1
+        xs = [
+            struct.unpack_from("<9f", scaled, 84 + 12)[i]
+            for i in (0, 3, 6)
+        ]
+        assert abs(max(xs) - 20.0) < 1e-4
+
+    def test_ascii_stl_now_scales(self, tmp_path: Path) -> None:
+        """ASCII STL could never scale before — the inline fallback is
+        binary-only, and the dead primary import meant ASCII input always
+        returned (None, 0.0).  The engine parses both formats."""
+        import kiln.plugins._validation_pipeline_internals as internals
+
+        stl = tmp_path / "ascii.stl"
+        stl.write_text(
+            "solid box\n"
+            "  facet normal 0 0 1\n"
+            "    outer loop\n"
+            "      vertex 0 0 0\n"
+            "      vertex 10 0 0\n"
+            "      vertex 0 10 0\n"
+            "    endloop\n"
+            "  endfacet\n"
+            "endsolid box\n"
+        )
+        scaled_path, factor = internals._apply_scale(str(stl), 2.0)
+        assert scaled_path is not None and Path(scaled_path).exists()
+        assert factor == 2.0
+
+
+# ---------------------------------------------------------------------------
 # Tests — scale_check fires for small inline-parsed model
 # ---------------------------------------------------------------------------
 
@@ -2012,11 +2288,19 @@ def _make_binary_stl_with_dims(
 
 
 class TestScaleCheckFires:
-    """scale_check should fire when inline parser detects a tiny model."""
+    """A small-but-real model is noted, never accused and never rescaled."""
 
-    def test_scale_check_warns_for_small_model(self, tmp_path: Path) -> None:
-        """scale_check should fire when inline parser detects a tiny model."""
-        # Create a tiny model (2mm x 2mm x 2mm)
+    def test_a_2mm_model_is_noted_without_naming_the_one_impossible_unit(
+        self, tmp_path: Path,
+    ) -> None:
+        """2mm is printable, so it passes — and metres is arithmetically out.
+
+        Its predecessor asserted a FAILED ``scale_check`` reading "likely
+        exported in meters", which would make this part 2000mm — larger
+        than every printer in the catalog.  The check named the single unit
+        that could not be the answer, and recommended a "50-100x" factor
+        that is not a unit conversion at all.
+        """
         stl = _make_binary_stl_with_dims(
             tmp_path, x_range=(0, 2), y_range=(0, 2), z_range=(0, 2),
         )
@@ -2030,12 +2314,26 @@ class TestScaleCheckFires:
         ):
             result = _invoke_tool(stl)
 
-        # Assert that a check with name "scale_check" exists and failed
-        scale_checks = [c for c in result["checks"] if c["name"] == "scale_check"]
-        assert len(scale_checks) == 1
-        assert scale_checks[0]["passed"] is False
-        assert "2.0mm" in scale_checks[0]["details"]
-        assert scale_checks[0]["severity"] == "warning"
+        assert not [c for c in result["checks"] if c["name"] == "scale_check"], (
+            "scale_check was folded into unit_check — two rules, one question"
+        )
+
+        notices = [c for c in result["checks"] if c["name"] == "unit_check"]
+        assert len(notices) == 1
+        assert notices[0]["passed"] is True
+        assert notices[0]["severity"] == "info"
+        assert "2mm" in notices[0]["details"]
+        assert "centimeters → 20mm" in notices[0]["details"]
+        assert "inches → 50.8mm" in notices[0]["details"]
+        # "meters" is a substring of "centimeters", so ask the judgement
+        # itself rather than the rendered sentence.
+        from kiln.plugins.validation_pipeline_tools import _unit_verdict
+
+        assert [u for u, _ in _unit_verdict(2.0).candidates] == ["centimeters", "inches"], (
+            "metres would make this 2000mm — larger than any printer Kiln knows"
+        )
+
+        assert not result.get("repaired"), "a 2mm part must not be rescaled"
 
 
 # ---------------------------------------------------------------------------

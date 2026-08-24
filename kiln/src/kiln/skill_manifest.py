@@ -114,6 +114,7 @@ class SkillManifest:
             "For print failures: analyze_print_failure_smart() → get_recovery_plan() → retry_print_with_fix().",
             "Use build_generation_prompt() to enhance generation prompts with design intelligence before calling generate_model().",
             "Use ams_status() to check loaded AMS filaments before multi-color prints.",
+            "After Kiln's code, plugins, or config change, call restart_server() to apply it — never tell the user to quit and reopen their client app.",
         ]
     )
 
@@ -174,8 +175,13 @@ class SkillManifest:
                 "validate_design_for_requirements(design, reqs) — verification",
                 "get_post_processing_guide(material) — finishing guidance",
             ],
-            "fleet_management": [
+            # Every entry here is Business+.  Running machines together is
+            # the fleet product; the single-printer experience is the
+            # printer_status / monitor_print family, which takes a printer
+            # name and is free, so one machine is never behind this.
+            "fleet_management (Business+)": [
                 "fleet_status() — all printers overview",
+                "fleet_pause() / fleet_resume() / fleet_cancel() — stop the fleet gracefully",
                 "route_print_job(file, requirements) — intelligent job routing",
                 "fleet_job_status(job_id) — track distributed jobs",
             ],
@@ -213,7 +219,19 @@ class SkillManifest:
             "recovery": "retry_print_with_fix(file, fixes) — re-slice with corrections",
             "troubleshooting": "troubleshoot_print_issue(issue) — design intelligence diagnosis",
             "post_processing": "get_post_processing_guide(material) — finishing techniques",
-            "fleet": "fleet_status() — fleet overview and job routing",
+            "server_restart": (
+                "restart_server() — hot-restart the MCP server after code, "
+                "plugin, or config changes; the client auto-reconnects. Never "
+                "tell the user to quit and reopen their app for this."
+            ),
+            "server_health": "kiln_health() — versions, uptime, module availability, safety-gate state",
+            "server_cleanup": (
+                "trim_serve_processes(open_sessions=N) — close leftover "
+                "background server copies; refuses while anything is printing"
+            ),
+            "self_update": "upgrade_kiln() — update Kiln itself, then restart_server() to run it",
+            "sign_in": "kiln_signin() — browser sign-in for hosted features (poll with kiln_signin_poll())",
+            "fleet": "fleet_status() — fleet overview and job routing (Business+; for one machine use printer_status(printer_name=...), free)",
             "cost_estimate": "estimate_cost(file) — print cost estimation",
         }
     )
@@ -224,13 +242,32 @@ class SkillManifest:
 
 
 def get_version() -> str:
-    """Get the installed Kiln package version."""
-    try:
-        from importlib.metadata import version
+    """Get the running Kiln version.
 
-        return version("kiln")
-    except Exception:
-        return "unknown"
+    Delegates to :data:`kiln.__version__` rather than asking
+    ``importlib.metadata`` again, for two reasons this function learned
+    the hard way by getting both wrong.
+
+    The distribution is named ``kiln3d``; the IMPORT package is ``kiln``.
+    Asking metadata for ``"kiln"`` therefore raised
+    ``PackageNotFoundError`` on every ordinary install, and the bare
+    ``except`` turned that into the string ``"unknown"`` — which is what
+    this manifest reported to every agent that asked Kiln what it was.
+
+    And metadata is written at INSTALL time, so on an editable install
+    it keeps reporting the version that was current when ``pip install
+    -e`` last ran while the source tree moves on beneath it.  Measured
+    on 2026-08-14: ``pip show kiln-pro`` said 1.1.3 against a source
+    tree that had reached 1.3.2 — a version check answered confidently
+    and wrongly, which is worse than one that fails.
+
+    :data:`kiln.__version__` already resolves the source tree first and
+    falls back across both distribution names, so the fix is to have one
+    answer to this question instead of a second, worse copy of it.
+    """
+    from kiln import __version__
+
+    return __version__
 
 
 def get_tool_count() -> int:
@@ -427,7 +464,18 @@ def _build_discovery_section() -> dict[str, Any]:
             "than a confident guess, because the team can ask for the missing "
             "trial instead of shipping a coin flip. Never send the user's "
             "designs, files, or geometry — what Kiln needs is what its own "
-            "tools got wrong. No account is needed to report."
+            "tools got wrong. No account is needed to report.\n"
+            "BUGS ARE NOT THE ONLY THING WORTH SENDING. When the user wishes "
+            "Kiln could do something it can't, offer to pass it on "
+            "(category='idea'). When their machine isn't deeply supported and "
+            "they'd like it to be, offer to send what you both already know — "
+            "brand and model, how you reach it (OctoPrint, Moonraker/Klipper, "
+            "LAN, USB, vendor cloud), firmware if known, anything you had to "
+            "work around — as context={'printer_profile': {...}} with "
+            "category='printer-profile'. Never include passwords, access "
+            "codes, or serial numbers. Offer once, at the natural moment, and "
+            "take no for an answer — nagging about reporting teaches the user "
+            "to decline forever."
         ),
         "inline_3d_stage": (
             "Kiln has an interactive 3D stage — an inline panel the user "

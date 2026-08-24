@@ -142,12 +142,19 @@ def _is_stale(cache: dict[str, Any]) -> bool:
     return (time.time() - float(cache.get("checked_at", 0))) > _CACHE_TTL_SECONDS
 
 
-def _write_cache(latest: str) -> None:
+def _write_cache(latest: str, highlights: list[str] | tuple[str, ...] = ()) -> None:
     try:
         path = _cache_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w") as f:
-            json.dump({"latest": latest, "checked_at": time.time()}, f)
+            json.dump(
+                {
+                    "latest": latest,
+                    "checked_at": time.time(),
+                    "highlights": list(highlights),
+                },
+                f,
+            )
     except OSError as exc:
         _logger.debug("Update-check cache write failed: %s", exc)
 
@@ -156,8 +163,47 @@ def _write_cache(latest: str) -> None:
 # Network fetch (daemon-thread only — never on the caller's hot path)
 # ---------------------------------------------------------------------------
 
+# The latest release's upgrade highlights, embedded in the package README as an
+# HTML comment (invisible on the rendered PyPI page) and therefore present in
+# the SAME PyPI JSON response the update check already fetches — no second
+# request, no new endpoint.  This is the only way an older client can name
+# features of a release that postdates it: its own package can't know them.
+# Kept in lockstep with README_HIGHLIGHTS_RE in kiln-pro's
+# scripts/audit_version_posture.py, which reconciles the block's wording.
+_HIGHLIGHTS_RE = re.compile(
+    r"<!--\s*kiln-highlights:\s*(?P<version>[0-9][0-9A-Za-z.\-]*)\s*\n"
+    r"(?P<body>.*?)\n\s*kiln-highlights:end\s*-->",
+    re.DOTALL,
+)
+# Defensive caps on remote-sourced copy: the description is fetched data, so a
+# surprising block must degrade to "fewer/shorter highlights", never to a
+# flooded tool result.
+_MAX_HIGHLIGHTS = 3
+_MAX_HIGHLIGHT_CHARS = 200
 
-def _fetch_latest_from_pypi() -> str | None:
+
+def _parse_highlights(description: Any, version: str) -> list[str]:
+    """Highlight clauses recorded for exactly ``version``, else ``[]``.
+
+    A block naming any other version is ignored — highlights must describe
+    the release the nudge is steering the user toward, never a stale one.
+    """
+    if not isinstance(description, str) or not description:
+        return []
+    for match in _HIGHLIGHTS_RE.finditer(description):
+        if match.group("version") != version:
+            continue
+        items = [
+            line.strip()[2:].strip()
+            for line in match.group("body").splitlines()
+            if line.strip().startswith("* ")
+        ]
+        return [item[:_MAX_HIGHLIGHT_CHARS] for item in items if item][:_MAX_HIGHLIGHTS]
+    return []
+
+
+def _fetch_release_info() -> dict[str, Any] | None:
+    """One PyPI JSON fetch → ``{"latest": str, "highlights": [str, ...]}``."""
     try:
         import urllib.request
 
@@ -178,16 +224,28 @@ def _fetch_latest_from_pypi() -> str | None:
         _logger.debug("PyPI update check failed (non-fatal): %s", exc)
         return None
 
-    latest = (data.get("info") or {}).get("version")
-    return latest if isinstance(latest, str) and latest else None
+    info = data.get("info") or {}
+    latest = info.get("version")
+    if not isinstance(latest, str) or not latest:
+        return None
+    return {
+        "latest": latest,
+        "highlights": _parse_highlights(info.get("description"), latest),
+    }
+
+
+def _fetch_latest_from_pypi() -> str | None:
+    """Latest published version only — for the explicit ``kiln upgrade`` path."""
+    info = _fetch_release_info()
+    return info["latest"] if info else None
 
 
 def _refresh_runner() -> None:
     global _refresh_in_flight
     try:
-        latest = _fetch_latest_from_pypi()
-        if latest:
-            _write_cache(latest)
+        info = _fetch_release_info()
+        if info:
+            _write_cache(info["latest"], info.get("highlights") or ())
     finally:
         with _refresh_lock:
             _refresh_in_flight = False
@@ -239,6 +297,11 @@ def check_for_update(current_version: str | None = None) -> dict[str, Any] | Non
             "command": "pip install --upgrade kiln3d",
             "summary": "Kiln 1.1.5.2 is available (you're on 1.1.5.1).",
         }
+
+    When the latest release published upgrade highlights (see
+    :func:`_parse_highlights`), the dict also carries ``highlights`` — a short
+    list of what the new version is worth updating for, so a surface can sell
+    the update instead of only announcing it.
     """
     if not update_check_enabled():
         return None
@@ -262,7 +325,7 @@ def check_for_update(current_version: str | None = None) -> dict[str, Any] | Non
     from kiln.version_policy import evaluate
 
     verdict = evaluate(current, latest=latest)
-    return {
+    info: dict[str, Any] = {
         "available": True,
         "current": current,
         "latest": latest,
@@ -272,6 +335,18 @@ def check_for_update(current_version: str | None = None) -> dict[str, Any] | Non
         # The tool an agent calls once the user says "yes, update it."
         "action": "upgrade_kiln",
     }
+    # Cached alongside the version they describe, so they can't go stale
+    # independently; re-capped on read because the cache file is user-writable.
+    raw = cache.get("highlights")
+    if isinstance(raw, list):
+        highlights = [
+            item.strip()[:_MAX_HIGHLIGHT_CHARS]
+            for item in raw
+            if isinstance(item, str) and item.strip()
+        ][:_MAX_HIGHLIGHTS]
+        if highlights:
+            info["highlights"] = highlights
+    return info
 
 
 def update_banner_line(current_version: str | None = None) -> str | None:

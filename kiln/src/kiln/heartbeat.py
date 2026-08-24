@@ -82,6 +82,56 @@ def _is_ci_environment() -> bool:
     return any(os.environ.get(name) for name in _CI_ENV_VARS)
 
 
+#: Opt back IN from inside a container, for someone whose real, durable
+#: install genuinely runs there.  Explicit, because the default has to
+#: protect the measurement rather than the edge case.
+_CONTAINER_OPT_IN = "KILN_TELEMETRY_ALLOW_CONTAINER"
+
+
+def _is_container() -> bool:
+    """True inside a Docker/containerd/Kubernetes container.
+
+    A container is an EPHEMERAL runner, not an install: its disk — and
+    therefore its ``installation_id`` — is fresh every run, so each
+    invocation mints a brand-new "install" that never returns.  That
+    inflates the install count with phantoms and, worse, ships whatever
+    counters the run happened to touch as if a person had done them.
+
+    Measured 2026-08-15: one linux row, zero printers, ``pro_installed``
+    false, carrying ``prints_today=5`` and a tool call literally named
+    ``test`` — the only content in the usage dashboard's paywall-demand
+    panel, which therefore read as real customer demand.  The CI env
+    guard could not see it because a container does not inherit the
+    runner's ``CI`` variables.
+
+    Deliberately covers the whole telemetry surface (recording AND
+    sending), not just the counter that exposed it, since every counter
+    a container touches is phantom for the same reason.
+    """
+    if os.environ.get(_CONTAINER_OPT_IN):
+        return False
+    try:
+        if os.path.exists("/.dockerenv"):
+            return True
+        with open("/proc/1/cgroup", encoding="utf-8") as fh:
+            blob = fh.read()
+        return any(m in blob for m in ("docker", "containerd", "kubepods", "podman"))
+    except OSError:
+        # No /proc (macOS, Windows) — those are the platforms where a
+        # bare install is the norm, so absence is not evidence of a
+        # container.
+        return False
+
+
+def _is_ephemeral_runner() -> bool:
+    """CI, or a container: a process whose telemetry is never a user's.
+
+    One predicate so the recording side and the sending side can never
+    disagree about which processes are real installs.
+    """
+    return _is_ci_environment() or _is_container()
+
+
 def _is_hosted_multitenant() -> bool:
     """True on a hosted multi-tenant deploy (api.kiln3d.com's Fly box).
 
@@ -337,11 +387,33 @@ def _is_pro_installed() -> bool:
         return False
 
 
+def _bridge_running() -> bool | None:
+    """Whether a persistent bridge is running on this machine, or ``None``.
+
+    This is the one field that says whether print hours can ever recover on
+    their own: the duration watchdog dies with the MCP server process, so an
+    install with no bridge loses every ending its chat session outlives —
+    and without this we cannot tell how common that is.
+
+    The pidfile check is machine-level, not process-level, so a heartbeat
+    from a short-lived server still reports the long-lived bridge beside it.
+    Lazy import with its own guard: bridge_commands pulls CLI dependencies,
+    and a missing one must read as "could not determine" (``None``), never
+    as "no bridge" — an honest absence, same as the counters.
+    """
+    try:
+        from kiln.cli.bridge_commands import _anything_running
+
+        return _anything_running()
+    except Exception:
+        return None
+
+
 def _send_heartbeat() -> None:
     """Send a single heartbeat to Supabase."""
     global _sent_on  # noqa: PLW0603
 
-    if _is_ci_environment() or _is_hosted_multitenant():
+    if _is_ephemeral_runner() or _is_hosted_multitenant():
         return
 
     with _lock:
@@ -402,6 +474,20 @@ def _send_heartbeat() -> None:
             # crashed the usage dashboard's tool-usage tile the first time
             # anything tried to read it (kiln-pro migration 095, 2026-07-09).
             "p_details": {
+                # The late subset of prints_hours_known — durations learned
+                # from a frozen printer clock after the ending, not by
+                # watching it (watched = known − reported).  Inside
+                # p_details rather than a p_* field of its own because
+                # record_heartbeat's server-side signature is fixed: an
+                # unknown p_* argument errors the whole heartbeat.
+                "prints_hours_reported": stats.get(
+                    "prints_hours_reported", 0
+                ),
+                # Whether a persistent bridge runs on this machine (None =
+                # could not determine).  Reported because it decides whether
+                # the install can ever notice endings its chat sessions
+                # outlive — the reason prints_hours_reported exists.
+                "bridge_running": _bridge_running(),
                 "texture_names": stats.get("texture_names", {}),
                 "decoration_types": stats.get("decoration_types", {}),
                 "slicer_profiles": stats.get("slicer_profiles", {}),
@@ -510,7 +596,7 @@ def start_heartbeat_scheduler() -> None:
     global _scheduler_started  # noqa: PLW0603
     if not _telemetry_enabled():
         return
-    if _is_ci_environment() or _is_hosted_multitenant():
+    if _is_ephemeral_runner() or _is_hosted_multitenant():
         return
     with _lock:
         if _scheduler_started:
@@ -528,7 +614,7 @@ def send_heartbeat_async() -> None:
     """
     if not _telemetry_enabled():
         return
-    if _is_ci_environment() or _is_hosted_multitenant():
+    if _is_ephemeral_runner() or _is_hosted_multitenant():
         return
     if _sent_on == str(date.today()) or _already_sent_today():
         return

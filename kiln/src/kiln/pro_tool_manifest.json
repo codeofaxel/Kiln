@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-11T16:59:13.665719+00:00",
-  "tool_count": 414,
+  "generated": "2026-08-19T23:54:34.049873+00:00",
+  "tool_count": 415,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -49,7 +49,11 @@
     },
     "speed_control": {
       "label": "Speed Control",
-      "pitch": "Real-time printer speed control, scheduling, and fleet-wide adjustments."
+      "pitch": "Real-time printer speed control and layer-based scheduling."
+    },
+    "fleet_operations": {
+      "label": "Fleet Operations",
+      "pitch": "Drive every printer at once \u2014 pause, resume or cancel the whole farm gracefully, fan mid-print changes across machines, and plan material swaps and reroutes for the fleet."
     },
     "ams_control": {
       "label": "AMS Control",
@@ -1595,9 +1599,9 @@
     },
     {
       "name": "export_step",
-      "description": "Export a design as a STEP file \u2014 real analytic B-rep, always.\n\nFree tier: 3 STEP exports/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Export a design as a STEP file \u2014 real analytic B-rep, always.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "cad_exchange",
       "parameters": {
         "properties": {
@@ -1616,12 +1620,6 @@
         ],
         "title": "export_stepArguments",
         "type": "object"
-      },
-      "quota": {
-        "bucket": "export",
-        "limit": 3,
-        "noun": "STEP exports",
-        "period": "month"
       }
     },
     {
@@ -1652,6 +1650,15 @@
         },
         "title": "cloud_backup_configureArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -1677,6 +1684,15 @@
         ],
         "title": "cloud_clone_designArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -1727,6 +1743,15 @@
         ],
         "title": "cloud_list_remote_branchesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -1813,6 +1838,15 @@
         ],
         "title": "cloud_pull_branchArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -1985,6 +2019,15 @@
         ],
         "title": "cloud_push_branchArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -2264,6 +2307,15 @@
         ],
         "title": "cloud_remote_addArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -2276,6 +2328,15 @@
         "properties": {},
         "title": "cloud_remote_listArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -2338,6 +2399,15 @@
         "properties": {},
         "title": "cloud_sync_devicesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -2356,6 +2426,15 @@
         },
         "title": "cloud_sync_historyArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -2381,6 +2460,15 @@
         ],
         "title": "cloud_sync_resolve_conflictArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cloud_workspace_v1",
+        "variant": "cloud_workspace",
+        "feature": "Design library on every machine",
+        "headline": "Take this design library to every machine you use.",
+        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
+        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -2582,6 +2670,15 @@
         ],
         "title": "generate_qr_decorationArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "qr_branding_v1",
+        "variant": "qr_branding",
+        "feature": "QR codes on printed products",
+        "headline": "Put a scannable QR on this product.",
+        "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
+        "free_included": "The product itself still generates without the QR."
       }
     },
     {
@@ -2607,7 +2704,7 @@
     },
     {
       "name": "paint_mesh_regions",
-      "description": "Paint mesh regions by id and write a painted 3MF.",
+      "description": "Paint mesh regions by id and write a painted 3MF. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
       "access": "free",
       "category": "decoration",
@@ -3192,61 +3289,6 @@
       }
     },
     {
-      "name": "rebuild_design",
-      "description": "Re-execute the full build pipeline from a saved recipe (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "design_modification",
-      "parameters": {
-        "properties": {
-          "recipe_path": {
-            "title": "Recipe Path",
-            "type": "string"
-          },
-          "brief_id": {
-            "default": "",
-            "title": "Brief Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "recipe_path"
-        ],
-        "title": "rebuild_designArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "smart_redesign",
-      "description": "Interpret a natural language instruction and modify the design (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "design_modification",
-      "parameters": {
-        "properties": {
-          "recipe_path": {
-            "title": "Recipe Path",
-            "type": "string"
-          },
-          "instruction": {
-            "title": "Instruction",
-            "type": "string"
-          },
-          "brief_id": {
-            "default": "",
-            "title": "Brief Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "recipe_path",
-          "instruction"
-        ],
-        "title": "smart_redesignArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "build_organic_mesh",
       "description": "Build a freeform/organic mesh from a smooth-blended primitive recipe. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
@@ -3654,6 +3696,15 @@
         ],
         "title": "apply_decoration_presetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -3843,6 +3894,15 @@
         ],
         "title": "best_design_versionArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -4237,6 +4297,15 @@
         ],
         "title": "compare_branchesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -4272,6 +4341,15 @@
         ],
         "title": "compare_design_versionsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -4446,6 +4524,15 @@
         ],
         "title": "create_decoration_presetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -4542,6 +4629,15 @@
         ],
         "title": "create_designArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -4608,6 +4704,15 @@
         ],
         "title": "create_design_branchArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -5006,6 +5111,15 @@
         },
         "title": "get_decoration_presetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5026,6 +5140,15 @@
         ],
         "title": "get_designArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5051,6 +5174,15 @@
         ],
         "title": "get_design_ancestryArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -5071,6 +5203,15 @@
         ],
         "title": "get_design_pull_requestArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_review_v1",
+        "variant": "design_review",
+        "feature": "Reviewable design changes",
+        "headline": "Propose this change and review it before it merges.",
+        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
+        "free_included": "The design itself stays yours to edit and download."
       }
     },
     {
@@ -5091,6 +5232,15 @@
         ],
         "title": "get_featureArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5523,6 +5673,15 @@
         },
         "title": "list_decoration_presetsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5553,6 +5712,15 @@
         ],
         "title": "list_design_branchesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -5590,6 +5758,15 @@
         },
         "title": "list_design_pull_requestsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_review_v1",
+        "variant": "design_review",
+        "feature": "Reviewable design changes",
+        "headline": "Propose this change and review it before it merges.",
+        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
+        "free_included": "The design itself stays yours to edit and download."
       }
     },
     {
@@ -5643,6 +5820,15 @@
         },
         "title": "list_designsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5790,6 +5976,15 @@
         },
         "title": "list_featuresArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5961,6 +6156,15 @@
         ],
         "title": "merge_design_branchesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -6152,6 +6356,15 @@
         ],
         "title": "propose_design_changeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_review_v1",
+        "variant": "design_review",
+        "feature": "Reviewable design changes",
+        "headline": "Propose this change and review it before it merges.",
+        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
+        "free_included": "The design itself stays yours to edit and download."
       }
     },
     {
@@ -6299,6 +6512,15 @@
         ],
         "title": "rebase_design_branchArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -7095,6 +7317,15 @@
         ],
         "title": "review_design_pull_requestArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_review_v1",
+        "variant": "design_review",
+        "feature": "Reviewable design changes",
+        "headline": "Propose this change and review it before it merges.",
+        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
+        "free_included": "The design itself stays yours to edit and download."
       }
     },
     {
@@ -7228,6 +7459,15 @@
         ],
         "title": "save_featureArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "design_library_v1",
+        "variant": "design_library",
+        "feature": "Saved design library",
+        "headline": "Keep this work in a library you can come back to.",
+        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
+        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -7286,6 +7526,15 @@
         ],
         "title": "show_branch_historyArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -7316,6 +7565,15 @@
         ],
         "title": "show_design_lineageArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -8015,6 +8273,15 @@
         ],
         "title": "visualize_branch_treeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "durable_design_history_v1",
+        "variant": "durable_design_history",
+        "feature": "Durable design history",
+        "headline": "Keep this part as the version you can return to.",
+        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
+        "free_included": "Download the current file where that option is already available."
       }
     },
     {
@@ -8088,6 +8355,15 @@
         ],
         "title": "assess_drawing_manufacturabilityArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8113,6 +8389,15 @@
         ],
         "title": "intake_engineering_drawingArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8165,6 +8450,15 @@
         ],
         "title": "manage_drawing_intakesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8196,6 +8490,15 @@
         ],
         "title": "submit_drawing_extractionArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "drawing_manufacturability_v1",
+        "variant": "drawing_manufacturability",
+        "feature": "Drawing manufacturability and quoting",
+        "headline": "Turn this customer drawing into a machine-specific quoting decision.",
+        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       }
     },
     {
@@ -8358,6 +8661,15 @@
         },
         "title": "analyze_frame_bracingArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "structural_design_v1",
+        "variant": "structural_design",
+        "feature": "Load-bearing design verdicts",
+        "headline": "Size this part for the load it has to carry.",
+        "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
+        "free_included": "General design guidance and safety cautions stay available at every tier."
       }
     },
     {
@@ -8446,6 +8758,15 @@
         },
         "title": "apply_calibration_recommendationsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -8505,6 +8826,15 @@
         },
         "title": "assess_calibration_statusArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -8617,6 +8947,15 @@
         ],
         "title": "compute_iso_fitArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -8724,6 +9063,15 @@
         ],
         "title": "design_for_loadArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "structural_design_v1",
+        "variant": "structural_design",
+        "feature": "Load-bearing design verdicts",
+        "headline": "Size this part for the load it has to carry.",
+        "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
+        "free_included": "General design guidance and safety cautions stay available at every tier."
       }
     },
     {
@@ -8767,6 +9115,15 @@
         },
         "title": "explain_calibration_for_designArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -8792,6 +9149,15 @@
         ],
         "title": "get_calibration_freshnessArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -8810,6 +9176,15 @@
         },
         "title": "get_calibration_health_recommendationsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -8900,6 +9275,15 @@
         ],
         "title": "import_third_party_calibrationArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -8971,6 +9355,15 @@
         ],
         "title": "query_per_machine_offsetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -9052,6 +9445,15 @@
         ],
         "title": "recommend_running_clearanceArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -9092,6 +9494,15 @@
         ],
         "title": "record_calibration_correctionArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -9122,6 +9533,15 @@
         ],
         "title": "request_calibration_test_printArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "machine_calibration_v1",
+        "variant": "machine_calibration",
+        "feature": "Calibration measured from your printer",
+        "headline": "Calibrate the numbers to the machine that prints them.",
+        "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
+        "free_included": "General design guidance and printability checks stay available."
       }
     },
     {
@@ -9629,6 +10049,15 @@
         },
         "title": "assess_fair_reaccomplishmentArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -9801,6 +10230,15 @@
         ],
         "title": "design_hole_for_productArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -9996,6 +10434,15 @@
         ],
         "title": "ingest_material_datasheetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "material_datasheets_v1",
+        "variant": "material_datasheets",
+        "feature": "Supplier datasheet ingestion",
+        "headline": "Turn this supplier datasheet into a material Kiln can plan with.",
+        "outcome_preview": "Kiln Business would verify the quoted datasheet values, build a structured material profile, and keep it in your ingested-materials library.",
+        "free_included": "The built-in material catalog stays available."
       }
     },
     {
@@ -10024,6 +10471,15 @@
         },
         "title": "list_ingested_materialsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "material_datasheets_v1",
+        "variant": "material_datasheets",
+        "feature": "Supplier datasheet ingestion",
+        "headline": "Turn this supplier datasheet into a material Kiln can plan with.",
+        "outcome_preview": "Kiln Business would verify the quoted datasheet values, build a structured material profile, and keep it in your ingested-materials library.",
+        "free_included": "The built-in material catalog stays available."
       }
     },
     {
@@ -10176,6 +10632,15 @@
         ],
         "title": "manage_fair_characteristicsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10206,6 +10671,15 @@
         ],
         "title": "manage_fair_evidence_bundleArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10259,6 +10733,15 @@
         ],
         "title": "manage_fair_registryArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10668,6 +11151,15 @@
         ],
         "title": "prepopulate_fair_draftArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "production_evidence_v1",
+        "variant": "production_evidence",
+        "feature": "Governed production evidence",
+        "headline": "Assemble the governed evidence for this exact revision.",
+        "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
+        "free_included": "Safety cautions and the need for human review stay visible."
       }
     },
     {
@@ -10720,6 +11212,15 @@
         },
         "title": "read_material_datasheetArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "material_datasheets_v1",
+        "variant": "material_datasheets",
+        "feature": "Supplier datasheet ingestion",
+        "headline": "Turn this supplier datasheet into a material Kiln can plan with.",
+        "outcome_preview": "Kiln Business would verify the quoted datasheet values, build a structured material profile, and keep it in your ingested-materials library.",
+        "free_included": "The built-in material catalog stays available."
       }
     },
     {
@@ -10805,6 +11306,15 @@
         ],
         "title": "recommend_adhesiveArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "adhesive_guidance_v1",
+        "variant": "adhesive_guidance",
+        "feature": "Adhesive and bonding guidance",
+        "headline": "Choose a bonding path for this material pair and exposure.",
+        "outcome_preview": "Kiln Pro would rank suitable bonding paths and prepare the surface-preparation and cure steps for the stated conditions.",
+        "free_included": "General bonding cautions stay available where safety requires them."
       }
     },
     {
@@ -10878,6 +11388,15 @@
         },
         "title": "recommend_holeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "compensated_fit_v1",
+        "variant": "compensated_fit",
+        "feature": "Printer-compensated fit",
+        "headline": "Size this feature for the real printer and material.",
+        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "free_included": "General fit guidance stays available."
       }
     },
     {
@@ -10926,6 +11445,15 @@
         },
         "title": "recommend_joint_strategyArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "structural_design_v1",
+        "variant": "structural_design",
+        "feature": "Load-bearing design verdicts",
+        "headline": "Size this part for the load it has to carry.",
+        "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
+        "free_included": "General design guidance and safety cautions stay available at every tier."
       }
     },
     {
@@ -11123,6 +11651,15 @@
         ],
         "title": "record_bond_outcomeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "adhesive_guidance_v1",
+        "variant": "adhesive_guidance",
+        "feature": "Adhesive and bonding guidance",
+        "headline": "Choose a bonding path for this material pair and exposure.",
+        "outcome_preview": "Kiln Pro would rank suitable bonding paths and prepare the surface-preparation and cure steps for the stated conditions.",
+        "free_included": "General bonding cautions stay available where safety requires them."
       }
     },
     {
@@ -11324,6 +11861,488 @@
           }
         },
         "title": "review_magnet_supplier_packetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "add_feature_during_print_fleet",
+      "description": "Add the same feature (e.g. a hat) to N paused printers (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "feature": {
+            "title": "Feature",
+            "type": "string"
+          },
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          },
+          "first_layer_height_mm": {
+            "default": 0.2,
+            "title": "First Layer Height Mm",
+            "type": "number"
+          },
+          "orient": {
+            "default": "auto",
+            "title": "Orient",
+            "type": "string"
+          },
+          "hotend_temp": {
+            "default": 220,
+            "title": "Hotend Temp",
+            "type": "integer"
+          },
+          "bed_temp": {
+            "default": 65,
+            "title": "Bed Temp",
+            "type": "integer"
+          },
+          "filament_type": {
+            "default": "PLA",
+            "title": "Filament Type",
+            "type": "string"
+          },
+          "parent_design_id": {
+            "default": "",
+            "title": "Parent Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature",
+          "printers"
+        ],
+        "title": "add_feature_during_print_fleetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "assess_fleet_power_loss",
+      "description": "Triage a whole fleet after a power loss \u2014 mixed brands/models (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "failures": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failures"
+          }
+        },
+        "title": "assess_fleet_power_lossArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "decorate_during_print_fleet",
+      "description": "Apply the same decoration to N paused printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "decoration": {
+            "title": "Decoration",
+            "type": "string"
+          },
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          },
+          "depth_mm": {
+            "default": 1.2,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "image_scale": {
+            "default": 0.7,
+            "title": "Image Scale",
+            "type": "number"
+          },
+          "threshold": {
+            "default": 0.35,
+            "title": "Threshold",
+            "type": "number"
+          },
+          "bevel": {
+            "default": true,
+            "title": "Bevel",
+            "type": "boolean"
+          },
+          "aspect_policy": {
+            "default": "auto_crop",
+            "title": "Aspect Policy",
+            "type": "string"
+          },
+          "hotend_temp": {
+            "default": 220,
+            "title": "Hotend Temp",
+            "type": "integer"
+          },
+          "bed_temp": {
+            "default": 65,
+            "title": "Bed Temp",
+            "type": "integer"
+          },
+          "filament_type": {
+            "default": "PLA",
+            "title": "Filament Type",
+            "type": "string"
+          },
+          "parent_design_id": {
+            "default": "",
+            "title": "Parent Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decoration",
+          "printers"
+        ],
+        "title": "decorate_during_print_fleetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "evaluate_fleet_reroute",
+      "description": "Decide whether a failed FDM job should move to another printer (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "failure_id": {
+            "title": "Failure Id",
+            "type": "string"
+          },
+          "alternative_printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Alternative Printers",
+            "type": "array"
+          },
+          "completion_pct": {
+            "default": 0.0,
+            "title": "Completion Pct",
+            "type": "number"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "model_size_mm": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Size Mm"
+          }
+        },
+        "required": [
+          "failure_id",
+          "alternative_printers"
+        ],
+        "title": "evaluate_fleet_rerouteArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_cancel",
+      "description": "Cancel prints across the whole fleet, gracefully (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "preserve_temperatures": {
+            "default": false,
+            "title": "Preserve Temperatures",
+            "type": "boolean"
+          }
+        },
+        "title": "fleet_cancelArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_pause",
+      "description": "Pause printing across the whole fleet, gracefully (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "keep_temps": {
+            "default": true,
+            "title": "Keep Temps",
+            "type": "boolean"
+          }
+        },
+        "title": "fleet_pauseArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_resume",
+      "description": "Resume paused prints across the whole fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          }
+        },
+        "title": "fleet_resumeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_set_speed",
+      "description": "Set speed across all registered printers in the fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "percent": {
+            "title": "Percent",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "percent"
+        ],
+        "title": "fleet_set_speedArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_skip_objects",
+      "description": "Skip failed objects across several fleet printers at once (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "printers"
+        ],
+        "title": "fleet_skip_objectsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "plan_fleet_material_change",
+      "description": "Plan future-object material/color changes across a fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          },
+          "targets": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Targets",
+            "type": "array"
+          },
+          "trigger_object": {
+            "default": "",
+            "title": "Trigger Object",
+            "type": "string"
+          },
+          "plate_number": {
+            "default": 1,
+            "title": "Plate Number",
+            "type": "integer"
+          },
+          "source_filament_type": {
+            "default": "PLA",
+            "title": "Source Filament Type",
+            "type": "string"
+          },
+          "source_filament_color": {
+            "default": "",
+            "title": "Source Filament Color",
+            "type": "string"
+          },
+          "require_ams_match": {
+            "default": true,
+            "title": "Require Ams Match",
+            "type": "boolean"
+          },
+          "build_artifacts": {
+            "default": false,
+            "title": "Build Artifacts",
+            "type": "boolean"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "execute_ready": {
+            "default": false,
+            "title": "Execute Ready",
+            "type": "boolean"
+          },
+          "prepared_sessions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prepared Sessions"
+          }
+        },
+        "required": [
+          "printers",
+          "targets"
+        ],
+        "title": "plan_fleet_material_changeArguments",
+        "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "cross_machine_inventory_v1",
+        "variant": "cross_machine_inventory",
+        "feature": "Cross-machine material inventory",
+        "headline": "Answer this material question across every machine at once.",
+        "outcome_preview": "Kiln Business would compare spools and capability across the registered machines and prepare one cross-machine answer.",
+        "free_included": "The per-printer answer stays available."
+      }
+    },
+    {
+      "name": "revert_mid_print_fleet",
+      "description": "Revert mid-print transforms on N printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "title": "revert_mid_print_fleetArguments",
         "type": "object"
       }
     },
@@ -12146,65 +13165,6 @@
       }
     },
     {
-      "name": "add_feature_during_print_fleet",
-      "description": "Add the same feature (e.g. a hat) to N paused printers (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "feature": {
-            "title": "Feature",
-            "type": "string"
-          },
-          "printers": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Printers",
-            "type": "array"
-          },
-          "first_layer_height_mm": {
-            "default": 0.2,
-            "title": "First Layer Height Mm",
-            "type": "number"
-          },
-          "orient": {
-            "default": "auto",
-            "title": "Orient",
-            "type": "string"
-          },
-          "hotend_temp": {
-            "default": 220,
-            "title": "Hotend Temp",
-            "type": "integer"
-          },
-          "bed_temp": {
-            "default": 65,
-            "title": "Bed Temp",
-            "type": "integer"
-          },
-          "filament_type": {
-            "default": "PLA",
-            "title": "Filament Type",
-            "type": "string"
-          },
-          "parent_design_id": {
-            "default": "",
-            "title": "Parent Design Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "feature",
-          "printers"
-        ],
-        "title": "add_feature_during_print_fleetArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "add_pin_joints",
       "description": "Give two touching parts a REAL pin-and-socket joint. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -12385,34 +13345,6 @@
           }
         },
         "title": "apply_mid_print_decoration_planArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "assess_fleet_power_loss",
-      "description": "Triage a whole fleet after a power loss \u2014 mixed brands/models (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "failures": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Failures"
-          }
-        },
-        "title": "assess_fleet_power_lossArguments",
         "type": "object"
       }
     },
@@ -12653,6 +13585,15 @@
         ],
         "title": "check_nozzle_capacity_for_printArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -13033,158 +13974,6 @@
       }
     },
     {
-      "name": "decorate_during_print_fleet",
-      "description": "Apply the same decoration to N paused printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "decoration": {
-            "title": "Decoration",
-            "type": "string"
-          },
-          "printers": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Printers",
-            "type": "array"
-          },
-          "depth_mm": {
-            "default": 1.2,
-            "title": "Depth Mm",
-            "type": "number"
-          },
-          "image_scale": {
-            "default": 0.7,
-            "title": "Image Scale",
-            "type": "number"
-          },
-          "threshold": {
-            "default": 0.35,
-            "title": "Threshold",
-            "type": "number"
-          },
-          "bevel": {
-            "default": true,
-            "title": "Bevel",
-            "type": "boolean"
-          },
-          "aspect_policy": {
-            "default": "auto_crop",
-            "title": "Aspect Policy",
-            "type": "string"
-          },
-          "hotend_temp": {
-            "default": 220,
-            "title": "Hotend Temp",
-            "type": "integer"
-          },
-          "bed_temp": {
-            "default": 65,
-            "title": "Bed Temp",
-            "type": "integer"
-          },
-          "filament_type": {
-            "default": "PLA",
-            "title": "Filament Type",
-            "type": "string"
-          },
-          "parent_design_id": {
-            "default": "",
-            "title": "Parent Design Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "decoration",
-          "printers"
-        ],
-        "title": "decorate_during_print_fleetArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "evaluate_fleet_reroute",
-      "description": "Decide whether a failed FDM job should move to another printer (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "failure_id": {
-            "title": "Failure Id",
-            "type": "string"
-          },
-          "alternative_printers": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Alternative Printers",
-            "type": "array"
-          },
-          "completion_pct": {
-            "default": 0.0,
-            "title": "Completion Pct",
-            "type": "number"
-          },
-          "material": {
-            "default": "",
-            "title": "Material",
-            "type": "string"
-          },
-          "model_size_mm": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "number"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Model Size Mm"
-          }
-        },
-        "required": [
-          "failure_id",
-          "alternative_printers"
-        ],
-        "title": "evaluate_fleet_rerouteArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "fleet_skip_objects",
-      "description": "Skip failed objects across several fleet printers at once (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "printers": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Printers",
-            "type": "array"
-          }
-        },
-        "required": [
-          "printers"
-        ],
-        "title": "fleet_skip_objectsArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "food_safety_for_printer",
       "description": "Pro+ \u2014 combined material + nozzle food-safety verdict.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -13324,6 +14113,15 @@
         ],
         "title": "get_auto_tuned_settingsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "learned_settings_v1",
+        "variant": "learned_settings",
+        "feature": "Settings learned from your prints",
+        "headline": "Start this print with the settings your history earned.",
+        "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
+        "free_included": "Slicing and printing with standard settings stay available."
       }
     },
     {
@@ -13374,6 +14172,15 @@
         ],
         "title": "get_maintenance_predictionArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -13442,6 +14249,15 @@
         },
         "title": "get_my_nozzle_wear_patternsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -13497,6 +14313,15 @@
         ],
         "title": "get_optimal_settingsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "learned_settings_v1",
+        "variant": "learned_settings",
+        "feature": "Settings learned from your prints",
+        "headline": "Start this print with the settings your history earned.",
+        "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
+        "free_included": "Slicing and printing with standard settings stay available."
       }
     },
     {
@@ -13532,6 +14357,15 @@
         ],
         "title": "get_print_confidenceArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "learned_settings_v1",
+        "variant": "learned_settings",
+        "feature": "Settings learned from your prints",
+        "headline": "Start this print with the settings your history earned.",
+        "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
+        "free_included": "Slicing and printing with standard settings stay available."
       }
     },
     {
@@ -13572,6 +14406,15 @@
         ],
         "title": "get_print_learning_summaryArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "learned_settings_v1",
+        "variant": "learned_settings",
+        "feature": "Settings learned from your prints",
+        "headline": "Start this print with the settings your history earned.",
+        "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
+        "free_included": "Slicing and printing with standard settings stay available."
       }
     },
     {
@@ -13784,6 +14627,15 @@
         ],
         "title": "nozzle_drift_attributionArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -13816,95 +14668,15 @@
         ],
         "title": "nozzle_wear_statusArguments",
         "type": "object"
-      }
-    },
-    {
-      "name": "plan_fleet_material_change",
-      "description": "Plan future-object material/color changes across a fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "printers": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Printers",
-            "type": "array"
-          },
-          "targets": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Targets",
-            "type": "array"
-          },
-          "trigger_object": {
-            "default": "",
-            "title": "Trigger Object",
-            "type": "string"
-          },
-          "plate_number": {
-            "default": 1,
-            "title": "Plate Number",
-            "type": "integer"
-          },
-          "source_filament_type": {
-            "default": "PLA",
-            "title": "Source Filament Type",
-            "type": "string"
-          },
-          "source_filament_color": {
-            "default": "",
-            "title": "Source Filament Color",
-            "type": "string"
-          },
-          "require_ams_match": {
-            "default": true,
-            "title": "Require Ams Match",
-            "type": "boolean"
-          },
-          "build_artifacts": {
-            "default": false,
-            "title": "Build Artifacts",
-            "type": "boolean"
-          },
-          "output_dir": {
-            "default": "",
-            "title": "Output Dir",
-            "type": "string"
-          },
-          "execute_ready": {
-            "default": false,
-            "title": "Execute Ready",
-            "type": "boolean"
-          },
-          "prepared_sessions": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Prepared Sessions"
-          }
-        },
-        "required": [
-          "printers",
-          "targets"
-        ],
-        "title": "plan_fleet_material_changeArguments",
-        "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -14293,6 +15065,15 @@
         ],
         "title": "predict_print_failure_riskArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "learned_settings_v1",
+        "variant": "learned_settings",
+        "feature": "Settings learned from your prints",
+        "headline": "Start this print with the settings your history earned.",
+        "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
+        "free_included": "Slicing and printing with standard settings stay available."
       }
     },
     {
@@ -14585,6 +15366,15 @@
         ],
         "title": "record_nozzle_replacementArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "nozzle_wear_v1",
+        "variant": "nozzle_wear",
+        "feature": "Nozzle wear tracking",
+        "headline": "Know how worn this nozzle is before it costs a print.",
+        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
+        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -14768,32 +15558,6 @@
           }
         },
         "title": "revert_mid_printArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "revert_mid_print_fleet",
-      "description": "Revert mid-print transforms on N printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "sessions": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Sessions",
-            "type": "array"
-          }
-        },
-        "required": [
-          "sessions"
-        ],
-        "title": "revert_mid_print_fleetArguments",
         "type": "object"
       }
     },
@@ -16615,6 +17379,15 @@
         ],
         "title": "add_qr_to_productArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "qr_branding_v1",
+        "variant": "qr_branding",
+        "feature": "QR codes on printed products",
+        "headline": "Put a scannable QR on this product.",
+        "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
+        "free_included": "The product itself still generates without the QR."
       }
     },
     {
@@ -17081,26 +17854,6 @@
       }
     },
     {
-      "name": "fleet_set_speed",
-      "description": "Set speed across all registered printers in the fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "speed_control",
-      "parameters": {
-        "properties": {
-          "percent": {
-            "title": "Percent",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "percent"
-        ],
-        "title": "fleet_set_speedArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "get_speed_schedule",
       "description": "Get the current active speed schedule and status (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -17182,7 +17935,7 @@
     },
     {
       "name": "report_issue",
-      "description": "Report a bug or a workaround \u2014 what broke, and what fixed it.",
+      "description": "Tell the Kiln team something \u2014 a bug, an idea, printer details, or a question.",
       "tier": "free",
       "access": "free",
       "category": "support",
@@ -17263,6 +18016,15 @@
         ],
         "title": "add_org_memberArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17305,6 +18067,15 @@
         ],
         "title": "add_team_memberArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17359,6 +18130,15 @@
         ],
         "title": "apply_role_templateArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17401,6 +18181,15 @@
         ],
         "title": "assign_artifact_to_orgArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17466,6 +18255,15 @@
         ],
         "title": "create_orgArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17525,6 +18323,15 @@
         ],
         "title": "create_teamArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17711,6 +18518,15 @@
         ],
         "title": "grant_scopeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17748,6 +18564,15 @@
         },
         "title": "list_approval_gatesArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       }
     },
     {
@@ -17939,6 +18764,15 @@
         ],
         "title": "remove_approval_gateArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       }
     },
     {
@@ -17964,6 +18798,15 @@
         ],
         "title": "remove_org_memberArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -17989,6 +18832,15 @@
         ],
         "title": "remove_team_memberArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -18068,6 +18920,15 @@
         ],
         "title": "revoke_scopeArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -18144,6 +19005,15 @@
         ],
         "title": "set_approval_gateArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       }
     },
     {
@@ -18214,6 +19084,15 @@
         ],
         "title": "setup_teamArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {
@@ -18249,6 +19128,15 @@
         ],
         "title": "transfer_artifact_between_orgsArguments",
         "type": "object"
+      },
+      "upgrade_nudge": {
+        "schema_version": 1,
+        "copy_version": "team_workspace_v1",
+        "variant": "team_workspace",
+        "feature": "Shared team workspace",
+        "headline": "Run this work in a workspace your team shares.",
+        "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
+        "free_included": "Your personal designs and history stay fully yours."
       }
     },
     {

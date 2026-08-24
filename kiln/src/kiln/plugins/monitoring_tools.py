@@ -23,12 +23,16 @@ import threading
 import time
 from typing import Any
 
+from kiln.auto_record_hook import note_cancel_requested
 from kiln.errors import HostedUnavailableError
 from kiln.events import EventType
 from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
+
+# Raised when Kiln is asked to command a machine it is not driving.
+from kiln.printers.base import PrinterEngagementError  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Timelapse frame store — ~/.kiln/timelapses/<watch_id>/
@@ -372,6 +376,7 @@ class _PrintWatcher:
                         f"(cancel_at_percent={self._cancel_at_percent}%)."
                     )
                     _logger.info("[watch %s] %s", self._watch_id, cancel_msg)
+                    note_cancel_requested(adapter)
                     try:
                         adapter.cancel_print()
                     except Exception as cancel_exc:
@@ -705,6 +710,28 @@ class _PrintWatcher:
                 # Wait using the stop event so stop() can wake us
                 self._stop_event.wait(self._poll_interval)
 
+        except PrinterEngagementError as exc:
+            # Kiln was handed this machine back, or moved to another one,
+            # while this watch was still running.  That is the user getting
+            # what they asked for, not a fault: the watch ENDS, and it says
+            # so.  Reporting it as an error would put a red result in front
+            # of someone for doing the exact thing the refusal told them to.
+            _logger.info(
+                "watch %s ended: Kiln no longer holds this printer", self._watch_id,
+            )
+            self._finish(
+                {
+                    "success": True,
+                    "watch_id": self._watch_id,
+                    "outcome": "handed_back",
+                    "detail": str(exc),
+                    "elapsed_seconds": round(time.time() - self._start_time, 1),
+                    "progress_log": list(self._progress_log[-20:]),
+                    "snapshots": list(self._snapshots),
+                    "snapshot_failures": self._snapshot_failures,
+                }
+            )
+            return
         except Exception as exc:
             _logger.exception("Error in print watcher %s", self._watch_id)
             self._finish(
@@ -1007,6 +1034,17 @@ class _MonitoringToolsPlugin:
                     _srv._get_registry().get(printer_name) if printer_name else _srv._get_adapter()
                 )
 
+                # Kiln watches what Kiln runs: a live watch is a running
+                # service pointed at a machine, and a plan that runs one
+                # printer at a time keeps one watched.  Same helper the
+                # health monitor uses, so the two watcher surfaces cannot
+                # drift into two different answers.  Checking this printer
+                # by hand stays free and unlimited either way.
+                if block := _srv._watch_capacity_error(
+                    adapter, printer_name or "default",
+                ):
+                    return block
+
                 # Early exit: if printer is idle with no active job, don't start
                 initial_state = adapter.get_state()
                 initial_job = adapter.get_job()
@@ -1043,6 +1081,22 @@ class _MonitoringToolsPlugin:
                 )
                 _srv._watchers[watch_id] = watcher
                 watcher.start()
+
+                # Watching a print the user started by hand is the OTHER way
+                # Kiln comes to be driving a machine.  Recorded here, at the
+                # moment a watch really begins, so "monitoring" is a state the
+                # slot rule can check rather than a vague association with a
+                # printer that merely happens to be busy.
+                try:
+                    from kiln.printers.engagement import engage
+
+                    # No extra get_job here: the watcher is about to poll the
+                    # printer anyway, and engagement.observe fills the job
+                    # identity in from that.  Asking now would consume a
+                    # reading the watch loop is already paying for.
+                    engage(adapter, None, reason="watching")
+                except Exception:  # noqa: BLE001 — never break a watch
+                    _logger.debug("watch engagement not recorded", exc_info=True)
 
                 resp: dict[str, Any] = {
                     "success": True,
@@ -1239,6 +1293,20 @@ class _MonitoringToolsPlugin:
                     code="NOT_FOUND",
                 )
             result = watcher.stop()
+
+            # Stopping the watch is the user saying they will take it from
+            # here, so it hands the machine back rather than leaving Kiln
+            # recorded as driving something it is no longer looking at.
+            try:
+                from kiln.printers.engagement import current, hand_back
+
+                engaged = current()
+                if engaged is not None and engaged.reason == "watching":
+                    peer = _srv._get_registry().get(engaged.label)
+                    hand_back(peer)
+            except Exception:  # noqa: BLE001 — never break a stop
+                _logger.debug("watch hand-back failed", exc_info=True)
+
             return {"success": True, **result}
 
         @mcp.tool()
@@ -1249,6 +1317,7 @@ class _MonitoringToolsPlugin:
             first_layer_checks: int = 3,
             first_layer_interval: int = 60,
             auto_pause: bool = True,
+            preview_token: str | None = None,
         ) -> dict:
             """Start a print and automatically monitor the first layer.
 
@@ -1286,12 +1355,20 @@ class _MonitoringToolsPlugin:
             ):
                 return block
             try:
-                adapter = (
-                    _srv._get_registry().get(printer_name) if printer_name else _srv._get_adapter()
-                )
+                # The same consent rule start_print applies: this starts a
+                # print on a file already on the printer, which is the same
+                # act under a different name.
+                if block := _srv._preview_gate_error(
+                    "start_monitored_print", file_name, preview_token,
+                    printer_name=printer_name,
+                    is_resume=_srv._is_resume_mode_3mf(file_name),
+                ):
+                    return block
+                # Same door as the control verbs: config.yaml fallback included.
+                adapter = _srv._resolve_adapter(printer_name)
 
                 # -- Automatic pre-flight safety gate (mandatory) --
-                pf = unwrap_tool_result(_srv.preflight_check())
+                pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
                 if not pf.get("ready", False):
                     _srv._audit(
                         "start_monitored_print",
@@ -1313,7 +1390,7 @@ class _MonitoringToolsPlugin:
                 # the printer's last word about the previous one.
                 sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name)
-                _srv._get_heater_watchdog().notify_print_started()
+                _srv._note_print_started(adapter)
                 _srv._audit(
                     "start_monitored_print", "print_started", details={"file": file_name}
                 )

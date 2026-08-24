@@ -45,7 +45,9 @@ pip install kiln3d
 
 ## Quick Start
 
-Three steps. Then ask your AI to make something.
+**Using Claude Desktop? Install Kiln in one click.** [Download `kiln.mcpb`](https://github.com/codeofaxel/Kiln/releases/latest/download/kiln.mcpb) and double-click it — Claude Desktop installs Kiln and wires it in (just Claude Desktop: steps 1 and 2 below are how Codex and every other AI app connect), so those steps aren't yours. Two things still are: OpenSCAD, and Kiln's terms — the command shows them and asks you to type your acceptance, which is why it's yours and not your AI's: `uvx --from kiln3d kiln accept-terms`. The bundle and that command both run on [`uv`](https://docs.astral.sh/uv/getting-started/installation/) — free, with a one-line install for each platform at that link. If Claude Desktop says the server failed to start, that's uv missing: install it and restart. Updates arrive with the extension, not via `kiln self-update`.
+
+Everyone else — three steps. Then ask your AI to make something.
 
 **1. Install**
 
@@ -83,7 +85,7 @@ Drop this into Claude Desktop, Claude Code, Codex, Cursor, or any MCP-capable ag
 
 **3. Ask** — paste a sentence like this into your agent. Kiln does the rest:
 
-> I have a Bambu A1, make me a coaster with my dog's photo on it
+> Make me a coaster with my dog's photo on it
 
 That's the whole happy path. Your AI does the designing, slicing, and printing — you never touch a CLI. OS-specific walkthrough (Windows, WSL 2, Linux) at **[kiln3d.com/install](https://kiln3d.com/install?utm_source=github&utm_medium=readme)**.
 
@@ -170,7 +172,7 @@ kiln agent --model openai/gpt-4o
 kiln agent --model meta-llama/llama-3.1-70b-instruct --tier essential
 ```
 
-Tool tiers auto-match model capability: **essential** (16 tools) for smaller models, **standard** (61 tools) for mid-range, **full** (133 tools) for stronger models. All <!-- KILN_MCP_TOOL_COUNT:OLD --> 896 tools are available over MCP via `kiln serve`.
+Tool tiers auto-match model capability: **essential** (15 tools) for smaller models, **standard** (60 tools) for mid-range, **full** (135 tools) for stronger models. All <!-- KILN_MCP_TOOL_COUNT:OLD --> 901 tools are available over MCP via `kiln serve`.
 </details>
 
 <details>
@@ -191,7 +193,7 @@ Tool tiers auto-match model capability: **essential** (16 tools) for smaller mod
 
 Kiln only needs IP reachability on your LAN. Ethernet-only printers are fully supported.
 
-**Optional tools:** [PrusaSlicer](https://www.prusa3d.com/prusaslicer/) or OrcaSlicer for slicing STL → G-code (`brew install --cask prusaslicer`); [OpenSCAD](https://openscad.org/downloads#snapshots) for local text-to-3D generation — install the current build (`brew install --cask openscad@snapshot`); set `KILN_GEMINI_API_KEY` to enable Gemini-generated geometry.
+**Optional tools:** [PrusaSlicer](https://www.prusa3d.com/prusaslicer/) OrcaSlicer, or BambuStudio for slicing STL → G-code (`brew install --cask prusaslicer`); [OpenSCAD](https://openscad.org/downloads#snapshots) for local text-to-3D generation — install the current build (`brew install --cask openscad@snapshot`); set `KILN_GEMINI_API_KEY` to enable Gemini-generated geometry.
 
 ### Linux / WSL 2
 
@@ -246,7 +248,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
-- **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 903 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 235 CLI commands built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 908 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 239 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
 - **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Business)
@@ -255,7 +257,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 - **Smart material routing** — 25 materials, 45 brand-specific filament profiles (Bambu, Prusament, Polymaker, and more) across 11 material families. Intent-based recommendations with printer capability awareness.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure recovery, closed-loop AI generation feedback (failed prints auto-improve future generations), preflight safety checks on every job.
 - **Doomed prints stopped early** — Too big for the build plate, or a material your hotend can't melt? Caught before filament is wasted, rotated to fit when possible, one-command override. Pro shows the fix: true usable area, cleanest split, or the material to switch to.
-- **Search → Slice → Print** — Search and download 3D models from MyMiniFactory and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
+- **Search → Slice → Print** — Search and download 3D models from MyMiniFactory and Cults3D (search only), auto-slice with PrusaSlicer, OrcaSlicer, or BambuStudio, print — all from one agent conversation.
 - **Safety at scale** — 51 named per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
 
 ## Supported Printers
@@ -375,7 +377,7 @@ Patent pending across semantic mesh merge, outcome-correlated branching, and sig
 
 ## What Agents Can Do
 
-The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 896 tools** to agents, plus prompts and resources for **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 903 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice:
+The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 901 tools** to agents, plus prompts and resources for **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 908 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice:
 
 | Theme | Example tools |
 |-------|---------------|
@@ -407,7 +409,7 @@ The complete tool catalog, grouped by subsystem, lives in **[Project Docs](docs/
 
 **AI model generation.** Set any provider key and it's available instantly — `KILN_MESHY_API_KEY`, `KILN_TRIPO3D_API_KEY`, `KILN_STABILITY_API_KEY`, `KILN_GEMINI_API_KEY` — or use local OpenSCAD with no key. Generated meshes are auto-validated for printability (manifold, triangle count, bounding box) before printing. `kiln generate` renders a 3-view preview by default.
 
-**Slicing.** Wraps PrusaSlicer and OrcaSlicer for headless slicing; auto-detects installed slicers on PATH, macOS app bundles, or via `KILN_SLICER_PATH`. Supports STL, 3MF, STEP, OBJ, AMF with material-aware temps and smart supports.
+**Slicing.** Wraps PrusaSlicer, OrcaSlicer, and BambuStudio for headless slicing; auto-detects installed slicers on PATH, macOS app bundles, or via `KILN_SLICER_PATH`. Supports STL, 3MF, STEP, OBJ, AMF with material-aware temps and smart supports.
 
 **Fulfillment (no printer required).** Print through Craftcloud's network — quote, validate address, confirm, order, track — or run alongside your own printers for overflow and specialty materials. Normal users go through the hosted proxy (credentials stay server-side, spend limits enforced); operators can use direct mode with `KILN_FULFILLMENT_PROVIDER=craftcloud` + `KILN_CRAFTCLOUD_API_KEY`.
 
@@ -415,13 +417,13 @@ The complete tool catalog, grouped by subsystem, lives in **[Project Docs](docs/
 
 ## Pricing
 
-All local printing is **free forever** — status, file management, slicing, fleet control, and printing to your own printers cost nothing. Kiln charges a **5% orchestration fee** on orders placed through external manufacturing services (first 3/month free, $0.25 min / $200 max per order), shown transparently in every quote.
+All local printing is **free forever** — status, file management, slicing, fleet control, and printing to your own printers cost nothing. Kiln charges a **5% orchestration fee** on orders placed through external manufacturing services (first 3 orders each calendar month free, on every tier; $0.25 min / $200 max per order), shown transparently in every quote. Outsourced order volume is not capped on any tier.
 
 | Tier | Price | Headline |
 |------|-------|----------|
 | **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, one printer, design intelligence, linear design history. |
 | **Pro** | $49/mo | Git-for-3D branching/signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, nozzle-wear tracking, solo cloud sync. |
-| **Business** | $199/mo | Commercial use, 3 printers + 3 seats, fleet management, cross-printer learning, QR generation, assembly manuals, team pull requests, approval gates, fulfillment, webhooks. |
+| **Business** | $199/mo | Commercial use, 3 printers + 3 seats, fleet management, cross-printer learning, QR generation, assembly manuals, team pull requests, approval gates, webhooks. |
 | **Enterprise** | Contact us | Large fleets, SSO/SCIM, RBAC, audit trail, encrypted G-code at rest, white-label manuals, 99.9% SLA, on-prem/VPC. |
 
 Full comparison at **[kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)**. Run `kiln upgrade` to activate a license key. For provider-routed orders, the provider remains merchant of record; Kiln acts as orchestration infrastructure.
@@ -507,7 +509,7 @@ Entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=stri
 | `server.py` | MCP server with tools, resources, and subsystem wiring |
 | `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Creality, Bambu, Prusa Link, Elegoo) |
 | `marketplaces/` | Model marketplace adapters (MyMiniFactory, Cults3D, Thingiverse, metadata-only sources) |
-| `slicer.py` | Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection |
+| `slicer.py` | Slicer integration (PrusaSlicer, OrcaSlicer, BambuStudio) with auto-detection |
 | `registry.py` | Fleet registry for multi-printer management |
 | `queue.py` | Priority job queue with status tracking |
 | `scheduler.py` | Background job dispatcher with history-based smart routing |
@@ -547,7 +549,7 @@ Entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=stri
 | `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |
 | `pro_tool_manifest.json` | Public manifest for kiln-pro tool discovery and REST proxy stubs |
 | `decoration_quota.py` | Free-tier decoration quota tracking and tier resolution hooks |
-| `cli/` | Click CLI with <!-- KILN_CLI_COUNT:OLD --> 235 commands and JSON output |
+| `cli/` | Click CLI with <!-- KILN_CLI_COUNT:OLD --> 239 commands and JSON output |
 
 kiln-pro ([kiln3d.com](https://kiln3d.com/?utm_source=github&utm_medium=readme)) extends public Kiln with paid-tier REST serving, billing, licensing, SSO, RBAC, G-code encryption, uptime reporting, team administration, and project-cost workflows. Public Kiln exposes only the interface/proxy surface for those capabilities; the private implementation stays in kiln-pro.
 </details>

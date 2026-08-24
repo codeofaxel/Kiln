@@ -66,6 +66,30 @@ def _file_stem_token(file_name: str | None) -> str:
             return base
         base = stem
 
+
+def normalize_print_error(value: Any) -> int | None:
+    """Coerce a firmware error code for storage.  ``None`` means "no code".
+
+    Zero collapses to NULL on purpose: a printer reporting ``print_error=0``
+    is saying it has no fault to name, which is what NULL already means in
+    this column.  Kept apart, every clean print would file a literal 0 and
+    every reader would have to remember to exclude it — the shape that
+    turns a column meant for counting faults into one that mostly counts
+    their absence.  Anything that cannot be read as an integer blanks
+    rather than storing: this column exists to be grouped and counted, and
+    a value nobody can group is worse than an honest blank.  A code that
+    arrived as a digit string still counts as a code; ``True`` does not,
+    since Python would otherwise file it as fault number 1.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        code = int(value)
+    except (TypeError, ValueError):
+        return None
+    return code or None
+
+
 #: Where a test/CI run's writes go instead of the user's real database.
 #: Per interpreter, so a suite still gets a working DB that persists across
 #: the run — just not the one holding somebody's print history.
@@ -586,23 +610,50 @@ class KilnDB:
         self._conn.commit()
 
     def _migrate_print_outcomes(self) -> None:
-        """Add the determined_by column to existing print_outcomes tables.
+        """Add the determined_by and print_error columns to existing tables.
 
         ``determined_by`` records WHO settled the outcome: ``observed`` (a
         live Kiln process watched the terminal transition), ``inferred``
         (reconstructed from printer state on a later reconnect), or
         ``user_reported`` (a human told us).  Three sources can disagree;
         the record has to say which one it is carrying.
+
+        ``print_error`` is the raw firmware error code the print tripped —
+        EVIDENCE, kept separate from ``failure_mode``, which is a VERDICT.
+        One machine cannot characterise a fault: establishing that a
+        cancel during bed levelling trips a Z-homing fault, and that it
+        latches roughly a third of the time, took six deliberate runs on a
+        single A1 and still bought only "sometimes".  What model, what
+        firmware, and what predicts a latch are questions only a fleet can
+        answer, and it can only answer them from rows that kept the code.
+        NULL for rows written before this column and for backends that
+        report no such code.
         """
         if self._is_postgres:
             rows = self._conn.execute(
-                "SELECT column_name FROM information_schema.columns WHERE table_name = 'print_outcomes'",
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_name = 'print_outcomes'",
             ).fetchall()
-            columns = {row[0] for row in rows}
+            types = {row[0]: row[1] for row in rows}
         else:
-            columns = {row[1] for row in self._conn.execute("PRAGMA table_info(print_outcomes)").fetchall()}
+            types = {
+                row[1]: row[2]
+                for row in self._conn.execute("PRAGMA table_info(print_outcomes)").fetchall()
+            }
+        columns = set(types)
         if "determined_by" not in columns:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN determined_by TEXT DEFAULT NULL")
+        if "print_error" not in columns:
+            self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN print_error BIGINT DEFAULT NULL")
+        elif types.get("print_error") == "integer":
+            # Postgres only, and only for the few hours this column existed
+            # as int4.  SQLite's INTEGER is already 64-bit; Postgres's tops
+            # out at 2147483647, which every HMS family from 0x80 up
+            # exceeds — an insert that would fail on somebody's printer
+            # long after the code that chose the type was forgotten.
+            self._conn.execute(
+                "ALTER TABLE print_outcomes ALTER COLUMN print_error TYPE BIGINT"
+            )
         self._conn.commit()
 
     def _migrate_printer_materials(self) -> None:
@@ -911,6 +962,7 @@ class KilnDB:
                     notes           TEXT,
                     agent_id        TEXT,
                     determined_by   TEXT,
+                    print_error     BIGINT DEFAULT NULL,
                     created_at      REAL NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer
@@ -2446,8 +2498,8 @@ class KilnDB:
                     """INSERT INTO print_outcomes
                        (job_id, printer_name, file_name, file_hash, material_type,
                         outcome, quality_grade, failure_mode, settings, environment,
-                        notes, agent_id, determined_by, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        notes, agent_id, determined_by, print_error, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         outcome["job_id"],
                         outcome["printer_name"],
@@ -2462,6 +2514,7 @@ class KilnDB:
                         outcome.get("notes"),
                         outcome.get("agent_id"),
                         outcome.get("determined_by"),
+                        normalize_print_error(outcome.get("print_error")),
                         outcome.get("created_at", time.time()),
                     ),
                 )
@@ -2514,6 +2567,13 @@ class KilnDB:
         ``created_at`` is deliberately preserved — for a row opened at
         print start it is the START time, which is what "your print
         finished while Kiln wasn't watching" surfaces need.
+
+        ``print_error`` COALESCEs like every other refinement here, so the
+        code an ending carried survives the pending row it resolves: that
+        row was opened at print START, before any fault existed, and is the
+        row a hook-observed ending adopts rather than inserting beside.
+        Dropping it there would have thrown the evidence away on the exact
+        path that produces almost all of it.
         """
         if new_job_id:
             self._conn.execute(
@@ -2530,7 +2590,8 @@ class KilnDB:
                    material_type = COALESCE(?, material_type),
                    file_hash = COALESCE(?, file_hash),
                    agent_id = COALESCE(?, agent_id),
-                   determined_by = COALESCE(?, determined_by)
+                   determined_by = COALESCE(?, determined_by),
+                   print_error = COALESCE(?, print_error)
                WHERE id = ?""",
             (
                 outcome["outcome"],
@@ -2543,6 +2604,7 @@ class KilnDB:
                 outcome.get("file_hash"),
                 outcome.get("agent_id"),
                 outcome.get("determined_by"),
+                normalize_print_error(outcome.get("print_error")),
                 row_id,
             ),
         )

@@ -151,6 +151,41 @@ class Diagnosis:
         return [s for s in self.what_to_do if s != DOCTOR_STEP]
 
 
+def _lock_holder_note() -> str:
+    """Name the bridge when it is the process holding the database.
+
+    Kiln records the bridge's own PID in ``~/.kiln/bridge.state``, so the
+    one holder a user must NOT kill is the one Kiln can already identify.
+    Read defensively and by hand — this runs on the failure path, where
+    importing the bridge's own module is exactly the kind of machinery
+    that may be why we are here.
+
+    Returns a sentence to embed, or ``""`` when nothing is known.  A
+    guess would be worse than silence: telling someone a PID is safe to
+    kill is the mistake this exists to prevent.
+    """
+    try:
+        import json
+
+        state = json.loads(
+            (kiln_home() / "bridge.state").read_text(encoding="utf-8")
+        )
+        pid = state.get("pid")
+        if not isinstance(pid, int):
+            return ""
+        try:
+            os.kill(pid, 0)  # signal 0 = "does this process exist?"
+        except OSError:
+            return ""  # recorded, but gone — not the holder
+        return (
+            f"One of the processes holding it is your Kiln bridge (PID {pid}), "
+            f"which is what lets kiln3d.com reach your printer — do not kill "
+            f"it, or the web app will show your printer as disconnected."
+        )
+    except Exception:  # noqa: BLE001 — a diagnosis must never be the crash
+        return ""
+
+
 def explain(exc: BaseException) -> Diagnosis:
     """Translate a startup exception into plain English.
 
@@ -187,6 +222,39 @@ def explain(exc: BaseException) -> Diagnosis:
                     f"a fresh one: `mv {db_path} {db_path}.bak`. This starts "
                     "you over with no print history, so keep the .bak file "
                     "and mention it if you report the problem.",
+                ],
+            )
+
+        # Another Kiln process is holding the database.  Worth naming the
+        # holder rather than leaving "database is locked" to be solved by
+        # guesswork: measured 2026-08-14, an agent cleared this lock by
+        # reading raw PIDs out of lsof and killing the two that looked
+        # stale.  One of them was the user's BRIDGE — the process that
+        # connects their printer to kiln3d.com — and the web monitor then
+        # showed the never-installed onboarding prompt for the rest of the
+        # night.  Nothing identified it, though Kiln writes the bridge's
+        # own PID to ~/.kiln/bridge.state and can read it back.
+        if "database is locked" in low or "database table is locked" in low:
+            return Diagnosis(
+                kind="database_locked",
+                headline="Another Kiln process is using the database.",
+                what_happened=(
+                    f"Kiln could not open its database at {db_path} because "
+                    f"something else has it open ({text}). "
+                    + _lock_holder_note()
+                    + " Nothing is damaged — two copies of Kiln simply cannot "
+                    "prepare the same database at once."
+                ),
+                what_to_do=[
+                    DOCTOR_STEP,
+                    "Close the leftover servers the safe way: `kiln trim` "
+                    "(or the trim_serve_processes tool). It checks that "
+                    "nothing is printing first, and it leaves the bridge "
+                    "alone.",
+                    "Do NOT kill Kiln processes by PID from `lsof` output. "
+                    "The bridge — the process that lets kiln3d.com reach "
+                    "your printer — holds this database too, and killing it "
+                    "silently disconnects your printer from the web app.",
                 ],
             )
 

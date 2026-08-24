@@ -25,9 +25,11 @@ def _stl(path, triangles: int = 2):
 @pytest.fixture(autouse=True)
 def _clean_cache(monkeypatch):
     stage_link._cache.clear()
+    stage_link._REFUSED_BEARER = None
     monkeypatch.delenv(stage_link._OPT_OUT_ENV, raising=False)
     yield
     stage_link._cache.clear()
+    stage_link._REFUSED_BEARER = None
 
 
 class _Resp:
@@ -413,3 +415,43 @@ class TestGenericProductKeyIsFound:
         counts when the value is actually a mesh."""
         for value in ("/t/out.scad", "/t/out.png", "/t/out.gcode", "/t/outdir"):
             assert stage_link.find_mesh_path({"output_path": value}) is None, value
+
+
+class TestRefusedBearerMemory:
+    """A 401 is a property of the bearer; the upload must not be re-paid.
+
+    Measured 2026-08-19: a stale local session collected FOUR refused
+    multi-megabyte uploads inside one decorate call, each spending upload
+    time inside a live tool request that MCP clients bound at ~60s.
+    """
+
+    def test_a_401_stops_further_uploads_for_that_bearer(self, tmp_path, monkeypatch):
+        calls = _wire(monkeypatch, resp=_Resp(status=401), token="stale-tok")
+        stl = _stl_at(tmp_path, "a.stl")
+        assert stage_link.stage_link_for(stl) is None
+        assert len(calls) == 1
+        # Second render, same process, same stale bearer: no upload at all.
+        stl2 = _stl_at(tmp_path, "b.stl")
+        assert stage_link.stage_link_for(stl2) is None
+        assert len(calls) == 1, "the refused bearer was re-uploaded to"
+
+    def test_a_fresh_sign_in_uploads_again(self, tmp_path, monkeypatch):
+        calls = _wire(monkeypatch, resp=_Resp(status=401), token="stale-tok")
+        assert stage_link.stage_link_for(_stl_at(tmp_path, "a.stl")) is None
+        assert len(calls) == 1
+        # New bearer VALUE: the skip is keyed by value, not by having failed.
+        calls2 = _wire(monkeypatch, token="fresh-tok")
+        assert stage_link.stage_link_for(_stl_at(tmp_path, "b.stl")) is not None
+        assert len(calls2) == 1
+
+    def test_a_transport_error_is_not_remembered(self, tmp_path, monkeypatch):
+        """Only an AUTH verdict condemns a bearer — a 500 or a network blip
+        must not silently disable links for the rest of the process."""
+        calls = _wire(monkeypatch, resp=_Resp(status=500), token="ok-tok")
+        assert stage_link.stage_link_for(_stl_at(tmp_path, "a.stl")) is None
+        assert stage_link.stage_link_for(_stl_at(tmp_path, "b.stl")) is None
+        assert len(calls) == 2, "a non-auth failure must keep trying"
+
+
+def _stl_at(tmp_path, name):
+    return _stl(tmp_path / name)

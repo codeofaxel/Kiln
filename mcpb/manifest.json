@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "kiln",
   "display_name": "Kiln",
-  "version": "1.3.2",
+  "version": "1.4.1.1",
   "description": "AI agent control of real 3D printers \u2014 design, slice, print, monitor, and recover across Bambu Lab, Creality, Prusa, Elegoo, and more.",
   "long_description": "Kiln is an open-source MCP server that lets AI agents (Claude Desktop, Claude Code, Codex, or any custom MCP client) drive real 3D printers end to end. In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result \u2014 over OctoPrint, Moonraker/Klipper, PrusaLink, Direct USB, and Bambu Lab's native protocol.\n\nThis bundle installs Kiln locally so it can reach a printer on your own network \u2014 Kiln is fundamentally a local-first tool, not a hosted service.",
   "author": {

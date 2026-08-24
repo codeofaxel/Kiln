@@ -14,6 +14,25 @@ photo decoration carried the frame (found on a real coaster, 2026-07-29).
 The invariant here is deliberately style-agnostic and dependency-agnostic:
 whatever the style, and whatever optional dependency is missing, the
 heightmap's border must be at the no-carve level.
+
+Transparency is the second axis these fixtures cover: ``convert("L")``
+drops the alpha channel, decoding a transparent surround as BLACK — which
+this pipeline reads as content, so a logo carved its whole bounding box
+(2026-08-18).  The surround is composited before any grayscale convert,
+so an opaque and a transparent source behave identically here.
+
+**Polarity is deliberately NOT parametrized, and that is a finding, not
+an omission.**  The values in this DAT are RAW LUMINANCE — dark ink near
+0, light field near 1 — because ``generate_emboss_scad`` inverts the file
+again on the way out (``_invert_dat_heightmap``) to make the ink tall.
+The two inversions are a PAIR.  A ``invert=True`` variant of the
+assertions below therefore looks obviously wrong (the field reads 1.0,
+not 0.0) while being exactly right, and "fixing" that reading breaks the
+compiled STL: the carve stops following the ink and fills the whole scale
+box.  Measured, 2026-08-18, by compiling both ways.  The end-to-end proof
+that the ink is what actually gets cut lives in kiln-pro's
+``tests/test_decal_offset_fidelity.py``, which parses the compiled STL —
+the only level where this question can be answered honestly.
 """
 
 from __future__ import annotations
@@ -54,6 +73,21 @@ def _photo_like(path: pathlib.Path, size=(400, 280)) -> pathlib.Path:
     return path
 
 
+def _mark_on_transparent(path: pathlib.Path, size=(400, 280)) -> pathlib.Path:
+    """The same logo shape a brand actually ships: opaque ink, alpha surround."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGBA", size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.polygon(
+        [(140, 200), (170, 90), (230, 90), (260, 200)],
+        outline=(0, 0, 0, 255), width=8,
+    )
+    d.rectangle([150, 150, 250, 160], fill=(0, 0, 0, 255))
+    img.save(path)
+    return path
+
+
 def _border_values(dat_path: str) -> list[float]:
     rows = [
         [float(v) for v in line.split()]
@@ -66,25 +100,29 @@ def _border_values(dat_path: str) -> list[float]:
     return top + bottom + left + right
 
 
+@pytest.mark.parametrize("source", ["opaque", "transparent"])
 @pytest.mark.parametrize("style", ["coin", "photo", "stencil", "default"])
 @pytest.mark.parametrize("mask", ["auto", "circle", "rectangle", "rounded_rectangle"])
-def test_emboss_never_carves_the_image_rectangle(tmp_path, style, mask):
-    """No style, no mask choice, may leave the border carving."""
-    src = _mark_on_white(tmp_path / "mark.png")
-    out = tmp_path / f"out_{style}_{mask}"
+def test_emboss_never_carves_the_image_rectangle(tmp_path, style, mask, source):
+    """No style, no mask choice and no alpha may leave the border carving."""
+    if source == "opaque":
+        src = _mark_on_white(tmp_path / "mark.png")
+    else:
+        src = _mark_on_transparent(tmp_path / "mark_alpha.png")
+    out = tmp_path / f"out_{style}_{mask}_{source}"
     out.mkdir()
 
     hm = prepare_image_for_emboss(
-        str(src), str(out), max_resolution=120, style=style, mask=mask
+        str(src), str(out), max_resolution=120, style=style, mask=mask,
     )
     border = _border_values(hm["dat_path"])
 
     assert border, "heightmap had no rows"
     worst = max(border)
     assert worst == pytest.approx(0.0, abs=1e-6), (
-        f"style={style!r} mask={mask!r}: the heightmap border carves "
-        f"(max {worst:.3f} of full depth), so the source image's rectangle "
-        "is cut into the part as a sunken frame"
+        f"style={style!r} mask={mask!r} source={source!r}: the heightmap "
+        f"border carves (max {worst:.3f} of full depth), so the source "
+        "image's rectangle is cut into the part as a sunken frame"
     )
 
 
@@ -95,7 +133,7 @@ def test_photo_content_still_carves_inside_the_shape(tmp_path):
     out.mkdir()
 
     hm = prepare_image_for_emboss(
-        str(src), str(out), max_resolution=120, style="coin", mask="circle"
+        str(src), str(out), max_resolution=120, style="coin", mask="circle",
     )
     rows = [
         [float(v) for v in line.split()]
@@ -138,29 +176,49 @@ def test_missing_background_removal_still_masks(tmp_path, monkeypatch):
     )
 
 
-def test_a_mark_carves_only_its_own_ink(tmp_path):
+@pytest.mark.parametrize("source", ["opaque", "transparent", "transparent-white-ink"])
+def test_a_mark_carves_only_its_own_ink(tmp_path, source):
     """A logo must not sit in a pool: only the artwork displaces the surface.
 
     The carve fraction must track the artwork's ink coverage, not the area
     of any mask shape. A pool (circle or otherwise) around a mark carves
     the field, and the field of a logo is empty space that belongs to the
     part's own surface.
+
+    The transparent case pins the alpha half: a dropped alpha channel
+    decodes the surround as ink, so the mark's whole bounding box counts
+    as artwork.  The white-ink case pins the vanishing-mark fallback: a
+    white logo on a transparent surround (the light variant every brand
+    kit ships) is invisible against a white flatten, so the alpha
+    coverage must be taken as the ink — ink colour never changes carve
+    geometry.
     """
     from PIL import Image, ImageDraw
 
     size = (400, 300)
-    img = Image.new("L", size, 255)
-    d = ImageDraw.Draw(img)
-    d.rectangle([120, 90, 280, 120], fill=0)
-    d.rectangle([170, 120, 230, 220], fill=0)
-    ink = sum(1 for v in img.getdata() if v < 128) / (size[0] * size[1])
+    if source == "opaque":
+        img = Image.new("L", size, 255)
+        d = ImageDraw.Draw(img)
+        d.rectangle([120, 90, 280, 120], fill=0)
+        d.rectangle([170, 120, 230, 220], fill=0)
+        ink = sum(1 for v in img.getdata() if v < 128) / (size[0] * size[1])
+    else:
+        fill = (
+            (255, 255, 255, 255) if source == "transparent-white-ink"
+            else (0, 0, 0, 255)
+        )
+        img = Image.new("RGBA", size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        d.rectangle([120, 90, 280, 120], fill=fill)
+        d.rectangle([170, 120, 230, 220], fill=fill)
+        ink = sum(1 for p in img.getdata() if p[3] > 128) / (size[0] * size[1])
     src = tmp_path / "mark.png"
     img.save(src)
     out = tmp_path / "out"
     out.mkdir()
 
     hm = prepare_image_for_emboss(
-        str(src), str(out), max_resolution=120, style="coin", mask="auto"
+        str(src), str(out), max_resolution=120, style="coin", mask="auto",
     )
     rows = [
         [float(v) for v in line.split()]
@@ -170,6 +228,56 @@ def test_a_mark_carves_only_its_own_ink(tmp_path):
     vals = [v for r in rows for v in r]
     carve = sum(1 for v in vals if v > 0.3) / len(vals)
     assert carve == pytest.approx(ink, abs=0.05), (
-        f"carve fraction {carve:.3f} vs ink coverage {ink:.3f} — the engine "
-        "is carving a pool around the mark, not just the mark"
+        f"source={source!r}: carve fraction {carve:.3f} vs ink coverage "
+        f"{ink:.3f} — the engine is carving a pool around the mark, not "
+        "just the mark"
+    )
+
+
+def test_transparent_and_flattened_sources_produce_identical_heightmaps(tmp_path):
+    """Alpha must mean "empty field", byte-for-byte.
+
+    A transparent-surround image and the same image pre-flattened onto
+    white must produce the SAME .dat through a style path.  This is the
+    contract that makes every style block safe without reasoning about
+    each one's filter chain: if ``convert("L")`` ever drops alpha again,
+    the surround decodes as black and the outputs diverge immediately.
+    """
+    import random
+
+    from PIL import Image
+
+    random.seed(7)
+    size = (200, 200)
+    src_rgba = Image.new("RGBA", size, (0, 0, 0, 0))
+    px = src_rgba.load()
+    # Noisy interior so the mark detector reads "photo" and the style
+    # preprocessing path (the historical alpha-dropping door) actually runs.
+    for y in range(20, 180):
+        for x in range(20, 180):
+            g = random.randrange(256)
+            px[x, y] = (g, g, g, 255)
+    p_rgba = tmp_path / "noisy.png"
+    src_rgba.save(p_rgba)
+
+    flat = Image.new("RGBA", size, (255, 255, 255, 255))
+    flat.paste(src_rgba, mask=src_rgba.split()[3])
+    p_flat = tmp_path / "noisy_flat.png"
+    flat.convert("RGB").save(p_flat)
+
+    out_a = tmp_path / "out_a"
+    out_a.mkdir()
+    out_b = tmp_path / "out_b"
+    out_b.mkdir()
+    hm_a = prepare_image_for_emboss(
+        str(p_rgba), str(out_a), invert=True, style="photo", mask="none"
+    )
+    hm_b = prepare_image_for_emboss(
+        str(p_flat), str(out_b), invert=True, style="photo", mask="none"
+    )
+    dat_a = pathlib.Path(hm_a["dat_path"]).read_text()
+    dat_b = pathlib.Path(hm_b["dat_path"]).read_text()
+    assert dat_a == dat_b, (
+        "a transparent surround and a white surround diverged — an "
+        "alpha-dropping convert is back in the pipeline"
     )

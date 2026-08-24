@@ -31,21 +31,6 @@ from kiln.plugins._validation_pipeline_internals import (
     _ABS_WARP_THRESHOLD_MM as _ABS_WARP_THRESHOLD_MM,
 )
 from kiln.plugins._validation_pipeline_internals import (
-    _AUTO_SCALE_LARGE_THRESHOLD_MM as _AUTO_SCALE_LARGE_THRESHOLD_MM,
-)
-from kiln.plugins._validation_pipeline_internals import (
-    _AUTO_SCALE_MICRON_FACTOR as _AUTO_SCALE_MICRON_FACTOR,
-)
-from kiln.plugins._validation_pipeline_internals import (
-    _AUTO_SCALE_MIN_TRIANGLES as _AUTO_SCALE_MIN_TRIANGLES,
-)
-from kiln.plugins._validation_pipeline_internals import (
-    _AUTO_SCALE_SMALL_THRESHOLD_MM as _AUTO_SCALE_SMALL_THRESHOLD_MM,
-)
-from kiln.plugins._validation_pipeline_internals import (
-    _AUTO_SCALE_TARGET_HEIGHT_MM as _AUTO_SCALE_TARGET_HEIGHT_MM,
-)
-from kiln.plugins._validation_pipeline_internals import (
     _DEFAULT_INFILL_FACTOR as _DEFAULT_INFILL_FACTOR,
 )
 from kiln.plugins._validation_pipeline_internals import (
@@ -103,6 +88,9 @@ from kiln.plugins._validation_pipeline_internals import (
     _inline_stl_scale as _inline_stl_scale,
 )
 from kiln.plugins._validation_pipeline_internals import (
+    _max_dim_mm as _max_dim_mm,
+)
+from kiln.plugins._validation_pipeline_internals import (
     _PipelineReport as _PipelineReport,
 )
 from kiln.plugins._validation_pipeline_internals import (
@@ -110,6 +98,9 @@ from kiln.plugins._validation_pipeline_internals import (
 )
 from kiln.plugins._validation_pipeline_internals import (
     _sanitize_summary_detail as _sanitize_summary_detail,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _scaled_copy_path as _scaled_copy_path,
 )
 from kiln.plugins._validation_pipeline_internals import (
     _step_auto_scale as _step_auto_scale,
@@ -143,6 +134,12 @@ from kiln.plugins._validation_pipeline_internals import (
 )
 from kiln.plugins._validation_pipeline_internals import (
     _step_watertight_check as _step_watertight_check,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _unit_verdict as _unit_verdict,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _UnitVerdict as _UnitVerdict,
 )
 
 _logger = logging.getLogger(__name__)
@@ -464,18 +461,23 @@ class _ValidationPipelinePlugin:
             printer_id: str = "",
             material: str = "PLA",
         ) -> dict:
-            """Prepare any AI-generated model for printing — auto-fixes the unit problem.
+            """Prepare any AI-generated model for printing — fixes the unit mix-up.
 
             AI model generators (Meshy, Tripo, Stability, Gemini) routinely
-            export models in meters instead of millimeters, producing figurines
-            that are 1.9mm tall.  This tool detects and fixes that, plus runs
-            the full validation pipeline and provides smart recommendations
-            for simplification and hollowing.
+            export models in meters instead of millimeters, so a 60mm figurine
+            reads as 0.06mm.  This tool corrects that by the real unit
+            conversion when exactly one explains the size — never by scaling
+            to an invented "reasonable" target — then runs the full validation
+            pipeline and provides smart recommendations for simplification
+            and hollowing.
 
             Pipeline:
                 1. Run validate_and_prepare for baseline analysis
-                2. Auto-scale detection — if max dim < 10mm, scale to a
-                   reasonable size (or to target_height_mm if provided)
+                2. Size — scale to target_height_mm when given; otherwise
+                   apply a unit correction only when exactly one real
+                   conversion (meters, centimeters, inches, microns) lands
+                   the model at a printable size.  A size several units
+                   could explain, or none can, is reported, never guessed at.
                 3. Mesh simplification recommendation (if > 100K triangles)
                 4. Smart hollow recommendation (only when appropriate)
                 5. Re-validate the scaled model
@@ -484,8 +486,9 @@ class _ValidationPipelinePlugin:
             Works with STL, OBJ, and 3MF files.
 
             :param input_path: Path to the AI-generated model file.
-            :param target_height_mm: Desired height in mm.  If 0, auto-detects
-                a reasonable size based on model aspect ratio.
+            :param target_height_mm: Desired height in mm — an instruction,
+                honored at any starting size.  If 0, only a unit mistake is
+                ever fixed; the model's designed size is otherwise kept.
             :param printer_id: Optional printer model ID for bed-fit checking.
             :param material: Material name (default "PLA") for material checks.
             :returns: Dict with original/prepared comparison, actions taken,
@@ -507,12 +510,12 @@ class _ValidationPipelinePlugin:
                 "printability_score": baseline.get("printability_score", 0),
             }
 
-            # Extract dimensions for scaling logic
+            # Extract dimensions for scaling logic.  ``or``-chaining, not
+            # ``dict.get`` defaults, so a present-but-zero ``z`` still falls
+            # through to ``height_mm`` — same idiom as ``_max_dim_mm``.
             dims = baseline.get("model_info", {}).get("dimensions_mm", {})
-            x = float(dims.get("x", dims.get("width_mm", 0)) or 0)
-            y = float(dims.get("y", dims.get("depth_mm", 0)) or 0)
-            z = float(dims.get("z", dims.get("height_mm", 0)) or 0)
-            max_dim = max(x, y, z)
+            z = float(dims.get("z") or dims.get("height_mm") or 0)
+            max_dim = _max_dim_mm(baseline.get("model_info", {}))
             tri_count = int(baseline.get("model_info", {}).get("triangles", 0))
 
             # Track the working path — may change after scaling
@@ -520,108 +523,81 @@ class _ValidationPipelinePlugin:
             scale_factor = 0.0
 
             # -------------------------------------------------------
-            # Step 2: Auto-scale detection
+            # Step 2: size — the caller's instruction, else a unit repair
             # -------------------------------------------------------
-            needs_scaling = (
-                max_dim > 0
-                and max_dim < _AUTO_SCALE_SMALL_THRESHOLD_MM
-                and tri_count > _AUTO_SCALE_MIN_TRIANGLES
-            )
+            # Two different questions that used to share one branch.  A
+            # ``target_height_mm`` is an INSTRUCTION and always wins: the
+            # user said how big they want it, so no inference is involved
+            # and it applies at any size.  Without one, the only thing we
+            # may change is a unit mistake, and only when exactly one real
+            # conversion explains the size.
+            #
+            # What this replaces: three invented sizes chosen by aspect
+            # ratio — 80mm for "figurine", 100mm for "flat", 60mm for
+            # "cubic".  None is a unit conversion; each simply asserts how
+            # big the user's object ought to be, and is wrong for every
+            # object whose true size is not that number.
+            verdict = _unit_verdict(max_dim)
+            reason = ""
 
-            if needs_scaling:
-                if target_height_mm > 0:
-                    # User-specified target height — scale to that
-                    scale_factor = target_height_mm / z if z > 0 else target_height_mm / max_dim
-                    reason = f"scaled to target height {target_height_mm}mm"
-                else:
-                    # Auto-detect reasonable size based on aspect ratio
-                    if z > 0 and x > 0 and y > 0:
-                        if z > max(x, y) * 1.5:
-                            # Figurine: tall and narrow → 80mm tall
-                            target = 80.0
-                            scale_factor = target / z
-                            reason = "figurine detected (tall) — scaled to 80mm height"
-                        elif z < max(x, y) * 0.5:
-                            # Flat object → 100mm in widest dimension
-                            target = 100.0
-                            widest = max(x, y)
-                            scale_factor = target / widest
-                            reason = "flat object detected — scaled to 100mm wide"
-                        else:
-                            # Cubic → 60mm in largest dimension
-                            target = 60.0
-                            scale_factor = target / max_dim
-                            reason = "cubic object detected — scaled to 60mm"
-                    else:
-                        # Fallback: scale to 60mm
-                        target = 60.0
-                        scale_factor = target / max_dim if max_dim > 0 else 1.0
-                        reason = "auto-scaled to 60mm (default)"
+            if target_height_mm > 0 and z > 0:
+                scale_factor = target_height_mm / z
+                reason = f"scaled to the requested height of {target_height_mm}mm"
+            elif verdict.corrected:
+                scale_factor = verdict.factor
+                reason = verdict.describe()
+            elif verdict.status in ("ambiguous", "oversize", "unexplained"):
+                recommendations.append(verdict.describe())
 
-                if scale_factor > 0 and scale_factor != 1.0:
-                    scaled_path: str | None = None
+            # One writer for both cases.  The duplicate that used to sit
+            # below — same rescale, same fallback, same logging, reached
+            # only when a target height met a normal-size model — is where
+            # the two branches were free to drift apart.
+            if scale_factor > 0 and abs(scale_factor - 1.0) > 0.01:
+                scaled_path: str | None = None
 
-                    # Try rescale_model from server
+                # The shared rescale engine — the same one the
+                # ``rescale_model`` tool wraps, imported directly because a
+                # registered tool is not an importable function (the old
+                # ``from kiln.server import rescale_model`` stopped resolving
+                # when the tool moved into a plugin, so this path silently
+                # fell through to the binary-only inline scaler on every call).
+                try:
+                    from kiln.generation.validation import rescale_stl as _rescale
+
+                    result = _rescale(
+                        input_path,
+                        scale_factor=scale_factor,
+                        output_path=_scaled_copy_path(input_path),
+                    )
+                    sp = result.get("path", "")
+                    if sp and Path(sp).exists():
+                        scaled_path = sp
+                except Exception:
+                    _logger.debug(
+                        "rescale_stl failed for prepare_ai_model",
+                        exc_info=True,
+                    )
+
+                # Inline fallback for STL
+                if scaled_path is None and Path(input_path).suffix.lower() == ".stl":
                     try:
-                        from kiln.server import rescale_model as _rescale
-
-                        result = _rescale(input_path, scale_factor=scale_factor)
-                        sp = result.get("path", "")
-                        if sp and Path(sp).exists():
-                            scaled_path = sp
+                        scaled_path = _inline_stl_scale(input_path, scale_factor)
                     except Exception:
                         _logger.debug(
-                            "rescale_model unavailable for prepare_ai_model",
+                            "Inline STL scaling failed in prepare_ai_model",
                             exc_info=True,
                         )
 
-                    # Inline fallback for STL
-                    if scaled_path is None and Path(input_path).suffix.lower() == ".stl":
-                        try:
-                            scaled_path = _inline_stl_scale(input_path, scale_factor)
-                        except Exception:
-                            _logger.debug(
-                                "Inline STL scaling failed in prepare_ai_model",
-                                exc_info=True,
-                            )
-
-                    if scaled_path is not None:
-                        working_path = scaled_path
-                        actions_taken.append(
-                            f"Scaled {scale_factor:.1f}x ({reason})"
-                        )
-                    else:
-                        # Could not scale — report factor for manual use
-                        recommendations.append(
-                            f"Could not auto-scale. Apply scale factor "
-                            f"{scale_factor:.1f}x manually with rescale_model."
-                        )
-            elif target_height_mm > 0 and z > 0 and max_dim >= _AUTO_SCALE_SMALL_THRESHOLD_MM:
-                # Model is normal size but user wants a specific height
-                scale_factor = target_height_mm / z
-                if abs(scale_factor - 1.0) > 0.01:
-                    scaled_path_t: str | None = None
-                    try:
-                        from kiln.server import rescale_model as _rescale2
-
-                        result2 = _rescale2(input_path, scale_factor=scale_factor)
-                        sp2 = result2.get("path", "")
-                        if sp2 and Path(sp2).exists():
-                            scaled_path_t = sp2
-                    except Exception:
-                        _logger.debug("rescale_model unavailable for target_height", exc_info=True)
-
-                    if scaled_path_t is None and Path(input_path).suffix.lower() == ".stl":
-                        try:
-                            scaled_path_t = _inline_stl_scale(input_path, scale_factor)
-                        except Exception:
-                            _logger.debug("Inline STL scaling failed for target_height", exc_info=True)
-
-                    if scaled_path_t is not None:
-                        working_path = scaled_path_t
-                        actions_taken.append(
-                            f"Scaled {scale_factor:.2f}x to target height {target_height_mm}mm"
-                        )
+                if scaled_path is not None:
+                    working_path = scaled_path
+                    actions_taken.append(f"Scaled {scale_factor:g}x — {reason}")
+                else:
+                    # Could not scale — report factor for manual use
+                    recommendations.append(
+                        f"Could not auto-scale. Apply scale factor "
+                        f"{scale_factor:g}x manually with rescale_model."
+                    )
 
             # -------------------------------------------------------
             # Step 3: Mesh simplification recommendation

@@ -33,7 +33,7 @@ pipx install kiln3d
 - ** 224 CLI commands** for human and agent use
 - **Model search** across MyMiniFactory, Cults3D, Thangs, GrabCAD, Etsy
 - **Text/sketch-to-3D generation** with multiple provider backends
-- **Auto-slicing** via PrusaSlicer or OrcaSlicer
+- **Auto-slicing** via PrusaSlicer, OrcaSlicer, or BambuStudio
 - **Fleet management** with multi-site, multi-printer support
 - **Safety enforcement** — pre-flight checks, G-code validation, temp limits, confirmation gates
 - **Print monitoring** with camera snapshots and failure detection

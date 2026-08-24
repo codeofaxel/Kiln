@@ -11,11 +11,22 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import enum
+import logging
 import os
 import re
+import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, ClassVar
+
+logger = logging.getLogger(__name__)
+
+# Guards the one-time, per-instance setup of the idle-release bookkeeping.
+# Module-level because the state it protects is what would otherwise have to
+# hold its own lock — an adapter cannot lazily create a lock to guard its own
+# lazy creation.  Contended only on an adapter's first connection.
+_IDLE_SETUP_LOCK = threading.Lock()
 
 
 def is_resume_mode_3mf(file_name: str) -> bool:
@@ -69,6 +80,20 @@ class PrinterError(Exception):
     def __init__(self, message: str, *, cause: Exception | None = None) -> None:
         super().__init__(message)
         self.cause = cause
+
+
+class PrinterEngagementError(PrinterError):
+    """Refused because Kiln is already working with a different machine.
+
+    A subclass of :class:`PrinterError` on purpose: every caller already
+    handles that, so the refusal reaches a user as a message rather than a
+    traceback, on every surface, without one of them being updated first.
+    ``verdict`` carries the structured form for surfaces that render.
+    """
+
+    def __init__(self, verdict: dict, *, cause: Exception | None = None) -> None:
+        super().__init__(str(verdict.get("reason") or "Kiln is working with another printer."), cause=cause)
+        self.verdict = verdict
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +302,13 @@ class JobProgress:
     # Extended layer tracking (populated by adapters that support it).
     current_layer: int | None = None
     total_layers: int | None = None
+    # The BACKEND's own id for this job, when it issues one that is really
+    # unique -- Prusa Link's ``job.id`` is the same handle its pause/resume/
+    # cancel endpoints take.  Left None by every backend that issues nothing
+    # (Moonraker, OctoPrint, Duet, Elegoo) and by Bambu, whose task_id /
+    # subtask_id are the literal "0" on every LAN print.  Consumers must not
+    # invent one here: ``kiln.printers.job_identity`` owns the fallback.
+    job_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
@@ -284,7 +316,7 @@ class JobProgress:
         Extended fields that are ``None`` are omitted for compactness.
         """
         data = asdict(self)
-        for key in ("current_layer", "total_layers"):
+        for key in ("current_layer", "total_layers", "job_id"):
             if data.get(key) is None:
                 data.pop(key, None)
         return data
@@ -373,6 +405,20 @@ class PrinterCapabilities:
     can_update_firmware: bool = False
     can_snapshot: bool = False
     can_detect_filament: bool = False
+    #: Whether :meth:`PrinterAdapter.clear_error` can acknowledge a latched
+    #: firmware error.  Defaults to False so a backend that has not been
+    #: taught its firmware's acknowledgement advertises the truth — a caller
+    #: offering the user a button that cannot work is worse than no button.
+    can_clear_error: bool = False
+    #: Whether cancelling DURING a calibration routine (bed levelling, Z
+    #: homing) trips a firmware fault on this backend.  Measured on an A1
+    #: (2026-08-13): a cancel mid-levelling aborts the homing move and the
+    #: firmware latches "Z axis homing failed" — every subsequent print
+    #: refused until a power cycle.  Pausing first turns that same fault
+    #: transient: it self-clears in about fifteen seconds and the job lands
+    #: as "cancelled".  Default False: a backend nobody has measured is not
+    #: assumed to share the hazard, because the guard costs a real command.
+    cancel_during_calibration_faults: bool = False
     device_type: str = "fdm_printer"
     supported_extensions: tuple[str, ...] = (".gcode", ".gco", ".g")
 
@@ -535,6 +581,60 @@ class PrinterInfo:
 # ---------------------------------------------------------------------------
 
 
+
+def _make_engagement_gated(action: str, original):
+    """Wrap *original* so it consults the single-printer engagement first."""
+    import functools
+
+    @functools.wraps(original)
+    def _gated(self, *args, **kwargs):
+        from kiln.printers.engagement import check_command, observe
+
+        verdict = check_command(self, action)
+        if verdict is not None:
+            raise PrinterEngagementError(verdict)
+        result = original(self, *args, **kwargs)
+        # Learn from the answer the command already produced.  Claiming the
+        # free slot from here rather than from the gate is what keeps the
+        # rule free: asking the printer up front cost a second round trip on
+        # the first status call of every engagement.
+        observe(self, action, result)
+        return result
+
+    _gated._kiln_engagement_wrapped = True  # type: ignore[attr-defined]
+    return _gated
+
+
+def _install_engagement_gate(cls: type, *, own_methods_only: bool) -> None:
+    """Gate every printer-directed command on *cls*.
+
+    ``own_methods_only`` is the load-bearing argument.  The base class is
+    wrapped once with it False, so an adapter that INHERITS a control method
+    is gated by that.  Each subclass is then wrapped with it True, so only a
+    method the subclass really overrides gets its own wrapper.
+
+    The distinction is not tidiness.  Writing a wrapper into every subclass's
+    ``__dict__`` would make each adapter LOOK like it overrides the base
+    template, and several adapters are pinned by tests asserting they do not
+    (``"resume_print" not in DuetAdapter.__dict__``) precisely because
+    overriding one is how the base safety gate gets bypassed.  Gating must not
+    cost the suite its ability to see that.
+    """
+    from kiln.printers.engagement import GATED_ACTIONS
+
+    for action in sorted(GATED_ACTIONS):
+        original = cls.__dict__.get(action) if own_methods_only else getattr(cls, action, None)
+        if original is None or not callable(original):
+            continue
+        if getattr(original, "_kiln_engagement_wrapped", False):
+            continue
+        if getattr(original, "__isabstractmethod__", False):
+            # Wrapping an abstract method would return a concrete function and
+            # quietly switch OFF the ABC check that forces every adapter to
+            # implement it.  The subclass that implements it gets gated instead.
+            continue
+        setattr(cls, action, _make_engagement_gated(action, original))
+
 class PrinterAdapter(ABC):
     """Abstract base for all printer backend adapters.
 
@@ -627,6 +727,19 @@ class PrinterAdapter(ABC):
             _observed_get_state._kiln_outcome_wrapped = True  # type: ignore[attr-defined]
             cls.get_state = _observed_get_state
 
+        # ------------------------------------------------------------------
+        # Single-printer engagement: every printer-directed command asks
+        # whether Kiln is already working with a DIFFERENT machine.  Same
+        # engine-not-instance shape as the two wraps above, and the same
+        # reason -- the tier rule used to live only on start_print, so the
+        # eight sibling commands that actually operate a second machine were
+        # never asked.  Resolved with getattr rather than cls.__dict__ so an
+        # adapter that INHERITS a control method is gated too: reading only
+        # the subclass's own dict is exactly how a door gets missed.
+        # ------------------------------------------------------------------
+        _install_engagement_gate(cls, own_methods_only=True)
+
+
     def set_safety_profile(self, profile_id: str) -> None:
         """Bind a printer safety profile for temperature validation.
 
@@ -637,6 +750,222 @@ class PrinterAdapter(ABC):
             profile_id: Profile identifier (e.g. ``"ender3"``, ``"bambu_x1c"``).
         """
         self._safety_profile_id = profile_id
+
+    # -- print-duration semantics ----------------------------------------
+    #
+    # What this backend's ``JobProgress.print_time_seconds`` means AFTER the
+    # print ends — the fact that decides whether a late reading can be
+    # trusted (see ``_record_print_duration``):
+    #
+    #   "frozen"     the printer reports its own job clock and freezes it at
+    #                the ending, so a late read is merely late and still
+    #                correct;
+    #   "stopwatch"  the number is a Kiln-side stopwatch nothing stops on
+    #                its own, so a late read keeps counting and inflates;
+    #   "none"       the backend has no job clock at all (direct USB), so
+    #                its hours are unknowable rather than zero.
+    #
+    # The default is the STRICT one on purpose: an adapter that never
+    # declares is treated as a stopwatch, whose late readings are refused —
+    # forgetting to declare can cost real hours, never invent them.  Every
+    # concrete adapter declares explicitly (pinned by
+    # test_print_duration_capture, alongside the documentation copy in
+    # scripts/adapter_conformance.yaml — which is NOT shipped in the pip
+    # package, which is why runtime reads this attribute and not that file).
+    _DURATION_SEMANTICS: ClassVar[str] = "stopwatch"
+
+    # -- idle connection release ----------------------------------------
+    #
+    # Some printers ration connections: a Bambu accepts only a few LAN MQTT
+    # clients, an Elegoo only a few websockets.  Kiln runs one ``kiln serve``
+    # per MCP session and hosts do not reliably reap them, so an adapter that
+    # holds its connection for the life of its process turns "sessions I once
+    # opened" into "slots the printer no longer has" — the user meets that as
+    # a printer that is powered on, pingable, and unreachable (2026-08-14).
+    #
+    # The machinery lives here, once, rather than in each push-based adapter,
+    # so the two cannot drift on the part that is subtle: when NOT to release.
+    # A backend opts in by setting the two class attributes below and
+    # overriding :meth:`_connection_is_live`.
+
+    #: Env var this backend reads for its idle window.  "" = no opt-in.
+    _IDLE_RELEASE_ENV: ClassVar[str] = ""
+    #: Seconds of caller inactivity before release.  0 = feature off.
+    _IDLE_RELEASE_DEFAULT_S: ClassVar[float] = 0.0
+    #: How often the reaper wakes to test the window (fraction of it).
+    _IDLE_POLL_DIVISOR: ClassVar[float] = 4.0
+
+    def _init_idle_release(self) -> None:
+        """Set up idle bookkeeping.  Safe to call more than once.
+
+        Adapters in this package do not chain to a base ``__init__``, so this
+        is called explicitly from each opted-in adapter's constructor — and
+        every accessor below still tolerates its absence, so a backend that
+        opts in and forgets the call degrades to "never releases" rather than
+        raising ``AttributeError`` from a printer operation.
+
+        Double-checked so the common case takes no lock: ``_note_activity``
+        runs on EVERY read and write, and ``_IDLE_SETUP_LOCK`` is shared by
+        the whole process, so locking unconditionally here would funnel every
+        printer operation on every adapter through one mutex to re-answer a
+        question settled at construction.
+        """
+        if getattr(self, "_idle_stop", None) is not None:
+            return
+        with _IDLE_SETUP_LOCK:
+            if getattr(self, "_idle_stop", None) is None:
+                self._last_activity: float = time.monotonic()
+                self._idle_reaper: threading.Thread | None = None
+                self._idle_stop: threading.Event = threading.Event()
+
+    def _note_activity(self) -> None:
+        """Stamp caller demand.  Call from the adapter's connection funnel.
+
+        Deliberately measures calls INTO the adapter, never traffic arriving
+        from the printer: a printer pushes status whether or not anyone is
+        listening, so stamping on inbound frames would keep every slot alive
+        forever — precisely the condition the release exists to end.
+        """
+        self._init_idle_release()
+        self._last_activity = time.monotonic()
+
+    def _idle_window(self) -> float:
+        """Seconds of inactivity before the connection is released.
+
+        ``0`` or negative disables the release for this adapter.  An
+        unparseable env value falls back to the default rather than failing a
+        printer operation over a malformed setting.
+        """
+        if not self._IDLE_RELEASE_ENV:
+            return 0.0
+        raw = os.environ.get(self._IDLE_RELEASE_ENV, "")
+        if not raw:
+            return self._IDLE_RELEASE_DEFAULT_S
+        try:
+            return float(raw)
+        except ValueError:
+            logger.debug(
+                "%s=%r is not a number; using the %ss default",
+                self._IDLE_RELEASE_ENV,
+                raw,
+                self._IDLE_RELEASE_DEFAULT_S,
+            )
+            return self._IDLE_RELEASE_DEFAULT_S
+
+    def _connection_is_live(self) -> bool:
+        """True while this adapter holds an open connection.
+
+        Overridden by push-based backends; the default ``False`` stops the
+        reaper immediately for anything that never opted in.
+        """
+        return False
+
+    def _print_in_flight(self) -> bool:
+        """True while the printer is mid-job, as of the last status seen.
+
+        The reaper defers to this, and the default is the safe answer for a
+        backend that cannot tell: a job might be running, so keep the
+        connection.  Overriding it is what lets an idle printer's slot go
+        back while a printing one's is held.
+        """
+        return True
+
+    def _start_idle_reaper(self) -> None:
+        """Start the thread that releases the connection once it falls idle.
+
+        Call after every successful connect.  The thread exits as soon as it
+        releases, so an idle-disconnected adapter costs no thread at all —
+        only a connected one is worth watching.
+        """
+        window = self._idle_window()
+        if window <= 0:
+            return
+        self._init_idle_release()
+        reaper = getattr(self, "_idle_reaper", None)
+        if reaper is not None and reaper.is_alive():
+            return
+        self._idle_stop.clear()
+        self._idle_reaper = threading.Thread(
+            target=self._idle_loop,
+            args=(window,),
+            name=f"kiln-idle-release-{self.name}",
+            daemon=True,
+        )
+        self._idle_reaper.start()
+
+    def _stop_idle_reaper(self) -> None:
+        """Signal the reaper to exit.  Call from ``disconnect``.
+
+        Tolerates an adapter whose idle state was never initialised, so a
+        ``disconnect`` on a half-built adapter cannot raise ``AttributeError``
+        — that path runs during shutdown and error handling, where a new
+        exception is the last thing anyone needs.
+        """
+        idle_stop = getattr(self, "_idle_stop", None)
+        if idle_stop is not None:
+            idle_stop.set()
+
+    def _idle_loop(self, window: float) -> None:
+        """Release the connection after *window* seconds with no calls.
+
+        The checks run newest-cheapest-first and are all re-read each tick,
+        so a printer that starts a job, or a caller that turns up, defers the
+        release rather than racing it.
+
+        One residual race is accepted rather than engineered away: a caller
+        can enter the adapter's funnel in the instant between the last check
+        here and ``disconnect`` taking the backend's lock, and would then hold
+        a reference to a connection that is being closed underneath it.  It
+        costs that one call a retryable connection error, it cannot happen
+        until a printer has gone a full window untouched, and closing it
+        properly would mean a release protocol spanning the reaper and every
+        backend's connect lock — more deadlock surface than the failure is
+        worth.  The final activity re-read below narrows it to microseconds.
+        """
+        interval = max(1.0, window / self._IDLE_POLL_DIVISOR)
+        while not self._idle_stop.wait(interval):
+            if not self._connection_is_live():
+                return
+            if time.monotonic() - self._last_activity < window:
+                continue
+            if self._print_in_flight():
+                # Deferred, never cancelled: reassess on the next tick so the
+                # slot goes back once the job it was serving is over.
+                continue
+            # Re-read after the state checks above, which are not free: asking
+            # a backend whether it is printing can take a lock, and a call
+            # arriving during that answer must still win.
+            if time.monotonic() - self._last_activity < window:
+                continue
+            logger.info(
+                "Releasing idle connection to %s after %.0fs unused — this "
+                "printer allows only a few clients at once, and the next "
+                "call will reconnect.",
+                getattr(self, "_host", self.name),
+                window,
+            )
+            with contextlib.suppress(Exception):
+                self.disconnect()
+            return
+
+    def disconnect(self) -> None:  # noqa: B027  (concrete no-op, not abstract)
+        """Release any persistent connection this adapter holds.
+
+        A no-op for the HTTP-polling backends, which hold nothing between
+        calls.  The push-based ones override it: Bambu's MQTT and Elegoo's
+        websocket each occupy a connection slot the printer rations, so for
+        those "still constructed" must not mean "still connected".
+
+        Defined here so callers that clean up — process exit, an idle sweep,
+        a printer being deregistered — can release whatever they were handed
+        without asking what kind of printer it is.  Implementations must be
+        idempotent and must reconnect on demand.
+
+        Deliberately concrete rather than abstract: "I hold nothing, so there
+        is nothing to release" is the correct behaviour for most backends,
+        and making it abstract would force every one of them to write that
+        sentence out as an empty override.
+        """
 
     # -- identity & feature discovery -----------------------------------
 
@@ -759,6 +1088,26 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "job-start stamp failed", exc_info=True
                 )
+
+            # Kiln started this print, so Kiln is now driving this machine.
+            # Anchored to the same moment and for the same reason: it is the
+            # one event Kiln causes and therefore cannot miss.  A resume 3MF
+            # is excluded above -- it continues a print that already has an
+            # engagement, and re-recording it would reset the return budget.
+            try:
+                from kiln.printers.engagement import engage
+
+                # Recorded WITHOUT asking the printer which job this is: a
+                # status call right after a start is an extra round trip on
+                # the one path that must stay lean, and the identity arrives
+                # for free on the next get_job (engagement.observe fills it).
+                engage(self, None, reason="started")
+            except Exception:  # noqa: BLE001 — bookkeeping never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "engagement not recorded", exc_info=True
+                )
             try:
                 from kiln.daily_stats import record_print_start
 
@@ -768,6 +1117,20 @@ class PrinterAdapter(ABC):
 
                 _logging.getLogger(__name__).debug(
                     "print-start stat recording failed", exc_info=True
+                )
+            # Retain the sliced file for the web Monitor's layer viewer —
+            # joined to the slice ledger by the exact name this adapter was
+            # handed.  Same single-chokepoint reasoning as the counters
+            # above: every door that starts a print passes through here.
+            try:
+                from kiln.monitor_twin import note_print_started
+
+                note_print_started(self.name, file_name)
+            except Exception:  # noqa: BLE001 — the twin never affects a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "monitor-twin print-start note failed", exc_info=True
                 )
             # Nozzle wear counts at START — every print wears the nozzle,
             # success or failure, and an end-hook only sees the prints
@@ -789,7 +1152,18 @@ class PrinterAdapter(ABC):
             # print existed and settle how it went, instead of the print
             # vanishing from history entirely.
             try:
-                from kiln.auto_record_hook import open_pending_outcome
+                from kiln.auto_record_hook import (
+                    clear_cancel_intent,
+                    open_pending_outcome,
+                )
+
+                # A cancel asked for before this print has nothing to say
+                # about this print.  Dropping it HERE is what lets the intent
+                # outlive a slow stop sequence safely: the mechanism no longer
+                # has to guess how many seconds a printer takes to stop
+                # moving, retract, park and report idle, because the event
+                # that guess was standing in for is this one, exactly.
+                clear_cancel_intent(outcome_printer_name(self))
 
                 # The material Kiln COMMANDED at start is the strongest
                 # honest source — it survives even when the outcome is
@@ -798,8 +1172,15 @@ class PrinterAdapter(ABC):
                 # generic key; absent both, the record-time backfill
                 # (job metadata, live AMS on watched endings) covers it.
                 commanded_material = kwargs.get("material_type") or kwargs.get("material")
+                # Under the name every RESOLVER looks it up by.  self.name
+                # is the backend family — identical for every printer of a
+                # brand — while both reconcile doors and save_print_outcome's
+                # pending-row adoption key on outcome_printer_name.  Opened
+                # under the family name, the row could never be found again:
+                # each print left one more forever-pending row and its real
+                # ending was inserted as a second row beside it.
                 open_pending_outcome(
-                    self.name,
+                    outcome_printer_name(self),
                     file_name,
                     material_type=(
                         str(commanded_material) if commanded_material else None
@@ -1075,6 +1456,45 @@ class PrinterAdapter(ABC):
         Raises:
             PrinterError: If the e-stop command cannot be delivered.
         """
+
+    def clear_error(self) -> PrintResult:
+        """Acknowledge a latched firmware error so the printer can print again.
+
+        Deliberately NOT abstract, and it refuses by default.  A printer whose
+        error nobody knows how to clear must say so, because the alternative —
+        a default that pretends to work — is a button that reports success and
+        leaves the machine exactly as stuck as it was.  Adapters that know
+        their firmware's acknowledgement override this and set
+        :attr:`PrinterCapabilities.can_clear_error`.
+
+        This exists because a latched error is a DEAD END, not an
+        inconvenience.  Measured on an A1 (2026-08-13): a print cancelled
+        during bed levelling left the firmware reporting ``gcode_state=failed``
+        with a non-zero ``print_error``, which maps to
+        :attr:`PrinterStatus.ERROR`; the pre-flight check then refused every
+        subsequent print.  Dismissing the message on the printer's own screen
+        cleared the notification but NOT the reported state, so the machine
+        showed "ready" while Kiln — correctly — would not start a job.  There
+        was no way back through Kiln at all; only a power cycle cleared it.
+
+        The rule this restores is the one the rest of the status stack already
+        keeps: Kiln may refuse to act on what a printer reports, but it must
+        never leave the user with no way to reconcile the two.
+
+        :returns: A :class:`PrintResult` whose ``success`` says whether the
+            acknowledgement was DELIVERED, not whether the printer has since
+            gone idle — the caller re-reads state for that, and some firmware
+            takes a moment.
+        """
+        return PrintResult(
+            success=False,
+            message=(
+                f"{self.name} has no known way to clear a firmware error from "
+                "Kiln. Clear it on the printer's own screen or power-cycle it. "
+                "See scripts/adapter_conformance.yaml for what each backend "
+                "declares."
+            ),
+        )
 
     # -- calibration -----------------------------------------------------
 
@@ -1450,6 +1870,13 @@ DeviceAdapter = PrinterAdapter
 # ---------------------------------------------------------------------------
 
 
+# The base class's own concrete control methods, gated once.  Every adapter
+# that INHERITS one is covered by this; an adapter that overrides one is
+# covered by __init_subclass__.  Abstract methods are skipped there, so the
+# implementing subclass is what gets wrapped.
+_install_engagement_gate(PrinterAdapter, own_methods_only=False)
+
+
 def delegate_outcome_lifecycle(backend: PrinterAdapter) -> None:
     """Mark ``backend`` as an inner adapter its owner reports on behalf of.
 
@@ -1525,6 +1952,35 @@ def outcome_printer_name(adapter: Any) -> str:
     return getattr(adapter, "name", "") or "printer"
 
 
+def in_calibration_window(state: Any, job: Any) -> bool:
+    """Is this printer still in its pre-extrusion routine — levelling, homing?
+
+    The discriminator is the JOB, not the machine state, because the state
+    word does not distinguish them: an A1 reports ``printing`` throughout bed
+    levelling, exactly as it does mid-part.  What separates them is that
+    nothing has been laid down yet.
+
+    Measured across four cancels on an A1 (2026-08-13).  The three that
+    faulted all read ``current_layer=0`` with ``completion=0``; the one that
+    cancelled cleanly read ``completion=1.0``.  So a job that has reported
+    ANY progress is past the routine and out of the hazard.
+
+    Unknown reads as IN the window.  A printer that has not said where it is
+    yet is most likely still starting up, and what this gates is a sentence,
+    so an unnecessary one costs nothing.
+
+    Nothing ACTS on this.  Kiln knows the window is hazardous and does not
+    know what to do about it: pausing first was tried and, across six cancels
+    on an A1, changed nothing about whether the fault stuck.  What it gates is
+    telling the user what to expect, which is the part the evidence supports.
+    """
+    layer = getattr(job, "current_layer", None) if job is not None else None
+    completion = getattr(job, "completion", None) if job is not None else None
+    if isinstance(layer, (int, float)) and layer >= 1:
+        return False
+    return not (isinstance(completion, (int, float)) and completion > 0)
+
+
 def _current_job(adapter: PrinterAdapter) -> JobProgress | None:
     """The job the printer is (or was last) running, or ``None``.
 
@@ -1561,14 +2017,68 @@ def _current_job_label(adapter: PrinterAdapter) -> str | None:
 _MAX_CREDIBLE_PRINT_HOURS: float = 168.0
 
 
-def _record_watched_duration(
+def _ending_was_watched(
+    *,
+    observation_gap_seconds: float | None,
+    state_age_seconds: float | None,
+) -> bool:
+    """Did Kiln really SEE this ending, or merely find out afterwards?
+
+    True only when both halves of "watched" hold: the last time we had
+    current knowledge of this printer was recent, and the reading itself is
+    the present tense rather than a stale cache.  The two doors that reach
+    an ending each measure *observation_gap_seconds* the only way they
+    honestly can (see :func:`_record_print_duration`); neither decides for
+    itself what counts as watched — the thresholds live here, once.
+    """
+    from kiln.printers.progress_motion import WATCHED_ENDING_MAX_GAP_S
+
+    # Was our last current knowledge recent enough for "we saw it end" to be
+    # true?  Unknown — a first read, or a printer that has never spoken to
+    # this process — counts as no: it never watched anything.
+    if (
+        observation_gap_seconds is None
+        or observation_gap_seconds > WATCHED_ENDING_MAX_GAP_S
+    ):
+        return False
+
+    # And is the reading itself the present tense?  A push-cache answer that
+    # is minutes old dates the transition we just "saw", by exactly the same
+    # amount and for the same reason.  Absent age means the caller learned
+    # this from the printer on this call, which is current by construction.
+    return not (
+        isinstance(state_age_seconds, (int, float))
+        and state_age_seconds > STALE_STATE_WARN_AGE
+    )
+
+
+def _credible_hours(elapsed_seconds: Any) -> float | None:
+    """*elapsed_seconds* as hours, or ``None`` when no number can be banked.
+
+    Refuses a missing or non-positive reading — a printer with no clock to
+    report (direct USB: M27 gives SD-card byte progress, not time) falls out
+    here and stays honestly unknown, as
+    :file:`scripts/adapter_conformance.yaml` already declares — and anything
+    past :data:`_MAX_CREDIBLE_PRINT_HOURS`, the absurdity floor documented
+    on the constant itself.
+    """
+    if not isinstance(elapsed_seconds, (int, float)) or elapsed_seconds <= 0:
+        return None
+    hours = float(elapsed_seconds) / 3600.0
+    if hours > _MAX_CREDIBLE_PRINT_HOURS:
+        return None
+    return hours
+
+
+def _record_print_duration(
     *,
     job_label: str,
     elapsed_seconds: Any,
     state_age_seconds: float | None,
     observation_gap_seconds: float | None,
+    duration_semantics: str,
 ) -> None:
-    """Bank this print's duration — but only if Kiln really WATCHED it end.
+    """Bank this print's duration — if this reading can be TRUSTED.
 
     ``print_hours`` means the printer was RUNNING, not that parts shipped: a
     print cancelled at ten minutes really did run for ten minutes, and this
@@ -1588,13 +2098,24 @@ def _record_watched_duration(
       reads ~91.  Monotonic and plausible, so it would never look wrong — it
       would just quietly inflate every Bambu install's total.
 
-    One rule covers both, and it is the rule the design asks for: a duration
-    is recorded only when this ending was WATCHED — the last time we had
-    current knowledge of this printer was recent, and the reading itself is
-    not a stale cache.  Anything else is finding out afterwards, and an honest
-    absence beats a confident wrong number.  ``prints - prints_hours_known``
-    is what makes that absence visible instead of reading as zero hours
-    printed.
+    *duration_semantics* — the adapter's own ``_DURATION_SEMANTICS``
+    declaration — is which family this reading came from, and it decides
+    what a late one is worth:
+
+    * an ending :func:`_ending_was_watched` banks on every backend, exactly
+      as before;
+    * an ending noticed LATE banks only when the reading is ``"frozen"`` —
+      the printer's own clock stopped with the print, so late is merely
+      late — and is tagged ``reported`` so the daily total says how much of
+      itself arrived that way (``prints_hours_reported``, the late subset
+      of ``prints_hours_known``);
+    * a late ``"stopwatch"`` reading still banks NOTHING, because it kept
+      counting after the ending and would quietly inflate; ``"none"`` never
+      has a number to offer in the first place.
+
+    Anything refused stays an honest absence rather than a confident wrong
+    number — ``prints - prints_hours_known`` is what makes that absence
+    visible instead of reading as zero hours printed.
 
     TWO DOORS reach an ending, and this is the only place the rule lives.
     Each measures *observation_gap_seconds* — how long since we last had
@@ -1618,41 +2139,25 @@ def _record_watched_duration(
     dump, whose ``prev`` predates the outage, sail through this guard carrying
     the whole outage in its elapsed.
 
-    All three are the same quantity, so the thresholds below apply unchanged to
+    All three are the same quantity, so the thresholds apply unchanged to
     either door, and neither decides for itself what counts as watched.
-
-    A printer with no clock to report (direct USB: M27 gives SD-card byte
-    progress, not time) falls out at the first check and stays honestly
-    unknown, as :file:`scripts/adapter_conformance.yaml` already declares.
 
     Never raises — this runs inside a status read and inside an MQTT callback.
     """
-    if not isinstance(elapsed_seconds, (int, float)) or elapsed_seconds <= 0:
+    hours = _credible_hours(elapsed_seconds)
+    if hours is None:
         return
 
-    from kiln.printers.progress_motion import WATCHED_ENDING_MAX_GAP_S
-
-    # Was our last current knowledge recent enough for "we saw it end" to be
-    # true?  Unknown — a first read, or a printer that has never spoken to
-    # this process — counts as no: it never watched anything.
-    if (
-        observation_gap_seconds is None
-        or observation_gap_seconds > WATCHED_ENDING_MAX_GAP_S
-    ):
-        return
-
-    # And is the reading itself the present tense?  A push-cache answer that
-    # is minutes old dates the transition we just "saw", by exactly the same
-    # amount and for the same reason.  Absent age means the caller learned
-    # this from the printer on this call, which is current by construction.
-    if (
-        isinstance(state_age_seconds, (int, float))
-        and state_age_seconds > STALE_STATE_WARN_AGE
-    ):
-        return
-
-    hours = float(elapsed_seconds) / 3600.0
-    if hours > _MAX_CREDIBLE_PRINT_HOURS:
+    watched = _ending_was_watched(
+        observation_gap_seconds=observation_gap_seconds,
+        state_age_seconds=state_age_seconds,
+    )
+    # A late reading is only worth banking when the printer's own clock
+    # froze with the print.  Comparing against "frozen" — never against
+    # "stopwatch" — is the fail-safe direction: an adapter that forgot to
+    # declare inherits the strict default and its late readings are
+    # refused, which can cost real hours but never invent them.
+    if not watched and duration_semantics != "frozen":
         return
 
     from kiln.daily_stats import record_print_hours_for_job
@@ -1668,7 +2173,7 @@ def _record_watched_duration(
     # keys on the hook's ``job_id``.  Bank under a second spelling of the same
     # print and nothing collapses them; the hours row and the outcome row also
     # stop naming the same job.
-    record_print_hours_for_job(job_label, hours)
+    record_print_hours_for_job(job_label, hours, reported=not watched)
 
 
 def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> None:
@@ -1743,13 +2248,27 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
         # when there is actually a pending row to settle.
         from kiln.persistence import get_db
 
-        if get_db().list_print_outcomes(
-            printer_name=name, outcome="pending", limit=1,
-        ):
+        # The family name is where rows opened before the identity fix
+        # live; the gate must see them or the sweep never even fires.
+        family = getattr(adapter, "name", "") or ""
+        has_pending = bool(
+            get_db().list_print_outcomes(
+                printer_name=name, outcome="pending", limit=1,
+            )
+        ) or (
+            family != name
+            and bool(
+                get_db().list_print_outcomes(
+                    printer_name=family, outcome="pending", limit=1,
+                )
+            )
+        )
+        if has_pending:
             reconcile_pending_outcomes(
                 printer_name=name,
                 gcode_state=value,
                 current_job_label=_current_job_label(adapter),
+                legacy_printer_name=family or None,
             )
 
     prev = observe_state(name, value)
@@ -1767,13 +2286,14 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
                 job_id=label,
                 file_name=label,
             )
-            _record_watched_duration(
+            _record_print_duration(
                 # The id this door just gave the hook, so the hours row and
                 # the outcome row name one job.
                 job_label=label,
                 elapsed_seconds=getattr(job, "print_time_seconds", None),
                 state_age_seconds=getattr(state, "state_age_seconds", None),
                 observation_gap_seconds=read_gap_seconds,
+                duration_semantics=adapter._DURATION_SEMANTICS,
             )
         # Stop the elapsed clock: the job it was measuring is over.  This is
         # the first caller ``forget_job_start`` has ever had, and without it

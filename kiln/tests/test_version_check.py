@@ -21,6 +21,7 @@ test is marked ``slow`` and calls the real fetch directly.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -30,7 +31,7 @@ import pytest
 from kiln import version_check as vc
 
 # Real fetch captured before the autouse fixture stubs it, for the live test.
-_REAL_FETCH = vc._fetch_latest_from_pypi
+_REAL_FETCH = vc._fetch_release_info
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +40,7 @@ def _isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.delenv("KILN_NO_UPDATE_CHECK", raising=False)
     monkeypatch.delenv("KILN_OFFLINE", raising=False)
-    monkeypatch.setattr(vc, "_fetch_latest_from_pypi", lambda: None)
+    monkeypatch.setattr(vc, "_fetch_release_info", lambda: None)
     vc._refresh_in_flight = False
     yield
     vc._refresh_in_flight = False
@@ -220,7 +221,7 @@ def test_banner_line_none_when_current(tmp_path):
 
 
 def test_refresh_runner_writes_cache_and_clears_flag(monkeypatch):
-    monkeypatch.setattr(vc, "_fetch_latest_from_pypi", lambda: "1.2.3")
+    monkeypatch.setattr(vc, "_fetch_release_info", lambda: {"latest": "1.2.3", "highlights": []})
     vc._refresh_in_flight = True
     vc._refresh_runner()
     assert vc._load_cache()["latest"] == "1.2.3"
@@ -228,13 +229,13 @@ def test_refresh_runner_writes_cache_and_clears_flag(monkeypatch):
 
 
 def test_refresh_runner_no_write_when_fetch_fails(monkeypatch):
-    monkeypatch.setattr(vc, "_fetch_latest_from_pypi", lambda: None)
+    monkeypatch.setattr(vc, "_fetch_release_info", lambda: None)
     vc._refresh_runner()
     assert vc._load_cache() is None
 
 
 def test_kick_warms_cache(monkeypatch):
-    monkeypatch.setattr(vc, "_fetch_latest_from_pypi", lambda: "1.2.3")
+    monkeypatch.setattr(vc, "_fetch_release_info", lambda: {"latest": "1.2.3", "highlights": []})
     vc.kick_background_check()
     for t in threading.enumerate():
         if t.name == "kiln-update-check":
@@ -245,7 +246,7 @@ def test_kick_warms_cache(monkeypatch):
 def test_kick_noop_when_disabled(monkeypatch):
     monkeypatch.setenv("KILN_NO_UPDATE_CHECK", "1")
     fetched = []
-    monkeypatch.setattr(vc, "_fetch_latest_from_pypi", lambda: fetched.append(1) or "1.2.3")
+    monkeypatch.setattr(vc, "_fetch_release_info", lambda: fetched.append(1) or {"latest": "1.2.3", "highlights": []})
     vc.kick_background_check()
     time.sleep(0.05)
     assert fetched == []
@@ -346,6 +347,129 @@ class TestSelfUpdateCommand:
 
 @pytest.mark.slow
 def test_live_pypi_fetch_returns_a_version():
-    latest = _REAL_FETCH()
-    assert latest is not None
-    assert vc._release_tuple(latest)  # parses to a non-empty release tuple
+    info = _REAL_FETCH()
+    assert info is not None
+    assert vc._release_tuple(info["latest"])  # parses to a non-empty release tuple
+    assert isinstance(info["highlights"], list)
+
+
+# ---------------------------------------------------------------------------
+# upgrade highlights (parsed from the PyPI description, sold by the nudge)
+# ---------------------------------------------------------------------------
+
+_DESC = (
+    "# Kiln\n\n"
+    "<!-- kiln-highlights: 1.2.3\n"
+    "* designs export as real CAD files\n"
+    "* watch prints from the web\n"
+    "kiln-highlights:end -->\n\n"
+    "Body text.\n"
+)
+
+
+class TestParseHighlights:
+    def test_parses_matching_version(self):
+        assert vc._parse_highlights(_DESC, "1.2.3") == [
+            "designs export as real CAD files",
+            "watch prints from the web",
+        ]
+
+    def test_other_version_block_is_ignored(self):
+        assert vc._parse_highlights(_DESC, "1.2.4") == []
+
+    def test_absent_block_and_non_string_description(self):
+        assert vc._parse_highlights("no block here", "1.2.3") == []
+        assert vc._parse_highlights(None, "1.2.3") == []
+
+    def test_caps_item_count_and_length(self):
+        desc = (
+            "<!-- kiln-highlights: 1.2.3\n"
+            "* one\n* two\n* three\n* four\n"
+            f"* {'x' * 500}\n"
+            "kiln-highlights:end -->"
+        )
+        items = vc._parse_highlights(desc, "1.2.3")
+        assert items == ["one", "two", "three"]
+
+    def test_non_bullet_lines_are_ignored(self):
+        desc = (
+            "<!-- kiln-highlights: 1.2.3\n"
+            "not a bullet\n* real item\n\n"
+            "kiln-highlights:end -->"
+        )
+        assert vc._parse_highlights(desc, "1.2.3") == ["real item"]
+
+
+class TestHighlightsThroughTheCache:
+    def _seed(self, tmp_path, highlights):
+        d = tmp_path / ".kiln"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "update_check.json").write_text(
+            json.dumps(
+                {"latest": "9.9.9", "checked_at": time.time(), "highlights": highlights}
+            )
+        )
+
+    def test_refresh_writes_highlights_and_nudge_carries_them(self, monkeypatch):
+        monkeypatch.setattr(
+            vc,
+            "_fetch_release_info",
+            lambda: {"latest": "9.9.9", "highlights": ["a gain", "another gain"]},
+        )
+        vc._refresh_runner()
+        info = vc.check_for_update(current_version="1.0.0")
+        assert info["highlights"] == ["a gain", "another gain"]
+
+    def test_no_highlights_key_when_release_published_none(self, tmp_path):
+        self._seed(tmp_path, [])
+        info = vc.check_for_update(current_version="1.0.0")
+        assert info is not None
+        assert "highlights" not in info
+
+    def test_legacy_cache_without_highlights_still_nudges(self, tmp_path):
+        _seed_cache(tmp_path, "9.9.9")  # pre-highlights cache shape
+        info = vc.check_for_update(current_version="1.0.0")
+        assert info is not None
+        assert "highlights" not in info
+
+    def test_corrupt_highlights_are_dropped_not_fatal(self, tmp_path):
+        self._seed(tmp_path, [7, "", "  ", {"x": 1}, "kept"])
+        info = vc.check_for_update(current_version="1.0.0")
+        assert info["highlights"] == ["kept"]
+
+
+class TestReadmeHighlightsBlock:
+    """The README block is what every below-latest install will read via PyPI.
+
+    Pins: the block exists for the CURRENT package version (so a release
+    that forgets to refresh it goes red at the bump), parses with the real
+    parser, and holds the copy rules for a prompt every tier sees.
+    """
+
+    def _readme_and_version(self):
+        # Read the version the way test_version.py does rather than with
+        # tomllib: that module arrived in 3.11 and kiln supports 3.10, so
+        # importing it here took the whole 3.10 CI job down while every
+        # other interpreter stayed green.
+        root = Path(__file__).resolve().parents[1]
+        match = re.search(
+            r'(?m)^\s*version\s*=\s*"([^"]+)"\s*$',
+            (root / "pyproject.toml").read_text(encoding="utf-8"),
+        )
+        assert match, "could not find version in kiln/pyproject.toml"
+        return (root / "README.md").read_text(encoding="utf-8"), match.group(1)
+
+    def test_block_exists_for_current_version_and_parses(self):
+        readme, version = self._readme_and_version()
+        items = vc._parse_highlights(readme, version)
+        assert 2 <= len(items) <= 3, (
+            f"README carries no parseable kiln-highlights block for {version}; "
+            "refresh it at release (wording signed off with the changelog)."
+        )
+
+    def test_block_copy_rules(self):
+        readme, version = self._readme_and_version()
+        for item in vc._parse_highlights(readme, version):
+            assert "—" not in item and "–" not in item, item  # no em/en dashes
+            assert "desktop" not in item.lower(), item
+            assert len(item) <= 160, item

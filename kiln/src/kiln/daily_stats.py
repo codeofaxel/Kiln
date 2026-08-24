@@ -55,9 +55,12 @@ def _recording_suppressed() -> bool:
     if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules:
         return True
     try:
-        from kiln.heartbeat import _is_ci_environment
+        from kiln.heartbeat import _is_ephemeral_runner, _is_hosted_multitenant
 
-        return _is_ci_environment()
+        # CI, a container, or the hosted server: none of them is a user
+        # whose counters mean anything, and all three have shipped
+        # phantom rows.  One predicate, shared with the send side.
+        return _is_ephemeral_runner() or _is_hosted_multitenant()
     except Exception:
         return any(os.environ.get(v) for v in ("CI", "PYTEST_CURRENT_TEST"))
 
@@ -103,6 +106,7 @@ _COUNTED_OUTCOMES_MAX = 500
 _VALID_EVENTS = frozenset({
     "prints", "generations", "decorations", "textures",
     "slices", "downloads", "print_hours", "prints_hours_known",
+    "prints_hours_reported",
 })
 
 # Tool name → daily counter, applied at the tool-dispatch chokepoint
@@ -234,6 +238,11 @@ def _empty_day() -> dict[str, Any]:
         # duration nobody ever learned — an absence, which is a different
         # fact from a short print and must not render as one.
         "prints_hours_known": 0,
+        # The subset of prints_hours_known learned LATE from a printer
+        # whose own clock froze at the ending, rather than by watching the
+        # ending happen (see printers.base._record_print_duration).
+        # Watched = known − reported; the denominator for both is known.
+        "prints_hours_reported": 0,
         # Detailed breakdowns (name → count)
         "texture_names": {},       # {"tiger_stripe": 3, "custom": 1}
         "decoration_types": {},    # {"photo": 2, "qr": 1, "text": 5}
@@ -296,7 +305,7 @@ def _empty_day() -> dict[str, Any]:
 _ROLLOVER_COUNTERS = (
     "prints", "generations", "decorations",
     "textures", "slices", "downloads", "print_hours",
-    "prints_hours_known",
+    "prints_hours_known", "prints_hours_reported",
 )
 
 # The name->count maps carried through the day rollover alongside the
@@ -568,7 +577,9 @@ def record_print_outcome_event(
         _logger.debug("record_print_outcome_event(%s) failed: %s", job_id, exc)
 
 
-def _credit_hours(data: dict[str, Any], hours: float) -> None:
+def _credit_hours(
+    data: dict[str, Any], hours: float, *, reported: bool = False,
+) -> None:
     """Add one print's duration, and count that we LEARNED it.
 
     One writer for one physical fact, so the total and its denominator
@@ -576,10 +587,19 @@ def _credit_hours(data: dict[str, Any], hours: float) -> None:
     a path that adds hours without crediting the count would make the
     coverage figure lie in the reassuring direction.
 
+    *reported* marks a duration learned LATE from a printer whose own
+    clock froze at the ending, rather than by watching the ending happen.
+    It still counts in ``prints_hours_known`` — the split is a derivation
+    (watched = known − reported), never a second denominator.
+
     Caller must hold ``_lock`` — it is not reentrant.
     """
     data["print_hours"] = round(data.get("print_hours", 0.0) + hours, 2)
     data["prints_hours_known"] = int(data.get("prints_hours_known", 0)) + 1
+    if reported:
+        data["prints_hours_reported"] = (
+            int(data.get("prints_hours_reported", 0)) + 1
+        )
 
 
 def record_print_hours(hours: float) -> None:
@@ -593,7 +613,9 @@ def record_print_hours(hours: float) -> None:
         _logger.debug("record_print_hours failed: %s", exc)
 
 
-def record_print_hours_for_job(job_id: str, hours: float) -> None:
+def record_print_hours_for_job(
+    job_id: str, hours: float, *, reported: bool = False,
+) -> None:
     """Add print hours once per job.  Thread-safe, never raises.
 
     Two independent paths can learn one print's duration — the
@@ -603,6 +625,9 @@ def record_print_hours_for_job(job_id: str, hours: float) -> None:
     precisely because it is the dedupe key — durationless or idless
     reports should use plain :func:`record_print_hours` and accept the
     caller owns dedupe.
+
+    *reported* passes through to :func:`_credit_hours`: the duration was
+    learned late from a frozen printer clock, not by watching the ending.
     """
     key = str(job_id or "").strip()[:96]
     if not key or hours <= 0:
@@ -617,7 +642,7 @@ def record_print_hours_for_job(job_id: str, hours: float) -> None:
                 return
             seen.append(key)
             data["counted_hours"] = seen[-_COUNTED_OUTCOMES_MAX:]
-            _credit_hours(data, hours)
+            _credit_hours(data, hours, reported=reported)
             _write(data)
     except Exception as exc:
         _logger.debug("record_print_hours_for_job(%s) failed: %s", job_id, exc)
@@ -779,6 +804,7 @@ def get_daily_stats() -> dict[str, Any]:
         # makes the hours readable, and a reader that gets one and not
         # the other is back to guessing.
         "prints_hours_known": data.get("prints_hours_known", 0),
+        "prints_hours_reported": data.get("prints_hours_reported", 0),
         "texture_names": data.get("texture_names", {}),
         "decoration_types": data.get("decoration_types", {}),
         "slicer_profiles": data.get("slicer_profiles", {}),

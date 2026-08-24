@@ -627,3 +627,41 @@ class TestCadFactsRideTheInlinePayload:
         payload = sc[local_stage.VIEWER_STRUCTURED_CONTENT_KEY]
         assert "cad" not in payload
         assert payload["source"]["format"] == "stl"
+
+
+class TestInlineGeometryLever:
+    """KILN_STAGE_INLINE_GEOMETRY=0 makes results lean: token only.
+
+    The inline payload (~1.9 MB of base64 riding structuredContent) is
+    surfaced to the AGENT as tool-result text on some hosts, truncating at
+    the client's output cap and spending ~25k tokens of context per make
+    on geometry the agent cannot read (measured 2026-08-19).  The panel
+    already carries a lazy-fetch path for token-only results; this env is
+    the live-experiment lever for hosts where that fetch works.  Default
+    unchanged: inline stays on.
+    """
+
+    UI = local_stage.MCP_APPS_EXTENSION_ID
+
+    def _apps_host(self):
+        return _Host(_Caps(extensions={self.UI: {}}))
+
+    def test_lean_mode_ships_the_token_without_the_geometry(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KILN_STAGE_INLINE_GEOMETRY", "0")
+        sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
+                       tool_name="compile_scad")
+        assert sc["artifact"]["artifact_token"], (
+            "lean mode must still mint the token — it is the lazy fetch's key"
+        )
+        assert "kiln_viewer" not in sc, "lean mode still inlined the geometry"
+
+    def test_default_is_inline_geometry(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("KILN_STAGE_INLINE_GEOMETRY", raising=False)
+        sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
+                       tool_name="compile_scad")
+        assert "kiln_viewer" in sc, (
+            "the default flipped to lean — that is a decision for the live "
+            "host experiment, not a side effect"
+        )

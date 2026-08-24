@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import quote
 
 import requests
@@ -279,6 +279,10 @@ class PrusaLinkAdapter(PrinterAdapter):
     Raises:
         ValueError: If *host* is empty.
     """
+
+    # The job's time_printing is the printer's own clock, frozen at the
+    # ending — a late reading is merely late and still correct.
+    _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
     def __init__(
         self,
@@ -790,8 +794,13 @@ class PrusaLinkAdapter(PrinterAdapter):
         if time_remaining is not None:
             print_time_left_seconds = int(time_remaining)
 
+        # ``job.id`` is the server-assigned handle DELETE/pause/resume already
+        # take -- it is in this very payload, so surfacing it costs no request.
+        job_id = job.get("id")
+
         return JobProgress(
             file_name=None,  # Prusa Link doesn't include filename in status
+            job_id=str(job_id) if job_id is not None else None,
             completion=completion,
             print_time_seconds=print_time_seconds,
             print_time_left_seconds=print_time_left_seconds,
