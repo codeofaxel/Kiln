@@ -729,20 +729,22 @@ class TestThreadSafety:
         def _stop_clear(idx: int) -> None:
             try:
                 pid = f"printer-{idx}"
-                with mock.patch.object(coord, "_send_emergency_gcode", return_value=([], [])):
-                    coord.emergency_stop(pid)
+                coord.emergency_stop(pid)
                 coord.clear_stop(pid)
             except Exception as exc:
                 errors.append(str(exc))
 
-        threads = [
-            threading.Thread(target=_stop_clear, args=(i,))
-            for i in range(num_rounds)
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        # Patch once before spawning threads — mock.patch.object is not
+        # thread-safe when applied concurrently from multiple threads.
+        with mock.patch.object(coord, "_send_emergency_gcode", return_value=([], [])):
+            threads = [
+                threading.Thread(target=_stop_clear, args=(i,))
+                for i in range(num_rounds)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
 
         assert errors == []
 
