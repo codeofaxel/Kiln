@@ -375,20 +375,66 @@ flowchart TD
 
 Patent pending across semantic mesh merge, outcome-correlated branching, and signed-release-with-physical-provenance.
 
-## What Agents Can Do
+## Tools
 
-The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 901 tools** to agents, plus prompts and resources for **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 908 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice:
+The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 901 tools** to agents, plus prompts and resources for **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 908 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice, in the order a print actually happens:
 
-| Theme | Example tools |
-|-------|---------------|
-| **Control** | `printer_status` · `start_print` · `monitor_print` · `pause_print` · `cancel_print` · `emergency_stop` · `send_gcode` (validated) |
-| **Make** | `generate_model` (text → 3D) · `slice_and_print` · `analyze_printability` · `auto_orient_model` · `decorate_surface` (QR/photo/logo/texture) |
-| **Find &amp; outsource** | `search_all_models` · `download_and_upload` · `fulfillment_quote` · `fulfillment_order` |
-| **Recover &amp; learn** | `retry_print_with_fix` · `resume_interrupted_print` (Pro) · `predict_print_failure` · `get_printer_insights` · `diagnose_print_failure_live` |
-| **Versioning** (Pro+) | `save_design_version` · `diff_design_versions` · `get_proven_recipe` · `check_design_regression` |
-| **Fleet &amp; safety** | `fleet_status` · `submit_job` · `preflight_check` · `list_safety_profiles` · `validate_gcode_safe` |
+- **design_session**
+  - Talk to Kiln about what you're making and get back a design that matches what you asked for
+  - The front door for making anything: goal, geometry, preview, iterate. Free, unlimited, every tier
+- **compile_scad**
+  - Compile OpenSCAD code into a printable STL — the keyless path underneath a design session
+  - No API key and no external service: the agent writes the geometry, Kiln compiles it locally
+- **generate_model**
+  - Generate a 3D model from a text prompt through an external AI provider
+  - Optional, and off unless you bring your own key (Meshy, Tripo3D, Stability, Gemini)
+- **search_all_models**
+  - Search connected 3D model marketplaces in one call
+  - Covers MyMiniFactory and Cults3D; downloads where the marketplace supports it
+- **import_step_file**
+  - Import a STEP (.step/.stp) CAD file and convert it for Kiln's mesh pipeline
+- **analyze_printability**
+  - Run a full printability analysis on a mesh: overhangs, thin walls, warping risk, bed fit
+- **auto_orient_model**
+  - Find the print orientation that needs the least support and prints strongest
+- **repair_mesh**
+  - Repair mesh defects — holes, degenerate faces, rounding-noise seams
+  - The usual fix for a model an AI generator or a rough scan produced
+- **split_mesh_to_fit**
+  - Cut one solid too big for your build plate into printable pieces that reassemble
+- **recommend_material**
+  - Recommend materials for a use case, with the reasons and the trade-offs
+- **decorate_surface**
+  - Put any image, text, QR code, or pattern onto a model surface as an emboss or deboss
+- **slice_model**
+  - Slice a model (STL/3MF/STEP) to G-code using PrusaSlicer, OrcaSlicer, or BambuStudio
+- **estimate_print_cost_from_mesh**
+  - Estimate material cost, weight, and print time before committing the printer
+- **preflight_check**
+  - Run pre-print safety checks: printer state, temperatures, file validity, bed clearance
+- **start_print**
+  - Start a print on a connected machine
+- **monitor_print**
+  - One-shot print status: progress, temperatures, time remaining, cost, and a camera snapshot where the printer has one
+- **emergency_stop**
+  - Stop a running print immediately
+- **diagnose_print_failure_live**
+  - Diagnose a failing print from live printer state plus the model's own geometry
+- **retry_print_with_fix**
+  - Diagnose what went wrong on the last print, then re-slice and print with the fix applied
+- **resume_interrupted_print** *(Pro)*
+  - Resume an interrupted print with one call on any supported FDM printer
+- **save_design_version**
+  - Save a new version of a parametric design, so you can go back to the one that worked
+  - Linear history is free; branching, merges, and signed releases are Pro
+- **export_step**
+  - Export a finished design as a real STEP CAD file — analytic B-rep a machine shop can open and measure
+- **fleet_status** *(Business)*
+  - Live status of every printer in a fleet: state, temperatures, connection
+- **fulfillment_quote**
+  - Get a manufacturing quote from Craftcloud's network — printing without owning a printer
 
-The complete tool catalog, grouped by subsystem, lives in **[Project Docs](docs/PROJECT_DOCS.md)**. If you *are* the agent, [**kiln3d.com/agents**](https://kiln3d.com/agents?utm_source=github&utm_medium=readme) covers the same ground written in the second person, including the refusals worth knowing before you hit them.
+Beyond this slice, the catalog covers fleet orchestration, print-failure prediction, design version control, assembly manuals, and per-machine calibration; the deeper tiers are described at [kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme). The complete tool catalog, grouped by subsystem, lives in **[Project Docs](docs/PROJECT_DOCS.md)**. If you *are* the agent, [**kiln3d.com/agents**](https://kiln3d.com/agents?utm_source=github&utm_medium=readme) covers the same ground written in the second person, including the refusals worth knowing before you hit them.
 
 <details>
 <summary>MCP resources (read-only context for agents)</summary>
