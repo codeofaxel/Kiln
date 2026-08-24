@@ -396,6 +396,17 @@ def _plate_texture(footprint):
     return img
 
 
+#: Upper bound on candidate (pixel, triangle) pairs materialized at once
+#: by :func:`_rasterize`.  ~15 float64 working arrays ride each pair, so a
+#: slice of 1M pairs is a ~200 MB transient; the per-pixel winner buffers
+#: add 5 x (w*h) float64/int64 on top.  Small enough that two concurrent
+#: renders fit a 2 GB host beside a running API; large enough that slice
+#: overhead stays noise.  Numpy expression temporaries ride each slice at
+#: roughly 2x the named arrays, so the working set is ~150 MB here —
+#: measured, not estimated (1M-pair slices peaked ~880 MB in _rasterize).
+_PAIR_SLICE = 400_000
+
+
 def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
                w, h, pair_cap=120_000_000):
     """One z-buffered pass over a triangle soup.
@@ -403,11 +414,20 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
     ``attrs`` carries, per triangle vertex, either a unit NORMAL scaled by
     1/z (model triangles — shaded per pixel after visibility, three's
     smooth shading) or a texture u/z, v/z pair padded with a leading -2
-    sentinel (plate triangles — sampled from ``tex_np``).  Fully
-    vectorized: every candidate (pixel, triangle) pair is laid out flat,
-    barycentric-tested, then reduced per pixel by nearest depth.  Returns
-    an (h, w, 3) uint8 buffer, or ``None`` when the pair budget says this
-    frame is too heavy to paint honestly.
+    sentinel (plate triangles — sampled from ``tex_np``).  Vectorized in
+    BOUNDED SLICES: candidate (pixel, triangle) pairs are laid out flat at
+    most ``_PAIR_SLICE`` at a time and reduced into a persistent per-pixel
+    nearest-depth winner, so peak memory tracks the slice and the
+    framebuffer — never the scene.  (The one-shot layout this replaces
+    materialized ~15 float64 arrays over EVERY pair: >5 GB for an ordinary
+    supersampled 800x600 still, which OOM-killed a 2 GB host that asked
+    for one thumbnail.  Same formulas, same nearest-depth rule, same tie
+    order — the earliest pair among depth-equals wins, because a slice's
+    stable lexsort keeps first occurrence and later slices replace only on
+    STRICTLY nearer depth — so the output is bit-identical.)  Returns an
+    (h, w, 3) uint8 buffer, or ``None`` when the pair budget says this
+    frame is too heavy to paint honestly (with slicing that is a TIME
+    bound; memory no longer scales with the total).
     """
     np = _np
     x0 = np.clip(np.floor(tris_px.min(axis=1)), 0, w - 1).astype(np.int64)
@@ -428,86 +448,127 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
         logger.debug("stage paint: %d raster pairs exceeds the cap", total)
         return None
 
-    tri_id = np.repeat(np.arange(len(counts)), counts)
-    offsets = np.concatenate([[0], np.cumsum(counts)[:-1]])
-    local = np.arange(total) - offsets[tri_id]
-    px = x0[tri_id] + local % bw[tri_id]
-    py = y0[tri_id] + local // bw[tri_id]
-    cx = px + 0.5
-    cy = py + 0.5
+    cum = np.cumsum(counts)
+    offsets = cum - counts
 
-    ax, ay = tris_px[tri_id, 0], tris_py[tri_id, 0]
-    bx, by = tris_px[tri_id, 1], tris_py[tri_id, 1]
-    qx, qy = tris_px[tri_id, 2], tris_py[tri_id, 2]
-    area = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax)
-    w0 = (bx - cx) * (qy - cy) - (by - cy) * (qx - cx)
-    w1 = (qx - cx) * (ay - cy) - (qy - cy) * (ax - cx)
-    w2 = area - w0 - w1
-    nz = np.abs(area) > 1e-12
-    sgn = np.sign(area)
-    inside = nz & (w0 * sgn >= 0) & (w1 * sgn >= 0) & (w2 * sgn >= 0)
-    if not inside.any():
+    # Per-pixel winner state, float64 throughout so the shading below sees
+    # exactly the numbers the one-shot layout produced.
+    best_invz = np.zeros(h * w, dtype=np.float64)
+    best_b0 = np.empty(h * w, dtype=np.float64)
+    best_b1 = np.empty(h * w, dtype=np.float64)
+    best_b2 = np.empty(h * w, dtype=np.float64)
+    best_tri = np.zeros(h * w, dtype=np.int64)
+
+    for start in range(0, total, _PAIR_SLICE):
+        pair = np.arange(start, min(start + _PAIR_SLICE, total))
+        tri_id = np.searchsorted(cum, pair, side="right")
+        local = pair - offsets[tri_id]
+        px = x0[tri_id] + local % bw[tri_id]
+        py = y0[tri_id] + local // bw[tri_id]
+        cx = px + 0.5
+        cy = py + 0.5
+
+        ax, ay = tris_px[tri_id, 0], tris_py[tri_id, 0]
+        bx, by = tris_px[tri_id, 1], tris_py[tri_id, 1]
+        qx, qy = tris_px[tri_id, 2], tris_py[tri_id, 2]
+        area = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax)
+        w0 = (bx - cx) * (qy - cy) - (by - cy) * (qx - cx)
+        w1 = (qx - cx) * (ay - cy) - (qy - cy) * (ax - cx)
+        w2 = area - w0 - w1
+        nz = np.abs(area) > 1e-12
+        sgn = np.sign(area)
+        inside = nz & (w0 * sgn >= 0) & (w1 * sgn >= 0) & (w2 * sgn >= 0)
+        if not inside.any():
+            continue
+
+        tri_id = tri_id[inside]
+        px, py = px[inside], py[inside]
+        b0 = w0[inside] / area[inside]
+        b1 = w1[inside] / area[inside]
+        b2 = w2[inside] / area[inside]
+        invz = (b0 * tris_invz[tri_id, 0] + b1 * tris_invz[tri_id, 1]
+                + b2 * tris_invz[tri_id, 2])
+
+        # Nearest-depth per pixel within the slice (stable lexsort keeps
+        # the earliest among equals), then merge into the running winners.
+        pix = py * w + px
+        order = np.lexsort((-invz, pix))
+        pix_o = pix[order]
+        first = np.ones(len(pix_o), dtype=bool)
+        first[1:] = pix_o[1:] != pix_o[:-1]
+        sel = order[first]
+
+        p_sel = pix[sel]
+        upd = invz[sel] > best_invz[p_sel]
+        p_upd = p_sel[upd]
+        s_upd = sel[upd]
+        best_invz[p_upd] = invz[s_upd]
+        best_b0[p_upd] = b0[s_upd]
+        best_b1[p_upd] = b1[s_upd]
+        best_b2[p_upd] = b2[s_upd]
+        best_tri[p_upd] = tri_id[s_upd]
+
+    hit_all = np.nonzero(best_invz > 0.0)[0]
+    if len(hit_all) == 0:
         return empty
 
-    tri_id = tri_id[inside]
-    px, py = px[inside], py[inside]
-    b0 = w0[inside] / area[inside]
-    b1 = w1[inside] / area[inside]
-    b2 = w2[inside] / area[inside]
-    invz = (b0 * tris_invz[tri_id, 0] + b1 * tris_invz[tri_id, 1]
-            + b2 * tris_invz[tri_id, 2])
-
-    pix = py * w + px
-    order = np.lexsort((-invz, pix))
-    pix_o = pix[order]
-    first = np.ones(len(pix_o), dtype=bool)
-    first[1:] = pix_o[1:] != pix_o[:-1]
-    sel = order[first]
-
-    t_sel = tri_id[sel]
-    b0s, b1s, b2s, izs = b0[sel], b1[sel], b2[sel], invz[sel]
-    # Perspective-correct attribute interpolation: attrs are pre-divided
-    # by z per vertex, so (sum b_i * a_i/z_i) / (1/z) recovers a.
-    a_interp = (b0s[:, None] * attrs[t_sel, 0]
-                + b1s[:, None] * attrs[t_sel, 1]
-                + b2s[:, None] * attrs[t_sel, 2]) / izs[:, None]
-
-    rgb = np.empty((len(sel), 3), dtype=np.uint8)
-    textured = attrs[t_sel, 0, 0] <= -1.5  # sentinel channel marks the plate
-    if textured.any():
-        u = np.clip(a_interp[textured, 1], 0.0, 1.0 - 1e-9)
-        vv = np.clip(a_interp[textured, 2], 0.0, 1.0 - 1e-9)
-        th, tw = tex_np.shape[:2]
-        # Bilinear, matching the CanvasTexture's LinearFilter: nearest
-        # sampling made grid lines shimmer at minification and staircase
-        # at magnification, neither of which the photograph does.
-        fx = u * tw - 0.5
-        fy = vv * th - 0.5
-        x0f = np.floor(fx)
-        y0f = np.floor(fy)
-        tx = (fx - x0f)[:, None]
-        ty = (fy - y0f)[:, None]
-        xa = np.clip(x0f.astype(np.int64), 0, tw - 1)
-        xb = np.clip(xa + 1, 0, tw - 1)
-        ya = np.clip(y0f.astype(np.int64), 0, th - 1)
-        yb = np.clip(ya + 1, 0, th - 1)
-        tex = tex_np.astype(np.float64)
-        top = tex[ya, xa] * (1 - tx) + tex[ya, xb] * tx
-        bot = tex[yb, xa] * (1 - tx) + tex[yb, xb] * tx
-        rgb[textured] = np.clip(top * (1 - ty) + bot * ty + 0.5,
-                                0, 255).astype(np.uint8)
-    smooth = ~textured
-    if smooth.any():
-        n = a_interp[smooth, 0:3]
-        ln = np.linalg.norm(n, axis=1)
-        n = n / np.maximum(ln, 1e-12)[:, None]
-        pos = a_interp[smooth, 3:6]
-        view = eye[None, :] - pos
-        view = view / np.maximum(np.linalg.norm(view, axis=1), 1e-12)[:, None]
-        rgb[smooth] = _shade(albedo_lin, n, view)
-
+    # Interpolation + shading are pure per-pixel arithmetic, so they get
+    # the same slice treatment as the pair sweep — a dozen working arrays
+    # over EVERY hit pixel at once was the other gigabyte.
     buf = empty.reshape(h * w, 3)
-    buf[pix[sel]] = rgb
+    for hstart in range(0, len(hit_all), _PAIR_SLICE):
+        hit = hit_all[hstart:hstart + _PAIR_SLICE]
+        t_sel = best_tri[hit]
+        b0s, b1s, b2s, izs = (best_b0[hit], best_b1[hit],
+                              best_b2[hit], best_invz[hit])
+        # Perspective-correct attribute interpolation: attrs are pre-divided
+        # by z per vertex, so (sum b_i * a_i/z_i) / (1/z) recovers a.
+        a_interp = (b0s[:, None] * attrs[t_sel, 0]
+                    + b1s[:, None] * attrs[t_sel, 1]
+                    + b2s[:, None] * attrs[t_sel, 2]) / izs[:, None]
+
+        rgb = np.empty((len(hit), 3), dtype=np.uint8)
+        textured = attrs[t_sel, 0, 0] <= -1.5  # sentinel marks the plate
+        if textured.any():
+            u = np.clip(a_interp[textured, 1], 0.0, 1.0 - 1e-9)
+            vv = np.clip(a_interp[textured, 2], 0.0, 1.0 - 1e-9)
+            th, tw = tex_np.shape[:2]
+            # Bilinear, matching the CanvasTexture's LinearFilter: nearest
+            # sampling made grid lines shimmer at minification and
+            # staircase at magnification, neither of which the photograph
+            # does.
+            fx = u * tw - 0.5
+            fy = vv * th - 0.5
+            x0f = np.floor(fx)
+            y0f = np.floor(fy)
+            tx = (fx - x0f)[:, None]
+            ty = (fy - y0f)[:, None]
+            xa = np.clip(x0f.astype(np.int64), 0, tw - 1)
+            xb = np.clip(xa + 1, 0, tw - 1)
+            ya = np.clip(y0f.astype(np.int64), 0, th - 1)
+            yb = np.clip(ya + 1, 0, th - 1)
+            # Gather uint8 texels FIRST, convert the gathers — identical
+            # arithmetic to converting the whole texture up front, without
+            # holding a float64 copy of the full plate (hundreds of MB at
+            # the oversampled plate resolution).
+            top = (tex_np[ya, xa].astype(np.float64) * (1 - tx)
+                   + tex_np[ya, xb].astype(np.float64) * tx)
+            bot = (tex_np[yb, xa].astype(np.float64) * (1 - tx)
+                   + tex_np[yb, xb].astype(np.float64) * tx)
+            rgb[textured] = np.clip(top * (1 - ty) + bot * ty + 0.5,
+                                    0, 255).astype(np.uint8)
+        smooth = ~textured
+        if smooth.any():
+            n = a_interp[smooth, 0:3]
+            ln = np.linalg.norm(n, axis=1)
+            n = n / np.maximum(ln, 1e-12)[:, None]
+            pos = a_interp[smooth, 3:6]
+            view = eye[None, :] - pos
+            view = view / np.maximum(
+                np.linalg.norm(view, axis=1), 1e-12)[:, None]
+            rgb[smooth] = _shade(albedo_lin, n, view)
+
+        buf[hit] = rgb
     return buf.reshape(h, w, 3)
 
 

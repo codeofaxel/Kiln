@@ -20,6 +20,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from unittest import mock
+
 from kiln import stage_paint
 from kiln.stage_paint import try_paint_stage_views
 
@@ -449,3 +451,66 @@ def test_card_knobs_default_on_keeps_the_stage_contract(
     assert (
         Path(a[0]["path"]).read_bytes() == Path(b[0]["path"]).read_bytes()
     )
+
+
+# ---------------------------------------------------------------------------
+# Memory discipline — the pair sweep must never again scale with the scene
+# ---------------------------------------------------------------------------
+
+
+def test_slicing_is_math_neutral(probe: str, tmp_path: Path) -> None:
+    """The sliced pair sweep is a memory shape, not a look: rendering with
+    an absurdly small slice must be byte-identical to the shipped size.
+    Pins the merge rule (slice-local lexsort keeps the earliest among
+    depth-equals; across slices only STRICTLY nearer depth replaces) so a
+    future 'optimization' that reorders ties shows up as a diff here, not
+    as a subtly different product still."""
+    a = _render(probe, tmp_path)
+    with mock.patch.object(stage_paint, "_PAIR_SLICE", 7_001):
+        out2 = tmp_path / "tiny-slice"
+        b = try_paint_stage_views(
+            probe, _SEL, _ISO, output_dir=str(out2), width=800, height=600,
+        )
+    assert (
+        Path(a[0]["path"]).read_bytes() == Path(b[0]["path"]).read_bytes()
+    )
+
+
+def test_render_memory_stays_bounded(probe: str, tmp_path: Path) -> None:
+    """A still of an ordinary probe must fit a small host.  The unsliced
+    sweep laid out every (pixel, triangle) pair at once and peaked at
+    5.9 GB for THIS probe at 800x600 — which OOM-killed a 2 GB production
+    machine the first time a real request asked it for one thumbnail
+    (2026-08-24, exit_code=137 oom_killed=true).  The bound is generous
+    (2 GB) so CI variance never flakes it; the bug class it catches is an
+    order of magnitude, not a margin."""
+    import os
+    import subprocess
+    import sys
+
+    script = (
+        "import sys, resource\n"
+        f"sys.path[:0] = {list(sys.path)!r}\n"
+        "from kiln.stage_paint import try_paint_stage_views\n"
+        f"views = try_paint_stage_views({probe!r}, [('isometric', 'i')],\n"
+        "    {'isometric': (55, 0, 25)},\n"
+        f"    output_dir={str(tmp_path / 'membound')!r}, width=800, height=600)\n"
+        "assert views, 'painter declined the probe'\n"
+        "print(int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))\n"
+    )
+    # A minimal, explicit environment: the child measures the PAINTER,
+    # not the suite's fixtures.  The conftest relocates HOME (which would
+    # orphan user-site numpy/Pillow in the child and read as "painter
+    # declined"), disables the stage fetch, and other tests may leave
+    # stage knobs set — any of which turns this into a test of the
+    # harness.  The parent's fully-resolved sys.path is baked into the
+    # script so the child sees exactly the packages the suite runs
+    # against, wherever they were installed from.
+    env = {"PATH": os.environ.get("PATH", "")}
+    out = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True,
+        timeout=180, env=env,
+    )
+    assert out.returncode == 0, out.stderr[-1000:]
+    peak_mb = int(out.stdout.strip().splitlines()[-1]) / (1024 * 1024)
+    assert peak_mb < 2000, f"render peaked at {peak_mb:.0f} MB"
