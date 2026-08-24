@@ -4,13 +4,13 @@
 # support, as happened on the kiln/ side on 2026-07-12):
 # python3.10 -m venv /tmp/octoprint-cli-lock && /tmp/octoprint-cli-lock/bin/python -m pip install -e ".[dev]" && /tmp/octoprint-cli-lock/bin/python -m pip freeze | grep -v "^-e" | sort > requirements-lock.txt
 PyYAML==6.0.3
-Pygments==2.20.0
+Pygments==2.21.0
 certifi==2026.7.22
 charset-normalizer==3.5.1
 click==8.4.2
 coverage==7.15.4
 exceptiongroup==1.3.1
-idna==3.18
+idna==3.19
 iniconfig==2.3.0
 markdown-it-py==4.2.0
 mdurl==0.1.2
