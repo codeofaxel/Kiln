@@ -812,6 +812,12 @@ def get_daily_stats() -> dict[str, Any]:
         "tier_denials": data.get("tier_denials", {}),
         "account_wall": data.get("account_wall", {}),
         "tool_calls": data.get("tool_calls", {}),
+        # Recorded since the failure counter shipped, but never returned
+        # here — so the heartbeat's stats.get("tool_failures") read {} on
+        # every install, forever (0 of 1,000 production rows carried one,
+        # measured 2026-08-24).  The wire that was built to say "every
+        # P2S install fails at start_print" said nothing instead.
+        "tool_failures": data.get("tool_failures", {}),
         "update_nudge": data.get("update_nudge", {}),
         # The last COMPLETE day's counters (see _archive_completed_day).
         # The heartbeat reports these because the same-day counters it

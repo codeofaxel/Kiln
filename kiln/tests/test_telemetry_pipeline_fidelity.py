@@ -137,3 +137,47 @@ def test_bridge_running_ships_in_the_payload(pipeline):
 
     assert "bridge_running" in sent[0]["p_details"]
     assert sent[0]["p_details"]["bridge_running"] in (True, False, None)
+
+
+def test_tool_failures_actually_leave_the_machine(pipeline):
+    """The failure wire was dead end-to-end and every unit test passed.
+
+    ``record_tool_failure`` wrote to disk, ``_ROLLOVER_MAPS`` carried it
+    across midnight — and ``get_daily_stats`` never returned it, so the
+    heartbeat's ``stats.get("tool_failures")`` read ``{}`` on every
+    install, forever.  0 of 1,000 production rows carried one
+    (2026-08-24).  Only this whole-chain shape catches that class.
+    """
+    sent = pipeline
+
+    daily_stats.record_tool_call("start_print")
+    daily_stats.record_tool_failure("start_print")
+
+    # Same-day beat: today's maps carry it.
+    heartbeat._send_heartbeat()
+    details = sent[0]["p_details"]
+    assert details["tool_failures"] == {"start_print": 1}
+    assert details["tool_calls"] == {"start_print": 1}
+
+    # And across midnight the complete day still carries it.
+    _FakeDate._today = real_date(2026, 7, 26)
+    heartbeat._send_heartbeat()
+    prev = sent[1]["p_details"]["previous_day"]
+    assert prev["tool_failures"] == {"start_print": 1}
+    assert prev["tool_calls"] == {"start_print": 1}
+
+
+def test_every_map_the_heartbeat_reads_exists_in_daily_stats(pipeline):
+    """Lockstep for the MAPS, the way _VALID_EVENTS pins the scalars.
+
+    The heartbeat builds p_details with stats.get(<map>, {}) — a key
+    get_daily_stats doesn't return reads as {} forever and no test
+    of either side alone goes red.  tool_failures died exactly this
+    way.  Every rollover map must be present in the stats surface.
+    """
+    stats = daily_stats.get_daily_stats()
+    for key in daily_stats._ROLLOVER_MAPS:
+        assert key in stats, (
+            f"{key} rolls over locally but get_daily_stats never returns "
+            "it — the heartbeat will transmit {} forever"
+        )
