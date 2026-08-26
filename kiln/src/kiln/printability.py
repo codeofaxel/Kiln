@@ -48,6 +48,13 @@ class OverhangAnalysis:
     overhang_percentage: float  # % of total triangles
     needs_supports: bool
     worst_regions: list[dict[str, float]]  # [{x, y, z, angle}]
+    #: Steepest overhang that actually hangs in free air: excludes
+    #: faces of self-supporting regions (short bridges, lateral
+    #: closes, boolean seams, bed-proximate ceilings) AND flat bridge
+    #: decks, which are judged by span, not angle.  This is the number
+    #: per-material overhang limits should be compared against —
+    #: ``max_overhang_angle`` reads 90 on any part with any ceiling.
+    max_free_air_overhang_deg: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -100,6 +107,14 @@ class BridgingAnalysis:
     max_bridge_length_mm: float
     bridge_count: int
     needs_supports_for_bridges: bool
+    #: Longest span whose filament genuinely crosses air (two-sided
+    #: bridges, lateral closes, support-needing gaps).  Regions exempt
+    #: by mechanism — solid directly below, ceilings a hair off the
+    #: bed — contribute nothing here even though
+    #: ``max_bridge_length_mm`` still reports them honestly.  This is
+    #: the number per-material bridge limits should be compared
+    #: against.
+    max_free_air_span_mm: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1866,6 +1881,10 @@ class _DownwardRegion:
     span_mm: float
     needs_supports: bool
     bbox_span_mm: float
+    #: Portion of span_mm that genuinely crosses air (see
+    #: BridgingAnalysis.max_free_air_span_mm).  Zero for regions
+    #: exempt by mechanism.
+    free_air_span_mm: float = 0.0
 
 
 # Membership limit for downward-region aggregation: faces overhanging
@@ -2041,6 +2060,7 @@ def _analyze_downward_regions(
                 span_mm=0.0,
                 needs_supports=False,
                 bbox_span_mm=round(bbox_span, 2),
+                free_air_span_mm=0.0,
             ))
             continue
 
@@ -2084,6 +2104,7 @@ def _analyze_downward_regions(
                 span_mm=float("inf"),
                 needs_supports=True,
                 bbox_span_mm=round(bbox_span, 2),
+                free_air_span_mm=round(bbox_span, 2),
             ))
             continue
 
@@ -2104,6 +2125,7 @@ def _analyze_downward_regions(
             ]
 
         region_span = 0.0
+        region_free_air = 0.0
         region_needs_supports = False
         for gi in samples:
             tri = triangles[gi]
@@ -2163,10 +2185,13 @@ def _analyze_downward_regions(
             # chord when one exists (the gap supports must fill).
             if best_chord <= _MAX_SELF_SUPPORTING_BRIDGE_MM:
                 point_span = best_chord
+                point_free_air = best_chord
             elif d_sup <= _MAX_LATERAL_REACH_MM:
                 point_span = min(best_chord, 2.0 * d_sup)
+                point_free_air = point_span
             elif _solid_directly_below(cx, cy, _cz):
                 point_span = 0.0
+                point_free_air = 0.0
             elif _cz - z_min <= _BED_PROXIMATE_CEILING_MM:
                 # First-layers recess (a bottom QR pocket, a debossed
                 # logo underside): the ceiling bridges with the bed a
@@ -2178,14 +2203,18 @@ def _analyze_downward_regions(
                 point_span = (
                     best_chord if not math.isinf(best_chord) else 0.0
                 )
+                point_free_air = 0.0
             else:
                 region_needs_supports = True
                 point_span = (
                     best_chord if not math.isinf(best_chord)
                     else 2.0 * d_sup
                 )
+                point_free_air = point_span
             if point_span > region_span:
                 region_span = point_span
+            if point_free_air > region_free_air:
+                region_free_air = point_free_air
 
         regions.append(_DownwardRegion(
             triangle_indices=tri_indices,
@@ -2196,6 +2225,10 @@ def _analyze_downward_regions(
             ),
             needs_supports=region_needs_supports,
             bbox_span_mm=round(bbox_span, 2),
+            free_air_span_mm=(
+                region_free_air if math.isinf(region_free_air)
+                else round(region_free_air, 2)
+            ),
         ))
 
     return regions
@@ -2254,9 +2287,11 @@ def _analyze_bridging(
             max_bridge_length_mm=0.0,
             bridge_count=0,
             needs_supports_for_bridges=False,
+            max_free_air_span_mm=0.0,
         )
 
     max_bridge_len = 0.0
+    max_free_air = 0.0
     needs_supports = False
     for region in regions:
         if not region.flat_indices:
@@ -2268,11 +2303,17 @@ def _analyze_bridging(
             span = region.bbox_span_mm
         if span > max_bridge_len:
             max_bridge_len = span
+        free_air = region.free_air_span_mm
+        if math.isinf(free_air):
+            free_air = region.bbox_span_mm
+        if free_air > max_free_air:
+            max_free_air = free_air
 
     return BridgingAnalysis(
         max_bridge_length_mm=round(max_bridge_len, 2),
         bridge_count=bridge_count,
         needs_supports_for_bridges=needs_supports,
+        max_free_air_span_mm=round(max_free_air, 2),
     )
 
 
@@ -3741,6 +3782,38 @@ def analyze_printability(
                 _overhang_scoring_pct = round(
                     remaining / len(triangles) * 100.0, 1,
                 )
+
+    # Free-air overhang angle: the steepest overhang that genuinely
+    # hangs in air.  Excludes (a) faces of self-supporting regions
+    # (short bridges, lateral closes, boolean seams, bed-proximate
+    # ceilings) and (b) flat bridge decks, which are judged by SPAN,
+    # not angle.  ``max_overhang_angle`` reads 90 on any part with any
+    # ceiling anywhere, so per-material angle limits compared against
+    # it fired as noise on trivially printable parts; this is the
+    # number they should judge.
+    _exempt_overhang_tris = {
+        gi
+        for region in downward_regions
+        if region.flat_indices and not region.needs_supports
+        for gi in region.triangle_indices
+    }
+    _free_air_max_deg = 0.0
+    for _gi, _tri in enumerate(triangles):
+        if _gi in _exempt_overhang_tris:
+            continue
+        if _is_bed_supported_triangle(_tri, z_min, layer_height):
+            continue
+        _nn = _normalize(_triangle_normal(_tri[0], _tri[1], _tri[2]))
+        if _nn[2] >= 0 or _nn[2] <= _BRIDGE_FLAT_NZ_LIMIT:
+            continue
+        _afd = math.degrees(math.acos(max(-1.0, min(1.0, -_nn[2]))))
+        _oa = max(0.0, 90.0 - _afd)
+        if _oa > _free_air_max_deg:
+            _free_air_max_deg = _oa
+    from dataclasses import replace as _dc_replace
+    overhangs = _dc_replace(
+        overhangs, max_free_air_overhang_deg=round(_free_air_max_deg, 1),
+    )
 
     # Detect cylindrical-hole features.  Wrapped in try/except — a
     # malformed mesh or coarse triangulation can raise inside the

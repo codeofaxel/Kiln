@@ -437,3 +437,73 @@ class TestBedProximateCeilings:
         r = analyze_printability(
             _write_stl(tmp_path, "cavity.stl", tris), material="pla")
         assert r.bridging.needs_supports_for_bridges
+
+
+def _leaning_column_triangles(lean_deg=51.34, w=10.0, h=12.0, depth=12.0):
+    """Closed parallelogram column leaning +X: its right face is a
+    genuine sloped free-air overhang at ``lean_deg`` from vertical."""
+    dx = h * math.tan(math.radians(lean_deg))
+    profile = [(0.0, 0.0), (w, 0.0), (w + dx, h), (dx, h)]
+    caps = [(0, 1, 2), (0, 2, 3)]
+    return _extruded_profile_triangles(profile, caps, depth=depth)
+
+
+class TestFreeAirMetrics:
+    """max_free_air_span_mm / max_free_air_overhang_deg: the numbers
+    per-material limits should judge.  Raw max_bridge_length_mm and
+    max_overhang_angle keep reporting everything honestly; the
+    free-air twins exclude what is exempt by MECHANISM (solid below,
+    bed-proximate) and, for the angle, flat bridge decks (span
+    domain).  This is what lets the pro overlay stop double-punishing
+    a bottom QR pocket without losing its TPU short-bridge warnings."""
+
+    def test_bottom_pocket_reports_raw_but_zero_free_air(self, tmp_path):
+        tris = _plate_with_bottom_recess_triangles(60, 60, 4, 40, 40, 0.5)
+        r = analyze_printability(
+            _write_stl(tmp_path, "p.stl", tris), material="pla")
+        assert r.bridging.max_bridge_length_mm > 30       # honest
+        assert r.bridging.max_free_air_span_mm == 0.0     # exempt
+        assert r.overhangs.max_free_air_overhang_deg < 45
+
+    def test_elevated_cavity_is_free_air(self, tmp_path):
+        tris = _plate_with_bottom_recess_triangles(60, 60, 8, 40, 40, 5.0)
+        r = analyze_printability(
+            _write_stl(tmp_path, "c.stl", tris), material="pla")
+        assert r.bridging.max_free_air_span_mm > 30
+
+    def test_short_bridge_stays_free_air(self, tmp_path):
+        """A 7 mm elevated free-air bridge clears the public 10 mm
+        rule (no supports verdict) but MUST stay visible in the
+        free-air span — TPU's 3-5 mm material limits depend on it."""
+        tris = _plate_with_bottom_recess_triangles(30, 30, 8, 7, 7, 5.0)
+        r = analyze_printability(
+            _write_stl(tmp_path, "s.stl", tris), material="pla")
+        assert not r.bridging.needs_supports_for_bridges
+        assert 5.0 < r.bridging.max_free_air_span_mm <= 10.0
+
+    def test_flush_seam_is_not_free_air(self, tmp_path):
+        """Boolean seam resting on solid material: exempt by
+        mechanism, so no free-air span either."""
+        tris = _box_triangles(0, 0, 0, 20, 20, 2)
+        tris += _box_triangles(8, 8, 2.05, 11, 11, 5)
+        r = analyze_printability(
+            _write_stl(tmp_path, "f.stl", tris), material="pla")
+        assert r.bridging.max_free_air_span_mm < 1.0
+
+    def test_sloped_wall_angle_is_free_air(self, tmp_path):
+        """A genuinely leaning wall reports its true angle in the
+        free-air field — including angles below the 45-degree public
+        threshold, which TPU-class limits need to see."""
+        tris = _leaning_column_triangles(lean_deg=51.34)
+        r = analyze_printability(
+            _write_stl(tmp_path, "l.stl", tris), material="pla")
+        assert 48 < r.overhangs.max_free_air_overhang_deg < 55
+
+    def test_tabletop_deck_is_span_domain_not_angle_domain(self, tmp_path):
+        """A wide flat ceiling is judged by its span; it must not
+        push the free-air ANGLE to 90 the way the raw field does."""
+        tris = _plate_with_bottom_recess_triangles(60, 60, 8, 40, 40, 5.0)
+        r = analyze_printability(
+            _write_stl(tmp_path, "t.stl", tris), material="pla")
+        assert r.overhangs.max_overhang_angle >= 89.0
+        assert r.overhangs.max_free_air_overhang_deg < 45
