@@ -12,11 +12,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   your agent, which can send any of them for you. A person reads every one, and
   you can ask to be emailed when yours is fixed.
 
-- **Watch your print live, right in the conversation.** Ask how a print is
-  going and a live monitor opens beside the answer — progress, time left,
-  temperatures, and the camera while printing. Free with a Kiln account;
-  without one you still get the full text report.
-
 ### Fixed
 
 - **Multicolor and painted models now land on the print bed.** A model that
