@@ -3130,18 +3130,35 @@ def _score_generatable(summary: dict[str, Any], terms: list[str]) -> int:
     return score
 
 
-def find_generatable_design_templates(query: str) -> list[dict[str, Any]]:
-    """Find parametric templates matching a use case, best match first."""
+def score_generatable_design_templates(
+    query: str,
+) -> list[tuple[float, dict[str, Any]]]:
+    """Score every matching parametric template, best match first.
+
+    Returns ``(score, summary)`` pairs with the score normalised to
+    (0, 1].  The one scorer behind every template-search surface —
+    ``find_design_templates``, ``search_design_templates``, and the
+    approach recommender all rank with this, so a template findable on
+    one surface is findable on all of them.
+    """
     terms = _query_terms(query)
     if not terms:
         return []
-    scored = [
-        (_score_generatable(summary, terms), summary)
+    best = 6 * len(terms)   # every term hitting the id or display name
+    hits = [
+        (score / best, summary)
         for summary in list_generatable_design_templates()
+        if (score := _score_generatable(summary, terms)) > 0
     ]
-    hits = [(score, s) for score, s in scored if score > 0]
     hits.sort(key=lambda pair: (-pair[0], pair[1]["template_id"]))
-    return [summary for _, summary in hits]
+    return hits
+
+
+def find_generatable_design_templates(query: str) -> list[dict[str, Any]]:
+    """Find parametric templates matching a use case, best match first."""
+    return [
+        summary for _, summary in score_generatable_design_templates(query)
+    ]
 
 
 def _pattern_summary_with_label(template: dict[str, Any]) -> dict[str, Any]:

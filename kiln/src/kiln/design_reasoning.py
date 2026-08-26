@@ -2739,71 +2739,44 @@ def search_templates(
 ) -> TemplateSearchResult:
     """Search templates by natural-language description.
 
-    Uses token-overlap scoring: each query token is checked against the
-    template's ID, description, category, and tags.  Templates are ranked
-    by match ratio and returned in descending score order.
+    A thin shim over :func:`kiln.design_intelligence.
+    score_generatable_design_templates` — the one scorer behind every
+    template-search surface.  This module used to carry its own
+    substring scorer over the same file, and two rankings of one
+    library meant a template could match here and miss on the MCP
+    discovery tools, or the reverse, with nothing to say which was
+    right.  Only the envelope (scores, category filter, result cap)
+    lives here.
 
     :param query: Natural-language search string.
     :param max_results: Cap on returned matches (default 10).
     :param category_filter: If set, only return templates in this category.
     :returns: ``TemplateSearchResult`` with scored matches.
     """
-    import json as _json
+    from kiln.design_intelligence import (
+        list_generatable_design_templates,
+        score_generatable_design_templates,
+    )
 
+    total = len(list_generatable_design_templates())
     if not query or not query.strip():
-        return TemplateSearchResult(query=query, total_templates=0)
+        return TemplateSearchResult(query=query, total_templates=total)
 
-    templates_path = Path(__file__).parent / "data" / "design_templates.json"
-    if not templates_path.exists():
-        return TemplateSearchResult(query=query, total_templates=0)
-
-    with open(templates_path) as fh:
-        data: dict[str, Any] = _json.load(fh)
-
-    # Normalised query tokens
-    q_tokens = query.lower().split()
-    if not q_tokens:
-        return TemplateSearchResult(query=query, total_templates=0)
-
-    scored: list[tuple[float, str, dict[str, Any]]] = []
-    template_keys = [k for k in data if not k.startswith("_")]
-
-    for tid in template_keys:
-        tmpl = data[tid]
-        cat = tmpl.get("category", "")
-        if category_filter and cat != category_filter:
-            continue
-
-        # Build searchable text from template metadata
-        desc = tmpl.get("description", "")
-        tags = tmpl.get("tags", [])
-        search_text = " ".join([
-            tid.replace("_", " "),
-            desc,
-            cat.replace("_", " "),
-            " ".join(tags) if isinstance(tags, list) else "",
-        ]).lower()
-
-        # Score = fraction of query tokens found in search text
-        hits = sum(1 for t in q_tokens if t in search_text)
-        score = hits / len(q_tokens)
-
-        if score > 0:
-            scored.append((score, tid, {
-                "template_id": tid,
-                "score": round(score, 3),
-                "description": desc,
-                "category": cat,
-            }))
-
-    # Sort by score descending, then alphabetically for ties
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    top = scored[:max_results]
+    matches = [
+        {
+            "template_id": summary["template_id"],
+            "score": round(score, 3),
+            "description": summary["description"],
+            "category": summary["category"],
+        }
+        for score, summary in score_generatable_design_templates(query)
+        if not category_filter or summary["category"] == category_filter
+    ]
 
     return TemplateSearchResult(
         query=query,
-        matches=[entry[2] for entry in top],
-        total_templates=len(template_keys),
+        matches=matches[:max_results],
+        total_templates=total,
         search_method="keyword",
     )
 
