@@ -1250,6 +1250,11 @@ def _get_adapter() -> PrinterAdapter:
     be imported without requiring environment variables to be set (useful
     for testing and introspection).
 
+    When neither env vars nor config.yaml supplied a host, the registry's
+    effective default printer answers instead — embedding hosts populate
+    the registry directly, without ever running the config-resolution
+    step that fills the env/YAML globals.
+
     Returns:
         The active :class:`PrinterAdapter` instance.
 
@@ -1267,6 +1272,20 @@ def _get_adapter() -> PrinterAdapter:
     printer_type = _PRINTER_TYPE
 
     if not host:
+        # An empty host does not mean no printer exists.  The env/YAML
+        # globals are only populated by ``_reload_env_config()``, but an
+        # embedding host (kiln-pro's REST server, a bare ``create_app()``)
+        # may have loaded printers straight into the registry without ever
+        # routing through that config step.  The *named* door
+        # (``_resolve_adapter("default")``) already finds those adapters;
+        # raising here made the unnamed door on the very same registry
+        # answer "No printer configured" — the half-wired-door failure.
+        # Registry default first, env error only when both are empty.
+        # The adapter is returned uncached: the registry owns its
+        # lifecycle, and pinning it into ``_adapter`` would shadow a
+        # later, properly configured env/YAML default.
+        with contextlib.suppress(Exception):
+            return _get_registry().get(_resolve_effective_printer_name(None))
         raise RuntimeError(
             "No printer configured. Set KILN_PRINTER_HOST environment variable "
             "to the printer URL (e.g. http://octopi.local). Also set "
