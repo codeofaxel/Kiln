@@ -1607,6 +1607,50 @@ def check_boolean_success(input_stl: str, output_stl: str, *, tolerance: float =
     return abs(output_size - input_size) > input_size * tolerance
 
 
+def mesh_signature(stl_path: str) -> tuple[int, float] | None:
+    """Return ``(triangle_count, signed_volume_mm3)`` for an STL mesh.
+
+    The signed volume is the divergence-theorem tetrahedron sum — exact
+    for a closed mesh, and equally deterministic for an open one, which
+    is all identity comparison needs.  Returns ``None`` when the file
+    cannot be parsed (callers must then skip the comparison, never
+    guess).
+    """
+    try:
+        from kiln.surface_intelligence import _parse_stl
+
+        tris = _parse_stl(stl_path)
+    except Exception:
+        return None
+    volume = 0.0
+    for tri in tris:
+        (x1, y1, z1), (x2, y2, z2), (x3, y3, z3) = tri["vertices"]
+        volume += (
+            x1 * (y2 * z3 - y3 * z2)
+            - y1 * (x2 * z3 - x3 * z2)
+            + z1 * (x2 * y3 - x3 * y2)
+        ) / 6.0
+    return len(tris), volume
+
+
+def meshes_geometrically_identical(input_stl: str, output_stl: str) -> bool:
+    """True when two meshes have the same triangle count AND volume.
+
+    This is the honest post-carve check :func:`check_boolean_success`'s
+    file-size heuristic cannot give: a boolean whose cutter never touched
+    the body re-emits the input geometry, possibly re-tessellated into a
+    different file size, so byte deltas pass while nothing was carved.
+    Identical triangle count plus identical enclosed volume (within
+    0.01mm³) means the carve was a no-op.  Parse failures return False —
+    an unreadable mesh must not be branded a no-op.
+    """
+    sig_in = mesh_signature(input_stl)
+    sig_out = mesh_signature(output_stl)
+    if sig_in is None or sig_out is None:
+        return False
+    return sig_in[0] == sig_out[0] and abs(sig_in[1] - sig_out[1]) < 0.01
+
+
 # ---------------------------------------------------------------------------
 # QR code OpenSCAD module — Business feature, lives in kiln-pro
 # ---------------------------------------------------------------------------

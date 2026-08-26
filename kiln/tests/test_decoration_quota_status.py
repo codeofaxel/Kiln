@@ -54,6 +54,7 @@ def test_refund_gives_back_a_consumed_decoration(tmp_path: Path) -> None:
     assert ok is True
     tracker.refund()
     status = tracker.get_status().to_dict()
+    # A carve that produced nothing must not eat one of the 3 monthly slots.
     assert status["used"] == 0 and status["remaining"] == 3
 
 

@@ -14,6 +14,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Logos and text now land on the side of a cup, box, or vase.** Decorating
+  a hollow product's side quietly did nothing — the mark went into the empty
+  middle instead of the wall. On a round product, Kiln now warns that side art
+  is sized to the flat strip it lands on.
+
+- **A decoration that didn't take is now reported as a failure.** Kiln does
+  not return an unchanged model as a success, and a failed attempt doesn't
+  count against your monthly decorations. In some situations, that was
+  improperly happening. Now fixed.
+
 - **Printability grades stopped failing models that print fine.** Grades now
   follow what your printer actually does.
 
