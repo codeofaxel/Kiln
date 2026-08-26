@@ -304,11 +304,14 @@ class TestPaintedFileColorsSurvive:
     def _painted_cube(self, tmp_path, transform=None):
         from kiln.multicolor_3mf import compose_painted_3mf
 
+        # On the plate (positive coords), so compose_painted_3mf keeps the
+        # identity build transform and the transform-replace below works.
         mesh = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+        mesh.apply_translation((100.0, 100.0, 5.0))
         tris = [tuple(map(tuple, mesh.vertices[f])) for f in mesh.faces]
-        # top faces red (both verts at z=+5), everything else blue
+        # top faces red (all verts at z=10), everything else blue
         colors = [
-            "#F72323" if all(v[2] > 4.9 for v in t) else "#2366F7" for t in tris
+            "#F72323" if all(v[2] > 9.9 for v in t) else "#2366F7" for t in tris
         ]
         out = tmp_path / "painted.3mf"
         compose_painted_3mf(tris, colors, output_path=str(out))
@@ -337,18 +340,45 @@ class TestPaintedFileColorsSurvive:
             base64.b64decode(payload["vertex_colors"]), dtype=np.uint8
         ).reshape(-1, 3, 4)
         pos = _f32(payload["positions"]).reshape(-1, 3, 3)
-        top = (pos[:, :, 1] > 4.9).all(axis=1)   # viewer y == mesh z
+        top = (pos[:, :, 1] > 9.9).all(axis=1)   # viewer y == mesh z
         assert top.sum() == 2
         assert {tuple(c) for f in rgba[top] for c in f.tolist()} == {self.RED}
         assert {tuple(c) for f in rgba[~top] for c in f.tolist()} == {self.BLUE}
 
-    def test_a_transformed_item_is_refused_not_mispositioned(self, tmp_path):
-        """parse_colored_3mf ignores build transforms, so a moved item's
-        soup would sit at the wrong place — the guard keeps the honest
-        uncolored mesh instead."""
+    def test_a_translated_item_is_positioned_not_refused(self, tmp_path):
+        """parse_colored_3mf ignores build transforms, but a pure
+        translation is provably recoverable from the bbox delta — the
+        soup is shifted to where the slicer will place it and keeps its
+        colors.  This is the shape of every Kiln-painted file now that
+        ``compose_painted_3mf`` bakes a bed-centring translation."""
         moved = self._painted_cube(
             tmp_path,
             transform='transform="1 0 0 0 1 0 0 0 1 50.000000 0.000000 0.000000"',
+        )
+        payload = mesh_to_viewer_payload(moved)
+        assert payload["downgraded"] is False
+        pos = _f32(payload["positions"]).reshape(-1, 3)
+        # cube x 95..105 moved +50 -> 145..155 (mesh x == viewer x)
+        assert pos[:, 0].min() == pytest.approx(145.0)
+        assert pos[:, 0].max() == pytest.approx(155.0)
+        rgba = np.frombuffer(
+            base64.b64decode(payload["vertex_colors"]), dtype=np.uint8
+        ).reshape(-1, 3, 4)
+        assert {tuple(c) for f in rgba for c in f.tolist()} == {
+            self.RED, self.BLUE,
+        }
+
+    def test_a_rotated_item_is_refused_not_mispositioned(self, tmp_path):
+        """A rotation cannot be recovered from bounds alone, so the guard
+        keeps the honest uncolored mesh — a wrong color is worse than
+        none.  (45° about Z widens the cube's bbox, so the min and max
+        deltas disagree and the check catches it.)"""
+        moved = self._painted_cube(
+            tmp_path,
+            transform=(
+                'transform="0.707107 0.707107 0 -0.707107 0.707107 0 '
+                '0 0 1 0.000000 0.000000 0.000000"'
+            ),
         )
         payload = mesh_to_viewer_payload(moved)
         assert payload["downgraded"] is False
@@ -443,14 +473,36 @@ class TestPaintedFileColorsSurvive:
         assert payload["downgraded"] is False
         assert "vertex_colors" not in payload
 
-    def test_a_transformed_multi_object_item_is_refused(self, tmp_path):
-        """The segments sit in file coordinates; a moved build item's soup
-        would land at the wrong place, so it is refused like the
-        single-object case."""
+    def test_a_translated_multi_object_item_is_positioned(self, tmp_path):
+        """The segments sit in file coordinates; a translation-only build
+        item is applied to its segment's soup — like the single-object
+        case — so an arranged multi-object painted file keeps its colors
+        at the placed positions."""
         payload = mesh_to_viewer_payload(
             self._two_object_painted(
                 tmp_path,
                 item2_transform="1 0 0 0 1 0 0 0 1 5.000000 0.000000 0.000000",
+            )
+        )
+        assert payload["downgraded"] is False
+        pos = _f32(payload["positions"]).reshape(-1, 3)
+        # object b: x 20..30 moved +5 -> the whole soup spans 0..35
+        assert pos[:, 0].max() == pytest.approx(35.0)
+        rgba = np.frombuffer(
+            base64.b64decode(payload["vertex_colors"]), dtype=np.uint8
+        ).reshape(-1, 4)
+        assert {tuple(c) for c in rgba.tolist()} == {self.RED, self.BLUE}
+
+    def test_a_rotated_multi_object_item_is_refused(self, tmp_path):
+        """A rotated build item's soup cannot be proven aligned, so the
+        honest uncolored mesh wins."""
+        payload = mesh_to_viewer_payload(
+            self._two_object_painted(
+                tmp_path,
+                item2_transform=(
+                    "0.707107 0.707107 0 -0.707107 0.707107 0 "
+                    "0 0 1 0.000000 0.000000 0.000000"
+                ),
             )
         )
         assert payload["downgraded"] is False
@@ -511,10 +563,13 @@ class TestPaintedFileColorsSurvive:
         vertices on this exact fixture)."""
         from kiln.multicolor_3mf import compose_painted_3mf
 
+        # On the plate, so the composer keeps the identity transform and
+        # the viewer positions below stay in fixture coordinates.
         sphere = trimesh.creation.icosphere(subdivisions=3, radius=10.0)
+        sphere.apply_translation((100.0, 100.0, 10.0))
         tris = [tuple(map(tuple, sphere.vertices[f])) for f in sphere.faces]
         colors = [
-            "#F72323" if cz > 0 else "#2366F7"
+            "#F72323" if cz > 10.0 else "#2366F7"
             for cz in sphere.triangles_center[:, 2]
         ]
         out = tmp_path / "painted_dense.3mf"
@@ -529,10 +584,10 @@ class TestPaintedFileColorsSurvive:
         # Both zones survive, and nothing else appears.
         assert {tuple(c) for c in rgba.tolist()} == {self.RED, self.BLUE}
         # Clean split: outside a band the width of one source face around
-        # the paint boundary (mesh z == viewer y), every vertex carries
-        # its own side's color.
+        # the paint boundary at z=10 (mesh z == viewer y), every vertex
+        # carries its own side's color.
         band = 0.25
-        upper, lower = pos[:, 1] > band, pos[:, 1] < -band
+        upper, lower = pos[:, 1] > 10.0 + band, pos[:, 1] < 10.0 - band
         assert (rgba[upper] == self.RED).all()
         assert (rgba[lower] == self.BLUE).all()
 

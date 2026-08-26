@@ -375,6 +375,131 @@ def compute_3mf_bbox(threemf_path: str) -> dict[str, float] | None:
             os.unlink(tmp_path)
 
 
+def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
+    """Bbox of a model 3MF's geometry AS THE SLICER WILL PLACE IT.
+
+    Unlike :func:`compute_mesh_bbox` (raw vertices) this applies each
+    ``<build><item>`` transform — the coordinates that decide whether the
+    object is on the bed.  Slicers honour a 3MF's transforms literally
+    (no STL-style auto-centre), so a file whose vertices span negative
+    coordinates under an identity transform is off a corner-origin bed
+    even though its raw mesh "fits".
+
+    Handles ``<components>`` recursion with composed transforms.  Returns
+    ``None`` when the archive has no parseable geometry — callers treat
+    that as "check skipped", never as a failure.
+    """
+    import xml.etree.ElementTree as ET
+
+    def _parse_matrix(text: str | None) -> list[float]:
+        # 3MF 4x3 matrix, 12 numbers: rows m00..m22 then tx ty tz;
+        # points transform as row vectors: p' = p . M + t.
+        identity = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+        if not text:
+            return [float(v) for v in identity]
+        parts = text.split()
+        if len(parts) != 12:
+            return [float(v) for v in identity]
+        try:
+            return [float(v) for v in parts]
+        except ValueError:
+            return [float(v) for v in identity]
+
+    def _compose(a: list[float], b: list[float]) -> list[float]:
+        # p' = (p . A) . B  ->  combined M = A . B (rotation blocks),
+        # combined t = tA . B_rot + tB.
+        out = [0.0] * 12
+        for i in range(3):
+            for j in range(3):
+                out[i * 3 + j] = sum(a[i * 3 + k] * b[k * 3 + j] for k in range(3))
+        for j in range(3):
+            out[9 + j] = sum(a[9 + k] * b[k * 3 + j] for k in range(3)) + b[9 + j]
+        return out
+
+    def _apply(m: list[float], x: float, y: float, z: float) -> tuple[float, float, float]:
+        return (
+            x * m[0] + y * m[3] + z * m[6] + m[9],
+            x * m[1] + y * m[4] + z * m[7] + m[10],
+            x * m[2] + y * m[5] + z * m[8] + m[11],
+        )
+
+    def _local(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1]
+
+    try:
+        with zipfile.ZipFile(threemf_path) as zf:
+            model_name = next(
+                (n for n in zf.namelist()
+                 if n.lower().endswith(".model") and n.lower().startswith("3d/")),
+                None,
+            ) or next(
+                (n for n in zf.namelist() if n.lower().endswith(".model")), None
+            )
+            if model_name is None:
+                return None
+            root = ET.fromstring(zf.read(model_name))
+    except (zipfile.BadZipFile, ET.ParseError, KeyError, OSError) as exc:
+        logger.warning("compute_3mf_geometry_bbox failed for %s: %s",
+                       threemf_path, exc)
+        return None
+
+    meshes: dict[str, list[tuple[float, float, float]]] = {}
+    components: dict[str, list[tuple[str, list[float]]]] = {}
+    for el in root.iter():
+        if _local(el.tag) != "object":
+            continue
+        obj_id = el.get("id")
+        if obj_id is None:
+            continue
+        verts: list[tuple[float, float, float]] = []
+        comps: list[tuple[str, list[float]]] = []
+        for child in el.iter():
+            tag = _local(child.tag)
+            if tag == "vertex":
+                try:
+                    verts.append((
+                        float(child.get("x", "0")),
+                        float(child.get("y", "0")),
+                        float(child.get("z", "0")),
+                    ))
+                except ValueError:
+                    continue
+            elif tag == "component":
+                ref = child.get("objectid")
+                if ref is not None:
+                    comps.append((ref, _parse_matrix(child.get("transform"))))
+        if verts:
+            meshes[obj_id] = verts
+        if comps:
+            components[obj_id] = comps
+
+    points: list[tuple[float, float, float]] = []
+
+    def _collect(obj_id: str, matrix: list[float], depth: int = 0) -> None:
+        if depth > 8:  # cycle guard — a spec-legal file never nests this deep
+            return
+        for v in meshes.get(obj_id, ()):
+            points.append(_apply(matrix, *v))
+        for ref, child_m in components.get(obj_id, ()):
+            _collect(ref, _compose(child_m, matrix), depth + 1)
+
+    for el in root.iter():
+        if _local(el.tag) != "item":
+            continue
+        obj_id = el.get("objectid")
+        if obj_id is None:
+            continue
+        _collect(obj_id, _parse_matrix(el.get("transform")))
+
+    if not points:
+        return None
+    return {
+        "x_min": min(p[0] for p in points), "x_max": max(p[0] for p in points),
+        "y_min": min(p[1] for p in points), "y_max": max(p[1] for p in points),
+        "z_min": min(p[2] for p in points), "z_max": max(p[2] for p in points),
+    }
+
+
 # ---------------------------------------------------------------------------
 # The fit check
 # ---------------------------------------------------------------------------

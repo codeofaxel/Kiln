@@ -391,6 +391,84 @@ _STARTUP_CRASH_WINDOW_S = 10.0
 _SLICE_ATTEMPTS = 3
 
 
+def _bed_xy_bounds_from_profile(
+    profile: str | None,
+) -> tuple[float, float, float, float] | None:
+    """The bed's XY rectangle from a profile ini, or None.
+
+    Parses ``bed_shape = 0x0,256x0,256x256,0x256`` into
+    ``(x_min, y_min, x_max, y_max)``.  Corner-origin beds give
+    ``(0, 0, w, d)``; center-origin (delta) beds keep their negative
+    corners, so the fit check below works for both.
+    """
+    if not profile or not os.path.isfile(profile):
+        return None
+    try:
+        shape = ini_to_settings(profile).get("bed_shape", "")
+    except OSError:
+        return None
+    xs: list[float] = []
+    ys: list[float] = []
+    for corner in shape.split(","):
+        x, sep, y = corner.strip().partition("x")
+        if not sep:
+            continue
+        try:
+            xs.append(float(x))
+            ys.append(float(y))
+        except ValueError:
+            continue
+    if len(xs) < 3:
+        return None
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+# Matches kiln.printers.bed_fit._FIT_EPSILON_MM — floating-point noise on
+# the bed edge must not reject a model that fits.
+_BED_FIT_EPSILON_MM = 0.5
+
+
+def _check_3mf_on_bed(input_abs: str, profile: str | None) -> None:
+    """Refuse to slice a 3MF whose placed geometry misses the profile's bed.
+
+    3MF only: a 3MF carries explicit build transforms that slicers honour
+    literally, while loose STL geometry is auto-centred by PrusaSlicer.
+    Without this gate the failure is invisible — PrusaSlicer prints "All
+    objects are outside of the print volume." and exits 0 with no output
+    file, which used to surface as a generic "output file was not
+    created".  Skips silently when the bed shape or the geometry cannot
+    be determined: this is a diagnosis gate, not a new way to fail good
+    files.
+    """
+    bed = _bed_xy_bounds_from_profile(profile)
+    if bed is None:
+        return
+    from kiln.printers.bed_fit import compute_3mf_geometry_bbox
+
+    bbox = compute_3mf_geometry_bbox(input_abs)
+    if bbox is None:
+        return
+    bed_x_min, bed_y_min, bed_x_max, bed_y_max = bed
+    eps = _BED_FIT_EPSILON_MM
+    if (
+        bbox["x_min"] >= bed_x_min - eps
+        and bbox["x_max"] <= bed_x_max + eps
+        and bbox["y_min"] >= bed_y_min - eps
+        and bbox["y_max"] <= bed_y_max + eps
+    ):
+        return
+    raise SlicerError(
+        f"Model geometry (with its 3MF build transform applied) spans "
+        f"X[{bbox['x_min']:.1f}..{bbox['x_max']:.1f}] "
+        f"Y[{bbox['y_min']:.1f}..{bbox['y_max']:.1f}] mm, outside the "
+        f"profile's bed X[{bed_x_min:g}..{bed_x_max:g}] "
+        f"Y[{bed_y_min:g}..{bed_y_max:g}] mm. Slicers honour a 3MF's "
+        f"placement literally (no auto-centre), so this would slice to "
+        f"nothing. Re-export the 3MF centred on the bed, or translate "
+        f"the model so its footprint fits."
+    )
+
+
 def _run_slicer_with_startup_retry(
     cmd: list[str],
     *,
@@ -545,9 +623,13 @@ def _slice_with_orca(
             raise SlicerError(f"Slicer exited with code {result.returncode}. stderr: {stderr_snippet[:500]}")
 
         if not produced:
+            # This CLI reports on stdout, but surface both streams — the
+            # Slic3r-family lesson: the reason for a silent exit-0 no-write
+            # lives on whichever stream the message omitted.
+            reason = (result.stdout or "").strip() or (result.stderr or "").strip()
             raise SlicerError(
                 f"Slicer completed but wrote no G-code. "
-                f"stdout: {(result.stdout or '').strip()[:200]}"
+                f"Slicer said: {reason[:500] if reason else '(no output)'}"
             )
 
         # One plate, because slice_file promises exactly one file.  The model
@@ -619,6 +701,9 @@ def slice_file(
     ext = Path(input_abs).suffix.lower()
     if ext not in _INPUT_EXTENSIONS:
         raise SlicerError(f"Unsupported input format '{ext}'. Supported: {', '.join(sorted(_INPUT_EXTENSIONS))}")
+
+    if ext == ".3mf":
+        _check_3mf_on_bed(input_abs, profile)
 
     # Find slicer
     slicer = find_slicer(slicer_path)
@@ -707,11 +792,15 @@ def slice_file(
         stderr_snippet = (result.stderr or "").strip()[:500]
         raise SlicerError(f"Slicer exited with code {result.returncode}. stderr: {stderr_snippet}")
 
-    # Verify output exists
+    # Verify output exists.  PrusaSlicer can exit 0 without writing — e.g.
+    # "All objects are outside of the print volume." — and it says why on
+    # STDERR; a message that omitted stderr turned that specific reason
+    # into a generic mystery.
     if not os.path.isfile(out_file):
+        reason = (result.stderr or "").strip() or (result.stdout or "").strip()
         raise SlicerError(
             f"Slicer completed but output file was not created. "
-            f"stdout: {(result.stdout or '').strip()[:200]}"
+            f"Slicer said: {reason[:500] if reason else '(no output)'}"
         )
 
     _record_slice(profile, input_abs, out_file)

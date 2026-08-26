@@ -1442,6 +1442,9 @@ def compose_painted_3mf(
     *,
     output_path: str | None = None,
     name: str = "painted",
+    plate_width: float = 256.0,
+    plate_depth: float = 256.0,
+    printer_id: str | None = None,
 ) -> dict[str, Any]:
     """Compose a 3MF of ONE object whose colors vary per triangle.
 
@@ -1468,8 +1471,23 @@ def compose_painted_3mf(
         uncolored; such faces carry no reference and render neutral).
     :param output_path: Where to write.  Defaults to a temp file.
     :param name: The object name shown in slicers.
+    :param plate_width: Print plate X dimension in mm (default 256, same
+        legacy default as :func:`auto_arrange_parts`).  Used to place the
+        object ON the plate: a 3MF carries an explicit build transform
+        that slicers honour literally — PrusaSlicer does NOT auto-centre
+        it the way it auto-centres a loose STL, and a mesh with negative
+        coordinates is silently "outside of the print volume" (exit 0,
+        no gcode).  When the mesh bbox already sits inside the plate the
+        transform stays identity, preserving deliberate placement.
+    :param plate_depth: Print plate Y dimension in mm (default 256).
+    :param printer_id: Optional supported printer model id.  When it
+        resolves, its build volume overrides ``plate_width`` /
+        ``plate_depth``; when it does not, the defaults stand — bed
+        placement is a correction, never a reason to refuse a paint.
     :returns: Dict with ``output_path``, ``colors`` (distinct palette
-        actually referenced), and counts.  ``native_paint_truncated`` (int)
+        actually referenced), and counts.  ``bed_translation`` (``[tx,
+        ty, tz]``) appears when the build transform had to move the
+        object onto the plate.  ``native_paint_truncated`` (int)
         appears only when the palette exceeds :data:`PAINTED_STATE_MAX`
         colors: triangles past the limit keep their spec colorgroup
         reference but carry no native paint state.  ``{"success": False,
@@ -1524,6 +1542,45 @@ def compose_painted_3mf(
         if rgb_hex not in palette:
             palette.append(rgb_hex)
         tri_pindex.append(palette.index(rgb_hex))
+
+    if printer_id:
+        try:
+            from kiln.printers.bed_fit import resolve_build_volume
+
+            resolved = resolve_build_volume(printer_id)
+        except Exception:  # noqa: BLE001 — placement is advisory, never fatal
+            resolved = None
+            logger.debug("compose_painted_3mf: build volume lookup failed",
+                         exc_info=True)
+        if resolved is not None:
+            _model_id, build_volume = resolved
+            plate_width = build_volume[0]
+            plate_depth = build_volume[1]
+
+    # Place the object ON the plate.  The build item below carries an
+    # explicit transform that slicers honour literally: PrusaSlicer
+    # auto-centres loose STL geometry but takes a 3MF at its word, so a
+    # mesh centred on its own origin (negative x/y) lands off a
+    # corner-origin bed and the slice "succeeds" with no gcode.  A single
+    # translation of the whole object preserves every relative layout
+    # inside it (a jar and its lid stay a jar-width apart).
+    xs = [v[0] for v in vertices]
+    ys = [v[1] for v in vertices]
+    zs = [v[2] for v in vertices]
+    bed_eps = 0.5  # match kiln.printers.bed_fit._FIT_EPSILON_MM
+    on_plate = (
+        min(xs) >= -bed_eps and max(xs) <= plate_width + bed_eps
+        and min(ys) >= -bed_eps and max(ys) <= plate_depth + bed_eps
+        and min(zs) >= -bed_eps
+    )
+    if on_plate:
+        tx = ty = tz = 0.0
+    else:
+        tx = plate_width / 2.0 - (min(xs) + max(xs)) / 2.0
+        ty = plate_depth / 2.0 - (min(ys) + max(ys)) / 2.0
+        tz = -min(zs)
+        # 0.0 + x normalises -0.0 (e.g. -min(0.0)) out of the emitted XML
+        tx, ty, tz = 0.0 + tx, 0.0 + ty, 0.0 + tz
 
     colorgroup_id = 2  # the single object is id 1
     obj_name = _xml_escape(name)
@@ -1582,7 +1639,8 @@ def compose_painted_3mf(
         "    </object>",
         "  </resources>",
         "  <build>",
-        '    <item objectid="1" transform="1 0 0 0 1 0 0 0 1 0.000000 0.000000 0.000000"/>',
+        f'    <item objectid="1" transform="1 0 0 0 1 0 0 0 1 '
+        f'{tx:.6f} {ty:.6f} {tz:.6f}"/>',
         "  </build>",
         "</model>",
     ]
@@ -1672,6 +1730,8 @@ def compose_painted_3mf(
             )
         ),
     }
+    if (tx, ty, tz) != (0.0, 0.0, 0.0):
+        result["bed_translation"] = [round(tx, 6), round(ty, 6), round(tz, 6)]
     if degenerate_skipped:
         result["degenerate_skipped"] = degenerate_skipped
     if native_paint_truncated:

@@ -374,18 +374,23 @@ def _painted_3mf_mesh(
     * ONE object (*scene* ``None`` or single-geometry): the soup follows
       the file's object order and the flattened mesh follows the scene
       graph's; with one object the two cannot disagree, so the whole-mesh
-      guard suffices — triangle count and bounding box must agree
-      (``parse_colored_3mf`` ignores build-item transforms, so a
-      transformed or instanced item fails the bbox check and the caller
-      keeps the honest uncolored mesh rather than a mispositioned one).
+      guard suffices — triangle count must agree and the bounding boxes
+      must differ by at most a uniform TRANSLATION
+      (``parse_colored_3mf`` ignores build-item transforms, and a pure
+      translation — e.g. the bed-centring transform
+      ``compose_painted_3mf`` bakes into every off-plate paint — is
+      provably recoverable by shifting the soup; a rotated or scaled
+      item still fails the check and keeps the honest uncolored mesh).
     * SEVERAL objects: ordering is proven per part instead of assumed —
       each Scene geometry is matched to its ``ColoredMesh.segments`` entry
       BY NAME (the same name-else-id convention ``object_display_colors``
       keys by), refusing on duplicate names, on any count disagreement,
-      on a non-identity node transform (the segment's soup sits in file
-      coordinates), and on any segment whose soup bounds disagree with
-      that geometry's.  The soup is then assembled in scene-graph order,
-      so every face's color lands on the part that owns it.
+      on a node transform with a non-identity rotation block (the
+      segment's soup sits in file coordinates), and on any segment whose
+      soup bounds disagree with that geometry's.  A translation-only node
+      transform is applied to the segment's soup instead of refused.  The
+      soup is then assembled in scene-graph order, so every face's color
+      lands on the part that owns it.
 
     A file whose archive carries no color construct at all — core-spec,
     sidecar, or painting attribute — is turned away by a byte scan before
@@ -440,11 +445,14 @@ def _painted_3mf_mesh(
         soup = np.array(
             [[t.v0, t.v1, t.v2] for t in tris], dtype=np.float64,
         ).reshape(-1, 3)
-        if not (
-            np.allclose(soup.min(axis=0), flattened.bounds[0], atol=1e-4)
-            and np.allclose(soup.max(axis=0), flattened.bounds[1], atol=1e-4)
-        ):
-            return None
+        delta_min = flattened.bounds[0] - soup.min(axis=0)
+        delta_max = flattened.bounds[1] - soup.max(axis=0)
+        if not np.allclose(delta_min, delta_max, atol=1e-4):
+            return None  # rotated/scaled/instanced — alignment unprovable
+        if not np.allclose(delta_min, 0.0, atol=1e-4):
+            # The build item's translation (compose_painted_3mf bakes one
+            # to put an off-plate mesh on the bed) — recover it by shift.
+            soup = soup + delta_min
     else:
         by_key: dict[str, Any] = {}
         for seg in colored.segments:
@@ -454,15 +462,19 @@ def _painted_3mf_mesh(
         if sum(seg.count for seg in colored.segments) != len(colored.triangles):
             return None
         tris = []
+        soup_parts = []
         for node_name in scene.graph.nodes_geometry:
             transform, geom_name = scene.graph[node_name]
             geom = scene.geometry.get(geom_name)
             if not isinstance(geom, trimesh.Trimesh) or len(geom.faces) == 0:
                 continue
-            if transform is not None and not np.allclose(
-                transform, np.eye(4), atol=1e-9
-            ):
-                return None  # a moved instance's soup would sit at the wrong place
+            shift = None
+            if transform is not None:
+                if not np.allclose(
+                    np.asarray(transform)[:3, :3], np.eye(3), atol=1e-9
+                ):
+                    return None  # rotated/scaled instance — alignment unprovable
+                shift = np.asarray(transform, dtype=np.float64)[:3, 3]
             seg = by_key.get(geom_name)
             if seg is None or seg.count != len(geom.faces):
                 return None
@@ -475,12 +487,13 @@ def _painted_3mf_mesh(
                 and np.allclose(seg_soup.max(axis=0), geom.bounds[1], atol=1e-4)
             ):
                 return None
+            if shift is not None and not np.allclose(shift, 0.0, atol=1e-9):
+                seg_soup = seg_soup + shift  # translation-only build item
             tris.extend(seg_tris)
-        if len(tris) != len(flattened.faces):
+            soup_parts.append(seg_soup)
+        if not soup_parts or len(tris) != len(flattened.faces):
             return None
-        soup = np.array(
-            [[t.v0, t.v1, t.v2] for t in tris], dtype=np.float64,
-        ).reshape(-1, 3)
+        soup = np.vstack(soup_parts)
 
     mesh = trimesh.Trimesh(
         vertices=soup,
