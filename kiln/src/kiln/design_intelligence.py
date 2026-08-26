@@ -2957,6 +2957,231 @@ def find_public_design_templates(use_case: str) -> list[dict[str, Any]]:
     return matches
 
 
+# ---------------------------------------------------------------------------
+# Public API — Generatable Design Templates
+# ---------------------------------------------------------------------------
+#
+# Two different things in this codebase are called a "design template",
+# and they live in two files with the same NAME:
+#
+#   data/design_knowledge/design_templates.json — 18 design PATTERNS
+#       (snap-fit cantilever, living hinge, press fit).  Knowledge, not
+#       geometry: material compatibility and print orientation in public,
+#       dimension rules and known failure modes behind the paid overlay.
+#       Nothing here renders; you apply the pattern to geometry you write.
+#
+#   data/design_templates.json — 65 PARAMETRIC PARTS (shelf bracket,
+#       stackable bin, hose barb adapter).  Each carries OpenSCAD with
+#       named parameters and renders to a printable STL through
+#       ``generate_from_template``.
+#
+# Discovery read only the first file, so the parametric library was
+# unreachable from every search door: ``find_design_templates`` could not
+# return one, and its own docstring examples ("enclosure", "gear train",
+# "battery cover") each resolved to a PATTERN id that
+# ``generate_from_template`` rejects with NOT_FOUND.  Both libraries earn
+# their place — they answer different questions — but a caller has to be
+# able to tell them apart, so the merged search below labels every result
+# with whether it can be generated and what to call next.
+#
+# The pattern library's public projection is deliberately narrow (see
+# ``_build_design_template``: the orientation LABEL is public, the reason
+# for it is not).  Nothing here widens it — the parametric library is a
+# second source alongside it, never a new view onto it.
+
+_GENERATABLE_TEMPLATES_PATH = (
+    Path(__file__).parent / "data" / "design_templates.json"
+)
+
+# Words that carry no signal in a use-case query.  Without this, "a case
+# for my pi" scores every template that happens to say "for" in its
+# description.
+_TEMPLATE_STOPWORDS = frozenset({
+    "a", "an", "and", "any", "are", "as", "at", "be", "by", "can", "for",
+    "from", "get", "has", "have", "i", "in", "is", "it", "its", "make",
+    "me", "my", "need", "of", "on", "or", "print", "printed", "so",
+    "some", "that", "the", "then", "this", "to", "want", "what", "with",
+    "you", "your",
+})
+
+
+def _generatable_template_records() -> dict[str, dict[str, Any]]:
+    """Load the parametric (renderable) template records."""
+    try:
+        raw = json.loads(
+            _GENERATABLE_TEMPLATES_PATH.read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return {}
+    return {
+        template_id: data
+        for template_id, data in raw.items()
+        if not template_id.startswith("_") and isinstance(data, dict)
+    }
+
+
+def _generatable_template_summary(
+    template_id: str, data: dict[str, Any],
+) -> dict[str, Any]:
+    """Project one parametric template to its discovery summary.
+
+    Parameters are summarised by NAME, UNIT and DEFAULT rather than
+    omitted, because the whole reason to reach for this library is that
+    the user brought their own dimensions — an agent that cannot see
+    which dimensions a template accepts cannot offer it.
+    """
+    params = data.get("parameters") or {}
+    return {
+        "template_id": template_id,
+        "display_name": data.get("display_name", ""),
+        "description": data.get("description", ""),
+        "category": data.get("category", "general"),
+        "generatable": True,
+        "parameters": {
+            name: {
+                "default": spec.get("default"),
+                "unit": spec.get("unit", ""),
+                "description": spec.get("description", ""),
+            }
+            for name, spec in params.items()
+            if isinstance(spec, dict)
+        },
+        "next_step": (
+            f"generate_from_template({template_id!r}, parameters={{...}}) — "
+            f"renders a printable STL locally, no AI provider needed"
+        ),
+    }
+
+
+def list_generatable_design_templates() -> list[dict[str, Any]]:
+    """Return every parametric template summary, sorted by identifier."""
+    return [
+        _generatable_template_summary(template_id, data)
+        for template_id, data in sorted(_generatable_template_records().items())
+    ]
+
+
+def get_generatable_design_template(template_id: str) -> dict[str, Any] | None:
+    """Return one parametric template summary, or ``None`` if unknown."""
+    key = template_id.strip().lower()
+    data = _generatable_template_records().get(key)
+    if data is None:
+        return None
+    return _generatable_template_summary(key, data)
+
+
+def _query_terms(query: str) -> list[str]:
+    """Split a use-case query into meaningful lowercase search terms."""
+    cleaned = "".join(
+        ch if ch.isalnum() else " " for ch in (query or "").lower()
+    )
+    return [
+        word for word in cleaned.split()
+        if len(word) > 1 and word not in _TEMPLATE_STOPWORDS
+    ]
+
+
+def _matches_word(term: str, words: frozenset[str]) -> bool:
+    """True when a query term hits one of ``words`` at a word boundary.
+
+    Plain substring matching looked fine and was not: "bin" matched the
+    CATEGORY "plumbing", and "gear train" ranked drain_strainer level
+    with gear_spur because "strainer" contains "train".  Matching whole
+    words with a shared-prefix allowance keeps the stems that matter
+    ("bin"/"bins", "bracket"/"brackets") and drops the accidents.
+    """
+    for word in words:
+        if word == term or word.startswith(term):
+            return True
+        if len(word) >= 3 and term.startswith(word):
+            return True
+    return False
+
+
+def _words(*parts: str) -> frozenset[str]:
+    """Split text into lowercase word tokens for boundary matching."""
+    joined = " ".join(parts).lower()
+    cleaned = "".join(ch if ch.isalnum() else " " for ch in joined)
+    return frozenset(cleaned.split())
+
+
+def _score_generatable(summary: dict[str, Any], terms: list[str]) -> int:
+    """Score one parametric template against the query terms.
+
+    Weighted by where the term landed: an id or display-name hit means
+    the user named the part, a category hit means they named its job,
+    and a description hit is the weakest evidence of the three.
+    """
+    ident = _words(summary["template_id"], str(summary["display_name"]))
+    category = _words(str(summary["category"]))
+    description = _words(str(summary["description"]))
+    params = _words(" ".join(summary["parameters"]))
+
+    score = 0
+    for term in terms:
+        if _matches_word(term, ident):
+            score += 6
+        elif _matches_word(term, category):
+            score += 3
+        elif _matches_word(term, description):
+            score += 2
+        elif _matches_word(term, params):
+            score += 1
+    return score
+
+
+def find_generatable_design_templates(query: str) -> list[dict[str, Any]]:
+    """Find parametric templates matching a use case, best match first."""
+    terms = _query_terms(query)
+    if not terms:
+        return []
+    scored = [
+        (_score_generatable(summary, terms), summary)
+        for summary in list_generatable_design_templates()
+    ]
+    hits = [(score, s) for score, s in scored if score > 0]
+    hits.sort(key=lambda pair: (-pair[0], pair[1]["template_id"]))
+    return [summary for _, summary in hits]
+
+
+def _pattern_summary_with_label(template: dict[str, Any]) -> dict[str, Any]:
+    """Tag a pattern-library record so a caller cannot mistake it for geometry.
+
+    A copy, never a mutation of the projection itself: the pattern
+    library's public shape is pinned by its own leak-guard test, and this
+    label belongs to the merged SEARCH result, not to that projection.
+    """
+    labelled = dict(template)
+    labelled["generatable"] = False
+    labelled["next_step"] = (
+        f"get_design_template_info({template['template_id']!r}) for the "
+        f"pattern's material and orientation guidance, then write the "
+        f"OpenSCAD yourself and compile it with compile_scad. This is a "
+        f"design pattern, not a renderable part — generate_from_template "
+        f"does not accept it."
+    )
+    return labelled
+
+
+def search_all_design_templates(query: str) -> dict[str, list[dict[str, Any]]]:
+    """Search BOTH template libraries for one use case.
+
+    The single door every discovery tool goes through, so the parametric
+    library cannot go missing from one search surface and be present on
+    another — which is exactly how it stayed invisible.
+
+    :returns: ``{"generatable": [...], "patterns": [...]}`` — renderable
+        parts first, design patterns second, each result labelled.
+    """
+    return {
+        "generatable": find_generatable_design_templates(query),
+        "patterns": [
+            _pattern_summary_with_label(template)
+            for template in find_public_design_templates(query)
+        ],
+    }
+
+
 def _build_design_template(template_id: str, data: dict[str, Any]) -> DesignTemplate:
     """Build one template record from its merged knowledge-base entry.
 

@@ -17,6 +17,21 @@ from typing import Any
 
 _logger = logging.getLogger(__name__)
 
+def _template_part_count() -> int:
+    """How many parametric parts this build can render, counted live.
+
+    A number in onboarding copy is a number that goes stale — the skill
+    manifest advertised "18 templates" for a 65-part library for exactly
+    that reason.
+    """
+    try:
+        from kiln.design_intelligence import list_generatable_design_templates
+
+        return len(list_generatable_design_templates())
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 
 class _UtilityToolsPlugin:
     """Utility, health-check, onboarding, and admin tools.
@@ -619,6 +634,10 @@ class _UtilityToolsPlugin:
                 "Business feature).",
                 "3. Call `preflight_check` before starting any print to validate readiness.",
                 "4. Use `search_all_models` to find 3D models across marketplaces.",
+                "4b. Making a functional part to the user's own dimensions? "
+                "Call `find_design_templates(use_case)` first — Kiln ships a "
+                "library of print-verified parametric parts that render free "
+                "and locally via `generate_from_template`.",
                 "5. Use `slice_model` or `slice_and_print` to prepare and print files.",
                 "6. Use `validate_gcode` before `send_gcode` for raw G-code commands.",
             ]
@@ -904,16 +923,41 @@ class _UtilityToolsPlugin:
                         "one place, defaulting to OpenSCAD-native). If it is NOT "
                         "in your tools (free local install), run the SAME loop "
                         "yourself with compile_scad — do not try to call "
-                        "design_session. Either way, product generators, "
-                        "templates, image, and cloud are sub-paths under this "
-                        "one flow, not separate starting points."
+                        "design_session. Either way, the template library "
+                        "(see check_the_template_library_first), product "
+                        "generators, image, and cloud are sub-paths under "
+                        "this one flow, not separate starting points."
+                    ),
+                    "check_the_template_library_first": (
+                        f"Kiln ships {_template_part_count()} ready-made "
+                        "PARAMETRIC PARTS — brackets, bins, stands, cases, "
+                        "hooks, jigs, clamps, gears, plumbing and garden "
+                        "parts — and most agents never find out. When the "
+                        "user wants a FUNCTIONAL PART to their own "
+                        "dimensions ('a bracket for a 200 mm shelf', 'a bin "
+                        "that fits my drawer', 'a clip for an 8 mm cable'), "
+                        "call find_design_templates(use_case) BEFORE writing "
+                        "any OpenSCAD, and offer a match unprompted rather "
+                        "than waiting to be asked whether one exists. Then "
+                        "generate_from_template(id, {...}) renders a "
+                        "printable STL. It is FREE, runs locally through "
+                        "OpenSCAD with no AI provider or API key, and every "
+                        "part is print-verified at its default, minimum and "
+                        "maximum parameters. No match is a normal answer — "
+                        "fall back to writing OpenSCAD. (Results also "
+                        "include design PATTERNS marked generatable:false — "
+                        "snap fits, living hinges, press fits. Those are "
+                        "guidance for OpenSCAD you write; "
+                        "generate_from_template does not accept them.)"
                     ),
                     "default_is_openscad": (
-                        "To make a custom object from a description, DEFAULT to "
+                        "For a custom object the template library does not "
+                        "cover, DEFAULT to "
                         "writing the OpenSCAD yourself and compiling it locally "
                         "with compile_scad — free, no API key, works for every "
-                        "user. This is the first reach for any 'make me a ...' "
-                        "request. (compile_scad needs the OpenSCAD binary; see "
+                        "user. This is the reach for any 'make me a ...' "
+                        "request no template fits. (compile_scad needs the "
+                        "OpenSCAD binary; see "
                         "the 'openscad' field below if it isn't installed.)"
                     ),
                     "providers_are_opt_in": (

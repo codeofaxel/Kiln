@@ -5,12 +5,13 @@ Covers:
 - check_multi_material_pairing — happy path, exception
 - estimate_print_cost_from_mesh — happy path, file not found, bad input, exception
 - estimate_structural_load — happy path, unknown material, exception
-- find_design_templates — happy path, empty results, exception
+- find_design_templates — merged search across both template libraries,
+  ranking, labelling, and the pin that a generatable id really renders
 - get_design_template_info — happy path, unknown pattern, exception
 - get_material_design_profile — happy path, unknown material, exception
 - get_post_processing_guide — happy path, unknown material, exception
 - list_design_materials — happy path, exception
-- list_design_templates_catalog — happy path, exception
+- list_design_templates_catalog — both libraries, labelled, with parameters
 - match_design_requirements — happy path, empty match, exception
 - recommend_design_material — happy path, exception
 - broad printer-record helpers remain off the MCP registry
@@ -290,9 +291,89 @@ class TestFindDesignTemplates:
         result = registered_tools["find_design_templates"]("battery cover")
 
         assert result["success"] is True
-        assert result["count"] == 1
-        assert len(result["templates"]) == 1
+        # Both libraries: the mocked pattern plus whatever parametric
+        # parts really match.  The pattern is still there and still last.
+        assert result["pattern_count"] == 1
+        assert result["generatable_count"] >= 1
+        assert result["count"] == (
+            result["generatable_count"] + result["pattern_count"]
+        )
+        assert result["templates"][-1]["template_id"] == "snap_fit_cantilever"
         mock_fn.assert_called_once_with("battery cover")
+
+    @patch("kiln.design_intelligence.find_public_design_templates")
+    def test_generatable_parts_rank_before_patterns(
+        self, mock_fn, registered_tools,
+    ):
+        """A renderable part is the more useful answer, so it comes first."""
+        mock_fn.return_value = [_fake_public_template("snap_fit_cantilever")]
+
+        result = registered_tools["find_design_templates"]("battery")
+        flags = [t["generatable"] for t in result["templates"]]
+
+        assert flags, "expected at least one match"
+        assert flags == sorted(flags, reverse=True)
+
+    def test_every_result_says_whether_it_can_be_generated(
+        self, registered_tools,
+    ):
+        result = registered_tools["find_design_templates"]("bracket")
+
+        assert result["templates"]
+        for template in result["templates"]:
+            assert "generatable" in template
+            assert "next_step" in template
+
+    def test_generatable_ids_are_actually_renderable(self, registered_tools):
+        """The regression this whole change exists for.
+
+        Discovery read only the design-PATTERN library, so every one of
+        find_design_templates' own docstring examples returned an id
+        that generate_from_template rejects with NOT_FOUND.  Any id
+        offered as generatable must be one the generator accepts.
+        """
+        import json
+        from pathlib import Path
+
+        import kiln.server as _srv
+
+        library = json.loads(
+            (Path(_srv.__file__).parent / "data" / "design_templates.json")
+            .read_text(encoding="utf-8")
+        )
+        renderable = {k for k in library if not k.startswith("_")}
+
+        for use_case in (
+            "enclosure", "gear train", "battery cover", "storage bin",
+            "cable clip", "shelf bracket", "hose adapter", "garden stake",
+        ):
+            result = registered_tools["find_design_templates"](use_case)
+            for template in result["templates"]:
+                if template["generatable"]:
+                    assert template["template_id"] in renderable, (
+                        f"{use_case!r} offered "
+                        f"{template['template_id']!r} as generatable, but "
+                        f"generate_from_template cannot render it"
+                    )
+
+    def test_whole_parametric_library_is_reachable(self, registered_tools):
+        """No part may be unreachable from every search — that is the bug.
+
+        Searching each part's own display name must find it.  A template
+        nobody can search for is invisible however good its geometry is.
+        """
+        catalog = registered_tools["list_design_templates_catalog"]()
+        parts = [t for t in catalog["templates"] if t["generatable"]]
+        assert len(parts) >= 65
+
+        for part in parts:
+            found = registered_tools["find_design_templates"](
+                part["display_name"]
+            )
+            ids = {t["template_id"] for t in found["templates"]}
+            assert part["template_id"] in ids, (
+                f"{part['template_id']} cannot be found by its own name"
+            )
 
     @patch("kiln.design_intelligence.find_public_design_templates")
     def test_empty_results(self, mock_fn, registered_tools):
@@ -313,6 +394,45 @@ class TestFindDesignTemplates:
 
         assert result["success"] is False
         assert "boom" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# TestGenerateFromTemplateRejection
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateFromTemplateRejection:
+    """A rejected id has to say WHICH library it came from.
+
+    Both libraries are called "design templates" and one search returns
+    them side by side, so a design PATTERN reaching the generator is the
+    predictable miss.  Listing 65 ids and leaving the caller to diff them
+    by eye is not an answer.
+    """
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_pattern_id_is_named_as_a_pattern(self, _auth):
+        from kiln.server import generate_from_template
+
+        result = generate_from_template("snap_fit_cantilever")
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "NOT_FOUND"
+        message = result["error"]["message"]
+        assert "design PATTERN" in message
+        assert "get_design_template_info" in message
+        assert "compile_scad" in message
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_unknown_id_still_lists_the_parts(self, _auth):
+        from kiln.server import generate_from_template
+
+        result = generate_from_template("definitely_not_a_template")
+
+        assert result["success"] is False
+        message = result["error"]["message"]
+        assert "design PATTERN" not in message
+        assert "shelf_bracket" in message
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +476,24 @@ class TestGetDesignTemplateInfo:
 
         assert result["success"] is False
         assert "boom" in result["error"]
+
+    def test_resolves_a_parametric_part(self, registered_tools):
+        result = registered_tools["get_design_template_info"]("shelf_bracket")
+
+        assert result["success"] is True
+        assert result["generatable"] is True
+        assert result["parameters"]["arm_length"]["unit"] == "mm"
+
+    def test_pattern_is_labelled_not_generatable(self, registered_tools):
+        result = registered_tools["get_design_template_info"](
+            "snap_fit_cantilever"
+        )
+
+        assert result["success"] is True
+        assert result["generatable"] is False
+        # The leak guard still holds: private fields stay private.
+        assert "design_rules" not in result
+        assert "agent_guidance" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -727,21 +865,38 @@ class TestListDesignTemplatesCatalog:
         result = registered_tools["list_design_templates_catalog"]()
 
         assert result["success"] is True
-        assert result["count"] == 2
-        assert result["templates"][0]["template_id"] == "snap_fit_cantilever"
+        assert result["pattern_count"] == 2
+        # The parametric parts are the larger library and lead the list.
+        assert result["generatable_count"] >= 65
+        assert result["count"] == (
+            result["generatable_count"] + result["pattern_count"]
+        )
+        assert result["templates"][0]["generatable"] is True
+        assert result["templates"][-1]["template_id"] == "press_fit"
 
     @patch("kiln.design_intelligence.list_public_design_templates")
-    def test_summary_fields_present(self, mock_fn, registered_tools):
+    def test_pattern_summary_fields_present(self, mock_fn, registered_tools):
         mock_fn.return_value = [_fake_public_template()]
 
         result = registered_tools["list_design_templates_catalog"]()
-        pat = result["templates"][0]
+        pat = result["templates"][-1]
 
         assert "template_id" in pat
         assert "display_name" in pat
         assert "description" in pat
         assert "use_cases" in pat
         assert "best_materials" in pat
+        assert pat["generatable"] is False
+
+    def test_part_summary_carries_its_parameters(self, registered_tools):
+        """The dimensions a user brings are the reason to offer a part."""
+        result = registered_tools["list_design_templates_catalog"]()
+        part = next(t for t in result["templates"] if t["generatable"])
+
+        assert part["parameters"]
+        spec = next(iter(part["parameters"].values()))
+        assert "default" in spec
+        assert "unit" in spec
 
     @patch(
         "kiln.design_intelligence.list_public_design_templates",

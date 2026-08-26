@@ -406,35 +406,29 @@ class _DesignReasoningToolsPlugin:
             prompt_lower = prompt.lower()
             recommendations: dict[str, Any] = {"prompt": prompt}
 
-            # Check for template matches
+            # Check for template matches.
+            #
+            # This used to carry its own six-entry keyword table, which
+            # could reach 4 of the 65 parametric parts — and two of its
+            # six ids, "box_with_lid" and "nameplate", were not in the
+            # library at all, so a prompt saying "box" recommended a
+            # template that generate_from_template rejects with
+            # NOT_FOUND.  It now goes through the same search every
+            # other discovery door uses, so the whole library is
+            # reachable here and a recommended id is always renderable.
             try:
-                tpl_path = os.path.join(
-                    os.path.dirname(_srv.__file__), "data", "design_templates.json"
+                from kiln.design_intelligence import (
+                    find_generatable_design_templates,
                 )
-                with open(tpl_path) as fh:
-                    templates = json.load(fh)
 
-                matching_templates: list[dict[str, str]] = []
-                template_keywords: dict[str, list[str]] = {
-                    "phone_stand": ["phone", "stand", "holder", "dock", "cradle"],
-                    "hook": ["hook", "hanger", "wall hook", "coat hook"],
-                    "box_with_lid": ["box", "container", "case", "enclosure", "storage"],
-                    "cable_clip": ["cable", "clip", "wire", "cord", "organizer"],
-                    "shelf_bracket": ["bracket", "shelf", "support", "mount", "l-bracket"],
-                    "nameplate": ["nameplate", "name", "sign", "desk", "plaque", "label"],
-                }
-
-                for tid, keywords in template_keywords.items():
-                    if any(kw in prompt_lower for kw in keywords):
-                        tpl = templates.get(tid, {})
-                        matching_templates.append(
-                            {
-                                "template_id": tid,
-                                "display_name": tpl.get("display_name", tid),
-                                "description": tpl.get("description", ""),
-                            }
-                        )
-
+                matching_templates: list[dict[str, str]] = [
+                    {
+                        "template_id": tpl["template_id"],
+                        "display_name": tpl["display_name"],
+                        "description": tpl["description"],
+                    }
+                    for tpl in find_generatable_design_templates(prompt)[:5]
+                ]
                 recommendations["matching_templates"] = matching_templates
             except Exception:
                 recommendations["matching_templates"] = []

@@ -18,15 +18,36 @@ _logger = logging.getLogger(__name__)
 
 
 def _public_template_summary(template: dict[str, Any]) -> dict[str, Any]:
-    """Project a public template to its discovery fields."""
+    """Project a design PATTERN to its discovery fields.
+
+    ``generatable`` and ``next_step`` ride along when the merged search
+    put them there, because the one thing a caller must not have to
+    guess is whether the id it just received can be rendered.
+    """
     compatibility = template.get("material_compatibility") or {}
-    return {
+    summary = {
         "template_id": template.get("template_id"),
         "display_name": template.get("display_name"),
         "description": template.get("description"),
         "use_cases": list(template.get("use_cases") or []),
         "best_materials": list(compatibility.get("excellent") or []),
     }
+    for label in ("generatable", "next_step"):
+        if label in template:
+            summary[label] = template[label]
+    return summary
+
+
+#: Told to every caller that receives a mixed result set.  The two
+#: libraries answer different questions and only one of them renders.
+_TEMPLATE_LIBRARY_GUIDANCE = (
+    "Two kinds of result. generatable=true items are PARAMETRIC PARTS: "
+    "pass the id to generate_from_template with the user's own "
+    "dimensions and it renders a printable STL locally, free, with no "
+    "AI provider. generatable=false items are DESIGN PATTERNS "
+    "(snap fits, living hinges, press fits) — guidance for OpenSCAD you "
+    "write yourself; generate_from_template does not accept them."
+)
 
 
 class _DesignToolsPlugin:
@@ -686,26 +707,65 @@ class _DesignToolsPlugin:
 
         @mcp.tool()
         def get_design_template_info(template: str) -> dict:
-            """Get one template's public discovery and safety-floor fields.
+            """Look up one design template by id — parametric part or pattern.
+
+            Resolves an id from EITHER library and says which it came
+            from, so a caller never has to know in advance:
+
+            * a PARAMETRIC PART (``generatable: true``) comes back with
+              its full parameter list — names, defaults, and units — which
+              is what you need to fill in the user's own dimensions and
+              call ``generate_from_template``.
+            * a DESIGN PATTERN (``generatable: false``) comes back with
+              its use cases, material compatibility, and print
+              orientation.  Patterns are guidance for OpenSCAD you write
+              yourself; ``generate_from_template`` does not accept them.
 
             Args:
-                template: Template identifier.
+                template: Template identifier, from either library —
+                    e.g. "shelf_bracket" (part) or "snap_fit_cantilever"
+                    (pattern).  Use ``find_design_templates`` to search.
             """
-            from kiln.design_intelligence import get_public_design_template, list_public_design_templates
+            from kiln.design_intelligence import (
+                get_generatable_design_template,
+                get_public_design_template,
+                list_generatable_design_templates,
+                list_public_design_templates,
+            )
 
             try:
+                # Parametric parts first: they are the larger library and
+                # the one a caller can actually render.
+                part = get_generatable_design_template(template)
+                if part is not None:
+                    return {"success": True, **part}
+
                 record = get_public_design_template(template)
                 if record is None:
-                    available = [
+                    parts = [
+                        item["template_id"]
+                        for item in list_generatable_design_templates()
+                    ]
+                    patterns = [
                         item["template_id"]
                         for item in list_public_design_templates()
                     ]
                     return {
                         "success": False,
-                        "error": f"Unknown template: {template}. Available: {', '.join(available)}.",
+                        "error": (
+                            f"Unknown template: {template}. "
+                            f"Parametric parts: {', '.join(parts)}. "
+                            f"Design patterns: {', '.join(patterns)}."
+                        ),
                     }
                 result = dict(record)
                 result["success"] = True
+                result["generatable"] = False
+                result["next_step"] = (
+                    "This is a design pattern, not a renderable part — "
+                    "generate_from_template does not accept it. Apply the "
+                    "guidance in OpenSCAD you write, then compile_scad."
+                )
                 return result
             except Exception as exc:
                 _logger.error("Design template failed: %s", exc, exc_info=True)
@@ -713,18 +773,44 @@ class _DesignToolsPlugin:
 
         @mcp.tool()
         def list_design_templates_catalog() -> dict:
-            """List public design-template discovery summaries."""
-            from kiln.design_intelligence import list_public_design_templates
+            """Browse the whole design-template library, both kinds.
+
+            Returns every PARAMETRIC PART Kiln can render on its own —
+            brackets, bins, stands, cases, hooks, jigs, clamps, plumbing
+            and garden parts — followed by the DESIGN PATTERNS that are
+            guidance rather than geometry.  Every entry carries a
+            ``generatable`` flag and the call to make next.
+
+            The parametric parts are FREE and need no AI provider: they
+            compile locally through OpenSCAD.  Reach for one whenever a
+            user wants a functional part to their own dimensions, and
+            offer it before writing OpenSCAD from scratch — it is
+            faster and every part in the library is print-verified.
+
+            Use ``find_design_templates(use_case)`` to search rather than
+            reading the whole catalog.
+            """
+            from kiln.design_intelligence import (
+                list_generatable_design_templates,
+                list_public_design_templates,
+            )
 
             try:
-                summaries = [
+                parts = list_generatable_design_templates()
+                patterns = [
                     _public_template_summary(template)
                     for template in list_public_design_templates()
                 ]
+                for pattern in patterns:
+                    pattern["generatable"] = False
+                summaries = parts + patterns
                 return {
                     "success": True,
                     "templates": summaries,
                     "count": len(summaries),
+                    "generatable_count": len(parts),
+                    "pattern_count": len(patterns),
+                    "guidance": _TEMPLATE_LIBRARY_GUIDANCE,
                 }
             except Exception as exc:
                 _logger.error("List templates failed: %s", exc, exc_info=True)
@@ -732,23 +818,53 @@ class _DesignToolsPlugin:
 
         @mcp.tool()
         def find_design_templates(use_case: str) -> dict:
-            """Find public design-template summaries for a use case.
+            """Find a ready-made parametric part for what the user is making.
+
+            CALL THIS FIRST whenever a user asks for a FUNCTIONAL PART to
+            their own dimensions — a bracket that holds a shelf, a bin
+            that fits a drawer, a clip for an 8 mm cable, a case for a
+            board, an adapter between two hose sizes.  Kiln ships a
+            library of print-verified parametric parts; offering one is
+            faster and more reliable than writing OpenSCAD from scratch,
+            it is FREE, and it needs no AI provider or API key.  Do not
+            wait to be asked whether a template exists — search, and if
+            something fits, offer it.
+
+            Ranked best match first, across both libraries:
+
+            * ``generatable: true`` — a PARAMETRIC PART.  The result
+              carries its parameters, so you can fill in the user's
+              dimensions and call ``generate_from_template(id, {...})``
+              to render a printable STL.
+            * ``generatable: false`` — a DESIGN PATTERN (snap fit, living
+              hinge, press fit).  Guidance for OpenSCAD you write
+              yourself; ``generate_from_template`` does not accept it.
+
+            No match is a normal answer, not a failure — fall back to
+            writing OpenSCAD and compiling with ``compile_scad``.
 
             Args:
-                use_case: What you're designing (e.g. "enclosure",
-                    "gear train", "battery cover", "vase").
+                use_case: What the user is making, in their words —
+                    e.g. "shelf bracket", "storage bin", "cable clip",
+                    "enclosure", "gear train", "hose adapter".
             """
-            from kiln.design_intelligence import find_public_design_templates
+            from kiln.design_intelligence import search_all_design_templates
 
             try:
-                templates = find_public_design_templates(use_case)
+                found = search_all_design_templates(use_case)
+                parts = found["generatable"]
+                patterns = [
+                    _public_template_summary(template)
+                    for template in found["patterns"]
+                ]
+                templates = parts + patterns
                 return {
                     "success": True,
-                    "templates": [
-                        _public_template_summary(template)
-                        for template in templates
-                    ],
+                    "templates": templates,
                     "count": len(templates),
+                    "generatable_count": len(parts),
+                    "pattern_count": len(patterns),
+                    "guidance": _TEMPLATE_LIBRARY_GUIDANCE,
                 }
             except Exception as exc:
                 _logger.error("Find templates failed: %s", exc, exc_info=True)

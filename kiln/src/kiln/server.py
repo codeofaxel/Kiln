@@ -11655,16 +11655,24 @@ def get_feedback_loop_status(model_id: str) -> dict:
 
 @mcp.tool()
 def list_design_templates() -> dict:
-    """List available parametric design templates for common objects.
+    """List every parametric part Kiln can build, with full parameters.
 
-    Templates provide ready-to-use OpenSCAD code with customizable
-    parameters.  Use ``generate_from_template`` to render one into
-    a printable STL.
+    These are ready-made, print-verified FUNCTIONAL PARTS — brackets,
+    bins, stands, cases, hooks, jigs, clamps, plumbing and garden
+    parts — that render locally through OpenSCAD.  They are FREE and
+    need no AI provider or API key.  Whenever a user wants a functional
+    part to their own dimensions, check here before writing OpenSCAD
+    from scratch.
 
     Each template includes:
-    - Customizable parameters with defaults, ranges, and descriptions
-    - Pre-validated OpenSCAD code (prints without supports)
-    - Category and description
+    - Every parameter with its default, unit, and description
+    - Pre-validated OpenSCAD (prints without supports)
+    - Category and a one-line description of the job it does
+
+    Prefer ``find_design_templates(use_case)`` when you know what the
+    user is making — it searches this library by use case and ranks
+    matches, instead of returning all of them.  Then call
+    ``generate_from_template(id, {...})`` to render a printable STL.
     """
     try:
         import json as _json
@@ -11711,13 +11719,28 @@ def generate_from_template(
     template_id: str,
     parameters: dict | None = None,
 ) -> dict:
-    """Generate a 3D model from a parametric template with explicit parameters (local, no AI API).
+    """Build a printable STL from a parametric part, to the user's dimensions.
 
-    Use when you know which template and parameter values to use. For AI-assisted
-    parameter inference + structural analysis, use ``smart_generate_from_template``.
-    Renders the template's OpenSCAD code with custom parameter values
-    into a printable STL.  Use ``list_design_templates`` to see
-    available templates and their parameters.
+    This is how Kiln makes a FUNCTIONAL PART without writing any
+    OpenSCAD: pick a template, pass the dimensions the user gave you,
+    and get a print-ready STL.  It runs LOCALLY through OpenSCAD — free,
+    no AI provider, no API key, and every template in the library is
+    print-verified at its default, minimum, and maximum parameters.
+
+    Reach for this the moment a user describes a functional part they
+    need in specific sizes ("a bracket for a 200 mm shelf", "a bin that
+    fits my 80 mm drawer", "a clip for an 8 mm cable"). Find the
+    template with ``find_design_templates(use_case)``, read its
+    parameters with ``get_design_template_info(id)`` or
+    ``list_design_templates()``, then call this.
+
+    Only PARAMETRIC PARTS work here.  The design PATTERNS returned by
+    ``find_design_templates`` with ``generatable: false`` (snap fits,
+    living hinges, press fits) are guidance for OpenSCAD you write
+    yourself — this tool rejects them.
+
+    For AI-assisted parameter inference plus structural analysis, use
+    ``smart_generate_from_template``.
 
     When the kiln-pro package is installed (Pro+ tier), the result MAY
     carry an ``intent`` block describing the geometric assertions the
@@ -11726,9 +11749,11 @@ def generate_from_template(
     the result unchanged.  See https://kiln3d.com for tier details.
 
     Args:
-        template_id: Template ID from ``list_design_templates``.
-        parameters: Optional dict of parameter overrides
-            (e.g., ``{"phone_width": 80, "angle": 70}``).
+        template_id: Parametric part id, from ``find_design_templates``
+            or ``list_design_templates`` (e.g. ``"shelf_bracket"``).
+        parameters: Dict of parameter overrides carrying the user's own
+            dimensions (e.g. ``{"arm_length": 200, "thickness": 8}``).
+            Anything you leave out keeps the template's default.
     """
     if err := _check_auth("generate"):
         return err
@@ -11744,8 +11769,29 @@ def generate_from_template(
         tpl = data.get(template_id)
         if not tpl or template_id.startswith("_"):
             available = [k for k in data if not k.startswith("_")]
+            # A design PATTERN reaching this tool is the predictable
+            # miss, not an exotic one: both libraries are called
+            # "design templates" and discovery returns them side by
+            # side.  Naming what the id actually is beats listing 65
+            # ids the caller then has to diff by eye.
+            hint = ""
+            try:
+                from kiln.design_intelligence import get_public_design_template
+
+                if get_public_design_template(template_id) is not None:
+                    hint = (
+                        f" {template_id!r} is a design PATTERN, not a "
+                        f"parametric part — it carries guidance, not "
+                        f"geometry. Call get_design_template_info("
+                        f"{template_id!r}) for its material and "
+                        f"orientation rules, then write the OpenSCAD "
+                        f"yourself and compile it with compile_scad."
+                    )
+            except Exception:  # noqa: BLE001
+                pass
             return _error_dict(
-                f"Template {template_id!r} not found. Available: {', '.join(available)}",
+                f"Template {template_id!r} not found.{hint}"
+                f" Available parametric parts: {', '.join(available)}",
                 code="NOT_FOUND",
             )
 

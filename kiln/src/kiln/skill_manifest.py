@@ -14,6 +14,29 @@ from pathlib import Path
 from typing import Any
 
 
+def design_template_counts() -> dict[str, int]:
+    """How many design templates of each kind this build actually ships.
+
+    Derived, never written down.  The manifest said "18 templates" for
+    both entries while the parametric library held 65 — the number was
+    right about the design PATTERNS and silently wrong about the parts
+    an agent can render, which is the half a caller reaches for.  A
+    hand-maintained count in a capability map is a count that drifts.
+    """
+    try:
+        from kiln.design_intelligence import (
+            list_generatable_design_templates,
+            list_public_design_templates,
+        )
+
+        return {
+            "parametric_parts": len(list_generatable_design_templates()),
+            "design_patterns": len(list_public_design_templates()),
+        }
+    except Exception:  # noqa: BLE001
+        return {"parametric_parts": 0, "design_patterns": 0}
+
+
 @dataclass
 class SkillManifest:
     """Machine-readable skill manifest for agent integration."""
@@ -108,7 +131,7 @@ class SkillManifest:
             "Check the bottom view in previews for bed adhesion issues (elephant's foot, insufficient contact).",
             "Use design_session(verb=\"start\", idea=\"...\") as the FIRST step for any new design — captures the user's saved goal at the duty / environment / materials / safety layer and drives generation, the audit, and the post-print review.",
             "Saving something reusable has three kinds with different homes: a whole printable object is a design, a reusable mechanical edit or attachable part is a feature, a reusable visual layer (logo / photo / pattern) is a decoration — choose the kind before saving and ask the user if it's ambiguous.",
-            "Use recommend_design_material() for material selection and find_design_templates() for proven templates.",
+            "Use recommend_design_material() for material selection. When a user wants a FUNCTIONAL PART to their own dimensions, call find_design_templates(use_case) FIRST and offer a match unprompted — the parametric parts render locally for free through generate_from_template, no AI provider needed, and beat writing OpenSCAD from scratch.",
             "Run preflight_check() before every print job.",
             "Never guess on physical operations — ask the user when uncertain.",
             "For print failures: analyze_print_failure_smart() → get_recovery_plan() → retry_print_with_fix().",
@@ -170,7 +193,16 @@ class SkillManifest:
                 "list_design_goals(filter_status=\"all\") — inbox of every goal the user has committed",
                 "analyze_design_requirements(requirements) — internal functional-analysis lookup (design_session calls into this; agents rarely call directly)",
                 "get_material_design_profile(material) — material-specific design rules",
-                "find_design_templates(use_case) — proven design templates (18 templates)",
+                (
+                    "find_design_templates(use_case) — search the "
+                    "design template library ("
+                    + str(design_template_counts()['parametric_parts'])
+                    + " parametric parts that render via "
+                    "generate_from_template, plus "
+                    + str(design_template_counts()['design_patterns'])
+                    + " design patterns that are guidance only)"
+                ),
+                "generate_from_template(id, params) — render a parametric part to a printable STL, locally and free",
                 "estimate_structural_load(geometry, material) — load capacity analysis",
                 "validate_design_for_requirements(design, reqs) — verification",
                 "get_post_processing_guide(material) — finishing guidance",
@@ -197,7 +229,14 @@ class SkillManifest:
             "saved_goal_start": "design_session(verb=\"start\", idea=\"...\") — start a new saved goal; the Q&A captures duty / environment / materials / safety and drives the audit + post-print review",
             "saved_goal_list":  "list_design_goals(filter_status=\"all\") — list every saved goal; filter by status (needs_questions / ready_to_generate / matches_what_you_asked_for) to triage",
             "design_requirements": "analyze_design_requirements(requirements) — internal functional-requirements lookup (design_session calls into this; agents rarely call directly)",
-            "design_templates": "find_design_templates(use_case) — proven templates (18 in library)",
+            "design_templates": (
+                "find_design_templates(use_case) — "
+                + str(design_template_counts()['parametric_parts'])
+                + " ready-made parametric parts (render free via "
+                "generate_from_template) + "
+                + str(design_template_counts()['design_patterns'])
+                + " design patterns (guidance only)"
+            ),
             "material_selection": "recommend_design_material(use_case) — intelligent material pick",
             "material_rules": "get_material_design_profile(material) — constraints and rules",
             "load_analysis": "estimate_structural_load(geometry, material) — strength validation",

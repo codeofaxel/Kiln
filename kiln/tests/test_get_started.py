@@ -5,6 +5,7 @@ Covers:
 - safety_tools list includes safety_status
 - session_recovery section exists with correct fields
 - tip references safety_status
+- creating_models surfaces the parametric template library
 """
 
 from __future__ import annotations
@@ -102,6 +103,45 @@ class TestGetStarted:
     def test_show_a_mesh_file_workflow_names_the_stage_door(self):
         wf = get_started()["core_workflows"]["show_a_mesh_file_in_3d"]
         assert "import_external_mesh" in wf
+
+    def test_creating_models_surfaces_the_template_library(self):
+        """The 65 parametric parts were reachable only by guessing a name.
+
+        Nothing in onboarding mentioned them, so agents wrote OpenSCAD
+        from scratch for parts Kiln already ships print-verified.  The
+        step has to name both the search tool and the generator, or an
+        agent that reads it still cannot act on it.
+        """
+        section = get_started()["creating_models"]
+        step = section["check_the_template_library_first"]
+
+        assert "find_design_templates" in step
+        assert "generate_from_template" in step
+        # The count is read from the library, never written down.
+        assert "65" in step
+
+    def test_template_step_says_it_is_free_and_local(self):
+        """The reason to reach for a template over a cloud provider."""
+        step = get_started()["creating_models"][
+            "check_the_template_library_first"
+        ]
+
+        assert "FREE" in step
+        assert "no AI provider" in step
+
+    def test_template_step_warns_patterns_are_not_renderable(self):
+        """Both libraries come back from one search; only one renders."""
+        step = get_started()["creating_models"][
+            "check_the_template_library_first"
+        ]
+
+        assert "generatable:false" in step.replace(" ", "")
+
+    def test_quick_start_points_at_the_template_library(self):
+        """quick_start is the list an agent reads before anything else."""
+        steps = " ".join(get_started()["quick_start"])
+
+        assert "find_design_templates" in steps
 
     def test_safety_tools_includes_safety_status(self):
         result = get_started()
