@@ -617,6 +617,9 @@ class _DesignReasoningToolsPlugin:
             :param copies: Optional JSON dict of filename->count, e.g. ``{"part.stl": 3}``.
             :param printer_id: Optional supported printer model id.  When
                 provided, printer intelligence supplies the plate size.
+                Keep passing it downstream — a later
+                ``compose_multicolor_3mf`` without it judges the layout
+                against a 256mm default plate.
             :returns: Dict with arranged_parts, overflow_parts, plate_utilization, summary.
             """
             _srv._check_auth("design:arrange")
@@ -671,7 +674,10 @@ class _DesignReasoningToolsPlugin:
             placed at the *same* XY position (they overlap intentionally).
 
             Returns a list of positioned part specs ready to pass directly to
-            ``compose_multicolor_3mf``.
+            ``compose_multicolor_3mf`` — pass the SAME ``printer_id`` to that
+            call: the composer re-centres a group it judges off ITS plate
+            (256mm by default), so composing a layout packed for a different
+            bed without the printer undoes this placement.
 
             Arrangement strategy (free tier): simple left-to-right row layout.  For
             maximum plate density (2D bin-packing), use kiln-pro.

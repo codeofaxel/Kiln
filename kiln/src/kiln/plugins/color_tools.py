@@ -988,6 +988,7 @@ def _try_compose_3mf(
     zones: list[_ColorZone],
     output_dir: str,
     base_name: str,
+    printer_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Attempt to compose a multicolor 3MF.
 
@@ -1018,7 +1019,9 @@ def _try_compose_3mf(
 
     out_3mf = os.path.join(output_dir, f"{base_name}_multicolor.3mf")
     try:
-        result = compose_multicolor_3mf(parts, output_path=out_3mf)
+        result = compose_multicolor_3mf(
+            parts, output_path=out_3mf, printer_id=printer_id or None,
+        )
         return result.get("output_path", out_3mf), None
     except (ImportError, OSError, ValueError, TypeError) as exc:
         _logger.exception("Failed to compose multicolor 3MF")
@@ -1031,6 +1034,7 @@ def _try_compose_painted_3mf(
     palette: list[str],
     output_dir: str,
     base_name: str,
+    printer_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Compose the painted single-object 3MF for surface-following colorings.
 
@@ -1056,6 +1060,7 @@ def _try_compose_painted_3mf(
          for a in assignments],
         output_path=out_3mf,
         name=base_name,
+        printer_id=printer_id or None,
     )
     if not result.get("success"):
         return None, str(result.get("error"))
@@ -1537,6 +1542,7 @@ class _ColorToolsPlugin:
             input_path: str,
             num_colors: int = 4,
             color_palette: list[str] | None = None,
+            printer_id: str = "",
         ) -> dict:
             """Split a 3D model into horizontal color zones by Z-height.
 
@@ -1555,6 +1561,10 @@ class _ColorToolsPlugin:
             :param num_colors: Number of color zones (default 4).
             :param color_palette: List of hex colors (e.g.
                 ``["#FF0000", "#00FF00"]``).  Defaults to white/red/black/grey.
+            :param printer_id: Optional supported printer model id.  Names
+                the bed the composed 3MF is placed on, so a model sitting
+                off the plate is centred on the machine's real bed rather
+                than an assumed 256mm one.
             :returns: Dict with zone STL paths, hex colors, face counts
                 (boundary faces are cut and capped, so counts can exceed
                 the input's), per-zone ``watertight`` verdicts, AMS slot
@@ -1590,7 +1600,9 @@ class _ColorToolsPlugin:
                 triangles, assignments, num_colors, palette, output_dir,
                 base_name, cap_planes=cap_planes,
             )
-            threemf_path, compose_err = _try_compose_3mf(zones, output_dir, base_name)
+            threemf_path, compose_err = _try_compose_3mf(
+                zones, output_dir, base_name, printer_id=printer_id,
+            )
 
             warn = _band_height_warning(z_range, num_colors)
 
@@ -1617,6 +1629,7 @@ class _ColorToolsPlugin:
             num_colors: int = 4,
             method: str = "z_height",
             color_palette: list[str] | None = None,
+            printer_id: str = "",
         ) -> dict:
             """Split a 3D model into color zones by geometric region.
 
@@ -1645,6 +1658,10 @@ class _ColorToolsPlugin:
                 ``"normal"``, or ``"random"``.
             :param color_palette: List of hex colors.  Defaults to
                 white/red/black/grey.
+            :param printer_id: Optional supported printer model id.  Names
+                the bed the composed 3MF is placed on, so a model sitting
+                off the plate is centred on the machine's real bed rather
+                than an assumed 256mm one.
             :returns: Dict with zone STL paths, hex colors, face counts,
                 AMS slot mapping, weight estimates, and optional 3MF path.
             """
@@ -1697,13 +1714,14 @@ class _ColorToolsPlugin:
             if method == "z_height":
                 # Stacked bands stand as closed solids — one object per color.
                 threemf_path, compose_err = _try_compose_3mf(
-                    zones, output_dir, base_name,
+                    zones, output_dir, base_name, printer_id=printer_id,
                 )
             else:
                 # Surface-following colorings have no solid per color; the
                 # printable form is the whole mesh painted per triangle.
                 threemf_path, compose_err = _try_compose_painted_3mf(
                     triangles, assignments, palette, output_dir, base_name,
+                    printer_id=printer_id,
                 )
 
             warn: str | None = None

@@ -12411,6 +12411,9 @@ def merge_stl(
 def compose_multicolor_3mf(
     parts: list[dict],
     output_path: str = "",
+    plate_width: float = 256.0,
+    plate_depth: float = 256.0,
+    printer_id: str = "",
 ) -> dict:
     """Compose a multi-color / multi-material .3mf from multiple STL files.
 
@@ -12453,6 +12456,15 @@ def compose_multicolor_3mf(
 
         output_path: Where to write the .3mf.  Defaults to a temp file whose
             path is returned in the result.
+        plate_width: Print plate X dimension in mm (default 256 for legacy
+            callers without a printer id).
+        plate_depth: Print plate Y dimension in mm (default 256).
+        printer_id: Optional supported printer model id.  When it resolves,
+            its build volume overrides ``plate_width`` / ``plate_depth``.
+            The composer centres an off-plate group on THIS plate, so name
+            the printer whenever you know it — a group arranged for a
+            larger or smaller bed and composed against the 256 default is
+            re-centred onto a plate the machine does not have.
 
     Returns:
         Dict with ``success``, ``output_path``, ``parts``, ``total_triangles``,
@@ -12489,7 +12501,13 @@ def compose_multicolor_3mf(
             )
         )
 
-    return _compose(color_parts, output_path=output_path or None)
+    return _compose(
+        color_parts,
+        output_path=output_path or None,
+        plate_width=plate_width,
+        plate_depth=plate_depth,
+        printer_id=printer_id or None,
+    )
 
 
 # auto_arrange_parts_on_plate — moved to plugins/design_reasoning_tools.py
@@ -15744,7 +15762,14 @@ def multi_material_print(
                 # printer_id not in the supported-model catalog — arrange on
                 # the default plate size instead of refusing the print.
                 positioned = auto_arrange_parts(part_specs)
-            compose_result = compose_multicolor_3mf(positioned, output_path=output_3mf)
+            # Compose onto the plate the arrangement was packed for: the
+            # composer re-centres a group it judges off ITS plate, so a
+            # layout packed for a wider bed and composed at the 256
+            # default would be shifted — undoing the arrangement.  An
+            # unknown id falls back to the same default on both sides.
+            compose_result = compose_multicolor_3mf(
+                positioned, output_path=output_3mf, printer_id=printer_id or None,
+            )
         except Exception as exc:
             return _error_dict(
                 f"Failed to build multi-material 3MF: {exc}",
@@ -16202,7 +16227,11 @@ def multi_color_copies(
                 # printer_id not in the supported-model catalog — arrange on
                 # the default plate size instead of refusing the print.
                 positioned = auto_arrange_parts(part_specs, gap_mm=spacing_mm)
-            compose_result = compose_multicolor_3mf(positioned, output_path=output_3mf)
+            # Same pairing as multi_material_print: compose onto the plate
+            # the copies were arranged for, never the bare 256 default.
+            compose_result = compose_multicolor_3mf(
+                positioned, output_path=output_3mf, printer_id=printer_id or None,
+            )
         except Exception as exc:
             return _error_dict(
                 f"Failed to build multi-color 3MF: {exc}",
