@@ -17,10 +17,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Printability grades stopped failing models that print fine.** Grades now
   follow what your printer actually does.
 
-- **Multicolor and painted models now land on the print bed.** A model that
-  wasn't already centred produced a 3MF PrusaSlicer quietly refused to slice.
-  Kiln now places it on the plate automatically, and when something genuinely
-  doesn't fit, says so plainly instead of failing silently.
+- **Multicolor and painted models now land on the print bed — yours.** A model
+  that wasn't already centred produced a 3MF PrusaSlicer quietly refused to
+  slice. Kiln now places it on your printer's actual plate, and when something
+  genuinely doesn't fit, says so plainly instead of failing silently.
 
 ## [1.4.1.1] - 2026-08-19
 
