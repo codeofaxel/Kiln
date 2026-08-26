@@ -1774,7 +1774,11 @@ class _ColorToolsPlugin:
 
             Writes a painted 3MF (one watertight object, per-triangle
             colors) via the same composer ``paint_mesh_regions`` uses,
-            so the output slices identically.
+            so the output slices identically.  A successful paint is
+            also written back into the carve's face record (color,
+            target, output file) so the design's provenance says
+            "carved, then painted" — ``paint_recorded`` in the result
+            reports whether that write-back landed.
 
             :param model_path: The decorated mesh (STL/OBJ/3MF) whose
                 ``<mesh>.decoration_faces.json`` sidecar to consume.

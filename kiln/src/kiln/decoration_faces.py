@@ -40,6 +40,11 @@ This module records the answer instead of guessing it later:
     refusal — painting the wrong faces silently is the exact failure this
     module exists to end.
 
+``record_paint_event``
+    Painting's write-back: after the recorded faces are painted, the
+    sidecar gains a ``painted`` block (color, target, output 3MF), so the
+    record tells the whole story — carved, then painted what color.
+
 The single caller is :func:`kiln.emboss_generator.compile_embossed_model`,
 the one chokepoint every decoration door in both repos already funnels
 through (``decorate_surface``, ``apply_decoration``, preset apply,
