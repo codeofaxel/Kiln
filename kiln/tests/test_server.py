@@ -1149,6 +1149,42 @@ class TestGetAdapter:
 
 
 # ---------------------------------------------------------------------------
+# _get_registry() singleton convergence
+# ---------------------------------------------------------------------------
+
+class TestGetRegistryAdoption:
+    """_get_registry() adopts the canonical singleton, never clobbers it."""
+
+    def test_adopts_prepopulated_singleton(self, monkeypatch):
+        """Printers loaded into ``get_printer_registry()`` before the server's
+        first registry touch must survive it — the earlier build-and-replace
+        shape wiped them with a fresh empty registry."""
+        import kiln.registry as regmod
+        import kiln.server as mod
+
+        prepopulated = PrinterRegistry()
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        prepopulated.register("embedded", adapter)
+        monkeypatch.setattr(regmod, "_registry_singleton", prepopulated)
+        monkeypatch.setattr(mod, "_registry", None)
+
+        registry = mod._get_registry()
+        assert registry is prepopulated
+        assert registry.get("embedded") is adapter
+
+    def test_server_first_still_converges(self, monkeypatch):
+        """Server touching the registry first: module accessor sees the same
+        instance, as before."""
+        import kiln.registry as regmod
+        import kiln.server as mod
+
+        monkeypatch.setattr(regmod, "_registry_singleton", None)
+        monkeypatch.setattr(mod, "_registry", None)
+
+        assert mod._get_registry() is regmod.get_printer_registry()
+
+
+# ---------------------------------------------------------------------------
 # _validate_local_file() tests
 # ---------------------------------------------------------------------------
 

@@ -1506,7 +1506,14 @@ def _is_resume_mode_3mf(file_name: str) -> bool:
 
 
 def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
-    """Resolve the printer identifier used for emergency latch checks."""
+    """Resolve the printer identifier an unnamed call is effectively about.
+
+    Registry ``"default"`` wins, else the first registered name, else the
+    literal ``"default"``.  Used for emergency latch checks and by
+    :func:`_get_adapter`'s registry fallback, so the adapter an unnamed
+    call reaches and the name its bookkeeping is filed under stay the
+    same answer.
+    """
     if printer_name:
         return printer_name
     try:
@@ -2800,20 +2807,22 @@ def _get_registry() -> PrinterRegistry:
     callers outside ``kiln.server`` (print_health_monitor, heartbeat,
     auto_recover_engine, etc.) see the same instance the server has
     populated with adapters.
+
+    Adopts the canonical singleton rather than replacing it: an
+    embedding host may have populated ``get_printer_registry()`` with
+    its printers before any server tool runs, and the earlier
+    build-then-``register_default_singleton`` shape silently clobbered
+    those entries with a fresh empty registry.
     """
     global _registry  # noqa: PLW0603
     if _registry is None:
-        _registry = PrinterRegistry()
-        # Publish to the canonical singleton so non-server callers
-        # (kiln.registry.get_printer_registry) see the populated
-        # registry, not an empty one.
         try:
-            from kiln.registry import register_default_singleton
+            from kiln.registry import get_printer_registry
 
-            register_default_singleton(_registry)
+            _registry = get_printer_registry()
         except ImportError:
             # Defensive — registry module changes shouldn't break server boot.
-            pass
+            _registry = PrinterRegistry()
     return _registry
 
 
