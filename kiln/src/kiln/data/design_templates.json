@@ -2403,13 +2403,7 @@
         "description": "Shape: rectangle, square, circle, or oval"
       }
     },
-    "scad_template": "// Fridge Magnet — rectangle, square, circle, or oval\nw = ${width};\nh = ${height};\nt = ${thickness};\nmd = ${magnet_diameter};\nmz = ${magnet_depth};\nshape = \"${shape}\";\n\n$fn = 80;\n\nmodule magnet_body() {\n    if (shape == \"circle\")\n        cylinder(d=w, h=t);\n    else if (shape == \"oval\")\n        scale([1, h/w, 1]) cylinder(d=w, h=t);\n    else if (shape == \"square\") {\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,w-r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([r,w-r,0]) cylinder(r=r, h=t, $fn=20);\n        }\n    } else {\n        // rectangle (default)\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,h-r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([r,h-r,0]) cylinder(r=r, h=t, $fn=20);\n        }\n    }\n}\n\ndifference() {\n    magnet_body();\n    // Magnet recess on back — centered\n    cx = (shape == \"circle\" || shape == \"oval\") ? 0 : (shape == \"square\" ? w/2 : w/2);\n    cy = (shape == \"circle\" || shape == \"oval\") ? 0 : (shape == \"square\" ? w/2 : h/2);\n    translate([cx, cy, -0.1])\n        cylinder(d=md+0.3, h=mz+0.1, $fn=40);\n}",
-    "preview_angles": [
-      "top",
-      "bottom",
-      "isometric"
-    ],
-    "preview_notes": "Flat object — front/back faces are top and bottom. Show top (decoration face) and bottom (magnet recess) at priority."
+    "scad_template": "// Fridge Magnet — rectangle, square, circle, or oval\nw = ${width};\nh = ${height};\nt = ${thickness};\nmd = ${magnet_diameter};\nmz = ${magnet_depth};\nshape = \"${shape}\";\n\n$fn = 80;\n\nmodule magnet_body() {\n    if (shape == \"circle\")\n        cylinder(d=w, h=t);\n    else if (shape == \"oval\")\n        scale([1, h/w, 1]) cylinder(d=w, h=t);\n    else if (shape == \"square\") {\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,w-r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([r,w-r,0]) cylinder(r=r, h=t, $fn=20);\n        }\n    } else {\n        // rectangle (default)\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,h-r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([r,h-r,0]) cylinder(r=r, h=t, $fn=20);\n        }\n    }\n}\n\ndifference() {\n    magnet_body();\n    // Magnet recess on back — centered\n    cx = (shape == \"circle\" || shape == \"oval\") ? 0 : (shape == \"square\" ? w/2 : w/2);\n    cy = (shape == \"circle\" || shape == \"oval\") ? 0 : (shape == \"square\" ? w/2 : h/2);\n    translate([cx, cy, -0.1])\n        cylinder(d=md+0.3, h=mz+0.1, $fn=40);\n}"
   },
   "bookmark": {
     "display_name": "Bookmark",
@@ -2445,13 +2439,7 @@
         "description": "Page clip depth (0 = no clip)"
       }
     },
-    "scad_template": "// Parametric Bookmark\nw = ${width};\nl = ${length};\nt = ${thickness};\ncd = ${clip_depth};\n\nmodule bookmark() {\n    // Main body with rounded top\n    hull() {\n        cube([w, l - w/2, t]);\n        translate([w/2, l - w/2, 0])\n            cylinder(d=w, h=t, $fn=40);\n    }\n    // Page clip (hook at bottom)\n    if (cd > 0) {\n        translate([w*0.2, -cd, 0])\n            cube([w*0.6, cd, t]);\n        translate([w*0.2, -cd, 0])\n            cube([w*0.6, t*2, t + 3]);\n    }\n}\n\nbookmark();",
-    "preview_angles": [
-      "top",
-      "bottom",
-      "isometric"
-    ],
-    "preview_notes": "Flat object — both large faces are decoratable. Show top and bottom faces, not thin edges."
+    "scad_template": "// Parametric Bookmark\nw = ${width};\nl = ${length};\nt = ${thickness};\ncd = ${clip_depth};\n\nmodule bookmark() {\n    // Main body with rounded top\n    hull() {\n        cube([w, l - w/2, t]);\n        translate([w/2, l - w/2, 0])\n            cylinder(d=w, h=t, $fn=40);\n    }\n    // Page clip (hook at bottom)\n    if (cd > 0) {\n        translate([w*0.2, -cd, 0])\n            cube([w*0.6, cd, t]);\n        translate([w*0.2, -cd, 0])\n            cube([w*0.6, t*2, t + 3]);\n    }\n}\n\nbookmark();"
   },
   "pen_cup": {
     "display_name": "Pen Cup",
@@ -2522,13 +2510,6 @@
         "description": "QR pocket recess depth (matches coaster recipe)"
       }
     },
-    "scad_template": "// Pen Cup — cylinder or rectangle with QR pocket on bottom\nshape = \"${shape}\";\nd = ${diameter};\ndp = ${depth};\nh = ${height};\nwt = ${wall_thickness};\nbt = ${bottom_thickness};\ncr = ${corner_radius};\nqr_size = ${qr_pocket_size};\nqr_depth = ${qr_pocket_depth};\n\n$fn = 180;\n\nmodule outer_shell() {\n    if (shape == \"rectangle\") {\n        hull() {\n            translate([cr,cr,0]) cylinder(r=cr, h=h);\n            translate([d-cr,cr,0]) cylinder(r=cr, h=h);\n            translate([d-cr,dp-cr,0]) cylinder(r=cr, h=h);\n            translate([cr,dp-cr,0]) cylinder(r=cr, h=h);\n        }\n    } else {\n        cylinder(d=d, h=h);\n    }\n}\n\nmodule inner_cavity() {\n    if (shape == \"rectangle\") {\n        translate([wt, wt, bt])\n            hull() {\n                r = max(1, cr - wt);\n                translate([r,r,0]) cylinder(r=r, h=h);\n                translate([d-2*wt-r,r,0]) cylinder(r=r, h=h);\n                translate([d-2*wt-r,dp-2*wt-r,0]) cylinder(r=r, h=h);\n                translate([r,dp-2*wt-r,0]) cylinder(r=r, h=h);\n            }\n    } else {\n        translate([0, 0, bt])\n            cylinder(d=d - 2*wt, h=h);\n    }\n}\n\nmodule qr_pocket() {\n    if (qr_size > 0) {\n        cx = (shape == \"rectangle\") ? d/2 : 0;\n        cy = (shape == \"rectangle\") ? dp/2 : 0;\n        translate([cx - qr_size/2, cy - qr_size/2, -0.01])\n            cube([qr_size, qr_size, qr_depth + 0.01]);\n    }\n}\n\ndifference() {\n    outer_shell();\n    inner_cavity();\n    qr_pocket();\n}",
-    "preview_angles": [
-      "isometric",
-      "front",
-      "bottom",
-      "top"
-    ],
-    "preview_notes": "3D object — isometric for shape, front for decoration wall, bottom for QR pocket, top for opening."
+    "scad_template": "// Pen Cup — cylinder or rectangle with QR pocket on bottom\nshape = \"${shape}\";\nd = ${diameter};\ndp = ${depth};\nh = ${height};\nwt = ${wall_thickness};\nbt = ${bottom_thickness};\ncr = ${corner_radius};\nqr_size = ${qr_pocket_size};\nqr_depth = ${qr_pocket_depth};\n\n$fn = 180;\n\nmodule outer_shell() {\n    if (shape == \"rectangle\") {\n        hull() {\n            translate([cr,cr,0]) cylinder(r=cr, h=h);\n            translate([d-cr,cr,0]) cylinder(r=cr, h=h);\n            translate([d-cr,dp-cr,0]) cylinder(r=cr, h=h);\n            translate([cr,dp-cr,0]) cylinder(r=cr, h=h);\n        }\n    } else {\n        cylinder(d=d, h=h);\n    }\n}\n\nmodule inner_cavity() {\n    if (shape == \"rectangle\") {\n        translate([wt, wt, bt])\n            hull() {\n                r = max(1, cr - wt);\n                translate([r,r,0]) cylinder(r=r, h=h);\n                translate([d-2*wt-r,r,0]) cylinder(r=r, h=h);\n                translate([d-2*wt-r,dp-2*wt-r,0]) cylinder(r=r, h=h);\n                translate([r,dp-2*wt-r,0]) cylinder(r=r, h=h);\n            }\n    } else {\n        translate([0, 0, bt])\n            cylinder(d=d - 2*wt, h=h);\n    }\n}\n\nmodule qr_pocket() {\n    if (qr_size > 0) {\n        cx = (shape == \"rectangle\") ? d/2 : 0;\n        cy = (shape == \"rectangle\") ? dp/2 : 0;\n        translate([cx - qr_size/2, cy - qr_size/2, -0.01])\n            cube([qr_size, qr_size, qr_depth + 0.01]);\n    }\n}\n\ndifference() {\n    outer_shell();\n    inner_cavity();\n    qr_pocket();\n}"
   }
 }
