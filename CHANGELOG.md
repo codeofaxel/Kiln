@@ -22,6 +22,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   slice. Kiln now places it on your printer's actual plate, and when something
   genuinely doesn't fit, says so plainly instead of failing silently.
 
+- **A failed decoration no longer costs you one.** Your free monthly
+  decorations are only counted when one actually lands.
+
 ## [1.4.1.1] - 2026-08-19
 
 ### Added
