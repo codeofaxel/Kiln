@@ -27,6 +27,15 @@ import shutil
 
 _CHUNK = 1 << 20  # 1 MiB streaming hash/copy
 
+#: Provenance companions that must FOLLOW an asset into its durable home.
+#: Each is a sidecar suffix appended to the asset's own filename.  The copy
+#: is a dumb byte copy on purpose: a companion keyed to the asset's content
+#: hash (decoration faces are keyed to the mesh's sha256) stays valid at the
+#: new path because ``persist_asset`` copies content unchanged, and one that
+#: was already stale keeps failing its own read-time hash gate at the new
+#: home — validity is the reader's job, transport is ours.
+_COMPANION_SUFFIXES = (".decoration_faces.json",)
+
 
 def kiln_root() -> str:
     """Absolute path to the durable Kiln home (``~/.kiln``)."""
@@ -80,6 +89,11 @@ def persist_asset(
     ``dest_dir`` should itself be under ``~/.kiln`` (e.g. the design's own
     directory, or ``~/.kiln/decoration_assets``); callers pass the durable
     home for their artifact kind.
+
+    Provenance companions (see :data:`_COMPANION_SUFFIXES`) sitting beside
+    the source follow the asset to its durable home — copied even when the
+    asset itself deduplicated, so a sidecar updated after the first save
+    (a carve painted later) refreshes at the destination too.
     """
     if not src_path:
         return src_path
@@ -96,4 +110,27 @@ def persist_asset(
         tmp = f"{dest}.{os.getpid()}.part"
         shutil.copy2(abs_src, tmp)
         os.replace(tmp, dest)  # atomic publish
+    _persist_companions(abs_src, dest)
     return dest
+
+
+def _persist_companions(abs_src: str, dest: str) -> None:
+    """Carry an asset's provenance sidecars along with it.
+
+    Runs even when the asset itself deduplicated (``dest`` already
+    existed): the same mesh content can gain provenance later — a carve
+    painted after the first save — and the latest sidecar must win at the
+    durable home too.  Best-effort: losing a sidecar copy must never fail
+    the asset persist that succeeded.
+    """
+    for suffix in _COMPANION_SUFFIXES:
+        src_side = abs_src + suffix
+        if not os.path.isfile(src_side):
+            continue
+        try:
+            dest_side = dest + suffix
+            tmp = f"{dest_side}.{os.getpid()}.part"
+            shutil.copy2(src_side, tmp)
+            os.replace(tmp, dest_side)
+        except OSError:
+            pass
