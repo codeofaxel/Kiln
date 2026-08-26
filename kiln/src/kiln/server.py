@@ -17376,6 +17376,8 @@ def decorate_surface(
             face_info = find_largest_flat_face(model_path)
         else:
             face_info = find_named_face(model_path, face_lower)
+            if face_info.get("curvature_warning"):
+                warnings.append(face_info["curvature_warning"])
 
         face_width_mm = face_info.get("width_mm", 0)
 
@@ -17698,6 +17700,39 @@ def decorate_surface(
         elif not boolean_ok:
             warnings.append(
                 "Output STL is similar in size to input — the boolean may not have produced visible geometry changes."
+            )
+
+        # --- Step 6c: refuse to ship an unchanged mesh as success ---
+        # A floating cutter (wrong face plane, off-body offset) makes the
+        # boolean remove nothing: OpenSCAD compiles fine and the output
+        # is geometrically the input.  That is a failed decoration, not a
+        # decorated model — reporting it as success hands the caller an
+        # untouched mesh with a buried warning (measured 2026-08-25: a
+        # pen-cup front deboss shipped the input mesh, 1468 triangles and
+        # volume unchanged, success=True).
+        from kiln.emboss_generator import meshes_geometrically_identical
+
+        final_stl = compile_result.get("stl_path")
+        if final_stl and meshes_geometrically_identical(abs_model, final_stl):
+            _refund_decoration_quota(quota_consumed)
+            return _error_dict(
+                (
+                    f"{mode} produced no geometry change — the output mesh "
+                    "is identical to the input (same triangle count and "
+                    "volume), so the cutter never intersected the body and "
+                    "nothing was carved on the "
+                    f"{face_info.get('face_name', 'target')} face. Try a "
+                    "different face, remove large placement offsets, or "
+                    "use a flat-faced product. This attempt was not "
+                    "counted against your decoration quota."
+                ),
+                code="DECORATION_NOOP",
+                extra={
+                    "is_noop": True,
+                    "scad_path": scad_result["scad_path"],
+                    "output_stl": final_stl,
+                    **({"warnings": warnings} if warnings else {}),
+                },
             )
 
         # --- Step 7: Build result ---

@@ -257,58 +257,63 @@ def _face_centroid(group: dict[str, Any]) -> tuple[float, float, float]:
 
 
 # ---------------------------------------------------------------------------
-# Z-level sub-grouping for bowl/tray face disambiguation
+# Parallel-plane sub-grouping (bowl floor vs rim, outer vs interior wall)
 # ---------------------------------------------------------------------------
 
-# Minimum Z gap (mm) to consider two surfaces as distinct.
+# Minimum plane-offset gap (mm) to consider two surfaces as distinct.
 # 1.5mm is safe: tessellation wobble is ±0.1mm, FDM layer height is 0.2mm,
 # so anything >1mm apart is definitely a separate surface.
 _Z_GAP_THRESHOLD_MM = 1.5
 
 
-def _subgroup_by_z_level(group: dict[str, Any]) -> list[dict[str, Any]]:
-    """Split a face group into sub-groups by Z-level clustering.
+def _subgroup_by_parallel_planes(group: dict[str, Any]) -> list[dict[str, Any]]:
+    """Split a face group into sub-groups of distinct parallel planes.
 
-    Bowl-shaped models (ashtrays, trays) have interior floors AND exterior
-    rims that both face upward (normal=[0,0,1]).  Without Z-splitting,
-    they merge into one face with an averaged centroid that lands inside
-    the wall — wrong for decoration placement.
+    Same-normal triangles are NOT one surface.  Bowl-shaped models
+    (ashtrays, trays) have interior floors AND exterior rims that both
+    face upward; a hollow pen cup's outer FRONT wall and the interior
+    surface of its BACK wall both face −Y.  Merged, they average into
+    one face whose centroid floats inside the body — a deboss cutter
+    placed there touches no material and ``difference()`` silently
+    no-ops (measured 2026-08-25: "front" on a 72mm pen cup put the
+    cutter at the mesh's Y midline, not the y=0 wall).
 
-    Uses gap-based clustering: sort triangle centroids by Z, split wherever
-    two consecutive centroids are >1.5mm apart.  Continuous curves (frisbee
-    dome) have no gap and stay as one group.
+    Clusters triangles by their offset along the group's OWN normal
+    (``dot(centroid, normal)``): sort by offset, split wherever two
+    consecutive offsets are >1.5mm apart.  Along its own normal a planar
+    face — horizontal, vertical, or tilted — has constant offset, so
+    this never shreds the tilted-nameplate canvas the way the old
+    world-Z clustering would have (the 2026-05-03 "text on the bottom"
+    bug); continuous curves (frisbee dome) have no gap and stay merged.
 
-    Only applies to faces whose normal is mostly vertical (|nz| > 0.85).
-    A non-horizontal face (e.g. a wedge's angled hypotenuse, a tilted
-    nameplate canvas) by definition spans many Z levels — Z-splitting
-    would shred it into single-triangle sub-groups and pick the bed
-    instead. The 2026-05-03 nameplate "text on the bottom" bug came
-    from this: the angled face was Z-split into 2 triangles, the bottom
-    face stayed whole, and the engine picked the bottom as the "largest
-    flat face."
+    Every sub-group is annotated with ``_plane_offset`` (mean offset
+    along the normal — outermost surface has the largest value) and
+    ``_z_level`` (mean world-Z, kept for top/bottom floor-vs-rim picks).
     """
     tris = group["triangles"]
     if not tris:
         return [group]
 
-    # Only Z-split horizontal-ish faces. Tilted/vertical faces span Z by
-    # design and must stay merged.
-    if abs(group["normal"][2]) < 0.85:
-        return [group]
+    normal = group["normal"]
 
-    # Compute per-triangle Z centroid and area
-    tri_data: list[tuple[float, float, dict[str, Any]]] = []
+    # Per-triangle: offset along the group normal, world-Z, area
+    tri_data: list[tuple[float, float, float, dict[str, Any]]] = []
     for tri in tris:
         v1, v2, v3 = tri["vertices"]
         area = _triangle_area(v1, v2, v3)
-        z_mid = (v1[2] + v2[2] + v3[2]) / 3.0
-        tri_data.append((z_mid, area, tri))
+        mid = (
+            (v1[0] + v2[0] + v3[0]) / 3.0,
+            (v1[1] + v2[1] + v3[1]) / 3.0,
+            (v1[2] + v2[2] + v3[2]) / 3.0,
+        )
+        offset = _vec_dot(mid, normal)
+        tri_data.append((offset, mid[2], area, tri))
 
     tri_data.sort(key=lambda t: t[0])
 
-    # Gap-based clustering
-    clusters: list[list[tuple[float, float, dict[str, Any]]]] = []
-    current: list[tuple[float, float, dict[str, Any]]] = [tri_data[0]]
+    # Gap-based clustering along the plane offset
+    clusters: list[list[tuple[float, float, float, dict[str, Any]]]] = []
+    current: list[tuple[float, float, float, dict[str, Any]]] = [tri_data[0]]
 
     for i in range(1, len(tri_data)):
         if tri_data[i][0] - tri_data[i - 1][0] > _Z_GAP_THRESHOLD_MM:
@@ -317,32 +322,86 @@ def _subgroup_by_z_level(group: dict[str, Any]) -> list[dict[str, Any]]:
         current.append(tri_data[i])
     clusters.append(current)
 
-    # Only one cluster — no split needed
-    if len(clusters) == 1:
-        return [group]
-
     # Build sub-group dicts
     result: list[dict[str, Any]] = []
-    total_area = sum(t[1] for t in tri_data)
+    total_area = sum(t[2] for t in tri_data)
 
     for cluster in clusters:
-        cluster_tris = [t[2] for t in cluster]
-        cluster_area = sum(t[1] for t in cluster)
+        cluster_tris = [t[3] for t in cluster]
+        cluster_area = sum(t[2] for t in cluster)
 
         # Discard tiny artifact clusters (<1% of total face area)
         if cluster_area < total_area * 0.01:
             continue
 
-        z_values = [t[0] for t in cluster]
         result.append({
             "normal": group["normal"],
             "_weighted_normal": group.get("_weighted_normal", group["normal"]),
             "triangles": cluster_tris,
             "area_mm2": cluster_area,
-            "_z_level": sum(z_values) / len(z_values),
+            "_plane_offset": sum(t[0] for t in cluster) / len(cluster),
+            "_z_level": sum(t[1] for t in cluster) / len(cluster),
         })
 
     return result if result else [group]
+
+
+# ---------------------------------------------------------------------------
+# Choosing WHICH parallel plane is the decoratable surface
+# ---------------------------------------------------------------------------
+
+# A plane must hold at least this share of the largest same-facing plane's
+# area to be considered the decoratable surface.  It exists to reject thin
+# exterior slivers — a 1mm decorative rim ring that protrudes past the wall
+# is the outermost plane but cannot hold artwork — while still letting a
+# genuinely smaller outer wall win over a larger interior one.
+_EXTERIOR_MIN_AREA_SHARE = 0.25
+
+
+def _select_decoratable_plane(
+    planes: list[dict[str, Any]], face_name: str
+) -> dict[str, Any]:
+    """Pick which of several parallel same-facing planes to decorate.
+
+    Every door that resolves a face funnels through here, so the rule
+    cannot drift between ``find_named_face`` and ``find_largest_flat_face``
+    (they disagreed until 2026-08-25, and the auto door kept the bug the
+    named door had just lost).
+
+    * ``top`` — lowest plane: a bowl's or tray's interior FLOOR, which is
+      the surface a user means by "the top of this", not the rim.
+    * ``bottom`` — highest plane, the mirror of that.
+    * every side face — the OUTERMOST plane along the face's own normal:
+      the exterior wall.  A hollow body's interior back-wall surface faces
+      the same way as its outer front wall, and picking by area alone puts
+      the cutter on the interior one, floating inside the body where
+      ``difference()`` removes nothing.  Area cannot be the primary key
+      here: on a product with a window or cutout in the front wall the
+      unbroken interior plane is genuinely the LARGER of the two.
+    """
+    if not planes:
+        raise ValueError("no candidate planes")
+    if len(planes) == 1:
+        return planes[0]
+
+    if face_name in ("top", "bottom"):
+        # Among planes of similar area (within 15%), prefer the interior
+        # floor for top-facing surfaces and its mirror for bottom-facing.
+        max_area = max(p["area_mm2"] for p in planes)
+        candidates = [p for p in planes if p["area_mm2"] >= max_area * 0.85]
+        if face_name == "top":
+            return min(candidates, key=lambda p: p.get("_z_level", 0.0))
+        return max(candidates, key=lambda p: p.get("_z_level", 0.0))
+
+    max_area = max(p["area_mm2"] for p in planes)
+    candidates = [
+        p
+        for p in planes
+        if p["area_mm2"] >= max_area * _EXTERIOR_MIN_AREA_SHARE
+    ] or planes
+    return max(
+        candidates, key=lambda p: p.get("_plane_offset", float("-inf"))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -395,12 +454,12 @@ def find_largest_flat_face(stl_path: str, tolerance_deg: float = 10.0) -> dict[s
     if not groups:
         raise ValueError(f"No valid face groups found in {stl_path}")
 
-    # Sub-group by Z-level to separate bowl floors from rims.
-    # Without this, an ashtray's floor (z=3) and rim (z=20) merge into
-    # one "top" face with centroid at z~5 (inside the wall = wrong).
+    # Sub-group into distinct parallel planes: separates bowl floors from
+    # rims AND a hollow body's outer wall from the same-facing interior
+    # wall — merged, either pair averages to a centroid inside the body.
     expanded: list[dict[str, Any]] = []
     for g in groups:
-        expanded.extend(_subgroup_by_z_level(g))
+        expanded.extend(_subgroup_by_parallel_planes(g))
 
     # Among faces of similar area (within 5%), prefer top > front > sides
     # because users almost always want to decorate the top/visible face.
@@ -411,7 +470,19 @@ def find_largest_flat_face(stl_path: str, tolerance_deg: float = 10.0) -> dict[s
         candidates.sort(key=lambda g: _FACE_PREFERENCE.get(
             _name_from_normal(g["normal"]), 6
         ))
-    return _build_face_dict(candidates[0])
+
+    # Area picked the DIRECTION; the shared selector picks WHICH parallel
+    # plane facing that direction is the decoratable one.  Skipping this
+    # is how the auto door kept the interior-wall bug after the named door
+    # was fixed: on a hollow body the biggest same-facing plane can be an
+    # interior surface, and decorating it carves nothing.
+    winning_name = _name_from_normal(candidates[0]["normal"])
+    same_facing = [
+        g for g in expanded if _name_from_normal(g["normal"]) == winning_name
+    ]
+    return _build_face_dict(
+        _select_decoratable_plane(same_facing, winning_name)
+    )
 
 
 def find_named_face(stl_path: str, face_name: str) -> dict[str, Any]:
@@ -453,23 +524,37 @@ def find_named_face(stl_path: str, face_name: str) -> dict[str, Any]:
             f"No {face_name!r} face found. Available faces: {', '.join(available)}"
         )
 
-    # Sub-group by Z-level to separate bowl floors from rims
+    # Sub-group into distinct parallel planes (bowl floor vs rim, outer
+    # wall vs same-facing interior wall)
     expanded: list[dict[str, Any]] = []
     for g in matching:
-        expanded.extend(_subgroup_by_z_level(g))
+        expanded.extend(_subgroup_by_parallel_planes(g))
 
-    # Among sub-groups of similar area (within 15%), prefer lowest Z
-    # for top-facing surfaces — that's the interior floor (most useful
-    # decoration surface).  For bottom-facing, prefer highest Z.
-    max_area = max(sg["area_mm2"] for sg in expanded)
-    candidates = [sg for sg in expanded if sg["area_mm2"] >= max_area * 0.85]
-    if face_name_lower == "top":
-        best = min(candidates, key=lambda sg: sg.get("_z_level", 0))
-    elif face_name_lower == "bottom":
-        best = max(candidates, key=lambda sg: sg.get("_z_level", 0))
-    else:
-        best = max(candidates, key=lambda sg: sg["area_mm2"])
-    return _build_face_dict(best)
+    best = _select_decoratable_plane(expanded, face_name_lower)
+    face_dict = _build_face_dict(best)
+
+    # Curved-body hint: on a curved shell (cylindrical pen cup) the
+    # triangles facing "front" are one narrow facet band, so the
+    # resolved face is far narrower than the body and art gets sized
+    # to the facet (measured 2026-08-25: a 72mm cylinder's "front"
+    # resolved to a 13mm facet and clamped a logo to 5mm).  Flag it so
+    # callers can warn instead of silently shrinking the decoration.
+    if face_name_lower not in ("top", "bottom"):
+        x_axis, _ = _build_face_axes(face_dict["normal"])
+        u_vals = [
+            _vec_dot(v, x_axis) for tri in tris for v in tri["vertices"]
+        ]
+        body_extent = max(u_vals) - min(u_vals)
+        if body_extent > 0 and face_dict["width_mm"] < 0.6 * body_extent:
+            face_dict["curvature_warning"] = (
+                f"face {face_name_lower!r} resolved to a "
+                f"{face_dict['width_mm']:.1f}mm-wide facet of a body "
+                f"{body_extent:.1f}mm across — this surface appears "
+                "curved, so the decoration will be sized to the facet, "
+                "not the body. Use a flat-faced product or the top face "
+                "for full-size art."
+            )
+    return face_dict
 
 
 def compute_face_transform(face: dict[str, Any]) -> dict[str, Any]:

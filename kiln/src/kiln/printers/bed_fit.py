@@ -205,8 +205,15 @@ def compute_mesh_bbox(mesh_path: str) -> dict[str, float] | None:
 
     Returns a dict with x_min/x_max/y_min/y_max/z_min/z_max in mm, or
     ``None`` if the file cannot be parsed.  Uses the existing STL parser
-    for .stl files (consistent with other kiln tools) and falls back to
+    for .stl files (consistent with other kiln tools), the
+    transform-aware 3MF parser for .3mf files, and falls back to
     trimesh for other formats.
+
+    For a .3mf the bbox is the geometry AS THE SLICER WILL PLACE IT
+    (build-item transforms applied), because that is the question every
+    caller of this function is asking — slicers honour a 3MF's placement
+    literally, so raw vertex bounds would pass a file that slices to
+    nothing.
     """
     path = Path(mesh_path)
     if not path.is_file():
@@ -220,7 +227,13 @@ def compute_mesh_bbox(mesh_path: str) -> dict[str, float] | None:
             if errors or not vertices:
                 return None
             return _bounding_box(vertices)
-        # Fallback for .obj / .3mf / .glb via trimesh
+        if ext == ".3mf":
+            bbox = compute_3mf_geometry_bbox(str(path))
+            if bbox is not None:
+                return bbox
+            # No parseable <mesh> geometry (e.g. a gcode-carrying 3MF)
+            # — fall through to trimesh as a last resort.
+        # Fallback for .obj / .glb (and unparseable .3mf) via trimesh
         import trimesh  # type: ignore[import-not-found]
         mesh = trimesh.load(str(path), force="mesh")
         if mesh is None or not hasattr(mesh, "bounds"):
@@ -378,12 +391,12 @@ def compute_3mf_bbox(threemf_path: str) -> dict[str, float] | None:
 def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
     """Bbox of a model 3MF's geometry AS THE SLICER WILL PLACE IT.
 
-    Unlike :func:`compute_mesh_bbox` (raw vertices) this applies each
-    ``<build><item>`` transform — the coordinates that decide whether the
-    object is on the bed.  Slicers honour a 3MF's transforms literally
-    (no STL-style auto-centre), so a file whose vertices span negative
-    coordinates under an identity transform is off a corner-origin bed
-    even though its raw mesh "fits".
+    This applies each ``<build><item>`` transform — the coordinates that
+    decide whether the object is on the bed.  (:func:`compute_mesh_bbox`
+    routes .3mf here, so both report placed geometry.)  Slicers honour a
+    3MF's transforms literally (no STL-style auto-centre), so a file
+    whose vertices span negative coordinates under an identity transform
+    is off a corner-origin bed even though its raw mesh "fits".
 
     Handles ``<components>`` recursion with composed transforms.  Returns
     ``None`` when the archive has no parseable geometry — callers treat
