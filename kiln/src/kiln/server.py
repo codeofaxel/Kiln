@@ -14448,6 +14448,17 @@ def _start() -> None:
     except Exception:
         logger.debug("inline stage not installed", exc_info=True)
 
+    # The inline print monitor — the stage's sibling door (same MCP Apps
+    # mechanism, same cached-document delivery, monitor tools instead of
+    # mesh tools).  Same placement, same reason: it stamps registered
+    # tools.  The stage_cache.warm() above already pulls its document.
+    try:
+        from kiln import local_monitor
+
+        local_monitor.install(mcp)
+    except Exception:
+        logger.debug("inline monitor not installed", exc_info=True)
+
     # The update offer, on the FIRST tool result of the session.  The
     # server instructions already carry it, but that is one sentence in
     # a long preamble read once on connect — and a session that never

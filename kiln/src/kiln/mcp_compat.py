@@ -228,20 +228,82 @@ def _call_tool_name(source: Any) -> str | None:
     return None
 
 
+def _call_tool_args(source: Any) -> dict | None:
+    """Best-effort call arguments from a ``tools/call`` handler's input.
+
+    Same shapes as :func:`_call_tool_name`, same posture: anything
+    unreadable is ``None``, and a mutator treats that as "the call named
+    no arguments" — never as a reason to skip its work.
+    """
+    for obj in (
+        source,
+        getattr(source, "params", None),
+        getattr(getattr(source, "root", None), "params", None),
+    ):
+        args = getattr(obj, "arguments", None)
+        if isinstance(args, dict):
+            return args
+        if isinstance(obj, dict):
+            candidate = obj.get("arguments")
+            if isinstance(candidate, dict):
+                return candidate
+    return None
+
+
+def _adapt_mutator(mutate: Any) -> Any:
+    """Normalise a mutator to the 4-arg calling convention.
+
+    Mutators predate the ``arguments`` parameter and are registered by
+    other modules (and potentially other packages), so the chain accepts
+    both shapes: ``fn(result, ctx, name)`` and
+    ``fn(result, ctx, name, arguments)``.  Arity is read once here rather
+    than probed with a TypeError per call — a mutator that itself raises
+    TypeError must surface as ITS failure, not be silently retried with
+    fewer arguments.
+    """
+    import inspect
+
+    try:
+        params = [
+            p
+            for p in inspect.signature(mutate).parameters.values()
+            if p.kind
+            in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL)
+        ]
+        wants_args = len(params) >= 4 or any(
+            p.kind == p.VAR_POSITIONAL for p in params
+        )
+    except (TypeError, ValueError):
+        wants_args = False
+    if wants_args:
+        return mutate
+
+    def _three(result: Any, ctx: Any, name: str | None, _args: dict | None) -> None:
+        mutate(result, ctx, name)
+
+    return _three
+
+
 def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     """Wrap the lowlevel ``tools/call`` handler so ``mutate`` sees each result.
 
-    ``mutate(result, ctx, name)`` is called with the tool result object AFTER
-    the real handler produced it, and mutates it in place; its return value is
+    ``mutate(result, ctx, name)`` — or ``mutate(result, ctx, name,
+    arguments)`` — is called with the tool result object AFTER the real
+    handler produced it, and mutates it in place; its return value is
     ignored and it must not raise (callers wrap their own body).  ``ctx`` is
     the ``ServerRequestContext`` SDK 2 hands the handler — the only place the
     session (and so the host's declared capabilities) lives on 2.x — and None
     on 1.x, where ``client_capabilities`` reads the lowlevel server attribute
     instead.  ``name`` is the called tool's name when the request shape
     yields one (best-effort via ``_call_tool_name``), else None — it lets the
-    stage decide per TOOL what to attach, not just per host.  The handler's
-    own return value is passed through untouched, so a wrapper that does
-    nothing is invisible.
+    stage decide per TOOL what to attach, not just per host.  ``arguments``
+    is the call's own argument dict when the request shape yields one
+    (best-effort via ``_call_tool_args``), else None — it lets a mutator
+    attach for the MACHINE a call named, not just the default; a mutator
+    declared with three positional parameters simply never sees it
+    (arity is read once at registration, in ``_adapt_mutator``).  The
+    handler's own return value is passed through untouched, so a wrapper
+    that does nothing is invisible.
 
     Everything the two SDK majors disagree about lives here, because the
     disagreement is total — the handler is keyed by request TYPE on 1.x and by
@@ -272,20 +334,22 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     identity = f"{getattr(mutate, '__module__', '?')}."\
                f"{getattr(mutate, '__qualname__', repr(mutate))}"
 
-    def _run_all(result: Any, ctx: Any, name: str | None, chain: list) -> None:
+    def _run_all(
+        result: Any, ctx: Any, name: str | None, args: dict | None, chain: list
+    ) -> None:
         for _identity, fn in list(chain):
             try:
-                fn(result, ctx, name)
+                fn(result, ctx, name, args)
             except Exception:  # noqa: BLE001 -- one bad mutator, not all
                 _logger.debug("call-tool mutator failed", exc_info=True)
 
     def _wrap(previous: Any) -> Any:
         """Shared body: run the handler, let ``mutate`` see the result."""
 
-        def _apply(resp: Any, ctx: Any, name: str | None) -> Any:
+        def _apply(resp: Any, ctx: Any, name: str | None, args: dict | None) -> Any:
             # 1.x hands back a ServerResult with the real result on ``.root``;
             # 2.x hands back the CallToolResult itself, which has no ``.root``.
-            _run_all(getattr(resp, "root", resp), ctx, name, chain)
+            _run_all(getattr(resp, "root", resp), ctx, name, args, chain)
             return resp
 
         return _apply
@@ -298,14 +362,19 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
         if existing is not None:
             if identity in {k for k, _ in existing}:
                 return False  # same feature installing twice — attach once
-            existing.append((identity, mutate))
+            existing.append((identity, _adapt_mutator(mutate)))
             return True
         previous, params_type = entry.handler, entry.params_type
-        chain: list = [(identity, mutate)]
+        chain: list = [(identity, _adapt_mutator(mutate))]
         apply = _wrap(previous)
 
         async def _wrapped_v2(ctx: Any, params: Any) -> Any:
-            return apply(await previous(ctx, params), ctx, _call_tool_name(params))
+            return apply(
+                await previous(ctx, params),
+                ctx,
+                _call_tool_name(params),
+                _call_tool_args(params),
+            )
 
         setattr(_wrapped_v2, _WRAPPED, True)
         setattr(_wrapped_v2, _MUTATORS, chain)
@@ -322,13 +391,15 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     if existing is not None:
         if identity in {k for k, _ in existing}:
             return False  # same feature installing twice — attach once
-        existing.append((identity, mutate))
+        existing.append((identity, _adapt_mutator(mutate)))
         return True
-    chain = [(identity, mutate)]
+    chain = [(identity, _adapt_mutator(mutate))]
     apply = _wrap(previous)
 
     async def _wrapped_v1(req: Any) -> Any:
-        return apply(await previous(req), None, _call_tool_name(req))
+        return apply(
+            await previous(req), None, _call_tool_name(req), _call_tool_args(req)
+        )
 
     setattr(_wrapped_v1, _WRAPPED, True)
     setattr(_wrapped_v1, _MUTATORS, chain)
