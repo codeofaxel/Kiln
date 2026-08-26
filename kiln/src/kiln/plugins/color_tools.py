@@ -1745,6 +1745,156 @@ class _ColorToolsPlugin:
             except ImportError:
                 return response
 
+        @mcp.tool()
+        def paint_decoration_faces(
+            model_path: str,
+            color: str = "#F72323",
+            base_color: str = "",
+            target: str = "all",
+            output_path: str = "",
+            printer_id: str = "",
+        ) -> dict:
+            """Paint exactly the faces a decoration carve created (Pro-free).
+
+            A deboss/emboss records which output triangles it created —
+            recess floors and side-walls — in a face-provenance sidecar
+            beside the decorated mesh.  This tool paints THOSE faces and
+            nothing else, so a debossed logo with a closed outline (any
+            mark with enclosed regions) colors only its carved strokes:
+            the untouched surface island inside the outline stays the
+            body color, where crease-angle segmentation would have
+            "filled the logo in".
+
+            Use after any decoration door (``decorate_surface``,
+            ``apply_decoration``, ``apply_decoration_preset``,
+            ``smart_decorate``, ``batch_decorate``…) — they all record
+            the sidecar.  For meshes with no sidecar (older files,
+            hand-made carves), fall back to ``segment_mesh_regions`` +
+            ``paint_mesh_regions``.
+
+            Writes a painted 3MF (one watertight object, per-triangle
+            colors) via the same composer ``paint_mesh_regions`` uses,
+            so the output slices identically.
+
+            :param model_path: The decorated mesh (STL/OBJ/3MF) whose
+                ``<mesh>.decoration_faces.json`` sidecar to consume.
+            :param color: Hex color for the carved faces (default red).
+            :param base_color: Optional hex color for every other face.
+                Empty = uncolored (renders neutral; slicer maps it to
+                the base filament).
+            :param target: ``"all"`` carved faces (default), or
+                ``"floors"`` / ``"walls"`` when the record carries the
+                split — floors are the recess bottoms (the visible mark),
+                walls the carved sides.
+            :param output_path: Where to write the painted 3MF.  Default:
+                beside the model as ``<name>_painted.3mf``.
+            :param printer_id: Optional supported printer model id for
+                bed placement of the composed 3MF.
+            :returns: Dict with ``output_path``, ``painted_triangles``,
+                ``total_triangles``, and the composer's color summary.
+                Refuses loudly — no painting — when the sidecar is
+                missing, malformed, or STALE (mesh content changed since
+                the decoration was recorded).
+            """
+            from kiln.decoration_faces import (
+                load_decoration_faces,
+                load_mesh_triangles,
+            )
+
+            record, err = load_decoration_faces(model_path)
+            if record is None:
+                return {"success": False, "error": err, "code": "NO_FACE_RECORD"}
+
+            if target not in ("all", "floors", "walls"):
+                return {
+                    "success": False,
+                    "error": f"target must be 'all', 'floors' or 'walls', got {target!r}",
+                }
+            if target == "all":
+                indices = record["face_indices"]
+            else:
+                key = "floor_indices" if target == "floors" else "wall_indices"
+                if key not in record:
+                    return {
+                        "success": False,
+                        "error": (
+                            "this decoration record has no floors/walls split — "
+                            "use target='all'"
+                        ),
+                    }
+                indices = record[key]
+            if not indices:
+                return {
+                    "success": False,
+                    "error": (
+                        "the decoration record lists no faces for "
+                        f"target={target!r} — nothing to paint"
+                    ),
+                }
+
+            try:
+                triangles = load_mesh_triangles(model_path)
+            except Exception as exc:  # noqa: BLE001 — loader errors vary by format
+                return {"success": False, "error": f"could not load mesh: {exc}"}
+            if len(triangles) != record.get("triangle_count"):
+                # The sha256 gate should catch any edit first; this is a
+                # belt-and-braces refusal against loader disagreement.
+                return {
+                    "success": False,
+                    "error": (
+                        f"mesh has {len(triangles)} triangles but the record "
+                        f"expects {record.get('triangle_count')} — refusing to "
+                        "paint by stale indices"
+                    ),
+                    "code": "NO_FACE_RECORD",
+                }
+
+            base = base_color.strip() or None
+            colors: list[str | None] = [base] * len(triangles)
+            for i in indices:
+                colors[i] = color
+
+            from kiln.multicolor_3mf import compose_painted_3mf
+
+            out_path = output_path.strip() or os.path.join(
+                os.path.dirname(os.path.abspath(model_path)),
+                Path(model_path).stem + "_painted.3mf",
+            )
+            tri_list = [tuple(map(tuple, t)) for t in triangles]
+            composed = compose_painted_3mf(
+                tri_list,
+                colors,
+                output_path=out_path,
+                name=Path(model_path).stem,
+                printer_id=printer_id or None,
+            )
+            if not composed.get("success", True) and composed.get("error"):
+                return {"success": False, "error": composed["error"]}
+
+            response: dict[str, Any] = {
+                "success": True,
+                "output_path": composed.get("output_path", out_path),
+                "painted_triangles": len(indices),
+                "total_triangles": len(triangles),
+                "target": target,
+                "color": color,
+                "decoration": record.get("decoration") or {},
+                "summary": (
+                    f"Painted {len(indices)} decoration face"
+                    f"{'s' if len(indices) != 1 else ''} ({target}) {color}; "
+                    f"{len(triangles) - len(indices)} body faces untouched."
+                ),
+            }
+            for key in ("colors", "bed_translation", "native_paint_truncated"):
+                if key in composed:
+                    response[key] = composed[key]
+            if "floor_indices" in record and target == "all":
+                response["hint"] = (
+                    "This record distinguishes recess floors from side-walls — "
+                    "target='floors' paints just the visible mark."
+                )
+            return response
+
         _logger.debug("Registered color tools")
 
 

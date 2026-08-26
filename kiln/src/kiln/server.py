@@ -17524,10 +17524,22 @@ def decorate_surface(
         # --- Step 6: Compile to STL ---
         from kiln.emboss_generator import compile_embossed_model
 
+        # Metadata for the face-provenance sidecar the compile records
+        # (which output triangles the carve created — what painting
+        # consumes instead of re-guessing regions).
+        _face_meta = {
+            "mode": mode,
+            "depth_mm": effective_depth,
+            "content_type": ctype,
+            "image_style": image_style,
+            "face": face_info.get("face_name"),
+        }
         compile_result = compile_embossed_model(
             scad_result["scad_path"],
             scad_result["output_stl_path"],
             timeout=600,
+            decoration_meta=_face_meta,
+            face_normal=face_info.get("normal"),
         )
 
         if not compile_result.get("success"):
@@ -17614,6 +17626,8 @@ def decorate_surface(
                     scad_result["scad_path"],
                     scad_result["output_stl_path"],
                     timeout=600,
+                    decoration_meta=_face_meta,
+                    face_normal=face_info.get("normal"),
                 )
                 if compile_result.get("success"):
                     warnings.append(
@@ -17662,6 +17676,11 @@ def decorate_surface(
             "compile_time_seconds": compile_result.get("compile_time_seconds"),
             "scad_path": scad_result["scad_path"],
         }
+        if compile_result.get("decoration_faces"):
+            # Which output triangles this carve created, recorded beside the
+            # STL — paint_decoration_faces consumes this to color exactly
+            # the carved mark, enclosed surface islands excluded.
+            result_dict["decoration_faces"] = compile_result["decoration_faces"]
         if _provenance_info:
             result_dict["provenance"] = _provenance_info
         if warnings:
