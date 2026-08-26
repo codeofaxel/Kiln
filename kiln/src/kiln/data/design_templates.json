@@ -378,7 +378,7 @@
   },
   "measuring_scoop": {
     "display_name": "Measuring Scoop",
-    "description": "Kitchen scoop with flat-bottom bowl and ergonomic handle.",
+    "description": "Kitchen measuring scoop: cylindrical cup holding exactly the set volume when filled level, with a flat handle. Prints without supports.",
     "category": "kitchen",
     "parameters": {
       "volume_ml": {
@@ -1000,7 +1000,7 @@
   },
   "tablet_stand": {
     "display_name": "Tablet Stand",
-    "description": "Adjustable-angle tablet or e-reader stand with cable pass-through slot.",
+    "description": "Adjustable-angle tablet or e-reader stand with a cable pass-through notch. Prints upright, no supports.",
     "category": "desk_accessories",
     "parameters": {
       "width": {
@@ -1039,7 +1039,7 @@
         "description": "Front retaining lip"
       }
     },
-    "scad_template": "// Parametric Tablet Stand\n// Back support rises at the requested angle from mid-base; solid\n// side gussets brace it against tablet weight.\nw = ${width};\nang = ${angle};\nbd = ${base_depth};\nt = ${thickness};\nlip = ${lip_height};\n\nback_len = bd * 0.8;\nfoot_y = bd * 0.45;\ngusset = min(30, bd * 0.25);\n\nmodule stand() {\n    // Base\n    cube([w, bd, t]);\n    // Front lip\n    cube([w, t, lip]);\n    // Back support: inclined at `ang` above the bed, sunk into the\n    // base for a solid joint\n    translate([0, foot_y, t * cos(ang)])\n        rotate([ang - 90, 0, 0])\n            cube([w, t, back_len]);\n    // Side gussets (45-degree hypotenuse, printable)\n    for (x = [0, w - t])\n        translate([x, foot_y + t * 0.5, 0])\n            rotate([90, 0, 90])\n                linear_extrude(t)\n                    polygon([[0, 0], [gusset, 0], [0, gusset]]);\n}\n\nstand();"
+    "scad_template": "// Parametric Tablet Stand\n// Back support rises at the requested angle from mid-base; solid\n// side gussets brace it against tablet weight.\nw = ${width};\nang = ${angle};\nbd = ${base_depth};\nt = ${thickness};\nlip = ${lip_height};\n\nback_len = bd * 0.8;\nfoot_y = bd * 0.45;\ngusset = min(30, bd * 0.25);\n\nmodule stand() {\n    // Base\n    cube([w, bd, t]);\n    // Front lip\n    cube([w, t, lip]);\n    // Back support: inclined at `ang` above the bed, sunk into the\n    // base for a solid joint, with a cable pass-through notch at\n    // the bottom center\n    translate([0, foot_y, t * cos(ang)])\n        rotate([ang - 90, 0, 0])\n            difference() {\n                cube([w, t, back_len]);\n                // Cable notch at the bottom center, peaked at 45\n                // degrees so the slab above it prints bridge-free\n                translate([w / 2, -0.1, 0])\n                    rotate([-90, 0, 0])\n                        linear_extrude(t + 0.2)\n                            polygon([[-10, 0.1], [10, 0.1], [10, -12],\n                                     [0, -22], [-10, -12]]);\n            }\n    // Side gussets (45-degree hypotenuse, printable)\n    for (x = [0, w - t])\n        translate([x, foot_y + t * 0.5, 0])\n            rotate([90, 0, 90])\n                linear_extrude(t)\n                    polygon([[0, 0], [gusset, 0], [0, gusset]]);\n}\n\nstand();"
   },
   "drill_bit_holder": {
     "display_name": "Drill Bit Organizer",
@@ -1187,7 +1187,7 @@
   },
   "spice_jar_rack": {
     "display_name": "Spice Jar Rack",
-    "description": "Tiered step rack for uniform spice jars. Configurable jar size and count.",
+    "description": "Tiered step rack for uniform spice jars. Configurable jar size and count. Prints without supports.",
     "category": "kitchen",
     "parameters": {
       "jar_dia": {
@@ -1797,7 +1797,7 @@
   },
   "drain_strainer": {
     "display_name": "Drain Strainer",
-    "description": "Flat strainer disc with radial slot pattern for sink or floor drains.",
+    "description": "Drain strainer with radial slots and a coned rim that self-centers in the drain. Prints without supports.",
     "category": "plumbing",
     "parameters": {
       "drain_dia": {
@@ -2321,7 +2321,7 @@
   },
   "tool_holder_pegboard": {
     "display_name": "Pegboard Tool Holder",
-    "description": "Customizable pegboard hook for holding tools, cables, or accessories. Standard 25mm pegboard spacing.",
+    "description": "Customizable pegboard hook for holding tools, cables, or accessories. Standard 25mm pegboard spacing. Prints flat, no supports.",
     "category": "workshop",
     "parameters": {
       "hook_length": {
