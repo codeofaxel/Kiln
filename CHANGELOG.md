@@ -20,7 +20,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Multicolor and painted models now land on the print bed — yours.** A model
   that wasn't already centred produced a 3MF PrusaSlicer quietly refused to
   slice. Kiln now places it on your printer's actual plate, and when something
-  genuinely doesn't fit, says so plainly instead of failing silently.
+  genuinely doesn't fit, says so plainly instead of failing silently. An
+  off-plate 3MF is caught before slicing now, with how far to move it.
 
 ## [1.4.1.1] - 2026-08-19
 
