@@ -110,6 +110,32 @@ class TestFlatRebuilds:
         assert "cube([jw, jh, t]);" in s
 
 
+class TestSpoolHolderRails:
+    """The spool holder must give a spool something to actually ride on.
+
+    The old geometry was a base, two walls, and four bare posts — no
+    rollers, no notches, nothing a spool could rest or rotate on — while
+    the description promised roller bearings.  The rebuild carries the
+    spool on two half-round rails clipped at their 45-degree tangent
+    planes, with rail height computed from the spool diameter."""
+
+    def test_rails_exist_and_are_tangent_clipped(self, templates):
+        s = scad(templates, "spool_holder")
+        assert "module rail()" in s
+        assert "0.707" in s          # the 45-degree tangent half-chord
+
+    def test_rail_height_follows_the_spool_diameter(self, templates):
+        """A fixed rail height lets a big spool bottom out on the base."""
+        s = scad(templates, "spool_holder")
+        assert "sqrt(pow(R + r, 2) - pow(s / 2, 2))" in s
+        assert "R + 3 - drop" in s
+
+    def test_the_bare_posts_are_gone(self, templates):
+        s = scad(templates, "spool_holder")
+        assert "Roller support posts" not in s
+        assert "cube([wall, wall*2, rd + wall])" not in s
+
+
 class TestProfileExtrusions:
     """Clips and clamps re-expressed as 2D profiles extruded upward,
     so the layer lines wrap the spring features."""

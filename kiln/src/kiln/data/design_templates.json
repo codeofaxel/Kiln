@@ -498,7 +498,7 @@
   },
   "spool_holder": {
     "display_name": "Filament Spool Holder",
-    "description": "Bench stand that carries a filament spool clear of the desk: base plate, side walls, and paired cradle blocks. Size it to your spool's maximum width and diameter.",
+    "description": "Bench stand a filament spool rides on: two smooth half-round rails lift the spool clear of the base so it can rotate, side walls keep it from walking off the ends. One piece, prints without supports.",
     "category": "3d_printing",
     "parameters": {
       "spool_width": {
@@ -520,7 +520,7 @@
         "min": 10,
         "max": 30,
         "unit": "mm",
-        "description": "Roller diameter"
+        "description": "Rail diameter the spool rides on"
       },
       "wall": {
         "default": 4,
@@ -530,7 +530,7 @@
         "description": "Wall thickness"
       }
     },
-    "scad_template": "// Parametric Spool Holder\nsw = ${spool_width};\nsd = ${spool_dia};\nrd = ${roller_dia};\nwall = ${wall};\n\nbase_w = sw + wall * 4;\nbase_d = sd * 0.6;\nbase_h = wall;\nroller_spacing = sd * 0.35;\n\nmodule spool_holder() {\n    // Base plate\n    cube([base_w, base_d, base_h]);\n    // Side walls\n    for (x = [0, base_w - wall]) {\n        translate([x, 0, 0])\n            cube([wall, base_d, sd/4]);\n    }\n    // Roller cradles\n    for (y = [base_d/2 - roller_spacing/2, base_d/2 + roller_spacing/2]) {\n        translate([0, y, 0]) {\n            // Roller support posts\n            for (x = [wall, base_w - wall*2]) {\n                translate([x, -wall, 0])\n                    cube([wall, wall*2, rd + wall]);\n            }\n        }\n    }\n}\n\nspool_holder();"
+    "scad_template": "// Parametric Spool Holder\n// One-piece bench stand: the spool rides on two half-round rails.\n// Each rail is a support wall capped by a rod clipped at its\n// 45-degree tangent planes, so no surface overhangs; rail height is\n// computed from the spool diameter so the spool bottom always clears\n// the base.  (The old geometry had bare posts and nothing for a\n// spool to rest on at all.)\nsw = ${spool_width};\nsd = ${spool_dia};\nrd = ${roller_dia};\nwall = ${wall};\n\nbase_w = sw + wall * 4;\nbase_d = sd * 0.6;\nbase_h = wall;\n\nr = rd / 2;\nR = sd / 2;\ns = sd * 0.35;                    // rail center spacing\n// How far the spool center sits above the rail axes when resting\n// tangent on both rails\ndrop = sqrt(pow(R + r, 2) - pow(s / 2, 2));\n// Lift the rails so the spool bottom clears the base by >= 3 mm\nlift = max(2, R + 3 - drop);\nrail_c = base_h + lift + r;       // rail axis height\nhalf_w = r * 0.707;               // 45-degree tangent half-chord\n\nmodule rail() {\n    // Support wall under the rod, exactly as wide as the 45-degree\n    // tangent chord so the rod meets it with no overhang\n    translate([0, -half_w, 0])\n        cube([base_w, half_w * 2, rail_c]);\n    // Rod clipped at the tangent planes: vertical sides below,\n    // a <=45-degree arc on top for the spool to ride\n    intersection() {\n        translate([0, 0, rail_c])\n            rotate([0, 90, 0])\n                cylinder(h = base_w, r = r, $fn = 48);\n        translate([0, -half_w, rail_c - r])\n            cube([base_w, half_w * 2, r * 2]);\n    }\n}\n\nmodule spool_holder() {\n    // Base plate\n    cube([base_w, base_d, base_h]);\n    // Side walls keep the spool from walking off the rail ends\n    for (x = [0, base_w - wall])\n        translate([x, 0, 0])\n            cube([wall, base_d, rail_c + r + 10]);\n    // Rails\n    for (y = [base_d / 2 - s / 2, base_d / 2 + s / 2])\n        translate([0, y, 0])\n            rail();\n}\n\nspool_holder();\n"
   },
   "tube_connector": {
     "display_name": "Tube/Pipe Connector",
