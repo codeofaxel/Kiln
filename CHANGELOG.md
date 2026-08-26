@@ -12,6 +12,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   your agent, which can send any of them for you. A person reads every one, and
   you can ask to be emailed when yours is fixed.
 
+### Fixed
+
+- **Multicolor and painted models now land on the print bed.** A model that
+  wasn't already centred produced a 3MF PrusaSlicer quietly refused to slice.
+  Kiln now places it on the plate automatically, and when something genuinely
+  doesn't fit, says so plainly instead of failing silently.
+
 ## [1.4.1.1] - 2026-08-19
 
 ### Added
