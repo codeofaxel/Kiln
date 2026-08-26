@@ -874,6 +874,58 @@ def _bbox_volume(
 _WINDING_CONSISTENCY_THRESHOLD = 0.05
 
 
+def _drop_membrane_pairs(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> list[tuple[tuple[float, ...], ...]]:
+    """Remove zero-thickness membrane artifacts from a triangle soup.
+
+    Exactly-coincident stacked solids sometimes survive OpenSCAD's
+    union unfused: the shared plane is exported as two coplanar faces
+    over the same vertices, one facing up and one facing down.  The
+    membrane encloses no volume, but the downward half reads as a real
+    interior ceiling and poisons the overhang, bridging, and support
+    verdicts (2026-08-25: a barbed hose adapter graded C on 480 such
+    phantom faces).
+
+    A pair is dropped only when two triangles share the same three
+    vertices (to 0.1 um) with opposing normals; a same-winding exact
+    duplicate keeps one copy.  Genuine geometry never loses faces.
+    """
+    groups: dict[frozenset, list[int]] = {}
+    for idx, tri in enumerate(triangles):
+        key = frozenset(tuple(round(c, 4) for c in v) for v in tri)
+        if len(key) == 3:
+            groups.setdefault(key, []).append(idx)
+
+    drop: set[int] = set()
+    for idxs in groups.values():
+        if len(idxs) < 2:
+            continue
+        pool = [i for i in idxs]
+        while len(pool) >= 2:
+            base = pool.pop(0)
+            n_base = _normalize(_triangle_normal(*triangles[base]))
+            mate = None
+            for other in pool:
+                n_other = _normalize(_triangle_normal(*triangles[other]))
+                dot = sum(a * b for a, b in zip(n_base, n_other))
+                if dot < -0.999:      # opposing membrane pair
+                    mate = other
+                    drop.add(base)
+                    drop.add(other)
+                    break
+                if dot > 0.999:       # exact duplicate face
+                    mate = other
+                    drop.add(other)
+                    break
+            if mate is not None:
+                pool.remove(mate)
+
+    if not drop:
+        return triangles
+    return [t for i, t in enumerate(triangles) if i not in drop]
+
+
 def _normalize_triangle_winding_centroid(
     triangles: list[tuple[tuple[float, ...], ...]],
 ) -> list[tuple[tuple[float, ...], ...]]:
@@ -2681,6 +2733,107 @@ def _analyze_warping(
     )
 
 
+# Hydraulic-thickness (4V/A) bands for the thermal slenderness gate.
+# Calibrated against the 2026-08-25 template sweep: a 1.6 mm latch fin
+# reads 3.2 (full risk kept), a 12 mm coat-hook peg reads 12.0 (real
+# prints of both confirm only the fin is a genuine cracking risk).
+_STURDY_FEATURE_MM = 4.5   # >= this: features can flex/absorb, one level down
+_CHUNKY_FEATURE_MM = 8.0   # >= this: differential cooling is negligible
+
+# The gate only applies to materials with curated LOW thermal
+# amplification (Pro overlay: PLA 0.6, PETG ~0.8).  High-shrink
+# materials (ABS, Nylon, PP, PC, PEEK) crack at chunky transitions
+# too — bulk shrink force scales with the section — and the free
+# tier's uniform 1.0 factor deliberately keeps the conservative
+# safety floor, consistent with the free-vs-Pro seam everywhere else
+# in this module.
+_FORGIVING_STRESS_FACTOR = 0.8
+
+# The proxy reads the structure IMMEDIATELY above the transition (the
+# neck) — not everything above it, or a dumbbell's fat far cap would
+# mask its thin neck.
+_SUFFIX_BAND_MM = 6.0
+
+
+def _clip_triangle_above(
+    tri: tuple[tuple[float, ...], ...], z0: float,
+) -> list[tuple[tuple[float, ...], ...]]:
+    """Return the portion of ``tri`` with z >= z0, as 0-2 triangles."""
+    above = [v for v in tri if v[2] >= z0]
+    if len(above) == 3:
+        return [tri]
+    if not above:
+        return []
+
+    def lerp(a, b):
+        t = (z0 - a[2]) / (b[2] - a[2])
+        return (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), z0)
+
+    # Preserve winding: walk the original vertex order.
+    poly: list[tuple[float, ...]] = []
+    for i in range(3):
+        a, b = tri[i], tri[(i + 1) % 3]
+        if a[2] >= z0:
+            poly.append(a)
+        if (a[2] >= z0) != (b[2] >= z0):
+            poly.append(lerp(a, b))
+    if len(poly) < 3:
+        return []
+    return [(poly[0], poly[i], poly[i + 1]) for i in range(1, len(poly) - 1)]
+
+
+def _volume_above_plane(
+    triangles: list[tuple[tuple[float, ...], ...]], z0: float,
+) -> float:
+    """Exact mesh volume above the plane z=z0.
+
+    Each boundary triangle is clipped at z0 and its signed tetrahedron
+    volume taken against an apex ON the plane, so the unknown
+    cross-section cap at z0 contributes nothing.
+    """
+    apex = (0.0, 0.0, z0)
+    volume = 0.0
+    for tri in triangles:
+        for piece in _clip_triangle_above(tri, z0):
+            p = tuple(c - a for c, a in zip(piece[0], apex))
+            q = tuple(c - a for c, a in zip(piece[1], apex))
+            r = tuple(c - a for c, a in zip(piece[2], apex))
+            volume += (
+                p[0] * (q[1] * r[2] - q[2] * r[1])
+                - p[1] * (q[0] * r[2] - q[2] * r[0])
+                + p[2] * (q[0] * r[1] - q[1] * r[0])
+            ) / 6.0
+    return abs(volume)
+
+
+def _suffix_thickness_mm(
+    triangles: list[tuple[tuple[float, ...], ...]], z0: float,
+    band: float = _SUFFIX_BAND_MM,
+) -> float:
+    """Hydraulic thickness (4V/A) of the geometry in the band just
+    above ``z0`` — the neck the transition hands the print to.
+
+    Band volume is the difference of two exact above-plane volumes.
+    The area term counts wall-like faces only (|nz| < 0.7), clipped to
+    the band; flat tops would dilute the thickness reading without
+    describing any wall.
+    """
+    volume = (_volume_above_plane(triangles, z0)
+              - _volume_above_plane(triangles, z0 + band))
+    wall_area = 0.0
+    for tri in triangles:
+        for piece in _clip_triangle_above(tri, z0):
+            # Clip the band's top by mirroring through its midplane.
+            flipped = tuple((v[0], v[1], 2 * z0 + band - v[2]) for v in piece)
+            for kept in _clip_triangle_above(flipped, z0):
+                n = _normalize(_triangle_normal(*kept))
+                if abs(n[2]) < 0.7:
+                    wall_area += _triangle_area(*kept)
+    if wall_area < 1e-6:
+        return 0.0
+    return 4.0 * abs(volume) / wall_area
+
+
 def _analyze_thermal_stress(
     triangles: list[tuple[tuple[float, ...], ...]],
     bbox: dict[str, float],
@@ -2821,6 +2974,28 @@ def _analyze_thermal_stress(
         risk_level = "moderate"
     else:
         risk_level = "low"
+
+    # Slenderness gate: the area-change ratio measures how ABRUPT a
+    # transition is, not how FRAGILE the continuing structure is.
+    # Thermal contraction cracks thin necks — a 1.6 mm latch fin cools
+    # fast and concentrates stress across a sliver of weld — but a
+    # 12 mm peg above the same plate carries the same ratio and no
+    # real risk in a forgiving material.  Gauge the neck's hydraulic
+    # thickness (4V/A: a cylinder reads its diameter, a slab twice
+    # its wall) just above the peak zone and downgrade the verdict
+    # when it is sturdy.  Applies only when the material's curated
+    # stress factor is forgiving: high-shrink materials crack chunky
+    # transitions too, and the free tier's uniform 1.0 keeps the
+    # conservative safety floor.
+    if (stress_zones and risk_level != "low"
+            and stress_factor <= _FORGIVING_STRESS_FACTOR):
+        suffix_mm = _suffix_thickness_mm(triangles, stress_zones[0]["z_mm"])
+        if suffix_mm >= _CHUNKY_FEATURE_MM:
+            risk_level = {"critical": "moderate",
+                          "high": "low", "moderate": "low"}[risk_level]
+        elif suffix_mm >= _STURDY_FEATURE_MM:
+            risk_level = {"critical": "high",
+                          "high": "moderate", "moderate": "low"}[risk_level]
 
     score_deduction = int(cfg.get("score_deductions", {}).get(risk_level, 0))
 
@@ -3333,6 +3508,9 @@ def analyze_printability(
     from kiln.design_intelligence import load_pro_overlay_or_empty
 
     triangles, vertices = _parse_mesh(file_path)
+    # Membranes must go BEFORE winding normalization: a zero-thickness
+    # pair has no meaningful outward orientation to normalize.
+    triangles = _drop_membrane_pairs(triangles)
     triangles = _normalize_triangle_winding(triangles)
 
     # Bounding box.

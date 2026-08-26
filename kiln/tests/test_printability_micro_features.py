@@ -295,3 +295,89 @@ class TestThreadedJarTemplate:
         cones overshot the rim by 1.5 mm and read as a sawtooth."""
         scad = self._template()["scad_template"]
         assert "length - 2 * half" in scad
+
+
+def _plate_with_post_triangles(pw, pd, pt, post_w, post_d, post_h):
+    """One closed mesh: a plate with a centered rectangular post on
+    top.  The plate top is a proper annulus around the post footprint,
+    so there are no internal faces."""
+    x0, y0 = (pw - post_w) / 2, (pd - post_d) / 2
+    x1, y1 = x0 + post_w, y0 + post_d
+    zt, zp = pt, pt + post_h
+    tris = []
+
+    def quad(a, b, c, e):
+        tris.append((a, b, c))
+        tris.append((a, c, e))
+
+    # plate bottom (down)
+    quad((0, 0, 0), (0, pd, 0), (pw, pd, 0), (pw, 0, 0))
+    # plate sides
+    quad((0, 0, 0), (pw, 0, 0), (pw, 0, zt), (0, 0, zt))
+    quad((pw, 0, 0), (pw, pd, 0), (pw, pd, zt), (pw, 0, zt))
+    quad((pw, pd, 0), (0, pd, 0), (0, pd, zt), (pw, pd, zt))
+    quad((0, pd, 0), (0, 0, 0), (0, 0, zt), (0, pd, zt))
+    # plate top: annulus strips around the post footprint (up)
+    quad((0, 0, zt), (pw, 0, zt), (pw, y0, zt), (0, y0, zt))
+    quad((0, y1, zt), (pw, y1, zt), (pw, pd, zt), (0, pd, zt))
+    quad((0, y0, zt), (x0, y0, zt), (x0, y1, zt), (0, y1, zt))
+    quad((x1, y0, zt), (pw, y0, zt), (pw, y1, zt), (x1, y1, zt))
+    # post sides
+    quad((x0, y0, zt), (x1, y0, zt), (x1, y0, zp), (x0, y0, zp))
+    quad((x1, y0, zt), (x1, y1, zt), (x1, y1, zp), (x1, y0, zp))
+    quad((x1, y1, zt), (x0, y1, zt), (x0, y1, zp), (x1, y1, zp))
+    quad((x0, y1, zt), (x0, y0, zt), (x0, y0, zp), (x0, y1, zp))
+    # post top (up)
+    quad((x0, y0, zp), (x1, y0, zp), (x1, y1, zp), (x0, y1, zp))
+    return tris
+
+
+class TestMembraneArtifacts:
+    """Zero-thickness membrane pairs (exactly-coincident stacked
+    solids OpenSCAD failed to fuse) must not read as interior
+    ceilings.  2026-08-25: a barbed hose adapter graded C on 480 such
+    phantom faces."""
+
+    def test_membrane_pair_changes_nothing(self, tmp_path):
+        box = _box_triangles(0, 0, 0, 30, 20, 10)
+        quad = [(5.0, 5.0, 5.0), (25.0, 5.0, 5.0),
+                (25.0, 15.0, 5.0), (5.0, 15.0, 5.0)]
+        membrane = [
+            (quad[0], quad[1], quad[2]), (quad[0], quad[2], quad[3]),
+            (quad[0], quad[2], quad[1]), (quad[0], quad[3], quad[2]),
+        ]
+        clean = analyze_printability(
+            _write_stl(tmp_path, "clean.stl", box), material="pla")
+        dirty = analyze_printability(
+            _write_stl(tmp_path, "dirty.stl", box + membrane),
+            material="pla")
+        assert dirty.score == clean.score
+        assert (dirty.overhangs.overhang_triangle_count
+                == clean.overhangs.overhang_triangle_count)
+        assert dirty.triangle_count == clean.triangle_count
+
+    def test_real_geometry_keeps_all_faces(self, tmp_path):
+        box = _box_triangles(0, 0, 0, 30, 20, 10)
+        r = analyze_printability(
+            _write_stl(tmp_path, "box.stl", box), material="pla")
+        assert r.triangle_count == 12
+
+
+class TestThermalSlendernessGate:
+    """The area-change ratio says how abrupt a transition is, not how
+    fragile what continues above it is.  A chunky post and a thin fin
+    carry the same ratio; only the fin is a genuine cracking risk."""
+
+    def test_thick_post_is_not_a_stress_risk(self, tmp_path):
+        tris = _plate_with_post_triangles(120, 80, 5, 12, 12, 30)
+        r = analyze_printability(
+            _write_stl(tmp_path, "post.stl", tris), material="pla")
+        assert r.thermal_stress.risk_level in ("low", "moderate")
+        assert r.thermal_stress.score_deduction >= -5
+
+    def test_thin_fin_keeps_full_risk(self, tmp_path):
+        tris = _plate_with_post_triangles(120, 80, 5, 1.6, 30, 12)
+        r = analyze_printability(
+            _write_stl(tmp_path, "fin.stl", tris), material="pla")
+        assert r.thermal_stress.risk_level in ("high", "critical")
+        assert r.thermal_stress.score_deduction <= -10

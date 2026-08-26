@@ -263,20 +263,28 @@ _PRO_EXPECTED: dict[str, str] = {
     "pp_cube_30": "moderate",
     "cone_step_pla": "low", "bracket_unfilleted": "low",
     "coupler_abs": "moderate", "bottle_neck_pla": "low",
-    "T_junction_petg": "moderate",
+    # Slenderness-gated (2026-08-25): forgiving materials (stress
+    # factor <= 0.8) with a chunky neck (hydraulic thickness >= 4.5 mm
+    # in the 6 mm band above the peak zone) downgrade — a 20 mm solid
+    # PLA/PETG tower or a 60x10 PETG crossbar doesn't crack the way
+    # the same ratio does over a thin fin.  High-shrink materials and
+    # the free tier keep the undowngraded verdicts below/above.
+    "T_junction_petg": "low",
     "step_pyramid_pla": "low",
     "bushing_petg": "low",
     "step_pyramid_abs": "moderate", "step_pyramid_nylon": "high",
     "cone_step_abs": "moderate", "cone_step_nylon": "moderate",
     "cone_step_pp": "high", "cone_step_peek": "moderate",
-    "wide_base_tower_pla": "moderate", "wide_base_tower_petg": "moderate",
+    "wide_base_tower_pla": "low", "wide_base_tower_petg": "low",
     "wide_base_tower_abs": "critical", "wide_base_tower_nylon": "critical",
     "pcb_mount_abs": "critical", "funnel_step_pc": "critical",
     "bracket_pa6_gf": "moderate", "gear_blank_cf_nylon": "high",
     "dumbbell_peek": "critical", "flange_to_pin_abs": "critical",
     "multi_step_tower_pc": "high",
     "t_joint_unfilleted_pp": "critical",
-    "dumbbell_pla": "high", "flange_to_pin_nylon": "critical",
+    # 6 mm solid PLA neck: slenderness gate steps high down to
+    # moderate — sturdy enough to absorb the contraction.
+    "dumbbell_pla": "moderate", "flange_to_pin_nylon": "critical",
 }
 
 
