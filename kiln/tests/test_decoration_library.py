@@ -1044,3 +1044,89 @@ class TestCountedLedgerAcrossVersions:
             "roll-ledger", material="PLA", depth_mm=0.6, source_job_id="job-33"
         )
         assert fresh.proven_settings["PLA"].success_count == 1
+
+
+# ---------------------------------------------------------------------------
+# apply_decoration tool — material detection from a named printer
+# ---------------------------------------------------------------------------
+
+
+class TestApplyDecorationMaterialDetection:
+    """apply_decoration resolves the printer by name to detect material.
+
+    The detection block used to call ``kiln.server._get_adapter(printer_id)``
+    — a zero-argument resolver — so every named-printer detection died on a
+    TypeError that the best-effort except swallowed, and the material always
+    fell back to the decoration's defaults.
+    """
+
+    @staticmethod
+    def _apply_tool():
+        from kiln.plugins.decoration_library_tools import plugin
+
+        class _MockMCP:
+            def __init__(self):
+                self.tools = {}
+
+            def tool(self):
+                def decorator(fn):
+                    self.tools[fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        mcp = _MockMCP()
+        plugin.register(mcp)
+        return mcp.tools["apply_decoration"]
+
+    def test_printer_id_resolves_material(self, tmp_path: Path):
+        from unittest.mock import MagicMock, patch
+
+        save_decoration(
+            "Logo Text", content_type="text", content_data="hi", depth_mm=0.6,
+        )
+        model = tmp_path / "target.stl"
+        model.write_text("solid x\nendsolid x\n")
+
+        adapter = MagicMock()
+        adapter.get_state.return_value = MagicMock(active_material="PETG")
+
+        with (
+            patch("kiln.server._resolve_adapter", return_value=adapter) as resolve,
+            patch(
+                "kiln.server.decorate_surface",
+                return_value={"success": True, "output_path": str(tmp_path / "out.stl")},
+            ) as decorate,
+        ):
+            result = self._apply_tool()(
+                name="Logo Text", model_path=str(model), printer_id="workshop-a1",
+            )
+
+        assert result["success"] is True
+        resolve.assert_called_once_with("workshop-a1")
+        assert decorate.call_args.kwargs["material"] == "PETG"
+
+    def test_explicit_material_skips_printer(self, tmp_path: Path):
+        from unittest.mock import patch
+
+        save_decoration(
+            "Logo Text 2", content_type="text", content_data="yo", depth_mm=0.6,
+        )
+        model = tmp_path / "target2.stl"
+        model.write_text("solid x\nendsolid x\n")
+
+        with (
+            patch("kiln.server._resolve_adapter") as resolve,
+            patch(
+                "kiln.server.decorate_surface",
+                return_value={"success": True, "output_path": str(tmp_path / "out.stl")},
+            ) as decorate,
+        ):
+            result = self._apply_tool()(
+                name="Logo Text 2", model_path=str(model),
+                material="ABS", printer_id="workshop-a1",
+            )
+
+        assert result["success"] is True
+        resolve.assert_not_called()
+        assert decorate.call_args.kwargs["material"] == "ABS"

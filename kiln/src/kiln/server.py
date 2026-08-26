@@ -1250,6 +1250,11 @@ def _get_adapter() -> PrinterAdapter:
     be imported without requiring environment variables to be set (useful
     for testing and introspection).
 
+    When neither env vars nor config.yaml supplied a host, the registry's
+    effective default printer answers instead — embedding hosts populate
+    the registry directly, without ever running the config-resolution
+    step that fills the env/YAML globals.
+
     Returns:
         The active :class:`PrinterAdapter` instance.
 
@@ -1267,6 +1272,20 @@ def _get_adapter() -> PrinterAdapter:
     printer_type = _PRINTER_TYPE
 
     if not host:
+        # An empty host does not mean no printer exists.  The env/YAML
+        # globals are only populated by ``_reload_env_config()``, but an
+        # embedding host (kiln-pro's REST server, a bare ``create_app()``)
+        # may have loaded printers straight into the registry without ever
+        # routing through that config step.  The *named* door
+        # (``_resolve_adapter("default")``) already finds those adapters;
+        # raising here made the unnamed door on the very same registry
+        # answer "No printer configured" — the half-wired-door failure.
+        # Registry default first, env error only when both are empty.
+        # The adapter is returned uncached: the registry owns its
+        # lifecycle, and pinning it into ``_adapter`` would shadow a
+        # later, properly configured env/YAML default.
+        with contextlib.suppress(Exception):
+            return _get_registry().get(_resolve_effective_printer_name(None))
         raise RuntimeError(
             "No printer configured. Set KILN_PRINTER_HOST environment variable "
             "to the printer URL (e.g. http://octopi.local). Also set "
@@ -1487,7 +1506,14 @@ def _is_resume_mode_3mf(file_name: str) -> bool:
 
 
 def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
-    """Resolve the printer identifier used for emergency latch checks."""
+    """Resolve the printer identifier an unnamed call is effectively about.
+
+    Registry ``"default"`` wins, else the first registered name, else the
+    literal ``"default"``.  Used for emergency latch checks and by
+    :func:`_get_adapter`'s registry fallback, so the adapter an unnamed
+    call reaches and the name its bookkeeping is filed under stay the
+    same answer.
+    """
     if printer_name:
         return printer_name
     try:
@@ -2781,20 +2807,22 @@ def _get_registry() -> PrinterRegistry:
     callers outside ``kiln.server`` (print_health_monitor, heartbeat,
     auto_recover_engine, etc.) see the same instance the server has
     populated with adapters.
+
+    Adopts the canonical singleton rather than replacing it: an
+    embedding host may have populated ``get_printer_registry()`` with
+    its printers before any server tool runs, and the earlier
+    build-then-``register_default_singleton`` shape silently clobbered
+    those entries with a fresh empty registry.
     """
     global _registry  # noqa: PLW0603
     if _registry is None:
-        _registry = PrinterRegistry()
-        # Publish to the canonical singleton so non-server callers
-        # (kiln.registry.get_printer_registry) see the populated
-        # registry, not an empty one.
         try:
-            from kiln.registry import register_default_singleton
+            from kiln.registry import get_printer_registry
 
-            register_default_singleton(_registry)
+            _registry = get_printer_registry()
         except ImportError:
             # Defensive — registry module changes shouldn't break server boot.
-            pass
+            _registry = PrinterRegistry()
     return _registry
 
 
