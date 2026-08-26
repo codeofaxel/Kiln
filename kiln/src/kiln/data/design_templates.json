@@ -5,7 +5,7 @@
   },
   "phone_stand": {
     "display_name": "Phone Stand",
-    "description": "Angled phone stand with adjustable cradle width, angle, and base dimensions. Prints flat, no supports needed.",
+    "description": "Angled phone stand with adjustable cradle width, angle, and base dimensions. Prints upright, no supports.",
     "category": "desk_accessories",
     "parameters": {
       "phone_width": {
@@ -44,7 +44,7 @@
         "description": "Front lip to hold phone"
       }
     },
-    "scad_template": "// Parametric Phone Stand\nphone_width = ${phone_width};\nangle = ${angle};\nbase_depth = ${base_depth};\nthickness = ${thickness};\nlip_height = ${lip_height};\n\nmodule phone_stand() {\n    // Base plate\n    cube([phone_width + 10, base_depth, thickness]);\n    // Back support\n    translate([0, base_depth - thickness, 0])\n        rotate([90 - angle, 0, 0])\n            cube([phone_width + 10, base_depth * 0.8, thickness]);\n    // Front lip\n    translate([0, thickness, 0])\n        cube([phone_width + 10, thickness, lip_height]);\n    // Side rails\n    for (x = [0, phone_width + 10 - thickness]) {\n        translate([x, 0, 0])\n            cube([thickness, base_depth * 0.4, lip_height]);\n    }\n}\n\nphone_stand();"
+    "scad_template": "// Parametric Phone Stand\n// The back support rises at the requested angle from the middle of\n// the base, so its underside stays a printable slope and the loaded\n// phone bears over the base footprint.\nphone_width = ${phone_width};\nangle = ${angle};\nbase_depth = ${base_depth};\nthickness = ${thickness};\nlip_height = ${lip_height};\n\nw = phone_width + 10;\nsupport_len = base_depth * 0.8;\nfoot_y = base_depth * 0.45;\n\nmodule phone_stand() {\n    // Base plate\n    cube([w, base_depth, thickness]);\n    // Back support: inclined at `angle` above the bed, sunk into the\n    // base so it joins on a solid face rather than an edge\n    translate([0, foot_y, thickness * cos(angle)])\n        rotate([angle - 90, 0, 0])\n            cube([w, thickness, support_len]);\n    // Side gussets bracing the support (45-degree hypotenuse)\n    for (x = [0, w - thickness])\n        translate([x, foot_y + thickness * 0.5, 0])\n            rotate([90, 0, 90])\n                linear_extrude(thickness)\n                    polygon([[0, 0], [20, 0], [0, 20]]);\n    // Front lip\n    translate([0, thickness, 0])\n        cube([w, thickness, lip_height]);\n    // Side rails\n    for (x = [0, w - thickness]) {\n        translate([x, 0, 0])\n            cube([thickness, base_depth * 0.4, lip_height]);\n    }\n}\n\nphone_stand();"
   },
   "hook": {
     "display_name": "Wall Hook",
@@ -878,7 +878,7 @@
   },
   "stackable_bin": {
     "display_name": "Stackable Storage Bin",
-    "description": "Open-top bin with interlocking lip and ledge for stable vertical stacking.",
+    "description": "Stackable storage bin with interlocking lip and a card-pocket label holder. Prints without supports.",
     "category": "containers",
     "parameters": {
       "width": {
@@ -917,7 +917,7 @@
         "description": "Include front label slot (1=yes)"
       }
     },
-    "scad_template": "// Parametric Stackable Bin\nw = ${width};\nd = ${depth};\nh = ${height};\nwall = ${wall};\nlabel = ${label_slot};\n\nlip = 2;\n\nmodule bin() {\n    difference() {\n        union() {\n            // Outer shell\n            cube([w, d, h]);\n            // Stacking lip (extends above)\n            translate([wall, wall, h])\n                difference() {\n                    cube([w - wall*2, d - wall*2, lip]);\n                    translate([wall, wall, -0.1])\n                        cube([w - wall*4, d - wall*4, lip+0.2]);\n                }\n        }\n        // Inner cavity\n        translate([wall, wall, wall])\n            cube([w - wall*2, d - wall*2, h]);\n        // Stacking recess at bottom\n        translate([wall - 0.3, wall - 0.3, -0.1])\n            difference() {\n                cube([w - wall*2 + 0.6, d - wall*2 + 0.6, lip + 0.2]);\n                translate([wall + 0.3, wall + 0.3, -0.1])\n                    cube([w - wall*4, d - wall*4, lip + 0.4]);\n            }\n        // Label slot\n        if (label == 1) {\n            translate([w * 0.15, -0.1, h * 0.5])\n                cube([w * 0.7, wall + 0.2, h * 0.35]);\n        }\n    }\n}\n\nbin();"
+    "scad_template": "// Parametric Stackable Bin\nw = ${width};\nd = ${depth};\nh = ${height};\nwall = ${wall};\nlabel = ${label_slot};\n\nlip = 2;\n\nmodule bin() {\n    difference() {\n        union() {\n            // Outer shell\n            cube([w, d, h]);\n            // Stacking lip (extends above)\n            translate([wall, wall, h])\n                difference() {\n                    cube([w - wall * 2, d - wall * 2, lip]);\n                    translate([wall, wall, -0.1])\n                        cube([w - wall * 4, d - wall * 4, lip + 0.2]);\n                }\n        }\n        // Inner cavity; the floor sits above the stacking groove so\n        // a full wall thickness remains over it\n        translate([wall, wall, wall + lip + 0.2])\n            cube([w - wall * 2, d - wall * 2, h]);\n        // Stacking groove at the bottom: clears the lip of the bin\n        // below with 0.3 mm on both sides\n        translate([wall - 0.3, wall - 0.3, -0.1])\n            difference() {\n                cube([w - wall * 2 + 0.6, d - wall * 2 + 0.6, lip + 0.3]);\n                translate([wall + 0.6, wall + 0.6, -0.1])\n                    cube([w - wall * 4 - 0.6, d - wall * 4 - 0.6, lip + 0.5]);\n            }\n    }\n    // Label card pocket on the front wall: two L-rails and a ledge\n    // hold a paper card.  Undersides ramp at 45 degrees so the\n    // pocket prints without supports.\n    if (label == 1) {\n        card_w = w * 0.7;\n        card_x = w * 0.15;\n        pocket_lo = h * 0.45;\n        pocket_hi = h * 0.85;\n        rail_t = 2;\n        lip_t = 1.2;   // front lip thickness\n        gap = 1.2;     // card channel depth off the wall\n        prot = gap + lip_t;\n        rail_h = pocket_hi - pocket_lo;\n        for (side = [0, 1])\n            translate([side == 0 ? card_x - rail_t\n                                 : card_x + card_w + rail_t, 0, 0])\n            mirror([side, 0, 0]) {\n                // upright L-rail: stand-off leg plus a lip that\n                // traps the card edge in a channel against the wall\n                translate([0, 0, pocket_lo])\n                    linear_extrude(rail_h)\n                        polygon([[0, 0], [0, -prot],\n                                 [rail_t + 4, -prot],\n                                 [rail_t + 4, -gap],\n                                 [rail_t, -gap], [rail_t, 0]]);\n                // sloped transition from the wall to the rail bottom\n                hull() {\n                    translate([0, -prot, pocket_lo - 0.2])\n                        cube([rail_t + 4, prot, 0.2]);\n                    translate([0, -0.4, pocket_lo - prot])\n                        cube([rail_t + 4, 0.4, 0.2]);\n                }\n            }\n        // bottom ledge the card rests on, with the same slope back\n        // to the wall so it prints without supports\n        hull() {\n            translate([card_x, -prot, pocket_lo - 0.2])\n                cube([card_w, prot, 0.2]);\n            translate([card_x, -0.4, pocket_lo - prot])\n                cube([card_w, 0.4, 0.2]);\n        }\n    }\n}\n\nbin();"
   },
   "threaded_jar": {
     "display_name": "Threaded Jar with Lid",
@@ -957,7 +957,7 @@
   },
   "monitor_riser_shelf": {
     "display_name": "Monitor Riser Shelf",
-    "description": "Desktop monitor riser that fits over a keyboard. Parametric width, depth, and height.",
+    "description": "Monitor riser shelf. Prints upside down (shelf on the bed, legs up), no supports; flip over to use.",
     "category": "desk_accessories",
     "parameters": {
       "width": {
@@ -996,7 +996,7 @@
         "description": "Leg width"
       }
     },
-    "scad_template": "// Parametric Monitor Riser\nw = ${width};\nd = ${depth};\nh = ${height};\nt = ${thickness};\nlw = ${leg_width};\n\nmodule riser() {\n    // Top shelf\n    translate([0, 0, h - t])\n        cube([w, d, t]);\n    // Left leg\n    cube([lw, t, h]);\n    translate([0, d - t, 0])\n        cube([lw, t, h]);\n    // Right leg\n    translate([w - lw, 0, 0])\n        cube([lw, t, h]);\n    translate([w - lw, d - t, 0])\n        cube([lw, t, h]);\n    // Back panel for stability\n    translate([0, d - t, 0])\n        cube([w, t, h]);\n}\n\nriser();"
+    "scad_template": "// Parametric Monitor Riser\n// Prints upside down: shelf flat on the bed, legs and back panel\n// rising as plain walls.  Flip over to use.  No supports.\nw = ${width};\nd = ${depth};\nh = ${height};\nt = ${thickness};\nlw = ${leg_width};\n\nmodule riser() {\n    // Shelf (top surface in use) on the bed\n    cube([w, d, t]);\n    // Legs rising from the shelf\n    for (x = [0, w - lw]) {\n        translate([x, 0, t])\n            cube([lw, t, h - t]);\n        translate([x, d - t, t])\n            cube([lw, t, h - t]);\n    }\n    // Back panel for stability\n    translate([0, d - t, t])\n        cube([w, t, h - t]);\n}\n\nriser();"
   },
   "tablet_stand": {
     "display_name": "Tablet Stand",
@@ -1039,7 +1039,7 @@
         "description": "Front retaining lip"
       }
     },
-    "scad_template": "// Parametric Tablet Stand\nw = ${width};\nang = ${angle};\nbd = ${base_depth};\nt = ${thickness};\nlip = ${lip_height};\n\nback_h = bd * tan(ang - 45) + lip;\n\nmodule stand() {\n    // Base\n    cube([w, bd, t]);\n    // Front lip\n    cube([w, t, lip]);\n    // Back support\n    translate([0, bd - t, 0])\n        rotate([90 - ang, 0, 0])\n            cube([w, back_h, t]);\n    // Side triangles for rigidity\n    for (x = [0, w - t]) {\n        translate([x, 0, 0])\n            linear_extrude(height=t)\n                polygon([[0, t], [0, bd], [0, lip], [0, t]]);\n    }\n    // Cable slot (gap in back support)\n    // Represented by the gap between side supports\n}\n\nstand();"
+    "scad_template": "// Parametric Tablet Stand\n// Back support rises at the requested angle from mid-base; solid\n// side gussets brace it against tablet weight.\nw = ${width};\nang = ${angle};\nbd = ${base_depth};\nt = ${thickness};\nlip = ${lip_height};\n\nback_len = bd * 0.8;\nfoot_y = bd * 0.45;\ngusset = min(30, bd * 0.25);\n\nmodule stand() {\n    // Base\n    cube([w, bd, t]);\n    // Front lip\n    cube([w, t, lip]);\n    // Back support: inclined at `ang` above the bed, sunk into the\n    // base for a solid joint\n    translate([0, foot_y, t * cos(ang)])\n        rotate([ang - 90, 0, 0])\n            cube([w, t, back_len]);\n    // Side gussets (45-degree hypotenuse, printable)\n    for (x = [0, w - t])\n        translate([x, foot_y + t * 0.5, 0])\n            rotate([90, 0, 90])\n                linear_extrude(t)\n                    polygon([[0, 0], [gusset, 0], [0, gusset]]);\n}\n\nstand();"
   },
   "drill_bit_holder": {
     "display_name": "Drill Bit Organizer",
@@ -1226,7 +1226,7 @@
         "description": "Wall thickness"
       }
     },
-    "scad_template": "// Parametric Spice Rack\njd = ${jar_dia};\njpr = ${jars_per_row};\nrows = ${rows};\nsh = ${step_height};\nwall = ${wall};\n\ntotal_w = jpr * (jd + wall) + wall;\nrow_d = jd + wall * 2;\n\nmodule rack() {\n    for (r = [0:rows-1]) {\n        translate([0, r * row_d, r * sh]) {\n            difference() {\n                cube([total_w, row_d, wall + sh]);\n                // Jar recesses\n                for (j = [0:jpr-1]) {\n                    translate([wall + j * (jd + wall) + jd/2, row_d/2, wall])\n                        cylinder(h=sh+1, d=jd + 0.5, $fn=40);\n                }\n            }\n        }\n    }\n}\n\nrack();"
+    "scad_template": "// Parametric Spice Rack\n// Stepped tiers built as solid blocks that reach the bed, so every\n// tier is supported.  Jar recesses are cut from the top of each step.\njd = ${jar_dia};\njpr = ${jars_per_row};\nrows = ${rows};\nsh = ${step_height};\nwall = ${wall};\n\ntotal_w = jpr * (jd + wall) + wall;\nrow_d = jd + wall * 2;\n\nmodule rack() {\n    for (r = [0:rows - 1]) {\n        step_top = wall + sh + r * sh;\n        translate([0, r * row_d, 0])\n            difference() {\n                cube([total_w, row_d, step_top]);\n                // Jar recesses, sh deep from the top of the step\n                for (j = [0:jpr - 1]) {\n                    translate([wall + j * (jd + wall) + jd / 2,\n                               row_d / 2, step_top - sh])\n                        cylinder(h = sh + 1, d = jd + 0.5, $fn = 40);\n                }\n            }\n    }\n}\n\nrack();"
   },
   "bottle_opener": {
     "display_name": "Bottle Opener",
@@ -1331,7 +1331,7 @@
   },
   "cable_raceway_clip": {
     "display_name": "Cable Raceway Clip",
-    "description": "Snap-on clip for routing cables along desk edges or walls.",
+    "description": "Snap-in cable clip. Prints as an extruded profile, no supports, with layer lines wrapping the C for spring strength.",
     "category": "cable_management",
     "parameters": {
       "cable_dia": {
@@ -1363,7 +1363,7 @@
         "description": "Screw hole diameter"
       }
     },
-    "scad_template": "// Parametric Cable Raceway Clip\ncd = ${cable_dia};\nmw = ${mount_width};\nwall = ${wall};\nsh = ${screw_hole};\n\nor = cd/2 + wall;\nclip_w = mw;\n\nmodule clip() {\n    difference() {\n        union() {\n            // Mounting base\n            cube([clip_w, or * 2, wall]);\n            // Cable channel\n            translate([0, or, wall + or])\n                rotate([0, 90, 0])\n                    difference() {\n                        cylinder(h=clip_w, r=or, $fn=40);\n                        cylinder(h=clip_w, r=cd/2, $fn=40);\n                        // Entry slot (narrower than cable for snap fit)\n                        translate([or * 0.3, -or, 0])\n                            cube([or, or * 2, clip_w]);\n                    }\n        }\n        // Screw hole\n        translate([clip_w/2, or, -0.1])\n            cylinder(h=wall+0.2, d=sh, $fn=20);\n    }\n}\n\nclip();"
+    "scad_template": "// Parametric Cable Raceway Clip\n// The clip's cross-section (base, gusseted throat, snap C-ring) is\n// drawn as a 2D profile and extruded upward, so the whole part is\n// vertical walls on the bed -- no supports, and the layer lines run\n// around the C for maximum spring strength.\ncd = ${cable_dia};\nmw = ${mount_width};\nwall = ${wall};\nsh = ${screw_hole};\n\nor = cd / 2 + wall;\ncx = or;           // ring center x (over the base middle)\ncy = wall + or;    // ring center y (above the base)\nopen = or;         // entry slot width (narrower than the cable)\n\nmodule clip() {\n    difference() {\n        union() {\n            linear_extrude(mw)\n                union() {\n                    // Mounting base\n                    square([or * 2, wall]);\n                    // C-ring\n                    difference() {\n                        translate([cx, cy]) circle(r = or, $fn = 40);\n                        translate([cx, cy]) circle(r = cd / 2, $fn = 40);\n                        // Entry slot at the top\n                        translate([cx - open / 2, cy])\n                            square([open, or + 1]);\n                    }\n                    // Gusset joining ring to base\n                    translate([cx - or * 0.75, wall - 0.1])\n                        square([or * 1.5, or * 0.45]);\n                }\n        }\n        // Screw hole through the base\n        translate([cx, wall + 0.1, mw / 2])\n            rotate([90, 0, 0])\n                cylinder(h = wall + 0.2, d = sh, $fn = 20);\n    }\n}\n\nclip();"
   },
   "cable_grommet": {
     "display_name": "Desk Cable Grommet",
@@ -1466,7 +1466,7 @@
   },
   "rail_clamp": {
     "display_name": "Rail / Tube Clamp",
-    "description": "Clamp that grips round or square rails for mounting accessories.",
+    "description": "Split-ring rail clamp with cross bolt and mounting pad. Prints as an extruded profile, no supports.",
     "category": "mounts_and_adapters",
     "parameters": {
       "rail_dia": {
@@ -1505,7 +1505,7 @@
         "description": "Top mounting holes"
       }
     },
-    "scad_template": "// Parametric Rail Clamp\nrd = ${rail_dia};\ncw = ${clamp_width};\nwall = ${wall};\nbd = ${bolt_dia};\nmh = ${mount_holes};\n\nor = rd/2 + wall;\n\nmodule clamp() {\n    difference() {\n        union() {\n            // Clamp body\n            translate([0, 0, 0])\n                rotate([0, 90, 0])\n                    cylinder(h=cw, r=or, $fn=60);\n            // Mounting flat on top\n            translate([0, -or, or - wall])\n                cube([cw, or * 2, wall]);\n            // Bolt ears\n            translate([0, or - wall, -or])\n                cube([cw, wall * 2, or * 2]);\n        }\n        // Rail bore\n        translate([-0.1, 0, 0])\n            rotate([0, 90, 0])\n                cylinder(h=cw+0.2, d=rd+0.5, $fn=60);\n        // Split gap\n        translate([-0.1, or - 0.5, -or - 0.1])\n            cube([cw + 0.2, 1, or * 2 + 0.2]);\n        // Clamping bolt\n        translate([cw/2, or + wall, 0])\n            cylinder(h=or * 2, d=bd, $fn=20, center=true);\n        // Mounting holes on top\n        for (i = [1:mh]) {\n            translate([cw * i / (mh + 1), 0, or])\n                cylinder(h=wall + 0.2, d=bd, $fn=20);\n        }\n    }\n}\n\nclamp();"
+    "scad_template": "// Parametric Rail Clamp\n// The clamp's cross-section (split ring, bolt ears, mounting pad)\n// is a 2D profile extruded upward: every wall prints vertical, and\n// the clamping bolt crosses the split so tightening it actually\n// closes the ring.\nrd = ${rail_dia};\ncw = ${clamp_width};\nwall = ${wall};\nbd = ${bolt_dia};\nmh = ${mount_holes};\n\nor = rd / 2 + wall;\near_len = wall * 2 + bd;   // ears reach past the ring for the bolt\nslit = 1;\n\nmodule clamp() {\n    difference() {\n        linear_extrude(cw)\n            union() {\n                difference() {\n                    // Ring\n                    circle(r = or, $fn = 60);\n                    // Rail bore\n                    circle(d = rd + 0.5, $fn = 60);\n                }\n                // Bolt ears flanking the split, reaching +x\n                for (s = [-1, 1])\n                    translate([or * 0.6, s == 1 ? slit / 2 : -slit / 2 - wall])\n                        square([or * 0.4 + ear_len, wall]);\n                // Mounting pad: flat face at x = -or\n                translate([-or, -or * 0.7])\n                    square([wall * 1.2, or * 1.4]);\n            }\n        // Split gap through ring and between the ears\n        translate([or * 0.3, -slit / 2, -0.1])\n            cube([or + ear_len + 0.2, slit, cw + 0.2]);\n        // Clamping bolt across the split\n        translate([or + ear_len / 2, or, cw / 2])\n            rotate([90, 0, 0])\n                cylinder(h = or * 2, d = bd, $fn = 20);\n        // Mounting holes through the pad\n        for (i = [1:mh])\n            translate([-or - 0.1, 0, cw * i / (mh + 1)])\n                rotate([0, 90, 0])\n                    cylinder(h = wall * 1.4 + 0.2, d = bd * 0.8, $fn = 20);\n    }\n}\n\nclamp();"
   },
   "plant_label_stake": {
     "display_name": "Plant Label Stake",
@@ -1730,7 +1730,7 @@
   },
   "bench_dog": {
     "display_name": "Bench Dog",
-    "description": "Round bench dog peg for workbench holdfast holes.",
+    "description": "Bench dog with friction-fit spring slot. Prints head-down with a 45-degree flare, no supports.",
     "category": "workshop",
     "parameters": {
       "hole_dia": {
@@ -1762,7 +1762,7 @@
         "description": "Head/stop diameter"
       }
     },
-    "scad_template": "// Parametric Bench Dog\nhd = ${hole_dia};\nph = ${peg_height};\npd = ${peg_depth};\nhead = ${head_dia};\n\nspring_cut = 1;\n\nmodule dog() {\n    // Below-surface peg\n    difference() {\n        cylinder(h=pd, d=hd - 0.5, $fn=40);\n        // Spring slot for friction fit\n        translate([-spring_cut/2, -hd/2, 0])\n            cube([spring_cut, hd, pd * 0.7]);\n    }\n    // Shoulder/stop\n    translate([0, 0, pd])\n        cylinder(h=3, d=head, $fn=40);\n    // Above-surface head\n    translate([0, 0, pd + 3])\n        cylinder(h=ph - 3, d=head * 0.8, $fn=40);\n}\n\ndog();"
+    "scad_template": "// Parametric Bench Dog\n// Prints head-down: the wide head is on the bed, a 45-degree cone\n// flares out to the shoulder, and the peg rises last.  The\n// shoulder's seating face (which registers on the bench top in use)\n// prints as a flat top surface.\nhd = ${hole_dia};\nph = ${peg_height};\npd = ${peg_depth};\nhead = ${head_dia};\n\nspring_cut = 1;\nhead_d = head * 0.8;\ncone_h = (head - head_d) / 2 * 1.1;\n\nmodule dog() {\n    difference() {\n        union() {\n            // Above-surface head (on the bed)\n            cylinder(h = ph - 3, d = head_d, $fn = 40);\n            // Printable cone out to the shoulder\n            translate([0, 0, ph - 3])\n                cylinder(h = cone_h, d1 = head_d, d2 = head, $fn = 40);\n            // Shoulder; its top face seats on the bench in use\n            translate([0, 0, ph - 3 + cone_h])\n                cylinder(h = 3, d = head, $fn = 40);\n            // Below-surface peg\n            translate([0, 0, ph + cone_h])\n                cylinder(h = pd, d = hd - 0.5, $fn = 40);\n        }\n        // Spring slot for friction fit, cut down from the peg tip\n        translate([-spring_cut / 2, -hd / 2, ph + cone_h + pd * 0.3])\n            cube([spring_cut, hd, pd + 0.1]);\n    }\n}\n\ndog();"
   },
   "hose_barb_adapter": {
     "display_name": "Hose Barb Adapter",
@@ -1834,7 +1834,7 @@
         "description": "Strainer thickness"
       }
     },
-    "scad_template": "// Parametric Drain Strainer\ndd = ${drain_dia};\nrim = ${rim_width};\nslots = ${slot_count};\nt = ${thickness};\n\nod = dd + rim * 2;\nslot_w = 2;\n\nmodule strainer() {\n    difference() {\n        union() {\n            // Rim\n            cylinder(h=t, d=od, $fn=60);\n            // Recessed disc that sits inside drain\n            translate([0, 0, -3])\n                cylinder(h=3, d=dd - 1, $fn=60);\n        }\n        // Radial slots\n        for (a = [0:360/slots:359]) {\n            rotate([0, 0, a])\n                translate([-slot_w/2, 5, -3.1])\n                    cube([slot_w, dd/2 - 8, t + 3.2]);\n        }\n        // Center hole\n        translate([0, 0, -3.1])\n            cylinder(h=t + 3.2, d=8, $fn=20);\n    }\n}\n\nstrainer();"
+    "scad_template": "// Parametric Drain Strainer\n// The recessed disc sits in the drain; a 45-degree cone joins it to\n// the rim, so the rim underside prints without supports and the\n// strainer self-centers in the drain.\ndd = ${drain_dia};\nrim = ${rim_width};\nslots = ${slot_count};\nt = ${thickness};\n\nod = dd + rim * 2;\nslot_w = 2;\ncone_h = (od - (dd - 1)) / 2 * 1.1;  // slightly steeper than 45\n\nmodule strainer() {\n    difference() {\n        union() {\n            // Recessed disc that sits inside the drain\n            cylinder(h = 3, d = dd - 1, $fn = 60);\n            // Printable cone transition out to the rim\n            translate([0, 0, 3])\n                cylinder(h = cone_h, d1 = dd - 1, d2 = od, $fn = 60);\n            // Rim\n            translate([0, 0, 3 + cone_h])\n                cylinder(h = t, d = od, $fn = 60);\n        }\n        // Radial slots, kept inside the recessed disc.  The inner\n        // start radius grows with slot count so neighboring slots\n        // never merge near the center.\n        slot_r0 = max(5, slots * slot_w / 6.28 * 1.3);\n        for (a = [0:360 / slots:359]) {\n            rotate([0, 0, a])\n                translate([-slot_w / 2, slot_r0, -0.1])\n                    cube([slot_w, max(2, dd / 2 - 3 - slot_r0),\n                          3 + cone_h + t + 0.2]);\n        }\n        // Center hole\n        translate([0, 0, -0.1])\n            cylinder(h = 3 + cone_h + t + 0.2, d = 8, $fn = 20);\n    }\n}\n\nstrainer();"
   },
   "raspberry_pi_case": {
     "display_name": "Raspberry Pi Case",
@@ -1877,7 +1877,7 @@
         "description": "Include ventilation slots (1=yes)"
       }
     },
-    "scad_template": "// Parametric RPi Case\n// Two parts printed side by side, both open-face-up so neither has\n// an unsupported ceiling.  Flip the lid over onto the base to close.\n// Mounting standoffs follow the official Pi mechanical drawing:\n// 58 x 49 mm hole pattern, 3.5 mm from the SD-card end and 3.5 mm\n// from each long edge.\nbw = ${board_width};\nbd = ${board_depth};\nbh = ${board_height};\nwall = ${wall};\nvents = ${vent_slots};\n\nclear = 1;\now = bw + clear * 2 + wall * 2;\nod = bd + clear * 2 + wall * 2;\noh = bh + wall * 2 + 3;\n// Official hole pattern (85x56 board): inset 3.5 from the SD end,\n// spans 58 along the board; 3.5 from each long edge, spanning 49.\nhole_span_y = 58;\nhole_inset = 3.5;\n\nmodule standoff() {\n    difference() {\n        cylinder(h = 3, d = 6, $fn = 20);\n        translate([0, 0, -0.1])\n            cylinder(h = 3.2, d = 2.7, $fn = 20);\n    }\n}\n\nmodule case_bottom() {\n    difference() {\n        cube([ow, od, oh / 2]);\n        translate([wall, wall, wall])\n            cube([bw + clear * 2, bd + clear * 2, oh]);\n        // Power / HDMI cutout (long side)\n        translate([ow - wall - 0.1, wall + clear + 5, wall + 3])\n            cube([wall + 0.2, 45, 10]);\n        // SD card slot (short side, SD end); 45-degree peaked top\n        // so the wall above it prints without a bridge\n        translate([wall + bw / 2 - 6, -0.1, wall])\n            cube([12, wall + 0.2, 3]);\n        translate([wall + bw / 2, wall + 0.1, wall + 3])\n            rotate([90, 0, 0])\n                linear_extrude(wall + 0.2)\n                    polygon([[-6, 0], [6, 0], [0, 6]]);\n        // USB / Ethernet opening (short side opposite the SD end),\n        // open through the top edge\n        translate([wall + clear + 2, od - wall - 0.1, wall + 2])\n            cube([bw - 4, wall + 0.2, oh]);\n        // Ventilation: slots run through the top (mating) edge so\n        // they print without ceilings\n        if (vents == 1) {\n            for (y = [wall + 5 : 4 : od - wall - 5]) {\n                translate([-0.1, y, wall + 2])\n                    cube([wall + 0.2, 2, oh / 2]);\n            }\n        }\n    }\n    // PCB standoffs on the official hole pattern\n    for (x = [wall + clear + hole_inset, wall + clear + bw - hole_inset])\n        for (y = [wall + clear + hole_inset,\n                  wall + clear + min(hole_inset + hole_span_y,\n                                     bd - hole_inset)])\n            translate([x, y, wall])\n                standoff();\n}\n\nmodule case_top() {\n    // Printed roof-down (open face up); flip over onto the base.\n    translate([ow + 10, 0, 0]) {\n        difference() {\n            cube([ow, od, oh / 2]);\n            translate([wall, wall, wall])\n                cube([bw + clear * 2, bd + clear * 2, oh / 2]);\n            // USB / Ethernet notch: printed y-min wall lands on the\n            // USB face when the lid is flipped over onto the base\n            translate([wall + clear + 2, -0.1, oh / 2 - 10])\n                cube([bw - 4, wall + 0.2, 10.1]);\n        }\n    }\n}\n\ncase_bottom();\ncase_top();"
+    "scad_template": "// Parametric RPi Case\n// Two parts printed side by side, both open-face-up so neither has\n// an unsupported ceiling.  Flip the lid over onto the base to close.\n// Mounting standoffs follow the official Pi mechanical drawing:\n// 58 x 49 mm hole pattern, 3.5 mm from the SD-card end and 3.5 mm\n// from each long edge.\nbw = ${board_width};\nbd = ${board_depth};\nbh = ${board_height};\nwall = ${wall};\nvents = ${vent_slots};\n\nclear = 1;\now = bw + clear * 2 + wall * 2;\nod = bd + clear * 2 + wall * 2;\noh = bh + wall * 2 + 3;\n// Official hole pattern (85x56 board): inset 3.5 from the SD end,\n// spans 58 along the board; 3.5 from each long edge, spanning 49.\nhole_span_y = 58;\nhole_inset = 3.5;\n\nmodule standoff() {\n    difference() {\n        cylinder(h = 3, d = 6, $fn = 20);\n        translate([0, 0, -0.1])\n            cylinder(h = 3.2, d = 2.7, $fn = 20);\n    }\n}\n\nmodule case_bottom() {\n    difference() {\n        cube([ow, od, oh / 2]);\n        translate([wall, wall, wall])\n            cube([bw + clear * 2, bd + clear * 2, oh]);\n        // Power / HDMI cutout (long side)\n        translate([ow - wall - 0.1, wall + clear + 5, wall + 3])\n            cube([wall + 0.2, 45, oh]);\n        // SD card slot (short side, SD end); 45-degree peaked top\n        // so the wall above it prints without a bridge\n        translate([wall + bw / 2 - 6, -0.1, wall])\n            cube([12, wall + 0.2, 3]);\n        translate([wall + bw / 2, wall + 0.1, wall + 3])\n            rotate([90, 0, 0])\n                linear_extrude(wall + 0.2)\n                    polygon([[-6, 0], [6, 0], [0, 6]]);\n        // USB / Ethernet opening (short side opposite the SD end),\n        // open through the top edge\n        translate([wall + clear + 2, od - wall - 0.1, wall + 2])\n            cube([bw - 4, wall + 0.2, oh]);\n        // Ventilation: slots run through the top (mating) edge so\n        // they print without ceilings\n        if (vents == 1) {\n            for (y = [wall + 5 : 4 : od - wall - 5]) {\n                translate([-0.1, y, wall + 2])\n                    cube([wall + 0.2, 2, oh / 2]);\n            }\n        }\n    }\n    // PCB standoffs on the official hole pattern\n    for (x = [wall + clear + hole_inset, wall + clear + bw - hole_inset])\n        for (y = [wall + clear + hole_inset,\n                  wall + clear + min(hole_inset + hole_span_y,\n                                     bd - hole_inset)])\n            translate([x, y, wall])\n                standoff();\n}\n\nmodule case_top() {\n    // Printed roof-down (open face up); flip over onto the base.\n    translate([ow + 10, 0, 0]) {\n        difference() {\n            cube([ow, od, oh / 2]);\n            translate([wall, wall, wall])\n                cube([bw + clear * 2, bd + clear * 2, oh / 2]);\n            // USB / Ethernet notch: printed y-min wall lands on the\n            // USB face when the lid is flipped over onto the base\n            translate([wall + clear + 2, -0.1, oh / 2 - 10])\n                cube([bw - 4, wall + 0.2, 10.1]);\n        }\n    }\n}\n\ncase_bottom();\ncase_top();"
   },
   "switch_panel": {
     "display_name": "Switch Panel",
@@ -2046,7 +2046,7 @@
   },
   "cable_wrap_guide": {
     "display_name": "Cable Wrap Guide",
-    "description": "Spiral guide for neatly wrapping excess cable length. Mounts to desk or wall.",
+    "description": "Cable spool in two parts printed side by side; the mounting screw clamps the top flange onto the hub. No supports.",
     "category": "cable_management",
     "parameters": {
       "spool_dia": {
@@ -2085,11 +2085,11 @@
         "description": "Mounting hole diameter"
       }
     },
-    "scad_template": "// Cable Wrap Guide\nsd = ${spool_dia};\nsw = ${spool_width};\ncs = ${cable_slot};\nwall = ${wall};\nmh = ${mount_holes};\n\nmodule spool() {\n    difference() {\n        union() {\n            // Side walls\n            cylinder(h=wall, d=sd, $fn=50);\n            translate([0, 0, sw + wall])\n                cylinder(h=wall, d=sd, $fn=50);\n            // Hub\n            cylinder(h=sw + wall*2, d=sd/3, $fn=40);\n        }\n        // Center hole\n        translate([0, 0, -0.1])\n            cylinder(h=sw + wall*2 + 0.2, d=mh, $fn=20);\n        // Cable entry slot\n        translate([0, -cs/2, -0.1])\n            cube([sd/2+1, cs, sw + wall*2 + 0.2]);\n    }\n}\n\nspool();"
+    "scad_template": "// Cable Wrap Guide\n// Two parts printed side by side: the spool body (bottom flange +\n// hub) and a separate top flange disc.  The mounting screw passes\n// through both and clamps the flange on when the spool is mounted;\n// a shallow boss on the hub locates the flange concentrically.\nsd = ${spool_dia};\nsw = ${spool_width};\ncs = ${cable_slot};\nwall = ${wall};\nmh = ${mount_holes};\n\nhub_d = sd / 3;\nboss_h = 1.6;\n\nmodule spool_body() {\n    difference() {\n        union() {\n            // Bottom flange\n            cylinder(h = wall, d = sd, $fn = 50);\n            // Hub; the top 1.6 mm acts as a locating boss for the\n            // top flange\n            cylinder(h = wall + sw + boss_h, d = hub_d, $fn = 40);\n        }\n        // Center screw hole\n        translate([0, 0, -0.1])\n            cylinder(h = wall + sw + boss_h + 0.2, d = mh, $fn = 20);\n        // Cable entry slot through hub and flange\n        translate([0, -cs / 2, -0.1])\n            cube([sd / 2 + 1, cs, wall + sw + boss_h + 0.2]);\n    }\n}\n\nmodule top_flange() {\n    difference() {\n        cylinder(h = wall + boss_h, d = sd, $fn = 50);\n        // Locating recess that drops over the hub boss\n        translate([0, 0, wall])\n            cylinder(h = boss_h + 0.1, d = hub_d + 0.4, $fn = 40);\n        // Center screw hole\n        translate([0, 0, -0.1])\n            cylinder(h = wall + boss_h + 0.2, d = mh, $fn = 20);\n    }\n}\n\nspool_body();\ntranslate([sd + 10, 0, 0])\n    top_flange();"
   },
   "clamp_pad": {
     "display_name": "Soft Jaw Clamp Pad",
-    "description": "Protective jaw pad for bench vises — prevents marring delicate workpieces.",
+    "description": "Soft jaw pad that slips over metal vise jaws. Prints face-down, no supports.",
     "category": "workshop",
     "parameters": {
       "jaw_width": {
@@ -2121,7 +2121,7 @@
         "description": "Face thickness"
       }
     },
-    "scad_template": "// Soft Jaw Clamp Pad\njw = ${jaw_width};\njh = ${jaw_height};\nd = ${depth};\nt = ${thickness};\n\nmodule pad() {\n    // Front face\n    cube([jw, t, jh]);\n    // Wrap-around grip\n    translate([0, 0, 0])\n        cube([jw, d, t]);\n    translate([0, 0, jh-t])\n        cube([jw, d, t]);\n    // Side retainers\n    cube([t, d, jh]);\n    translate([jw-t, 0, 0])\n        cube([t, d, jh]);\n}\n\npad();"
+    "scad_template": "// Soft Jaw Clamp Pad\n// Prints face-down: the pad face lies flat on the bed and the\n// wrap-around grips rise as vertical walls.  No supports.\njw = ${jaw_width};\njh = ${jaw_height};\nd = ${depth};\nt = ${thickness};\n\nmodule pad() {\n    // Pad face on the bed\n    cube([jw, jh, t]);\n    // Wrap-around grips (top and bottom edges of the jaw)\n    translate([0, 0, t])\n        cube([jw, t, d - t]);\n    translate([0, jh - t, t])\n        cube([jw, t, d - t]);\n    // Side retainers\n    translate([0, 0, t])\n        cube([t, jh, d - t]);\n    translate([jw - t, 0, t])\n        cube([t, jh, d - t]);\n}\n\npad();"
   },
   "dowel_jig": {
     "display_name": "Dowel Jig",
@@ -2168,7 +2168,7 @@
   },
   "birdhouse_panel": {
     "display_name": "Birdhouse Front Panel",
-    "description": "Replacement front panel for birdhouses with configurable entry hole and perch.",
+    "description": "Birdhouse front panel with entry hole and integrated perch. Prints flat on its back, no supports.",
     "category": "garden",
     "parameters": {
       "width": {
@@ -2207,7 +2207,7 @@
         "description": "Perch dowel diameter"
       }
     },
-    "scad_template": "// Birdhouse Front Panel\nw = ${width};\nh = ${height};\ned = ${entry_dia};\nt = ${thickness};\npd = ${perch_dia};\n\nmodule panel() {\n    difference() {\n        // Panel with peaked top\n        hull() {\n            cube([w, t, h - w/4]);\n            translate([w/2, 0, h])\n                rotate([-90, 0, 0])\n                    cylinder(h=t, r=0.1, $fn=4);\n        }\n        // Entry hole\n        translate([w/2, -0.1, h*0.6])\n            rotate([-90, 0, 0])\n                cylinder(h=t+0.2, d=ed, $fn=40);\n        // Perch hole\n        translate([w/2, -0.1, h*0.6 - ed/2 - 15])\n            rotate([-90, 0, 0])\n                cylinder(h=t+0.2, d=pd+0.3, $fn=20);\n    }\n    // Perch dowel\n    translate([w/2, -15, h*0.6 - ed/2 - 15])\n        rotate([-90, 0, 0])\n            cylinder(h=15+t+10, d=pd, $fn=20);\n}\n\npanel();"
+    "scad_template": "// Birdhouse Front Panel\n// Prints flat on its back: the panel is a 2D outline extruded to\n// thickness, and the perch is a vertical post fused to the panel.\nw = ${width};\nh = ${height};\ned = ${entry_dia};\nt = ${thickness};\npd = ${perch_dia};\n\nmodule panel() {\n    difference() {\n        // Panel with peaked top, lying flat\n        linear_extrude(t)\n            polygon([[0, 0], [w, 0], [w, h - w / 4],\n                     [w / 2, h], [0, h - w / 4]]);\n        // Entry hole\n        translate([w / 2, h * 0.6, -0.1])\n            cylinder(h = t + 0.2, d = ed, $fn = 40);\n    }\n    // Perch: vertical post fused to the panel front\n    translate([w / 2, h * 0.6 - ed / 2 - 15, 0])\n        cylinder(h = t + 15, d = pd, $fn = 20);\n}\n\npanel();"
   },
   "gear_spur": {
     "display_name": "Spur Gear",
@@ -2286,7 +2286,7 @@
         "description": "Flange outer diameter"
       }
     },
-    "scad_template": "// GT2 Timing Pulley\nnt = ${teeth};\nbd = ${bore_dia};\nbw = ${belt_width};\nfd = ${flange_dia};\n\npitch = 2; // GT2 = 2mm pitch\npr = nt * pitch / (2 * 3.14159);\nor = pr + 0.25;\nfh = 1.5; // flange height\n\nmodule pulley() {\n    difference() {\n        union() {\n            // Bottom flange\n            cylinder(h=fh, d=fd, $fn=50);\n            // Toothed section\n            translate([0, 0, fh])\n                cylinder(h=bw, r=or, $fn=nt*2);\n            // Top flange\n            translate([0, 0, fh + bw])\n                cylinder(h=fh, d=fd, $fn=50);\n        }\n        // Bore\n        translate([0, 0, -0.1])\n            cylinder(h=bw + fh*2 + 0.2, d=bd, $fn=30);\n        // Teeth grooves (simplified)\n        for (i = [0:nt-1])\n            rotate([0, 0, i * 360/nt])\n                translate([pr, 0, fh - 0.1])\n                    cylinder(h=bw+0.2, d=1, $fn=10);\n    }\n}\n\npulley();"
+    "scad_template": "// GT2 Timing Pulley\nnt = ${teeth};\nbd = ${bore_dia};\nbw = ${belt_width};\nfd = ${flange_dia};\n\npitch = 2; // GT2 = 2mm pitch\npr = nt * pitch / (2 * 3.14159);\nor = pr + 0.25;\n// Flanges must clear the tooth barrel or the barrel overhangs them\nfde = max(fd, (or + 1.5) * 2);\nfh = 1.5; // flange height\n// 45-degree cone joining the barrel to the top flange, so the\n// flange underside prints without supports\ncone_h = max(0.6, (fde / 2 - or) * 1.1);\n\nmodule pulley() {\n    difference() {\n        union() {\n            // Bottom flange\n            cylinder(h = fh, d = fde, $fn = 50);\n            // Toothed section\n            translate([0, 0, fh])\n                cylinder(h = bw, r = or, $fn = nt * 2);\n            // Printable cone up to the top flange\n            translate([0, 0, fh + bw])\n                cylinder(h = cone_h, r1 = or, r2 = fde / 2, $fn = 50);\n            // Top flange\n            translate([0, 0, fh + bw + cone_h])\n                cylinder(h = fh, d = fde, $fn = 50);\n        }\n        // Bore\n        translate([0, 0, -0.1])\n            cylinder(h = bw + fh * 2 + cone_h + 0.2, d = bd, $fn = 30);\n        // Teeth grooves (simplified)\n        for (i = [0:nt - 1])\n            rotate([0, 0, i * 360 / nt])\n                translate([pr, 0, fh - 0.1])\n                    cylinder(h = bw + 0.2, d = 1, $fn = 10);\n    }\n}\n\npulley();"
   },
   "z_axis_guide": {
     "display_name": "Z-Axis Endstop Mount",
