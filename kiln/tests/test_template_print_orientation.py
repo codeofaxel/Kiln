@@ -105,9 +105,78 @@ class TestFlatRebuilds:
         assert "linear_extrude(t)" in s
         assert "pd + 0.3" not in s  # the old floating-dowel clearance
 
-    def test_clamp_pad_prints_face_down(self, templates):
+    def test_clamp_pad_prints_face_down_and_clears_the_jaw(self, templates):
+        """The old grips wrapped inward: the pocket was 2 x thickness
+        SMALLER than the jaw it had to slip over."""
         s = scad(templates, "clamp_pad")
-        assert "cube([jw, jh, t]);" in s
+        assert "cube([fw, fh, t]);" in s
+        assert "jw + 2 * t + 0.6" in s
+
+
+class TestCriticSweepRepairs:
+    """Pins for the 2026-08-26 function-critique sweep: 23 templates
+    printed beautifully and could not do their jobs — buried fasteners,
+    parts that could never assemble, features erased by later booleans.
+    Each pin holds the load-bearing line of one repair."""
+
+    def test_gear_bore_cannot_swallow_the_root_disc(self, templates):
+        assert "bd_eff" in scad(templates, "gear_spur")
+
+    def test_wrench_mouth_admits_the_bolt(self, templates):
+        assert "square([head_r + 1, jaw]);" in scad(templates, "wrench")
+
+    def test_bin_cavity_stops_below_the_stacking_lip(self, templates):
+        assert "h - wall - lip - 0.2]);" in scad(templates, "stackable_bin")
+
+    def test_hinge_box_hinges_at_rim_level(self, templates):
+        s = scad(templates, "hinge_box")
+        assert "half_h - hinge_t" in s
+        assert "module tray()" in s
+
+    def test_stand_faces_pass_through_the_lip(self, templates):
+        assert "foot_y = max(2," in scad(templates, "phone_stand")
+        assert "foot_y = max(2," in scad(templates, "tablet_stand")
+
+    def test_rail_clamp_bore_stays_clear(self, templates):
+        s = scad(templates, "rail_clamp")
+        assert "bore_r + 0.75" in s
+        assert "or - bore_r - 0.3" in s
+
+    def test_servo_screws_live_in_the_apron(self, templates):
+        assert "cd + apron" in scad(templates, "servo_bracket")
+
+    def test_grommet_snap_engages_past_the_desk(self, templates):
+        assert "translate([0, 0, flange_t + dt])" in scad(templates, "cable_grommet")
+        assert "d = hd - 0.4" in scad(templates, "cable_grommet")
+
+    def test_scoop_cavity_is_cut_after_the_handle(self, templates):
+        s = scad(templates, "measuring_scoop")
+        assert s.index("hull()") < s.index("cylinder(h = depth + 0.1")
+
+    def test_pulley_grooves_admit_a_gt2_tooth(self, templates):
+        assert "d = 1.6" in scad(templates, "pulley_gt2")
+
+    def test_vent_hook_passes_its_own_slot(self, templates):
+        assert "hook_drop = 1.6" in scad(templates, "phone_vent_mount")
+
+    def test_pi_lid_carries_a_registration_tongue(self, templates):
+        assert "Registration tongue" in scad(templates, "raspberry_pi_case")
+
+    def test_nozzle_sockets_measure_across_flats(self, templates):
+        assert "/ cos(30)" in scad(templates, "nozzle_rack")
+
+    def test_din_clip_channel_is_open_and_sprung(self, templates):
+        s = scad(templates, "din_rail_clip")
+        assert "module profile()" in s
+        assert "Spring relief" in s
+
+    def test_raceway_screw_reaches_through_the_gusset(self, templates):
+        assert "cy - cd / 2 + 0.1" in scad(templates, "cable_raceway_clip")
+
+    def test_corner_brace_webs_leave_the_holes_clear(self, templates):
+        s = scad(templates, "corner_brace")
+        assert "for (y = [0, w - 3])" in s
+        assert "[t, 0, 0]" not in s   # the old invalid 3D vertex
 
 
 class TestSpoolHolderRails:
@@ -241,7 +310,7 @@ class TestSecondSweep:
     def test_chain_link_channel_is_open(self, templates):
         """The old cable channel was a sealed internal cavity."""
         s = scad(templates, "cable_chain_link")
-        assert "cube([ll, ow, wall]);" in s          # floor, open top
+        assert "cube([ll - mouth, ow, wall]);" in s  # floor stops at the mouth
         assert "cube([ll - wall*2, iw, ih])" not in s  # sealed void
         assert "pd + 0.4" in s                        # real pin holes
 
