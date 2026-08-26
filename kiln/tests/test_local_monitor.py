@@ -15,6 +15,8 @@ The properties worth defending mirror the stage's, plus this door's own:
 
 from __future__ import annotations
 
+import json
+
 import anyio
 import pytest
 
@@ -272,6 +274,140 @@ class TestComposeLocalPayload:
         without = local_monitor.compose_local_payload(include_camera=False)
         assert with_cam["camera"] == {"image_base64": "QUJD"}
         assert "camera" not in without
+
+
+class TestTheAccountAxisAsksForAnAccountNotACredential:
+    """The rope must fire for a stranger and never for a member.
+
+    Measured 2026-08-25: a signed-in enterprise account whose refresh had
+    been rejected the day before resolved to NO bearer.  Gating on the
+    bearer would have shown the panel's own owner the sign-in
+    invitation — and would rope every user the moment they went offline,
+    in a panel that is direct and never calls the API at all.
+    """
+
+    _real_signed_in = staticmethod(local_monitor._signed_in)
+
+    @pytest.fixture(autouse=True)
+    def _isolated_auth(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+        monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+        (tmp_path / ".kiln").mkdir(parents=True, exist_ok=True)
+        return tmp_path / ".kiln" / "auth_tokens.json"
+
+    def test_no_account_on_this_machine_is_signed_out(self):
+        assert self._real_signed_in() is False
+
+    def test_a_completed_signin_is_signed_in(self, _isolated_auth):
+        _isolated_auth.write_text(
+            json.dumps({"auth_uid": "abc", "email": "a@b.com"}), encoding="utf-8"
+        )
+        assert self._real_signed_in() is True
+
+    def test_a_lapsed_session_is_still_an_account(self, _isolated_auth):
+        """The regression this class exists for: refresh rejected, access
+        token stale — still the same person, still their panel."""
+        _isolated_auth.write_text(
+            json.dumps(
+                {
+                    "auth_uid": "abc",
+                    "email": "adam@example.com",
+                    "tier": "enterprise",
+                    "refresh_rejected_at": "2026-08-24T22:06:33Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert self._real_signed_in() is True
+
+        from kiln.auth_session import resolve_api_bearer
+
+        assert not resolve_api_bearer().token, (
+            "precondition: this state has no usable bearer — which is "
+            "exactly why the axis must not ask for one"
+        )
+
+    def test_an_operator_license_counts_as_an_account(self, monkeypatch):
+        monkeypatch.setenv("KILN_LICENSE_KEY", "kiln_live_whatever")
+        assert self._real_signed_in() is True
+
+    def test_a_corrupt_token_file_reads_as_signed_out_without_raising(
+        self, _isolated_auth
+    ):
+        _isolated_auth.write_text("{not json", encoding="utf-8")
+        assert self._real_signed_in() is False
+
+
+class TestTheStatusRefusalIsUnwrappedFromTheRealShape:
+    """The failure axis, driven through the REAL ``_direct_status`` against
+    ``printer_status``'s REAL refusal shape.
+
+    The composition test above stubs ``_direct_status`` wholesale, which is
+    precisely how the nesting bug reached a live machine: ``_error_dict``
+    returns ``{"success": false, "error": {code, message, retryable}}``,
+    the door read ``error`` as a string, and the panel — which tells "no
+    printer configured" from "printer offline" by reading ``code`` and
+    ``message`` — got a dict and a fallback word.  A user with no printer
+    set up was shown the remedy for an unplugged one.
+    """
+
+    #: Captured before the autouse stub replaces the module attribute.
+    _real_direct_status = staticmethod(local_monitor._direct_status)
+
+    def _refuse(self, monkeypatch, answer):
+        import kiln.server as server
+
+        monkeypatch.setattr(
+            server, "printer_status", lambda printer_name=None, detail=None: answer
+        )
+        return self._real_direct_status(None)
+
+    def test_the_nested_error_dict_unwraps_to_code_and_sentence(self, monkeypatch):
+        """Built with the server's OWN ``_error_dict``, so a change to that
+        shape breaks this loudly instead of silently re-nesting."""
+        from kiln.server import _error_dict
+
+        answer = _error_dict(
+            "Failed to get printer status: No printer configured. Set "
+            "KILN_PRINTER_HOST environment variable to the printer URL.",
+            code="ERROR",
+        )
+        status, failure = self._refuse(monkeypatch, answer)
+
+        assert status is None
+        assert failure["code"] == "ERROR", "the real code must survive, not a fallback"
+        assert isinstance(failure["message"], str), (
+            "a dict here renders as '[object Object]' in the panel"
+        )
+        # The panel's own no-printer test is a substring check on this
+        # sentence; pin that it can still match.
+        assert "no printer configured" in failure["message"].lower()
+
+    def test_a_named_printer_refusal_carries_its_own_code(self, monkeypatch):
+        from kiln.server import _error_dict
+
+        _, failure = self._refuse(
+            monkeypatch, _error_dict("Printer 'x' not found.", code="NOT_FOUND")
+        )
+        assert failure == {"code": "NOT_FOUND", "message": "Printer 'x' not found."}
+
+    def test_a_flat_refusal_still_reads(self, monkeypatch):
+        """Any other caller's flat shape must not regress into the fallback."""
+        _, failure = self._refuse(
+            monkeypatch,
+            {"success": False, "code": "PRINTER_NOT_FOUND", "error": "Nope."},
+        )
+        assert failure == {"code": "PRINTER_NOT_FOUND", "message": "Nope."}
+
+    def test_a_shapeless_refusal_falls_back_without_crashing(self, monkeypatch):
+        _, failure = self._refuse(monkeypatch, {"success": False})
+        assert failure["code"] == "TOOL_FAILURE"
+        assert isinstance(failure["message"], str)
+
+    def test_a_success_answer_is_the_status_axis(self, monkeypatch):
+        answer = {"success": True, "printer": {"state": "idle", "connected": True}}
+        status, failure = self._refuse(monkeypatch, answer)
+        assert failure is None and status is answer
 
 
 class TestTheRoomCameraRule:

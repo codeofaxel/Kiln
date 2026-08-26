@@ -28,6 +28,29 @@ heartbeat that keeps the panel current.  Re-measuring that constraint is
 what the diagnostics verb below exists for: if a current host grants the
 callback, the panel live-polls and the ride-along becomes the fallback.
 
+THE ONE PROCESS THAT OWNS THE PRINTER
+-------------------------------------
+Measured 2026-08-25 against a real Bambu A1, with sixteen ``kiln serve``
+processes alive on one machine: the printer answered ping with no loss
+while this door's own status read said ``connected: false, state:
+"offline"`` — and ``lsof`` showed why.  Only four or five processes held
+an ESTABLISHED TCP session to the printer's MQTT port; every other one sat
+in SYN_SENT.  The machine does not REFUSE the extra connections (no RST,
+which would be a fast, legible error); it silently ignores the SYN, so a
+losing process retries until it times out and then honestly reports the
+printer offline.  Trimming back to three servers moved a starved process
+to ESTABLISHED in about twelve seconds, and the same status read returned
+the live machine.
+
+So the constraint is a small connection CEILING, not the single slot it
+was first written up as — and the consequence for this module is the same
+either way, only firmer: the panel must be served by a process that
+ALREADY holds a session to the printer.  Spawning a sibling process to
+serve a monitor is the one implementation that cannot work, because the
+sibling is exactly the process the ceiling starves.  That is why this door
+lives inside the server that owns the connection, and why its status axis
+is a direct in-process read rather than a call to anything else.
+
 THE ACCOUNT AXIS
 ----------------
 The panel is free; using it live asks for the free Kiln account.  The
@@ -163,17 +186,37 @@ def _host_renders_apps(mcp: Any, ctx: Any = None) -> bool:
 
 
 def _signed_in() -> bool:
-    """Whether this machine holds a Kiln sign-in — the account axis.
+    """Whether this machine has a Kiln ACCOUNT — the account axis.
 
-    The same resolver ``monitor_twin.publish`` uses; never raises.  An
-    unreadable auth state reads as signed out, which renders the sign-in
-    invitation — the recoverable wrong answer, since the next result
-    re-resolves.
+    Deliberately NOT ``resolve_api_bearer().token``, which is the question
+    "can I call the API right now".  Measured 2026-08-25 on a real
+    machine: a signed-in enterprise account whose refresh had been
+    rejected the previous day resolved to no bearer, and this panel would
+    have shown its own owner the sign-in invitation.  A lapsed session and
+    a stranger are not the same person, and the codebase already knows the
+    difference (``auth_session._signin_hint`` speaks to the first).
+
+    The deeper reason the bearer is the wrong question: this door is
+    DIRECT.  It reads the printer in-process and never calls the API at
+    all, so gating it on a live bearer gates a local capability on the
+    network — which would rope every user the moment they went offline,
+    in a panel whose whole point is that it works without the cloud.  A
+    session that needs renewing is surfaced where a bearer is actually
+    required (publishing, hosted calls), not here.
+
+    So: an operator license, or a completed sign-in on disk.  No network,
+    no refresh, no raising — an unreadable auth state reads as no account,
+    which is recoverable because the next result re-resolves it.
     """
     try:
-        from kiln.auth_session import resolve_api_bearer
+        if (os.environ.get("KILN_LICENSE_KEY") or "").strip():
+            return True
+        from kiln.auth_session import _read_tokens
 
-        return bool(resolve_api_bearer().token)
+        stored = _read_tokens()
+        # The identity, not the credential: either field means someone
+        # completed a sign-in on this machine.
+        return bool(stored.get("auth_uid") or stored.get("email"))
     except Exception:  # noqa: BLE001 — auth trouble is not a monitor failure
         logger.debug("monitor account axis unresolved", exc_info=True)
         return False
@@ -191,14 +234,31 @@ def _direct_status(printer_name: str | None) -> tuple[dict | None, dict | None]:
     same tool the hosted door relays — so the panel sees one shape on every
     door.  Imported lazily from the server module, which is importable by
     the time anything calls this (it installed us).
+
+    The refusal is UNWRAPPED here, because ``_error_dict`` nests it:
+    ``{"success": false, "error": {"code", "message", "retryable"}}``.
+    Reading ``error`` as a string put a dict in the failure's ``message``
+    and the fallback word in its ``code`` — and the panel resolver, which
+    tells "no printer configured" from "printer offline" by reading
+    exactly those two, then showed a user with no printer set up the
+    remedy for an unplugged one (measured against a real machine
+    2026-08-25).  Both shapes are accepted: a flat refusal from any other
+    caller still reads correctly.
     """
     from kiln.server import printer_status
 
     answer = printer_status(printer_name=printer_name, detail="lite")
     if isinstance(answer, dict) and answer.get("success") is False:
+        err = answer.get("error")
+        if isinstance(err, dict):
+            code = err.get("code")
+            message = err.get("message")
+        else:
+            code = answer.get("code")
+            message = err
         return None, {
-            "code": answer.get("code") or "TOOL_FAILURE",
-            "message": answer.get("error") or "printer_status refused.",
+            "code": str(code or "TOOL_FAILURE"),
+            "message": str(message or "printer_status refused."),
         }
     return (answer if isinstance(answer, dict) else None), None
 
