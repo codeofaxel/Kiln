@@ -12,6 +12,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   your agent, which can send any of them for you. A person reads every one, and
   you can ask to be emailed when yours is fixed.
 
+- **Paint a carved logo and get the logo, not a filled-in blob.** Ask for a
+  debossed mark in a second color and Kiln paints the carved strokes only — a
+  logo with a closed outline keeps its middle in the body color instead of
+  flooding solid.
+
 ### Fixed
 
 - **Logos and text now land on the side of a cup, box, or vase.** Decorating
