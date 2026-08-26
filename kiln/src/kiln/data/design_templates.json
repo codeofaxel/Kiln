@@ -48,7 +48,7 @@
   },
   "hook": {
     "display_name": "Wall Hook",
-    "description": "Simple wall hook with screw hole. Prints flat on back surface.",
+    "description": "Wall hook with screw hole. Prints on its side as an extruded profile — no supports, layer lines wrap the J for strength.",
     "category": "hardware",
     "parameters": {
       "hook_radius": {
@@ -87,7 +87,7 @@
         "description": "Screw hole diameter"
       }
     },
-    "scad_template": "// Parametric Wall Hook\nhook_radius = ${hook_radius};\nthickness = ${thickness};\nwidth = ${width};\nplate_height = ${plate_height};\nscrew_hole_dia = ${screw_hole_dia};\n\nmodule wall_hook() {\n    difference() {\n        union() {\n            // Mounting plate\n            cube([width, thickness, plate_height]);\n            // Hook arm\n            translate([0, 0, 0])\n                cube([width, hook_radius + thickness * 2, thickness]);\n            // Hook curve\n            translate([0, hook_radius + thickness, thickness])\n                rotate([0, 90, 0])\n                    difference() {\n                        cylinder(h=width, r=hook_radius + thickness, $fn=60);\n                        cylinder(h=width, r=hook_radius, $fn=60);\n                        translate([-hook_radius * 2, 0, 0])\n                            cube([hook_radius * 4, hook_radius * 2, width]);\n                    }\n        }\n        // Screw hole\n        translate([width/2, -1, plate_height * 0.7])\n            rotate([-90, 0, 0])\n                cylinder(h=thickness+2, d=screw_hole_dia, $fn=30);\n    }\n}\n\nwall_hook();"
+    "scad_template": "// Parametric Wall Hook\n// The side profile (plate, arm, J-curve, rounded tip) is drawn in\n// 2D and extruded to width, so the hook prints lying on its side:\n// no supports, and the layer lines wrap the J for strength.\nhook_radius = ${hook_radius};\nt = ${thickness};\nwidth = ${width};\nplate_height = ${plate_height};\nscrew_hole_dia = ${screw_hole_dia};\n\ncx = t + hook_radius;        // J-curve center, out from the wall\ncy = t + hook_radius;        // J-curve center height\n\nmodule wall_hook() {\n    difference() {\n        linear_extrude(width)\n            union() {\n                // Mounting plate (against the wall at x=0)\n                square([t, plate_height]);\n                // Arm along the bottom, out to the curve\n                square([cx, t]);\n                // J-curve: half-annulus opening back toward the wall\n                difference() {\n                    translate([cx, cy]) circle(r = hook_radius + t, $fn = 60);\n                    translate([cx, cy]) circle(r = hook_radius, $fn = 60);\n                    // keep the half away from the wall\n                    translate([cx - hook_radius - t - 1, cy - hook_radius - t - 1])\n                        square([hook_radius + t + 1,\n                                (hook_radius + t + 1) * 2]);\n                }\n                // Rounded tip at the top of the J\n                translate([cx, cy + hook_radius + t / 2])\n                    circle(d = t, $fn = 30);\n            }\n        // Screw hole through the plate (into the wall)\n        translate([-0.1, plate_height * 0.7, width / 2])\n            rotate([0, 90, 0])\n                cylinder(h = t + 0.2, d = screw_hole_dia, $fn = 30);\n    }\n}\n\nwall_hook();"
   },
   "cable_clip": {
     "display_name": "Cable Management Clip",
@@ -213,7 +213,7 @@
   },
   "sd_card_holder": {
     "display_name": "SD Card Holder",
-    "description": "Compact holder for SD and microSD cards with labeled slots.",
+    "description": "Desktop holder for SD and microSD cards in two rows of top-opening slots; cards stand proud for easy grip. No supports.",
     "category": "desk_accessories",
     "parameters": {
       "sd_slots": {
@@ -238,11 +238,11 @@
         "description": "Wall thickness"
       }
     },
-    "scad_template": "// Parametric SD Card Holder\nsd_n = ${sd_slots};\nmicro_n = ${micro_slots};\nwall = ${wall};\n\nsd_w = 24.5; sd_h = 32.5; sd_t = 2.5;\nmicro_w = 11.5; micro_h = 15.5; micro_t = 1.5;\nslot_gap = 1;\n\ntotal_w = max(sd_n * (sd_t + slot_gap + wall), micro_n * (micro_t + slot_gap + wall)) + wall;\ntotal_d = max(sd_w, micro_w) + wall * 2;\ntotal_h = sd_h + micro_h + wall * 3;\n\nmodule holder() {\n    difference() {\n        cube([total_w, total_d, total_h]);\n        // SD slots\n        for (i = [0:sd_n-1]) {\n            translate([wall + i * (sd_t + slot_gap + wall), wall, wall])\n                cube([sd_t + slot_gap, sd_w + 1, sd_h]);\n        }\n        // MicroSD slots\n        for (i = [0:micro_n-1]) {\n            translate([wall + i * (micro_t + slot_gap + wall), wall, sd_h + wall * 2])\n                cube([micro_t + slot_gap, micro_w + 1, micro_h]);\n        }\n    }\n}\n\nholder();"
+    "scad_template": "// Parametric SD Card Holder\n// A solid block with top-opening slots in two rows: SD cards in\n// front, microSD behind.  Cards drop in from above and stand proud\n// of the block so they can be gripped.  Every slot opens through\n// the top face -- no sealed pockets, no supports.\nsd_n = ${sd_slots};\nmicro_n = ${micro_slots};\nwall = ${wall};\n\nsd_w = 24.5; sd_h = 32.5; sd_t = 2.5;\nmicro_w = 11.5; micro_h = 15.5; micro_t = 1.5;\nslot_gap = 1;\n\nsd_pitch = sd_t + slot_gap + wall;\nmicro_pitch = micro_t + slot_gap + wall;\nsd_row_w = sd_n * sd_pitch + wall;\nmicro_row_w = micro_n * micro_pitch + wall;\ntotal_w = max(sd_row_w, micro_row_w);\nsd_depth = sd_h * 0.6;        // slot depth; cards stand proud\nmicro_depth = micro_h * 0.6;\ntotal_h = wall + sd_depth;\ntotal_d = wall + (sd_w + 1) + wall\n          + (micro_n > 0 ? (micro_w + 1) + wall : 0);\n\nmodule holder() {\n    difference() {\n        cube([total_w, total_d, total_h]);\n        // SD slots (front row), open through the top\n        for (i = [0:sd_n - 1]) {\n            translate([(total_w - sd_row_w) / 2 + wall + i * sd_pitch,\n                       wall, total_h - sd_depth])\n                cube([sd_t + slot_gap, sd_w + 1, sd_depth + 0.1]);\n        }\n        // MicroSD slots (back row), open through the top\n        if (micro_n > 0) {\n            for (i = [0:micro_n - 1]) {\n                translate([(total_w - micro_row_w) / 2 + wall\n                               + i * micro_pitch,\n                           wall + sd_w + 1 + wall, total_h - micro_depth])\n                    cube([micro_t + slot_gap, micro_w + 1,\n                          micro_depth + 0.1]);\n            }\n        }\n    }\n}\n\nholder();"
   },
   "coat_hook_multi": {
     "display_name": "Multi-Peg Coat Hook",
-    "description": "Wall-mounted coat rack with multiple pegs. Prints flat on back.",
+    "description": "Wall-mounted coat rack with multiple pegs. Prints flat on its back, pegs up, no supports.",
     "category": "hardware",
     "parameters": {
       "pegs": {
@@ -288,7 +288,7 @@
         "description": "Mounting hole diameter"
       }
     },
-    "scad_template": "// Parametric Multi-Peg Coat Hook\npegs = ${pegs};\npeg_l = ${peg_length};\npeg_d = ${peg_dia};\nsp = ${spacing};\nph = ${plate_height};\nhd = ${hole_dia};\nt = 5;\n\ntotal_w = (pegs - 1) * sp + peg_d + 20;\n\nmodule coat_hook() {\n    difference() {\n        union() {\n            // Back plate\n            translate([-10, 0, 0])\n                cube([total_w, t, ph]);\n            // Pegs\n            for (i = [0:pegs-1]) {\n                translate([i * sp + peg_d/2, t, ph/2])\n                    rotate([-90, 0, 0])\n                        cylinder(h=peg_l, d=peg_d, $fn=30);\n                // Peg tip ball\n                translate([i * sp + peg_d/2, t + peg_l, ph/2])\n                    sphere(d=peg_d + 2, $fn=30);\n            }\n        }\n        // Mounting holes\n        for (x = [5, total_w - 15]) {\n            translate([x, -1, ph/2])\n                rotate([-90, 0, 0])\n                    cylinder(h=t+2, d=hd, $fn=20);\n        }\n    }\n}\n\ncoat_hook();"
+    "scad_template": "// Parametric Multi-Peg Coat Hook\n// Prints flat on its back: the plate lies on the bed and the pegs\n// rise as vertical posts.  Each peg root steps down through a boss\n// and a steep cone so the cross-section change is gradual, and the\n// mushroom tip keeps coats from sliding off.\npegs = ${pegs};\npeg_l = ${peg_length};\npeg_d = ${peg_dia};\nsp = ${spacing};\nph = ${plate_height};\nhd = ${hole_dia};\nt = 5;\n\ntotal_w = (pegs - 1) * sp + peg_d + 20;\nfirst_x = 10 + peg_d / 2;\n\nmodule peg() {\n    // Root boss and steep cone: strong, and a gradual transition\n    cylinder(h = 3, d = peg_d + 6, $fn = 30);\n    translate([0, 0, 3])\n        cylinder(h = 4.2, d1 = peg_d + 6, d2 = peg_d, $fn = 30);\n    cylinder(h = peg_l - peg_d / 2, d = peg_d, $fn = 30);\n    // Mushroom tip: sub-45-degree flare, then an upward dome\n    translate([0, 0, peg_l - peg_d / 2 - 1.9])\n        cylinder(h = 1.9, d1 = peg_d, d2 = peg_d + 3, $fn = 30);\n    translate([0, 0, peg_l - peg_d / 2])\n        intersection() {\n            sphere(d = peg_d + 3, $fn = 30);\n            cylinder(h = peg_d, d = peg_d + 3, $fn = 30);\n        }\n}\n\nmodule coat_hook() {\n    difference() {\n        cube([total_w, ph, t]);\n        // Mounting holes in the first and last peg gaps, clear of\n        // the peg root bosses\n        for (x = [first_x + sp / 2, total_w - first_x - sp / 2]) {\n            translate([x, ph / 2, -0.1]) {\n                cylinder(h = t + 0.2, d = hd, $fn = 20);\n                // Countersink, steeper than 45 degrees\n                translate([0, 0, t - hd * 0.35 + 0.1])\n                    cylinder(h = hd * 0.35 + 0.1, d1 = hd, d2 = hd * 1.5,\n                             $fn = 20);\n            }\n        }\n    }\n    for (i = [0:pegs - 1])\n        translate([first_x + i * sp, ph / 2, t])\n            peg();\n}\n\ncoat_hook();"
   },
   "hinge_box": {
     "display_name": "Print-in-Place Hinge Box",
@@ -570,7 +570,7 @@
   },
   "battery_holder": {
     "display_name": "Battery Holder",
-    "description": "Holder for AA, AAA, or 18650 batteries with snap-fit retention.",
+    "description": "Battery tray for AA, AAA, or 18650 cells. Snap-in trough lips and a finger scoop; prints without supports.",
     "category": "electronics",
     "parameters": {
       "battery_type": {
@@ -593,7 +593,7 @@
         "description": "Wall thickness"
       }
     },
-    "scad_template": "// Parametric Battery Holder\nbtype = \"${battery_type}\";\ncount = ${count};\nwall = ${wall};\n\n// Battery dimensions (diameter, length)\nbd = (btype == \"AAA\") ? 10.5 : (btype == \"18650\") ? 18.6 : 14.5;\nbl = (btype == \"AAA\") ? 44.5 : (btype == \"18650\") ? 65 : 50.5;\n\nslot_w = bd + 1;\ntotal_w = count * (slot_w + wall) + wall;\n\nmodule holder() {\n    difference() {\n        cube([total_w, bl + wall * 2, bd/2 + wall + 2]);\n        for (i = [0:count-1]) {\n            // Battery slot\n            translate([wall + i * (slot_w + wall) + slot_w/2, wall, bd/2 + wall])\n                rotate([-90, 0, 0])\n                    cylinder(h=bl, d=bd + 0.5, $fn=30);\n            // Finger scoop for removal\n            translate([wall + i * (slot_w + wall) + slot_w/2, wall + bl/2, bd + wall + 2])\n                cylinder(h=5, d=bd * 0.6, $fn=20);\n        }\n    }\n    // Snap ridges\n    for (i = [0:count-1]) {\n        for (y = [wall + 5, wall + bl - 5]) {\n            translate([wall + i * (slot_w + wall) + 1, y, bd/2 + wall - 1])\n                cube([slot_w - 2, 2, 1.5]);\n        }\n    }\n}\n\nholder();"
+    "scad_template": "// Parametric Battery Holder\n// Tray of half-round troughs.  The block top sits above the trough\n// centerline, so each mouth is ~1.5 mm narrower than the battery\n// and the curved lips snap-retain it (they stay under the 45-degree\n// overhang limit).  A finger-scoop valley across the middle widens\n// the mouths there for easy insertion and removal.\nbtype = \"${battery_type}\";\ncount = ${count};\nwall = ${wall};\n\n// Battery dimensions (diameter, length)\nbd = (btype == \"AAA\") ? 10.5 : (btype == \"18650\") ? 18.6 : 14.5;\nbl = (btype == \"AAA\") ? 44.5 : (btype == \"18650\") ? 65 : 50.5;\n\nslot_w = bd + 1;\ntotal_w = count * (slot_w + wall) + wall;\nr = (bd + 0.5) / 2;\ncz = bd / 2 + wall;                    // trough centerline height\nmouth_half = bd / 2 - 0.75;            // mouth is bd - 1.5 wide\ntop = cz + sqrt(r * r - mouth_half * mouth_half);\n\nmodule holder() {\n    difference() {\n        cube([total_w, bl + wall * 2, top]);\n        for (i = [0:count - 1]) {\n            // Battery trough; the rim lips retain the battery\n            translate([wall + i * (slot_w + wall) + slot_w / 2, wall, cz])\n                rotate([-90, 0, 0])\n                    cylinder(h = bl, d = bd + 0.5, $fn = 40);\n        }\n        // Finger scoop: a valley across the top at mid-length opens\n        // the mouths wide enough to tilt a battery in or lift it out\n        translate([-0.1, wall + bl / 2, top])\n            rotate([0, 90, 0])\n                cylinder(h = total_w + 0.2, d = bd, $fn = 40);\n    }\n}\n\nholder();"
   },
   "wrench": {
     "display_name": "Parametric Wrench",
@@ -1259,7 +1259,7 @@
   },
   "filament_guide": {
     "display_name": "Filament Guide Clip",
-    "description": "Clip-on filament guide for printer frame extrusions. Directs filament path.",
+    "description": "Filament guide that slides onto printer frame extrusions. Prints flat as an extruded profile, no supports.",
     "category": "3d_printing",
     "parameters": {
       "extrusion_size": {
@@ -1291,7 +1291,7 @@
         "description": "Wall thickness"
       }
     },
-    "scad_template": "// Parametric Filament Guide Clip\nes = ${extrusion_size};\ntid = ${tube_id};\nal = ${arm_length};\nwall = ${wall};\n\nclip_gap = es - 1;\nclip_w = 15;\n\nmodule guide() {\n    // Clip body\n    difference() {\n        cube([es + wall*2, clip_w, es + wall*2]);\n        translate([wall, -0.1, wall])\n            cube([es + 0.5, clip_w + 0.2, es + 0.5]);\n        // Entry slot\n        translate([wall + es/4, -0.1, es + wall])\n            cube([es/2, clip_w + 0.2, wall + 1]);\n    }\n    // Guide arm\n    translate([es/2 + wall, clip_w/2, es + wall*2]) {\n        // Arm\n        cylinder(h=al, d=tid + wall*2, $fn=30);\n        // Tube hole\n    }\n}\n\ndifference() {\n    guide();\n    // Tube through-hole\n    translate([es/2 + wall, clip_w/2, es + wall*2 - 0.1])\n        cylinder(h=al + 0.2, d=tid, $fn=20);\n}"
+    "scad_template": "// Parametric Filament Guide Clip\n// The clip's cross-section -- C-clip around the extrusion, side\n// entry opening with snap lips, guide arm with a teardrop tube\n// hole -- is one 2D profile extruded to the clip width.  Prints\n// flat with no supports; layer lines wrap the C so the snap flexes\n// along the plastic, not across layers.\nes = ${extrusion_size};\ntid = ${tube_id};\nal = ${arm_length};\nwall = ${wall};\n\nclip_w = 15;\narm_w = tid + wall * 2;\n// Tube hole center, up the arm from the top of the clip body\nhole_y = es + wall * 2 + al - arm_w / 2;\n\nmodule teardrop(d) {\n    // Circle plus a 45-degree roof so the horizontal hole prints\n    // cleanly without support\n    r = d / 2;\n    circle(r = r, $fn = 30);\n    polygon([[-r * 0.707, r * 0.707], [0, r * 1.414],\n             [r * 0.707, r * 0.707]]);\n}\n\nmodule profile() {\n    difference() {\n        union() {\n            // Clip body around the extrusion\n            square([es + wall * 2, es + wall * 2]);\n            // Guide arm rising from the top, with a rounded end\n            translate([es / 2 + wall - arm_w / 2, es + wall * 2 - 0.1])\n                square([arm_w, al - arm_w / 2 + 0.1]);\n            translate([es / 2 + wall, hole_y])\n                circle(d = arm_w, $fn = 30);\n        }\n        // Extrusion pocket\n        translate([wall, wall])\n            square([es + 0.5, es + 0.5]);\n        // Side entry opening with snap lips (clips onto the rail)\n        translate([-0.1, wall + es * 0.15])\n            square([wall + 0.2, es * 0.7]);\n        // Tube hole\n        translate([es / 2 + wall, hole_y])\n            teardrop(tid);\n    }\n}\n\nlinear_extrude(clip_w) profile();"
   },
   "nozzle_rack": {
     "display_name": "Nozzle Organizer",
@@ -1396,7 +1396,7 @@
   },
   "gopro_mount": {
     "display_name": "GoPro Mount Adapter",
-    "description": "Standard GoPro 3-prong mount base with configurable attachment method.",
+    "description": "Standard GoPro 3-finger mount base with teardrop pivot hole. Prints without supports.",
     "category": "mounts_and_adapters",
     "parameters": {
       "base_width": {
@@ -1419,14 +1419,9 @@
         "max": 8,
         "unit": "mm",
         "description": "Base plate thickness"
-      },
-      "mount_type": {
-        "default": "flat",
-        "type": "string",
-        "description": "Base type: flat, adhesive, screw"
       }
     },
-    "scad_template": "// GoPro Mount Adapter\nbw = ${base_width};\nbd = ${base_depth};\nbt = ${base_thickness};\n\n// GoPro standard dimensions\nprong_w = 3;\nprong_h = 8;\nprong_gap = 3.5;\npin_d = 5;\n\nmodule gopro_fingers() {\n    // 3-prong GoPro mount\n    for (i = [-1, 0, 1]) {\n        translate([i * (prong_w + prong_gap) - prong_w/2, -prong_w/2, 0])\n            cube([prong_w, prong_w + 2, prong_h]);\n    }\n}\n\nmodule mount() {\n    // Base plate\n    translate([-bw/2, -bd/2, 0])\n        cube([bw, bd, bt]);\n    // GoPro prongs\n    translate([0, 0, bt])\n        difference() {\n            gopro_fingers();\n            // Pin hole\n            translate([0, 0, prong_h/2])\n                rotate([0, 90, 0])\n                    cylinder(h=30, d=pin_d, $fn=20, center=true);\n        }\n}\n\nmount();"
+    "scad_template": "// GoPro Mount Adapter\n// Standard 3-finger GoPro mount base.  Finger geometry follows the\n// community-measured standard: 3.0 mm fingers, 3.1 mm gaps, 5.2 mm\n// pivot hole, rounded finger ends.  The pivot hole is a teardrop so\n// it prints horizontally without supports.\nbw = ${base_width};\nbd = ${base_depth};\nbt = ${base_thickness};\n\nfinger_t = 3.0;\ngap = 3.1;\npitch = finger_t + gap;\nhole_d = 5.2;\nend_r = 7.4;               // rounded finger end radius\nhole_z = 8.2;              // hole center above the base\n\nmodule finger_profile() {\n    difference() {\n        union() {\n            translate([-end_r, 0]) square([end_r * 2, hole_z]);\n            translate([0, hole_z]) circle(r = end_r, $fn = 40);\n        }\n        // Teardrop pivot hole: circle plus a 45-degree roof\n        translate([0, hole_z]) {\n            circle(d = hole_d, $fn = 30);\n            polygon([[-hole_d / 2 * 0.707, hole_d / 2 * 0.707],\n                     [0, hole_d / 2 * 1.414],\n                     [hole_d / 2 * 0.707, hole_d / 2 * 0.707]]);\n        }\n    }\n}\n\nmodule finger() {\n    rotate([90, 0, 90])\n        linear_extrude(finger_t)\n            finger_profile();\n}\n\nmodule mount() {\n    // Base plate\n    translate([-bw / 2, -bd / 2, 0])\n        cube([bw, bd, bt]);\n    // Three fingers on the standard pitch\n    for (i = [-1, 0, 1])\n        translate([i * pitch - finger_t / 2, 0, bt])\n            finger();\n}\n\nmount();"
   },
   "vesa_adapter": {
     "display_name": "VESA Adapter Plate",
@@ -1509,7 +1504,7 @@
   },
   "plant_label_stake": {
     "display_name": "Plant Label Stake",
-    "description": "Pointed garden stake with flat label area for marking plants.",
+    "description": "Pointed garden stake with raised-text label. Prints lying flat, so soil-push loads run along the layers.",
     "category": "garden",
     "parameters": {
       "label_width": {
@@ -1546,7 +1541,7 @@
         "description": "Label text"
       }
     },
-    "scad_template": "// Parametric Plant Label Stake\nlw = ${label_width};\nlh = ${label_height};\nsl = ${stake_length};\nt = ${thickness};\ntxt = \"${text_string}\";\n\nmodule stake() {\n    // Label area\n    translate([0, 0, sl])\n        cube([lw, t, lh]);\n    // Stake body (tapers to point)\n    hull() {\n        translate([lw/2 - t, 0, 0])\n            cube([t * 2, t, 0.1]);\n        translate([0, 0, sl])\n            cube([lw, t, 0.1]);\n    }\n    // Point\n    hull() {\n        translate([lw/2, 0, 0])\n            cube([0.1, t, 0.1]);\n        translate([lw/2 - t, 0, 15])\n            cube([t * 2, t, 0.1]);\n    }\n    // Embossed text\n    translate([lw/2, t, sl + lh/2])\n        rotate([90, 0, 0])\n            linear_extrude(height=0.8)\n                text(txt, size=lh*0.4, halign=\"center\", valign=\"center\", font=\"Liberation Sans:style=Bold\");\n}\n\nstake();"
+    "scad_template": "// Parametric Plant Label Stake\n// Prints lying flat: the label, blade, and point are one 2D outline\n// extruded to thickness, with the text raised on the top face.\n// Flat layers also run along the stake, so pushing it into soil\n// loads the plastic along the layers instead of across them.\nlw = ${label_width};\nlh = ${label_height};\nsl = ${stake_length};\nt = ${thickness};\ntxt = \"${text_string}\";\n\nmodule stake() {\n    // Outline: point, tapering blade, label plate\n    linear_extrude(t)\n        polygon([[lw / 2 - 0.75, 0],\n                 [lw / 2 + 0.75, 0],\n                 [lw / 2 + t * 1.5, 15],\n                 [lw, sl],\n                 [lw, sl + lh],\n                 [0, sl + lh],\n                 [0, sl],\n                 [lw / 2 - t * 1.5, 15]]);\n    // Raised text on the label face, sized to fit and hard-clipped\n    // to the plate so no glyph can ever hang off the edge\n    txt_size = min(lh * 0.4, (lw - 8) / (0.78 * max(1, len(txt))));\n    intersection() {\n        translate([2, sl + 2, 0])\n            cube([lw - 4, lh - 4, t + 1]);\n        translate([lw / 2, sl + lh / 2, t])\n            linear_extrude(0.8)\n                text(txt, size = txt_size, halign = \"center\",\n                     valign = \"center\",\n                     font = \"Liberation Sans:style=Bold\");\n    }\n}\n\nstake();"
   },
   "pot_drip_tray": {
     "display_name": "Plant Pot Drip Tray",
@@ -1629,7 +1624,7 @@
   },
   "phone_vent_mount": {
     "display_name": "Phone Vent Mount",
-    "description": "Spring-grip phone holder that clips into car air vents.",
+    "description": "Car vent phone mount in two flat parts: cradle plus a vent fin that locks through the cradle's slot. No supports.",
     "category": "automotive",
     "parameters": {
       "phone_width": {
@@ -1661,7 +1656,7 @@
         "description": "Material thickness"
       }
     },
-    "scad_template": "// Parametric Phone Vent Mount\npw = ${phone_width};\ngd = ${grip_depth};\nvsw = ${vent_slot_width};\nt = ${thickness};\n\nbody_h = 40;\nclip_h = 25;\n\nmodule mount() {\n    // Back plate\n    cube([pw + gd * 2, t, body_h]);\n    // Side grips\n    for (x = [0, pw + gd]) {\n        translate([x, 0, 0])\n            cube([gd, gd, body_h]);\n    }\n    // Bottom ledge\n    translate([gd, 0, 0])\n        cube([pw, gd * 0.6, t]);\n    // Vent clip (behind)\n    translate([pw/2 + gd - 5, -clip_h, body_h * 0.3]) {\n        cube([10, clip_h, t]);\n        // Clip hook\n        translate([0, 0, -vsw - 1])\n            cube([10, t + 2, vsw + 1]);\n    }\n}\n\nmount();"
+    "scad_template": "// Parametric Phone Vent Mount\n// Two flat parts, both printed without supports.  The cradle prints\n// on its back (grips and ledge rise as walls); the vent fin prints\n// on its side.  The fin's tongue slides through the slot in the\n// cradle's plate until its flange seats, then the tongue hooks\n// behind a vent slat -- the vent face traps the plate against the\n// flange, and the phone's weight keeps the hook seated.\npw = ${phone_width};\ngd = ${grip_depth};\nvsw = ${vent_slot_width};\nt = ${thickness};\n\nbody_h = 40;\ntongue_len = 28;\nfin_t = 9;                 // fin thickness (across the slot)\ntongue_h = max(1.8, vsw * 0.9);\nhook_drop = 3;\n\nmodule cradle() {\n    difference() {\n        union() {\n            // Back plate on the bed\n            cube([pw + gd * 2, body_h, t]);\n            // Side grips\n            for (x = [0, pw + gd])\n                translate([x, 0, 0])\n                    cube([gd, body_h, gd]);\n            // Bottom ledge (holds the phone's lower edge)\n            translate([gd, 0, 0])\n                cube([pw, t, gd * 0.6]);\n        }\n        // Fin slot through the plate\n        translate([(pw + gd * 2 - fin_t - 0.4) / 2, body_h * 0.55, -0.1])\n            cube([fin_t + 0.4, tongue_h + 0.4, t + 0.2]);\n    }\n}\n\nmodule fin() {\n    x0 = 4;                          // flange thickness\n    x1 = x0 + t + 0.6 + tongue_len;  // tongue end / hook face\n    linear_extrude(fin_t)\n        polygon([\n            [0, -4],                          // flange bottom\n            [x0, -4],\n            [x0, 0],                          // tongue underside\n            [x1, 0],\n            [x1, -hook_drop],                 // hook face (catches slat)\n            [x1 + 1.5, -hook_drop],           // hook bottom\n            [x1 + 1.5 + hook_drop + tongue_h, tongue_h],  // entry ramp\n            [x0, tongue_h],                   // tongue top edge\n            [x0, tongue_h + 4],               // flange top\n            [0, tongue_h + 4],\n        ]);\n}\n\ncradle();\n// Fin printed beside the cradle, flat on its side\ntranslate([(pw + gd * 2) / 2 + fin_t / 2, body_h + 8, 0])\n    rotate([0, 0, 90])\n        fin();"
   },
   "fuse_puller": {
     "display_name": "Fuse Puller",
@@ -1766,7 +1761,7 @@
   },
   "hose_barb_adapter": {
     "display_name": "Hose Barb Adapter",
-    "description": "Barbed fitting for adapting between two different hose diameters.",
+    "description": "Barbed fitting adapting between two hose diameters. Diamond barbs and coned transitions print support-free.",
     "category": "plumbing",
     "parameters": {
       "small_id": {
@@ -1798,7 +1793,7 @@
         "description": "Wall thickness"
       }
     },
-    "scad_template": "// Parametric Hose Barb Adapter\nsid = ${small_id};\nlid = ${large_id};\nbl = ${barb_length};\nwall = ${wall};\n\nbarb_h = 1.2;\nbarbs = 3;\nstep = bl / barbs;\n\nmodule barb_section(od, len) {\n    for (i = [0:barbs-1]) {\n        translate([0, 0, i * step])\n            cylinder(h=step * 0.7, d1=od + barb_h, d2=od, $fn=30);\n        translate([0, 0, i * step + step * 0.7])\n            cylinder(h=step * 0.3, d=od, $fn=30);\n    }\n}\n\nmodule adapter() {\n    difference() {\n        union() {\n            // Small end barbs\n            barb_section(sid + wall * 2, bl);\n            // Center shoulder\n            translate([0, 0, bl])\n                cylinder(h=5, d=max(sid, lid) + wall * 2 + barb_h * 2, $fn=40);\n            // Large end barbs\n            translate([0, 0, bl + 5])\n                barb_section(lid + wall * 2, bl);\n        }\n        // Through bore (stepped)\n        translate([0, 0, -0.1])\n            cylinder(h=bl + 5.2, d=sid, $fn=30);\n        translate([0, 0, bl + 5])\n            cylinder(h=bl + 0.1, d=lid, $fn=30);\n    }\n}\n\nadapter();"
+    "scad_template": "// Parametric Hose Barb Adapter\n// The whole body is one revolved profile (and the bore another), so\n// there are no stacked-solid seams to leave artifacts.  Barbs are\n// symmetric ~40-degree diamonds: printable without supports in\n// either direction, and the ridge still bites under a hose clamp.\nsid = ${small_id};\nlid = ${large_id};\nbl = ${barb_length};\nwall = ${wall};\n\nbarb_h = 1.2;   // radial ridge height\nbarbs = 3;\nstep = bl / barbs;\n// ~40 degrees on each barb face, capped so short barb sections\n// keep a monotonic profile\nrise = min(barb_h * 2 * 1.2, step * 0.45);\nsod = sid + wall * 2;\nlod = lid + wall * 2;\nshoulder_d = max(sid, lid) + wall * 2 + barb_h * 2;\ncone_h = (shoulder_d - sod) / 2 * 1.1;   // 45-degree cone under shoulder\nz_top = bl + cone_h + 4;                 // large section start\n\n// One barbed section as revolved-profile points, base at z0\nfunction barb_pts(od, z0) = concat(\n    [[od / 2, z0]],\n    [for (i = [0:barbs - 1]) each [\n        [od / 2, z0 + i * step + step - 2 * rise],\n        [od / 2 + barb_h, z0 + i * step + step - rise],\n        [od / 2, z0 + (i + 1) * step]]]);\n\nmodule adapter() {\n    difference() {\n        rotate_extrude($fn = 60)\n            polygon(concat(\n                [[0, 0]],\n                barb_pts(sod, 0),\n                [[shoulder_d / 2, bl + cone_h],\n                 [shoulder_d / 2, z_top]],\n                barb_pts(lod, z_top),\n                [[0, z_top + bl]]));\n        // Bore: small end, 45-degree internal transition, large end\n        rotate_extrude($fn = 60)\n            polygon([[0, -0.1],\n                     [sid / 2, -0.1],\n                     [sid / 2, z_top - (lid - sid) / 2 * 1.1],\n                     [lid / 2, z_top],\n                     [lid / 2, z_top + bl + 0.1],\n                     [0, z_top + bl + 0.1]]);\n    }\n}\n\nadapter();"
   },
   "drain_strainer": {
     "display_name": "Drain Strainer",
@@ -2003,7 +1998,7 @@
   },
   "cable_chain_link": {
     "display_name": "Cable Chain Link",
-    "description": "Parametric snap-fit cable chain link for CNC machines and 3D printers. Print multiple and snap together.",
+    "description": "Snap-together cable chain link with an open cable channel and pivot pins. Prints floor-down, no supports.",
     "category": "cable_management",
     "parameters": {
       "inner_width": {
@@ -2042,7 +2037,7 @@
         "description": "Hinge pin diameter"
       }
     },
-    "scad_template": "// Cable Chain Link\niw = ${inner_width};\nih = ${inner_height};\nll = ${link_length};\nwall = ${wall};\npd = ${pin_dia};\n\now = iw + wall * 2;\noh = ih + wall * 2;\n\nmodule link() {\n    difference() {\n        union() {\n            // Main channel\n            difference() {\n                cube([ll, ow, oh]);\n                translate([wall, wall, wall])\n                    cube([ll - wall*2, iw, ih]);\n            }\n            // Pin cylinders at back\n            for (y = [-1, ow+1])\n                translate([ll-wall, y < 0 ? 0 : ow, oh/2])\n                    rotate([90, 0, 0])\n                        cylinder(h=wall, d=pd+wall, $fn=20);\n        }\n        // Pin holes at front\n        translate([0, -1, oh/2])\n            rotate([90, 0, 0])\n                rotate([0, 90, 0])\n                    cylinder(h=2, d=pd+0.3, $fn=20);\n    }\n}\n\nlink();"
+    "scad_template": "// Cable Chain Link\n// Open-top U-channel that actually admits a cable, with pivot pins\n// on the male end and a widened female mouth with pin holes on the\n// other.  Links snap together end to end.  Prints floor-down with\n// no sealed cavities.\niw = ${inner_width};\nih = ${inner_height};\nll = ${link_length};\nwall = ${wall};\npd = ${pin_dia};\n\now = iw + wall * 2;\noh = ih + wall;                // floor + open top\nmouth = pd * 2 + 4;            // overlap length at the joint\npz = wall + ih * 0.5;          // pivot height\n\nmodule link() {\n    difference() {\n        union() {\n            // Channel: floor and side walls, open top\n            cube([ll, ow, wall]);\n            for (s = [0, ow - wall])\n                translate([0, s, 0])\n                    cube([ll - mouth, wall, oh]);\n            // Female mouth: walls spread outward so the next link's\n            // male end nests inside\n            for (s = [-wall - 0.3, ow + 0.3])\n                translate([ll - mouth, s, 0])\n                    cube([mouth, wall, oh]);\n            // Ribs joining the channel walls to the offset mouth walls\n            for (s = [-wall - 0.3, ow - wall])\n                translate([ll - mouth, s, 0])\n                    cube([wall, wall * 2 + 0.3, oh]);\n            // Pivot pins on the male end, sticking outward\n            for (s = [0, ow])\n                translate([mouth / 2, s + (s == 0 ? -wall * 0.7 : 0), pz])\n                    rotate([-90, 0, 0])\n                        cylinder(h = wall * 0.7, d = pd, $fn = 20);\n        }\n        // Pin holes through the female mouth walls\n        for (s = [-wall - 0.4, ow + 0.3 - 0.1])\n            translate([ll - mouth / 2, s, pz])\n                rotate([-90, 0, 0])\n                    cylinder(h = wall + 0.2, d = pd + 0.4, $fn = 20);\n        // Chamfer the male end's top edge so the joint can pivot\n        translate([-0.1, -wall - 0.5, pz + pd / 2 + 1])\n            rotate([0, -30, 0])\n                cube([mouth * 2, ow + wall * 2 + 1, oh]);\n    }\n}\n\nlink();"
   },
   "cable_wrap_guide": {
     "display_name": "Cable Wrap Guide",

@@ -185,3 +185,82 @@ class TestStackableBin:
         s = scad(templates, "stackable_bin")
         assert "wall + lip + 0.2])" in s  # cavity floor above the groove
         assert "wall + 0.6" in s          # groove inner clearance
+
+
+class TestSecondSweep:
+    """The 46-template follow-up sweep: four templates were broken
+    outright (sealed voids, floating features, severed arms) and six
+    graded C on orientation.  Same treatment, same pins."""
+
+    def test_sd_slots_open_through_the_top(self, templates):
+        """The old 'slots' were sealed voids inside a solid brick —
+        no card could ever enter one."""
+        s = scad(templates, "sd_card_holder")
+        assert "total_h - sd_depth" in s
+        assert "if (micro_n > 0)" in s
+
+    def test_battery_troughs_retain_by_mouth_lips(self, templates):
+        """The old snap ridges floated in mid-air inside the slots,
+        and the finger scoop was cut entirely above the part."""
+        s = scad(templates, "battery_holder")
+        assert "mouth_half" in s
+        assert "Finger scoop" in s
+
+    def test_filament_guide_arm_is_attached(self, templates):
+        """The old entry slot severed the guide arm from the clip."""
+        s = scad(templates, "filament_guide")
+        assert "linear_extrude(clip_w)" in s
+        assert "teardrop" in s
+
+    def test_chain_link_channel_is_open(self, templates):
+        """The old cable channel was a sealed internal cavity."""
+        s = scad(templates, "cable_chain_link")
+        assert "cube([ll, ow, wall]);" in s          # floor, open top
+        assert "cube([ll - wall*2, iw, ih])" not in s  # sealed void
+        assert "pd + 0.4" in s                        # real pin holes
+
+    def test_hook_is_a_profile_extrusion(self, templates):
+        s = scad(templates, "hook")
+        assert "linear_extrude(width)" in s
+
+    def test_coat_hook_roots_and_hole_placement(self, templates):
+        """Mounting holes used to sit under the end pegs' fillets;
+        the peg roots now step down through a boss and steep cone so
+        the cross-section transition is gradual."""
+        s = scad(templates, "coat_hook_multi")
+        assert "d1 = peg_d + 6, d2 = peg_d" in s
+        assert "first_x + sp / 2" in s
+
+    def test_barb_adapter_is_seamless_revolves(self, templates):
+        """Stacked cones left zero-thickness membranes at coincident
+        seams; the body and bore are now single revolved profiles,
+        with the barb rise capped so short sections stay monotonic."""
+        s = scad(templates, "hose_barb_adapter")
+        assert s.count("rotate_extrude") == 2
+        assert "step * 0.45" in s
+
+    def test_stake_text_cannot_overflow(self, templates):
+        """At max label size the raised text hung off the plate edge
+        (floating glyph ends).  Sized by string length and clipped."""
+        s = scad(templates, "plant_label_stake")
+        assert "len(txt)" in s
+        assert "intersection()" in s
+
+    def test_vent_mount_is_two_flat_parts(self, templates):
+        """The old vent clip cantilevered in mid-air behind the
+        plate.  Cradle and vent fin now print flat separately and
+        join through a slot in the plate."""
+        s = scad(templates, "phone_vent_mount")
+        assert "module cradle()" in s
+        assert "module fin()" in s
+        assert "fin_t + 0.4" in s
+
+    def test_gopro_fingers_match_the_standard(self, templates):
+        """The old prongs were 8 mm stubs with a tangent hole that
+        left knife-edge walls, and mount_type was advertised but
+        never used."""
+        s = scad(templates, "gopro_mount")
+        assert "finger_t = 3.0" in s
+        assert "hole_d = 5.2" in s
+        assert "Teardrop" in s or "teardrop" in s
+        assert "mount_type" not in templates["gopro_mount"]["parameters"]
