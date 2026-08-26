@@ -930,6 +930,67 @@ def _build_project_settings(flush_matrix_str: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Bed placement (shared by both composers)
+# ---------------------------------------------------------------------------
+
+#: Matches kiln.printers.bed_fit._FIT_EPSILON_MM — floating-point noise on
+#: the plate edge must not trigger a re-placement.
+_BED_EPSILON_MM = 0.5
+
+
+def _resolve_plate(
+    plate_width: float, plate_depth: float, printer_id: str | None,
+) -> tuple[float, float]:
+    """Plate XY dimensions, from the printer when it resolves.
+
+    An unresolvable ``printer_id`` keeps the caller's dimensions rather
+    than failing: bed placement is a correction, never a reason to
+    refuse a compose.
+    """
+    if printer_id:
+        try:
+            from kiln.printers.bed_fit import resolve_build_volume
+
+            resolved = resolve_build_volume(printer_id)
+        except Exception:  # noqa: BLE001 — placement is advisory, never fatal
+            resolved = None
+            logger.debug("build volume lookup failed for %r", printer_id,
+                         exc_info=True)
+        if resolved is not None:
+            _model_id, build_volume = resolved
+            return build_volume[0], build_volume[1]
+    return plate_width, plate_depth
+
+
+def _plate_translation(
+    min_x: float, max_x: float,
+    min_y: float, max_y: float,
+    min_z: float,
+    plate_width: float, plate_depth: float,
+) -> tuple[float, float, float]:
+    """The translation that puts a bbox on the plate — zeros when it fits.
+
+    Both composers write 3MF build transforms that slicers honour
+    literally: PrusaSlicer auto-centres a loose STL but takes a 3MF at
+    its word, so geometry off a corner-origin bed is silently "outside
+    of the print volume" (exit 0, no gcode).  A bbox already inside the
+    plate returns ``(0, 0, 0)`` so deliberate placement is respected;
+    otherwise the bbox is centred on the plate and floored to z=0.
+    """
+    if (
+        min_x >= -_BED_EPSILON_MM and max_x <= plate_width + _BED_EPSILON_MM
+        and min_y >= -_BED_EPSILON_MM and max_y <= plate_depth + _BED_EPSILON_MM
+        and min_z >= -_BED_EPSILON_MM
+    ):
+        return (0.0, 0.0, 0.0)
+    tx = plate_width / 2.0 - (min_x + max_x) / 2.0
+    ty = plate_depth / 2.0 - (min_y + max_y) / 2.0
+    tz = -min_z
+    # 0.0 + x normalises -0.0 (e.g. -min(0.0)) out of the emitted XML
+    return (0.0 + tx, 0.0 + ty, 0.0 + tz)
+
+
+# ---------------------------------------------------------------------------
 # Bounding box helper
 # ---------------------------------------------------------------------------
 
@@ -1101,13 +1162,18 @@ def auto_arrange_parts(
 def compose_multicolor_3mf(
     parts: list[ColorPart],
     output_path: str | None = None,
+    *,
+    plate_width: float = 256.0,
+    plate_depth: float = 256.0,
+    printer_id: str | None = None,
 ) -> dict[str, Any]:
     """Compose a multi-color / multi-material .3mf from multiple STL files.
 
     Creates a single print-ready .3mf containing all parts with per-part
     AMS/extruder assignments.  All parts must share the same coordinate
-    origin — they are overlaid in the slicer exactly as positioned in the
-    STL files.
+    origin — their relative layout is preserved exactly as positioned in
+    the STL files (when the group as a whole sits off the plate, one
+    common translation moves it onto the bed; see ``plate_width``).
 
     Compatible slicers:
         * **BambuStudio** — reads ``Metadata/model_settings.config``
@@ -1122,6 +1188,19 @@ def compose_multicolor_3mf(
             its ``x/y/z`` translation on top of its source coordinates.
         output_path: Where to write the .3mf.  Defaults to a system temp
             file (path returned in the result dict).
+        plate_width: Print plate X dimension in mm (default 256, same
+            legacy default as :func:`auto_arrange_parts`).  When the
+            union bbox of every placed part misses the plate, ONE common
+            translation is added to every build item so the whole group
+            lands on the bed with its relative layout intact — slicers
+            honour 3MF placement literally (PrusaSlicer auto-centres a
+            loose STL but never a 3MF), so an off-plate group silently
+            slices to nothing.  Already-on-plate groups are untouched.
+        plate_depth: Print plate Y dimension in mm (default 256).
+        printer_id: Optional supported printer model id; when it
+            resolves, its build volume overrides ``plate_width`` /
+            ``plate_depth``.  Unresolvable ids keep the defaults —
+            placement is a correction, never a reason to refuse.
 
     Returns:
         Dict with keys:
@@ -1131,6 +1210,8 @@ def compose_multicolor_3mf(
         * ``parts`` (int) — number of color parts
         * ``total_vertices`` (int)
         * ``total_triangles`` (int) — triangles actually emitted
+        * ``bed_translation`` (``[tx, ty, tz]``) — only present when the
+          whole group had to be moved onto the plate
         * ``degenerate_skipped`` (int) — only present when > 0: input
           triangles dropped because their vertices collapse under exact
           dedup (the 3MF spec forbids repeated indices)
@@ -1281,6 +1362,39 @@ def compose_multicolor_3mf(
             }
 
     # -----------------------------------------------------------------------
+    # Place the GROUP on the plate.  One common translation added to every
+    # build item, so relative layout (overlapping color parts, arranged
+    # copies) is preserved exactly — see _plate_translation for why an
+    # off-plate 3MF silently slices to nothing.
+    # -----------------------------------------------------------------------
+    plate_w, plate_d = _resolve_plate(plate_width, plate_depth, printer_id)
+    g_min_x = g_min_y = g_min_z = float("inf")
+    g_max_x = g_max_y = float("-inf")
+    for part, vertices, _ in parsed:
+        g_min_x = min(g_min_x, min(v[0] for v in vertices) + part.x)
+        g_max_x = max(g_max_x, max(v[0] for v in vertices) + part.x)
+        g_min_y = min(g_min_y, min(v[1] for v in vertices) + part.y)
+        g_max_y = max(g_max_y, max(v[1] for v in vertices) + part.y)
+        g_min_z = min(g_min_z, min(v[2] for v in vertices) + part.z)
+    bed_tx, bed_ty, bed_tz = _plate_translation(
+        g_min_x, g_max_x, g_min_y, g_max_y, g_min_z, plate_w, plate_d,
+    )
+    if (bed_tx, bed_ty, bed_tz) != (0.0, 0.0, 0.0):
+        from dataclasses import replace as _dc_replace
+
+        parsed = [
+            (
+                _dc_replace(
+                    part,
+                    x=part.x + bed_tx, y=part.y + bed_ty, z=part.z + bed_tz,
+                ),
+                vertices,
+                triangles,
+            )
+            for part, vertices, triangles in parsed
+        ]
+
+    # -----------------------------------------------------------------------
     # Resolve output path
     # -----------------------------------------------------------------------
     if output_path is None:
@@ -1336,6 +1450,10 @@ def compose_multicolor_3mf(
         "total_triangles": total_t,
         "extruder_map": extruder_summary,
     }
+    if (bed_tx, bed_ty, bed_tz) != (0.0, 0.0, 0.0):
+        result["bed_translation"] = [
+            round(bed_tx, 6), round(bed_ty, 6), round(bed_tz, 6),
+        ]
     if degenerate_skipped:
         result["degenerate_skipped"] = degenerate_skipped
     if len({p.extruder for p, _, _ in parsed}) > 1:
@@ -1543,44 +1661,17 @@ def compose_painted_3mf(
             palette.append(rgb_hex)
         tri_pindex.append(palette.index(rgb_hex))
 
-    if printer_id:
-        try:
-            from kiln.printers.bed_fit import resolve_build_volume
-
-            resolved = resolve_build_volume(printer_id)
-        except Exception:  # noqa: BLE001 — placement is advisory, never fatal
-            resolved = None
-            logger.debug("compose_painted_3mf: build volume lookup failed",
-                         exc_info=True)
-        if resolved is not None:
-            _model_id, build_volume = resolved
-            plate_width = build_volume[0]
-            plate_depth = build_volume[1]
-
-    # Place the object ON the plate.  The build item below carries an
-    # explicit transform that slicers honour literally: PrusaSlicer
-    # auto-centres loose STL geometry but takes a 3MF at its word, so a
-    # mesh centred on its own origin (negative x/y) lands off a
-    # corner-origin bed and the slice "succeeds" with no gcode.  A single
-    # translation of the whole object preserves every relative layout
-    # inside it (a jar and its lid stay a jar-width apart).
+    # Place the object ON the plate.  A single translation of the whole
+    # object preserves every relative layout inside it (a jar and its
+    # lid stay a jar-width apart) — see _plate_translation for why the
+    # transform must not stay identity for an off-plate mesh.
+    plate_width, plate_depth = _resolve_plate(plate_width, plate_depth, printer_id)
     xs = [v[0] for v in vertices]
     ys = [v[1] for v in vertices]
     zs = [v[2] for v in vertices]
-    bed_eps = 0.5  # match kiln.printers.bed_fit._FIT_EPSILON_MM
-    on_plate = (
-        min(xs) >= -bed_eps and max(xs) <= plate_width + bed_eps
-        and min(ys) >= -bed_eps and max(ys) <= plate_depth + bed_eps
-        and min(zs) >= -bed_eps
+    tx, ty, tz = _plate_translation(
+        min(xs), max(xs), min(ys), max(ys), min(zs), plate_width, plate_depth,
     )
-    if on_plate:
-        tx = ty = tz = 0.0
-    else:
-        tx = plate_width / 2.0 - (min(xs) + max(xs)) / 2.0
-        ty = plate_depth / 2.0 - (min(ys) + max(ys)) / 2.0
-        tz = -min(zs)
-        # 0.0 + x normalises -0.0 (e.g. -min(0.0)) out of the emitted XML
-        tx, ty, tz = 0.0 + tx, 0.0 + ty, 0.0 + tz
 
     colorgroup_id = 2  # the single object is id 1
     obj_name = _xml_escape(name)

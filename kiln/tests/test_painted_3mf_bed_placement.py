@@ -242,13 +242,31 @@ class TestPreSliceBedGate:
         with patch(
             "subprocess.run",
             side_effect=AssertionError("slicer must not launch"),
-        ):
-            with pytest.raises(SlicerError) as exc:
-                slice_file(threemf, profile=ini, output_dir=str(tmp_path))
+        ), pytest.raises(SlicerError) as exc:
+            slice_file(threemf, profile=ini, output_dir=str(tmp_path))
         msg = str(exc.value)
         assert "X[-30.0..-20.0]" in msg
         assert "Y[-31.0..-21.0]" in msg
         assert "X[0..256]" in msg
+
+    def test_oversize_3mf_gets_rescale_advice_not_translate(self, tmp_path):
+        """A footprint larger than the bed can't be fixed by moving it —
+        the error must say rescale/split, not 'centre it'."""
+        big = _off_bed_model_xml().replace('x="-30"', 'x="-300"').replace(
+            'x="-20"', 'x="300"'
+        )
+        threemf = _write_3mf(tmp_path / "big.3mf", big)
+        with patch(
+            "subprocess.run",
+            side_effect=AssertionError("slicer must not launch"),
+        ), pytest.raises(SlicerError) as exc:
+            slice_file(
+                threemf, profile=_bambu_bed_ini(tmp_path),
+                output_dir=str(tmp_path),
+            )
+        msg = str(exc.value)
+        assert "rescale" in msg
+        assert "translate the model" not in msg
 
     def test_on_bed_3mf_passes_the_gate(self, tmp_path):
         result = compose_painted_3mf(
@@ -291,10 +309,102 @@ class TestStderrSurfaced:
         with patch(
             "kiln.slicer.find_slicer",
             return_value=SlicerInfo(path="/fake/prusa-slicer", name="prusa-slicer"),
-        ), patch("subprocess.run", return_value=mock_run):
-            with pytest.raises(SlicerError) as exc:
-                slice_file(str(stl), output_dir=str(tmp_path))
+        ), patch("subprocess.run", return_value=mock_run), pytest.raises(SlicerError) as exc:
+            slice_file(str(stl), output_dir=str(tmp_path))
         assert "outside of the print volume" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# compose_multicolor_3mf: the sibling door places the GROUP on the plate
+# ---------------------------------------------------------------------------
+
+
+def _write_cube_stl(path: Path, size: float, off: tuple[float, float, float]) -> str:
+    import struct
+
+    v = [
+        (0, 0, 0), (size, 0, 0), (size, size, 0), (0, size, 0),
+        (0, 0, size), (size, 0, size), (size, size, size), (0, size, size),
+    ]
+    v = [(a + off[0], b + off[1], c + off[2]) for a, b, c in v]
+    faces = [
+        (0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+        (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7),
+    ]
+    with open(path, "wb") as fh:
+        fh.write(b"\0" * 80)
+        fh.write(struct.pack("<I", len(faces)))
+        for a, b, c in faces:
+            fh.write(struct.pack("<3f", 0, 0, 0))
+            for i in (a, b, c):
+                fh.write(struct.pack("<3f", *v[i]))
+            fh.write(struct.pack("<H", 0))
+    return str(path)
+
+
+def _item_translations(threemf_path: str) -> list[tuple[float, float, float]]:
+    with zipfile.ZipFile(threemf_path) as zf:
+        xml = zf.read("3D/3dmodel.model").decode()
+    out = []
+    for m in re.finditer(r'<item objectid="\d+"\s+transform="([^"]+)"', xml):
+        values = [float(v) for v in m.group(1).split()]
+        assert len(values) == 12
+        out.append((values[9], values[10], values[11]))
+    assert out, "no build items found"
+    return out
+
+
+class TestMulticolorGroupPlacement:
+    def test_off_plate_group_gets_one_common_shift(self, tmp_path):
+        """Two parts off the plate move together: relative layout intact."""
+        from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
+
+        a = _write_cube_stl(tmp_path / "a.stl", 20.0, (-10.0, -10.0, 0.0))
+        b = _write_cube_stl(tmp_path / "b.stl", 10.0, (-45.0, -5.0, 0.0))
+        result = compose_multicolor_3mf(
+            [
+                ColorPart(a, extruder=1, name="body"),
+                ColorPart(b, extruder=2, name="accent"),
+            ],
+            output_path=str(tmp_path / "mc.3mf"),
+        )
+        assert result["success"], result
+        # union bbox x -45..10 (centre -17.5), y -10..10 (centre 0)
+        expect = (128.0 - (-17.5), 128.0 - 0.0, 0.0)
+        translations = _item_translations(result["output_path"])
+        assert len(translations) == 2
+        for t in translations:
+            assert t == pytest.approx(expect)
+        assert result["bed_translation"] == [
+            pytest.approx(145.5), pytest.approx(128.0), 0.0,
+        ]
+
+    def test_on_plate_group_is_untouched(self, tmp_path):
+        """Arranged parts (auto_arrange_parts output) keep their placement."""
+        from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
+
+        a = _write_cube_stl(tmp_path / "a.stl", 20.0, (0.0, 0.0, 0.0))
+        result = compose_multicolor_3mf(
+            [ColorPart(a, extruder=1, name="body", x=30.0, y=40.0)],
+            output_path=str(tmp_path / "mc.3mf"),
+        )
+        assert result["success"], result
+        assert _item_translations(result["output_path"]) == [(30.0, 40.0, 0.0)]
+        assert "bed_translation" not in result
+
+    def test_gate_accepts_the_placed_group(self, tmp_path):
+        """The written file passes slice_file's pre-slice bed gate."""
+        from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
+
+        a = _write_cube_stl(tmp_path / "a.stl", 20.0, (-10.0, -10.0, 0.0))
+        result = compose_multicolor_3mf(
+            [ColorPart(a, extruder=1, name="body")],
+            output_path=str(tmp_path / "mc.3mf"),
+        )
+        bbox = compute_3mf_geometry_bbox(result["output_path"])
+        assert bbox is not None
+        assert bbox["x_min"] == pytest.approx(118.0)
+        assert bbox["x_max"] == pytest.approx(138.0)
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +444,36 @@ def test_painted_negative_mesh_slices_end_to_end(tmp_path):
     result = compose_painted_3mf(
         tris, colors, output_path=str(tmp_path / "painted.3mf"),
         printer_id="bambu_a1",
+    )
+    assert result["success"], result
+    assert "bed_translation" in result
+
+    sliced = slice_file(
+        result["output_path"],
+        profile=resolve_slicer_profile("bambu_a1"),
+        slicer_path=_real_prusaslicer(),
+        output_dir=str(tmp_path / "out"),
+        timeout=300,
+    )
+    assert sliced.success
+    assert os.path.getsize(sliced.output_path) > 0
+
+
+@pytest.mark.skipif(_real_prusaslicer() is None, reason="needs a real PrusaSlicer")
+def test_multicolor_negative_group_slices_end_to_end(tmp_path):
+    """The sibling door: a zone-style multi-object 3MF whose parts sit at
+    their raw (negative) STL coordinates must also reach gcode."""
+    from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
+    from kiln.slicer_profiles import resolve_slicer_profile
+
+    a = _write_cube_stl(tmp_path / "a.stl", 20.0, (-10.0, -10.0, 0.0))
+    b = _write_cube_stl(tmp_path / "b.stl", 10.0, (-45.0, -5.0, 0.0))
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(a, extruder=1, name="body", color="#AAAAAA"),
+            ColorPart(b, extruder=2, name="accent", color="#111111"),
+        ],
+        output_path=str(tmp_path / "mc.3mf"),
     )
     assert result["success"], result
     assert "bed_translation" in result

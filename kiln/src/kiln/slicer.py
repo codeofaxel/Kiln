@@ -457,6 +457,21 @@ def _check_3mf_on_bed(input_abs: str, profile: str | None) -> None:
         and bbox["y_max"] <= bed_y_max + eps
     ):
         return
+    span_x = bbox["x_max"] - bbox["x_min"]
+    span_y = bbox["y_max"] - bbox["y_min"]
+    too_big = (
+        span_x > (bed_x_max - bed_x_min) + eps
+        or span_y > (bed_y_max - bed_y_min) + eps
+    )
+    fix = (
+        # No translation can fit an oversize footprint — say so instead of
+        # sending the user in circles re-centring it.
+        "The footprint is larger than the bed: rescale the model or "
+        "split it into parts that fit."
+        if too_big
+        else "Re-export the 3MF centred on the bed, or translate the "
+        "model so its footprint fits."
+    )
     raise SlicerError(
         f"Model geometry (with its 3MF build transform applied) spans "
         f"X[{bbox['x_min']:.1f}..{bbox['x_max']:.1f}] "
@@ -464,8 +479,7 @@ def _check_3mf_on_bed(input_abs: str, profile: str | None) -> None:
         f"profile's bed X[{bed_x_min:g}..{bed_x_max:g}] "
         f"Y[{bed_y_min:g}..{bed_y_max:g}] mm. Slicers honour a 3MF's "
         f"placement literally (no auto-centre), so this would slice to "
-        f"nothing. Re-export the 3MF centred on the bed, or translate "
-        f"the model so its footprint fits."
+        f"nothing. {fix}"
     )
 
 

@@ -176,9 +176,16 @@ class TestScenePartColorsSurvive:
         from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
 
         def make():
+            # On the plate (positive coords), so compose_multicolor_3mf
+            # keeps the parts where the fixture puts them instead of
+            # baking a bed-centring group shift.
             if dense:
-                return trimesh.creation.icosphere(subdivisions=3, radius=10.0)
-            return trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+                m = trimesh.creation.icosphere(subdivisions=3, radius=10.0)
+                m.apply_translation((100.0, 100.0, 10.0))
+            else:
+                m = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+                m.apply_translation((100.0, 100.0, 5.0))
+            return m
 
         lo, hi = make(), make()
         hi.apply_translation((0.0, 0.0, 30.0))
@@ -213,9 +220,9 @@ class TestScenePartColorsSurvive:
         # shipped exactly zero of them.
         assert {tuple(c) for c in rgba.tolist()} == {tuple(self.RED), tuple(self.BLUE)}
         # And each lands on ITS part: viewer-space y is mesh-space z, the
-        # zones sit at z ∈ [-5, 5] and z ∈ [25, 35].
-        assert (rgba[pos[:, 1] < 15.0] == self.RED).all()
-        assert (rgba[pos[:, 1] > 15.0] == self.BLUE).all()
+        # zones sit at z ∈ [0, 10] and z ∈ [30, 40].
+        assert (rgba[pos[:, 1] < 25.0] == self.RED).all()
+        assert (rgba[pos[:, 1] > 25.0] == self.BLUE).all()
 
     def test_a_colorless_multipart_scene_ships_no_color_buffer(self, tmp_path):
         """No part claims a color → no buffer, same as today — the viewer's
@@ -241,8 +248,8 @@ class TestScenePartColorsSurvive:
         rgba = self._rgba(payload)
         pos = _f32(payload["positions"])
         assert {tuple(c) for c in rgba.tolist()} == {tuple(self.RED), tuple(self.BLUE)}
-        assert (rgba[pos[:, 1] < 15.0] == self.RED).all()
-        assert (rgba[pos[:, 1] > 15.0] == self.BLUE).all()
+        assert (rgba[pos[:, 1] < 25.0] == self.RED).all()
+        assert (rgba[pos[:, 1] > 25.0] == self.BLUE).all()
 
     def test_an_oversized_multicolor_mesh_still_downgrades_honestly(
         self, tmp_path, monkeypatch
