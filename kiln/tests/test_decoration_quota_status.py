@@ -45,3 +45,34 @@ def test_status_at_the_cap_shows_zero_remaining(tmp_path: Path) -> None:
         assert ok is True
     status = tracker.get_status().to_dict()
     assert status["used"] == 3 and status["remaining"] == 0
+
+
+def test_refund_gives_back_a_consumed_decoration(tmp_path: Path) -> None:
+    tracker = DecorationQuota(quota_path=tmp_path / "decoration_usage.json")
+    tracker._get_tier = lambda: "free"  # noqa: SLF001
+    ok, _ = tracker.check_and_increment()
+    assert ok is True
+    tracker.refund()
+    status = tracker.get_status().to_dict()
+    assert status["used"] == 0 and status["remaining"] == 3
+
+
+def test_refund_floors_at_zero(tmp_path: Path) -> None:
+    tracker = DecorationQuota(quota_path=tmp_path / "decoration_usage.json")
+    tracker._get_tier = lambda: "free"  # noqa: SLF001
+    tracker.refund()  # nothing consumed — must not go negative
+    status = tracker.get_status().to_dict()
+    assert status["used"] == 0 and status["remaining"] == 3
+
+
+def test_refund_reopens_a_capped_month(tmp_path: Path) -> None:
+    tracker = DecorationQuota(quota_path=tmp_path / "decoration_usage.json")
+    tracker._get_tier = lambda: "free"  # noqa: SLF001
+    for _ in range(3):
+        ok, _ = tracker.check_and_increment()
+        assert ok is True
+    ok, err = tracker.check_and_increment()
+    assert ok is False and err is not None
+    tracker.refund()  # e.g. a compile failure gave the slot back
+    ok, _ = tracker.check_and_increment()
+    assert ok is True
