@@ -230,6 +230,24 @@ class DecorationQuota:
             data["count"] = int(data.get("count", 0)) + 1
             self._write(data)
 
+    def refund(self) -> None:
+        """Give back one decoration counted by ``check_and_increment``.
+
+        The quota is consumed up front (check-and-increment), so a pipeline
+        exit that delivers nothing — a compile failure, a no-op boolean, bad
+        content — must hand the slot back or the caller pays for a carve
+        they never received.  Floors at zero, and a month rollover between
+        consume and refund leaves the fresh month's counter alone (there is
+        nothing of this month's to give back).
+        """
+        month = self._current_month()
+        with self._lock:
+            data = self._read()
+            if data.get("month") != month:
+                return
+            data["count"] = max(0, int(data.get("count", 0)) - 1)
+            self._write(data)
+
 
 # ---------------------------------------------------------------------------
 # Error formatting
