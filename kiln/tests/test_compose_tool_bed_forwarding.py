@@ -183,6 +183,23 @@ class TestColorToolsForwardTheBed:
         cx, _cy = _centre_xy(result["multicolor_3mf"])
         assert cx == pytest.approx(128.0, abs=0.5)
 
+    def test_by_region_zone_path_composes_onto_the_named_bed(self):
+        """method="z_height" takes _try_compose_3mf from its OWN call site,
+        which can lose the forward independently of by_height's."""
+        stl = _write_stl(_off_plate_box())
+        try:
+            result = _color_tool("auto_color_by_region")(
+                input_path=stl, num_colors=2, method="z_height",
+                printer_id="bambu_a1_mini",
+            )
+        finally:
+            os.unlink(stl)
+        assert result["success"] is True, result.get("error")
+        assert result.get("multicolor_3mf"), result.get("compose_3mf_error")
+        cx, cy = _centre_xy(result["multicolor_3mf"])
+        assert cx == pytest.approx(90.0, abs=0.5)
+        assert cy == pytest.approx(90.0, abs=0.5)
+
     def test_by_region_painted_path_composes_onto_the_named_bed(self):
         """method="normal" takes the OTHER composer — compose_painted_3mf."""
         stl = _write_stl(_off_plate_box())
