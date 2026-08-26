@@ -5,7 +5,7 @@
   },
   "phone_stand": {
     "display_name": "Phone Stand",
-    "description": "Angled phone stand with adjustable cradle width, angle, and base dimensions. Prints upright, no supports.",
+    "description": "Holds a phone at a set viewing angle on a desk. Give it your phone's width and the angle you want. Prints upright, no supports.",
     "category": "desk_accessories",
     "parameters": {
       "phone_width": {
@@ -91,7 +91,7 @@
   },
   "cable_clip": {
     "display_name": "Cable Management Clip",
-    "description": "Adhesive-pad cable clip with snap-in channels; the cable runs along the clip. Prints as an extruded profile, no supports.",
+    "description": "Holds one to four cable runs against a desk or wall — cables snap into C-channels above a flat stick-down pad. Set the cable diameter. Prints as an extruded profile, no supports.",
     "category": "desk_accessories",
     "parameters": {
       "cable_dia": {
@@ -163,7 +163,7 @@
   },
   "drawer_organizer": {
     "display_name": "Drawer Organizer Tray",
-    "description": "Grid-based drawer organizer with customizable compartments. Prints flat.",
+    "description": "Divides a drawer into a grid of compartments. Set the drawer's width and depth and how many columns and rows you want. Prints as an open tray, no supports.",
     "category": "containers",
     "parameters": {
       "width": {
@@ -292,7 +292,7 @@
   },
   "hinge_box": {
     "display_name": "Print-in-Place Hinge Box",
-    "description": "Box with living hinge that prints as one piece, folds to close.",
+    "description": "Small-parts box that prints as one flat piece and folds shut on a living hinge. Set the box width, depth, and height. No supports.",
     "category": "containers",
     "parameters": {
       "width": {
@@ -335,7 +335,7 @@
   },
   "funnel": {
     "display_name": "Funnel",
-    "description": "Kitchen/workshop funnel. Prints mouth-down on a full rim ring, no supports.",
+    "description": "Decants liquids or powders into a narrow opening. Set the mouth and spout diameters to match what you're pouring into. Prints mouth-down on a full rim ring, no supports.",
     "category": "kitchen",
     "parameters": {
       "mouth_dia": {
@@ -407,7 +407,7 @@
   },
   "wall_plate_cover": {
     "display_name": "Wall Plate / Switch Cover",
-    "description": "Standard wall plate cover for light switches or outlets.",
+    "description": "Replaces a broken or mismatched switch plate. Pick single toggle, double toggle, or outlet, and set the plate size. Prints flat, no supports.",
     "category": "hardware",
     "parameters": {
       "style": {
@@ -498,7 +498,7 @@
   },
   "spool_holder": {
     "display_name": "Filament Spool Holder",
-    "description": "Tabletop filament spool holder with roller bearings and adjustable width.",
+    "description": "Bench stand that carries a filament spool clear of the desk: base plate, side walls, and paired cradle blocks. Size it to your spool's maximum width and diameter.",
     "category": "3d_printing",
     "parameters": {
       "spool_width": {
@@ -534,7 +534,7 @@
   },
   "tube_connector": {
     "display_name": "Tube/Pipe Connector",
-    "description": "Parametric tube coupler for joining pipes or tubes. Straight or angled.",
+    "description": "Joins two tubes or pipes end to end, straight or at a bend angle you set. The sleeve slips over both ends — size it from the tube's outer diameter.",
     "category": "hardware",
     "parameters": {
       "tube_od": {
@@ -597,7 +597,7 @@
   },
   "wrench": {
     "display_name": "Parametric Wrench",
-    "description": "Open-ended wrench for hex bolts. Specify the bolt size.",
+    "description": "Open-ended wrench sized to one hex bolt. Give the across-flats size; jaw and handle print flat as one piece.",
     "category": "tools",
     "parameters": {
       "bolt_size_mm": {
@@ -626,7 +626,7 @@
   },
   "spacer_washer": {
     "display_name": "Spacer / Washer",
-    "description": "Flat spacer ring with configurable inner diameter, outer diameter, and thickness.",
+    "description": "Sets a gap in a bolted stack, or spreads load like a washer. Set the hole, outer diameter, and thickness. Prints flat, no supports.",
     "category": "hardware",
     "parameters": {
       "inner_dia": {
@@ -655,7 +655,7 @@
   },
   "corner_brace": {
     "display_name": "Corner Brace",
-    "description": "L-shaped reinforcement bracket with mounting holes for joining perpendicular surfaces.",
+    "description": "Reinforces a right-angle joint in a frame or box. L bracket with screw holes through both arms — set the arm length, hole size, and holes per arm.",
     "category": "hardware",
     "parameters": {
       "arm_length": {
@@ -698,7 +698,7 @@
   },
   "standoff": {
     "display_name": "Hex Standoff",
-    "description": "Hexagonal standoff with through-hole for PCB or panel mounting.",
+    "description": "Holds a board or panel a set distance off its mounting surface. Hex body with a screw through-hole; set the height and hex across-flats.",
     "category": "hardware",
     "parameters": {
       "height": {
@@ -727,7 +727,7 @@
   },
   "shaft_collar": {
     "display_name": "Shaft Collar",
-    "description": "Clamping collar for locking position on a round shaft. Split design with bolt hole.",
+    "description": "Locks a position on a round shaft. Split ring that a cross bolt pinches shut — set the shaft diameter and bolt size.",
     "category": "hardware",
     "parameters": {
       "shaft_dia": {
@@ -763,7 +763,7 @@
   },
   "pcb_standoff_mount": {
     "display_name": "PCB Mounting Plate",
-    "description": "Mounting plate with standoff posts for standard PCB sizes. Configurable hole spacing.",
+    "description": "Mounts a bare PCB inside an enclosure or on a panel. Base plate with four screw posts — set the board's hole-to-hole spacing.",
     "category": "electronics",
     "parameters": {
       "board_width": {
@@ -806,7 +806,7 @@
   },
   "din_rail_clip": {
     "display_name": "DIN Rail Clip",
-    "description": "Snap-on DIN rail mount adapter for custom modules. Standard 35mm rail.",
+    "description": "Puts a custom module on a 35 mm DIN rail. Back plate with lipped grips at both rail edges and a flat face to mount to; set the mounting face size.",
     "category": "electronics",
     "parameters": {
       "mount_width": {
@@ -835,7 +835,7 @@
   },
   "servo_bracket": {
     "display_name": "Servo Mounting Bracket",
-    "description": "L-bracket for standard hobby servo motors with mounting tabs.",
+    "description": "Holds a hobby servo against a frame or panel. U-channel around the servo body with a screwed-down base flange — set your servo's body dimensions.",
     "category": "electronics",
     "parameters": {
       "servo_width": {
@@ -1000,7 +1000,7 @@
   },
   "tablet_stand": {
     "display_name": "Tablet Stand",
-    "description": "Adjustable-angle tablet or e-reader stand with a cable pass-through notch. Prints upright, no supports.",
+    "description": "Holds a tablet or e-reader at a set viewing angle, with a charging-cable notch through the back. Prints upright, no supports.",
     "category": "desk_accessories",
     "parameters": {
       "width": {
@@ -1043,7 +1043,7 @@
   },
   "drill_bit_holder": {
     "display_name": "Drill Bit Organizer",
-    "description": "Block with graduated holes for organizing drill bit sets by size.",
+    "description": "Stands a drill bit set upright in size order — holes step evenly from your smallest bit to your largest. Set the size range and count.",
     "category": "tools",
     "parameters": {
       "min_dia": {
@@ -1086,7 +1086,7 @@
   },
   "hex_key_rack": {
     "display_name": "Hex Key Rack",
-    "description": "Wall-mount rack with graduated slots for Allen key sets.",
+    "description": "Wall rack that holds an Allen key set in size order, slots stepping evenly from the smallest key to the largest. Set the size range and count.",
     "category": "tools",
     "parameters": {
       "min_size": {
@@ -1122,7 +1122,7 @@
   },
   "sanding_block": {
     "display_name": "Sanding Block",
-    "description": "Ergonomic sanding block with clip grooves for sandpaper retention.",
+    "description": "Hand block for sanding flat. Sandpaper tucks into a slot at each end and a finger recess sits on top — size the block to the paper you cut.",
     "category": "tools",
     "parameters": {
       "width": {
@@ -1187,7 +1187,7 @@
   },
   "spice_jar_rack": {
     "display_name": "Spice Jar Rack",
-    "description": "Tiered step rack for uniform spice jars. Configurable jar size and count. Prints without supports.",
+    "description": "Brings a back row of spice jars into view on a stepped rack. Set your jar diameter, jars per row, and number of rows. Prints without supports.",
     "category": "kitchen",
     "parameters": {
       "jar_dia": {
@@ -1230,7 +1230,7 @@
   },
   "bottle_opener": {
     "display_name": "Bottle Opener",
-    "description": "Lever-style bottle cap opener with ergonomic grip.",
+    "description": "Pops a crown cap — hooked lever head sized to the standard 26.5 mm cap, with a grip handle. Prints flat, no supports.",
     "category": "kitchen",
     "parameters": {
       "length": {
@@ -1295,7 +1295,7 @@
   },
   "nozzle_rack": {
     "display_name": "Nozzle Organizer",
-    "description": "Small organizer block with labeled slots for spare printer nozzles.",
+    "description": "Keeps spare nozzles from rolling away, standing each one upright in its own hex socket. Set the slot count and nozzle hex size.",
     "category": "3d_printing",
     "parameters": {
       "slots": {
@@ -1425,7 +1425,7 @@
   },
   "vesa_adapter": {
     "display_name": "VESA Adapter Plate",
-    "description": "Adapter plate converting between VESA 75mm and 100mm mounting patterns.",
+    "description": "Bolts a monitor with one VESA pattern to an arm with another — one plate drilled with both hole patterns. Set the two spacings. Prints flat, no supports.",
     "category": "mounts_and_adapters",
     "parameters": {
       "from_spacing": {
@@ -1545,7 +1545,7 @@
   },
   "pot_drip_tray": {
     "display_name": "Plant Pot Drip Tray",
-    "description": "Saucer/drip tray sized for specific pot diameters.",
+    "description": "Catches runoff under a plant pot. Saucer sized to your pot's base diameter plus a margin you set. Prints as an open tray, no supports.",
     "category": "garden",
     "parameters": {
       "pot_dia": {
@@ -1581,7 +1581,7 @@
   },
   "seed_spacer": {
     "display_name": "Seed Spacing Template",
-    "description": "Flat template with configurable hole grid for consistent seed spacing.",
+    "description": "Lays out a seed bed at even spacing — a flat template you press into soil and plant through. Set the grid spacing and hole count.",
     "category": "garden",
     "parameters": {
       "grid_spacing": {
@@ -1689,7 +1689,7 @@
   },
   "corner_clamp_jig": {
     "display_name": "90° Corner Clamp Jig",
-    "description": "Alignment jig for holding pieces at exact 90 degrees during gluing or welding.",
+    "description": "Holds two workpieces square while glue sets. Inside corner with fences along both arms on a braced base plate — set the arm length to the stock you're joining.",
     "category": "workshop",
     "parameters": {
       "arm_length": {
@@ -1876,7 +1876,7 @@
   },
   "switch_panel": {
     "display_name": "Switch Panel",
-    "description": "Flat panel with configurable cutouts for toggle or rocker switches.",
+    "description": "Front panel for a row of toggle or rocker switches, with corner mounting holes. Set the switch hole diameter, count, and spacing. Prints flat, no supports.",
     "category": "electronics",
     "parameters": {
       "switches": {
@@ -1926,7 +1926,7 @@
   },
   "p_trap_cover": {
     "display_name": "P-Trap Access Cover",
-    "description": "Snap-fit cover plate for exposed P-trap pipes under sinks. Conceals plumbing cleanly.",
+    "description": "Hides the exposed P-trap under a sink. Lipped panel with a pipe pass-through at the bottom — set the panel size and pipe diameter. Prints flat, no supports.",
     "category": "plumbing",
     "parameters": {
       "width": {
@@ -1962,7 +1962,7 @@
   },
   "shower_caddy_hook": {
     "display_name": "Shower Caddy Hook",
-    "description": "Over-the-pipe hook for hanging shower caddies or accessories on shower pipes.",
+    "description": "Hangs a caddy or towel off a shower pipe. C-clamp that snaps over the pipe with a curled hook arm — set the pipe's outer diameter. Prints as an extruded profile, no supports.",
     "category": "plumbing",
     "parameters": {
       "pipe_dia": {
@@ -2120,7 +2120,7 @@
   },
   "dowel_jig": {
     "display_name": "Dowel Jig",
-    "description": "Self-centering dowel drilling jig for precise joint alignment. Multiple hole spacing options.",
+    "description": "Drills a row of dowel holes in line. Guide block with a reference groove that registers on the workpiece edge — set the dowel diameter, hole count, and spacing.",
     "category": "workshop",
     "parameters": {
       "dowel_dia": {
@@ -2206,7 +2206,7 @@
   },
   "gear_spur": {
     "display_name": "Spur Gear",
-    "description": "Involute spur gear with configurable tooth count, module, and face width. For hobby robotics and mechanisms.",
+    "description": "Spur gear for a hobby mechanism or robot. Set the tooth count, module, and bore; it meshes with any gear of the same module. Prints flat, no supports.",
     "category": "hardware",
     "parameters": {
       "teeth": {
@@ -2249,7 +2249,7 @@
   },
   "pulley_gt2": {
     "display_name": "GT2 Timing Pulley",
-    "description": "GT2 belt timing pulley for 3D printers and CNC. Configurable tooth count and bore.",
+    "description": "Drives a 2 mm-pitch GT2 belt on a printer or CNC axis. Flanged barrel with simplified tooth grooves — set the tooth count and shaft bore. Prints without supports.",
     "category": "hardware",
     "parameters": {
       "teeth": {
@@ -2285,7 +2285,7 @@
   },
   "z_axis_guide": {
     "display_name": "Z-Axis Endstop Mount",
-    "description": "Adjustable Z-endstop mount for 3D printer frames. Slides on 2020 extrusion.",
+    "description": "Carries a Z endstop switch on a printer's 2020 frame. Clamp body slides in the extrusion slot with a switch platform beside it — set the switch width.",
     "category": "3d_printing",
     "parameters": {
       "slot_width": {
@@ -2321,7 +2321,7 @@
   },
   "tool_holder_pegboard": {
     "display_name": "Pegboard Tool Holder",
-    "description": "Customizable pegboard hook for holding tools, cables, or accessories. Standard 25mm pegboard spacing. Prints flat, no supports.",
+    "description": "Pegboard hook for a tool, cable, or accessory, on the standard 25 mm peg spacing, with an upturned tip that keeps the tool on. Prints flat, no supports.",
     "category": "workshop",
     "parameters": {
       "hook_length": {
@@ -2407,7 +2407,7 @@
   },
   "bookmark": {
     "display_name": "Bookmark",
-    "description": "Thin flat bookmark with optional page clip and decoration-ready face. Designed for thin-wall printing.",
+    "description": "Thin flat bookmark with an optional page clip and a decoration-ready face. Prints flat at thin-wall thickness.",
     "category": "accessories",
     "parameters": {
       "width": {
