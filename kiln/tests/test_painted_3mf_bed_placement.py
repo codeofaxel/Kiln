@@ -487,3 +487,66 @@ def test_multicolor_negative_group_slices_end_to_end(tmp_path):
     )
     assert sliced.success
     assert os.path.getsize(sliced.output_path) > 0
+
+
+# ---------------------------------------------------------------------------
+# The shared mesh-bbox path reads a model 3MF's PLACED geometry, so the
+# slice tool's top-level bed_fit report agrees with the pre-slice gate
+# instead of answering BBOX_UNKNOWN while the gate knows the bbox.
+# ---------------------------------------------------------------------------
+
+
+class TestMeshBboxReadsPlaced3mf:
+    """compute_mesh_bbox / validate_mesh_for_printer on model 3MFs."""
+
+    def test_3mf_bbox_is_placed_geometry(self, tmp_path):
+        from kiln.printers.bed_fit import compute_mesh_bbox
+
+        xml = _off_bed_model_xml().replace(
+            'transform="1 0 0 0 1 0 0 0 1 0 0 0"',
+            'transform="1 0 0 0 1 0 0 0 1 100 100 0"',
+        )
+        threemf = _write_3mf(tmp_path / "placed.3mf", xml)
+        bbox = compute_mesh_bbox(threemf)
+        assert bbox is not None
+        assert bbox["x_min"] == pytest.approx(70.0)
+        assert bbox["x_max"] == pytest.approx(80.0)
+        assert bbox["y_min"] == pytest.approx(69.0)
+
+    def test_off_bed_3mf_reports_bbox_not_unknown(self, tmp_path):
+        from kiln.printers.bed_fit import validate_mesh_for_printer
+
+        threemf = _write_3mf(tmp_path / "off.3mf", _off_bed_model_xml())
+        fit = validate_mesh_for_printer(threemf, "bambu_a1")
+        assert fit["error_code"] == "OFF_BED_GEOMETRY"
+        assert fit["bbox"] is not None
+        assert fit["bbox"]["x_min"] == pytest.approx(-30.0)
+        assert fit["suggested_translate"] is not None
+
+    def test_on_bed_3mf_validates_ok_with_bbox(self, tmp_path):
+        from kiln.printers.bed_fit import validate_mesh_for_printer
+
+        xml = _off_bed_model_xml().replace(
+            'transform="1 0 0 0 1 0 0 0 1 0 0 0"',
+            'transform="1 0 0 0 1 0 0 0 1 128 128 0"',
+        )
+        threemf = _write_3mf(tmp_path / "on.3mf", xml)
+        fit = validate_mesh_for_printer(threemf, "bambu_a1")
+        assert fit["ok"], fit
+        assert fit["error_code"] is None
+        assert fit["bbox"] is not None
+
+    def test_geometryless_3mf_still_soft_passes(self, tmp_path):
+        """A 3MF with no <mesh> (e.g. gcode-carrying) keeps fail-open
+        BBOX_UNKNOWN semantics — the fix must not turn missing data
+        into a block."""
+        from kiln.printers.bed_fit import validate_mesh_for_printer
+
+        threemf = _write_3mf(
+            tmp_path / "empty.3mf",
+            '<?xml version="1.0"?><model xmlns="http://schemas.microsoft.com'
+            '/3dmanufacturing/core/2015/02"><resources/><build/></model>',
+        )
+        fit = validate_mesh_for_printer(threemf, "bambu_a1")
+        assert fit["ok"] is True
+        assert fit["error_code"] == "BBOX_UNKNOWN"
