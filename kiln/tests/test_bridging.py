@@ -151,7 +151,12 @@ def _write_u_channel_stl(
     front_quad((0, 0, 0), (wall_mm, 0, 0), (wall_mm, 0, tz), (0, 0, tz))
     front_quad((wall_mm + span, 0, 0), (tx, 0, 0), (tx, 0, tz), (wall_mm + span, 0, tz))
     front_quad((wall_mm, 0, pz), (wall_mm + span, 0, pz), (wall_mm + span, 0, tz), (wall_mm, 0, tz))
-    front_quad((wall_mm, 0, 0), (wall_mm + span, 0, 0), (wall_mm + span, 0, pz), (wall_mm, 0, pz))
+    # NOTE: the gap's front face below the ceiling is deliberately
+    # ABSENT — the channel is open at both ends, like a table between
+    # two pillars.  With it present the cavity is a four-side-anchored
+    # tunnel and the honest supported-chord measurement correctly
+    # reports the (short) depth direction as the bridge span, which is
+    # not what these fixtures are built to exercise.
 
     # Back (+Y at y=ty) mirror
     def back_quad(a, b, c, d):
@@ -159,7 +164,6 @@ def _write_u_channel_stl(
     back_quad((0, ty, 0), (0, ty, tz), (wall_mm, ty, tz), (wall_mm, ty, 0))
     back_quad((wall_mm + span, ty, 0), (wall_mm + span, ty, tz), (tx, ty, tz), (tx, ty, 0))
     back_quad((wall_mm, ty, pz), (wall_mm, ty, tz), (wall_mm + span, ty, tz), (wall_mm + span, ty, pz))
-    back_quad((wall_mm, ty, 0), (wall_mm, ty, pz), (wall_mm + span, ty, pz), (wall_mm + span, ty, 0))
 
     with open(path, "wb") as f:
         f.write(b"\x00" * 80)
@@ -178,20 +182,23 @@ def _write_u_channel_stl(
 
 
 class TestBridgeMeasurementSemantic:
-    """Pin the post-2026-05-17 semantic: ``max_bridge_length_mm`` is the
-    larger of the bridge triangle's XY-bbox dimensions, NOT the 3D
-    longest edge (which over-stated by hypotenuse-bias on cavities
-    where depth >> span)."""
+    """Pin the supported-chord semantic: ``max_bridge_length_mm`` is
+    the distance the slicer actually bridges — the shortest chord
+    between opposing supported anchors at the deck's widest point.
+    Slicers pick the bridge direction, so a narrow cavity reports its
+    anchored span, never its depth (the old XY-bbox measure) and never
+    the 3D longest edge (the pre-2026-05-17 hypotenuse bias)."""
 
-    def test_2mm_bridge_8mm_depth_reports_8mm_not_hypotenuse(self, tmp_path):
-        """A 2 mm bridge through an 8 mm-deep cavity must report 8.0 mm
-        (the cavity depth = max XY dim), not 8.25 mm (the hypotenuse)."""
+    def test_2mm_bridge_8mm_depth_reports_2mm_span(self, tmp_path):
+        """A 2 mm bridge through an 8 mm-deep cavity must report
+        2.0 mm — the anchored gap the filament crosses.  The XY-bbox
+        era reported 8.0 (the cavity depth, which nothing bridges);
+        the pre-bbox era reported 8.25 (the hypotenuse)."""
         p = str(tmp_path / "tiny_bridge.stl")
         _write_u_channel_stl(p, span_mm=2.0, depth_mm=8.0)
         r = analyze_printability(p, material="pla")
         assert r.bridging.bridge_count > 0
-        # Pre-fix value was 8.246 (sqrt(4 + 64)); new value is 8.0.
-        assert r.bridging.max_bridge_length_mm == pytest.approx(8.0, abs=0.05)
+        assert r.bridging.max_bridge_length_mm == pytest.approx(2.0, abs=0.05)
 
     def test_30mm_bridge_8mm_depth_reports_30mm_not_31(self, tmp_path):
         """A 30 mm bridge through an 8 mm-deep cavity reports 30.0 mm
