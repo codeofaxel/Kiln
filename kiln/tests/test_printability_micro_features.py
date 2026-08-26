@@ -381,3 +381,59 @@ class TestThermalSlendernessGate:
             _write_stl(tmp_path, "fin.stl", tris), material="pla")
         assert r.thermal_stress.risk_level in ("high", "critical")
         assert r.thermal_stress.score_deduction <= -10
+
+
+def _plate_with_bottom_recess_triangles(pw, pd, pt, rw, rd, depth):
+    """One closed mesh: a plate with a centered rectangular recess in
+    its UNDERSIDE (ceiling at z=depth), like a bottom QR pocket."""
+    x0, y0 = (pw - rw) / 2, (pd - rd) / 2
+    x1, y1 = x0 + rw, y0 + rd
+    tris = []
+
+    def quad(a, b, c, e):
+        tris.append((a, b, c))
+        tris.append((a, c, e))
+
+    # bottom annulus around the recess (down)
+    quad((0, 0, 0), (0, y0, 0), (pw, y0, 0), (pw, 0, 0))
+    quad((0, y1, 0), (0, pd, 0), (pw, pd, 0), (pw, y1, 0))
+    quad((0, y0, 0), (0, y1, 0), (x0, y1, 0), (x0, y0, 0))
+    quad((x1, y0, 0), (x1, y1, 0), (pw, y1, 0), (pw, y0, 0))
+    # recess walls
+    quad((x0, y0, 0), (x0, y0, depth), (x1, y0, depth), (x1, y0, 0))
+    quad((x1, y0, 0), (x1, y0, depth), (x1, y1, depth), (x1, y1, 0))
+    quad((x1, y1, 0), (x1, y1, depth), (x0, y1, depth), (x0, y1, 0))
+    quad((x0, y1, 0), (x0, y1, depth), (x0, y0, depth), (x0, y0, 0))
+    # recess ceiling (down)
+    quad((x0, y0, depth), (x0, y1, depth), (x1, y1, depth), (x1, y0, depth))
+    # plate top (up)
+    quad((0, 0, pt), (pw, 0, pt), (pw, pd, pt), (0, pd, pt))
+    # plate sides
+    quad((0, 0, 0), (pw, 0, 0), (pw, 0, pt), (0, 0, pt))
+    quad((pw, 0, 0), (pw, pd, 0), (pw, pd, pt), (pw, 0, pt))
+    quad((pw, pd, 0), (0, pd, 0), (0, pd, pt), (pw, pd, pt))
+    quad((0, pd, 0), (0, 0, 0), (0, 0, pt), (0, pd, pt))
+    return tris
+
+
+class TestBedProximateCeilings:
+    """A wide ceiling a hair above the bed (a bottom QR pocket) prints
+    reliably — the bed catches any sag, and a support could not even
+    fit in the gap.  The proven coaster workflow bridges an 84 mm
+    pocket ceiling at 0.5 mm and scans.  The exemption must NOT reach
+    ceilings with real air under them."""
+
+    def test_bottom_pocket_is_exempt(self, tmp_path):
+        tris = _plate_with_bottom_recess_triangles(60, 60, 4, 40, 40, 0.5)
+        r = analyze_printability(
+            _write_stl(tmp_path, "pocket.stl", tris), material="pla")
+        assert not r.bridging.needs_supports_for_bridges
+        assert not r.overhangs.needs_supports
+        # the span itself still reports honestly
+        assert r.bridging.max_bridge_length_mm > 30
+
+    def test_elevated_ceiling_keeps_its_verdict(self, tmp_path):
+        tris = _plate_with_bottom_recess_triangles(60, 60, 8, 40, 40, 5.0)
+        r = analyze_printability(
+            _write_stl(tmp_path, "cavity.stl", tris), material="pla")
+        assert r.bridging.needs_supports_for_bridges

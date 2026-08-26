@@ -264,3 +264,35 @@ class TestSecondSweep:
         assert "hole_d = 5.2" in s
         assert "Teardrop" in s or "teardrop" in s
         assert "mount_type" not in templates["gopro_mount"]["parameters"]
+
+
+class TestPolishLap:
+    """The final polish pass: the last four B-graders remodeled, and
+    pen_cup's bottom QR pocket covered by the bed-proximate ceiling
+    exemption in the engine (see TestBedProximateCeilings)."""
+
+    def test_cable_clip_is_an_extruded_profile(self, templates):
+        """The old clip's entry slot left a 0.2 mm sliver at the ring
+        top, and the cable bore ran vertically."""
+        s = scad(templates, "cable_clip")
+        assert "linear_extrude(base_w)" in s
+        assert "pitch = max(base_w, cable_dia + wall * 2 + 2)" in s
+
+    def test_shelf_bracket_brace_is_real(self, templates):
+        """The old 'gusset' was a flat triangle parallel to the shelf
+        (load-useless), plus a 'Mirrored gusset' comment with no code."""
+        s = scad(templates, "shelf_bracket")
+        assert "linear_extrude(w)" in s
+        assert "brace_lo" in s
+        assert "Mirrored gusset" not in s
+
+    def test_fuse_puller_prints_flat(self, templates):
+        s = scad(templates, "fuse_puller")
+        assert "linear_extrude(t)" in s
+
+    def test_funnel_prints_mouth_down_seamless(self, templates):
+        """One revolved wall section: no stacked-solid membrane seams,
+        rim ring on the bed, cone narrowing upward."""
+        s = scad(templates, "funnel")
+        assert "rotate_extrude" in s
+        assert "mouth-down" in s.lower()

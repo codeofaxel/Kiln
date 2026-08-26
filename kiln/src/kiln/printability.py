@@ -1888,6 +1888,14 @@ _BRIDGE_CHORD_DIRECTIONS: int = 12
 # worst point is interior, which stride sampling still hits.
 _BRIDGE_SPAN_SAMPLE_CAP: int = 200
 
+# Ceilings this close to the bed (three 0.2 mm layers) are exempt
+# from the needs-supports verdict: the bed itself catches any sag, a
+# support could not fit in the gap, and the empirically proven QR
+# workflow prints an 84 mm pocket ceiling at 0.5 mm.  Deliberately
+# NOT extended further: at millimeter-plus gaps a fused sag starts
+# ruining functional clearances rather than cosmetics.
+_BED_PROXIMATE_CEILING_MM: float = 0.61
+
 # A boundary edge counts as supported when the neighbouring
 # non-region triangle extends below the edge by more than this (mm) —
 # i.e. there is a wall descending from the bridge deck for the
@@ -2159,6 +2167,17 @@ def _analyze_downward_regions(
                 point_span = min(best_chord, 2.0 * d_sup)
             elif _solid_directly_below(cx, cy, _cz):
                 point_span = 0.0
+            elif _cz - z_min <= _BED_PROXIMATE_CEILING_MM:
+                # First-layers recess (a bottom QR pocket, a debossed
+                # logo underside): the ceiling bridges with the bed a
+                # hair beneath it, so any sag lands harmlessly on the
+                # plate instead of drooping into air — the coaster
+                # recipe prints an 84 mm pocket ceiling this way and
+                # scans.  Supports could not even fit in the gap.  The
+                # span still reports; only the verdict is lifted.
+                point_span = (
+                    best_chord if not math.isinf(best_chord) else 0.0
+                )
             else:
                 region_needs_supports = True
                 point_span = (
