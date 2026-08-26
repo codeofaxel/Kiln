@@ -1178,6 +1178,21 @@ class _GenerationAIToolsPlugin:
 
                     variations.append(var_entry)
 
+                # One count per call, not per variant: the user asked
+                # for this template once and got N renders of it.
+                # Counting each variant would let a single call outweigh
+                # a week of real builds.  This tool loads and renders
+                # the template itself rather than going through
+                # generate_from_template, so it needs its own entry --
+                # a second door that would otherwise report nothing.
+                if variations:
+                    try:
+                        from kiln.daily_stats import record_template_use
+
+                        record_template_use(template_id)
+                    except Exception:  # noqa: BLE001
+                        pass  # telemetry never breaks a generation
+
                 response = {
                     "success": True,
                     "template": template_id,

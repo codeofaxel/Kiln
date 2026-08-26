@@ -291,6 +291,14 @@ def _empty_day() -> dict[str, Any]:
         # was previously invisible for anyone not signed in.  Names +
         # counts only, never arguments or paths.
         "tool_calls": {},          # {"generate_coaster": 4, "slice_model": 2}
+        # Which parametric design templates got built today —
+        # {template_id: count}.  The `generations` scalar counts ~25
+        # tools that make a model and cannot say whether any of them was
+        # a template, so "does anyone use the template library" and "we
+        # have no way to tell" were the same number.  Template ids only:
+        # never the parameter VALUES, which are the user's own
+        # dimensions and say what they are building.
+        "template_uses": {},       # {"shelf_bracket": 3, "stackable_bin": 1}
         # Print-counting bookkeeping — see _PENDING_STARTS_MAX above.
         # Local only: get_daily_stats() never returns these, so nothing
         # here reaches the heartbeat.
@@ -316,7 +324,7 @@ _ROLLOVER_MAPS = (
     "tier_denials", "account_wall", "tool_calls", "tool_failures",
     "update_nudge",
     "texture_names", "decoration_types", "slicer_profiles",
-    "marketplace_sources",
+    "marketplace_sources", "template_uses",
 )
 
 
@@ -789,6 +797,34 @@ def record_tool_call(tool_name: str) -> None:
     _record_name_count("tool_calls", tool_name)
 
 
+def record_template_use(template_id: str) -> None:
+    """Count one build of parametric design template ``template_id``.
+
+    Recorded in the tool BODY, not at the dispatch chokepoint, because
+    the dispatcher sees that ``generate_from_template`` was called and
+    not which template it built — the same reason the texture and
+    decoration tools record their own detail.  The ``generations``
+    scalar keeps counting at the chokepoint, so nothing is
+    double-counted here; this map is the breakdown beside it.
+
+    Counted once per successful build, and only where a user asked for
+    a PART.  Deliberately not counted:
+
+    * ``optimize_template_params`` — a parameter sweep renders dozens of
+      variants of one template to grade them.  Counting each would let a
+      single optimisation run outweigh a week of real builds and read as
+      demand that is not there.
+    * ``design_to_gcode_pipeline`` — an end-to-end pipeline whose
+      template step is incidental to what the caller asked for.
+
+    ``smart_generate_from_template`` needs no entry of its own: it calls
+    ``generate_from_template``, so it lands here through that.
+
+    Silent by contract — telemetry never breaks a tool call.
+    """
+    _record_name_count("template_uses", template_id)
+
+
 def get_daily_stats() -> dict[str, Any]:
     """Return today's counters and breakdowns."""
     data = _read()
@@ -819,6 +855,10 @@ def get_daily_stats() -> dict[str, Any]:
         # P2S install fails at start_print" said nothing instead.
         "tool_failures": data.get("tool_failures", {}),
         "update_nudge": data.get("update_nudge", {}),
+        # Returned here from the start.  A map recorded but not returned
+        # reads {} in every heartbeat forever — exactly how tool_failures
+        # shipped nothing on 1,000 production rows.
+        "template_uses": data.get("template_uses", {}),
         # The last COMPLETE day's counters (see _archive_completed_day).
         # The heartbeat reports these because the same-day counters it
         # can see at server startup are structurally near-empty.

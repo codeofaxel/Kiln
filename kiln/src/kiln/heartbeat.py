@@ -528,6 +528,14 @@ def _send_heartbeat() -> None:
                 # attempt and the outcome all happen on the user's own
                 # machine and never touch a server.
                 "update_nudge": stats.get("update_nudge", {}),
+                # Which parametric design templates got built —
+                # {template_id: count_today}.  The library is free and
+                # reachable only through the MCP tools, so no server
+                # call is made when one is built and this heartbeat is
+                # the only place its use is ever visible.  Template ids
+                # only: never the parameter values, which are the
+                # user's own dimensions.
+                "template_uses": _top_n(stats.get("template_uses", {}), 100),
                 # Model names of EVERY registered printer (deduped,
                 # capped) — the top-level printer_model field only ever
                 # names the default machine, which made second printers

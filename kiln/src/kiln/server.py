@@ -11822,6 +11822,19 @@ def generate_from_template(
 
         # If succeeded, also validate the mesh
         if job.status.value == "succeeded":
+            # Which template was built, for the daily heartbeat.  The
+            # library is free and reachable only through these MCP
+            # tools, so nothing server-side ever learns a template was
+            # used; without this the answer to "does anyone use them"
+            # is a shrug.  Id only — the parameter values are the
+            # user's own dimensions and stay on their machine.
+            try:
+                from kiln.daily_stats import record_template_use
+
+                record_template_use(template_id)
+            except Exception:  # noqa: BLE001
+                pass  # telemetry never breaks a generation
+
             dl = gen.download_result(job.id)
             val = validate_mesh(dl.local_path)
             result_dict["result"] = dl.to_dict()

@@ -123,6 +123,60 @@ def test_every_counter_field_the_dashboard_reads_is_in_the_payload(pipeline):
     assert "previous_day" in payload["p_details"]
 
 
+def test_a_template_build_reaches_the_dashboard(pipeline):
+    """Which parametric template got built has to survive the whole chain.
+
+    The 65-part library is free and reachable only through the MCP
+    tools, so building one makes no server call — this heartbeat is the
+    only evidence it happened.  The `generations` scalar cannot answer
+    it: ~25 tools increment that and none of them says which was a
+    template, so "nobody uses templates" and "we never measured" read
+    the same.
+    """
+    sent = pipeline
+
+    daily_stats.record_template_use("shelf_bracket")
+    daily_stats.record_template_use("shelf_bracket")
+    daily_stats.record_template_use("stackable_bin")
+
+    _FakeDate._today = real_date(2026, 7, 26)
+    heartbeat._send_heartbeat()
+
+    prev = sent[0]["p_details"]["previous_day"]
+    assert prev["template_uses"] == {"shelf_bracket": 2, "stackable_bin": 1}
+
+
+def test_template_uses_never_carries_a_parameter_value(pipeline):
+    """Ids only.  The parameters are the user's own dimensions."""
+    sent = pipeline
+
+    daily_stats.record_template_use("shelf_bracket")
+    heartbeat._send_heartbeat()
+
+    shipped = sent[0]["p_details"]["template_uses"]
+    assert shipped == {"shelf_bracket": 1}
+    assert all(isinstance(v, int) for v in shipped.values())
+
+
+def test_every_breakdown_map_leaves_the_machine(pipeline):
+    """The failure that hid five maps at once, pinned generically.
+
+    tool_failures was recorded for months and never returned by
+    get_daily_stats, so the heartbeat read {} on every install forever —
+    0 of 1,000 production rows carried one.  A per-map assertion would
+    not have caught it, because the map nobody thought to assert is
+    exactly the one that breaks.  Derive the list instead.
+    """
+    sent = pipeline
+    heartbeat._send_heartbeat()
+
+    details = sent[0]["p_details"]
+    for name in daily_stats._ROLLOVER_MAPS:
+        assert name in details, (
+            f"{name} survives midnight but never leaves the machine"
+        )
+
+
 def test_bridge_running_ships_in_the_payload(pipeline):
     """The field that says whether print hours can recover on their own.
 

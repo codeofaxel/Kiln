@@ -436,6 +436,87 @@ class TestGenerateFromTemplateRejection:
 
 
 # ---------------------------------------------------------------------------
+# TestTemplateUsageIsRecorded
+# ---------------------------------------------------------------------------
+
+
+class TestTemplateUsageIsRecorded:
+    """The generator has to phone the counter, or the wire measures nothing.
+
+    A recorder nobody calls is the same blind spot with extra steps, so
+    the call is pinned at the tool, not just unit-tested in isolation.
+    """
+
+    @staticmethod
+    def _succeeded_provider(tmp_path):
+        job = MagicMock()
+        job.status.value = "succeeded"
+        job.error = None
+        job.to_dict.return_value = {"id": "j1", "status": "succeeded"}
+
+        stl = tmp_path / "out.stl"
+        stl.write_text("solid x\nendsolid x\n", encoding="utf-8")
+
+        dl = MagicMock()
+        dl.local_path = str(stl)
+        dl.to_dict.return_value = {"local_path": str(stl)}
+
+        provider = MagicMock()
+        provider.generate.return_value = job
+        provider.download_result.return_value = dl
+        return provider
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_a_successful_build_is_counted_by_template_id(
+        self, _auth, tmp_path,
+    ):
+        import kiln.daily_stats as stats
+        import kiln.server as srv
+
+        with patch.object(
+            srv, "_get_generation_provider",
+            return_value=self._succeeded_provider(tmp_path),
+        ), patch.object(srv, "validate_mesh") as mock_validate, patch.object(
+            stats, "record_template_use"
+        ) as mock_record:
+            mock_validate.return_value = SimpleNamespace(
+                to_dict=lambda: {"valid": True}, bounding_box=None,
+            )
+            srv.generate_from_template("shelf_bracket", {"arm_length": 200})
+
+        mock_record.assert_called_once_with("shelf_bracket")
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_a_rejected_template_is_not_counted(self, _auth):
+        import kiln.daily_stats as stats
+        import kiln.server as srv
+
+        with patch.object(stats, "record_template_use") as mock_record:
+            srv.generate_from_template("snap_fit_cantilever")
+
+        mock_record.assert_not_called()
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_a_counter_failure_never_breaks_the_build(self, _auth, tmp_path):
+        """Telemetry is silent by contract, including when it is broken."""
+        import kiln.daily_stats as stats
+        import kiln.server as srv
+
+        with patch.object(
+            srv, "_get_generation_provider",
+            return_value=self._succeeded_provider(tmp_path),
+        ), patch.object(srv, "validate_mesh") as mock_validate, patch.object(
+            stats, "record_template_use", side_effect=RuntimeError("boom")
+        ):
+            mock_validate.return_value = SimpleNamespace(
+                to_dict=lambda: {"valid": True}, bounding_box=None,
+            )
+            result = srv.generate_from_template("shelf_bracket")
+
+        assert result["success"] is True
+
+
+# ---------------------------------------------------------------------------
 # TestGetDesignTemplateInfo
 # ---------------------------------------------------------------------------
 
