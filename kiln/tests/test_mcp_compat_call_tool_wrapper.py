@@ -190,3 +190,56 @@ def test_the_callback_receives_the_tool_name():
     assert seen == ["probe_tool"], (
         f"tool name did not reach the callback on SDK major {MCP_SDK_MAJOR}: {seen}"
     )
+
+
+def test_a_four_arg_callback_receives_the_call_arguments():
+    """The monitor attaches for the MACHINE a call named, so the call's own
+    arguments must survive the wrapper — while three-arg mutators (the
+    stage, anything older) keep working unchanged beside it."""
+    result = _Result()
+    mcp, invoke = _server_with_base_handler(result)
+
+    seen: list = []
+    legacy: list = []
+    wrap_call_tool_result(
+        mcp, lambda inner, ctx, name, args: seen.append((name, args))
+    )
+
+    def _legacy(inner, ctx, name):
+        legacy.append(name)
+
+    wrap_call_tool_result(mcp, _legacy)
+
+    from mcp.types import CallToolRequestParams
+
+    params = CallToolRequestParams(
+        name="probe_tool", arguments={"printer_name": "workshop-a1"}
+    )
+    server = lowlevel_server(mcp)
+
+    if MCP_SDK_MAJOR >= 2:
+        handler = server.get_request_handler("tools/call").handler
+        anyio.run(handler, None, params)
+    else:
+        from mcp.types import CallToolRequest
+
+        req = CallToolRequest(method="tools/call", params=params)
+        anyio.run(server.request_handlers[CallToolRequest], req)
+
+    assert seen == [("probe_tool", {"printer_name": "workshop-a1"})], (
+        f"call arguments did not reach the callback on SDK major "
+        f"{MCP_SDK_MAJOR}: {seen}"
+    )
+    assert legacy == ["probe_tool"], "a three-arg mutator must keep working"
+
+
+def test_an_argless_request_shape_hands_the_callback_none():
+    """Every other test invokes with params=None; this pins that the 4-arg
+    convention reads that shape as None rather than crashing the chain."""
+    result = _Result()
+    mcp, invoke = _server_with_base_handler(result)
+
+    seen: list = []
+    wrap_call_tool_result(mcp, lambda inner, ctx, name, args: seen.append(args))
+    invoke()
+    assert seen == [None]

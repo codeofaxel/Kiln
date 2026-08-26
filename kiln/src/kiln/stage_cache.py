@@ -1,16 +1,19 @@
-"""The 3D stage document, cached on this machine.
+"""The inline panel documents, cached on this machine.
 
 WHY THIS EXISTS
 ---------------
-Kiln's inline 3D stage — the panel a conversation renders so you can turn a
-part over instead of squinting at a still — is one self-contained HTML
-document.  Shipping it inside the package would freeze it at whatever the
-release day looked like; fetching it on every render would make the first
-design of a session wait on a download.  So it is fetched once, cached on
-disk, and revalidated cheaply against the server's ETag.
+Kiln's inline panels — the 3D stage a conversation renders so you can turn
+a part over, and the print monitor that watches a job — are each one
+self-contained HTML document.  Shipping them inside the package would
+freeze them at whatever the release day looked like; fetching on every
+render would make the first design of a session wait on a download.  So
+each is fetched once, cached on disk, and revalidated cheaply against the
+server's ETag.
 
-    warm()      -> pull it in the background at server start
-    document()  -> the document, or None if there has never been one
+    warm()              -> pull both in the background at server start
+    document()          -> the stage document, or None if there has never
+                           been one
+    monitor_document()  -> same, for the print monitor panel
 
 DESIGN NOTES
 ------------
@@ -57,12 +60,26 @@ _MAX_BYTES = 16 * 1024 * 1024
 #: page, or a misconfigured proxy — none of which belong in the cache.
 _HTML_SNIFF = b"<!doctype html"
 
-_DOC_NAME = "mesh_viewer.html"
-_ETAG_NAME = "mesh_viewer.etag"
+#: The cached documents, keyed by short name.  Each is the same shape: one
+#: self-contained HTML bundle, fetched from its endpoint, revalidated by
+#: ETag, and served from disk forever after.  Filenames double as the cache
+#: filenames, so adding a document here is the whole registration.
+_DOCS: dict[str, dict[str, str]] = {
+    "stage": {
+        "file": "mesh_viewer.html",
+        "etag": "mesh_viewer.etag",
+        "endpoint": "/api/mcp-apps/mesh-viewer",
+    },
+    "monitor": {
+        "file": "print_monitor.html",
+        "etag": "print_monitor.etag",
+        "endpoint": "/api/mcp-apps/print-monitor",
+    },
+}
 
-#: Read once per process after the first hit — the document is ~750 KB and a
-#: mesh result must not pay a disk read to find that out.
-_memo: str | None = None
+#: Read once per process after the first hit — a document is ~750 KB and a
+#: mesh result must not pay a disk read to find that out.  Keyed like _DOCS.
+_memo: dict[str, str] = {}
 _lock = threading.Lock()
 
 
@@ -91,29 +108,32 @@ def cache_dir() -> Path:
     return d
 
 
-def _read_disk() -> str | None:
+def _read_disk(doc: str) -> str | None:
     try:
-        return (cache_dir() / _DOC_NAME).read_text(encoding="utf-8")
+        return (cache_dir() / _DOCS[doc]["file"]).read_text(encoding="utf-8")
     except OSError:
         return None
 
 
-def _read_etag() -> str | None:
+def _read_etag(doc: str) -> str | None:
     try:
-        etag = (cache_dir() / _ETAG_NAME).read_text(encoding="utf-8").strip()
+        etag = (
+            (cache_dir() / _DOCS[doc]["etag"]).read_text(encoding="utf-8").strip()
+        )
     except OSError:
         return None
     return etag or None
 
 
-def _write(document: str, etag: str | None) -> None:
+def _write(doc: str, document: str, etag: str | None) -> None:
     """Write the pair atomically enough that a crash can't pair a new ETag
     with an old document — the shape that makes a stale stage permanent."""
     d = cache_dir()
-    tmp = d / f"{_DOC_NAME}.tmp"
+    name = _DOCS[doc]["file"]
+    tmp = d / f"{name}.tmp"
     tmp.write_text(document, encoding="utf-8")
-    tmp.replace(d / _DOC_NAME)
-    etag_path = d / _ETAG_NAME
+    tmp.replace(d / name)
+    etag_path = d / _DOCS[doc]["etag"]
     if etag:
         etag_path.write_text(etag, encoding="utf-8")
     else:
@@ -122,7 +142,7 @@ def _write(document: str, etag: str | None) -> None:
         etag_path.unlink(missing_ok=True)
 
 
-def _fetch(etag: str | None) -> tuple[str, str | None] | None:
+def _fetch(doc: str, etag: str | None) -> tuple[str, str | None] | None:
     """``(document, etag)`` from the API, ``None`` for "keep what you have".
 
     ``None`` covers both a 304 (the cached copy is current, which is the
@@ -138,7 +158,7 @@ def _fetch(etag: str | None) -> tuple[str, str | None] | None:
     headers = {"If-None-Match": etag} if etag else {}
     try:
         resp = httpx.get(
-            f"{_api_base()}/api/mcp-apps/mesh-viewer",
+            f"{_api_base()}{_DOCS[doc]['endpoint']}",
             headers=headers,
             timeout=_TIMEOUT_S,
             follow_redirects=True,
@@ -168,43 +188,55 @@ def _fetch(etag: str | None) -> tuple[str, str | None] | None:
         return None
 
 
-def refresh() -> str | None:
-    """Bring the cache up to date if the network allows.  Never raises.
+def _refresh_doc(doc: str) -> str | None:
+    """Bring one document's cache up to date if the network allows.
 
     Returns **the document this machine now has** — which after a failed
     fetch is the one it already had, and after a first-ever failure is
     ``None``.  Answering "what do you have" rather than "did the fetch
     succeed" is the honest shape: a 500 from the API is not a loss when the
-    stage is already on disk, and reporting it as one would be a lie in the
-    log and a trap for a caller.
+    document is already on disk, and reporting it as one would be a lie in
+    the log and a trap for a caller.
     """
-    global _memo
     if (os.environ.get(_OPT_OUT_ENV) or "").strip().lower() in {"1", "true", "yes"}:
-        return document()
+        return _document(doc)
     try:
-        on_disk = _read_disk()
-        fresh = _fetch(_read_etag() if on_disk else None)
+        on_disk = _read_disk(doc)
+        fresh = _fetch(doc, _read_etag(doc) if on_disk else None)
         if fresh is None:
-            return document()
-        doc, etag = fresh
-        _write(doc, etag)
+            return _document(doc)
+        text, etag = fresh
+        _write(doc, text, etag)
         with _lock:
-            _memo = doc
-        return doc
-    except Exception:  # noqa: BLE001 — a stage refresh must never break a server
-        logger.debug("stage cache refresh failed", exc_info=True)
+            _memo[doc] = text
+        return text
+    except Exception:  # noqa: BLE001 — a panel refresh must never break a server
+        logger.debug("stage cache refresh failed for %s", doc, exc_info=True)
         return None
 
 
+def refresh() -> str | None:
+    """Refresh the stage document (back-compat name).  Never raises."""
+    return _refresh_doc("stage")
+
+
+def _refresh_all() -> None:
+    for doc in _DOCS:
+        _refresh_doc(doc)
+
+
 def warm() -> threading.Thread | None:
-    """Start the refresh on a daemon thread.  Returns it, or ``None``.
+    """Start the refresh of every document on a daemon thread.
 
     Called at server start so the first design of a session finds the
-    document already there.  On a background thread because a cold cache is
-    a 750 KB download and no user should watch a server boot behind it.
+    documents already there.  On a background thread because a cold cache
+    is a 750 KB download per document and no user should watch a server
+    boot behind it.
     """
     try:
-        t = threading.Thread(target=refresh, daemon=True, name="kiln-stage-cache-warm")
+        t = threading.Thread(
+            target=_refresh_all, daemon=True, name="kiln-stage-cache-warm"
+        )
         t.start()
         return t
     except Exception:  # noqa: BLE001
@@ -212,27 +244,35 @@ def warm() -> threading.Thread | None:
         return None
 
 
-def document() -> str | None:
-    """The cached stage document, or ``None`` if this machine has never had one.
+def _document(doc: str) -> str | None:
+    """The cached document, or ``None`` if this machine has never had one.
 
     Reads disk at most once per process.  Deliberately does NOT fetch: this
     is called while a host waits on a ``resources/read``, and a synchronous
     download there would hang the panel on a slow line — the warm at server
     start is what fills the cache.
     """
-    global _memo
     with _lock:
-        if _memo is not None:
-            return _memo
-    doc = _read_disk()
-    if doc is None:
+        if doc in _memo:
+            return _memo[doc]
+    text = _read_disk(doc)
+    if text is None:
         return None
     with _lock:
-        _memo = doc
-    return _memo
+        _memo[doc] = text
+    return text
+
+
+def document() -> str | None:
+    """The cached stage document, or ``None`` — see ``_document``."""
+    return _document("stage")
+
+
+def monitor_document() -> str | None:
+    """The cached print-monitor document, or ``None`` — see ``_document``."""
+    return _document("monitor")
 
 
 def _reset_for_tests() -> None:
-    global _memo
     with _lock:
-        _memo = None
+        _memo.clear()
