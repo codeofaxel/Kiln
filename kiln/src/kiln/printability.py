@@ -1779,87 +1779,132 @@ def _raycast_min_distances(
     return min_dist
 
 
-def _analyze_bridging(
+@dataclass
+class _DownwardRegion:
+    """One edge-connected patch of support-needing (≥45°) downward faces.
+
+    A patch prints without supports when every sampled deck point
+    satisfies at least one of two physical mechanisms:
+
+    - **Two-sided bridging**: some straight chord through the point has
+      BOTH endpoints on supported boundary (material continuing below
+      the edge) and is ≤ the self-supporting bridge limit.  Slicers
+      pick the bridge direction, so a 2 × 20 mm cavity ceiling is a
+      2 mm bridge, not a 20 mm one.
+    - **Lateral reach**: the point is within a couple of extrusion
+      widths of supported boundary — each extruded line anchors to the
+      previous one, so a narrow one-side-anchored band (a debossed
+      logo's recess ceiling, a small flange lip) closes cleanly even
+      though no two-sided chord exists.
+
+    ``needs_supports`` is True when some deck point has neither
+    mechanism — a wide cantilever, a dome bottom, an island, or a
+    genuinely long bridge.
+
+    ``span_mm`` is the reported worst effective span: per point the
+    smaller of (best two-sided chord, 2 × distance-to-supported-
+    boundary), maxed over points; ``inf`` for islands with no
+    supported boundary at all (callers fall back to
+    ``bbox_span_mm``, the legacy conservative XY-bounding-box
+    measure).
+    """
+
+    triangle_indices: list[int]
+    flat_indices: list[int]
+    span_mm: float
+    needs_supports: bool
+    bbox_span_mm: float
+
+
+# Membership limit for downward-region aggregation: faces overhanging
+# 45° or more (nz ≤ -cos(45°)).  Shallower faces build as ordinary
+# stepped layers and can anchor a bridge, so they terminate a region.
+_DOWNWARD_REGION_NZ_LIMIT: float = -math.cos(math.radians(45.0))
+
+# Flat-ceiling limit — matches the bridge-candidate filter below.
+_BRIDGE_FLAT_NZ_LIMIT: float = -0.9
+
+# Chord probing: 12 directions = 15° steps over the half-circle.  For a
+# strip crossed at the worst mis-alignment (7.5°) the measured chord
+# overstates the true width by 1/cos(7.5°) ≈ 0.9%, well inside the
+# tolerance of the 10 mm rule it feeds.
+_BRIDGE_CHORD_DIRECTIONS: int = 12
+
+# Per-region cap on sampled deck points.  Regions are usually tiny;
+# the cap bounds pathological meshes (a 10K-facet ceiling) without
+# losing the max — a strip's span is position-independent and a disc's
+# worst point is interior, which stride sampling still hits.
+_BRIDGE_SPAN_SAMPLE_CAP: int = 200
+
+# A boundary edge counts as supported when the neighbouring
+# non-region triangle extends below the edge by more than this (mm) —
+# i.e. there is a wall descending from the bridge deck for the
+# filament to land on.  Neighbours that only rise (the side face of
+# the very slab whose underside we are measuring, the continuation of
+# a dome) are free edges: bridging toward them has nothing to anchor
+# on.
+_BRIDGE_SUPPORTED_EDGE_DROP_MM: float = 1e-3
+
+# Two-sided bridge spans up to this print reliably without supports —
+# the same universal 10 mm rule the public scoring has always used
+# (the pro overlay layers per-material limits on top).
+_MAX_SELF_SUPPORTING_BRIDGE_MM: float = 10.0
+
+# One-sided lateral reach: an extruded line anchors to the line laid
+# next to it, so deck points within a few extrusion widths (0.4 mm
+# nozzle baseline) of supported boundary close cleanly even with no
+# opposing anchor.  Beyond this a free edge droops and needs support.
+_MAX_LATERAL_REACH_MM: float = 2.0
+
+
+def _analyze_downward_regions(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
     *,
     layer_height: float = 0.2,
-    normalize_winding: bool = True,
-) -> BridgingAnalysis:
-    """Detect unsupported horizontal spans (bridges).
+) -> list[_DownwardRegion]:
+    """Aggregate support-needing downward faces into connected regions
+    and measure each region's worst bridgeable span (see
+    :class:`_DownwardRegion`)."""
 
-    Identifies triangles with normals pointing nearly straight down
-    that are above the first layer (not bed-touching), then
-    aggregates them into connected regions before measuring.
-
-    ``max_bridge_length_mm`` is the larger XY-bounding-box dimension
-    of the largest connected bridge region — the conservative span
-    the slicer would need to cross in the worst-case bridging
-    direction.  Connected-region aggregation closes the arch-under-
-    measurement gap: an arched ceiling is one bridge with the chord
-    as its span, not N tiny facets each reporting their own edge.
-    For a flat rectangular cavity ceiling (2 triangles in one
-    region) the region bbox is identical to the per-triangle
-    measurement, so this fix is additive on flat cases and only
-    changes behavior on curved / multi-triangle bridges.
-
-    Prior single-triangle implementations used ``max(triangle_edge)``
-    which over-stated by hypotenuse-bias on cavities where depth >>
-    span (a 2 mm bridge × 8 mm depth reported 8.25 mm instead of
-    8 mm).  Bbox replaces hypotenuse; region-aggregation replaces
-    per-facet.
-
-    ``bridge_count`` is the per-TRIANGLE count (back-compat with
-    the public scoring formula's ``min(15, 5 + bridge_count)`` —
-    switching to per-region would lower the score deduction on real
-    arches, which we don't want until the scoring formula is
-    updated in lockstep).
-    """
-    if normalize_winding:
-        triangles = _normalize_triangle_winding(triangles)
-
-    bed_threshold = _bed_threshold_z(z_min, layer_height)
-
-    # ---- Filter pass: collect bridge-candidate triangles -----------
-    candidates: list[tuple[tuple[float, ...], ...]] = []
-    for tri in triangles:
-        if _is_bed_supported_triangle(tri, z_min, layer_height):
-            continue
-        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
-        if centroid[2] <= bed_threshold:
-            continue
-        n = _triangle_normal(tri[0], tri[1], tri[2])
-        nn = _normalize(n)
-        if nn[2] > -0.9:
-            continue
-        candidates.append(tri)
-
-    bridge_count = len(candidates)
-    if not candidates:
-        return BridgingAnalysis(
-            max_bridge_length_mm=0.0,
-            bridge_count=0,
-            needs_supports_for_bridges=False,
-        )
-
-    # ---- Connectivity pass: union-find by shared edge --------------
-    # Round vertex coordinates to a sub-micron grid so STL float drift
-    # doesn't make two genuinely-identical vertices hash differently.
     def _vkey(v: tuple[float, ...]) -> tuple[int, int, int]:
-        # 6 decimals = 1 nm precision; enough margin to absorb f32 noise
-        # from STL parsing while still distinguishing real-world
-        # neighboring vertices.
         return (
             int(round(v[0] * 1_000_000)),
             int(round(v[1] * 1_000_000)),
             int(round(v[2] * 1_000_000)),
         )
 
-    parent = list(range(len(candidates)))
+    def _ekey(a: tuple[float, ...], b: tuple[float, ...]) -> tuple:
+        ka, kb = _vkey(a), _vkey(b)
+        return (ka, kb) if ka < kb else (kb, ka)
+
+    bed_threshold = _bed_threshold_z(z_min, layer_height)
+
+    member_idx: list[int] = []
+    is_flat: list[bool] = []
+    for i, tri in enumerate(triangles):
+        if _is_bed_supported_triangle(tri, z_min, layer_height):
+            continue
+        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
+        if centroid[2] <= bed_threshold:
+            continue
+        nn = _normalize(_triangle_normal(tri[0], tri[1], tri[2]))
+        if nn[2] > _DOWNWARD_REGION_NZ_LIMIT:
+            continue
+        member_idx.append(i)
+        is_flat.append(nn[2] <= _BRIDGE_FLAT_NZ_LIMIT)
+
+    if not member_idx:
+        return []
+
+    member_set = set(member_idx)
+
+    # Union-find over region members by shared edge.
+    parent = list(range(len(member_idx)))
 
     def _find(i: int) -> int:
         while parent[i] != i:
-            parent[i] = parent[parent[i]]  # path compression
+            parent[i] = parent[parent[i]]
             i = parent[i]
         return i
 
@@ -1868,52 +1913,290 @@ def _analyze_bridging(
         if ra != rb:
             parent[ra] = rb
 
-    edge_to_tri: dict[tuple, int] = {}
-    for i, tri in enumerate(candidates):
-        v0, v1, v2 = _vkey(tri[0]), _vkey(tri[1]), _vkey(tri[2])
-        e_ab = (v0, v1) if v0 < v1 else (v1, v0)
-        e_bc = (v1, v2) if v1 < v2 else (v2, v1)
-        e_ca = (v2, v0) if v2 < v0 else (v0, v2)
-        for e in (e_ab, e_bc, e_ca):
-            if e in edge_to_tri:
-                _union(i, edge_to_tri[e])
+    edge_owner: dict[tuple, int] = {}
+    for local, gi in enumerate(member_idx):
+        tri = triangles[gi]
+        for e in (
+            _ekey(tri[0], tri[1]),
+            _ekey(tri[1], tri[2]),
+            _ekey(tri[2], tri[0]),
+        ):
+            if e in edge_owner:
+                _union(local, edge_owner[e])
             else:
-                edge_to_tri[e] = i
+                edge_owner[e] = local
 
-    # ---- Measurement pass: per-region XY bbox ----------------------
-    region_x_min: dict[int, float] = {}
-    region_x_max: dict[int, float] = {}
-    region_y_min: dict[int, float] = {}
-    region_y_max: dict[int, float] = {}
-    for i, tri in enumerate(candidates):
-        root = _find(i)
-        for v in tri:
-            x, y = v[0], v[1]
-            if root not in region_x_min:
-                region_x_min[root] = x
-                region_x_max[root] = x
-                region_y_min[root] = y
-                region_y_max[root] = y
+    # Full-mesh edge map so boundary edges can be classified by their
+    # non-region neighbour (supported wall below vs free rise above).
+    mesh_edges: dict[tuple, list[int]] = {}
+    for i, tri in enumerate(triangles):
+        for e in (
+            _ekey(tri[0], tri[1]),
+            _ekey(tri[1], tri[2]),
+            _ekey(tri[2], tri[0]),
+        ):
+            mesh_edges.setdefault(e, []).append(i)
+
+    # Group members per region root.
+    groups: dict[int, list[int]] = {}
+    for local in range(len(member_idx)):
+        groups.setdefault(_find(local), []).append(local)
+
+    # Lazy full-mesh array for the material-directly-below probe (only
+    # built if some deck point fails both the chord and lateral tests).
+    _tris_arr: np.ndarray | None = None
+
+    def _solid_directly_below(cx: float, cy: float, cz: float) -> bool:
+        """True when the point one-and-a-half layers under the deck is
+        inside the solid — the deck face rests on material below (a
+        boolean seam, a feature starting flush on a floor) and prints
+        as an ordinary layer bond even though the mesh topology reads
+        it as an unanchored underside."""
+        nonlocal _tris_arr
+        if _tris_arr is None:
+            _tris_arr = np.asarray(triangles, dtype=np.float64)
+        probe = np.array(
+            [[cx, cy, cz - 1.5 * layer_height]], dtype=np.float64,
+        )
+        try:
+            return bool(_points_inside_mesh(probe, _tris_arr)[0])
+        except (ValueError, IndexError):
+            return False
+
+    regions: list[_DownwardRegion] = []
+    for locals_ in groups.values():
+        tri_indices = [member_idx[lo] for lo in locals_]
+        flat_indices = [member_idx[lo] for lo in locals_ if is_flat[lo]]
+
+        # Region XY bbox — the legacy conservative span, kept for
+        # unbridgeable regions.
+        xs = [v[0] for gi in tri_indices for v in triangles[gi]]
+        ys = [v[1] for gi in tri_indices for v in triangles[gi]]
+        bbox_span = max(max(xs) - min(xs), max(ys) - min(ys))
+
+        if not flat_indices:
+            regions.append(_DownwardRegion(
+                triangle_indices=tri_indices,
+                flat_indices=[],
+                span_mm=0.0,
+                needs_supports=False,
+                bbox_span_mm=round(bbox_span, 2),
+            ))
+            continue
+
+        # Boundary edges of the region: edges owned by exactly one
+        # region triangle.  Each carries a supported flag from its
+        # non-region neighbours.
+        edge_count: dict[tuple, int] = {}
+        edge_verts: dict[tuple, tuple] = {}
+        for gi in tri_indices:
+            tri = triangles[gi]
+            for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+                e = _ekey(a, b)
+                edge_count[e] = edge_count.get(e, 0) + 1
+                edge_verts[e] = (a, b)
+
+        seg_a: list[tuple[float, float]] = []
+        seg_b: list[tuple[float, float]] = []
+        seg_supported: list[bool] = []
+        for e, count in edge_count.items():
+            if count != 1:
+                continue
+            a, b = edge_verts[e]
+            edge_z = min(a[2], b[2])
+            supported = False
+            for ni in mesh_edges.get(e, []):
+                if ni in member_set:
+                    continue
+                ntri = triangles[ni]
+                n_min_z = min(v[2] for v in ntri)
+                if n_min_z < edge_z - _BRIDGE_SUPPORTED_EDGE_DROP_MM:
+                    supported = True
+                    break
+            seg_a.append((a[0], a[1]))
+            seg_b.append((b[0], b[1]))
+            seg_supported.append(supported)
+
+        if not seg_a:
+            regions.append(_DownwardRegion(
+                triangle_indices=tri_indices,
+                flat_indices=flat_indices,
+                span_mm=float("inf"),
+                needs_supports=True,
+                bbox_span_mm=round(bbox_span, 2),
+            ))
+            continue
+
+        pa = np.asarray(seg_a, dtype=np.float64)
+        pb = np.asarray(seg_b, dtype=np.float64)
+        d_seg = pb - pa
+        supported_arr = np.asarray(seg_supported, dtype=bool)
+        sup_a = pa[supported_arr]
+        sup_d = d_seg[supported_arr]
+        sup_len_sq = np.maximum((sup_d ** 2).sum(axis=1), 1e-18)
+
+        samples = flat_indices
+        if len(samples) > _BRIDGE_SPAN_SAMPLE_CAP:
+            stride = len(samples) / _BRIDGE_SPAN_SAMPLE_CAP
+            samples = [
+                samples[int(k * stride)]
+                for k in range(_BRIDGE_SPAN_SAMPLE_CAP)
+            ]
+
+        region_span = 0.0
+        region_needs_supports = False
+        for gi in samples:
+            tri = triangles[gi]
+            cx, cy, _cz = _triangle_centroid(tri[0], tri[1], tri[2])
+
+            # Two-sided bridge: shortest chord through the point whose
+            # nearest boundary hit on BOTH sides is a supported edge.
+            best_chord = float("inf")
+            for k in range(_BRIDGE_CHORD_DIRECTIONS):
+                theta = math.pi * k / _BRIDGE_CHORD_DIRECTIONS
+                ux, uy = math.cos(theta), math.sin(theta)
+                # 2D ray/segment intersection, both directions at once:
+                # solve p + t*u = a + s*d for each boundary segment.
+                denom = ux * d_seg[:, 1] - uy * d_seg[:, 0]
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    w_x = pa[:, 0] - cx
+                    w_y = pa[:, 1] - cy
+                    s = (w_x * uy - w_y * ux) / denom
+                    t = np.where(
+                        np.abs(ux) > np.abs(uy),
+                        (pa[:, 0] + s * d_seg[:, 0] - cx) / ux,
+                        (pa[:, 1] + s * d_seg[:, 1] - cy) / uy,
+                    )
+                hit = (np.abs(denom) > 1e-12) & (s >= -1e-9) & (s <= 1.0 + 1e-9)
+                fwd = hit & (t > 1e-9)
+                bwd = hit & (t < -1e-9)
+                if not fwd.any() or not bwd.any():
+                    continue
+                t_f = np.where(fwd, t, np.inf)
+                t_b = np.where(bwd, -t, np.inf)
+                i_f = int(np.argmin(t_f))
+                i_b = int(np.argmin(t_b))
+                if not (supported_arr[i_f] and supported_arr[i_b]):
+                    continue
+                chord = float(t_f[i_f] + t_b[i_b])
+                if chord < best_chord:
+                    best_chord = chord
+
+            # One-sided lateral reach: distance to the nearest
+            # supported boundary segment.
+            if len(sup_a):
+                rel = np.array([cx, cy]) - sup_a
+                proj = np.clip(
+                    (rel * sup_d).sum(axis=1) / sup_len_sq, 0.0, 1.0,
+                )
+                closest = sup_a + proj[:, None] * sup_d
+                diff = np.array([cx, cy]) - closest
+                d_sup = float(np.sqrt((diff ** 2).sum(axis=1).min()))
             else:
-                if x < region_x_min[root]:
-                    region_x_min[root] = x
-                elif x > region_x_max[root]:
-                    region_x_max[root] = x
-                if y < region_y_min[root]:
-                    region_y_min[root] = y
-                elif y > region_y_max[root]:
-                    region_y_max[root] = y
+                d_sup = float("inf")
+
+            # Span selection mirrors the print mechanism: a true
+            # two-sided bridge reports its chord; a point that only
+            # closes by lateral reach reports twice its distance to
+            # the anchor (the width of the band being closed); a
+            # point with neither needs supports and reports the
+            # chord when one exists (the gap supports must fill).
+            if best_chord <= _MAX_SELF_SUPPORTING_BRIDGE_MM:
+                point_span = best_chord
+            elif d_sup <= _MAX_LATERAL_REACH_MM:
+                point_span = min(best_chord, 2.0 * d_sup)
+            elif _solid_directly_below(cx, cy, _cz):
+                point_span = 0.0
+            else:
+                region_needs_supports = True
+                point_span = (
+                    best_chord if not math.isinf(best_chord)
+                    else 2.0 * d_sup
+                )
+            if point_span > region_span:
+                region_span = point_span
+
+        regions.append(_DownwardRegion(
+            triangle_indices=tri_indices,
+            flat_indices=flat_indices,
+            span_mm=(
+                region_span if math.isinf(region_span)
+                else round(region_span, 2)
+            ),
+            needs_supports=region_needs_supports,
+            bbox_span_mm=round(bbox_span, 2),
+        ))
+
+    return regions
+
+
+def _analyze_bridging(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    z_min: float,
+    *,
+    layer_height: float = 0.2,
+    normalize_winding: bool = True,
+    precomputed_regions: list[_DownwardRegion] | None = None,
+) -> BridgingAnalysis:
+    """Detect unsupported horizontal spans (bridges).
+
+    Identifies triangles with normals pointing nearly straight down
+    that are above the first layer (not bed-touching), then
+    aggregates them into connected regions before measuring.
+
+    ``max_bridge_length_mm`` is the worst bridgeable span across the
+    connected bridge regions — for each region, the shortest supported
+    chord at its widest deck point (see :class:`_DownwardRegion`).
+    Slicers pick the bridge direction, so the span that matters is the
+    distance to the nearest opposing anchors, not the region's overall
+    extent: a 2 × 20 mm recess ceiling is a 2 mm bridge, a narrow
+    annular relief band is its band width.  The prior XY-bounding-box
+    measure charged both as 20 mm+ "long bridges", failing perfectly
+    printable parts (and, through the pro overlay's per-material
+    bridging limit, deducting a second time for the same phantom span).
+
+    A region needs supports when some deck point can neither bridge
+    (no supported chord ≤ 10 mm) nor be reached laterally from a
+    supported edge (see :class:`_DownwardRegion`) — wide cantilevers,
+    dome bottoms, islands, genuinely long bridges.  Islands with no
+    supported boundary at all report the conservative XY-bounding-box
+    span.
+
+    ``bridge_count`` is the per-TRIANGLE count of near-flat
+    (normal z ≤ -0.9) ceiling faces (back-compat with the public
+    scoring formula's ``min(15, 5 + bridge_count)``).
+    """
+    if normalize_winding:
+        triangles = _normalize_triangle_winding(triangles)
+
+    regions = (
+        precomputed_regions
+        if precomputed_regions is not None
+        else _analyze_downward_regions(
+            triangles, z_min, layer_height=layer_height,
+        )
+    )
+
+    bridge_count = sum(len(r.flat_indices) for r in regions)
+    if bridge_count == 0:
+        return BridgingAnalysis(
+            max_bridge_length_mm=0.0,
+            bridge_count=0,
+            needs_supports_for_bridges=False,
+        )
 
     max_bridge_len = 0.0
-    for root in region_x_min:
-        dx = region_x_max[root] - region_x_min[root]
-        dy = region_y_max[root] - region_y_min[root]
-        bbox_dim = max(dx, dy)
-        if bbox_dim > max_bridge_len:
-            max_bridge_len = bbox_dim
-
-    # Bridges > 10mm typically need supports.
-    needs_supports = max_bridge_len > 10.0
+    needs_supports = False
+    for region in regions:
+        if not region.flat_indices:
+            continue
+        if region.needs_supports:
+            needs_supports = True
+        span = region.span_mm
+        if math.isinf(span):
+            span = region.bbox_span_mm
+        if span > max_bridge_len:
+            max_bridge_len = span
 
     return BridgingAnalysis(
         max_bridge_length_mm=round(max_bridge_len, 2),
@@ -2493,7 +2776,22 @@ def _analyze_thermal_stress(
     stress_zones: list[dict[str, float]] = []
     max_ratio = 1.0
 
+    # Thermal contraction stress needs structure ABOVE the transition
+    # to crack: a cross-section step carrying only a sliver of
+    # remaining print (a decorative rim detail, a thread run-out, a
+    # pyramid tip) has nothing above it for differential cooling to
+    # act on.  Ignore transitions where the wall area above the layer
+    # is a negligible fraction of the part — without this, a spiky rim
+    # feature turns a trivially printable part "critical".
+    total_wall_area = sum(layer_areas)
+    suffix_area = [0.0] * (num_layers + 1)
+    for i in range(num_layers - 1, -1, -1):
+        suffix_area[i] = suffix_area[i + 1] + layer_areas[i]
+    significance_floor = total_wall_area * 0.02
+
     for i in range(1, num_layers):
+        if suffix_area[i] < significance_floor:
+            continue
         a_prev = max(layer_areas[i - 1], floor)
         a_curr = max(layer_areas[i], floor)
         bigger = max(a_prev, a_curr)
@@ -2724,16 +3022,27 @@ def _compute_score(
     warping: WarpingAnalysis | None = None,
     thermal_stress: ThermalStressAnalysis | None = None,
     adhesion_force: AdhesionForceEstimate | None = None,
+    overhang_scoring_pct: float | None = None,
 ) -> int:
     """Compute a printability score from 0-100.
 
     Starts at 100 and deducts points for each issue found.
+
+    ``overhang_scoring_pct`` overrides the overhang percentage used
+    for the deduction — the caller passes the percentage of overhangs
+    that genuinely need supports when part of the reported set is
+    self-supporting (small bridgeable / lateral-reach regions).
     """
     score = 100
 
     # Overhang deductions (max -30)
     if overhangs.needs_supports:
-        score -= min(30, int(overhangs.overhang_percentage * 0.5))
+        pct = (
+            overhang_scoring_pct
+            if overhang_scoring_pct is not None
+            else overhangs.overhang_percentage
+        )
+        score -= min(30, int(pct * 0.5))
 
     # Thin wall deductions (max -25)
     if thin_walls.thin_wall_count > 0:
@@ -3125,11 +3434,15 @@ def analyze_printability(
             component_size_uniformity = 0.0
             mesh_genus = 0
             tris_arr_for_pro = None
+    downward_regions = _analyze_downward_regions(
+        triangles, z_min, layer_height=layer_height,
+    )
     bridging = _analyze_bridging(
         triangles,
         z_min,
         layer_height=layer_height,
         normalize_winding=False,
+        precomputed_regions=downward_regions,
     )
     bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox, layer_height=layer_height)
     supports = _analyze_supports(
@@ -3157,16 +3470,10 @@ def analyze_printability(
     # anchored on one side and impossible to bridge, fails the geometry
     # test and correctly keeps ``needs_supports=True``.
     #
-    # Note: bridging.needs_supports_for_bridges is intentionally NOT a
-    # gate here.  That field is derived from max triangle edge length,
-    # which equals the bridge's diagonal (sqrt(span²+depth²)) for
-    # rectangular bridge geometry — strictly larger than the actual
-    # spannable axis-aligned width.  An 8x12mm bridge reports
-    # max_bridge_length_mm = sqrt(208) ≈ 14.42, which trips the 10mm
-    # universal-rule limit even though slicers comfortably bridge the
-    # 8mm short axis.  The two-sided-anchor geometry test in
-    # ``_likely_bridge_substituted`` is the better gate for this
-    # judgment.
+    # Note: this global test complements the per-region span analysis
+    # below — it confirms whole-part tabletop bridges (which can be a
+    # single region wider than the lateral-reach rule allows) via
+    # solid-probing under the overhang footprint.
     #
     # Addresses the 5/64 bridge false positives surfaced by the
     # 2026-05-17 PrusaSlicer cross-validation (C03/C04 square_bridge,
@@ -3187,6 +3494,56 @@ def analyze_printability(
         # even if contradictory.
         _bridge_substituted_overhang_pct = overhangs.overhang_percentage
         overhangs = replace(overhangs, needs_supports=False)
+
+    # Per-region self-supporting exemption.  Overhang triangles that
+    # belong to a downward region every deck point of which either
+    # bridges (supported chord ≤ 10 mm) or is within lateral reach of
+    # a supported edge — thread reliefs, small flange lips, recess
+    # ceilings, chamfer undersides — print cleanly with no supports.
+    # They stay in the reported ``overhang_triangle_count`` (the
+    # geometry is real) but are excluded from the score deduction and,
+    # when ALL overhangs are self-supporting, from the
+    # ``needs_supports`` verdict.  This is the general form of the
+    # micro-feature problem: a model studded with hundreds of tiny
+    # self-supporting undersides used to fail with an F while any
+    # slicer printed it support-free.
+    _self_supporting_overhang_count = 0
+    _overhang_scoring_pct: float | None = None
+    if overhangs.needs_supports and downward_regions:
+        # Only regions with a measured bridge deck qualify: a region
+        # with no near-flat faces (a plain steep slope) was never
+        # span-verified, so it keeps its support-needing status.
+        exempt_indices = [
+            gi
+            for region in downward_regions
+            if region.flat_indices and not region.needs_supports
+            for gi in region.triangle_indices
+        ]
+        for gi in exempt_indices:
+            tri = triangles[gi]
+            nn = _normalize(_triangle_normal(tri[0], tri[1], tri[2]))
+            if nn[2] >= 0:
+                continue
+            angle_from_down = math.degrees(
+                math.acos(max(-1.0, min(1.0, -nn[2])))
+            )
+            overhang_angle = max(0.0, 90.0 - angle_from_down)
+            if overhang_angle + 1e-9 < _resolved_threshold:
+                continue
+            _self_supporting_overhang_count += 1
+        if _self_supporting_overhang_count > 0:
+            remaining = max(
+                0,
+                overhangs.overhang_triangle_count
+                - _self_supporting_overhang_count,
+            )
+            if remaining == 0:
+                from dataclasses import replace
+                overhangs = replace(overhangs, needs_supports=False)
+            elif len(triangles) > 0:
+                _overhang_scoring_pct = round(
+                    remaining / len(triangles) * 100.0, 1,
+                )
 
     # Detect cylindrical-hole features.  Wrapped in try/except — a
     # malformed mesh or coarse triangulation can raise inside the
@@ -3221,6 +3578,7 @@ def analyze_printability(
     score = _compute_score(
         overhangs, thin_walls, bridging, bed_adhesion, supports,
         warping=warping, thermal_stress=thermal_stress, adhesion_force=adhesion_force,
+        overhang_scoring_pct=_overhang_scoring_pct,
     )
     grade = _score_to_grade(score)
     recommendations = _build_recommendations(
@@ -3235,6 +3593,14 @@ def analyze_printability(
     # overhang in the geometry.  Silent downgrade is worse UX than
     # "needs supports + slicer will bridge" was — at least the old
     # version told the user something.
+    if _self_supporting_overhang_count > 0:
+        recommendations.insert(
+            0,
+            f"{_self_supporting_overhang_count} small overhang face(s) "
+            f"sit on self-supporting features (short bridges or "
+            f"lateral-reach lips) — the slicer prints these without "
+            f"supports; they are excluded from the score."
+        )
     if _bridge_substituted_overhang_pct is not None:
         recommendations.insert(
             0,
