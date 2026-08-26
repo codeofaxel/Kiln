@@ -19,10 +19,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   middle instead of the wall. On a round product, Kiln now warns that side art
   is sized to the flat strip it lands on.
 
-- **A decoration that didn't take is now reported as a failure.** Kiln does
-  not return an unchanged model as a success, and a failed attempt doesn't
-  count against your monthly decorations. In some situations, that was
-  improperly happening. Now fixed.
+- **A decoration that didn't take is reported as a failure, and doesn't cost
+  you one.** Kiln no longer returns an unchanged model as a success, and your
+  free monthly decorations are only counted when one actually lands.
 
 - **Printability grades stopped failing models that print fine.** Grades now
   follow what your printer actually does.
@@ -32,9 +31,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   slice. Kiln now places it on your printer's actual plate, and when something
   genuinely doesn't fit, says so plainly instead of failing silently. An
   off-plate 3MF is caught before slicing now, with how far to move it.
-
-- **A failed decoration no longer costs you one.** Your free monthly
-  decorations are only counted when one actually lands.
 
 ## [1.4.1.1] - 2026-08-19
 
