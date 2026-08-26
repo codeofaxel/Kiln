@@ -1871,6 +1871,18 @@ class _ColorToolsPlugin:
             if not composed.get("success", True) and composed.get("error"):
                 return {"success": False, "error": composed["error"]}
 
+            # Close the provenance loop: the sidecar told us what to paint;
+            # write back what we painted, so the design's record carries
+            # "carved, then painted <color>" instead of stopping at the carve.
+            from kiln.decoration_faces import record_paint_event
+
+            paint_recorded = record_paint_event(
+                model_path,
+                color=color,
+                target=target,
+                output_path=composed.get("output_path", out_path),
+            ) is not None
+
             response: dict[str, Any] = {
                 "success": True,
                 "output_path": composed.get("output_path", out_path),
@@ -1878,6 +1890,7 @@ class _ColorToolsPlugin:
                 "total_triangles": len(triangles),
                 "target": target,
                 "color": color,
+                "paint_recorded": paint_recorded,
                 "decoration": record.get("decoration") or {},
                 "summary": (
                     f"Painted {len(indices)} decoration face"

@@ -356,3 +356,58 @@ class TestPaintDecorationFaces:
         record_decoration_faces(original, decorated)
         result = _call_paint_tool(model_path=decorated, target="ceilings")
         assert result["success"] is False
+
+
+# ---------------------------------------------------------------------------
+# Paint provenance: painting writes back what it painted
+# ---------------------------------------------------------------------------
+
+
+class TestPaintEventRecording:
+    def test_paint_tool_records_color_in_sidecar(self, carved_pair, tmp_path):
+        from kiln.decoration_faces import load_decoration_faces
+
+        original, decorated, _ = carved_pair
+        record_decoration_faces(original, decorated, face_normal=(0, 0, 1))
+        result = _call_paint_tool(
+            model_path=decorated,
+            color="#F72323",
+            output_path=str(tmp_path / "painted.3mf"),
+        )
+        assert result["success"] is True
+        assert result["paint_recorded"] is True
+
+        loaded, err = load_decoration_faces(decorated)
+        assert err is None, "paint annotation must not break the hash gate"
+        painted = loaded["painted"]
+        assert painted["color"] == "#F72323"
+        assert painted["target"] == "all"
+        assert painted["output"] == "painted.3mf"
+        assert painted["output_sha256"]
+
+    def test_repaint_keeps_latest_color_only(self, carved_pair, tmp_path):
+        from kiln.decoration_faces import load_decoration_faces
+
+        original, decorated, _ = carved_pair
+        record_decoration_faces(original, decorated, face_normal=(0, 0, 1))
+        _call_paint_tool(
+            model_path=decorated, color="#112233",
+            output_path=str(tmp_path / "a.3mf"),
+        )
+        _call_paint_tool(
+            model_path=decorated, color="#F72323", target="floors",
+            output_path=str(tmp_path / "b.3mf"),
+        )
+        loaded, _ = load_decoration_faces(decorated)
+        assert loaded["painted"]["color"] == "#F72323"
+        assert loaded["painted"]["target"] == "floors"
+
+    def test_paint_event_never_raises_without_sidecar(self, carved_pair, tmp_path):
+        from kiln.decoration_faces import record_paint_event
+
+        _, decorated, _ = carved_pair
+        out = record_paint_event(
+            decorated, color="#FFFFFF", target="all",
+            output_path=str(tmp_path / "x.3mf"),
+        )
+        assert out is None

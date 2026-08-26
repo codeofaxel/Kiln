@@ -422,6 +422,63 @@ def record_decoration_faces(
         return None
 
 
+def record_paint_event(
+    decorated_mesh_path: str,
+    *,
+    color: str,
+    target: str,
+    output_path: str,
+) -> dict[str, Any] | None:
+    """Record that the carve's faces were painted, in the same sidecar.
+
+    Painting reads the face record; this writes the answer back, so the
+    provenance chain carries the whole story — carved, then painted what
+    color — instead of stopping at the carve.  The block replaces any
+    previous one (latest paint wins: repainting while iterating is the
+    normal flow, and a history of abandoned colors is noise).
+
+    The sidecar stays keyed to the SOURCE mesh's sha256 — painting writes
+    a new 3MF and never touches the mesh it read, so the existing hash
+    gate keeps working unchanged.  Best-effort like recording: returns
+    the updated record, or ``None`` when there is no valid sidecar to
+    annotate (logged at debug, never raised).
+
+    :param decorated_mesh_path: The carved mesh whose sidecar to annotate.
+    :param color: Hex color painted onto the carve faces.
+    :param target: Which faces were painted (``all``/``floors``/``walls``).
+    :param output_path: The painted 3MF that was produced.
+    """
+    try:
+        record, err = load_decoration_faces(decorated_mesh_path)
+        if record is None:
+            logger.debug(
+                "paint event not recorded for %s: %s", decorated_mesh_path, err
+            )
+            return None
+        painted: dict[str, Any] = {
+            "color": color,
+            "target": target,
+            "output": os.path.basename(output_path),
+            "painted_at_unix": int(time.time()),
+        }
+        if os.path.isfile(output_path):
+            painted["output_sha256"] = mesh_sha256(output_path)
+        record["painted"] = painted
+        sidecar = sidecar_path_for(decorated_mesh_path)
+        tmp = sidecar + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(record, fh, separators=(",", ":"))
+        os.replace(tmp, sidecar)
+        return record
+    except Exception:
+        logger.debug(
+            "paint event recording failed for %s",
+            decorated_mesh_path,
+            exc_info=True,
+        )
+        return None
+
+
 def load_decoration_faces(
     decorated_mesh_path: str,
 ) -> tuple[dict[str, Any] | None, str | None]:
