@@ -236,6 +236,29 @@ class TestPrinterStatus:
         assert result["success"] is False
         assert result["error"]["code"] == "INTERNAL_ERROR"
 
+    def test_unnamed_call_resolves_registry_default(
+        self, monkeypatch, mock_printer_state_idle, mock_job_progress, mock_capabilities
+    ):
+        """Registry holds 'default', env unset → printer_status() with no
+        printer_name resolves it instead of demanding KILN_PRINTER_HOST."""
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "")
+
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        adapter.get_state.return_value = mock_printer_state_idle
+        adapter.get_job.return_value = mock_job_progress
+        type(adapter).capabilities = PropertyMock(return_value=mock_capabilities)
+
+        fresh_registry = PrinterRegistry()
+        fresh_registry.register("default", adapter)
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = printer_status()
+        assert result["success"] is True
+        assert result["printer"]["state"] == "idle"
+
 
 # ---------------------------------------------------------------------------
 # printer_files()
@@ -936,6 +959,55 @@ class TestGetAdapter:
         with pytest.raises(RuntimeError, match="KILN_PRINTER_HOST"):
             mod._get_adapter()
 
+    def test_registry_default_answers_when_env_unset(self, monkeypatch):
+        """Registry populated + no env/YAML host → the unnamed door resolves.
+
+        An embedding host (kiln-pro's REST server, a bare ``create_app()``)
+        loads printers straight into the registry without ever running the
+        config-resolution step that fills the env/YAML globals.  The named
+        door already finds those adapters; the unnamed door must not answer
+        "No printer configured" off the same registry.
+        """
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "")
+
+        fresh_registry = PrinterRegistry()
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        fresh_registry.register("default", adapter)
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        assert mod._get_adapter() is adapter
+        # Uncached: the registry owns this adapter's lifecycle, so it must
+        # not be pinned into the env-default slot.
+        assert mod._adapter is None
+
+    def test_registry_sole_printer_answers_when_env_unset(self, monkeypatch):
+        """A single registry entry not named 'default' also answers unnamed calls."""
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "")
+
+        fresh_registry = PrinterRegistry()
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        fresh_registry.register("workshop-a1", adapter)
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        assert mod._get_adapter() is adapter
+
+    def test_empty_registry_still_raises_env_error(self, monkeypatch):
+        """No env host AND empty registry keeps the actionable env-var error."""
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "")
+        monkeypatch.setattr(mod, "_registry", PrinterRegistry())
+
+        with pytest.raises(RuntimeError, match="KILN_PRINTER_HOST"):
+            mod._get_adapter()
+
     def test_missing_api_key_for_octoprint(self, monkeypatch):
         """Missing KILN_PRINTER_API_KEY raises RuntimeError for octoprint."""
         import kiln.server as mod
@@ -1074,6 +1146,42 @@ class TestGetAdapter:
 
         result = mod._get_adapter()
         assert result is mock_adapter
+
+
+# ---------------------------------------------------------------------------
+# _get_registry() singleton convergence
+# ---------------------------------------------------------------------------
+
+class TestGetRegistryAdoption:
+    """_get_registry() adopts the canonical singleton, never clobbers it."""
+
+    def test_adopts_prepopulated_singleton(self, monkeypatch):
+        """Printers loaded into ``get_printer_registry()`` before the server's
+        first registry touch must survive it — the earlier build-and-replace
+        shape wiped them with a fresh empty registry."""
+        import kiln.registry as regmod
+        import kiln.server as mod
+
+        prepopulated = PrinterRegistry()
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        prepopulated.register("embedded", adapter)
+        monkeypatch.setattr(regmod, "_registry_singleton", prepopulated)
+        monkeypatch.setattr(mod, "_registry", None)
+
+        registry = mod._get_registry()
+        assert registry is prepopulated
+        assert registry.get("embedded") is adapter
+
+    def test_server_first_still_converges(self, monkeypatch):
+        """Server touching the registry first: module accessor sees the same
+        instance, as before."""
+        import kiln.registry as regmod
+        import kiln.server as mod
+
+        monkeypatch.setattr(regmod, "_registry_singleton", None)
+        monkeypatch.setattr(mod, "_registry", None)
+
+        assert mod._get_registry() is regmod.get_printer_registry()
 
 
 # ---------------------------------------------------------------------------

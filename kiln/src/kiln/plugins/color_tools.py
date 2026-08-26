@@ -988,6 +988,7 @@ def _try_compose_3mf(
     zones: list[_ColorZone],
     output_dir: str,
     base_name: str,
+    printer_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Attempt to compose a multicolor 3MF.
 
@@ -1018,7 +1019,9 @@ def _try_compose_3mf(
 
     out_3mf = os.path.join(output_dir, f"{base_name}_multicolor.3mf")
     try:
-        result = compose_multicolor_3mf(parts, output_path=out_3mf)
+        result = compose_multicolor_3mf(
+            parts, output_path=out_3mf, printer_id=printer_id or None,
+        )
         return result.get("output_path", out_3mf), None
     except (ImportError, OSError, ValueError, TypeError) as exc:
         _logger.exception("Failed to compose multicolor 3MF")
@@ -1031,6 +1034,7 @@ def _try_compose_painted_3mf(
     palette: list[str],
     output_dir: str,
     base_name: str,
+    printer_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Compose the painted single-object 3MF for surface-following colorings.
 
@@ -1056,6 +1060,7 @@ def _try_compose_painted_3mf(
          for a in assignments],
         output_path=out_3mf,
         name=base_name,
+        printer_id=printer_id or None,
     )
     if not result.get("success"):
         return None, str(result.get("error"))
@@ -1537,6 +1542,7 @@ class _ColorToolsPlugin:
             input_path: str,
             num_colors: int = 4,
             color_palette: list[str] | None = None,
+            printer_id: str = "",
         ) -> dict:
             """Split a 3D model into horizontal color zones by Z-height.
 
@@ -1555,6 +1561,10 @@ class _ColorToolsPlugin:
             :param num_colors: Number of color zones (default 4).
             :param color_palette: List of hex colors (e.g.
                 ``["#FF0000", "#00FF00"]``).  Defaults to white/red/black/grey.
+            :param printer_id: Optional supported printer model id.  Names
+                the bed the composed 3MF is placed on, so a model sitting
+                off the plate is centred on the machine's real bed rather
+                than an assumed 256mm one.
             :returns: Dict with zone STL paths, hex colors, face counts
                 (boundary faces are cut and capped, so counts can exceed
                 the input's), per-zone ``watertight`` verdicts, AMS slot
@@ -1590,7 +1600,9 @@ class _ColorToolsPlugin:
                 triangles, assignments, num_colors, palette, output_dir,
                 base_name, cap_planes=cap_planes,
             )
-            threemf_path, compose_err = _try_compose_3mf(zones, output_dir, base_name)
+            threemf_path, compose_err = _try_compose_3mf(
+                zones, output_dir, base_name, printer_id=printer_id,
+            )
 
             warn = _band_height_warning(z_range, num_colors)
 
@@ -1617,6 +1629,7 @@ class _ColorToolsPlugin:
             num_colors: int = 4,
             method: str = "z_height",
             color_palette: list[str] | None = None,
+            printer_id: str = "",
         ) -> dict:
             """Split a 3D model into color zones by geometric region.
 
@@ -1645,6 +1658,10 @@ class _ColorToolsPlugin:
                 ``"normal"``, or ``"random"``.
             :param color_palette: List of hex colors.  Defaults to
                 white/red/black/grey.
+            :param printer_id: Optional supported printer model id.  Names
+                the bed the composed 3MF is placed on, so a model sitting
+                off the plate is centred on the machine's real bed rather
+                than an assumed 256mm one.
             :returns: Dict with zone STL paths, hex colors, face counts,
                 AMS slot mapping, weight estimates, and optional 3MF path.
             """
@@ -1697,13 +1714,14 @@ class _ColorToolsPlugin:
             if method == "z_height":
                 # Stacked bands stand as closed solids — one object per color.
                 threemf_path, compose_err = _try_compose_3mf(
-                    zones, output_dir, base_name,
+                    zones, output_dir, base_name, printer_id=printer_id,
                 )
             else:
                 # Surface-following colorings have no solid per color; the
                 # printable form is the whole mesh painted per triangle.
                 threemf_path, compose_err = _try_compose_painted_3mf(
                     triangles, assignments, palette, output_dir, base_name,
+                    printer_id=printer_id,
                 )
 
             warn: str | None = None
@@ -1726,6 +1744,156 @@ class _ColorToolsPlugin:
                 )
             except ImportError:
                 return response
+
+        @mcp.tool()
+        def paint_decoration_faces(
+            model_path: str,
+            color: str = "#F72323",
+            base_color: str = "",
+            target: str = "all",
+            output_path: str = "",
+            printer_id: str = "",
+        ) -> dict:
+            """Paint exactly the faces a decoration carve created (Pro-free).
+
+            A deboss/emboss records which output triangles it created —
+            recess floors and side-walls — in a face-provenance sidecar
+            beside the decorated mesh.  This tool paints THOSE faces and
+            nothing else, so a debossed logo with a closed outline (any
+            mark with enclosed regions) colors only its carved strokes:
+            the untouched surface island inside the outline stays the
+            body color, where crease-angle segmentation would have
+            "filled the logo in".
+
+            Use after any decoration door (``decorate_surface``,
+            ``apply_decoration``, ``apply_decoration_preset``,
+            ``smart_decorate``, ``batch_decorate``…) — they all record
+            the sidecar.  For meshes with no sidecar (older files,
+            hand-made carves), fall back to ``segment_mesh_regions`` +
+            ``paint_mesh_regions``.
+
+            Writes a painted 3MF (one watertight object, per-triangle
+            colors) via the same composer ``paint_mesh_regions`` uses,
+            so the output slices identically.
+
+            :param model_path: The decorated mesh (STL/OBJ/3MF) whose
+                ``<mesh>.decoration_faces.json`` sidecar to consume.
+            :param color: Hex color for the carved faces (default red).
+            :param base_color: Optional hex color for every other face.
+                Empty = uncolored (renders neutral; slicer maps it to
+                the base filament).
+            :param target: ``"all"`` carved faces (default), or
+                ``"floors"`` / ``"walls"`` when the record carries the
+                split — floors are the recess bottoms (the visible mark),
+                walls the carved sides.
+            :param output_path: Where to write the painted 3MF.  Default:
+                beside the model as ``<name>_painted.3mf``.
+            :param printer_id: Optional supported printer model id for
+                bed placement of the composed 3MF.
+            :returns: Dict with ``output_path``, ``painted_triangles``,
+                ``total_triangles``, and the composer's color summary.
+                Refuses loudly — no painting — when the sidecar is
+                missing, malformed, or STALE (mesh content changed since
+                the decoration was recorded).
+            """
+            from kiln.decoration_faces import (
+                load_decoration_faces,
+                load_mesh_triangles,
+            )
+
+            record, err = load_decoration_faces(model_path)
+            if record is None:
+                return {"success": False, "error": err, "code": "NO_FACE_RECORD"}
+
+            if target not in ("all", "floors", "walls"):
+                return {
+                    "success": False,
+                    "error": f"target must be 'all', 'floors' or 'walls', got {target!r}",
+                }
+            if target == "all":
+                indices = record["face_indices"]
+            else:
+                key = "floor_indices" if target == "floors" else "wall_indices"
+                if key not in record:
+                    return {
+                        "success": False,
+                        "error": (
+                            "this decoration record has no floors/walls split — "
+                            "use target='all'"
+                        ),
+                    }
+                indices = record[key]
+            if not indices:
+                return {
+                    "success": False,
+                    "error": (
+                        "the decoration record lists no faces for "
+                        f"target={target!r} — nothing to paint"
+                    ),
+                }
+
+            try:
+                triangles = load_mesh_triangles(model_path)
+            except Exception as exc:  # noqa: BLE001 — loader errors vary by format
+                return {"success": False, "error": f"could not load mesh: {exc}"}
+            if len(triangles) != record.get("triangle_count"):
+                # The sha256 gate should catch any edit first; this is a
+                # belt-and-braces refusal against loader disagreement.
+                return {
+                    "success": False,
+                    "error": (
+                        f"mesh has {len(triangles)} triangles but the record "
+                        f"expects {record.get('triangle_count')} — refusing to "
+                        "paint by stale indices"
+                    ),
+                    "code": "NO_FACE_RECORD",
+                }
+
+            base = base_color.strip() or None
+            colors: list[str | None] = [base] * len(triangles)
+            for i in indices:
+                colors[i] = color
+
+            from kiln.multicolor_3mf import compose_painted_3mf
+
+            out_path = output_path.strip() or os.path.join(
+                os.path.dirname(os.path.abspath(model_path)),
+                Path(model_path).stem + "_painted.3mf",
+            )
+            tri_list = [tuple(map(tuple, t)) for t in triangles]
+            composed = compose_painted_3mf(
+                tri_list,
+                colors,
+                output_path=out_path,
+                name=Path(model_path).stem,
+                printer_id=printer_id or None,
+            )
+            if not composed.get("success", True) and composed.get("error"):
+                return {"success": False, "error": composed["error"]}
+
+            response: dict[str, Any] = {
+                "success": True,
+                "output_path": composed.get("output_path", out_path),
+                "painted_triangles": len(indices),
+                "total_triangles": len(triangles),
+                "target": target,
+                "color": color,
+                "decoration": record.get("decoration") or {},
+                "summary": (
+                    f"Painted {len(indices)} decoration face"
+                    f"{'s' if len(indices) != 1 else ''} ({target}) {color}; "
+                    f"{len(triangles) - len(indices)} body faces untouched."
+                ),
+            }
+            for key in ("colors", "bed_translation", "native_paint_truncated"):
+                if key in composed:
+                    response[key] = composed[key]
+            if "floor_indices" in record and target == "all":
+                response["hint"] = (
+                    "This record distinguishes recess floors from side-walls — "
+                    "target='floors' paints just the visible mark."
+                )
+            return response
 
         _logger.debug("Registered color tools")
 

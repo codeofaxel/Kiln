@@ -286,9 +286,9 @@ class _DecorationLibraryPlugin:
             resolved_material = material
             if not resolved_material and printer_id:
                 try:
-                    from kiln.server import _get_adapter
+                    from kiln.server import _resolve_adapter
 
-                    adapter = _get_adapter(printer_id)
+                    adapter = _resolve_adapter(printer_id)
                     state = adapter.get_state()
                     if hasattr(state, "active_material") and state.active_material:
                         resolved_material = state.active_material

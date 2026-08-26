@@ -1061,8 +1061,11 @@ def auto_arrange_parts(
             {"stl_path": "/tmp/c1_qr.stl",   "extruder": 2, "group": 0, "name": "c1_qr"},
             {"stl_path": "/tmp/c2_body.stl",  "extruder": 1, "group": 1, "name": "c2_body"},
             {"stl_path": "/tmp/c2_qr.stl",    "extruder": 2, "group": 1, "name": "c2_qr"},
-        ], plate_width=256, plate_depth=256, gap_mm=5)
-        result = compose_multicolor_3mf(parts)
+        ], printer_id="bambu_a1", gap_mm=5)
+        result = compose_multicolor_3mf(parts, printer_id="bambu_a1")
+        # Same printer on both calls: the composer re-centres a group it
+        # judges off ITS plate, so arranging for one bed and composing
+        # against another undoes the arrangement.
     """
     if printer_id:
         from kiln.printers.bed_fit import resolve_build_volume

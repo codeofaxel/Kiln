@@ -12,17 +12,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   your agent, which can send any of them for you. A person reads every one, and
   you can ask to be emailed when yours is fixed.
 
-- **Watch your print live, right in the conversation.** Ask how a print is
-  going and a live monitor opens beside the answer — progress, time left,
-  temperatures, and the camera while printing. Free with a Kiln account;
-  without one you still get the full text report.
-
 ### Fixed
 
-- **Multicolor and painted models now land on the print bed.** A model that
-  wasn't already centred produced a 3MF PrusaSlicer quietly refused to slice.
-  Kiln now places it on the plate automatically, and when something genuinely
-  doesn't fit, says so plainly instead of failing silently.
+- **Logos and text now land on the side of a cup, box, or vase.** Decorating
+  a hollow product's side quietly did nothing — the mark went into the empty
+  middle instead of the wall. On a round product, Kiln now warns that side art
+  is sized to the flat strip it lands on.
+
+- **A decoration that didn't take is reported as a failure, and doesn't cost
+  you one.** Kiln no longer returns an unchanged model as a success, and your
+  free monthly decorations are only counted when one actually lands.
+
+- **Printability grades stopped failing models that print fine.** Grades now
+  follow what your printer actually does.
+
+- **Multicolor and painted models now land on the print bed — yours.** A model
+  that wasn't already centred produced a 3MF PrusaSlicer quietly refused to
+  slice. Kiln now places it on your printer's actual plate, and when something
+  genuinely doesn't fit, says so plainly instead of failing silently. An
+  off-plate 3MF is caught before slicing now, with how far to move it.
 
 ## [1.4.1.1] - 2026-08-19
 

@@ -578,8 +578,8 @@ def get_printer_registry() -> PrinterRegistry:
     ``heartbeat``, ``kiln_pro.recovery.auto_recover_engine``) reach for
     a registry without a circular dependency on ``kiln.server``.  This
     accessor is the canonical no-circular import path; ``kiln.server``
-    has its own ``_get_registry`` that wraps the same singleton via
-    ``register_default_singleton`` so both surfaces converge.
+    has its own ``_get_registry`` that adopts this same singleton, so
+    both surfaces converge regardless of which one touches it first.
 
     Thread-safe via double-checked locking.  Returns the same instance
     on every call.
@@ -596,11 +596,12 @@ def get_printer_registry() -> PrinterRegistry:
 def register_default_singleton(registry: PrinterRegistry) -> None:
     """Replace the module-level singleton.
 
-    ``kiln.server._get_registry`` calls this on first registry build
-    so that ``get_printer_registry`` returns the same instance the
-    server has populated with adapters.  Without this convergence,
-    callers that imported ``get_printer_registry`` directly would
-    see an empty registry while the server has the real one.
+    Kept for embedders that deliberately install their own registry
+    instance.  ``kiln.server._get_registry`` no longer calls this — it
+    adopts the singleton via :func:`get_printer_registry` instead, so
+    convergence no longer depends on the server touching the registry
+    first.  Replacing the singleton after adapters are registered
+    orphans them; prefer registering into the existing instance.
     """
     global _registry_singleton
     with _registry_singleton_lock:

@@ -1250,6 +1250,11 @@ def _get_adapter() -> PrinterAdapter:
     be imported without requiring environment variables to be set (useful
     for testing and introspection).
 
+    When neither env vars nor config.yaml supplied a host, the registry's
+    effective default printer answers instead — embedding hosts populate
+    the registry directly, without ever running the config-resolution
+    step that fills the env/YAML globals.
+
     Returns:
         The active :class:`PrinterAdapter` instance.
 
@@ -1267,6 +1272,20 @@ def _get_adapter() -> PrinterAdapter:
     printer_type = _PRINTER_TYPE
 
     if not host:
+        # An empty host does not mean no printer exists.  The env/YAML
+        # globals are only populated by ``_reload_env_config()``, but an
+        # embedding host (kiln-pro's REST server, a bare ``create_app()``)
+        # may have loaded printers straight into the registry without ever
+        # routing through that config step.  The *named* door
+        # (``_resolve_adapter("default")``) already finds those adapters;
+        # raising here made the unnamed door on the very same registry
+        # answer "No printer configured" — the half-wired-door failure.
+        # Registry default first, env error only when both are empty.
+        # The adapter is returned uncached: the registry owns its
+        # lifecycle, and pinning it into ``_adapter`` would shadow a
+        # later, properly configured env/YAML default.
+        with contextlib.suppress(Exception):
+            return _get_registry().get(_resolve_effective_printer_name(None))
         raise RuntimeError(
             "No printer configured. Set KILN_PRINTER_HOST environment variable "
             "to the printer URL (e.g. http://octopi.local). Also set "
@@ -1487,7 +1506,14 @@ def _is_resume_mode_3mf(file_name: str) -> bool:
 
 
 def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
-    """Resolve the printer identifier used for emergency latch checks."""
+    """Resolve the printer identifier an unnamed call is effectively about.
+
+    Registry ``"default"`` wins, else the first registered name, else the
+    literal ``"default"``.  Used for emergency latch checks and by
+    :func:`_get_adapter`'s registry fallback, so the adapter an unnamed
+    call reaches and the name its bookkeeping is filed under stay the
+    same answer.
+    """
     if printer_name:
         return printer_name
     try:
@@ -2781,20 +2807,22 @@ def _get_registry() -> PrinterRegistry:
     callers outside ``kiln.server`` (print_health_monitor, heartbeat,
     auto_recover_engine, etc.) see the same instance the server has
     populated with adapters.
+
+    Adopts the canonical singleton rather than replacing it: an
+    embedding host may have populated ``get_printer_registry()`` with
+    its printers before any server tool runs, and the earlier
+    build-then-``register_default_singleton`` shape silently clobbered
+    those entries with a fresh empty registry.
     """
     global _registry  # noqa: PLW0603
     if _registry is None:
-        _registry = PrinterRegistry()
-        # Publish to the canonical singleton so non-server callers
-        # (kiln.registry.get_printer_registry) see the populated
-        # registry, not an empty one.
         try:
-            from kiln.registry import register_default_singleton
+            from kiln.registry import get_printer_registry
 
-            register_default_singleton(_registry)
+            _registry = get_printer_registry()
         except ImportError:
             # Defensive — registry module changes shouldn't break server boot.
-            pass
+            _registry = PrinterRegistry()
     return _registry
 
 
@@ -12411,6 +12439,9 @@ def merge_stl(
 def compose_multicolor_3mf(
     parts: list[dict],
     output_path: str = "",
+    plate_width: float = 256.0,
+    plate_depth: float = 256.0,
+    printer_id: str = "",
 ) -> dict:
     """Compose a multi-color / multi-material .3mf from multiple STL files.
 
@@ -12453,6 +12484,15 @@ def compose_multicolor_3mf(
 
         output_path: Where to write the .3mf.  Defaults to a temp file whose
             path is returned in the result.
+        plate_width: Print plate X dimension in mm (default 256 for legacy
+            callers without a printer id).
+        plate_depth: Print plate Y dimension in mm (default 256).
+        printer_id: Optional supported printer model id.  When it resolves,
+            its build volume overrides ``plate_width`` / ``plate_depth``.
+            The composer centres an off-plate group on THIS plate, so name
+            the printer whenever you know it — a group arranged for a
+            larger or smaller bed and composed against the 256 default is
+            re-centred onto a plate the machine does not have.
 
     Returns:
         Dict with ``success``, ``output_path``, ``parts``, ``total_triangles``,
@@ -12489,7 +12529,13 @@ def compose_multicolor_3mf(
             )
         )
 
-    return _compose(color_parts, output_path=output_path or None)
+    return _compose(
+        color_parts,
+        output_path=output_path or None,
+        plate_width=plate_width,
+        plate_depth=plate_depth,
+        printer_id=printer_id or None,
+    )
 
 
 # auto_arrange_parts_on_plate — moved to plugins/design_reasoning_tools.py
@@ -15744,7 +15790,14 @@ def multi_material_print(
                 # printer_id not in the supported-model catalog — arrange on
                 # the default plate size instead of refusing the print.
                 positioned = auto_arrange_parts(part_specs)
-            compose_result = compose_multicolor_3mf(positioned, output_path=output_3mf)
+            # Compose onto the plate the arrangement was packed for: the
+            # composer re-centres a group it judges off ITS plate, so a
+            # layout packed for a wider bed and composed at the 256
+            # default would be shifted — undoing the arrangement.  An
+            # unknown id falls back to the same default on both sides.
+            compose_result = compose_multicolor_3mf(
+                positioned, output_path=output_3mf, printer_id=printer_id or None,
+            )
         except Exception as exc:
             return _error_dict(
                 f"Failed to build multi-material 3MF: {exc}",
@@ -16202,7 +16255,11 @@ def multi_color_copies(
                 # printer_id not in the supported-model catalog — arrange on
                 # the default plate size instead of refusing the print.
                 positioned = auto_arrange_parts(part_specs, gap_mm=spacing_mm)
-            compose_result = compose_multicolor_3mf(positioned, output_path=output_3mf)
+            # Same pairing as multi_material_print: compose onto the plate
+            # the copies were arranged for, never the bare 256 default.
+            compose_result = compose_multicolor_3mf(
+                positioned, output_path=output_3mf, printer_id=printer_id or None,
+            )
         except Exception as exc:
             return _error_dict(
                 f"Failed to build multi-color 3MF: {exc}",
@@ -16855,6 +16912,25 @@ def check_ambient_conditions(
         return _error_dict(f"Failed to check ambient conditions: {exc}", code="AMBIENT_CHECK_ERROR")
 
 
+def _refund_decoration_quota(consumed: bool) -> None:
+    """Give back the decoration a failed decorate_surface exit consumed.
+
+    ``check_decoration_quota()`` counts the decoration up front (check-and-
+    increment), so every exit between that check and a delivered result must
+    hand the slot back or a free-tier caller pays for a carve they never
+    received.  Best-effort: a refund failure never masks the real error
+    being returned.
+    """
+    if not consumed:
+        return
+    try:
+        from kiln.decoration_quota import get_decoration_quota
+
+        get_decoration_quota().refund()
+    except Exception:
+        logger.debug("Decoration quota refund failed", exc_info=True)
+
+
 def _finish_decoration_result(result_dict: dict, *, content: str) -> dict:
     """Common tail for every SUCCESSFUL decorate_surface exit.
 
@@ -17022,12 +17098,17 @@ def decorate_surface(
         return err
 
     # --- Decoration quota (3/month for free tier) ---
+    # check_decoration_quota() is check-and-increment, so from here on every
+    # failure exit must refund via _refund_decoration_quota(quota_consumed)
+    # or a free-tier caller loses a slot to a carve they never received.
+    quota_consumed = False
     try:
         from kiln.decoration_quota import check_decoration_quota
 
         ok, quota_err = check_decoration_quota()
         if not ok:
             return quota_err
+        quota_consumed = True
     except Exception:
         pass  # Fail open — don't block on quota errors
 
@@ -17090,9 +17171,11 @@ def decorate_surface(
 
     # --- Validate model ---
     if not os.path.isfile(model_path):
+        _refund_decoration_quota(quota_consumed)
         return _error_dict(f"Model not found: {model_path}", code="FILE_NOT_FOUND")
     model_ext = os.path.splitext(model_path)[1].lower()
     if model_ext not in (".stl", ".obj"):
+        _refund_decoration_quota(quota_consumed)
         return _error_dict(
             f"decorate_surface requires STL or OBJ, got {model_ext!r}.",
             code="VALIDATION_ERROR",
@@ -17115,11 +17198,13 @@ def decorate_surface(
                 elif ext in (".png", ".jpg", ".jpeg", ".bmp", ".gif"):
                     ctype = "image"
                 else:
+                    _refund_decoration_quota(quota_consumed)
                     return _error_dict(
                         f"Unsupported image format: {ext!r}. Use PNG, JPG, or SVG.",
                         code="UNSUPPORTED_FORMAT",
                     )
             else:
+                _refund_decoration_quota(quota_consumed)
                 return _error_dict(
                     f"Cannot resolve content: {content!r}. Provide a file path or 'text:...' for text.",
                     code="INVALID_CONTENT",
@@ -17133,6 +17218,7 @@ def decorate_surface(
         # apply_procedural_texture, which own curved-surface projection.
         if face.lower().strip() == "wall":
             if ctype != "text":
+                _refund_decoration_quota(quota_consumed)
                 return _error_dict(
                     "face='wall' supports text content only ('text:...'). "
                     "For images or patterns on curved walls use "
@@ -17140,6 +17226,7 @@ def decorate_surface(
                     code="INVALID_CONTENT",
                 )
             if mode != "deboss":
+                _refund_decoration_quota(quota_consumed)
                 return _error_dict(
                     "face='wall' text is deboss-only (carved into the "
                     "wall); emboss on a curved wall is not supported yet.",
@@ -17147,6 +17234,7 @@ def decorate_surface(
                 )
             wall_text_val = content.split(":", 1)[1].strip()
             if not wall_text_val:
+                _refund_decoration_quota(quota_consumed)
                 return _error_dict(
                     "No text to wrap — pass content='text:YOUR TEXT'.",
                     code="INVALID_CONTENT",
@@ -17154,6 +17242,7 @@ def decorate_surface(
             # The wrap engine works from the mesh geometry, so it needs an
             # STL.  The generic check above admits OBJ for the flat path.
             if os.path.splitext(model_path)[1].lower() != ".stl":
+                _refund_decoration_quota(quota_consumed)
                 return _error_dict(
                     "face='wall' needs an STL. Convert with "
                     "import_external_mesh, or use a flat face for this "
@@ -17168,6 +17257,7 @@ def decorate_surface(
                 if wall_engine is None:
                     raise ImportError("wall-text engine unavailable")
             except ImportError:
+                _refund_decoration_quota(quota_consumed)
                 return _error_dict(
                     "Curved-wall text wrapping runs on the engine that "
                     "ships with kiln-pro — included on the hosted service "
@@ -17212,12 +17302,15 @@ def decorate_surface(
                     code="TEXT_DOES_NOT_FIT",
                 )
                 err["suggestions"] = exc.verdict.get("suggestions", [])
+                _refund_decoration_quota(quota_consumed)
                 return err
             except getattr(
                 wall_engine, "NoRoundWallError", ValueError
             ) as exc:
+                _refund_decoration_quota(quota_consumed)
                 return _error_dict(str(exc), code="NO_ROUND_WALL")
             except ValueError as exc:
+                _refund_decoration_quota(quota_consumed)
                 return _error_dict(str(exc), code="INVALID_MODEL")
 
             output_stl = wall_result["stl_path"]
@@ -17283,6 +17376,8 @@ def decorate_surface(
             face_info = find_largest_flat_face(model_path)
         else:
             face_info = find_named_face(model_path, face_lower)
+            if face_info.get("curvature_warning"):
+                warnings.append(face_info["curvature_warning"])
 
         face_width_mm = face_info.get("width_mm", 0)
 
@@ -17297,6 +17392,7 @@ def decorate_surface(
                 if pro_features is None:
                     raise ImportError("kiln-pro not installed")
             except ImportError:
+                _refund_decoration_quota(quota_consumed)
                 return _error_dict(
                     tier_required_message(
                         "SVG logo decoration",
@@ -17418,6 +17514,7 @@ def decorate_surface(
                             (fit_h - 2.0 * ample_margin) / k,
                         )
                     if allowed_w <= 0:
+                        _refund_decoration_quota(quota_consumed)
                         return _error_dict(
                             f"Face ({fit_w:.0f}x{fit_h:.0f}mm) is too small "
                             "to carry readable text.",
@@ -17444,6 +17541,7 @@ def decorate_surface(
             content_info = generate_text_image(text_content, work_dir)
 
         else:
+            _refund_decoration_quota(quota_consumed)
             return _error_dict(
                 f"Unknown content_type: {content_type!r}.",
                 code="VALIDATION_ERROR",
@@ -17495,13 +17593,26 @@ def decorate_surface(
         # --- Step 6: Compile to STL ---
         from kiln.emboss_generator import compile_embossed_model
 
+        # Metadata for the face-provenance sidecar the compile records
+        # (which output triangles the carve created — what painting
+        # consumes instead of re-guessing regions).
+        _face_meta = {
+            "mode": mode,
+            "depth_mm": effective_depth,
+            "content_type": ctype,
+            "image_style": image_style,
+            "face": face_info.get("face_name"),
+        }
         compile_result = compile_embossed_model(
             scad_result["scad_path"],
             scad_result["output_stl_path"],
             timeout=600,
+            decoration_meta=_face_meta,
+            face_normal=face_info.get("normal"),
         )
 
         if not compile_result.get("success"):
+            _refund_decoration_quota(quota_consumed)
             result_dict: dict[str, Any] = {
                 "status": "compile_failed",
                 "message": (f"OpenSCAD compilation failed. Error: {compile_result.get('error', 'unknown')}"),
@@ -17585,6 +17696,8 @@ def decorate_surface(
                     scad_result["scad_path"],
                     scad_result["output_stl_path"],
                     timeout=600,
+                    decoration_meta=_face_meta,
+                    face_normal=face_info.get("normal"),
                 )
                 if compile_result.get("success"):
                     warnings.append(
@@ -17601,6 +17714,39 @@ def decorate_surface(
         elif not boolean_ok:
             warnings.append(
                 "Output STL is similar in size to input — the boolean may not have produced visible geometry changes."
+            )
+
+        # --- Step 6c: refuse to ship an unchanged mesh as success ---
+        # A floating cutter (wrong face plane, off-body offset) makes the
+        # boolean remove nothing: OpenSCAD compiles fine and the output
+        # is geometrically the input.  That is a failed decoration, not a
+        # decorated model — reporting it as success hands the caller an
+        # untouched mesh with a buried warning (measured 2026-08-25: a
+        # pen-cup front deboss shipped the input mesh, 1468 triangles and
+        # volume unchanged, success=True).
+        from kiln.emboss_generator import meshes_geometrically_identical
+
+        final_stl = compile_result.get("stl_path")
+        if final_stl and meshes_geometrically_identical(abs_model, final_stl):
+            _refund_decoration_quota(quota_consumed)
+            return _error_dict(
+                (
+                    f"{mode} produced no geometry change — the output mesh "
+                    "is identical to the input (same triangle count and "
+                    "volume), so the cutter never intersected the body and "
+                    "nothing was carved on the "
+                    f"{face_info.get('face_name', 'target')} face. Try a "
+                    "different face, remove large placement offsets, or "
+                    "use a flat-faced product. This attempt was not "
+                    "counted against your decoration quota."
+                ),
+                code="DECORATION_NOOP",
+                extra={
+                    "is_noop": True,
+                    "scad_path": scad_result["scad_path"],
+                    "output_stl": final_stl,
+                    **({"warnings": warnings} if warnings else {}),
+                },
             )
 
         # --- Step 7: Build result ---
@@ -17633,6 +17779,11 @@ def decorate_surface(
             "compile_time_seconds": compile_result.get("compile_time_seconds"),
             "scad_path": scad_result["scad_path"],
         }
+        if compile_result.get("decoration_faces"):
+            # Which output triangles this carve created, recorded beside the
+            # STL — paint_decoration_faces consumes this to color exactly
+            # the carved mark, enclosed surface islands excluded.
+            result_dict["decoration_faces"] = compile_result["decoration_faces"]
         if _provenance_info:
             result_dict["provenance"] = _provenance_info
         if warnings:
@@ -17652,11 +17803,14 @@ def decorate_surface(
         return _finish_decoration_result(result_dict, content=content)
 
     except FileNotFoundError as exc:
+        _refund_decoration_quota(quota_consumed)
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
     except ValueError as exc:
+        _refund_decoration_quota(quota_consumed)
         return _error_dict(str(exc), code="VALIDATION_ERROR")
     except Exception as exc:
         logger.exception("Error in decorate_surface")
+        _refund_decoration_quota(quota_consumed)
         return _error_dict(
             f"Failed in decorate_surface: {exc}",
             code="INTERNAL_ERROR",

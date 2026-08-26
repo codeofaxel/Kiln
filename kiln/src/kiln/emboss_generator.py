@@ -1402,6 +1402,8 @@ def compile_embossed_model(
     openscad_path: str | None = None,
     timeout: int = 120,
     export_format: str = "stl",
+    decoration_meta: dict[str, Any] | None = None,
+    face_normal: list[float] | tuple[float, float, float] | None = None,
 ) -> dict[str, Any]:
     """Compile a ``.scad`` file to STL or 3MF using the OpenSCAD CLI.
 
@@ -1424,6 +1426,13 @@ def compile_embossed_model(
         ``"3mf"`` (preserves ``color()`` information, requires OpenSCAD
         2024+).  Falls back to STL silently if the installed OpenSCAD
         version is older than 2024.
+    decoration_meta:
+        Optional free-form metadata about the decoration being carved
+        (mode, depth, content type…), stored verbatim in the face-
+        provenance sidecar (see below).
+    face_normal:
+        Optional normal of the decorated face; enables the sidecar's
+        floors/walls split.
 
     Returns
     -------
@@ -1438,10 +1447,27 @@ def compile_embossed_model(
         ``success`` — boolean indicating whether compilation succeeded.
         ``error`` — error message string (only present when *success* is
         ``False``).
+        ``decoration_faces`` — present when face provenance was recorded
+        (see below): dict with ``sidecar_path``, ``count``, and the
+        floors/walls split counts when available.
+
+    Face provenance
+    ---------------
+    On a successful compile whose ``.scad`` imports a mesh (the
+    deboss/emboss pattern: ``difference()``/``union()`` against an
+    imported STL/OBJ), the output is diffed against that imported mesh
+    and the triangles the boolean CREATED — recess floors and walls, or
+    raised emboss geometry — are recorded in a
+    ``<output>.decoration_faces.json`` sidecar via
+    :func:`kiln.decoration_faces.record_decoration_faces`.  This runs
+    here, at the one chokepoint every decoration door funnels through,
+    so no door needs its own recording branch.  Best-effort: a recording
+    failure never fails the compile.
     """
     # Detect whether the .scad file uses SVG import() — if so we need
     # OpenSCAD 2024+ because 2021 silently fails SVG booleans.
     _uses_svg = False
+    _scad_text = ""
     try:
         _scad_text = Path(scad_path).read_text(encoding="utf-8")
         _uses_svg = ".svg" in _scad_text and "import(" in _scad_text
@@ -1570,7 +1596,7 @@ def compile_embossed_model(
     out = Path(output_path)
     file_size = out.stat().st_size if out.exists() else 0
 
-    return {
+    result_dict: dict[str, Any] = {
         "stl_path": output_path,
         "output_path": output_path,
         "export_format": actual_format,
@@ -1578,6 +1604,62 @@ def compile_embossed_model(
         "compile_time_seconds": round(elapsed, 2),
         "success": True,
     }
+
+    # Face provenance: the scad's imported mesh is the pre-carve model, so
+    # this is the one moment both sides of the boolean are known.  Every
+    # decoration door funnels through this compile, which is what makes
+    # recording here the ONE shared helper instead of a per-door branch.
+    faces_record = _record_face_provenance(
+        _scad_text,
+        output_path,
+        decoration_meta=decoration_meta,
+        face_normal=face_normal,
+    )
+    if faces_record is not None:
+        summary: dict[str, Any] = {
+            "sidecar_path": faces_record.get("sidecar_path"),
+            "count": len(faces_record.get("face_indices", [])),
+        }
+        if "floor_indices" in faces_record:
+            summary["floors"] = len(faces_record["floor_indices"])
+            summary["walls"] = len(faces_record["wall_indices"])
+        result_dict["decoration_faces"] = summary
+
+    return result_dict
+
+
+#: Mesh import inside a generated .scad — the pre-carve model the boolean
+#: consumed.  SVG imports (2D content) deliberately do not match.
+_SCAD_MESH_IMPORT_RE = re.compile(
+    r'import\s*\(\s*(?:file\s*=\s*)?"([^"]+\.(?:stl|obj|3mf))"',
+    re.IGNORECASE,
+)
+
+
+def _record_face_provenance(
+    scad_text: str,
+    output_path: str,
+    *,
+    decoration_meta: dict[str, Any] | None,
+    face_normal: list[float] | tuple[float, float, float] | None,
+) -> dict[str, Any] | None:
+    """Diff the compiled output against the scad's imported mesh and record
+    the carve-created faces in a sidecar.  Best-effort; ``None`` when the
+    scad imports no mesh, the source is gone, or recording fails."""
+    match = _SCAD_MESH_IMPORT_RE.search(scad_text)
+    if not match:
+        return None
+    source_mesh = match.group(1)
+    if not os.path.isfile(source_mesh):
+        return None
+    from kiln.decoration_faces import record_decoration_faces
+
+    return record_decoration_faces(
+        source_mesh,
+        output_path,
+        decoration=decoration_meta,
+        face_normal=face_normal,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1605,6 +1687,50 @@ def check_boolean_success(input_stl: str, output_stl: str, *, tolerance: float =
     if input_size == 0:
         return True
     return abs(output_size - input_size) > input_size * tolerance
+
+
+def mesh_signature(stl_path: str) -> tuple[int, float] | None:
+    """Return ``(triangle_count, signed_volume_mm3)`` for an STL mesh.
+
+    The signed volume is the divergence-theorem tetrahedron sum — exact
+    for a closed mesh, and equally deterministic for an open one, which
+    is all identity comparison needs.  Returns ``None`` when the file
+    cannot be parsed (callers must then skip the comparison, never
+    guess).
+    """
+    try:
+        from kiln.surface_intelligence import _parse_stl
+
+        tris = _parse_stl(stl_path)
+    except Exception:
+        return None
+    volume = 0.0
+    for tri in tris:
+        (x1, y1, z1), (x2, y2, z2), (x3, y3, z3) = tri["vertices"]
+        volume += (
+            x1 * (y2 * z3 - y3 * z2)
+            - y1 * (x2 * z3 - x3 * z2)
+            + z1 * (x2 * y3 - x3 * y2)
+        ) / 6.0
+    return len(tris), volume
+
+
+def meshes_geometrically_identical(input_stl: str, output_stl: str) -> bool:
+    """True when two meshes have the same triangle count AND volume.
+
+    This is the honest post-carve check :func:`check_boolean_success`'s
+    file-size heuristic cannot give: a boolean whose cutter never touched
+    the body re-emits the input geometry, possibly re-tessellated into a
+    different file size, so byte deltas pass while nothing was carved.
+    Identical triangle count plus identical enclosed volume (within
+    0.01mm³) means the carve was a no-op.  Parse failures return False —
+    an unreadable mesh must not be branded a no-op.
+    """
+    sig_in = mesh_signature(input_stl)
+    sig_out = mesh_signature(output_stl)
+    if sig_in is None or sig_out is None:
+        return False
+    return sig_in[0] == sig_out[0] and abs(sig_in[1] - sig_out[1]) < 0.01
 
 
 # ---------------------------------------------------------------------------
