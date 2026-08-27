@@ -2502,6 +2502,11 @@
       "bed_shape": "0x0,320x0,320x320,0x320",
       "max_print_height": "300",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "qidi_q2c": {
@@ -2537,6 +2542,11 @@
       "bed_shape": "0x0,270x0,270x270,0x270",
       "max_print_height": "256",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "qidi_max4": {
@@ -2572,6 +2582,11 @@
       "bed_shape": "0x0,390x0,390x390,0x390",
       "max_print_height": "340",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "qidi_x_smart3": {
@@ -2607,6 +2622,11 @@
       "bed_shape": "0x0,175x0,175x180,0x180",
       "max_print_height": "170",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "ender3_s1_pro": {
