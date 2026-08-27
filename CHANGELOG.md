@@ -7,16 +7,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **Four more QIDI printers.** The Plus 5, Max 4, Q2C and X-Smart 3 now have
-  full profiles — build volume, safe temperature ceilings, per-material
-  settings, and the material list each one can actually run. Two carry limits
-  worth knowing before you print: the Q2C is enclosed but has no chamber
-  heater, and the X-Smart 3 stops 50 C short of its siblings, so the
-  high-temperature filaments QIDI ships profiles for cannot run on it.
-  *Free tells you a material won't work on your machine; Kiln Pro tells you
-  why, what the printer actually does at that limit, and what to run instead.*
-  See https://kiln3d.com/pricing.
-
+- **Four more QIDI printers.** The Plus 5, Max 4, Q2C and X-Smart 3. *Free tells
+  you a material won't work on your machine; Kiln Pro tells you why, and what to
+  run instead, plus more depth.* See https://kiln3d.com/pricing.
 - **Tell the Kiln team something.** A new Support page in the web app takes
   bugs, ideas, printers you want supported, and questions — or just say it to
   your agent, which can send any of them for you. A person reads every one, and
@@ -35,16 +28,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- **Safety warnings that were missing on printers we already supported.**
-  Several QIDI machines switch their air filter off while the chamber is
-  heating — exactly when ABS and ASA need it — and the Q1 Pro has no filter
-  fitted at all. Those now say so.
-
-- **The X-Max 3's dry box was described as something it isn't.** It keeps dry
-  filament dry; it cannot dry wet filament, and the temperature we quoted
-  belongs to the chamber heater rather than the box. That matters most for the
-  filled and high-temperature materials this machine is bought for.
-
+- **Air-filter warnings on QIDI printers.** Several switch the filter off while
+  the chamber heats — exactly when ABS and ASA need it.
 - **Parts that printed beautifully now also work.** Twenty-three of
   the ready-made parts had flaws you'd only find after printing. All
   rebuilt and re-tested.
