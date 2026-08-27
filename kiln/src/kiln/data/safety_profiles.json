@@ -1001,7 +1001,7 @@
       320,
       300
     ],
-    "notes": "Enclosed CoreXY, 370 C bimetal hardened nozzle, 65 C actively heated chamber. Klipper, so the existing Moonraker adapter reaches it. A 9x13 mm corner of the bed is blocked by the filament cutter. Ventilation note: this machine switches its air filter OFF whenever chamber heating is on, so ABS, ASA and PC prints run unfiltered — ventilate the room rather than relying on the built-in filter."
+    "notes": "Enclosed CoreXY, 370 C bimetal hardened nozzle, 65 C actively heated chamber. Klipper, so the existing Moonraker adapter reaches it. A 9x13 mm corner of the bed is blocked by the filament cutter. Ventilation note: this machine switches its air filter OFF whenever chamber heating is on, so ABS, ASA and PC prints run unfiltered — ventilate the room rather than relying on the built-in filter. Power note: the heatbed holds maximum power for the first three to five minutes of every job, so peak draw is well above the steady-state figures. Worth knowing before putting it on a shared circuit or a UPS."
   },
   "qidi_q2c": {
     "display_name": "QIDI Q2C",
@@ -1016,7 +1016,7 @@
       270,
       256
     ],
-    "notes": "A Q2 with the chamber heater removed. Still fully enclosed — glass shell, door and top cover — but with no heated chamber, so ABS, ASA, PC and PPS will warp on large or tall parts where the Q2 would hold them flat. An 11x16 mm corner of the bed is blocked by the filament cutter. Ventilation note: the air filter is an optional extra that is NOT in the box, so an unfiltered enclosure concentrates styrene until the door is opened — ventilate the room for ABS and ASA."
+    "notes": "A Q2 with the chamber heater removed. Still fully enclosed — glass shell, door and top cover — but with no heated chamber, so ABS, ASA, PC and PPS will warp on large or tall parts where the Q2 would hold them flat. An 11x16 mm corner of the bed is blocked by the filament cutter. Ventilation note: the air filter is an optional extra that is NOT in the box, so an unfiltered enclosure concentrates styrene until the door is opened — ventilate the room for ABS and ASA. Safety note: this machine has no physical X or Y endstops - it homes by sensing motor stall, so a jam can make it believe it has homed when it has not. There is a documented case of the bed being driven into the toolhead afterwards. Clear cooled filament from the purge chute before homing or changing filament."
   },
   "qidi_max4": {
     "display_name": "QIDI Max 4",
@@ -1031,7 +1031,7 @@
       390,
       340
     ],
-    "notes": "The largest QIDI: 390x390x340 enclosed CoreXY, 370 C bimetal hardened nozzle, 65 C PTC chamber under closed-loop control. Klipper, so the existing Moonraker adapter reaches it. Four small keep-outs sit at the bed edges; the largest clear rectangle is 374x384 mm. Ventilation note: the air filter is switched OFF whenever chamber heating is on, so ABS, ASA, PC and nylon prints run unfiltered — ventilate the room and let the chamber clear before opening the door."
+    "notes": "The largest QIDI: 390x390x340 enclosed CoreXY, 370 C bimetal hardened nozzle, 65 C PTC chamber under closed-loop control. Klipper, so the existing Moonraker adapter reaches it. Small keep-outs at the bed edges reduce the usable area; the front-left one is the filament cutter. Ventilation note: the air filter is switched OFF whenever chamber heating is on, so ABS, ASA, PC and nylon prints run unfiltered — ventilate the room and let the chamber clear before opening the door."
   },
   "qidi_x_smart3": {
     "display_name": "QIDI X-Smart 3",
@@ -1046,7 +1046,7 @@
       180,
       170
     ],
-    "notes": "The small enclosed QIDI: 175x180x170 CoreXY, 300 C hotend - 50 C lower than its X-3 siblings, so PPS, PET-CF and PAHT-CF are out of reach even though QIDI ships profiles for them. Enclosed but passive: the chamber self-heats to about 50 C from waste heat and there is no heater, so ABS and ASA warp on anything large. The stock nozzle is BRASS, not hardened - carbon, glass, wood and metal-filled filaments need a hardened nozzle first. Ventilation note: unlike the X-Max 3 and X-Plus 3, this model has NO activated-carbon filter, only a circulation fan, so ABS and ASA vent styrene straight into the room."
+    "notes": "The small enclosed QIDI: 175x180x170 CoreXY, 300 C hotend - 50 C lower than its X-3 siblings, so PPS, PET-CF and PAHT-CF are out of reach even though QIDI ships profiles for them. Enclosed but passive: the chamber self-heats to about 50 C from waste heat and there is no heater, so ABS and ASA warp on anything large. The stock nozzle is BRASS, not hardened - carbon, glass, wood and metal-filled filaments need a hardened nozzle first. Ventilation note: unlike the X-Max 3 and X-Plus 3, this model has NO activated-carbon filter, only a circulation fan, so ABS and ASA vent styrene straight into the room. Safety note: this machine ships with published default SSH credentials and is a networked device - change them before putting it on a shared network. Also do not update Klipper on it: the board only runs QIDI's modified build, and updating bricks it with an MCU protocol error."
   },
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",

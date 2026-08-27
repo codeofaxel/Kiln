@@ -1877,8 +1877,7 @@
       "pa-cf",
       "pc",
       "petg",
-      "pla",
-      "pps"
+      "pla"
     ],
     "typical_tolerance_mm": 0.15,
     "max_print_speed_mm_s": 250,

@@ -2472,7 +2472,7 @@
   "qidi_plus5": {
     "display_name": "QIDI Plus 5",
     "slicer": "orcaslicer",
-    "notes": "Enclosed CoreXY with a 370 C bimetal hardened nozzle and 65 C actively heated chamber. Klipper, so the existing Moonraker adapter reaches it. A 9x13 mm front-left corner is reserved for the filament cutter. QIDI markets a 40 mm3/s hotend but the fastest profile it ships for this machine is 24.5 mm3/s.",
+    "notes": "Enclosed CoreXY with a 370 C bimetal hardened nozzle and 65 C actively heated chamber. Klipper, so the existing Moonraker adapter reaches it. A 9x13 mm front-left corner is reserved for the filament cutter. QIDI's marketed hotend flow figure is not reachable with the profiles it ships.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -2542,7 +2542,7 @@
   "qidi_max4": {
     "display_name": "QIDI Max 4",
     "slicer": "orcaslicer",
-    "notes": "The largest QIDI at 390x390x340, with a 370 C bimetal hardened nozzle and a 65 C PTC chamber under closed-loop control. Rated 800 mm/s and 30000 mm/s2, though QIDI was still patching step loss at those figures in its most recent published firmware - treat them as ceilings rather than working setpoints. Four small bed keep-outs leave 374x384 mm genuinely clear. Klipper, so the existing Moonraker adapter reaches it.",
+    "notes": "The largest QIDI at 390x390x340, with a 370 C bimetal hardened nozzle and a 65 C PTC chamber under closed-loop control. Small bed keep-outs reduce the usable area; the front-left one is the filament cutter. Klipper, so the existing Moonraker adapter reaches it.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
