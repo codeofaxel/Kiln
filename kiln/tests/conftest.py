@@ -1088,3 +1088,23 @@ def _restore_kiln_pro_stubs():
         if name not in saved:
             del sys.modules[name]
     sys.modules.update(saved)
+
+
+@pytest.fixture(autouse=True)
+def _reset_fastener_content_keys():
+    """Give every test a fresh SESSION for the fastener advisory.
+
+    ``kiln.fastener_advice`` speaks each content key once per process, and a
+    test process is many sessions pretending to be one.  Without this reset
+    the first test to build a part with a screw hole silences every later
+    test at every other seam — and the failure would read as "the advisory
+    stopped working" rather than "the previous test used it up".
+
+    Reset AFTER the test as well as before, so a test that deliberately
+    exhausts the key cannot leak that state into an unrelated suite.
+    """
+    from kiln.fastener_advice import reset_emitted_content_keys
+
+    reset_emitted_content_keys()
+    yield
+    reset_emitted_content_keys()

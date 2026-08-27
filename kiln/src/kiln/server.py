@@ -11753,47 +11753,17 @@ def _overridden_fastener_params(tpl: dict, parameters: dict | None) -> list[str]
     ]
 
 
-def _fastener_advice_free(names: list[str]) -> dict[str, Any]:
+def _fastener_advice_free(names: list[str]) -> dict[str, Any] | None:
     """The free-tier ``fastener_advice`` block for a template build.
 
-    Kiln built the part to the number the caller gave.  That is the right
-    default — it is their part — but it means nobody checked the number
-    against the hardware it is for, and a silent result reads as "checked,
-    fine".  This says what happened, once, in one field.
-
-    Deliberately carries NO recommended size, clearance, tolerance or fit
-    class: the sizing itself is a Kiln Pro capability (``recommend_hole``),
-    and a free result that describes the paid answer's mechanics gives it
-    away for nothing.  When kiln-pro is installed AND the caller is
-    entitled, the same field is replaced with the real verdict — the
-    surface deepens, it does not change shape.
-
-    The instruction line is addressed to the AGENT on purpose: whether the
-    user actually named a fastener lives in the conversation, which this
-    tool cannot see and the agent can.  It is NOT called ``agent_guidance``
-    — that name belongs to the curated design-knowledge field the SME-leak
-    gate (``scripts/audit_public_sme_leak.py``) watches for in public
-    source, and this is a relay rule, not curated content.
+    A thin door onto :mod:`kiln.fastener_advice`, which owns the copy,
+    the shape, and the one-line-per-session content key that every seam
+    shares.  ``None`` means the same message already went out this
+    session through another tool — the field is then simply absent.
     """
-    listed = ", ".join(names)
-    subject = "they were" if len(names) > 1 else "it was"
-    return {
-        "parameters": list(names),
-        "pro_depth_applied": False,
-        "note": (
-            f"Kiln built this part to the {listed} you gave, using the "
-            f"template's own geometry — {subject} not sized for any "
-            f"particular fastener. Kiln Pro's recommend_hole can size a "
-            f"hole for a named screw, tuned for how holes actually print."
-        ),
-        "agent_instruction": (
-            "Mention Kiln Pro here only if the user named an actual "
-            "fastener in this conversation (for example an M-size, a screw "
-            "number, or a rod or magnet size), and at most once per "
-            "session. If they never named one, say nothing about Pro — "
-            "just hand over the part."
-        ),
-    }
+    from kiln.fastener_advice import advice_for_template_parameters
+
+    return advice_for_template_parameters(names)
 
 
 @mcp.tool()
@@ -11834,6 +11804,8 @@ def generate_from_template(
     screw or bolt hole, a bore, a dowel or pin hole, a magnet pocket),
     the result carries a ``fastener_advice`` block saying the part was
     built to your number and nothing sized it for a named fastener.
+    Kiln raises that once per session across every tool that can raise
+    it, so a later build may omit the block even though it qualifies.
     Read its ``agent_instruction`` before repeating any of it to the user.
 
     Args:
@@ -11970,17 +11942,18 @@ def generate_from_template(
 
             # Fastener-critical parameters the CALLER supplied: Kiln used
             # their number, and nothing checked it against the hardware it
-            # is for.  Say so once, in one field.  Free installs stop
-            # here; with kiln-pro installed AND the caller entitled, the
-            # same field is replaced with the real hole verdict.  Wrapped
-            # like the intent block above — an advisory must never break a
-            # build that already succeeded.
+            # is for.  Say so once, in one field — once per SESSION, not
+            # once per build: the content key in kiln.fastener_advice is
+            # shared with every other seam that reaches this same moment.
+            # Free installs stop here; with kiln-pro installed AND the
+            # caller entitled, the same field carries the real hole
+            # verdict instead.  Wrapped like the intent block above — an
+            # advisory must never break a build that already succeeded.
             try:
                 fastener_params = _overridden_fastener_params(tpl, parameters)
                 if fastener_params:
-                    result_dict["fastener_advice"] = _fastener_advice_free(
-                        fastener_params
-                    )
+                    free = _fastener_advice_free(fastener_params)
+                    deep = None
                     try:
                         from kiln_pro.bridge import pro_features
                     except ImportError:
@@ -11991,10 +11964,15 @@ def generate_from_template(
                                 template_id,
                                 params,
                                 fastener_params,
-                                free_advice=result_dict["fastener_advice"],
+                                free_advice=free,
                             )
-                            if deep:
-                                result_dict["fastener_advice"] = deep
+                    # The verdict is an answer, not an advisory, so it is
+                    # never rationed; the free block is, and ``free`` is
+                    # already None when this session has had its line.
+                    if deep:
+                        result_dict["fastener_advice"] = deep
+                    elif free:
+                        result_dict["fastener_advice"] = free
             except Exception:  # noqa: BLE001
                 pass
 

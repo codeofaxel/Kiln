@@ -62,6 +62,14 @@ class _PrintabilityToolsPlugin:
             thresholds; with Kiln Pro they are tuned to the specific
             material and printer (kiln3d.com/pricing).
 
+            When the mesh turns out to have holes in it, the result also
+            carries a ``fastener_advice`` block saying they were measured
+            but not checked against the hardware meant to go in.  Kiln
+            raises that once per session across every tool that can raise
+            it, so a later analysis may omit the block even though the
+            part has holes.  Read its ``agent_instruction`` before
+            repeating any of it to the user.
+
             Args:
                 file_path: Path to an STL or OBJ mesh file.
                 nozzle_diameter: Printer nozzle diameter in mm (default 0.4).
@@ -93,7 +101,7 @@ class _PrintabilityToolsPlugin:
                     material=material,
                     printer_id=printer_id or None,
                 )
-                return {
+                resp: dict[str, Any] = {
                     "success": True,
                     "report": report.to_dict(),
                     "message": (
@@ -101,6 +109,50 @@ class _PrintabilityToolsPlugin:
                         f"{'Printable' if report.printable else 'Not recommended for printing'}."
                     ),
                 }
+
+                # The widest of the fastener-advice seams: this one
+                # reaches ANY mesh, however it was made.  The trigger is
+                # free — hole detection already ran above and the holes
+                # are in the report — and it is DETECTION, never a guess
+                # about intent: no holes, no advisory.  Said once per
+                # session across every seam that can say it (the shared
+                # content key in ``kiln.fastener_advice``).  Wrapped so
+                # an advisory can never cost the caller their report,
+                # and attached BESIDE ``report`` so nothing in the
+                # report's own recommendations is displaced.
+                try:
+                    if report.holes:
+                        from kiln.fastener_advice import (
+                            advice_for_detected_holes,
+                        )
+
+                        free = advice_for_detected_holes()
+                        deep = None
+                        try:
+                            from kiln_pro.bridge import pro_features
+                        except ImportError:
+                            pass
+                        else:
+                            if pro_features.is_available(
+                                "fastener_hole_advice"
+                            ):
+                                deep = (
+                                    pro_features.fastener_hole_advice
+                                    .advise_detected_holes(
+                                        report.holes, free_advice=free,
+                                    )
+                                )
+                        if deep:
+                            resp["fastener_advice"] = deep
+                        elif free:
+                            resp["fastener_advice"] = free
+                except Exception:  # noqa: BLE001
+                    _logger.debug(
+                        "fastener advice skipped on printability report",
+                        exc_info=True,
+                    )
+
+                return resp
             except ValueError as exc:
                 return _srv._error_dict(
                     f"Failed to analyze printability: {exc}",

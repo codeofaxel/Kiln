@@ -1377,3 +1377,361 @@ class TestFastenerFlagsAreWellFormed:
 
     def test_the_library_actually_carries_flags(self):
         assert len(self._flagged()) >= 15
+
+
+# ---------------------------------------------------------------------------
+# The other two fastener-advice seams, and the one-per-session rule
+# ---------------------------------------------------------------------------
+
+
+def _printability_tools():
+    """The printability plugin's tools, captured off a stand-in MCP."""
+    tools: dict[str, callable] = {}
+
+    class _MCP:
+        def tool(self):
+            def decorator(fn):
+                tools[fn.__name__] = fn
+                return fn
+            return decorator
+
+    from kiln.plugins.printability_tools import plugin
+
+    plugin.register(_MCP())
+    return tools
+
+
+def _fake_report(holes, recommendations=("Wear a respirator when spraying.",)):
+    """A printability report stub carrying whatever holes the test wants."""
+    return SimpleNamespace(
+        holes=list(holes),
+        score=72,
+        grade="B",
+        printable=True,
+        recommendations=list(recommendations),
+        to_dict=lambda: {
+            "score": 72,
+            "grade": "B",
+            "printable": True,
+            "holes": list(holes),
+            "recommendations": list(recommendations),
+        },
+    )
+
+
+def _analyze(holes=({"diameter_mm": 5.2, "depth_mm": 8.0, "axis": "z"},), **kw):
+    """Run the analyze_printability TOOL with the mesh analysis stood in for."""
+    tool = _printability_tools()["analyze_printability"]
+    with patch(
+        "kiln.printability.analyze_printability",
+        return_value=_fake_report(holes),
+    ):
+        return tool("part.stl", **kw)
+
+
+def _compile(fastener=None):
+    """Run the compile_scad TOOL with the OpenSCAD binary stood in for."""
+    tools: dict[str, callable] = {}
+
+    class _MCP:
+        def tool(self):
+            def decorator(fn):
+                tools[fn.__name__] = fn
+                return fn
+            return decorator
+
+    from kiln.plugins.design_tools import plugin
+
+    plugin.register(_MCP())
+    kwargs = {} if fastener is None else {"fastener": fastener}
+    with patch(
+        "kiln.parametric.compile_scad_code", return_value="/tmp/out.stl",
+    ), patch(
+        "kiln.emboss_generator.openscad_version_warning", return_value=None,
+    ):
+        return tools["compile_scad"](scad_code="cube(10);", **kwargs)
+
+
+class TestFastenerAdviceOnPrintabilityReports:
+    """The widest seam: any mesh, however it was made.
+
+    The trigger is DETECTION, not inference — the analysis already found
+    cylindrical holes and listed them.  No holes, no advisory; nothing here
+    reads intent out of geometry.
+    """
+
+    def test_a_report_that_found_holes_carries_the_advisory(self):
+        result = _analyze()
+
+        advice = result["fastener_advice"]
+        assert advice["pro_depth_applied"] is False
+        assert advice["parameters"] == []
+        assert advice["note"] and advice["agent_instruction"]
+
+    def test_a_report_with_no_holes_says_nothing(self):
+        assert "fastener_advice" not in _analyze(holes=())
+
+    def test_the_report_itself_is_untouched(self):
+        """The advisory rides BESIDE the report.  Nothing it does may edit,
+        reorder, or displace a recommendation the free analysis computed —
+        those are the cautions, and cautions are never traded for a pitch."""
+        result = _analyze()
+
+        assert result["success"] is True
+        assert result["report"]["recommendations"] == [
+            "Wear a respirator when spraying.",
+        ]
+        assert result["report"]["score"] == 72
+        assert "fastener_advice" not in result["report"]
+
+    def test_it_survives_kiln_pro_being_absent(self, monkeypatch):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _no_kiln_pro(name, *args, **kwargs):
+            if name.startswith("kiln_pro"):
+                raise ImportError("No module named 'kiln_pro'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _no_kiln_pro)
+        result = _analyze()
+
+        assert result["success"] is True
+        assert result["fastener_advice"]["pro_depth_applied"] is False
+
+    def test_an_advisory_fault_never_breaks_the_report(self, monkeypatch):
+        """The report is the product; the advisory is not worth losing it."""
+        import kiln.fastener_advice as fa
+
+        monkeypatch.setattr(
+            fa, "advice_for_detected_holes",
+            lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        result = _analyze()
+
+        assert result["success"] is True
+        assert result["report"]["score"] == 72
+        assert "fastener_advice" not in result
+
+    def test_an_entitled_kiln_pro_replaces_the_same_field(self, monkeypatch):
+        """The surface deepens, it does not change shape: same field name."""
+        deep = {"pro_depth_applied": True, "holes": [{"diameter_mm": 5.2}]}
+        fake = SimpleNamespace(
+            is_available=lambda feature: feature == "fastener_hole_advice",
+            fastener_hole_advice=SimpleNamespace(
+                advise_detected_holes=lambda *a, **k: deep,
+            ),
+        )
+        monkeypatch.setitem(
+            __import__("sys").modules, "kiln_pro.bridge",
+            SimpleNamespace(pro_features=fake),
+        )
+        assert _analyze()["fastener_advice"] == deep
+
+
+class TestFastenerAdviceOnCompiledScad:
+    """DECLARED intent only.
+
+    Nothing reads the OpenSCAD source looking for screw holes.  Inferring a
+    fastener out of geometry would be wrong often, and a field that fires
+    wrongly is a field agents learn to skip.  No argument, no advisory.
+    """
+
+    def test_naming_a_fastener_gets_the_advisory(self):
+        result = _compile(fastener="M4")
+
+        advice = result["fastener_advice"]
+        assert advice["pro_depth_applied"] is False
+        assert advice["parameters"] == ["M4"]
+        assert advice["note"] and advice["agent_instruction"]
+
+    def test_compiling_without_naming_one_says_nothing(self):
+        assert "fastener_advice" not in _compile()
+        assert "fastener_advice" not in _compile(fastener="")
+        assert "fastener_advice" not in _compile(fastener="   ")
+
+    def test_screw_holes_in_the_source_are_not_a_trigger(self):
+        """The rejected version, pinned: geometry is never read as intent."""
+        tools: dict[str, callable] = {}
+
+        class _MCP:
+            def tool(self):
+                def decorator(fn):
+                    tools[fn.__name__] = fn
+                    return fn
+                return decorator
+
+        from kiln.plugins.design_tools import plugin
+
+        plugin.register(_MCP())
+        with patch(
+            "kiln.parametric.compile_scad_code", return_value="/tmp/out.stl",
+        ), patch(
+            "kiln.emboss_generator.openscad_version_warning", return_value=None,
+        ):
+            result = tools["compile_scad"](
+                scad_code=(
+                    "// M3 screw holes for the bracket\n"
+                    "difference(){cube(20); cylinder(d=3.4,h=30);}"
+                ),
+            )
+
+        assert result["success"] is True
+        assert "fastener_advice" not in result
+
+    def test_it_survives_kiln_pro_being_absent(self, monkeypatch):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _no_kiln_pro(name, *args, **kwargs):
+            if name.startswith("kiln_pro"):
+                raise ImportError("No module named 'kiln_pro'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _no_kiln_pro)
+        result = _compile(fastener="M4")
+
+        assert result["success"] is True
+        assert result["fastener_advice"]["pro_depth_applied"] is False
+
+    def test_an_advisory_fault_never_breaks_the_compile(self, monkeypatch):
+        import kiln.fastener_advice as fa
+
+        monkeypatch.setattr(
+            fa, "advice_for_named_fastener",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        result = _compile(fastener="M4")
+
+        assert result["success"] is True
+        assert result["stl_path"] == "/tmp/out.stl"
+        assert "fastener_advice" not in result
+
+
+class TestOneLinePerSessionKeyedOnContent:
+    """Not a session counter and not per-seam counters.
+
+    The advisory is deduped on what it is ABOUT.  Every seam claims the same
+    key, so the user hears this once however many doors they walk through —
+    and a genuinely different message, carrying its own key, still gets its
+    one turn.
+    """
+
+    def test_two_seams_in_one_session_emit_one_line(self, tmp_path):
+        first = _build(tmp_path, "shelf_bracket", {"hole_dia": 5})
+        second = _analyze()
+
+        assert "fastener_advice" in first
+        assert "fastener_advice" not in second
+
+    def test_the_order_does_not_matter(self, tmp_path):
+        first = _analyze()
+        second = _compile(fastener="M4")
+        third = _build(tmp_path, "shelf_bracket", {"hole_dia": 5})
+
+        assert "fastener_advice" in first
+        assert "fastener_advice" not in second
+        assert "fastener_advice" not in third
+
+    def test_a_seam_that_did_not_qualify_does_not_burn_the_line(self, tmp_path):
+        """A report with no holes and a compile with no fastener never
+        claimed anything, so the template build still gets to speak."""
+        assert "fastener_advice" not in _analyze(holes=())
+        assert "fastener_advice" not in _compile()
+
+        result = _build(tmp_path, "shelf_bracket", {"hole_dia": 5})
+        assert "fastener_advice" in result
+
+    def test_a_different_message_still_gets_its_turn(self):
+        """The key is the CONTENT, so a new subject is not silenced by an
+        old one.  Adding a fourth seam later is one argument, not new state."""
+        from kiln.fastener_advice import advice_for_detected_holes
+
+        assert advice_for_detected_holes() is not None
+        assert advice_for_detected_holes() is None
+        assert advice_for_detected_holes(content_key="something_else") is not None
+
+    def test_a_new_session_starts_over(self):
+        from kiln.fastener_advice import (
+            advice_for_detected_holes,
+            reset_emitted_content_keys,
+        )
+
+        assert advice_for_detected_holes() is not None
+        assert advice_for_detected_holes() is None
+        reset_emitted_content_keys()
+        assert advice_for_detected_holes() is not None
+
+
+class TestNoFastenerFactsInAnyFreeCopy:
+    """The moat rule, over EVERY seam's copy at once.
+
+    Sizing is the paid capability.  Free copy that names a recommended
+    number, a clearance, a tolerance, a fit class, or the checklist the paid
+    analysis runs hands the answer over for nothing.  This greps the module
+    that owns all three seams' words, so new copy cannot slip in beside the
+    reviewed copy without being read.
+    """
+
+    _BANNED = (
+        r"clearance", r"tolerance", r"press fit", r"close fit",
+        r"loose fit", r"shrink", r"compensat", r"\bmm\b",
+        r"wall thickness", r"edge distance", r"engagement", r"torque",
+        r"chamfer",
+    )
+
+    @staticmethod
+    def _module_copy() -> str:
+        """Every user-visible string constant the module ships."""
+        import kiln.fastener_advice as fa
+
+        return " ".join(
+            value
+            for name, value in vars(fa).items()
+            if isinstance(value, str) and not name.startswith("__")
+        )
+
+    def _assert_clean(self, blob: str) -> None:
+        import re
+
+        blob = blob.lower()
+        assert not any(ch.isdigit() for ch in blob), blob
+        for banned in self._BANNED:
+            assert not re.search(banned, blob), f"free copy leaks {banned!r}"
+
+    def test_the_module_constants_are_clean(self):
+        self._assert_clean(self._module_copy())
+
+    def test_every_seams_built_copy_is_clean(self, tmp_path):
+        from kiln.fastener_advice import (
+            advice_for_detected_holes,
+            advice_for_named_fastener,
+            advice_for_template_parameters,
+            reset_emitted_content_keys,
+        )
+
+        for build in (
+            lambda: advice_for_template_parameters(["magnet_diameter"]),
+            lambda: advice_for_detected_holes(),
+            lambda: advice_for_named_fastener("M4"),
+        ):
+            reset_emitted_content_keys()
+            block = build()
+            # The name the caller gave rides in ``parameters``, never in the
+            # prose — that is what keeps this grep able to stay blunt.
+            self._assert_clean(
+                f"{block['note']} {block['agent_instruction']}"
+            )
+
+    def test_the_offer_sentence_is_written_once(self):
+        """Three seams, one benefit line — so there is one sentence to
+        review, not three that drift."""
+        import kiln.fastener_advice as fa
+
+        assert fa._OFFER in fa.advice_for_template_parameters(["hole_dia"])["note"]
+        fa.reset_emitted_content_keys()
+        assert fa._OFFER in fa.advice_for_detected_holes()["note"]
+        fa.reset_emitted_content_keys()
+        assert fa._OFFER in fa.advice_for_named_fastener("M4")["note"]

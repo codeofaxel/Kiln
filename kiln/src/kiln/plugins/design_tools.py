@@ -1526,7 +1526,12 @@ class _DesignToolsPlugin:
 
 
         @mcp.tool()
-        def compile_scad(scad_code: str = "", scad_path: str = "", timeout: int = 300) -> dict:
+        def compile_scad(
+            scad_code: str = "",
+            scad_path: str = "",
+            timeout: int = 300,
+            fastener: str = "",
+        ) -> dict:
             """Compile OpenSCAD code into an STL file.
 
             Takes OpenSCAD source code OR a path to a .scad file, compiles
@@ -1536,10 +1541,20 @@ class _DesignToolsPlugin:
             For surface() heightmap operations (photo emboss, lithophane),
             increase timeout to 600+ seconds.
 
+            When you pass ``fastener``, the result carries a
+            ``fastener_advice`` block saying the code compiled as written
+            and nothing resized the hole for that fastener.  Kiln raises
+            it once per session across every tool that can raise it.  Read
+            its ``agent_instruction`` before repeating any of it.
+
             Args:
                 scad_code: Valid OpenSCAD source code (provide this OR scad_path).
                 scad_path: Path to a .scad file (provide this OR scad_code).
                 timeout: Maximum compilation time in seconds (default 300).
+                fastener: The fastener the user named, e.g. ``"M4"`` — pass
+                    only if they actually said one.  Kiln does NOT read your
+                    OpenSCAD looking for screw holes; guessing intent out of
+                    geometry would be wrong often. No argument, no advisory.
             """
             import os
 
@@ -1569,6 +1584,45 @@ class _DesignToolsPlugin:
                 _osw = openscad_version_warning()
                 if _osw:
                     response["openscad_warning"] = _osw
+
+                # DECLARED intent only.  The caller told us which fastener
+                # this part is for; nothing here parses the source looking
+                # for screw holes, because a guess that fires wrongly is a
+                # field agents learn to skip.  Said once per session across
+                # every seam that can say it (the shared content key in
+                # ``kiln.fastener_advice``).  Wrapped — an advisory must
+                # never cost the caller a compile that already succeeded.
+                if fastener and fastener.strip():
+                    try:
+                        from kiln.fastener_advice import (
+                            advice_for_named_fastener,
+                        )
+
+                        _free = advice_for_named_fastener(fastener.strip())
+                        _deep = None
+                        try:
+                            from kiln_pro.bridge import pro_features
+                        except ImportError:
+                            pass
+                        else:
+                            if pro_features.is_available(
+                                "fastener_hole_advice"
+                            ):
+                                _deep = (
+                                    pro_features.fastener_hole_advice
+                                    .advise_named_fastener(
+                                        fastener.strip(), free_advice=_free,
+                                    )
+                                )
+                        if _deep:
+                            response["fastener_advice"] = _deep
+                        elif _free:
+                            response["fastener_advice"] = _free
+                    except Exception:  # noqa: BLE001
+                        _logger.debug(
+                            "fastener advice skipped on compile",
+                            exc_info=True,
+                        )
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
