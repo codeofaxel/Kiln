@@ -2328,3 +2328,83 @@ class TestBundlePrintabilityFindings:
         _ = f.grade
         _ = f.recommendations
         _ = f.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Placement check — end-to-end through the real analyzer.
+#
+# Every door into printability (the CLI, the design tools, both
+# validation pipelines, the estimators) reaches it through
+# analyze_printability, so pinning it here pins it for all of them.
+# ---------------------------------------------------------------------------
+
+
+def _sunk_below_bed(triangles: list[tuple], drop_mm: float) -> list[tuple]:
+    """Translate *triangles* down so the part hangs through the plate."""
+    return [
+        tuple((x, y, z - drop_mm) for x, y, z in tri) for tri in triangles
+    ]
+
+
+class TestPlacementCheck:
+    """Where the part sits, graded alongside how it is shaped."""
+
+    def test_part_below_the_plate_is_not_printable(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(
+                tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
+            )
+            report = analyze_printability(path)
+
+            assert report.printable is False
+            assert report.grade == "F"
+            assert any(
+                "below the build plate" in r for r in report.recommendations
+            )
+            assert any(
+                "center_model_on_bed" in r for r in report.recommendations
+            )
+
+    def test_part_resting_on_the_plate_is_untouched(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            on_bed = _write_stl(tmpdir, _outward_cube_triangles(20.0))
+            report = analyze_printability(on_bed)
+
+            assert not any(
+                "below the build plate" in r for r in report.recommendations
+            )
+
+    def test_bed_resolves_from_printer_id(self):
+        """No explicit build_volume — the printer's own bed is used."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(400.0))
+            report = analyze_printability(path, printer_id="bambu_a1")
+
+            assert any(
+                "exceeds build volume" in r for r in report.recommendations
+            )
+            assert report.printable is False
+
+    def test_unknown_printer_skips_the_fit_check(self):
+        """An unresolvable bed degrades quietly rather than raising."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(400.0))
+            report = analyze_printability(
+                path, printer_id="definitely_not_a_printer_9000",
+            )
+
+            assert not any(
+                "exceeds build volume" in r for r in report.recommendations
+            )
+
+    def test_oversize_alone_is_enough_to_fail(self):
+        """A shape-perfect part that cannot fit the bed is not printable."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(400.0))
+            baseline = analyze_printability(path)
+            report = analyze_printability(
+                path, build_volume=(256.0, 256.0, 256.0),
+            )
+
+            assert baseline.printable is True  # shape alone is fine
+            assert report.printable is False   # placement is not

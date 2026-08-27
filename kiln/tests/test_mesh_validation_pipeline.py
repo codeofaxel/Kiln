@@ -1273,3 +1273,297 @@ class TestValidationPipelineInspectionBundle:
         assert result.printability_score == 80
         # Bundle still rides along on the result for downstream readers.
         assert result.inspection_bundle is partial_bundle
+
+
+# ---------------------------------------------------------------------------
+# TestValidationPipelinePlacementCheck
+#
+# The bundle short-circuit skips the analyze_printability re-run, and so
+# also skipped the placement check that runs at the end of it.  A part
+# hanging below the bed or wider than the machine came back graded on
+# shape alone.  Both paths now call the one shared helper.
+# ---------------------------------------------------------------------------
+
+
+_OFF_BED_BBOX = {
+    "x_min": 0.0, "x_max": 40.0,
+    "y_min": 0.0, "y_max": 40.0,
+    "z_min": -40.0, "z_max": 10.0,  # hangs 40 mm through the plate
+}
+
+_OVERSIZED_BBOX = {
+    "x_min": 0.0, "x_max": 400.0,
+    "y_min": 0.0, "y_max": 200.0,
+    "z_min": 0.0, "z_max": 30.0,  # 400 x 200 mm on a 256 mm bed
+}
+
+
+class TestValidationPipelinePlacementCheck:
+    """A bundle-sourced report must reach the same placement verdict as
+    a directly-analyzed one."""
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_bundle_off_bed_mesh_is_flagged(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """Geometry below z=0 drops a bundle-sourced 'A' below printable."""
+        mock_validate.return_value = _make_mesh_validation_result(
+            bounding_box=_OFF_BED_BBOX,
+        )
+        bundle = _make_inspection_bundle(
+            printability_score=95, printability_grade="A",
+        )
+
+        result = run_validation_pipeline(stl_file, inspection_bundle=bundle)
+
+        mock_printability.assert_not_called()  # still the short-circuit path
+        assert any(
+            "below the build plate" in r for r in result.recommendations
+        )
+        assert "below the build plate" in result.recommendations[0]
+        assert result.printability_score < 50
+        assert result.printability_grade == "F"
+        assert result.printability_details["printable"] is False
+        # Placement is feasibility: it fails the run on its own, without
+        # having to clear min_printability_score first.
+        assert result.passed is False
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_bundle_oversized_mesh_is_flagged(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """A part larger than an explicit bed is flagged on the bundle path."""
+        mock_validate.return_value = _make_mesh_validation_result(
+            bounding_box=_OVERSIZED_BBOX,
+        )
+        bundle = _make_inspection_bundle(
+            printability_score=95, printability_grade="A",
+        )
+
+        result = run_validation_pipeline(
+            stl_file,
+            inspection_bundle=bundle,
+            build_volume=(256.0, 256.0, 256.0),
+        )
+
+        assert any("exceeds build volume" in r for r in result.recommendations)
+        assert result.printability_score < 50
+        assert result.passed is False
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_bundle_oversized_flagged_against_resolved_bed(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """No explicit build_volume — the bed resolves from printer_id."""
+        mock_validate.return_value = _make_mesh_validation_result(
+            bounding_box=_OVERSIZED_BBOX,
+        )
+        bundle = _make_inspection_bundle(
+            printability_score=95, printability_grade="A",
+        )
+
+        result = run_validation_pipeline(
+            stl_file, inspection_bundle=bundle, printer_id="bambu_a1",
+        )
+
+        assert any("exceeds build volume" in r for r in result.recommendations)
+        assert result.printability_score < 50
+        assert result.passed is False
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_unresolvable_bed_skips_fit_check(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """An unknown printer skips the fit check rather than raising."""
+        mock_validate.return_value = _make_mesh_validation_result(
+            bounding_box=_OVERSIZED_BBOX,
+        )
+        bundle = _make_inspection_bundle(
+            printability_score=95, printability_grade="A",
+        )
+
+        result = run_validation_pipeline(
+            stl_file,
+            inspection_bundle=bundle,
+            printer_id="definitely_not_a_printer_9000",
+        )
+
+        assert not any(
+            "exceeds build volume" in r for r in result.recommendations
+        )
+        assert result.printability_score == 95  # untouched
+        assert result.fits_build_volume is None
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_bundle_details_track_the_placement_verdict(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """The ride-along findings report the verdict the pipeline
+        reports, and the caller's own bundle dict is left untouched."""
+        mock_validate.return_value = _make_mesh_validation_result(
+            bounding_box=_OFF_BED_BBOX,
+        )
+        bundle = _make_inspection_bundle(
+            printability_score=95, printability_grade="A",
+        )
+
+        result = run_validation_pipeline(stl_file, inspection_bundle=bundle)
+
+        details = result.printability_details
+        assert details["score"] == result.printability_score
+        assert details["grade"] == "F"
+        assert details["printable"] is False
+
+        # The input bundle is the caller's — never mutated in place.
+        findings = bundle["channels"]["printability"]["findings"]
+        assert findings["score"] == 95
+        assert findings["grade"] == "A"
+        assert findings["printable"] is True
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_well_placed_bundle_mesh_is_untouched(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """A part sitting on the bed and inside it keeps its bundle score."""
+        mock_validate.return_value = _make_mesh_validation_result()
+        bundle = _make_inspection_bundle(
+            printability_score=88, printability_grade="B",
+        )
+
+        result = run_validation_pipeline(
+            stl_file, inspection_bundle=bundle, printer_id="bambu_a1",
+        )
+
+        assert result.printability_score == 88
+        assert result.printability_grade == "B"
+        assert result.passed is True
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_low_score_bar_does_not_rescue_an_off_bed_part(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """min_printability_score says how ROUGH a mesh the caller will
+        take, not whether they will take one that cannot print."""
+        mock_validate.return_value = _make_mesh_validation_result(
+            bounding_box=_OFF_BED_BBOX,
+        )
+        bundle = _make_inspection_bundle(
+            printability_score=95, printability_grade="A",
+        )
+
+        result = run_validation_pipeline(
+            stl_file, inspection_bundle=bundle, min_printability_score=0,
+        )
+
+        assert result.passed is False
+        assert any(
+            "below the build plate" in w for w in result.warnings
+        )
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_direct_branch_off_bed_also_fails(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """The no-bundle branch reaches the same verdict — the faults are
+        read from the mesh, not from whichever path produced the score."""
+        mock_validate.return_value = _make_mesh_validation_result(
+            bounding_box=_OFF_BED_BBOX,
+        )
+        mock_printability.return_value = _make_printability_report(
+            score=95, grade="A",
+        )
+
+        result = run_validation_pipeline(stl_file)
+
+        assert result.passed is False
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_direct_branch_gets_the_same_resolved_bed(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """With no bundle, the placement check runs inside
+        analyze_printability — so the pipeline must hand it the same bed
+        the bundle branch measures against, or the two paths drift."""
+        mock_validate.return_value = _make_mesh_validation_result()
+        mock_printability.return_value = _make_printability_report(
+            score=95, grade="A",
+        )
+
+        run_validation_pipeline(stl_file, printer_id="bambu_a1")
+
+        kwargs = mock_printability.call_args.kwargs
+        assert kwargs["build_volume"] == (256.0, 256.0, 256.0)
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_auto_scale_defers_the_fit_deduction_to_step_4(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """With auto_scale on, step 4 shrinks an oversized mesh to fit —
+        so step 3 must not dock the score for a size about to be fixed.
+        Off-bed geometry is still docked: scaling cannot lift a part."""
+        mock_validate.return_value = _make_mesh_validation_result(
+            bounding_box=_OVERSIZED_BBOX,
+        )
+        bundle = _make_inspection_bundle(
+            printability_score=95, printability_grade="A",
+        )
+
+        with patch(_SCALE) as mock_scale:
+            mock_scale.return_value = {
+                "scale_factor": 0.6,
+                "path": stl_file,
+                "new_dimensions": {"x": 240.0, "y": 120.0, "z": 18.0},
+            }
+            result = run_validation_pipeline(
+                stl_file,
+                inspection_bundle=bundle,
+                build_volume=(256.0, 256.0, 256.0),
+                auto_scale=True,
+            )
+
+        assert result.printability_score == 95  # not double-penalised
+        assert not any(
+            "exceeds build volume" in r for r in result.recommendations
+        )
+        assert result.fits_build_volume is True
+
+
+def test_placement_helper_is_the_single_shared_implementation():
+    """Both paths route through this one helper — a pure-unit pin on the
+    convention it keeps: recommendation first, score deducted, grade and
+    printable recomputed."""
+    from kiln.printability import _apply_placement_check
+
+    recs = ["increase wall count"]
+    score, grade, printable, faults = _apply_placement_check(
+        95,
+        recs,
+        _OFF_BED_BBOX,
+        build_volume=(256.0, 256.0, 256.0),
+    )
+
+    assert len(faults) == 1
+    assert "below the build plate" in recs[0]
+    assert recs[-1] == "increase wall count"  # existing advice preserved
+    assert score == 45
+    assert grade == "F"
+    assert printable is False
+
+
+def test_placement_helper_degrades_without_a_bbox():
+    """No bounding box → nothing measurable → no deduction, no raise."""
+    from kiln.printability import _apply_placement_check
+
+    recs: list[str] = []
+    assert _apply_placement_check(90, recs, None) == (90, "A", True, [])
+    assert recs == []
