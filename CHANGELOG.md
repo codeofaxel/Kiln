@@ -7,6 +7,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Four more QIDI printers.** The Plus 5, Max 4, Q2C and X-Smart 3. *Free tells
+  you a material won't work on your machine; Kiln Pro tells you why, and what to
+  run instead, plus more depth.* See https://kiln3d.com/pricing.
 - **Tell the Kiln team something.** A new Support page in the web app takes
   bugs, ideas, printers you want supported, and questions — or just say it to
   your agent, which can send any of them for you. A person reads every one, and
@@ -25,6 +28,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Air-filter warnings on QIDI printers.** Several switch the filter off while
+  the chamber heats — exactly when ABS and ASA need it.
 - **Parts that printed beautifully now also work.** Twenty-three of
   the ready-made parts had flaws you'd only find after printing. All
   rebuilt and re-tested.

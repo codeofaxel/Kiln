@@ -1826,6 +1826,136 @@
     "chamber_temp_c": 65,
     "chamber_heated": true
   },
+  "qidi_plus5": {
+    "printer_id": "qidi_plus5",
+    "display_name": "QIDI Plus 5",
+    "manufacturer": "QIDI",
+    "build_volume_mm": {
+      "x": 320,
+      "y": 320,
+      "z": 300
+    },
+    "max_hotend_temp_c": 370,
+    "max_bed_temp_c": 120,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "pa-cf",
+      "pc",
+      "petg",
+      "pla",
+      "pps"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 250,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ],
+    "chamber_temp_c": 65,
+    "chamber_heated": true
+  },
+  "qidi_q2c": {
+    "printer_id": "qidi_q2c",
+    "display_name": "QIDI Q2C",
+    "manufacturer": "QIDI",
+    "build_volume_mm": {
+      "x": 270,
+      "y": 270,
+      "z": 256
+    },
+    "max_hotend_temp_c": 370,
+    "max_bed_temp_c": 120,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "pa-cf",
+      "pc",
+      "petg",
+      "pla"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 250,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
+  },
+  "qidi_max4": {
+    "printer_id": "qidi_max4",
+    "display_name": "QIDI Max 4",
+    "manufacturer": "QIDI",
+    "build_volume_mm": {
+      "x": 390,
+      "y": 390,
+      "z": 340
+    },
+    "max_hotend_temp_c": 370,
+    "max_bed_temp_c": 120,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "pa-cf",
+      "pc",
+      "petg",
+      "pla",
+      "pps"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 300,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ],
+    "chamber_temp_c": 65,
+    "chamber_heated": true
+  },
+  "qidi_x_smart3": {
+    "printer_id": "qidi_x_smart3",
+    "display_name": "QIDI X-Smart 3",
+    "manufacturer": "QIDI",
+    "build_volume_mm": {
+      "x": 175,
+      "y": 180,
+      "z": 170
+    },
+    "max_hotend_temp_c": 300,
+    "max_bed_temp_c": 120,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "asa",
+      "petg",
+      "pla",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 200,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
+  },
   "ender3_s1_pro": {
     "display_name": "Ender 3 S1 Pro",
     "manufacturer": "Creality",
