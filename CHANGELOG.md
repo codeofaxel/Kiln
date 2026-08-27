@@ -7,6 +7,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Four more QIDI printers.** The Plus 5, Max 4, Q2C and X-Smart 3 now have
+  full profiles — build volume, safe temperature ceilings, per-material
+  settings and the material list each one can actually run. Two of them come
+  with warnings worth reading before you print: the Q2C has no chamber heater
+  despite being enclosed, and the X-Smart 3 stops 50 C short of its siblings,
+  so the high-temperature filaments QIDI ships profiles for cannot run on it.
+
+- **Safety notes that were missing on printers we already supported.** Several
+  QIDI machines switch their air filter off while the chamber is heating —
+  which is exactly when ABS and ASA need it — and the Q1 Pro has no filter
+  fitted at all. Those now say so. The X-Max 3's dry box is also described
+  correctly: it keeps dry filament dry, it cannot dry wet filament.
+
 - **Tell the Kiln team something.** A new Support page in the web app takes
   bugs, ideas, printers you want supported, and questions — or just say it to
   your agent, which can send any of them for you. A person reads every one, and
