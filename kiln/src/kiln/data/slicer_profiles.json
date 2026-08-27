@@ -2392,7 +2392,7 @@
   "qidi_x_max3": {
     "display_name": "QIDI X-Max 3",
     "slicer": "orcaslicer",
-    "notes": "Large-format enclosed CoreXY, 350 C hotend, 65 C actively heated chamber, integrated dryer box. Ships both a copper-alloy and a hardened-steel hotend, so abrasive filled grades need no upgrade. Klipper firmware — existing Moonraker adapter reaches it.",
+    "notes": "Large-format enclosed CoreXY, 350 C hotend, 65 C actively heated chamber, a PASSIVE desiccant dry box - it keeps dry filament dry but cannot dry wet filament, and the 65 C figure belongs to the chamber heater, not the box. Ships both a copper-alloy and a hardened-steel hotend, so abrasive filled grades need no upgrade. Klipper firmware — existing Moonraker adapter reaches it.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",

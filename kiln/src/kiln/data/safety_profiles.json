@@ -941,7 +941,7 @@
       305,
       280
     ],
-    "notes": "Enclosed CoreXY with a 370 C bimetal nozzle and 65 C independent chamber heating — the highest hotend of any consumer machine here, and enough for unfilled PPS. Klipper firmware with a Fluidd web interface, so the existing Moonraker adapter reaches it."
+    "notes": "Enclosed CoreXY with a 370 C bimetal nozzle and 65 C independent chamber heating — the highest hotend of any consumer machine here, and enough for unfilled PPS. Klipper firmware with a Fluidd web interface, so the existing Moonraker adapter reaches it. Ventilation note: this machine switches its air filter OFF whenever chamber heating is on, and QIDI's own profiles additionally set the filter fan to zero for ABS, ASA, PC and PPS. So the filter is inert for exactly the materials it exists to handle — ventilate the room rather than relying on it."
   },
   "qidi_q1_pro": {
     "display_name": "QIDI Q1 Pro",
@@ -956,7 +956,7 @@
       245,
       240
     ],
-    "notes": "Compact enclosed CoreXY, 350 C ceramic-heated bimetal hotend with 60 C independent chamber heating. Klipper firmware — reachable through the existing Moonraker adapter."
+    "notes": "Compact enclosed CoreXY, 350 C ceramic-heated bimetal hotend with 60 C independent chamber heating. Klipper firmware — reachable through the existing Moonraker adapter. Ventilation note: this model has NO factory air filtration — QIDI ships the activated-carbon box as a model you print yourself — and its ABS and ASA profiles switch the exhaust fan off to hold chamber heat. So styrenics vent straight into the room unless you ventilate it yourself."
   },
   "qidi_x_max3": {
     "display_name": "QIDI X-Max 3",
@@ -971,7 +971,7 @@
       325,
       315
     ],
-    "notes": "Large-format enclosed CoreXY, 350 C hotend, 65 C actively heated chamber, integrated dryer box. Ships both a copper-alloy and a hardened-steel hotend, so abrasive filled grades need no upgrade. Klipper firmware — existing Moonraker adapter reaches it."
+    "notes": "Large-format enclosed CoreXY, 350 C hotend, 65 C actively heated chamber, a PASSIVE desiccant dry box - it keeps dry filament dry but cannot dry wet filament, and the 65 C figure belongs to the chamber heater, not the box. Ships both a copper-alloy and a hardened-steel hotend, so abrasive filled grades need no upgrade. Klipper firmware — existing Moonraker adapter reaches it."
   },
   "qidi_q2": {
     "display_name": "QIDI Q2",
@@ -986,7 +986,7 @@
       270,
       256
     ],
-    "notes": "Enclosed CoreXY with a 370 C bimetal hardened-steel nozzle and 65 C second-generation independent chamber heating — the same hotend ceiling as the Plus 4 in a smaller frame, so unfilled PPS is in range. Klipper, so the existing Moonraker adapter reaches it."
+    "notes": "Enclosed CoreXY with a 370 C bimetal hardened-steel nozzle and 65 C second-generation independent chamber heating — the same hotend ceiling as the Plus 4 in a smaller frame, so unfilled PPS is in range. Klipper, so the existing Moonraker adapter reaches it. Ventilation note: this machine switches its air filter OFF whenever chamber heating is on, and QIDI's own profiles additionally set the filter fan to zero for ABS, ASA, PC and PPS. So the filter is inert for exactly the materials it exists to handle — ventilate the room rather than relying on it."
   },
   "qidi_plus5": {
     "display_name": "QIDI Plus 5",
