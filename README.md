@@ -172,7 +172,7 @@ kiln agent --model openai/gpt-4o
 kiln agent --model meta-llama/llama-3.1-70b-instruct --tier essential
 ```
 
-Tool tiers auto-match model capability: **essential** (15 tools) for smaller models, **standard** (60 tools) for mid-range, **full** (135 tools) for stronger models. All <!-- KILN_MCP_TOOL_COUNT:OLD --> 901 tools are available over MCP via `kiln serve`.
+Tool tiers auto-match model capability: **essential** (15 tools) for smaller models, **standard** (60 tools) for mid-range, **full** (135 tools) for stronger models. All <!-- KILN_MCP_TOOL_COUNT:OLD --> 902 tools are available over MCP via `kiln serve`.
 </details>
 
 <details>
@@ -248,7 +248,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
-- **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 908 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 239 CLI commands built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 909 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 239 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
 - **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Business)
@@ -377,7 +377,7 @@ Patent pending across semantic mesh merge, outcome-correlated branching, and sig
 
 ## Tools
 
-The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 901 tools** to agents, plus prompts and resources for **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 908 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice, in the order a print actually happens:
+The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 902 tools** to agents, plus prompts and resources for **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 909 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice, in the order a print actually happens:
 
 - **design_session**
   - Talk to Kiln about what you're making and get back a design that matches what you asked for

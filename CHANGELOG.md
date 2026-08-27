@@ -31,6 +31,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Printability grades stopped failing models that print fine.** Grades now
   follow what your printer actually does.
 
+- **Models that can't fit or sit on your bed no longer pass.** A part
+  hanging below the build plate or wider than your printer used to grade
+  an A. Both now fail, and say how to fix it.
+
 - **Multicolor and painted models now land on the print bed — yours.** A model
   that wasn't already centred produced a 3MF PrusaSlicer quietly refused to
   slice. Kiln now places it on your printer's actual plate, and when something

@@ -168,6 +168,7 @@ def run_validation_pipeline(
     auto_scale: bool = False,
     min_printability_score: int = 40,
     inspection_bundle: dict[str, Any] | None = None,
+    printer_id: str | None = None,
 ) -> ValidationPipelineResult:
     """Run the full mesh validation pipeline.
 
@@ -189,6 +190,10 @@ def run_validation_pipeline(
         running a redundant :func:`analyze_printability` pass — same
         answer, half the cost.  Legacy callers (no bundle) get the
         unchanged path.
+    :param printer_id: Optional printer whose bed the placement check
+        measures against when *build_volume* is not given.  An unknown
+        printer resolves to no bed, which skips the fit check rather
+        than failing the run.
     :returns: :class:`ValidationPipelineResult` with full report.
     """
     from kiln.generation.validation import (
@@ -311,6 +316,25 @@ def run_validation_pipeline(
         # ------------------------------------------------------------------
         _logger.info("Step 3/4: Analyzing printability")
 
+        from kiln.printability import (
+            _apply_placement_check,
+            _placement_faults,
+            _resolve_placement_volume,
+        )
+
+        # Resolve the bed once — an explicit build_volume wins, else the
+        # printer catalogue answers (or answers None for a machine it
+        # does not know, which skips the fit check rather than failing).
+        resolved_build_volume = _resolve_placement_volume(
+            build_volume, printer_id,
+        )
+        # With auto_scale on, step 4 shrinks an oversized mesh to fit and
+        # the part becomes printable — so the fit half of the placement
+        # check must not dock the score here on a size step 4 is about to
+        # fix.  Off-bed geometry is docked either way: scaling does not
+        # lift a part back above z = 0.
+        placement_volume = None if auto_scale else resolved_build_volume
+
         printability_score = 0
         printability_grade = "F"
         printability_details: dict[str, Any] | None = None
@@ -343,6 +367,44 @@ def run_validation_pipeline(
                 printability_score,
                 printability_grade,
             )
+
+            # The bundle's findings describe the mesh's SHAPE; they carry
+            # no verdict on where the part sits.  Skipping the
+            # analyze_printability re-run therefore also skipped the
+            # placement check that runs at the end of it, and a part
+            # hanging below the bed or wider than the machine came back
+            # graded on shape alone.  Run the one shared helper here so
+            # this path lands on the same verdict as the direct one.
+            (
+                printability_score,
+                printability_grade,
+                placement_printable,
+                placement_recs,
+            ) = _apply_placement_check(
+                printability_score,
+                recommendations,
+                bounding_box,
+                build_volume=placement_volume,
+            )
+
+            if placement_recs:
+                # Keep the ride-along findings coherent with the verdict
+                # the pipeline is actually reporting.  This is the local
+                # copy, so the caller's bundle is left untouched.
+                printability_details["score"] = printability_score
+                printability_details["grade"] = printability_grade
+                printability_details["printable"] = placement_printable
+                printability_details["recommendations"] = [
+                    *placement_recs,
+                    *printability_details.get("recommendations", []),
+                ]
+                _logger.warning(
+                    "Placement check overrode bundle findings — "
+                    "score %d/100 (grade %s): %s",
+                    printability_score,
+                    printability_grade,
+                    "; ".join(placement_recs),
+                )
         else:
             try:
                 from kiln.printability import analyze_printability
@@ -352,6 +414,9 @@ def run_validation_pipeline(
                     nozzle_diameter=nozzle_diameter,
                     layer_height=layer_height,
                     material=material.lower(),
+                    # Same bed the bundle branch checks against, so the
+                    # two branches cannot reach different verdicts.
+                    build_volume=placement_volume,
                 )
                 printability_score = report.score
                 printability_grade = report.grade
@@ -369,6 +434,14 @@ def run_validation_pipeline(
                 errors.append(f"Printability analysis failed: {exc}")
                 _logger.error("Printability analysis failed: %s", exc, exc_info=True)
 
+        # Whichever branch produced the score above, the geometry is the
+        # same — so read the faults once, from the mesh, rather than from
+        # whichever path happened to run.  Pure detection: it re-reads the
+        # verdict without deducting a second time.
+        placement_faults = _placement_faults(
+            bounding_box, build_volume=placement_volume,
+        )
+
         # ------------------------------------------------------------------
         # Step 4: Build volume check (+ optional auto-scale)
         # ------------------------------------------------------------------
@@ -376,12 +449,12 @@ def run_validation_pipeline(
         was_scaled = False
         scale_factor = 1.0
 
-        if build_volume is not None:
+        if resolved_build_volume is not None:
             _logger.info(
                 "Step 4/4: Checking build volume fit (%.0f x %.0f x %.0f mm)",
-                *build_volume,
+                *resolved_build_volume,
             )
-            fits = _mesh_fits_volume(dimensions, build_volume)
+            fits = _mesh_fits_volume(dimensions, resolved_build_volume)
 
             if fits:
                 fits_build_volume = True
@@ -391,9 +464,9 @@ def run_validation_pipeline(
                 try:
                     scale_result = scale_to_fit(
                         working_path,
-                        max_x_mm=build_volume[0],
-                        max_y_mm=build_volume[1],
-                        max_z_mm=build_volume[2],
+                        max_x_mm=resolved_build_volume[0],
+                        max_y_mm=resolved_build_volume[1],
+                        max_z_mm=resolved_build_volume[2],
                     )
                     scale_factor = scale_result["scale_factor"]
                     was_scaled = scale_factor < 1.0
@@ -422,11 +495,12 @@ def run_validation_pipeline(
                 errors.append(
                     f"Mesh exceeds build volume "
                     f"({dimensions!r} vs "
-                    f"{build_volume[0]}x{build_volume[1]}x{build_volume[2]} mm).",
+                    f"{resolved_build_volume[0]}x{resolved_build_volume[1]}"
+                    f"x{resolved_build_volume[2]} mm).",
                 )
                 _logger.warning("Mesh does not fit build volume.")
         else:
-            _logger.info("Step 4/4: Skipped — no build volume specified.")
+            _logger.info("Step 4/4: Skipped — no build volume resolved.")
 
         # ------------------------------------------------------------------
         # Step 5: Composite verdict
@@ -446,6 +520,16 @@ def run_validation_pipeline(
 
         if fits_build_volume is False:
             passed = False
+
+        # Placement is feasibility, not quality, so it is deliberately not
+        # filtered through min_printability_score — that setting says how
+        # rough a mesh the caller will accept, not whether they will take
+        # one that cannot print at all.  This is the same reasoning that
+        # already lets fits_build_volume fail a run on its own; without it
+        # the two placement faults were graded alike but gated differently.
+        if placement_faults:
+            passed = False
+            warnings.extend(placement_faults)
 
         if validation.errors:
             passed = False
