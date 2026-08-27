@@ -14269,7 +14269,7 @@
         "high_temp_bed",
         "dry_box"
       ],
-      "notes": "PEI 1010 cannot run on this printer: needs a 380C hotend, this printer tops out at 370C; needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+      "notes": "PEI 1010 cannot run on this printer: needs a 380C hotend, this printer tops out at 370C; needs an actively heated chamber at 160C, this printer has no chamber heater; needs a 130C bed, this printer tops out at 120C."
     },
     "pei_9085": {
       "status": "not_compatible",
@@ -14278,7 +14278,7 @@
         "high_temp_bed",
         "dry_box"
       ],
-      "notes": "PEI 9085 cannot run on this printer: needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+      "notes": "PEI 9085 cannot run on this printer: needs an actively heated chamber at 160C, this printer has no chamber heater; needs a 130C bed, this printer tops out at 120C."
     },
     "pekk": {
       "status": "not_compatible",
@@ -14286,7 +14286,7 @@
         "heated_chamber",
         "dry_box"
       ],
-      "notes": "PEKK cannot run on this printer: needs an actively heated chamber at 90C, this printer reaches 65C."
+      "notes": "PEKK cannot run on this printer: needs an actively heated chamber at 90C, this printer has no chamber heater."
     },
     "ppsu": {
       "status": "not_compatible",
@@ -14296,7 +14296,7 @@
         "high_temp_bed",
         "dry_box"
       ],
-      "notes": "PPSU cannot run on this printer: needs a 390C hotend, this printer tops out at 370C; needs an actively heated chamber at 170C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+      "notes": "PPSU cannot run on this printer: needs a 390C hotend, this printer tops out at 370C; needs an actively heated chamber at 170C, this printer has no chamber heater; needs a 130C bed, this printer tops out at 120C."
     },
     "pps": {
       "status": "needs_upgrade",
@@ -14751,7 +14751,7 @@
         "high_temp_bed",
         "dry_box"
       ],
-      "notes": "PEI 1010 cannot run on this printer: needs a 380C hotend, this printer tops out at 300C; needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+      "notes": "PEI 1010 cannot run on this printer: needs a 380C hotend, this printer tops out at 300C; needs an actively heated chamber at 160C, this printer has no chamber heater; needs a 130C bed, this printer tops out at 120C."
     },
     "pei_9085": {
       "status": "not_compatible",
@@ -14760,7 +14760,7 @@
         "high_temp_bed",
         "dry_box"
       ],
-      "notes": "PEI 9085 cannot run on this printer: needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+      "notes": "PEI 9085 cannot run on this printer: needs an actively heated chamber at 160C, this printer has no chamber heater; needs a 130C bed, this printer tops out at 120C."
     },
     "pekk": {
       "status": "not_compatible",
@@ -14768,7 +14768,7 @@
         "heated_chamber",
         "dry_box"
       ],
-      "notes": "PEKK cannot run on this printer: needs an actively heated chamber at 90C, this printer reaches 65C."
+      "notes": "PEKK cannot run on this printer: needs an actively heated chamber at 90C, this printer has no chamber heater."
     },
     "ppsu": {
       "status": "not_compatible",
@@ -14778,11 +14778,12 @@
         "high_temp_bed",
         "dry_box"
       ],
-      "notes": "PPSU cannot run on this printer: needs a 390C hotend, this printer tops out at 300C; needs an actively heated chamber at 170C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+      "notes": "PPSU cannot run on this printer: needs a 390C hotend, this printer tops out at 300C; needs an actively heated chamber at 170C, this printer has no chamber heater; needs a 130C bed, this printer tops out at 120C."
     },
     "pps": {
       "status": "not_compatible",
       "upgrades_needed": [
+        "hardened_nozzle",
         "high_temp_hotend"
       ],
       "notes": "This machine's hotend stops at 300C, 50C below its larger siblings. QIDI ships a profile for this material inherited from those siblings that asks for more than 300C, so it cannot run here - the profile existing is not the same as the machine being able to."
@@ -14884,6 +14885,7 @@
     "pet_cf": {
       "status": "not_compatible",
       "upgrades_needed": [
+        "hardened_nozzle",
         "high_temp_hotend"
       ],
       "notes": "This machine's hotend stops at 300C, 50C below its larger siblings. QIDI ships a profile for this material inherited from those siblings that asks for more than 300C, so it cannot run here - the profile existing is not the same as the machine being able to."
@@ -14963,16 +14965,17 @@
         "high_temp_bed",
         "high_temp_hotend"
       ],
-      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs about 375C for a normal build and this machine reaches 370C."
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs about 375C for a normal build and this machine reaches 300C."
     },
     "pekk_esd": {
       "status": "not_compatible",
       "upgrades_needed": [
         "dry_box",
         "hardened_nozzle",
-        "heated_chamber"
+        "heated_chamber",
+        "high_temp_hotend"
       ],
-      "notes": "PEKK-ESD cannot run on this printer: it needs about 375C for a normal build and this machine reaches 370C."
+      "notes": "PEKK-ESD cannot run on this printer: it needs about 375C for a normal build and this machine reaches 300C."
     },
     "pla_esd": {
       "status": "needs_upgrade",
