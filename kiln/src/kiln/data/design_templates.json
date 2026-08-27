@@ -566,7 +566,7 @@
         "description": "Bend angle (0 = straight)"
       }
     },
-    "scad_template": "// Parametric Tube Connector\ntod = ${tube_od};\nwall = ${wall};\nlen = ${length};\nang = ${angle};\n\nod = tod + wall * 2;\nbend_r = od * 2;\n\nmodule connector() {\n    if (ang == 0) {\n        // Straight connector\n        difference() {\n            cylinder(h=len*2, d=od, $fn=50, center=true);\n            cylinder(h=len*2+2, d=tod + 0.4, $fn=50, center=true);\n        }\n    } else {\n        // Angled connector\n        difference() {\n            union() {\n                cylinder(h=len, d=od, $fn=50);\n                translate([0, 0, len])\n                    rotate([ang, 0, 0])\n                        cylinder(h=len, d=od, $fn=50);\n                // Elbow joint\n                translate([0, 0, len])\n                    sphere(d=od, $fn=50);\n            }\n            union() {\n                cylinder(h=len+1, d=tod + 0.4, $fn=50);\n                translate([0, 0, len])\n                    rotate([ang, 0, 0])\n                        cylinder(h=len+1, d=tod + 0.4, $fn=50);\n                translate([0, 0, len])\n                    sphere(d=tod + 0.4, $fn=50);\n            }\n        }\n    }\n}\n\nconnector();"
+    "scad_template": "// Parametric Tube Connector\ntod = ${tube_od};\nwall = ${wall};\nlen = ${length};\nang = ${angle};\n\nod = tod + wall * 2;\nbend_r = od * 2;\n\nmodule connector() {\n    if (ang == 0) {\n        // Straight connector, base on the bed\n        difference() {\n            cylinder(h=len*2, d=od, $fn=50);\n            translate([0, 0, -1])\n                cylinder(h=len*2+2, d=tod + 0.4, $fn=50);\n        }\n    } else {\n        // Angled connector\n        difference() {\n            union() {\n                cylinder(h=len, d=od, $fn=50);\n                translate([0, 0, len])\n                    rotate([ang, 0, 0])\n                        cylinder(h=len, d=od, $fn=50);\n                // Elbow joint\n                translate([0, 0, len])\n                    sphere(d=od, $fn=50);\n            }\n            union() {\n                cylinder(h=len+1, d=tod + 0.4, $fn=50);\n                translate([0, 0, len])\n                    rotate([ang, 0, 0])\n                        cylinder(h=len+1, d=tod + 0.4, $fn=50);\n                translate([0, 0, len])\n                    sphere(d=tod + 0.4, $fn=50);\n            }\n        }\n    }\n}\n\nconnector();"
   },
   "battery_holder": {
     "display_name": "Battery Holder",
@@ -961,9 +961,9 @@
     "category": "desk_accessories",
     "parameters": {
       "width": {
-        "default": 400,
-        "min": 250,
-        "max": 600,
+        "default": 240,
+        "min": 200,
+        "max": 400,
         "unit": "mm",
         "description": "Shelf width"
       },

@@ -3529,8 +3529,14 @@ def analyze_printability(
     :param layer_height: Print layer height in mm.
     :param max_overhang_angle: Max overhang angle (degrees) before
         supports are needed.
-    :param build_volume: Optional (X, Y, Z) build volume in mm.  If
-        provided, the report will warn if the model exceeds it.
+    :param build_volume: Optional (X, Y, Z) build volume in mm.  When
+        omitted the bed is resolved from ``printer_id`` (else the
+        configured printer, else the reference plate) via
+        :func:`kiln.stage_plate.resolve_stage_plate`, so a part larger
+        than the bed is caught even though almost no caller supplies
+        one.  A part that overflows the bed, or one whose geometry
+        sits below z=0, is a blocking finding: it drops the score
+        below the ``printable`` threshold rather than shaving a grade.
     :param material: Material ID for warping and cost analysis (default ``"pla"``).
     :param infill_percent: Interior infill density (0-100) for cost estimation.
     :param include_hole_detection: When True (default), also run
@@ -3946,20 +3952,6 @@ def analyze_printability(
     if bridging.bridge_count > 0:
         time_mod += 0.05
 
-    # Build volume check.
-    if build_volume is not None:
-        bx, by, bz = build_volume
-        dx = bbox["x_max"] - bbox["x_min"]
-        dy = bbox["y_max"] - bbox["y_min"]
-        dz = bbox["z_max"] - bbox["z_min"]
-        if dx > bx or dy > by or dz > bz:
-            recommendations.insert(
-                0,
-                f"Model ({dx:.1f} x {dy:.1f} x {dz:.1f} mm) exceeds build volume ({bx:.0f} x {by:.0f} x {bz:.0f} mm).",
-            )
-            score = max(0, score - 20)
-            grade = _score_to_grade(score)
-
     printable = score >= 50
 
     model_height = bbox["z_max"] - bbox["z_min"]
@@ -4080,7 +4072,95 @@ def analyze_printability(
                 if isinstance(enriched.get("recommendations"), list):
                     report.recommendations = list(enriched["recommendations"])
 
+    _apply_placement_check(
+        report,
+        z_min=z_min,
+        bbox=bbox,
+        build_volume=build_volume,
+        printer_id=printer_id,
+    )
     return report
+
+
+def _apply_placement_check(
+    report: PrintabilityReport,
+    *,
+    z_min: float,
+    bbox: dict[str, float],
+    build_volume: tuple[float, float, float] | None,
+    printer_id: str | None,
+) -> None:
+    """Fail a report whose part is off the bed or bigger than the bed.
+
+    Every other analysis in this module proves PRINTABILITY — overhangs,
+    walls, bridges, adhesion — and none of them ever asks where the
+    geometry actually sits.  That blind spot graded two physically
+    impossible templates "A": ``tube_connector`` at z_min = -40 mm (half
+    the part modelled below the plate) and ``monitor_riser_shelf`` at
+    400 x 200 mm on a 256 mm Bambu A1 bed.  No overhang angle or wall
+    thickness rescues either one, so both are blocking findings.
+
+    The bed-fit half already existed but only ran when a caller passed
+    ``build_volume`` explicitly — and almost nobody does, which is
+    exactly how the 400 mm shelf sailed through.  When it isn't
+    supplied, resolve the bed the way the rest of the product does.
+
+    Runs LAST, mutating the finished report, because the kiln-pro
+    overlay recomputes score / grade / printable from the sub-analyses
+    (which know nothing about placement) and would otherwise hand the
+    400 mm shelf its A straight back.  Placement is geometry, not
+    judgment: no material tuning makes a part fit a bed it doesn't fit.
+    """
+    bed_label = "build volume"
+    bed: tuple[float | None, float | None, float | None] = (None, None, None)
+    if build_volume is not None:
+        bed = build_volume
+    else:
+        # A resolver hiccup must never break the analysis: leaving
+        # ``bed`` unset skips the fit check, matching the degraded-output
+        # posture used for cost and hole detection.
+        with contextlib.suppress(Exception):
+            from kiln.stage_plate import resolve_stage_plate
+
+            plate = resolve_stage_plate(printer_id)
+            bed = (plate.get("x_mm"), plate.get("y_mm"), plate.get("z_mm"))
+            bed_label = plate.get("label") or "reference bed"
+
+    dx = bbox["x_max"] - bbox["x_min"]
+    dy = bbox["y_max"] - bbox["y_min"]
+    dz = bbox["z_max"] - bbox["z_min"]
+    faults: list[str] = []
+    # -0.01 mm tolerance so float noise in an exported mesh doesn't read
+    # as a part buried under the plate.  ``z_min`` is the geometry-derived
+    # plate plane, not the vertex-list minimum.
+    if z_min < -0.01:
+        faults.append(
+            f"Part is not resting on the bed: its lowest geometry sits "
+            f"{abs(z_min):.1f} mm below the plate (z_min = {z_min:.2f} mm). "
+            f"Anything under z=0 cannot print — shift the model up so its "
+            f"lowest point is at z=0."
+        )
+    over = [
+        f"{axis} {size:.1f} > {limit:.0f}"
+        for axis, size, limit in (("X", dx, bed[0]), ("Y", dy, bed[1]), ("Z", dz, bed[2]))
+        if limit and size > limit
+    ]
+    if over:
+        faults.append(
+            f"Model ({dx:.1f} x {dy:.1f} x {dz:.1f} mm) exceeds build volume "
+            f"({bed_label}): {', '.join(over)} mm.  Scale it down, split it "
+            f"into plate-sized parts, or print it on a larger machine."
+        )
+    if not faults:
+        return
+    for fault in reversed(faults):
+        report.recommendations.insert(0, fault)
+    # Same deduct-and-regrade convention the bed-fit check already used,
+    # sized so a part that cannot physically print drops out of
+    # ``printable`` (score >= 50) instead of coming back a tidy B.
+    report.score = max(0, report.score - 60 * len(faults))
+    report.grade = _score_to_grade(report.score)
+    report.printable = report.score >= 50
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,7 @@ The still image is the floor under all of it, always.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -445,20 +446,91 @@ def token_for_call_result(result: Any) -> str | None:
     return None
 
 
-def _payload_for_mesh(mesh: str, **encode: Any) -> dict:
-    """Encode *mesh* and stamp this install's print bed onto it.
+def _center_on_plate(payload: dict | None) -> dict | None:
+    """Slide the geometry to the middle of the plate in X and Y, in place.
 
-    The one place a payload is built for the local stage.  Both doors below
-    go through it so neither can ship geometry with no bed under it — the
-    stage draws the plate from what arrives here, and a payload that names no
-    plate falls back to a reference square for a bed it knows nothing about.
+    WHY THIS IS HERE.  Geometry arrives in whatever coordinates its source
+    wrote, and a parametric model's origin is almost always a CORNER of the
+    part rather than its middle — a 120 x 150 SCAD panel occupies x 0..120,
+    y 0..150.  The stage, meanwhile, draws the print bed CENTERED on the
+    origin.  Left alone, most of Kiln's templates render parked in one
+    quadrant of the plate or hanging off its edge, which reads as a part
+    that will not print rather than as the coordinate convention it is.
+
+    Z is deliberately untouched.  The part rests ON the bed; lifting or
+    sinking it would be a claim about the print that isn't true.
+
+    ``positions`` (viewer space, where x = mesh x and z = -mesh y) and
+    ``bbox`` (mesh space) move by the SAME offset, so the payload can never
+    describe the part somewhere its vertices are not.  A downgraded payload
+    carries a bbox and no geometry — there is nothing to move, and moving
+    the bbox alone would invent exactly that disagreement — so it passes
+    through untouched.
+
+    Never raises: an off-centre part on the plate beats a tool call that
+    died over furniture.
+    """
+    try:
+        if not isinstance(payload, dict) or payload.get("downgraded"):
+            return payload
+        positions = payload.get("positions")
+        bbox = payload.get("bbox")
+        if not isinstance(positions, str) or not isinstance(bbox, dict):
+            return payload
+        lo, hi = bbox.get("min"), bbox.get("max")
+        if not (isinstance(lo, list) and isinstance(hi, list)):
+            return payload
+        if len(lo) != 3 or len(hi) != 3:
+            return payload
+        dx = -(float(lo[0]) + float(hi[0])) / 2.0
+        dy = -(float(lo[1]) + float(hi[1])) / 2.0
+        if not dx and not dy:
+            return payload  # already centred — nothing to re-encode
+
+        import numpy as np
+
+        xyz = (
+            np.frombuffer(base64.b64decode(positions), dtype="<f4")
+            .reshape(-1, 3)
+            .copy()
+        )
+        xyz[:, 0] += dx  # viewer x IS mesh x
+        xyz[:, 2] -= dy  # viewer z is -mesh y, so mesh +y moves viewer -z
+        payload["positions"] = base64.b64encode(
+            xyz.astype("<f4", copy=False).tobytes()
+        ).decode("ascii")
+        bbox["min"] = [round(float(lo[0]) + dx, 4), round(float(lo[1]) + dy, 4), lo[2]]
+        bbox["max"] = [round(float(hi[0]) + dx, 4), round(float(hi[1]) + dy, 4), hi[2]]
+    except Exception:  # noqa: BLE001 — the stage may be off-centre, never broken
+        logger.debug("stage centring skipped", exc_info=True)
+    return payload
+
+
+def _payload_for_mesh(mesh: str, **encode: Any) -> dict:
+    """Encode *mesh*, stand it on the plate, and stamp this install's bed on.
+
+    The one place a payload is built for the stage — all THREE doors go
+    through it: the result hook, the panel's lazy fetch, and the still
+    renderer in :mod:`kiln.stage_still`, which photographs this same stage.
+    None of them can ship geometry with no bed under it: the stage draws the
+    plate from what arrives here, and a payload that names no plate falls
+    back to a reference square for a bed it knows nothing about.  Same
+    reasoning puts the centring here: a door that forgot it would draw a
+    correct bed with the part parked in a corner of it.
+
+    The stills door used to build its payload directly and was therefore
+    exempt from both — so a still and the live stage disagreed about the
+    same mesh.  That is the failure this docstring is here to prevent, and
+    it is why the count above is worth keeping accurate: a fourth caller
+    that reaches for ``mesh_to_viewer_payload`` instead of this function
+    silently opts out of the bed and the centring.
 
     Raises whatever the encoder raises; each door decides what to say about
-    it, since one of them is answering a person and the other is not.
+    it, since they are not all answering a person.
     """
     from kiln.stage_plate import attach_stage_plate
 
-    return attach_stage_plate(mesh_to_viewer_payload(mesh, **encode))
+    return attach_stage_plate(_center_on_plate(mesh_to_viewer_payload(mesh, **encode)))
 
 
 def _inline_payload(token: str) -> dict | None:

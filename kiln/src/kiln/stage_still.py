@@ -593,10 +593,18 @@ def try_render_stage_views(
             logger.debug("stage stills: cached stage predates colour — using OpenSCAD")
             return None
 
-        from kiln.mesh_payload import mesh_to_viewer_payload
+        # Through the local stage's payload door, not around it.  This
+        # renderer PHOTOGRAPHS the stage, so anything the door does to a
+        # payload is part of what the photograph is supposed to show: the
+        # part stood on the plate, and the plate resolved to this install's
+        # actual printer.  Building the payload directly here meant the
+        # still and the live stage disagreed by construction — same mesh,
+        # part parked in a corner, over a bed the document had to invent.
+        # The caps stay this renderer's own; only the door is shared.
+        from kiln.local_stage import _payload_for_mesh
 
         try:
-            payload = mesh_to_viewer_payload(
+            payload = _payload_for_mesh(
                 file_path,
                 max_triangles=_STILL_MAX_TRIANGLES,
                 max_bytes=_STILL_MAX_BYTES,

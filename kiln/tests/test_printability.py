@@ -2328,3 +2328,141 @@ class TestBundlePrintabilityFindings:
         _ = f.grade
         _ = f.recommendations
         _ = f.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Placement check
+#
+# Grading proved printability -- overhangs, walls, bridges, adhesion -- and
+# never asked WHERE the geometry sat.  Two design templates that cannot
+# physically print graded "A" through that blind spot: tube_connector at
+# z_min = -40 mm (half the part below the plate) and monitor_riser_shelf at
+# 400 x 200 mm on a 256 mm bed.  These pin the check that closes it.
+# ---------------------------------------------------------------------------
+
+
+def _sunk_cube_triangles(size: float = 20.0, drop: float = 40.0) -> list[tuple]:
+    """A cube translated ``drop`` mm below the plate -- the tube_connector bug."""
+    return [
+        tuple((v[0], v[1], v[2] - drop) for v in tri)
+        for tri in _cube_triangles(size)
+    ]
+
+
+def _fake_plate(x_mm=256.0, y_mm=256.0, z_mm=256.0, label="Test Bed"):
+    """Stand-in for ``resolve_stage_plate`` so tests don't depend on
+    whichever printer the machine running them happens to have configured."""
+    def _resolve(printer_id=None):
+        return {
+            "x_mm": x_mm, "y_mm": y_mm, "z_mm": z_mm,
+            "printer_id": "test_printer", "label": label, "source": "printer",
+        }
+    return _resolve
+
+
+def _placement_flags(report) -> list[str]:
+    return [
+        r for r in report.recommendations
+        if "not resting on the bed" in r or "exceeds build volume" in r
+    ]
+
+
+class TestPlacementCheck:
+    """A part underground or bigger than the bed must not report as printable."""
+
+    def test_part_below_bed_is_flagged(self, monkeypatch):
+        """z_min < 0: tube_connector sat 40 mm under the plate and graded A."""
+        monkeypatch.setattr("kiln.stage_plate.resolve_stage_plate", _fake_plate())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _sunk_cube_triangles(20.0, 40.0))
+            report = analyze_printability(path)
+            flags = _placement_flags(report)
+            assert any("not resting on the bed" in f for f in flags), report.recommendations
+            assert "40.0 mm below the plate" in flags[0]
+            # Blocking, not advisory: a part under the plate is not printable.
+            assert report.printable is False
+            assert report.grade != "A"
+
+    def test_part_larger_than_resolved_bed_is_flagged(self, monkeypatch):
+        """No explicit build_volume: the bed comes from the shared resolver.
+
+        monitor_riser_shelf is 400 x 200 mm at defaults and graded A because
+        the bed-fit check only ran when a caller passed ``build_volume`` --
+        and the template pipeline never did.
+        """
+        monkeypatch.setattr("kiln.stage_plate.resolve_stage_plate", _fake_plate())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(300.0))
+            report = analyze_printability(path)
+            flags = _placement_flags(report)
+            assert any("exceeds build volume" in f for f in flags), report.recommendations
+            assert "Test Bed" in flags[0]
+            assert report.printable is False
+            assert report.grade != "A"
+
+    def test_bed_resting_in_volume_part_is_not_flagged(self, monkeypatch):
+        """The false-positive guard: a normal part must stay silent.
+
+        A gate that fires on healthy parts gets ignored, which would put the
+        two real failures right back where they were.
+        """
+        monkeypatch.setattr("kiln.stage_plate.resolve_stage_plate", _fake_plate())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(20.0))
+            report = analyze_printability(path)
+            assert _placement_flags(report) == []
+            assert report.printable is True
+
+    def test_float_noise_below_zero_is_not_flagged(self, monkeypatch):
+        """-0.001 mm is export rounding, not a part buried under the plate."""
+        monkeypatch.setattr("kiln.stage_plate.resolve_stage_plate", _fake_plate())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _sunk_cube_triangles(20.0, 0.001))
+            report = analyze_printability(path)
+            assert _placement_flags(report) == []
+
+    def test_part_exactly_bed_sized_is_not_flagged(self, monkeypatch):
+        """A part the exact size of the bed fits -- the comparison is strict."""
+        monkeypatch.setattr(
+            "kiln.stage_plate.resolve_stage_plate", _fake_plate(100.0, 100.0, 100.0),
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(100.0))
+            report = analyze_printability(path)
+            assert _placement_flags(report) == []
+
+    def test_bed_resolution_failure_degrades_gracefully(self, monkeypatch):
+        """A resolver that blows up skips the fit check; it never breaks analysis."""
+        def _boom(printer_id=None):
+            raise RuntimeError("no printer catalogue")
+
+        monkeypatch.setattr("kiln.stage_plate.resolve_stage_plate", _boom)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(300.0))
+            report = analyze_printability(path)
+            assert isinstance(report, PrintabilityReport)
+            # Bed unknown -> no bed-fit verdict, and no exception.
+            assert not any("exceeds build volume" in r for r in report.recommendations)
+
+    def test_bed_resolution_failure_still_catches_underground_part(self, monkeypatch):
+        """z < 0 needs no bed: it stays flagged even when resolution fails."""
+        def _boom(printer_id=None):
+            raise RuntimeError("no printer catalogue")
+
+        monkeypatch.setattr("kiln.stage_plate.resolve_stage_plate", _boom)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _sunk_cube_triangles(20.0, 40.0))
+            report = analyze_printability(path)
+            assert any("not resting on the bed" in r for r in report.recommendations)
+            assert report.printable is False
+
+    def test_explicit_build_volume_still_wins(self, monkeypatch):
+        """An explicit envelope overrides the resolver, as it always did."""
+        monkeypatch.setattr(
+            "kiln.stage_plate.resolve_stage_plate", _fake_plate(1000.0, 1000.0, 1000.0),
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(100.0))
+            report = analyze_printability(path, build_volume=(50.0, 50.0, 50.0))
+            assert any("exceeds build volume" in r for r in report.recommendations)
+            assert report.printable is False
