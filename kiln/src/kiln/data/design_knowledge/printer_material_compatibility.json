@@ -14017,6 +14017,971 @@
       "upgrades_needed": []
     }
   },
+  "qidi_plus5": {
+    "peek": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEEK cannot run on this printer: needs a 380C hotend, this printer tops out at 370C; needs an actively heated chamber at 70C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pei_1010": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEI 1010 cannot run on this printer: needs a 380C hotend, this printer tops out at 370C; needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pei_9085": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEI 9085 cannot run on this printer: needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pekk": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "dry_box"
+      ],
+      "notes": "PEKK cannot run on this printer: needs an actively heated chamber at 90C, this printer reaches 65C."
+    },
+    "ppsu": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PPSU cannot run on this printer: needs a 390C hotend, this printer tops out at 370C; needs an actively heated chamber at 170C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pps": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PPS is within this printer's thermal range. It still needs dry filament, and results depend on holding the nozzle temperature continuously rather than peaking to it."
+    },
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Well inside this machine's range. Ventilate the room: the air filter is switched off whenever chamber heating is on, so this material prints unfiltered."
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Well inside this machine's range. Ventilate the room: the air filter is switched off whenever chamber heating is on, so this material prints unfiltered."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ]
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Well inside this machine's range. Ventilate the room: the air filter is switched off whenever chamber heating is on, so this material prints unfiltered."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Well inside this machine's range. Ventilate the room: the air filter is switched off whenever chamber heating is on, so this material prints unfiltered."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ]
+    },
+    "pla_matte": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_hf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_tough": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_95a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_85a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pvb": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_build_surface",
+        "dry_box"
+      ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    }
+  },
+  "qidi_q2c": {
+    "peek": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEEK cannot run on this printer: needs a 380C hotend, this printer tops out at 370C; needs an actively heated chamber at 70C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pei_1010": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEI 1010 cannot run on this printer: needs a 380C hotend, this printer tops out at 370C; needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pei_9085": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEI 9085 cannot run on this printer: needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pekk": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "dry_box"
+      ],
+      "notes": "PEKK cannot run on this printer: needs an actively heated chamber at 90C, this printer reaches 65C."
+    },
+    "ppsu": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PPSU cannot run on this printer: needs a 390C hotend, this printer tops out at 370C; needs an actively heated chamber at 170C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pps": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber"
+      ],
+      "notes": "This printer is enclosed but has no chamber heater, so it holds no set ambient temperature. QIDI ships the chamber-heated sibling's recipe for this material with the ambient term removed, which shows up as corner lift and weaker layer bonding that scales with part size and height. PPS softens around 180C, so an unheated chamber gives a much larger gradient than the recipe assumes. Well-dried small parts only. Glass-filled PPS is the exception - QIDI asks for no chamber heat on that grade even on the chamber-heated sibling, so it loses nothing here."
+    },
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "heated_chamber"
+      ],
+      "notes": "This printer is enclosed but has no chamber heater, so it holds no set ambient temperature. QIDI ships the chamber-heated sibling's recipe for this material with the ambient term removed, which shows up as corner lift and weaker layer bonding that scales with part size and height. Small and medium parts still print well."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "heated_chamber"
+      ],
+      "notes": "This printer is enclosed but has no chamber heater, so it holds no set ambient temperature. QIDI ships the chamber-heated sibling's recipe for this material with the ambient term removed, which shows up as corner lift and weaker layer bonding that scales with part size and height. Small and medium parts still print well."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber"
+      ],
+      "notes": "This printer is enclosed but has no chamber heater, so it holds no set ambient temperature. QIDI ships the chamber-heated sibling's recipe for this material with the ambient term removed, which shows up as corner lift and weaker layer bonding that scales with part size and height."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber"
+      ],
+      "notes": "This printer is enclosed but has no chamber heater, so it holds no set ambient temperature. QIDI ships the chamber-heated sibling's recipe for this material with the ambient term removed, which shows up as corner lift and weaker layer bonding that scales with part size and height."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber"
+      ],
+      "notes": "This printer is enclosed but has no chamber heater, so it holds no set ambient temperature. QIDI ships the chamber-heated sibling's recipe for this material with the ambient term removed, which shows up as corner lift and weaker layer bonding that scales with part size and height. Polycarbonate has the worst warp-to-value ratio here: small thick parts are viable, large flat panels will lift and delaminate and no slicer setting fixes that."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber"
+      ],
+      "notes": "This printer is enclosed but has no chamber heater, so it holds no set ambient temperature. QIDI ships the chamber-heated sibling's recipe for this material with the ambient term removed, which shows up as corner lift and weaker layer bonding that scales with part size and height."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber"
+      ],
+      "notes": "This printer is enclosed but has no chamber heater, so it holds no set ambient temperature. QIDI ships the chamber-heated sibling's recipe for this material with the ambient term removed, which shows up as corner lift and weaker layer bonding that scales with part size and height."
+    },
+    "pla_matte": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_hf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_tough": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_95a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_85a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pvb": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_build_surface",
+        "dry_box"
+      ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    }
+  },
+  "qidi_max4": {
+    "peek": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEEK cannot run on this printer: needs a 380C hotend, this printer tops out at 370C; needs an actively heated chamber at 70C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pei_1010": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEI 1010 cannot run on this printer: needs a 380C hotend, this printer tops out at 370C; needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pei_9085": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEI 9085 cannot run on this printer: needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pekk": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "dry_box"
+      ],
+      "notes": "PEKK cannot run on this printer: needs an actively heated chamber at 90C, this printer reaches 65C."
+    },
+    "ppsu": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PPSU cannot run on this printer: needs a 390C hotend, this printer tops out at 370C; needs an actively heated chamber at 170C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pps": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "Thermally in range, but QIDI's own guidance asks for a 0.6mm or larger hardened-steel or tungsten-carbide nozzle rather than the stock 0.4mm, and drying at 110-140C which needs a forced-air dryer - the heated bed and the filament box both fall short."
+    },
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Well inside this machine's range. Ventilate the room: the air filter is switched off whenever chamber heating is on, so this material prints unfiltered."
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Well inside this machine's range. Ventilate the room: the air filter is switched off whenever chamber heating is on, so this material prints unfiltered."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ]
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Well inside this machine's range. Ventilate the room: the air filter is switched off whenever chamber heating is on, so this material prints unfiltered."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Well inside this machine's range. Ventilate the room: the air filter is switched off whenever chamber heating is on, so this material prints unfiltered."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "QIDI recommends a 0.6mm or larger nozzle for every carbon- or glass-filled material on this machine."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ]
+    },
+    "pla_matte": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_hf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_tough": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_95a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_85a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pvb": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_build_surface",
+        "dry_box"
+      ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    }
+  },
+  "qidi_x_smart3": {
+    "peek": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEEK cannot run on this printer: needs a 380C hotend, this printer tops out at 370C; needs an actively heated chamber at 70C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pei_1010": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEI 1010 cannot run on this printer: needs a 380C hotend, this printer tops out at 370C; needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pei_9085": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEI 9085 cannot run on this printer: needs an actively heated chamber at 160C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pekk": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "dry_box"
+      ],
+      "notes": "PEKK cannot run on this printer: needs an actively heated chamber at 90C, this printer reaches 65C."
+    },
+    "ppsu": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PPSU cannot run on this printer: needs a 390C hotend, this printer tops out at 370C; needs an actively heated chamber at 170C, this printer reaches 65C; needs a 130C bed, this printer tops out at 120C."
+    },
+    "pps": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend"
+      ],
+      "notes": "This machine's hotend stops at 300C, 50C below its larger siblings. QIDI ships a profile for this material inherited from those siblings that asks for more than 300C, so it cannot run here - the profile existing is not the same as the machine being able to."
+    },
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "wood_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "The stock nozzle on this model is brass, not hardened. Filled and filled-adjacent filaments will widen a brass orifice within a few hundred grams, which shows up as gradual over-extrusion and lost accuracy rather than an obvious failure. Fit a hardened nozzle first."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "The stock nozzle on this model is brass, not hardened. Filled and filled-adjacent filaments will widen a brass orifice within a few hundred grams, which shows up as gradual over-extrusion and lost accuracy rather than an obvious failure. Fit a hardened nozzle first."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "The stock nozzle on this model is brass, not hardened. Filled and filled-adjacent filaments will widen a brass orifice within a few hundred grams, which shows up as gradual over-extrusion and lost accuracy rather than an obvious failure. Fit a hardened nozzle first."
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "QIDI zeroes the chamber target for this model, so it is meant to run on the passive enclosure alone - the chamber reaches about 50C from waste heat. Keep parts small; there is no chamber heat to stop large ones lifting. Ventilate the room: unlike its siblings this model has no carbon filter, only a circulation fan."
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "QIDI zeroes the chamber target for this model, so it is meant to run on the passive enclosure alone - the chamber reaches about 50C from waste heat. Keep parts small; there is no chamber heat to stop large ones lifting. Ventilate the room: unlike its siblings this model has no carbon filter, only a circulation fan."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber"
+      ],
+      "notes": "QIDI does not list nylon as compatible with this model. Thermally it just fits, but unfilled nylon shrinks hard and there is no chamber heat to hold it flat."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "The stock nozzle on this model is brass, not hardened. Filled and filled-adjacent filaments will widen a brass orifice within a few hundred grams, which shows up as gradual over-extrusion and lost accuracy rather than an obvious failure. Fit a hardened nozzle first."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "The stock nozzle on this model is brass, not hardened. Filled and filled-adjacent filaments will widen a brass orifice within a few hundred grams, which shows up as gradual over-extrusion and lost accuracy rather than an obvious failure. Fit a hardened nozzle first."
+    },
+    "polycarbonate": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber"
+      ],
+      "notes": "QIDI does not list polycarbonate as compatible with this model, and the profile it ships still asks for 60C of chamber heat on a machine with no chamber heater. Expect warped, delaminated parts. A nozzle upgrade does not help - the missing capability cannot be bought."
+    },
+    "pc_abs": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber"
+      ],
+      "notes": "QIDI does not list polycarbonate as compatible with this model, and the profile it ships still asks for 60C of chamber heat on a machine with no chamber heater. Expect warped, delaminated parts. A nozzle upgrade does not help - the missing capability cannot be bought."
+    },
+    "pet_cf": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend"
+      ],
+      "notes": "This machine's hotend stops at 300C, 50C below its larger siblings. QIDI ships a profile for this material inherited from those siblings that asks for more than 300C, so it cannot run here - the profile existing is not the same as the machine being able to."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "The stock nozzle on this model is brass, not hardened. Filled and filled-adjacent filaments will widen a brass orifice within a few hundred grams, which shows up as gradual over-extrusion and lost accuracy rather than an obvious failure. Fit a hardened nozzle first."
+    },
+    "pla_matte": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_hf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_tough": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_95a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_85a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pvb": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_build_surface",
+        "dry_box"
+      ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "The stock nozzle on this model is brass, not hardened. Filled and filled-adjacent filaments will widen a brass orifice within a few hundred grams, which shows up as gradual over-extrusion and lost accuracy rather than an obvious failure. Fit a hardened nozzle first."
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "The stock nozzle on this model is brass, not hardened. Filled and filled-adjacent filaments will widen a brass orifice within a few hundred grams, which shows up as gradual over-extrusion and lost accuracy rather than an obvious failure. Fit a hardened nozzle first."
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pla_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "The stock nozzle on this model is brass, not hardened. Filled and filled-adjacent filaments will widen a brass orifice within a few hundred grams, which shows up as gradual over-extrusion and lost accuracy rather than an obvious failure. Fit a hardened nozzle first."
+    }
+  },
   "ender3_s1_pro": {
     "pla": {
       "status": "compatible",
