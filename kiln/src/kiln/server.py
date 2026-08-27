@@ -855,13 +855,28 @@ def _build_instructions() -> str:
     )
 
     # --- Design intelligence ---
+    # Counts are read from the libraries, never written here.  This block
+    # said "18 design templates" while the PARAMETRIC library held 65 — the
+    # number was right about the design PATTERNS and silently wrong about
+    # the parts an agent can actually build, on the one surface every agent
+    # reads at connect time.
+    try:
+        from kiln.skill_manifest import design_template_counts
+
+        _tpl = design_template_counts()
+        _parts_n, _patterns_n = _tpl["parametric_parts"], _tpl["design_patterns"]
+    except Exception:  # noqa: BLE001 — instructions must never fail to build
+        _parts_n = _patterns_n = 0
     parts.append(
         "DESIGN INTELLIGENCE: Kiln has a comprehensive design knowledge system "
-        "(25 materials with 45 brand-specific filament profiles, 18 design templates). Key tools:\n"
+        "(25 materials with 45 brand-specific filament profiles, "
+        f"{_parts_n} ready-made parametric parts, {_patterns_n} design "
+        "patterns). Key tools:\n"
         "  - `design_session(verb=\"start\", idea=\"...\")` — user-facing entry point for any new design (captures saved goal at duty / environment / materials / safety layer)\n"
         "  - `analyze_design_requirements(requirements)` — internal functional-analysis lookup `design_session` calls into\n"
         "  - `recommend_design_material(use_case)` — intelligent material selection\n"
-        "  - `find_design_templates(use_case)` — proven design templates\n"
+        f"  - `find_design_templates(use_case)` — search {_parts_n} ready-made parametric parts (brackets, bins, stands, cases, hooks, jigs, clamps). Call this FIRST when the user wants a functional part to their own dimensions\n"
+        "  - `generate_from_template(id, params)` — build one to a printable STL, locally and free, no AI provider needed\n"
         "  - `get_material_design_profile(material)` — material-specific rules\n"
         "  - `estimate_structural_load(...)` — load capacity analysis\n"
         "  - `validate_design_for_requirements(...)` — design verification\n"
