@@ -17,7 +17,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   logo with a closed outline keeps its middle in the body color instead of
   flooding solid.
 
+- **Ask for a bracket, get a bracket.** Kiln ships 65 ready-made
+  parametric parts — brackets, bins, stands, cases, hooks, jigs,
+  clamps — and nothing could find them until now. Describe what you
+  need in your own dimensions and your agent offers one, then builds
+  it. No API key needed.
+
 ### Fixed
+
+- **Parts that printed beautifully now also work.** Twenty-three of
+  the ready-made parts had flaws you'd only find after printing. All
+  rebuilt and re-tested.
+
+- **Your part now sits on your printer's bed in the 3D view**, not
+  parked in a corner of it.
 
 - **Logos and text now land on the side of a cup, box, or vase.** Decorating
   a hollow product's side quietly did nothing — the mark went into the empty
