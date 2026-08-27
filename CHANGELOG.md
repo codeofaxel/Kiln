@@ -56,6 +56,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Air-filter warnings on QIDI printers.** Several switch the filter off while
   the chamber heats — exactly when ABS and ASA need it.
+- **Your printer heats up before it starts printing.** On OrcaSlicer, a print
+  sliced for a Klipper machine — every K1, K2, QIDI, Voron and Ender V3 Kiln
+  knows about — went straight from homing to laying down plastic without ever
+  being told to heat. Kiln now guarantees the bed and nozzle are up to
+  temperature, and the machine has homed, before anything extrudes. On
+  PrusaSlicer only one machine was affected — the Vision Miner 22 IDEX, which
+  was missing its nozzle wait there too and gained it from the same fix.
+
+- **The generic Klipper profile can slice again.** It produced no file at all,
+  on either slicer, because its start G-code referred to a temperature setting
+  in a form neither one accepts.
+
 - **Parts that printed beautifully now also work.** Twenty-three of
   the ready-made parts had flaws you'd only find after printing. All
   rebuilt and re-tested.
