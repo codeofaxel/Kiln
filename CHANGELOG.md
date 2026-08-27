@@ -28,6 +28,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Decorations land on the face you actually look at.** Ask for a texture,
+  logo, or engraving without saying where, and Kiln now picks the visible
+  side — a tray gets its top, not its hidden underside. Name a face yourself
+  and it still goes exactly there. Every decoration tool follows the same
+  rule, and it works on 3MF models as well as STL.
+
 - **Air-filter warnings on QIDI printers.** Several switch the filter off while
   the chamber heats — exactly when ABS and ASA need it.
 - **Parts that printed beautifully now also work.** Twenty-three of
