@@ -2568,6 +2568,64 @@
       }
     }
   },
+  "qidi_x_smart3": {
+    "display_name": "QIDI X-Smart 3",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": true,
+    "build_volume_mm": [
+      175,
+      180,
+      170
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 120,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 60,
+        "fan": 100
+      },
+      "PLA+": {
+        "hotend": 230,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 250,
+        "bed": 80,
+        "fan": 90
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 90,
+        "fan": 80
+      },
+      "ASA": {
+        "hotend": 270,
+        "bed": 90,
+        "fan": 50
+      },
+      "TPU": {
+        "hotend": 230,
+        "bed": 35,
+        "fan": 100
+      },
+      "PLA-CF": {
+        "hotend": 230,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG-CF": {
+        "hotend": 255,
+        "bed": 80,
+        "fan": 40
+      }
+    }
+  },
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",
     "firmware": "marlin",

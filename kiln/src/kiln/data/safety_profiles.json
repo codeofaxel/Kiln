@@ -1033,6 +1033,21 @@
     ],
     "notes": "The largest QIDI: 390x390x340 enclosed CoreXY, 370 C bimetal hardened nozzle, 65 C PTC chamber under closed-loop control. Klipper, so the existing Moonraker adapter reaches it. Four small keep-outs sit at the bed edges; the largest clear rectangle is 374x384 mm. Ventilation note: the air filter is switched OFF whenever chamber heating is on, so ABS, ASA, PC and nylon prints run unfiltered — ventilate the room and let the chamber clear before opening the door."
   },
+  "qidi_x_smart3": {
+    "display_name": "QIDI X-Smart 3",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 30.0,
+    "build_volume": [
+      175,
+      180,
+      170
+    ],
+    "notes": "The small enclosed QIDI: 175x180x170 CoreXY, 300 C hotend - 50 C lower than its X-3 siblings, so PPS, PET-CF and PAHT-CF are out of reach even though QIDI ships profiles for them. Enclosed but passive: the chamber self-heats to about 50 C from waste heat and there is no heater, so ABS and ASA warp on anything large. The stock nozzle is BRASS, not hardened - carbon, glass, wood and metal-filled filaments need a hardened nozzle first. Ventilation note: unlike the X-Max 3 and X-Plus 3, this model has NO activated-carbon filter, only a circulation fan, so ABS and ASA vent styrene straight into the room."
+  },
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",
     "max_hotend_temp": 300.0,
