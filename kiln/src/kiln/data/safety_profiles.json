@@ -988,6 +988,51 @@
     ],
     "notes": "Enclosed CoreXY with a 370 C bimetal hardened-steel nozzle and 65 C second-generation independent chamber heating — the same hotend ceiling as the Plus 4 in a smaller frame, so unfilled PPS is in range. Klipper, so the existing Moonraker adapter reaches it."
   },
+  "qidi_plus5": {
+    "display_name": "QIDI Plus 5",
+    "max_hotend_temp": 370.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 65.0,
+    "max_feedrate": 36000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 30.0,
+    "build_volume": [
+      320,
+      320,
+      300
+    ],
+    "notes": "Enclosed CoreXY, 370 C bimetal hardened nozzle, 65 C actively heated chamber. Klipper, so the existing Moonraker adapter reaches it. A 9x13 mm corner of the bed is blocked by the filament cutter. Ventilation note: this machine switches its air filter OFF whenever chamber heating is on, so ABS, ASA and PC prints run unfiltered — ventilate the room rather than relying on the built-in filter."
+  },
+  "qidi_q2c": {
+    "display_name": "QIDI Q2C",
+    "max_hotend_temp": 370.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 36000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 30.0,
+    "build_volume": [
+      270,
+      270,
+      256
+    ],
+    "notes": "A Q2 with the chamber heater removed. Still fully enclosed — glass shell, door and top cover — but with no heated chamber, so ABS, ASA, PC and PPS will warp on large or tall parts where the Q2 would hold them flat. An 11x16 mm corner of the bed is blocked by the filament cutter. Ventilation note: the air filter is an optional extra that is NOT in the box, so an unfiltered enclosure concentrates styrene until the door is opened — ventilate the room for ABS and ASA."
+  },
+  "qidi_max4": {
+    "display_name": "QIDI Max 4",
+    "max_hotend_temp": 370.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 65.0,
+    "max_feedrate": 48000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 30.0,
+    "build_volume": [
+      390,
+      390,
+      340
+    ],
+    "notes": "The largest QIDI: 390x390x340 enclosed CoreXY, 370 C bimetal hardened nozzle, 65 C PTC chamber under closed-loop control. Klipper, so the existing Moonraker adapter reaches it. Four small keep-outs sit at the bed edges; the largest clear rectangle is 374x384 mm. Ventilation note: the air filter is switched OFF whenever chamber heating is on, so ABS, ASA, PC and nylon prints run unfiltered — ventilate the room and let the chamber clear before opening the door."
+  },
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",
     "max_hotend_temp": 300.0,
