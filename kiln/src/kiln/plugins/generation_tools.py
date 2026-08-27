@@ -425,6 +425,11 @@ class _GenerationToolsPlugin:
                     auto_repair=auto_repair,
                     auto_scale=auto_scale,
                     min_printability_score=min_printability_score,
+                    # Forwarded even though the bed is usually resolved
+                    # above: the pipeline's placement check falls back to
+                    # its own catalogue lookup for ids this door could
+                    # not resolve, so the tuned axis stays reachable here.
+                    printer_id=printer_id or None,
                 )
                 return {
                     "success": True,

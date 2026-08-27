@@ -393,7 +393,9 @@ class BundlePrintabilityFindings:
     ) -> BundlePrintabilityFindings:
         score = int(findings.get("score") or 0)
         return cls(
-            printable=bool(findings.get("printable", score >= 50)),
+            printable=bool(
+                findings.get("printable", score >= _PRINTABLE_SCORE_MIN)
+            ),
             score=score,
             grade=str(findings.get("grade") or "F"),
             recommendations=list(findings.get("recommendations") or []),
@@ -3335,6 +3337,154 @@ def _score_to_grade(score: int) -> str:
     return "F"
 
 
+# ---------------------------------------------------------------------------
+# Placement check
+#
+# Shape analysis (overhangs, walls, bridging) grades how a part is
+# built; it says nothing about WHERE the part sits.  A model hanging
+# below the bed or wider than the machine can score an untroubled A and
+# still be impossible to print.  Both the direct analysis path and the
+# pipeline's bundle-sourced path route through the one helper below so
+# they cannot drift apart on that verdict.
+# ---------------------------------------------------------------------------
+
+#: Score deducted per placement failure.  Sized so that a single
+#: failure lands any report under :data:`_PRINTABLE_SCORE_MIN` from any
+#: starting grade — a part off the bed or over the bed's edge does not
+#: print at all, so an otherwise clean A must not still read printable.
+_PLACEMENT_PENALTY = 50
+
+#: Slack allowed below z=0 before the part counts as off the bed.  Mesh
+#: coordinates carry float noise; a vertex at -1e-9 mm is on the bed.
+_PLACEMENT_Z_TOLERANCE_MM = 0.001
+
+#: Minimum score for a report to call itself printable.
+_PRINTABLE_SCORE_MIN = 50
+
+
+def _bbox_span(bbox: dict[str, float] | None) -> tuple[float, float, float] | None:
+    """Return ``(dx, dy, dz)`` for *bbox*, or ``None`` if unmeasurable."""
+    if not bbox:
+        return None
+    try:
+        return (
+            bbox["x_max"] - bbox["x_min"],
+            bbox["y_max"] - bbox["y_min"],
+            bbox["z_max"] - bbox["z_min"],
+        )
+    except (KeyError, TypeError):
+        return None
+
+
+def _resolve_placement_volume(
+    build_volume: tuple[float, float, float] | None,
+    printer_id: str | None,
+) -> tuple[float, float, float] | None:
+    """Resolve the bed to measure against, or ``None`` to skip the check.
+
+    An explicit *build_volume* always wins.  Failing that the printer
+    catalogue is consulted, which answers ``None`` for a machine it does
+    not know.  A bed that cannot be resolved skips the fit check rather
+    than raising — the same "unknown, don't block" contract
+    :func:`kiln.printers.bed_fit.get_build_volume` documents.
+    """
+    if build_volume is not None:
+        return build_volume
+    if not printer_id:
+        return None
+    try:
+        from kiln.printers.bed_fit import get_build_volume
+
+        return get_build_volume(printer_id)
+    except Exception:  # pragma: no cover - catalogue unavailable
+        return None
+
+
+def _placement_faults(
+    bbox: dict[str, float] | None,
+    *,
+    build_volume: tuple[float, float, float] | None = None,
+    printer_id: str | None = None,
+) -> list[str]:
+    """Return a recommendation per placement fault, worst first.
+
+    Pure detection — scores nothing and mutates nothing, so a caller can
+    re-check the verdict later without deducting twice.
+
+    Degrades quietly: an absent or malformed *bbox* skips both checks,
+    and an unresolvable bed skips the fit check.  Neither raises.
+    """
+    span = _bbox_span(bbox)
+    if span is None or bbox is None:
+        return []
+
+    faults: list[str] = []
+
+    dx, dy, dz = span
+    volume = _resolve_placement_volume(build_volume, printer_id)
+    if volume is not None:
+        bx, by, bz = volume
+        if dx > bx or dy > by or dz > bz:
+            faults.append(
+                f"Model ({dx:.1f} x {dy:.1f} x {dz:.1f} mm) exceeds build "
+                f"volume ({bx:.0f} x {by:.0f} x {bz:.0f} mm)."
+            )
+
+    z_min = bbox.get("z_min")
+    if z_min is not None and z_min < -_PLACEMENT_Z_TOLERANCE_MM:
+        faults.append(
+            f"Part sits {abs(z_min):.1f} mm below the build plate "
+            f"(z_min = {z_min:.1f} mm) — anything under the plate is lost "
+            f"when it slices. Drop it onto the plate first "
+            f"(center_model_on_bed)."
+        )
+
+    return faults
+
+
+def _apply_placement_check(
+    score: int,
+    recommendations: list[str],
+    bbox: dict[str, float] | None,
+    *,
+    build_volume: tuple[float, float, float] | None = None,
+    printer_id: str | None = None,
+) -> tuple[int, str, bool, list[str]]:
+    """Grade where the part sits, on top of how it is shaped.
+
+    Flags the two placement faults no shape metric can see:
+
+    * a part larger than the resolved build volume
+    * geometry below the bed (``z_min`` under 0) — the slicer silently
+      clips whatever hangs through the plate
+
+    Each fault goes to the TOP of *recommendations* (mutated in place —
+    placement outranks tuning advice) and deducts from the score.  Grade
+    is recomputed from what is left.
+
+    ``printable`` is gated on the faults themselves, not on the
+    arithmetic: a part that cannot physically print must not come back
+    printable just because it started from a high enough score to
+    survive the deduction.
+
+    :param score: Score so far, 0-100.
+    :param recommendations: Recommendation list, mutated in place.
+    :param bbox: Mesh bounding box with ``x_min``/``x_max``/... keys.
+    :param build_volume: Explicit ``(x, y, z)`` bed size in mm.
+    :param printer_id: Consulted for the bed when *build_volume* is absent.
+    :returns: ``(score, grade, printable, faults)``.
+    """
+    faults = _placement_faults(
+        bbox, build_volume=build_volume, printer_id=printer_id,
+    )
+    if faults:
+        recommendations[:0] = faults
+        score = max(0, score - _PLACEMENT_PENALTY * len(faults))
+
+    printable = score >= _PRINTABLE_SCORE_MIN and not faults
+    return score, _score_to_grade(score), printable, faults
+
+
 def _build_recommendations(
     overhangs: OverhangAnalysis,
     thin_walls: ThinWallAnalysis,
@@ -3530,7 +3680,8 @@ def analyze_printability(
     :param max_overhang_angle: Max overhang angle (degrees) before
         supports are needed.
     :param build_volume: Optional (X, Y, Z) build volume in mm.  If
-        provided, the report will warn if the model exceeds it.
+        provided, the report will warn if the model exceeds it.  Takes
+        precedence over the bed *printer_id* would resolve.
     :param material: Material ID for warping and cost analysis (default ``"pla"``).
     :param infill_percent: Interior infill density (0-100) for cost estimation.
     :param include_hole_detection: When True (default), also run
@@ -3538,7 +3689,10 @@ def analyze_printability(
         result on ``report.holes``.  Set False on perf-critical paths
         that don't need the per-hole list — hole detection re-parses
         the mesh internally, which roughly doubles the parse cost.
-    :param printer_id: When supplied and kiln-pro is installed, the
+    :param printer_id: Resolves the build volume for the placement
+        check when *build_volume* is not given; an unknown printer
+        simply skips that check.  Additionally, when kiln-pro is
+        installed, the
         Pro+ enrichment pass consults the per-machine calibration log
         for measured drift on each wired feature class (wall /
         overhang / bridge / hole) and shifts the matching threshold
@@ -3946,21 +4100,17 @@ def analyze_printability(
     if bridging.bridge_count > 0:
         time_mod += 0.05
 
-    # Build volume check.
-    if build_volume is not None:
-        bx, by, bz = build_volume
-        dx = bbox["x_max"] - bbox["x_min"]
-        dy = bbox["y_max"] - bbox["y_min"]
-        dz = bbox["z_max"] - bbox["z_min"]
-        if dx > bx or dy > by or dz > bz:
-            recommendations.insert(
-                0,
-                f"Model ({dx:.1f} x {dy:.1f} x {dz:.1f} mm) exceeds build volume ({bx:.0f} x {by:.0f} x {bz:.0f} mm).",
-            )
-            score = max(0, score - 20)
-            grade = _score_to_grade(score)
-
-    printable = score >= 50
+    # Placement check — where the part sits, not only how it is shaped.
+    # The validation pipeline's bundle-sourced path calls this same
+    # helper, so a report read from a bundle cannot reach a different
+    # placement verdict than one analyzed here.
+    score, grade, printable, placement_faults = _apply_placement_check(
+        score,
+        recommendations,
+        bbox,
+        build_volume=build_volume,
+        printer_id=printer_id,
+    )
 
     model_height = bbox["z_max"] - bbox["z_min"]
 
@@ -4079,6 +4229,21 @@ def analyze_printability(
                     report.printable = bool(enriched["printable"])
                 if isinstance(enriched.get("recommendations"), list):
                     report.recommendations = list(enriched["recommendations"])
+
+    # Safety floor.  The overlay above recomputes score / grade /
+    # printable from its own analysis and writes them straight onto the
+    # report — which silently undid the placement verdict and handed an
+    # off-bed or oversized part back as a printable A.  Placement is
+    # physics, not tuning, so it gets the last word on every tier.
+    # Clamping (never raising) keeps this idempotent: re-applying the
+    # floor cannot deduct twice.
+    if placement_faults:
+        report.score = max(0, min(report.score, score))
+        report.grade = _score_to_grade(report.score)
+        report.printable = False
+        for fault in reversed(placement_faults):
+            if fault not in report.recommendations:
+                report.recommendations.insert(0, fault)
 
     return report
 
