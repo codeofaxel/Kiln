@@ -3,8 +3,11 @@
 Analyzes STL meshes to find the best face for embossing, engraving, or
 decoration.  Used by the ``decorate_surface`` MCP tool.
 
-Only uses Python stdlib (math) plus Kiln's existing STL parser from
-``generation.validation`` — no numpy or trimesh.
+STL is read with Kiln's own stdlib parser from ``generation.validation``
+— no numpy, no trimesh, nothing imported that a plain STL run does not
+need.  Other mesh containers (3MF and friends) are read through trimesh,
+imported lazily inside the loader so that promise still holds for the STL
+path that every caller takes today.
 """
 
 from __future__ import annotations
@@ -50,6 +53,43 @@ def _parse_stl(path: str) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for tri in raw_tris:
         v1, v2, v3 = tri
+        normal = _compute_normal(v1, v2, v3)
+        result.append({"normal": normal, "vertices": [v1, v2, v3]})
+    return result
+
+
+def _parse_mesh(path: str) -> list[dict[str, Any]]:
+    """Parse any supported mesh file into the triangle dicts this module eats.
+
+    STL goes through :func:`_parse_stl` — pure stdlib, the path every
+    existing caller takes.  Anything else (3MF today) is read through
+    trimesh, imported lazily so the STL path never pays for it.
+    ``force="mesh"`` flattens a multi-part scene into one mesh with every
+    build-item transform APPLIED — a 3MF places its objects via per-item
+    transforms, and a face measured on untransformed vertices would sit in
+    the wrong spot.  ``process=False`` keeps trimesh from merging vertices
+    or dropping slivers, matching the untouched triangle stream the STL
+    parser produces.
+    """
+    suffix = Path(path).suffix.lower()
+    if suffix in ("", ".stl"):
+        return _parse_stl(path)
+
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Mesh file not found: {path}")
+
+    import trimesh
+
+    try:
+        mesh = trimesh.load(path, force="mesh", process=False)
+        triangles = mesh.triangles
+    except Exception as exc:
+        raise ValueError(f"Mesh parse error ({suffix}): {exc}") from exc
+
+    result: list[dict[str, Any]] = []
+    for tri in triangles:
+        v1, v2, v3 = (tuple(float(c) for c in v) for v in tri)
         normal = _compute_normal(v1, v2, v3)
         result.append({"normal": normal, "vertices": [v1, v2, v3]})
     return result
@@ -207,20 +247,31 @@ def _face_bounds(
     group: dict[str, Any],
     x_axis: tuple[float, ...],
     y_axis: tuple[float, ...],
-) -> tuple[float, float, float, float]:
-    """Project all vertices in *group* onto the 2D face plane.
+    normal: tuple[float, ...],
+) -> tuple[float, float, float, float, float, float]:
+    """Measure *group* in its own frame: the 2D face plane, and its thickness.
 
-    Returns (u_min, u_max, v_min, v_max) in millimetres.
+    Returns (u_min, u_max, v_min, v_max, n_min, n_max) in millimetres.
+
+    ``u``/``v`` are the in-plane extents — how WIDE and TALL the face is.
+    ``n`` is the extent along the NORMAL — how far the group's vertices
+    stray off a perfect plane.  They answer different questions and are
+    not interchangeable: a face 60mm wide can still be 0mm thick.  The
+    band matters to anything that has to decide whether a point lies ON
+    this face, because a real tessellated surface is never exactly flat.
     """
     u_min = float("inf")
     u_max = float("-inf")
     v_min = float("inf")
     v_max = float("-inf")
+    n_min = float("inf")
+    n_max = float("-inf")
 
     for tri in group["triangles"]:
         for vert in tri["vertices"]:
             u = _vec_dot(vert, x_axis)
             v = _vec_dot(vert, y_axis)
+            n = _vec_dot(vert, normal)
             if u < u_min:
                 u_min = u
             if u > u_max:
@@ -229,8 +280,12 @@ def _face_bounds(
                 v_min = v
             if v > v_max:
                 v_max = v
+            if n < n_min:
+                n_min = n
+            if n > n_max:
+                n_max = n
 
-    return u_min, u_max, v_min, v_max
+    return u_min, u_max, v_min, v_max, n_min, n_max
 
 
 def _face_centroid(group: dict[str, Any]) -> tuple[float, float, float]:
@@ -412,7 +467,9 @@ def _build_face_dict(group: dict[str, Any]) -> dict[str, Any]:
     """Convert an internal face-group into the public return dict."""
     normal = group["normal"]
     x_axis, y_axis = _build_face_axes(normal)
-    u_min, u_max, v_min, v_max = _face_bounds(group, x_axis, y_axis)
+    u_min, u_max, v_min, v_max, n_min, n_max = _face_bounds(
+        group, x_axis, y_axis, normal
+    )
     center = _face_centroid(group)
 
     return {
@@ -420,6 +477,12 @@ def _build_face_dict(group: dict[str, Any]) -> dict[str, Any]:
         "center": (round(center[0], 4), round(center[1], 4), round(center[2], 4)),
         "width_mm": round(u_max - u_min, 4),
         "height_mm": round(v_max - v_min, 4),
+        # Where the face SITS along its own normal, as a band.  ``width``/
+        # ``height`` measure the face across; these measure it edge-on, and
+        # a caller testing "is this vertex part of this face?" needs the
+        # band, not the extents.
+        "plane_min": round(n_min, 4),
+        "plane_max": round(n_max, 4),
         "area_mm2": round(group["area_mm2"], 4),
         "face_name": _name_from_normal(normal),
         "triangles": len(group["triangles"]),
@@ -446,7 +509,7 @@ def find_largest_flat_face(stl_path: str, tolerance_deg: float = 10.0) -> dict[s
         FileNotFoundError: If the STL file does not exist.
         ValueError: If the mesh contains no valid triangles.
     """
-    tris = _parse_stl(stl_path)
+    tris = _parse_mesh(stl_path)
     if not tris:
         raise ValueError(f"No valid triangles found in {stl_path}")
 
@@ -510,7 +573,7 @@ def find_named_face(stl_path: str, face_name: str) -> dict[str, Any]:
             f"Invalid face name {face_name!r}. Must be one of: {', '.join(sorted(valid_names))}"
         )
 
-    tris = _parse_stl(stl_path)
+    tris = _parse_mesh(stl_path)
     if not tris:
         raise ValueError(f"No valid triangles found in {stl_path}")
 
@@ -555,6 +618,35 @@ def find_named_face(stl_path: str, face_name: str) -> dict[str, Any]:
                 "for full-size art."
             )
     return face_dict
+
+
+def resolve_decoratable_face(
+    mesh_path: str, face_name: str | None = None
+) -> dict[str, Any]:
+    """Resolve the face a decoration lands on — THE rule, stated once.
+
+    Auto selection (``face_name`` empty, None, or ``"auto"``) prefers the top
+    face and only falls back to the largest flat face when the mesh has no
+    top-facing geometry at all.  Bare largest-flat picked a tray's
+    UNDERSIDE — its biggest flat face — and carved where the user never
+    looks; a named face skips the preference entirely.
+
+    Every consumer of "which face would the tool decorate?" must go
+    through here: the decoration tools when they carve, and anything that
+    records or displays the choice.  The rule once lived as a copied
+    branch at each tool, and independent copies drift — one door learns a
+    fix while its siblings keep the bug.  A single door can't drift from
+    itself.
+
+    Raises FileNotFoundError or ValueError exactly as the underlying
+    resolvers do; callers keep their own error envelopes.
+    """
+    if face_name and face_name != "auto":
+        return find_named_face(mesh_path, face_name)
+    try:
+        return find_named_face(mesh_path, "top")
+    except ValueError:
+        return find_largest_flat_face(mesh_path)
 
 
 def compute_face_transform(face: dict[str, Any]) -> dict[str, Any]:

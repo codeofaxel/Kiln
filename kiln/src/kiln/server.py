@@ -17521,18 +17521,17 @@ def decorate_surface(
             return _finish_decoration_result(result_dict, content=content)
 
         # --- Step 2: Find the target face (needed before SVG prep for sizing) ---
-        from kiln.surface_intelligence import (
-            find_largest_flat_face,
-            find_named_face,
-        )
+        from kiln.surface_intelligence import resolve_decoratable_face
 
         face_lower = face.lower().strip()
-        if face_lower == "auto":
-            face_info = find_largest_flat_face(model_path)
-        else:
-            face_info = find_named_face(model_path, face_lower)
-            if face_info.get("curvature_warning"):
-                warnings.append(face_info["curvature_warning"])
+        # One shared door for auto AND named: auto prefers the visible top
+        # face and only falls back to largest-flat when the mesh has no
+        # top-facing geometry.  This door used bare largest-flat for years,
+        # which picks a tray's UNDERSIDE — its biggest flat face — while
+        # every texture tool had already learned better.
+        face_info = resolve_decoratable_face(model_path, face_lower)
+        if face_lower != "auto" and face_info.get("curvature_warning"):
+            warnings.append(face_info["curvature_warning"])
 
         face_width_mm = face_info.get("width_mm", 0)
 
