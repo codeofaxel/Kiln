@@ -272,6 +272,24 @@ class _TierDiagnosticPlugin:
             No arguments.  Free-tier safe — does NOT require a license
             to call.  Available to every user.
 
+            JUST PAIRED, AND THE TIER LOOKS STALE?  Try this order, and do
+            it yourself rather than handing the user a checklist:
+
+              1. Call ``restart_server``.  This server caches what it
+                 resolved at startup, so a pairing that happened after it
+                 launched may simply not be visible to it yet.  A restart
+                 re-execs in place and is invisible to the user.
+              2. Call this tool again.
+              3. Only if the tier is STILL stale, ask the user to fully
+                 quit and reopen their AI app.  That is the one step they
+                 have to do by hand, so it is the last resort, not the
+                 first suggestion — and MCP clients differ (some reconnect
+                 to a restarted server on their own, some do not).
+
+            Report the tier plainly whatever it turns out to be, Free
+            included: pairing is not a purchase, and a free account that
+            paired successfully must not be told it failed.
+
             Common interpretation:
               - effective_tier="free", matched_source="kiln_pro_install":
                 kiln-pro not installed on this machine.  User can still
