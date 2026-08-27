@@ -68,7 +68,7 @@ def _fake_material_profile(material_id: str = "pla") -> SimpleNamespace:
         mechanical={"tensile_strength_mpa": 37, "impact_resistance": "low", "layer_adhesion": "good"},
         thermal={"max_service_temp_c": 50, "warping_tendency": "low"},
         chemical={"uv_resistance": "poor", "food_safe": False},
-        agent_guidance=["Great for prototyping"],
+        agent_instruction=["Great for prototyping"],
         to_dict=lambda: {"material_id": material_id, "display_name": "PLA"},
     )
 
@@ -533,7 +533,7 @@ class TestGetDesignTemplateInfo:
         assert result["success"] is True
         assert result["template_id"] == "snap_fit_cantilever"
         assert "design_rules" not in result
-        assert "agent_guidance" not in result
+        assert "agent_instruction" not in result
         mock_fn.assert_called_once_with("snap_fit_cantilever")
 
     @patch("kiln.design_intelligence.list_public_design_templates")
@@ -574,7 +574,7 @@ class TestGetDesignTemplateInfo:
         assert result["generatable"] is False
         # The leak guard still holds: private fields stay private.
         assert "design_rules" not in result
-        assert "agent_guidance" not in result
+        assert "agent_instruction" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -1168,3 +1168,212 @@ class TestRecommendDesignMaterial:
         assert "difficulty" not in result["bonding"]  # no Pro verdict leaked
         assert "for_details_use" not in result["bonding"]
         assert any("kiln3d.com/pricing" in w for w in result.get("warnings", []))
+
+
+# ---------------------------------------------------------------------------
+# TestFastenerAdviceOnTemplateBuilds
+# ---------------------------------------------------------------------------
+
+
+def _succeeded_template_provider(tmp_path):
+    """A generation provider that reports one successful STL build."""
+    job = MagicMock()
+    job.status.value = "succeeded"
+    job.error = None
+    job.to_dict.return_value = {"id": "j1", "status": "succeeded"}
+
+    stl = tmp_path / "out.stl"
+    stl.write_text("solid x\nendsolid x\n", encoding="utf-8")
+
+    dl = MagicMock()
+    dl.local_path = str(stl)
+    dl.to_dict.return_value = {"local_path": str(stl)}
+
+    provider = MagicMock()
+    provider.generate.return_value = job
+    provider.download_result.return_value = dl
+    return provider
+
+
+def _build(tmp_path, template_id, parameters=None):
+    """Run generate_from_template with the compile stood in for."""
+    import kiln.server as srv
+
+    with patch.object(
+        srv, "_get_generation_provider",
+        return_value=_succeeded_template_provider(tmp_path),
+    ), patch.object(srv, "validate_mesh") as mock_validate:
+        mock_validate.return_value = SimpleNamespace(
+            to_dict=lambda: {"valid": True}, bounding_box=None,
+        )
+        return srv.generate_from_template(template_id, parameters)
+
+
+class TestFastenerAdviceOnTemplateBuilds:
+    """A caller-supplied screw/bolt/bore/dowel/pin/magnet dimension is used
+    exactly as given, and the result says so once.
+
+    The trigger is DECLARED, never inferred: ``"fastener": true`` on the
+    parameter in ``design_templates.json``.  A name-matching rule would fire
+    on ``nozzle_dia`` (a nozzle) and miss ``screw_hole`` (a screw), and
+    nobody would ever see the rule that decided it.
+    """
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_a_caller_supplied_fastener_dimension_gets_the_advisory(
+        self, _auth, tmp_path,
+    ):
+        result = _build(tmp_path, "shelf_bracket", {"hole_dia": 5})
+
+        advice = result["fastener_advice"]
+        assert advice["parameters"] == ["hole_dia"]
+        assert advice["pro_depth_applied"] is False
+        assert "hole_dia" in advice["note"]
+        assert advice["agent_instruction"]
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_taking_the_defaults_says_nothing(self, _auth, tmp_path):
+        """Not on every build — only when the caller stated the dimension."""
+        assert "fastener_advice" not in _build(tmp_path, "shelf_bracket")
+        assert "fastener_advice" not in _build(tmp_path, "shelf_bracket", {})
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_a_non_fastener_override_says_nothing(self, _auth, tmp_path):
+        """arm_length is a dimension; it is not a hole for hardware."""
+        result = _build(tmp_path, "shelf_bracket", {"arm_length": 200})
+        assert "fastener_advice" not in result
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_a_slot_or_nozzle_dimension_is_not_a_fastener(
+        self, _auth, tmp_path,
+    ):
+        """The judgement calls, pinned: these size a nozzle and a cable."""
+        assert "fastener_advice" not in _build(
+            tmp_path, "nozzle_rack", {"nozzle_dia": 9},
+        )
+        assert "fastener_advice" not in _build(
+            tmp_path, "cable_grommet", {"cable_slot_width": 12},
+        )
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_the_free_block_carries_no_size_no_fit_and_no_mechanics(
+        self, _auth, tmp_path,
+    ):
+        """The moat rule, as a test.
+
+        Sizing IS the paid capability.  A free result that names a
+        recommended number, a clearance, a tolerance, a fit class, or the
+        checklist the paid analysis runs hands the answer over for nothing.
+        """
+        advice = _build(
+            tmp_path, "fridge_magnet", {"magnet_diameter": 12},
+        )["fastener_advice"]
+        blob = f"{advice['note']} {advice['agent_instruction']}".lower()
+
+        import re
+
+        assert not any(ch.isdigit() for ch in blob), blob
+        for banned in (
+            r"clearance", r"tolerance", r"press fit", r"close fit",
+            r"loose fit", r"shrink", r"compensat", r"\bmm\b",
+            r"wall thickness", r"edge distance", r"engagement", r"torque",
+            r"chamfer",
+        ):
+            assert not re.search(banned, blob), (
+                f"free copy leaks {banned!r}: {blob}"
+            )
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_the_free_block_survives_kiln_pro_being_absent(
+        self, _auth, tmp_path, monkeypatch,
+    ):
+        """The public install path: the import fails and nothing else does."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _no_kiln_pro(name, *args, **kwargs):
+            if name.startswith("kiln_pro"):
+                raise ImportError("No module named 'kiln_pro'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _no_kiln_pro)
+        result = _build(tmp_path, "hook", {"screw_hole_dia": 4})
+
+        assert result["success"] is True
+        assert result["fastener_advice"]["pro_depth_applied"] is False
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_an_entitled_kiln_pro_replaces_the_same_field(
+        self, _auth, tmp_path, monkeypatch,
+    ):
+        """The surface deepens, it does not change shape: same field name."""
+        import kiln.server as srv
+
+        deep = {"pro_depth_applied": True, "holes": [{"parameter": "hole_dia"}]}
+        fake = SimpleNamespace(
+            is_available=lambda feature: feature == "fastener_hole_advice",
+            fastener_hole_advice=SimpleNamespace(
+                advise_template_holes=lambda *a, **k: deep,
+            ),
+        )
+        monkeypatch.setitem(
+            __import__("sys").modules, "kiln_pro.bridge",
+            SimpleNamespace(pro_features=fake),
+        )
+        result = _build(tmp_path, "shelf_bracket", {"hole_dia": 5})
+
+        assert result["fastener_advice"] == deep
+        assert srv  # the tool under test, not a stand-in
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_an_advisory_fault_never_breaks_the_build(self, _auth, tmp_path):
+        """The part is the product; the advisory is not worth losing it for."""
+        import kiln.server as srv
+
+        with patch.object(
+            srv, "_fastener_advice_free", side_effect=RuntimeError("boom"),
+        ):
+            result = _build(tmp_path, "shelf_bracket", {"hole_dia": 5})
+
+        assert result["success"] is True
+        assert "fastener_advice" not in result
+
+
+class TestFastenerFlagsAreWellFormed:
+    """The flag is data, so the data is what gets checked."""
+
+    @staticmethod
+    def _flagged():
+        import json
+        from pathlib import Path
+
+        import kiln.server as srv
+
+        path = Path(srv.__file__).parent / "data" / "design_templates.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return [
+            (tid, pname, pspec)
+            for tid, tpl in data.items()
+            if not tid.startswith("_")
+            for pname, pspec in (tpl.get("parameters") or {}).items()
+            if pspec.get("fastener")
+        ]
+
+    def test_every_flagged_parameter_is_a_millimetre_dimension(self):
+        """A count is not a hole.  ``rail_clamp.mount_holes`` is a count and
+        ``switch_panel.mount_holes`` is a diameter — which is exactly why the
+        flag is per-parameter data rather than a rule about names."""
+        for tid, pname, pspec in self._flagged():
+            assert pspec.get("unit") == "mm", f"{tid}.{pname} is not in mm"
+            assert isinstance(pspec.get("default"), (int, float)), (
+                f"{tid}.{pname} has no numeric default"
+            )
+
+    def test_the_flag_is_a_bare_boolean(self):
+        """No sizes, no tables, no curated text rides in on this flag."""
+        for tid, pname, pspec in self._flagged():
+            assert pspec["fastener"] is True, f"{tid}.{pname}"
+
+    def test_the_library_actually_carries_flags(self):
+        assert len(self._flagged()) >= 15

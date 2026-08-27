@@ -11729,6 +11729,73 @@ def list_design_templates() -> dict:
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+def _overridden_fastener_params(tpl: dict, parameters: dict | None) -> list[str]:
+    """Which fastener-critical parameters did the CALLER supply?
+
+    Fastener-critical is DECLARED, never inferred: a parameter carries
+    ``"fastener": true`` in ``data/design_templates.json`` when the number
+    sizes a hole a real piece of hardware goes into or through — a screw
+    or bolt hole, a bore, a dowel or pin hole, a magnet pocket.  Matching
+    on the parameter's NAME instead would be a rule hidden in a regex,
+    silently wrong for ``nozzle_dia`` (a nozzle) and ``cable_slot_width``
+    (a cable), and silently blind to ``screw_hole``.
+
+    Returns the names in the template's own parameter order, so the
+    result is stable for a caller passing a dict in any order.
+    """
+    if not parameters:
+        return []
+    declared = tpl.get("parameters") or {}
+    return [
+        name
+        for name, spec in declared.items()
+        if name in parameters and isinstance(spec, dict) and spec.get("fastener")
+    ]
+
+
+def _fastener_advice_free(names: list[str]) -> dict[str, Any]:
+    """The free-tier ``fastener_advice`` block for a template build.
+
+    Kiln built the part to the number the caller gave.  That is the right
+    default — it is their part — but it means nobody checked the number
+    against the hardware it is for, and a silent result reads as "checked,
+    fine".  This says what happened, once, in one field.
+
+    Deliberately carries NO recommended size, clearance, tolerance or fit
+    class: the sizing itself is a Kiln Pro capability (``recommend_hole``),
+    and a free result that describes the paid answer's mechanics gives it
+    away for nothing.  When kiln-pro is installed AND the caller is
+    entitled, the same field is replaced with the real verdict — the
+    surface deepens, it does not change shape.
+
+    The instruction line is addressed to the AGENT on purpose: whether the
+    user actually named a fastener lives in the conversation, which this
+    tool cannot see and the agent can.  It is NOT called ``agent_guidance``
+    — that name belongs to the curated design-knowledge field the SME-leak
+    gate (``scripts/audit_public_sme_leak.py``) watches for in public
+    source, and this is a relay rule, not curated content.
+    """
+    listed = ", ".join(names)
+    subject = "they were" if len(names) > 1 else "it was"
+    return {
+        "parameters": list(names),
+        "pro_depth_applied": False,
+        "note": (
+            f"Kiln built this part to the {listed} you gave, using the "
+            f"template's own geometry — {subject} not sized for any "
+            f"particular fastener. Kiln Pro's recommend_hole can size a "
+            f"hole for a named screw, tuned for how holes actually print."
+        ),
+        "agent_instruction": (
+            "Mention Kiln Pro here only if the user named an actual "
+            "fastener in this conversation (for example an M-size, a screw "
+            "number, or a rod or magnet size), and at most once per "
+            "session. If they never named one, say nothing about Pro — "
+            "just hand over the part."
+        ),
+    }
+
+
 @mcp.tool()
 def generate_from_template(
     template_id: str,
@@ -11762,6 +11829,12 @@ def generate_from_template(
     template parameters implied, and a sidecar ``<mesh>.intent.json``
     is written next to the produced STL.  Free / public installs see
     the result unchanged.  See https://kiln3d.com for tier details.
+
+    When you pass a parameter that sizes a hole for real hardware (a
+    screw or bolt hole, a bore, a dowel or pin hole, a magnet pocket),
+    the result carries a ``fastener_advice`` block saying the part was
+    built to your number and nothing sized it for a named fastener.
+    Read its ``agent_instruction`` before repeating any of it to the user.
 
     Args:
         template_id: Parametric part id, from ``find_design_templates``
@@ -11894,6 +11967,36 @@ def generate_from_template(
                         # Intent emission is best-effort — never break
                         # the generator path on overlay failure.
                         pass
+
+            # Fastener-critical parameters the CALLER supplied: Kiln used
+            # their number, and nothing checked it against the hardware it
+            # is for.  Say so once, in one field.  Free installs stop
+            # here; with kiln-pro installed AND the caller entitled, the
+            # same field is replaced with the real hole verdict.  Wrapped
+            # like the intent block above — an advisory must never break a
+            # build that already succeeded.
+            try:
+                fastener_params = _overridden_fastener_params(tpl, parameters)
+                if fastener_params:
+                    result_dict["fastener_advice"] = _fastener_advice_free(
+                        fastener_params
+                    )
+                    try:
+                        from kiln_pro.bridge import pro_features
+                    except ImportError:
+                        pass
+                    else:
+                        if pro_features.is_available("fastener_hole_advice"):
+                            deep = pro_features.fastener_hole_advice.advise_template_holes(
+                                template_id,
+                                params,
+                                fastener_params,
+                                free_advice=result_dict["fastener_advice"],
+                            )
+                            if deep:
+                                result_dict["fastener_advice"] = deep
+            except Exception:  # noqa: BLE001
+                pass
 
             try:
                 from kiln_pro.plugins.git_render_tools import attach_inspect_bundle

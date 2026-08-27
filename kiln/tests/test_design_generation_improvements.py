@@ -4868,6 +4868,59 @@ class TestSmartGenerateFromTemplate:
             assert "infill_percent" in settings
 
     @patch("kiln.server._check_auth", return_value=None)
+    def test_the_fastener_advisory_survives_this_second_door(
+        self, mock_auth, tmp_path,
+    ):
+        """This tool builds its OWN envelope instead of returning
+        generate_from_template's, so anything that tool attaches is dropped
+        here unless it is carried across by hand.  Fixing the door the user
+        knocks on deliberately is half the job; this is the other door."""
+        smart_generate_from_template = _get_plugin_tool(
+            "generation_ai_tools", "smart_generate_from_template",
+        )
+        stl_path = str(tmp_path / "part.stl")
+        _write_cube_stl(stl_path, 20.0)
+
+        advice = {"parameters": ["hole_dia"], "pro_depth_applied": False,
+                  "note": "n", "agent_instruction": "g"}
+        with patch(
+            "kiln.server.generate_from_template",
+            return_value={
+                "success": True,
+                "parameters_used": {"hole_dia": 5},
+                "result": {"local_path": stl_path},
+                "dimensions": None,
+                "fastener_advice": advice,
+            },
+        ):
+            result = smart_generate_from_template("shelf_bracket", {"hole_dia": 5})
+
+        assert result.get("fastener_advice") == advice
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_a_build_with_no_fastener_parameter_adds_no_empty_key(
+        self, mock_auth, tmp_path,
+    ):
+        smart_generate_from_template = _get_plugin_tool(
+            "generation_ai_tools", "smart_generate_from_template",
+        )
+        stl_path = str(tmp_path / "part.stl")
+        _write_cube_stl(stl_path, 20.0)
+
+        with patch(
+            "kiln.server.generate_from_template",
+            return_value={
+                "success": True,
+                "parameters_used": {"arm_length": 200},
+                "result": {"local_path": stl_path},
+                "dimensions": None,
+            },
+        ):
+            result = smart_generate_from_template("shelf_bracket", {"arm_length": 200})
+
+        assert "fastener_advice" not in result
+
+    @patch("kiln.server._check_auth", return_value=None)
     def test_invalid_template_returns_error(self, mock_auth):
         smart_generate_from_template = _get_plugin_tool("generation_ai_tools", "smart_generate_from_template")
 

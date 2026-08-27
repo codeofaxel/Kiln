@@ -84,7 +84,8 @@
         "min": 3,
         "max": 6,
         "unit": "mm",
-        "description": "Screw hole diameter"
+        "description": "Screw hole diameter",
+        "fastener": true
       }
     },
     "scad_template": "// Parametric Wall Hook\n// The side profile (plate, arm, J-curve, rounded tip) is drawn in\n// 2D and extruded to width, so the hook prints lying on its side:\n// no supports, and the layer lines wrap the J for strength.\nhook_radius = ${hook_radius};\nt = ${thickness};\nwidth = ${width};\nplate_height = ${plate_height};\nscrew_hole_dia = ${screw_hole_dia};\n\ncx = t + hook_radius;        // J-curve center, out from the wall\ncy = t + hook_radius;        // J-curve center height\n\nmodule wall_hook() {\n    difference() {\n        linear_extrude(width)\n            union() {\n                // Mounting plate (against the wall at x=0)\n                square([t, plate_height]);\n                // Arm along the bottom, out to the curve\n                square([cx, t]);\n                // J-curve: half-annulus opening back toward the wall\n                difference() {\n                    translate([cx, cy]) circle(r = hook_radius + t, $fn = 60);\n                    translate([cx, cy]) circle(r = hook_radius, $fn = 60);\n                    // keep the half away from the wall\n                    translate([cx - hook_radius - t - 1, cy - hook_radius - t - 1])\n                        square([hook_radius + t + 1,\n                                (hook_radius + t + 1) * 2]);\n                }\n                // Rounded tip at the top of the J\n                translate([cx, cy + hook_radius + t / 2])\n                    circle(d = t, $fn = 30);\n            }\n        // Screw hole through the plate (into the wall)\n        translate([-0.1, plate_height * 0.7, width / 2])\n            rotate([0, 90, 0])\n                cylinder(h = t + 0.2, d = screw_hole_dia, $fn = 30);\n    }\n}\n\nwall_hook();"
@@ -156,7 +157,8 @@
         "min": 3,
         "max": 8,
         "unit": "mm",
-        "description": "Mounting hole diameter"
+        "description": "Mounting hole diameter",
+        "fastener": true
       }
     },
     "scad_template": "// Parametric Shelf Bracket\n// The bracket's side profile (wall plate, shelf arm on top, and a\n// real diagonal brace) is drawn in 2D and extruded to width, so it\n// prints lying flat with the layer lines running the length of the\n// brace -- loaded in-plane, where printed plastic is strongest.\narm = ${arm_length};\nwall_arm = ${wall_length};\nw = ${width};\nt = ${thickness};\nhole_d = ${hole_dia};\n\n// Brace foot ABOVE the lower wall hole (which sits at 0.15 * arm),\n// so the screw and its driver clear it\nbrace_lo = max(wall_arm * 0.35, t * 1.5 + 2);\n// Where the brace centerline crosses the upper wall hole's axis —\n// a driver tunnel is cut there\ntunnel_x = t + (wall_arm * 0.6 - brace_lo)\n    * (arm * 0.9 - t) / (wall_arm - t - brace_lo);\nbrace_x = arm * 0.9;\n\nmodule bracket() {\n    difference() {\n        linear_extrude(w)\n            union() {\n                // Wall plate (against the wall at x=0)\n                square([t, wall_arm]);\n                // Shelf arm along the top\n                translate([0, wall_arm - t])\n                    square([arm, t]);\n                // Diagonal brace from low on the wall to the arm tip\n                polygon([[t, brace_lo - t * 1.4],\n                         [t, brace_lo],\n                         [brace_x, wall_arm - t + 0.1],\n                         [brace_x - t * 1.4, wall_arm - t + 0.1]]);\n            }\n        // Wall mounting holes (into the wall)\n        for (y = [wall_arm * 0.15, wall_arm * 0.6])\n            translate([-0.1, y, w / 2])\n                rotate([0, 90, 0])\n                    cylinder(h = t + 0.2, d = hole_d, $fn = 30);\n        // Shelf screw hole up through the arm tip\n        translate([arm - t * 2, wall_arm - t - 0.1, w / 2])\n            rotate([-90, 0, 0])\n                cylinder(h = t + 0.2, d = hole_d * 0.8, $fn = 30);\n        // Driver tunnel through the brace on the upper wall hole's\n        // axis — teardrop section, so the horizontal bore needs no\n        // supports\n        translate([tunnel_x - 6, wall_arm * 0.6, w / 2])\n            rotate([0, 90, 0])\n                linear_extrude(12) {\n                    circle(d = hole_d * 2, $fn = 24);\n                    polygon([[-hole_d * 0.707, -hole_d * 0.707],\n                             [-hole_d * 1.414, 0],\n                             [-hole_d * 0.707, hole_d * 0.707]]);\n                }\n    }\n}\n\nbracket();"
@@ -285,7 +287,8 @@
         "min": 3,
         "max": 8,
         "unit": "mm",
-        "description": "Mounting hole diameter"
+        "description": "Mounting hole diameter",
+        "fastener": true
       }
     },
     "scad_template": "// Parametric Multi-Peg Coat Hook\n// Prints flat on its back: the plate lies on the bed and the pegs\n// rise as vertical posts.  Each peg root steps down through a boss\n// and a steep cone so the cross-section change is gradual, and the\n// mushroom tip keeps coats from sliding off.\npegs = ${pegs};\npeg_l = ${peg_length};\npeg_d = ${peg_dia};\nsp = ${spacing};\nph = ${plate_height};\nhd = ${hole_dia};\nt = 5;\n\ntotal_w = (pegs - 1) * sp + peg_d + 20;\nfirst_x = 10 + peg_d / 2;\n\nmodule peg() {\n    // Root boss and steep cone: strong, and a gradual transition\n    cylinder(h = 3, d = peg_d + 6, $fn = 30);\n    translate([0, 0, 3])\n        cylinder(h = 4.2, d1 = peg_d + 6, d2 = peg_d, $fn = 30);\n    cylinder(h = peg_l - peg_d / 2, d = peg_d, $fn = 30);\n    // Mushroom tip: sub-45-degree flare, then an upward dome\n    translate([0, 0, peg_l - peg_d / 2 - 1.9])\n        cylinder(h = 1.9, d1 = peg_d, d2 = peg_d + 3, $fn = 30);\n    translate([0, 0, peg_l - peg_d / 2])\n        intersection() {\n            sphere(d = peg_d + 3, $fn = 30);\n            cylinder(h = peg_d, d = peg_d + 3, $fn = 30);\n        }\n}\n\nmodule coat_hook() {\n    difference() {\n        cube([total_w, ph, t]);\n        // Mounting holes in the first and last peg gaps, clear of\n        // the peg root bosses\n        for (x = [first_x + sp / 2, total_w - first_x - sp / 2]) {\n            translate([x, ph / 2, -0.1]) {\n                cylinder(h = t + 0.2, d = hd, $fn = 20);\n                // Countersink, steeper than 45 degrees\n                translate([0, 0, t - hd * 0.35 + 0.1])\n                    cylinder(h = hd * 0.35 + 0.1, d1 = hd, d2 = hd * 1.5,\n                             $fn = 20);\n            }\n        }\n    }\n    for (i = [0:pegs - 1])\n        translate([first_x + i * sp, ph / 2, t])\n            peg();\n}\n\ncoat_hook();"
@@ -634,7 +637,8 @@
         "min": 2,
         "max": 30,
         "unit": "mm",
-        "description": "Inner hole diameter"
+        "description": "Inner hole diameter",
+        "fastener": true
       },
       "outer_dia": {
         "default": 12,
@@ -684,7 +688,8 @@
         "min": 2,
         "max": 8,
         "unit": "mm",
-        "description": "Mounting hole diameter"
+        "description": "Mounting hole diameter",
+        "fastener": true
       },
       "holes_per_arm": {
         "default": 2,
@@ -720,7 +725,8 @@
         "min": 2,
         "max": 6,
         "unit": "mm",
-        "description": "Through-hole diameter"
+        "description": "Through-hole diameter",
+        "fastener": true
       }
     },
     "scad_template": "// Parametric Hex Standoff\nh = ${height};\nhex = ${hex_size};\nhd = ${hole_dia};\n\ndifference() {\n    cylinder(h=h, d=hex/cos(30), $fn=6);\n    translate([0, 0, -0.1])\n        cylinder(h=h+0.2, d=hd, $fn=30);\n}"
@@ -756,7 +762,8 @@
         "min": 2,
         "max": 5,
         "unit": "mm",
-        "description": "Clamping bolt diameter"
+        "description": "Clamping bolt diameter",
+        "fastener": true
       }
     },
     "scad_template": "// Parametric Shaft Collar\nsd = ${shaft_dia};\ncw = ${collar_width};\nwall = ${wall};\nbd = ${bolt_dia};\n\nod = sd + wall * 2;\n\nmodule collar() {\n    difference() {\n        cylinder(h=cw, d=od, $fn=60);\n        // Shaft bore\n        translate([0, 0, -0.1])\n            cylinder(h=cw+0.2, d=sd+0.3, $fn=60);\n        // Split gap\n        translate([od/2-wall, -0.5, -0.1])\n            cube([wall+1, 1, cw+0.2]);\n        // Bolt hole through clamp ears\n        translate([od/2-wall/2, 0, cw/2])\n            rotate([90, 0, 0])\n                cylinder(h=od+2, d=bd, $fn=20, center=true);\n    }\n}\n\ncollar();"
@@ -792,7 +799,8 @@
         "min": 2,
         "max": 4,
         "unit": "mm",
-        "description": "Screw hole diameter"
+        "description": "Screw hole diameter",
+        "fastener": true
       },
       "base_thickness": {
         "default": 3,
@@ -1360,7 +1368,8 @@
         "min": 3,
         "max": 5,
         "unit": "mm",
-        "description": "Screw hole diameter"
+        "description": "Screw hole diameter",
+        "fastener": true
       }
     },
     "scad_template": "// Parametric Cable Raceway Clip\n// The clip's cross-section (base, gusseted throat, snap C-ring) is\n// drawn as a 2D profile and extruded upward, so the whole part is\n// vertical walls on the bed -- no supports, and the layer lines run\n// around the C for maximum spring strength.\ncd = ${cable_dia};\nmw = ${mount_width};\nwall = ${wall};\nsh = ${screw_hole};\n\nor = cd / 2 + wall;\ncx = or;           // ring center x (over the base middle)\ncy = wall + or;    // ring center y (above the base)\nopen = or;         // entry slot width (narrower than the cable)\n\nmodule clip() {\n    difference() {\n        union() {\n            linear_extrude(mw)\n                difference() {\n                    union() {\n                        // Mounting base\n                        square([or * 2, wall]);\n                        // C-ring\n                        translate([cx, cy]) circle(r = or, $fn = 40);\n                        // Gusset joining ring to base\n                        translate([cx - or * 0.75, wall - 0.1])\n                            square([or * 1.5, or * 0.45]);\n                    }\n                    // Bore and entry slot cut from ring AND gusset\n                    translate([cx, cy]) circle(r = cd / 2, $fn = 40);\n                    translate([cx - open / 2, cy])\n                        square([open, or + 1]);\n                }\n        }\n        // Screw hole bored from the bore floor down through the\n        // gusset and base — the driver reaches it through the top\n        // entry slot and the bore\n        translate([cx, cy - cd / 2 + 0.1, mw / 2])\n            rotate([90, 0, 0])\n                cylinder(h = cy - cd / 2 + 0.3, d = sh, $fn = 20);\n    }\n}\n\nclip();"
@@ -1454,7 +1463,8 @@
         "min": 4,
         "max": 6,
         "unit": "mm",
-        "description": "Bolt hole diameter"
+        "description": "Bolt hole diameter",
+        "fastener": true
       }
     },
     "scad_template": "// VESA Adapter Plate\nfs = ${from_spacing};\nts = ${to_spacing};\nt = ${thickness};\nbd = ${bolt_dia};\n\nplate_s = max(fs, ts) + 20;\n\nmodule adapter() {\n    difference() {\n        translate([-plate_s/2, -plate_s/2, 0])\n            cube([plate_s, plate_s, t]);\n        // Source pattern: through-holes with head counterbores so\n        // the target plate can seat flush over them\n        for (x = [-fs/2, fs/2])\n            for (y = [-fs/2, fs/2])\n                translate([x, y, -0.1]) {\n                    cylinder(h=t+0.2, d=bd, $fn=20);\n                    translate([0, 0, t - 2.4])\n                        cylinder(h=2.6, d=bd*1.9, $fn=24);\n                }\n        // Target pattern (through-holes)\n        for (x = [-ts/2, ts/2])\n            for (y = [-ts/2, ts/2])\n                translate([x, y, -0.1])\n                    cylinder(h=t+0.2, d=bd, $fn=20);\n    }\n}\n\nadapter();"
@@ -1490,7 +1500,8 @@
         "min": 3,
         "max": 8,
         "unit": "mm",
-        "description": "Clamping bolt diameter"
+        "description": "Clamping bolt diameter",
+        "fastener": true
       },
       "mount_holes": {
         "default": 2,
@@ -1919,7 +1930,8 @@
         "min": 2,
         "max": 4,
         "unit": "mm",
-        "description": "Corner mount hole diameter"
+        "description": "Corner mount hole diameter",
+        "fastener": true
       }
     },
     "scad_template": "// Parametric Switch Panel\nn = ${switches};\nsd = ${switch_dia};\nph = ${panel_height};\nsp = ${spacing};\nt = ${thickness};\nmhd = ${mount_holes};\n\npw = (n - 1) * sp + sd + 20;\nmargin = 8;\n\nmodule panel() {\n    difference() {\n        cube([pw, ph, t]);\n        // Switch holes\n        for (i = [0:n-1]) {\n            translate([10 + sd/2 + i * sp, ph/2, -0.1])\n                cylinder(h=t+0.2, d=sd, $fn=30);\n        }\n        // Corner mounting holes\n        for (x = [margin, pw - margin])\n            for (y = [margin, ph - margin])\n                translate([x, y, -0.1])\n                    cylinder(h=t+0.2, d=mhd, $fn=20);\n    }\n}\n\npanel();"
@@ -2034,7 +2046,8 @@
         "min": 2,
         "max": 5,
         "unit": "mm",
-        "description": "Hinge pin diameter"
+        "description": "Hinge pin diameter",
+        "fastener": true
       }
     },
     "scad_template": "// Cable Chain Link\n// Open-top U-channel that actually admits a cable, with pivot pins\n// on the male end and a widened female mouth with pin holes on the\n// other.  Links snap together end to end.  Prints floor-down with\n// no sealed cavities.\niw = ${inner_width};\nih = ${inner_height};\nll = ${link_length};\nwall = ${wall};\npd = ${pin_dia};\n\now = iw + wall * 2;\noh = ih + wall;                // floor + open top\nmouth = pd * 2 + 4;            // overlap length at the joint\npz = wall + ih * 0.5;          // pivot height\n\nmodule link() {\n    difference() {\n        union() {\n            // Channel floor stops short of the female mouth, so\n            // the mating link's floor can nest there\n            cube([ll - mouth, ow, wall]);\n            for (s = [0, ow - wall])\n                translate([0, s, 0])\n                    cube([ll - mouth, wall, oh]);\n            // Female mouth: walls spread outward so the next link's\n            // male end nests inside\n            for (s = [-wall - 0.3, ow + 0.3])\n                translate([ll - mouth, s, 0])\n                    cube([mouth, wall, oh]);\n            // Ribs joining the channel walls to the offset mouth walls\n            for (s = [-wall - 0.3, ow - wall])\n                translate([ll - mouth, s, 0])\n                    cube([wall, wall * 2 + 0.3, oh]);\n            // Pivot pins on the male end, sticking outward\n            for (s = [0, ow])\n                translate([mouth / 2, s + (s == 0 ? -wall * 0.7 : 0), pz])\n                    rotate([-90, 0, 0]) {\n                        cylinder(h = wall * 0.45, d = pd, $fn = 20);\n                        translate([0, 0, wall * 0.45])\n                            cylinder(h = wall * 0.3, d1 = pd, d2 = pd * 0.6, $fn = 20);\n                    }\n        }\n        // Pin holes through the female mouth walls\n        for (s = [-wall - 0.4, ow + 0.3 - 0.1])\n            translate([ll - mouth / 2, s, pz])\n                rotate([-90, 0, 0])\n                    cylinder(h = wall + 0.2, d = pd + 0.4, $fn = 20);\n        // Chamfer the male end's top edge so the joint can pivot\n        translate([-0.1, -wall - 0.5, pz + pd / 2 + 1])\n            rotate([0, -30, 0])\n                cube([mouth * 2, ow + wall * 2 + 1, oh]);\n    }\n}\n\nlink();"
@@ -2077,7 +2090,8 @@
         "min": 2,
         "max": 5,
         "unit": "mm",
-        "description": "Mounting hole diameter"
+        "description": "Mounting hole diameter",
+        "fastener": true
       }
     },
     "scad_template": "// Cable Wrap Guide\n// Two parts printed side by side: the spool body (bottom flange +\n// hub) and a separate top flange disc.  The mounting screw passes\n// through both and clamps the flange on when the spool is mounted;\n// a shallow boss on the hub locates the flange concentrically.\nsd = ${spool_dia};\nsw = ${spool_width};\ncs = ${cable_slot};\nwall = ${wall};\nmh = ${mount_holes};\n\nhub_d = sd / 3;\nboss_h = 1.6;\n\nmodule spool_body() {\n    difference() {\n        union() {\n            // Bottom flange\n            cylinder(h = wall, d = sd, $fn = 50);\n            // Hub; the top 1.6 mm acts as a locating boss for the\n            // top flange\n            cylinder(h = wall + sw + boss_h, d = hub_d, $fn = 40);\n        }\n        // Center screw hole\n        translate([0, 0, -0.1])\n            cylinder(h = wall + sw + boss_h + 0.2, d = mh, $fn = 20);\n        // Cable entry slot through hub and flange\n        translate([mh / 2 + 1.5, -cs / 2, -0.1])\n            cube([sd / 2 + 1, cs, wall + sw + boss_h + 0.2]);\n    }\n}\n\nmodule top_flange() {\n    difference() {\n        cylinder(h = wall + boss_h, d = sd, $fn = 50);\n        // Locating recess that drops over the hub boss\n        translate([0, 0, wall])\n            cylinder(h = boss_h + 0.1, d = hub_d + 0.4, $fn = 40);\n        // Center screw hole\n        translate([0, 0, -0.1])\n            cylinder(h = wall + boss_h + 0.2, d = mh, $fn = 20);\n    }\n}\n\nspool_body();\ntranslate([sd + 10, 0, 0])\n    top_flange();"
@@ -2128,7 +2142,8 @@
         "min": 4,
         "max": 12,
         "unit": "mm",
-        "description": "Dowel hole diameter"
+        "description": "Dowel hole diameter",
+        "fastener": true
       },
       "holes": {
         "default": 3,
@@ -2235,7 +2250,8 @@
         "min": 2,
         "max": 15,
         "unit": "mm",
-        "description": "Center bore diameter"
+        "description": "Center bore diameter",
+        "fastener": true
       },
       "pressure_angle": {
         "default": 20,
@@ -2264,7 +2280,8 @@
         "min": 3,
         "max": 10,
         "unit": "mm",
-        "description": "Bore diameter"
+        "description": "Bore diameter",
+        "fastener": true
       },
       "belt_width": {
         "default": 6,
@@ -2386,14 +2403,16 @@
         "min": 5,
         "max": 20,
         "unit": "mm",
-        "description": "Disc magnet diameter"
+        "description": "Disc magnet diameter",
+        "fastener": true
       },
       "magnet_depth": {
         "default": 2,
         "min": 1,
         "max": 5,
         "unit": "mm",
-        "description": "Magnet recess depth"
+        "description": "Magnet recess depth",
+        "fastener": true
       },
       "shape": {
         "default": "rectangle",

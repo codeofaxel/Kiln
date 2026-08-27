@@ -1074,6 +1074,15 @@ class _GenerationAIToolsPlugin:
                     },
                     "reinforcement": reinforcement_result,
                     "recommended_print_settings": settings.to_dict(),
+                    # This tool builds a fresh envelope rather than
+                    # returning generate_from_template's, so anything
+                    # that tool attaches has to be carried across by
+                    # hand or it is silently dropped at this door.
+                    **(
+                        {"fastener_advice": gen_result["fastener_advice"]}
+                        if gen_result.get("fastener_advice")
+                        else {}
+                    ),
                     "next_steps": (
                         f"STL ready at {stl_path}. "
                         f"Structural grade: {plan.structural_grade}. "
