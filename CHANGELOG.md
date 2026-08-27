@@ -9,16 +9,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Four more QIDI printers.** The Plus 5, Max 4, Q2C and X-Smart 3 now have
   full profiles — build volume, safe temperature ceilings, per-material
-  settings and the material list each one can actually run. Two of them come
-  with warnings worth reading before you print: the Q2C has no chamber heater
-  despite being enclosed, and the X-Smart 3 stops 50 C short of its siblings,
-  so the high-temperature filaments QIDI ships profiles for cannot run on it.
-
-- **Safety notes that were missing on printers we already supported.** Several
-  QIDI machines switch their air filter off while the chamber is heating —
-  which is exactly when ABS and ASA need it — and the Q1 Pro has no filter
-  fitted at all. Those now say so. The X-Max 3's dry box is also described
-  correctly: it keeps dry filament dry, it cannot dry wet filament.
+  settings, and the material list each one can actually run. Two carry limits
+  worth knowing before you print: the Q2C is enclosed but has no chamber
+  heater, and the X-Smart 3 stops 50 C short of its siblings, so the
+  high-temperature filaments QIDI ships profiles for cannot run on it.
+  *Free tells you a material won't work on your machine; Kiln Pro tells you
+  why, what the printer actually does at that limit, and what to run instead.*
+  See https://kiln3d.com/pricing.
 
 - **Tell the Kiln team something.** A new Support page in the web app takes
   bugs, ideas, printers you want supported, and questions — or just say it to
@@ -37,6 +34,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   it. No API key needed.
 
 ### Fixed
+
+- **Safety warnings that were missing on printers we already supported.**
+  Several QIDI machines switch their air filter off while the chamber is
+  heating — exactly when ABS and ASA need it — and the Q1 Pro has no filter
+  fitted at all. Those now say so.
+
+- **The X-Max 3's dry box was described as something it isn't.** It keeps dry
+  filament dry; it cannot dry wet filament, and the temperature we quoted
+  belongs to the chamber heater rather than the box. That matters most for the
+  filled and high-temperature materials this machine is bought for.
 
 - **Parts that printed beautifully now also work.** Twenty-three of
   the ready-made parts had flaws you'd only find after printing. All
