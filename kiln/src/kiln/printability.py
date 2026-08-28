@@ -287,6 +287,65 @@ class CostAnalysis:
         return asdict(self)
 
 
+#: Stable name for geometry that sits below the build plate.  The
+#: slicer clips anything under z = 0, so this is true of every machine
+#: — it says nothing about which bed the part was measured against.
+PLACEMENT_FAULT_OFF_BED = "off_bed"
+
+#: Stable name for a part larger than the build volume it was checked
+#: against.  Unlike ``off_bed`` this verdict is only as good as the bed
+#: that was resolved, so a consumer that cannot state WHICH bed should
+#: prefer the prose in :attr:`PrintabilityReport.recommendations`.
+PLACEMENT_FAULT_EXCEEDS_BED = "exceeds_bed"
+
+
+@dataclass
+class PlacementFault:
+    """One placement fault: a stable name beside the text a user reads.
+
+    ``message`` is the exact string that lands in
+    :attr:`PrintabilityReport.recommendations` — the two are the same
+    fault, so a consumer can show the words or branch on the name
+    without parsing English out of a sentence.
+    """
+
+    name: str  # PLACEMENT_FAULT_* — stable across releases
+    message: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class PlacementAnalysis:
+    """Where the part SITS, as opposed to how it is shaped.
+
+    Structured sibling to the placement lines the safety floor pushes to
+    the top of :attr:`PrintabilityReport.recommendations`: same faults,
+    same order (worst first), plus a machine-readable name each.
+    """
+
+    faults: list[PlacementFault] = field(default_factory=list)
+
+    @property
+    def fault_names(self) -> list[str]:
+        """Fault names, worst first.  Empty when the part sits fine."""
+        return [fault.name for fault in self.faults]
+
+    @property
+    def off_bed(self) -> bool:
+        """True when geometry hangs below the build plate."""
+        return PLACEMENT_FAULT_OFF_BED in self.fault_names
+
+    @property
+    def exceeds_bed(self) -> bool:
+        """True when the part is larger than the bed it was checked against."""
+        return PLACEMENT_FAULT_EXCEEDS_BED in self.fault_names
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 @dataclass
 class PrintabilityReport:
     """Full printability analysis report."""
@@ -352,6 +411,12 @@ class PrintabilityReport:
     # mesh is otherwise known-open.  Exposed for the kiln-pro overlay.
     # Defaults to 0.
     genus: int = 0
+    # Placement verdict — where the part sits relative to the plate.
+    # ``None`` on reports built directly by a client; an empty
+    # ``PlacementAnalysis`` means the part was checked and sits fine.
+    # The prose for each fault stays in ``recommendations`` exactly as
+    # before; this block only adds the machine-readable name beside it.
+    placement: PlacementAnalysis | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -3425,13 +3490,17 @@ def _resolve_placement_volume(
         return None
 
 
-def _placement_faults(
+def _placement_fault_records(
     bbox: dict[str, float] | None,
     *,
     build_volume: tuple[float, float, float] | None = None,
     printer_id: str | None = None,
-) -> list[str]:
-    """Return a recommendation per placement fault, worst first.
+) -> list[PlacementFault]:
+    """Detect placement faults, worst first, each with a stable name.
+
+    The single placement detector: :func:`_placement_faults` is the text
+    view of this list, so the words a user reads and the name a client
+    branches on can never disagree about what was found.
 
     Pure detection — scores nothing and mutates nothing, so a caller can
     re-check the verdict later without deducting twice.
@@ -3443,7 +3512,7 @@ def _placement_faults(
     if span is None or bbox is None:
         return []
 
-    faults: list[str] = []
+    faults: list[PlacementFault] = []
 
     dx, dy, dz = span
     volume = _resolve_placement_volume(build_volume, printer_id)
@@ -3451,20 +3520,50 @@ def _placement_faults(
         bx, by, bz = volume
         if dx > bx or dy > by or dz > bz:
             faults.append(
-                f"Model ({dx:.1f} x {dy:.1f} x {dz:.1f} mm) exceeds build "
-                f"volume ({bx:.0f} x {by:.0f} x {bz:.0f} mm)."
+                PlacementFault(
+                    name=PLACEMENT_FAULT_EXCEEDS_BED,
+                    message=(
+                        f"Model ({dx:.1f} x {dy:.1f} x {dz:.1f} mm) exceeds build "
+                        f"volume ({bx:.0f} x {by:.0f} x {bz:.0f} mm)."
+                    ),
+                )
             )
 
     z_min = bbox.get("z_min")
     if z_min is not None and z_min < -_PLACEMENT_Z_TOLERANCE_MM:
         faults.append(
-            f"Part sits {abs(z_min):.1f} mm below the build plate "
-            f"(z_min = {z_min:.1f} mm) — anything under the plate is lost "
-            f"when it slices. Drop it onto the plate first "
-            f"(center_model_on_bed)."
+            PlacementFault(
+                name=PLACEMENT_FAULT_OFF_BED,
+                message=(
+                    f"Part sits {abs(z_min):.1f} mm below the build plate "
+                    f"(z_min = {z_min:.1f} mm) — anything under the plate is lost "
+                    f"when it slices. Drop it onto the plate first "
+                    f"(center_model_on_bed)."
+                ),
+            )
         )
 
     return faults
+
+
+def _placement_faults(
+    bbox: dict[str, float] | None,
+    *,
+    build_volume: tuple[float, float, float] | None = None,
+    printer_id: str | None = None,
+) -> list[str]:
+    """Return a recommendation per placement fault, worst first.
+
+    Text view of :func:`_placement_fault_records` — same faults, same
+    order, message only.  Kept as-is for the callers that splice these
+    lines straight into a recommendation list.
+    """
+    return [
+        fault.message
+        for fault in _placement_fault_records(
+            bbox, build_volume=build_volume, printer_id=printer_id,
+        )
+    ]
 
 
 def _apply_placement_check(
@@ -4136,6 +4235,14 @@ def analyze_printability(
         build_volume=build_volume,
         printer_id=printer_id,
     )
+    # Same faults the line above turned into recommendations, kept in
+    # structured form so a consumer can name the fault without reading
+    # the sentence.  Pure detection — re-reading deducts nothing.
+    placement = PlacementAnalysis(
+        faults=_placement_fault_records(
+            bbox, build_volume=build_volume, printer_id=printer_id,
+        ),
+    )
 
     model_height = bbox["z_max"] - bbox["z_min"]
 
@@ -4178,6 +4285,7 @@ def analyze_printability(
         connected_components=component_count,
         component_size_uniformity=round(component_size_uniformity, 3),
         genus=mesh_genus,
+        placement=placement,
     )
 
     # Optional kiln-pro enrichment: when the kiln-pro package is
@@ -4262,6 +4370,11 @@ def analyze_printability(
     # physics, not tuning, so it gets the last word on every tier.
     # Clamping (never raising) keeps this idempotent: re-applying the
     # floor cannot deduct twice.
+    # Re-asserted here, not only at construction, so the structured
+    # verdict is governed by the same last-word rule as the score: no
+    # overlay, on any tier, can hand back a report whose placement block
+    # disagrees with the floor that was just applied.
+    report.placement = placement
     if placement_faults:
         report.score = max(0, min(report.score, score))
         report.grade = _score_to_grade(report.score)

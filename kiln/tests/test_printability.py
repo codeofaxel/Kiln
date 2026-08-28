@@ -2483,3 +2483,70 @@ class TestPlacementCheck:
 
             assert baseline.printable is True  # shape alone is fine
             assert report.printable is False   # placement is not
+
+
+class TestPlacementIsStructuredNotOnlyProse:
+    """The placement fault carries a NAME, not only an English sentence.
+
+    ``recommendations`` reaches the chat/agent path intact, but every
+    viewer that renders a compact verdict drops prose by design — so a
+    part hanging through the plate turned the rim red with nothing able
+    to say why.  A stable name beside the same text is what lets a
+    client name the fault without parsing the sentence.
+    """
+
+    def test_below_the_plate_names_the_fault(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(
+                tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
+            )
+            report = analyze_printability(path)
+
+            assert report.placement is not None
+            assert report.placement.fault_names == ["off_bed"]
+            assert report.placement.off_bed is True
+            assert report.placement.exceeds_bed is False
+
+    def test_bigger_than_the_bed_names_the_fault(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(400.0))
+            report = analyze_printability(
+                path, build_volume=(256.0, 256.0, 256.0),
+            )
+
+            assert report.placement is not None
+            assert report.placement.fault_names == ["exceeds_bed"]
+            assert report.placement.exceeds_bed is True
+            assert report.placement.off_bed is False
+
+    def test_named_fault_carries_the_same_words_as_the_recommendation(self):
+        """One detector, two views — the words and the name cannot drift."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(
+                tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
+            )
+            report = analyze_printability(path)
+
+            messages = [f.message for f in report.placement.faults]
+            assert messages
+            for message in messages:
+                assert message in report.recommendations
+
+    def test_a_part_that_sits_fine_is_checked_and_clean(self):
+        """Empty is not absent: the block says "checked, nothing wrong"."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(20.0))
+            report = analyze_printability(path)
+
+            assert report.placement is not None
+            assert report.placement.fault_names == []
+
+    def test_the_block_survives_to_dict(self):
+        """Dict consumers see the name too, not only dataclass readers."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(
+                tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
+            )
+            block = analyze_printability(path).to_dict()["placement"]
+
+            assert [f["name"] for f in block["faults"]] == ["off_bed"]
