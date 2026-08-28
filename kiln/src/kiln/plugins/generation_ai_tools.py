@@ -830,6 +830,33 @@ class _GenerationAIToolsPlugin:
                     profile=profile,
                     printer_id=printer_id,
                 )
+
+                # Printer's own start routine (kiln-pro handoff) — same seam
+                # as slice_and_print, so a generated model warms up exactly
+                # like an uploaded one.
+                start_handoff: str | None = None
+                try:
+                    _sg_adapter = _srv._resolve_adapter(printer_name)
+                except Exception:
+                    _sg_adapter = None
+                if _sg_adapter is not None and effective_printer_id:
+                    from kiln.slicer_profiles import (
+                        resolve_slicer_profile,
+                        start_gcode_override_from_printer,
+                    )
+
+                    _sg_patch, _sg_reason = start_gcode_override_from_printer(
+                        _sg_adapter, effective_printer_id, None
+                    )
+                    if _sg_patch:
+                        try:
+                            effective_profile = resolve_slicer_profile(
+                                effective_printer_id, overrides=_sg_patch
+                            )
+                            start_handoff = _sg_reason.removeprefix("handoff:")
+                        except Exception:
+                            _logger.debug("handoff re-resolve failed", exc_info=True)
+
                 slice_result = slice_file(
                     result.local_path,
                     profile=effective_profile,
@@ -919,6 +946,11 @@ class _GenerationAIToolsPlugin:
                     "slice": slice_result.to_dict(),
                     "upload": upload.to_dict(),
                     "file_name": file_name,
+                    **(
+                        {"start_gcode_source": f"{start_handoff} — the printer's own start routine"}
+                        if start_handoff
+                        else {}
+                    ),
                     "printer_id": effective_printer_id,
                     "profile_path": effective_profile,
                     "validation": gen_validation,
