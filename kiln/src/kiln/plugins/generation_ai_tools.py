@@ -452,7 +452,6 @@ class _GenerationAIToolsPlugin:
                 GenerationAuthError,
                 GenerationError,
                 GenerationResult,
-                convert_to_stl,
                 validate_mesh,
             )
 
@@ -466,9 +465,21 @@ class _GenerationAIToolsPlugin:
                 result = gen.download_result(job_id, output_dir=output_dir)
 
                 # Auto-convert OBJ/GLB to STL for maximum slicer compatibility.
+                # The conversion leaves a RECORD on the response: the original
+                # stays on disk beside the STL (textures and materials live
+                # only there), and until 2026-08-28 nothing named it — the
+                # result path was overwritten and the source silently
+                # orphaned in a temp dir.
+                conversion = None
                 if result.format in ("obj", "glb"):
+                    source_format = result.format
                     try:
-                        stl_path = convert_to_stl(result.local_path)
+                        from kiln.format_conversion import convert_to_stl_recorded
+
+                        stl_path, conversion = convert_to_stl_recorded(
+                            result.local_path,
+                            tool="download_generated_model",
+                        )
                         result = GenerationResult(
                             job_id=result.job_id,
                             provider=result.provider,
@@ -477,9 +488,9 @@ class _GenerationAIToolsPlugin:
                             file_size_bytes=os.path.getsize(stl_path),
                             prompt=result.prompt,
                         )
-                        _logger.info("Auto-converted %s to STL: %s", result.format.upper(), stl_path)
+                        _logger.info("Auto-converted %s to STL: %s", source_format.upper(), stl_path)
                     except Exception as exc:
-                        _logger.warning("%s→STL conversion failed, keeping original: %s", result.format.upper(), exc)
+                        _logger.warning("%s→STL conversion failed, keeping original: %s", source_format.upper(), exc)
 
                 # Validate the mesh if it's a supported format.
                 validation = None
@@ -502,6 +513,10 @@ class _GenerationAIToolsPlugin:
                 response = {
                     "success": True,
                     "result": result.to_dict(),
+                    # The format-conversion receipt (None when the provider
+                    # already delivered STL): what went in, what came out,
+                    # what STL can't carry, and where the original still is.
+                    "conversion": conversion,
                     "validation": validation,
                     "dimensions": dimensions,
                     "experimental": True,
@@ -680,7 +695,6 @@ class _GenerationAIToolsPlugin:
                 GenerationError,
                 GenerationResult,
                 GenerationStatus,
-                convert_to_stl,
             )
             from kiln.printers.base import PrinterError
             from kiln.registry import PrinterNotFoundError
@@ -717,10 +731,19 @@ class _GenerationAIToolsPlugin:
                 # Step 3: Download
                 result = gen.download_result(job.id)
 
-                # Step 3.5: Auto-convert OBJ/GLB -> STL
+                # Step 3.5: Auto-convert OBJ/GLB -> STL, with the receipt —
+                # same record the download tool attaches, so the print
+                # pipeline's makes tell the same story.
+                conversion = None
                 if result.format in ("obj", "glb"):
+                    source_format = result.format
                     try:
-                        stl_path = convert_to_stl(result.local_path)
+                        from kiln.format_conversion import convert_to_stl_recorded
+
+                        stl_path, conversion = convert_to_stl_recorded(
+                            result.local_path,
+                            tool="generate_and_print",
+                        )
                         result = GenerationResult(
                             job_id=result.job_id,
                             provider=result.provider,
@@ -730,7 +753,7 @@ class _GenerationAIToolsPlugin:
                             prompt=result.prompt,
                         )
                     except Exception as exc:
-                        _logger.warning("%s->STL conversion failed: %s", result.format.upper(), exc)
+                        _logger.warning("%s->STL conversion failed: %s", source_format.upper(), exc)
 
                 # Step 4: Comprehensive validation pipeline.
                 #
@@ -916,6 +939,10 @@ class _GenerationAIToolsPlugin:
                 resp: dict[str, Any] = {
                     "success": print_verdict.ok if auto_printed else True,
                     "generation": result.to_dict(),
+                    # The format-conversion receipt (None when the provider
+                    # delivered STL) — same shape download_generated_model
+                    # attaches, so both AI doors tell the same story.
+                    "conversion": conversion,
                     "slice": slice_result.to_dict(),
                     "upload": upload.to_dict(),
                     "file_name": file_name,
