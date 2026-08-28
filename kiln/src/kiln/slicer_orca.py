@@ -40,6 +40,18 @@ a silent failure if you get it wrong:
     having no per-layer ``G92 E0`` — a profile that slices fine in PrusaSlicer
     failing here for a setting nobody wrote.
 
+5.  **``filament_max_volumetric_speed`` must be stated outright too**, and
+    for the same reason as (4): the two slicers default an omitted key to
+    OPPOSITE meanings.  PrusaSlicer defaults it to ``0`` — unlimited, honour
+    the profile's speeds — while Orca defaults to about 2 mm³/s, which clamps
+    every extruding move to roughly a tenth of what the profile asked for.
+    Measured 2026-08-27 on a real model through the bundled ``bambu_a1``
+    profile: with the key absent Orca estimated 5h27m and emitted extrusion
+    moves at 20-30 mm/s where the profile asks 200-250; stating ``0`` (or any
+    real limit) brought the same slice to 1h52m, next to PrusaSlicer's 2h19m
+    for the identical file.  This was not just a bad estimate — the G-code
+    itself printed at a fraction of the intended speed.
+
 One upstream crash is worth knowing about, and it is narrower than it looks.
 OrcaSlicer 2.3.2 SIGSEGVs inside
 ``update_values_to_printer_extruders_for_multiple_filaments`` when it is fed
@@ -158,6 +170,11 @@ _FILL_PATTERN_ALIASES: dict[str, str] = {
 # printer settings and carry no filament identity; the temperatures they DO
 # carry are what actually drive the print, and they are translated exactly.
 _DEFAULT_FILAMENT_TYPE = "PLA"
+
+# Spelled the same on both sides, but it needs stating rather than copying —
+# see finding 5 in the module docstring.  ``0`` is "no volumetric limit",
+# PrusaSlicer's default for the very same profiles.
+_FILAMENT_MAX_VOLUMETRIC_SPEED = "filament_max_volumetric_speed"
 
 # ---------------------------------------------------------------------------
 # Multicolor (measured against OrcaSlicer 2.3.x, 2026-08-27, by slicing a
@@ -405,6 +422,17 @@ def settings_to_orca_presets(
     for src, dst in _FILAMENT_PER_EXTRUDER.items():
         if src in settings:
             filament[dst] = _as_list(settings[src])
+
+    # Stated outright, exactly like use_relative_e_distances above and for
+    # the same reason: omitted, this key means "unlimited" to PrusaSlicer
+    # and "about 2 mm³/s" to Orca, which throttles the print to a tenth of
+    # the profile's speeds.  A profile that names a limit gets that limit;
+    # one that says nothing gets 0, which is what PrusaSlicer has always
+    # done with these same profiles — so the two slicers agree instead of
+    # silently disagreeing, and no material figure is invented here.
+    filament[_FILAMENT_MAX_VOLUMETRIC_SPEED] = _as_list(
+        settings.get("filament_max_volumetric_speed", "0")
+    )
 
     bed = settings.get("bed_temperature")
     bed_first = settings.get("first_layer_bed_temperature", bed)
