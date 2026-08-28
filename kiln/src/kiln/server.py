@@ -9976,18 +9976,65 @@ def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
     return None
 
 
+def _resolve_slice_printer_id(
+    printer_id: str | None,
+    printer_name: str | None = None,
+) -> str | None:
+    """Resolve the slicer-profile id for the machine a call is aimed at.
+
+    The profile must follow the TARGET printer, not the process-global
+    default: an explicit ``printer_id`` wins, then the named printer's
+    config-declared model, then its live adapter's self-reported model.
+    ``_PRINTER_MODEL`` describes the DEFAULT printer only, so it is
+    consulted solely when the call is aimed at the default printer —
+    a named second machine whose model can't be determined resolves to
+    ``None`` (slicer defaults) rather than the default machine's profile.
+    """
+    if printer_id:
+        # An explicit ask is honored (mapped when we recognize the hint,
+        # verbatim otherwise) — never silently replaced by another machine.
+        return _map_printer_hint_to_profile_id(printer_id) or printer_id
+    effective = None
+    if printer_name:
+        from kiln.printer_model_resolver import (
+            resolve_active_printer_name,
+            resolve_printer_model_for,
+        )
+
+        effective = _map_printer_hint_to_profile_id(
+            resolve_printer_model_for(printer_name)
+        )
+        if effective:
+            return effective
+        try:
+            from kiln.community_autofire import resolve_adapter_model
+
+            effective = _map_printer_hint_to_profile_id(
+                resolve_adapter_model(_resolve_adapter(printer_name))
+            )
+        except Exception as exc:
+            logger.debug("Adapter model probe failed for %r: %s", printer_name, exc)
+        if effective:
+            return effective
+        if printer_name != "default" and printer_name != resolve_active_printer_name():
+            return None
+    return _map_printer_hint_to_profile_id(_PRINTER_MODEL)
+
+
 def _resolve_slice_profile_context(
     profile: str | None,
     printer_id: str | None,
+    printer_name: str | None = None,
+    overrides: dict[str, str] | None = None,
 ) -> tuple[str | None, str | None]:
     """Resolve effective profile path for slicing."""
-    effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _map_printer_hint_to_profile_id(
-        _PRINTER_MODEL
-    )
+    effective_printer_id = _resolve_slice_printer_id(printer_id, printer_name)
     effective_profile = profile
     if effective_profile is None and effective_printer_id:
         try:
-            effective_profile = resolve_slicer_profile(effective_printer_id)
+            effective_profile = resolve_slicer_profile(
+                effective_printer_id, overrides=overrides or None
+            )
         except Exception as exc:
             logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
     return effective_printer_id, effective_profile

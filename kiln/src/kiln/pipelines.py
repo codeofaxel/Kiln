@@ -535,22 +535,31 @@ def quick_print(
         )
 
     def _resolve_profile() -> PipelineStep:
-        if ctx["effective_profile"] or not printer_id:
+        if ctx["effective_profile"]:
             return PipelineStep(
                 name="resolve_profile",
                 success=True,
-                message="Using explicit profile" if ctx["effective_profile"] else "No profile needed",
+                message="Using explicit profile",
+            )
+        import kiln.server as _server
+
+        effective_pid = _server._resolve_slice_printer_id(printer_id, printer_name)
+        if not effective_pid:
+            return PipelineStep(
+                name="resolve_profile",
+                success=True,
+                message="No profile needed",
             )
         step_start = time.time()
         try:
             from kiln.slicer_profiles import resolve_slicer_profile
 
-            ctx["effective_profile"] = resolve_slicer_profile(printer_id)
+            ctx["effective_profile"] = resolve_slicer_profile(effective_pid)
             return PipelineStep(
                 name="resolve_profile",
                 success=True,
-                message=f"Using bundled profile for {printer_id}",
-                data={"profile_path": ctx["effective_profile"], "printer_id": printer_id},
+                message=f"Using bundled profile for {effective_pid}",
+                data={"profile_path": ctx["effective_profile"], "printer_id": effective_pid},
                 duration_seconds=time.time() - step_start,
             )
         except Exception as exc:
@@ -948,7 +957,10 @@ def reslice_and_print(
                 success=True,
                 message="Using explicit profile",
             )
-        if not printer_id:
+        import kiln.server as _server
+
+        effective_pid = _server._resolve_slice_printer_id(printer_id, printer_name)
+        if not effective_pid:
             return PipelineStep(
                 name="resolve_profile",
                 success=True,
@@ -959,16 +971,16 @@ def reslice_and_print(
             from kiln.slicer_profiles import resolve_slicer_profile
 
             ctx["effective_profile"] = resolve_slicer_profile(
-                printer_id, overrides=effective_overrides
+                effective_pid, overrides=effective_overrides
             )
             override_msg = f" with {len(effective_overrides)} override(s)" if effective_overrides else ""
             return PipelineStep(
                 name="resolve_profile",
                 success=True,
-                message=f"Using bundled profile for {printer_id}{override_msg}",
+                message=f"Using bundled profile for {effective_pid}{override_msg}",
                 data={
                     "profile_path": ctx["effective_profile"],
-                    "printer_id": printer_id,
+                    "printer_id": effective_pid,
                     "overrides": effective_overrides,
                 },
                 duration_seconds=time.time() - step_start,
@@ -1571,17 +1583,23 @@ def benchmark(
 
     # Step 2: Resolve profile
     effective_profile = profile_path
-    if not effective_profile and printer_id:
+    if not effective_profile:
+        import kiln.server as _server
+
+        effective_pid = _server._resolve_slice_printer_id(printer_id, printer_name)
+    else:
+        effective_pid = None
+    if not effective_profile and effective_pid:
         step_start = time.time()
         try:
             from kiln.slicer_profiles import resolve_slicer_profile
 
-            effective_profile = resolve_slicer_profile(printer_id)
+            effective_profile = resolve_slicer_profile(effective_pid)
             steps.append(
                 PipelineStep(
                     name="resolve_profile",
                     success=True,
-                    message=f"Using bundled profile for {printer_id}",
+                    message=f"Using bundled profile for {effective_pid}",
                     data={"profile_path": effective_profile},
                     duration_seconds=time.time() - step_start,
                 )

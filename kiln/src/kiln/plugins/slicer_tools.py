@@ -1031,9 +1031,7 @@ class _SlicerToolsPlugin:
                 from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
                 # -- Resolve profile with overrides --
-                effective_printer_id = _srv._map_printer_hint_to_profile_id(
-                    printer_id
-                ) or _srv._map_printer_hint_to_profile_id(_srv._PRINTER_MODEL)
+                effective_printer_id = _srv._resolve_slice_printer_id(printer_id)
 
                 # -- Calibration overlay: when kiln-pro is installed and the
                 # user has a calibrated slicer profile for (printer, material),
@@ -1323,6 +1321,7 @@ class _SlicerToolsPlugin:
                 effective_printer_id, effective_profile = _srv._resolve_slice_profile_context(
                     profile=profile,
                     printer_id=printer_id,
+                    printer_name=printer_name,
                 )
 
                 # The as-given input, for the multicolor-flatten advisory:

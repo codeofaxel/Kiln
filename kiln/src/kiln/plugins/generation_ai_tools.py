@@ -829,6 +829,7 @@ class _GenerationAIToolsPlugin:
                 effective_printer_id, effective_profile = _srv._resolve_slice_profile_context(
                     profile=profile,
                     printer_id=printer_id,
+                    printer_name=printer_name,
                 )
                 slice_result = slice_file(
                     result.local_path,
