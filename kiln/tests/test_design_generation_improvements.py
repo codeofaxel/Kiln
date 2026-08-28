@@ -5931,6 +5931,76 @@ class TestDesignToGcode:
         assert "steps_completed" in d
         assert "success" in d
 
+    def test_slicing_step_imports_resolve(self):
+        """The slicing step's imports, exercised at test time.
+
+        Step 5 used to import a ``slice_stl`` that never existed in
+        ``kiln.slicer``; the ImportError was swallowed into a
+        "Slicer module not available" error on every run, so the
+        pipeline never sliced anything and no test noticed.  Importing
+        the exact symbols the step uses makes a renamed slicer entry
+        point fail the suite instead of a runtime fallback.
+        """
+        from kiln.slicer import SlicerNotFoundError, slice_file  # noqa: F401
+        from kiln.slicer_profiles import resolve_slicer_profile  # noqa: F401
+
+    @patch("kiln.design_reasoning.search_templates")
+    def test_slices_through_slice_file_with_printer_profile(
+        self, mock_search, tmp_path
+    ):
+        """The pipeline really reaches the slicer, with the printer's profile.
+
+        OpenSCAD rendering is stubbed to write a file; the slicer is spied
+        on.  The assertions that matter: ``slice_file`` is called (the old
+        code could not call anything — the import failed first), and the
+        profile it receives is the one resolved for ``printer_model``.
+        """
+        import pathlib
+        from unittest.mock import MagicMock
+
+        from kiln.design_reasoning import TemplateSearchResult, design_to_gcode
+
+        mock_search.return_value = TemplateSearchResult(
+            query="hook",
+            matches=[{
+                "template_id": "hook", "score": 1.0,
+                "description": "a hook", "category": "utility",
+            }],
+        )
+
+        def _fake_render(self, scad, stl):
+            pathlib.Path(stl).write_text("solid s" + chr(10) + "endsolid s" + chr(10))
+
+        captured = {}
+
+        def _fake_slice(input_path, **kwargs):
+            captured["profile"] = kwargs.get("profile")
+            out = tmp_path / "out.gcode"
+            out.write_text("G28" + chr(10))
+            return MagicMock(output_path=str(out))
+
+        def _fake_compile(scad_code, *, output_path=None, **kw):
+            _fake_render(None, None, output_path)
+            return output_path
+
+        with patch(
+            "kiln.parametric.compile_scad_code", side_effect=_fake_compile
+        ), patch("kiln.slicer.slice_file", side_effect=_fake_slice):
+            result = design_to_gcode(
+                "hook", output_dir=str(tmp_path), printer_model="ender3"
+            )
+
+        assert "slicing" in result.steps_completed, result.errors
+        # Substitution really happened: no ${placeholder} may survive
+        # into the .scad (the old code left every one in place, and no
+        # template ever compiled).
+        scad = pathlib.Path(result.scad_file).read_text(encoding="utf-8")
+        assert "${" not in scad
+        assert result.gcode_file and result.gcode_file.endswith("out.gcode")
+        assert captured["profile"] and captured["profile"].endswith(".ini")
+        ini = pathlib.Path(captured["profile"]).read_text(encoding="utf-8")
+        assert "Creality Ender 3" in ini or "ender3" in captured["profile"]
+
 
 class TestDesignToGcodePipelineTool:
     """Tests for design_to_gcode_pipeline MCP tool."""
