@@ -400,9 +400,6 @@ class _DesignReasoningToolsPlugin:
                 ("for ABS") — tunes the constraint analysis to it.
             :returns: Dict with recommendations.
             """
-            import json
-            import os
-
             prompt_lower = prompt.lower()
             recommendations: dict[str, Any] = {"prompt": prompt}
 
