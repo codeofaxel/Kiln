@@ -67,7 +67,11 @@ def _stub_pipeline_until_compile(monkeypatch, tmp_path, *, compile_result):
         "area_mm2": 6400.0,
         "center": (0.0, 0.0, 10.0),
     }
-    monkeypatch.setattr(surf, "find_largest_flat_face", lambda _p: face_info)
+    # The decorate door resolves faces through the shared resolver now;
+    # faking the resolver fakes both of its arms at once.
+    monkeypatch.setattr(
+        surf, "resolve_decoratable_face", lambda _p, _f=None: face_info
+    )
     monkeypatch.setattr(
         emboss, "measure_text_block_mm", lambda *_a, **_k: (40.0, 12.0, 0.0, 0.0)
     )

@@ -3,9 +3,11 @@
 Kiln's bundled printer settings are one flat dict per printer
 (``data/slicer_profiles.json``), and :func:`kiln.slicer_profiles._settings_to_ini`
 turns that dict into the PrusaSlicer ``.ini`` that ``--load`` wants.  This
-module turns the SAME dict into what the other command line wants: three
-standalone JSON presets — machine, process, filament — that
-``--load-settings`` / ``--load-filaments`` accept.
+module turns the SAME dict into what the other command line wants:
+standalone JSON presets — one machine, one process, and one filament per
+loaded slot — that ``--load-settings`` / ``--load-filaments`` accept.  A
+plain slice emits the classic three; a multicolor input emits a filament
+preset per color (see the multicolor block below).
 
 It is a serializer, not a second source of truth.  A profile is authored once,
 in PrusaSlicer's vocabulary, and this file is the only place that knows how
@@ -38,6 +40,18 @@ a silent failure if you get it wrong:
     having no per-layer ``G92 E0`` — a profile that slices fine in PrusaSlicer
     failing here for a setting nobody wrote.
 
+5.  **``filament_max_volumetric_speed`` must be stated outright too**, and
+    for the same reason as (4): the two slicers default an omitted key to
+    OPPOSITE meanings.  PrusaSlicer defaults it to ``0`` — unlimited, honour
+    the profile's speeds — while Orca defaults to about 2 mm³/s, which clamps
+    every extruding move to roughly a tenth of what the profile asked for.
+    Measured 2026-08-27 on a real model through the bundled ``bambu_a1``
+    profile: with the key absent Orca estimated 5h27m and emitted extrusion
+    moves at 20-30 mm/s where the profile asks 200-250; stating ``0`` (or any
+    real limit) brought the same slice to 1h52m, next to PrusaSlicer's 2h19m
+    for the identical file.  This was not just a bad estimate — the G-code
+    itself printed at a fraction of the intended speed.
+
 One upstream crash is worth knowing about, and it is narrower than it looks.
 OrcaSlicer 2.3.2 SIGSEGVs inside
 ``update_values_to_printer_extruders_for_multiple_filaments`` when it is fed
@@ -56,12 +70,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "PRIME_TOWER_WIDTH_MM",
     "OrcaPresets",
     "ini_to_settings",
     "settings_to_orca_presets",
@@ -155,10 +171,69 @@ _FILL_PATTERN_ALIASES: dict[str, str] = {
 # carry are what actually drive the print, and they are translated exactly.
 _DEFAULT_FILAMENT_TYPE = "PLA"
 
+# Spelled the same on both sides, but it needs stating rather than copying —
+# see finding 5 in the module docstring.  ``0`` is "no volumetric limit",
+# PrusaSlicer's default for the very same profiles.
+_FILAMENT_MAX_VOLUMETRIC_SPEED = "filament_max_volumetric_speed"
+
+# ---------------------------------------------------------------------------
+# Multicolor (measured against OrcaSlicer 2.3.x, 2026-08-27, by slicing a
+# painted three-color 3MF end to end and reading T0/T1/T2 back out of the
+# G-code).  Three findings, each a hard failure when missed:
+#
+# 1.  One filament preset per slot.  ``--load-filaments`` takes N files
+#     joined with ``;``; with one file Orca has one slot and silently
+#     prints every color with T0 — the flatten this module now exists to
+#     prevent.  Each preset needs ``filament_is_support`` stated: Orca
+#     cross-checks the per-filament vectors and refuses with
+#     "filament_is_support's count 1 not equal to filament_colour's size
+#     3" when one is missing.
+#
+# 2.  Explicit line widths.  An MMU-only flow (the purge/transition
+#     paths) defaults its width to zero, and Orca dies with
+#     "Flow::spacing() produced negative spacing" — only on multicolor,
+#     which is why single-filament slices of the same profile never saw
+#     it.  Widths are derived from the nozzle, not hardcoded.
+#
+# 3.  The prime tower must be enabled AND placed.  Without explicit
+#     ``wipe_tower_x``/``y`` Orca's default lands off the plate and the
+#     slice fails with "found gcode in unprintable area ... error_code =
+#     4".  The caller supplies a placement computed from the bed and the
+#     model's bbox.
+# ---------------------------------------------------------------------------
+
+#: Line width as a multiple of nozzle diameter — the ~105% every slicer
+#: defaults to (0.42 mm on a 0.4 mm nozzle).
+_LINE_WIDTH_NOZZLE_FACTOR = 1.05
+
+#: Process keys that must all state that width for a multicolor slice.
+_LINE_WIDTH_KEYS = (
+    "line_width",
+    "inner_wall_line_width",
+    "outer_wall_line_width",
+    "top_surface_line_width",
+    "sparse_infill_line_width",
+    "internal_solid_infill_line_width",
+    "initial_layer_line_width",
+    "support_line_width",
+)
+
+#: Prime (wipe) tower geometry for multicolor slices — the measured
+#: working values: a 30 mm tower with 30 mm³ prime volume and a 3 mm brim.
+PRIME_TOWER_WIDTH_MM = 30.0
+_PRIME_VOLUME_MM3 = 30.0
+_PRIME_TOWER_BRIM_MM = 3.0
+
 
 @dataclass(frozen=True)
 class OrcaPresets:
-    """The three presets one Orca slice needs, plus where they were written."""
+    """The presets one Orca slice needs, plus where they were written.
+
+    ``filaments`` / ``filament_paths`` carry one entry per filament slot;
+    a single-filament slice has exactly one.  ``filament`` and
+    ``filament_path`` remain the first slot, for the callers and tests
+    that predate multicolor.
+    """
 
     machine: dict[str, Any]
     process: dict[str, Any]
@@ -166,6 +241,14 @@ class OrcaPresets:
     machine_path: str | None = None
     process_path: str | None = None
     filament_path: str | None = None
+    filaments: tuple[dict[str, Any], ...] = ()
+    filament_paths: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.filaments:
+            object.__setattr__(self, "filaments", (self.filament,))
+        if not self.filament_paths and self.filament_path:
+            object.__setattr__(self, "filament_paths", (self.filament_path,))
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +306,10 @@ def settings_to_orca_presets(
     settings: dict[str, str],
     *,
     name: str = "kiln",
+    filament_colors: Sequence[str] | None = None,
+    wipe_tower_xy: tuple[float, float] | None = None,
 ) -> OrcaPresets:
-    """Translate Kiln's flat PrusaSlicer settings into three Orca presets.
+    """Translate Kiln's flat PrusaSlicer settings into Orca presets.
 
     Args:
         settings: PrusaSlicer-keyed settings, as bundled in
@@ -232,11 +317,22 @@ def settings_to_orca_presets(
         name: Base name for the emitted presets.  The machine's name is what
             the process and filament declare themselves compatible with, so
             all three are derived from this one string.
+        filament_colors: One display hex per filament SLOT.  Two-plus
+            entries switch on multicolor emission: one filament preset
+            per slot (identical but for name and ``filament_colour``),
+            plus the prime-tower and line-width process keys the painted
+            path needs — see the multicolor block comment above.  ``None``
+            or a single entry emits the classic single filament.
+        wipe_tower_xy: Prime tower corner position in bed coordinates,
+            required in practice for multicolor (Orca's default placement
+            can land off the plate and fail the slice).  Ignored for
+            single-filament.
 
     Returns:
-        An :class:`OrcaPresets` with the three preset bodies filled in.
+        An :class:`OrcaPresets` with the preset bodies filled in.
     """
     machine_name = f"{name}_machine"
+    multicolor = bool(filament_colors) and len(filament_colors) >= 2
 
     # --- machine -------------------------------------------------------
     machine: dict[str, Any] = {
@@ -287,6 +383,32 @@ def settings_to_orca_presets(
         pattern = process["sparse_infill_pattern"]
         process["sparse_infill_pattern"] = _FILL_PATTERN_ALIASES.get(pattern, pattern)
 
+    if multicolor:
+        # Explicit line widths: the MMU-only flow defaults to zero width
+        # and kills the slice (finding 2 in the multicolor block above).
+        try:
+            nozzle = float(settings.get("nozzle_diameter", "0.4"))
+        except (TypeError, ValueError):
+            nozzle = 0.4
+        width = f"{nozzle * _LINE_WIDTH_NOZZLE_FACTOR:.2f}"
+        for key in _LINE_WIDTH_KEYS:
+            process.setdefault(key, width)
+        # Prime tower — enabled ONLY together with a placement (finding
+        # 3).  Both halves measured: with a placement the slice is clean;
+        # enabled without one, Orca's default spot can sit off the plate
+        # and fail the whole slice; and omitted entirely the file still
+        # slices with every color intact (3 tools, 232 changes), just
+        # purging into the object rather than a tower.  So a caller that
+        # cannot say where the tower goes gets the colors it asked for
+        # instead of an error about an area it never chose.
+        if wipe_tower_xy is not None:
+            process["enable_prime_tower"] = "1"
+            process["prime_tower_width"] = f"{PRIME_TOWER_WIDTH_MM:g}"
+            process["prime_volume"] = f"{_PRIME_VOLUME_MM3:g}"
+            process["prime_tower_brim_width"] = f"{_PRIME_TOWER_BRIM_MM:g}"
+            process["wipe_tower_x"] = f"{wipe_tower_xy[0]:.2f}"
+            process["wipe_tower_y"] = f"{wipe_tower_xy[1]:.2f}"
+
     # --- filament ------------------------------------------------------
     filament: dict[str, Any] = {
         "type": "filament",
@@ -301,6 +423,17 @@ def settings_to_orca_presets(
         if src in settings:
             filament[dst] = _as_list(settings[src])
 
+    # Stated outright, exactly like use_relative_e_distances above and for
+    # the same reason: omitted, this key means "unlimited" to PrusaSlicer
+    # and "about 2 mm³/s" to Orca, which throttles the print to a tenth of
+    # the profile's speeds.  A profile that names a limit gets that limit;
+    # one that says nothing gets 0, which is what PrusaSlicer has always
+    # done with these same profiles — so the two slicers agree instead of
+    # silently disagreeing, and no material figure is invented here.
+    filament[_FILAMENT_MAX_VOLUMETRIC_SPEED] = _as_list(
+        settings.get("filament_max_volumetric_speed", "0")
+    )
+
     bed = settings.get("bed_temperature")
     bed_first = settings.get("first_layer_bed_temperature", bed)
     for plate in _PLATE_TYPES:
@@ -309,7 +442,27 @@ def settings_to_orca_presets(
         if bed_first is not None:
             filament[f"{plate}_temp_initial_layer"] = _as_list(bed_first)
 
-    return OrcaPresets(machine=machine, process=process, filament=filament)
+    if not multicolor:
+        return OrcaPresets(machine=machine, process=process, filament=filament)
+
+    # One preset per slot, identical but for identity and color.  Every
+    # per-filament vector stays one item long WITHIN each file — Orca
+    # sums the slots across the loaded files and cross-checks the vector
+    # lengths, so each file must also state filament_is_support
+    # (finding 1).
+    filaments: list[dict[str, Any]] = []
+    for i, color in enumerate(filament_colors, start=1):
+        slot = dict(filament)
+        slot["name"] = f"{name}_filament_{i}"
+        slot["filament_colour"] = [str(color)]
+        slot["filament_is_support"] = ["0"]
+        filaments.append(slot)
+    return OrcaPresets(
+        machine=machine,
+        process=process,
+        filament=filaments[0],
+        filaments=tuple(filaments),
+    )
 
 
 def write_orca_presets(
@@ -317,30 +470,50 @@ def write_orca_presets(
     out_dir: str,
     *,
     name: str = "kiln",
+    filament_colors: Sequence[str] | None = None,
+    wipe_tower_xy: tuple[float, float] | None = None,
 ) -> OrcaPresets:
-    """Serialize *settings* to three preset files in *out_dir*.
+    """Serialize *settings* to preset files in *out_dir*.
 
     Returns the same :class:`OrcaPresets` with its ``*_path`` fields filled
     in, ready to be handed to ``--load-settings`` / ``--load-filaments``.
+    Multicolor (see :func:`settings_to_orca_presets`) writes one filament
+    file per slot; ``filament_paths`` lists them in slot order.
     """
-    presets = settings_to_orca_presets(settings, name=name)
+    presets = settings_to_orca_presets(
+        settings,
+        name=name,
+        filament_colors=filament_colors,
+        wipe_tower_xy=wipe_tower_xy,
+    )
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
 
     paths: dict[str, str] = {}
     for kind, body in (
         ("machine", presets.machine),
         ("process", presets.process),
-        ("filament", presets.filament),
     ):
         path = os.path.join(out_dir, f"{name}_{kind}.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(body, fh, indent=1)
         paths[kind] = path
 
+    filament_paths: list[str] = []
+    single = len(presets.filaments) == 1
+    for i, body in enumerate(presets.filaments, start=1):
+        # The single-filament file keeps its historical name so nothing
+        # downstream of a plain slice changes.
+        suffix = "filament" if single else f"filament_{i}"
+        path = os.path.join(out_dir, f"{name}_{suffix}.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(body, fh, indent=1)
+        filament_paths.append(path)
+
     logger.debug("Wrote Orca presets for %s to %s", name, out_dir)
     return replace(
         presets,
         machine_path=paths["machine"],
         process_path=paths["process"],
-        filament_path=paths["filament"],
+        filament_path=filament_paths[0],
+        filament_paths=tuple(filament_paths),
     )

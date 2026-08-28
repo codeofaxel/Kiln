@@ -17,6 +17,7 @@ import logging
 import math
 import os
 import random
+import re
 import struct
 import tempfile
 from dataclasses import dataclass, field
@@ -1751,6 +1752,7 @@ class _ColorToolsPlugin:
             color: str = "#F72323",
             base_color: str = "",
             target: str = "all",
+            step_colors: dict | None = None,
             output_path: str = "",
             printer_id: str = "",
         ) -> dict:
@@ -1790,6 +1792,14 @@ class _ColorToolsPlugin:
                 ``"floors"`` / ``"walls"`` when the record carries the
                 split — floors are the recess bottoms (the visible mark),
                 walls the carved sides.
+            :param step_colors: Per-decoration colors for a chained
+                carve, e.g. ``{"0": "#F72323", "1": "#FFFFFF"}`` — keys
+                are step indices from the record's ``decorations`` list
+                (every result of this tool lists them).  When given it
+                is the COMPLETE paint spec: only the named steps are
+                painted, the rest stay base — so "name red, title left
+                plain" is one call.  Incompatible with a floors/walls
+                ``target``; ``color`` is ignored.
             :param output_path: Where to write the painted 3MF.  Default:
                 beside the model as ``<name>_painted.3mf``.
             :param printer_id: Optional supported printer model id for
@@ -1809,12 +1819,80 @@ class _ColorToolsPlugin:
             if record is None:
                 return {"success": False, "error": err, "code": "NO_FACE_RECORD"}
 
+            # Every record is a list of decoration steps: a chained carve
+            # stores them per step, a single carve IS step 0.  This is what
+            # step_colors indexes, and every result lists it so callers can
+            # discover the steps before choosing colors.
+            raw_steps = record.get("decorations")
+            if isinstance(raw_steps, list) and raw_steps and all(
+                isinstance(s, dict) and isinstance(s.get("face_indices"), list)
+                for s in raw_steps
+            ):
+                steps = raw_steps
+            else:
+                steps = [
+                    {
+                        "decoration": record.get("decoration") or {},
+                        "face_count": len(record["face_indices"]),
+                        "face_indices": record["face_indices"],
+                    }
+                ]
+
             if target not in ("all", "floors", "walls"):
                 return {
                     "success": False,
                     "error": f"target must be 'all', 'floors' or 'walls', got {target!r}",
                 }
-            if target == "all":
+
+            coerced_steps: dict[int, str] = {}
+            if step_colors:
+                if target != "all":
+                    return {
+                        "success": False,
+                        "error": (
+                            "step_colors paints whole decoration steps — "
+                            "it cannot be combined with a floors/walls target"
+                        ),
+                    }
+                for raw_key, raw_val in step_colors.items():
+                    try:
+                        idx_key = int(raw_key)
+                    except (TypeError, ValueError):
+                        return {
+                            "success": False,
+                            "error": f"step_colors key {raw_key!r} is not a step index",
+                        }
+                    if not 0 <= idx_key < len(steps):
+                        return {
+                            "success": False,
+                            "error": (
+                                f"step {idx_key} does not exist — this record has "
+                                f"{len(steps)} decoration step"
+                                f"{'s' if len(steps) != 1 else ''} (0"
+                                f"{f'-{len(steps) - 1}' if len(steps) > 1 else ''})"
+                            ),
+                            "decorations": _describe_steps(steps, {}),
+                        }
+                    val = str(raw_val).strip()
+                    if not re.fullmatch(r"#[0-9a-fA-F]{6}", val):
+                        return {
+                            "success": False,
+                            "error": (
+                                f"step_colors[{idx_key}] must be a #RRGGBB hex "
+                                f"color, got {raw_val!r}"
+                            ),
+                        }
+                    coerced_steps[idx_key] = val
+                if not coerced_steps:
+                    return {
+                        "success": False,
+                        "error": "step_colors is empty — name at least one step",
+                        "decorations": _describe_steps(steps, {}),
+                    }
+                indices = sorted(
+                    {i for k in coerced_steps for i in steps[k]["face_indices"]}
+                )
+            elif target == "all":
                 indices = record["face_indices"]
             else:
                 key = "floor_indices" if target == "floors" else "wall_indices"
@@ -1855,8 +1933,15 @@ class _ColorToolsPlugin:
 
             base = base_color.strip() or None
             colors: list[str | None] = [base] * len(triangles)
-            for i in indices:
-                colors[i] = color
+            if coerced_steps:
+                # Later steps carved later — where steps overlap, the
+                # later carve owns the surface, so its color wins.
+                for step_idx in sorted(coerced_steps):
+                    for i in steps[step_idx]["face_indices"]:
+                        colors[i] = coerced_steps[step_idx]
+            else:
+                for i in indices:
+                    colors[i] = color
 
             from kiln.multicolor_3mf import compose_painted_3mf
 
@@ -1882,11 +1967,27 @@ class _ColorToolsPlugin:
 
             paint_recorded = record_paint_event(
                 model_path,
-                color=color,
+                color=color if not coerced_steps else "",
                 target=target,
                 output_path=composed.get("output_path", out_path),
+                step_colors=coerced_steps or None,
             ) is not None
 
+            if coerced_steps:
+                summary = (
+                    f"Painted {len(indices)} decoration faces across "
+                    f"{len(coerced_steps)} of {len(steps)} steps ("
+                    + ", ".join(
+                        f"step {k}: {v}" for k, v in sorted(coerced_steps.items())
+                    )
+                    + f"); {len(triangles) - len(indices)} other faces untouched."
+                )
+            else:
+                summary = (
+                    f"Painted {len(indices)} decoration face"
+                    f"{'s' if len(indices) != 1 else ''} ({target}) {color}; "
+                    f"{len(triangles) - len(indices)} body faces untouched."
+                )
             response: dict[str, Any] = {
                 "success": True,
                 "output_path": composed.get("output_path", out_path),
@@ -1896,11 +1997,16 @@ class _ColorToolsPlugin:
                 "color": color,
                 "paint_recorded": paint_recorded,
                 "decoration": record.get("decoration") or {},
-                "summary": (
-                    f"Painted {len(indices)} decoration face"
-                    f"{'s' if len(indices) != 1 else ''} ({target}) {color}; "
-                    f"{len(triangles) - len(indices)} body faces untouched."
+                "decorations": _describe_steps(
+                    steps,
+                    coerced_steps
+                    or (
+                        dict.fromkeys(range(len(steps)), color)
+                        if target == "all"
+                        else {}
+                    ),
                 ),
+                "summary": summary,
             }
             for key in ("colors", "bed_translation", "native_paint_truncated"):
                 if key in composed:
@@ -1913,6 +2019,26 @@ class _ColorToolsPlugin:
             return response
 
         _logger.debug("Registered color tools")
+
+
+def _describe_steps(
+    steps: list[dict[str, Any]], painted: dict[int, str]
+) -> list[dict[str, Any]]:
+    """The record's decoration steps as a caller-facing listing.
+
+    One entry per step — index, the carve's own metadata, its face count,
+    and the color this paint gave it (``None`` when it stayed base).  This
+    is how a caller discovers what ``step_colors`` can address.
+    """
+    return [
+        {
+            "step": i,
+            "decoration": s.get("decoration") or {},
+            "face_count": len(s.get("face_indices") or []),
+            "color": painted.get(i),
+        }
+        for i, s in enumerate(steps)
+    ]
 
 
 plugin = _ColorToolsPlugin()

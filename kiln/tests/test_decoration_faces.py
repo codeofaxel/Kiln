@@ -411,3 +411,281 @@ class TestPaintEventRecording:
             output_path=str(tmp_path / "x.3mf"),
         )
         assert out is None
+
+
+# ---------------------------------------------------------------------------
+# Chained carves: a second decoration must not orphan the first
+# ---------------------------------------------------------------------------
+#
+# Second carve on the already-decorated box: a square recess debossed
+# into the top face at (5..8, 5..8), away from the ring.  The simulated
+# boolean:
+#   - preserves verbatim: base, island, ring walls, 3 of the 4 ring
+#     floor quads
+#   - re-triangulates ONE ring floor quad (flipped diagonal) — new by
+#     hash but lying ON the first carve's floor
+#   - rebuilds the surround (top surface) with a hole for the new recess
+#   - adds the new recess floor + walls
+#
+# The final mesh's record must cover BOTH carves: the preserved ring
+# geometry (carried forward by hash), the re-triangulated ring floor
+# fragment (rescued by distance to the prior carve's faces), and the new
+# recess.  Before chain carry-forward, the record held only the second
+# carve — "paint everything I carved" painted half the plate and
+# reported success.
+
+
+def _chained_triangles() -> dict[str, list[tuple]]:
+    """The twice-carved box, grouped so tests can address each part."""
+    lo, hi, top, floor_z = -10.0, 10.0, 10.0, 9.0
+    ro = 3.0  # ring outer half-width (matches _decorated_triangles)
+    b0, b1 = 5.0, 8.0  # second recess bounds
+
+    first = _decorated_triangles()
+
+    # One ring floor quad re-triangulated with the flipped diagonal:
+    # same quad surface, different triangles.
+    a, b, c, d = (-ro, 1.5, floor_z), (ro, 1.5, floor_z), (ro, ro, floor_z), (-ro, ro, floor_z)
+    retri_floor = [(b, c, d), (b, d, a)]
+    kept_floor = first["floor"][2:]  # the other 3 quads, verbatim
+
+    surround2: list[tuple] = []
+    surround2 += _quad((lo, 8.0, top), (hi, 8.0, top), (hi, hi, top), (lo, hi, top))
+    surround2 += _quad((lo, b0, top), (b0, b0, top), (b0, b1, top), (lo, b1, top))
+    surround2 += _quad((b1, b0, top), (hi, b0, top), (hi, b1, top), (b1, b1, top))
+    surround2 += _quad((lo, ro, top), (hi, ro, top), (hi, b0, top), (lo, b0, top))
+    surround2 += _quad((lo, lo, top), (hi, lo, top), (hi, -ro, top), (lo, -ro, top))
+    surround2 += _quad((lo, -ro, top), (-ro, -ro, top), (-ro, ro, top), (lo, ro, top))
+    surround2 += _quad((ro, -ro, top), (hi, -ro, top), (hi, ro, top), (ro, ro, top))
+
+    floor2 = _quad((b0, b0, floor_z), (b1, b0, floor_z), (b1, b1, floor_z), (b0, b1, floor_z))
+    walls2: list[tuple] = []
+    for p, q in (
+        ((b0, b0), (b1, b0)), ((b1, b0), (b1, b1)),
+        ((b1, b1), (b0, b1)), ((b0, b1), (b0, b0)),
+    ):
+        walls2 += _quad(
+            (p[0], p[1], top), (q[0], q[1], top),
+            (q[0], q[1], floor_z), (p[0], p[1], floor_z),
+        )
+
+    return {
+        "base": first["base"],
+        "island": first["island"],
+        "kept_floor": kept_floor,
+        "retri_floor": retri_floor,
+        "walls": first["walls"],
+        "surround2": surround2,
+        "floor2": floor2,
+        "walls2": walls2,
+    }
+
+
+@pytest.fixture
+def chained_pair(carved_pair, tmp_path):
+    """(decorated_path, twice_decorated_path, part-name → indices in the final mesh)."""
+    _original, decorated, _index_of = carved_pair
+    decorated2 = str(tmp_path / "jar_deboss_twice.stl")
+
+    parts = _chained_triangles()
+    ordered: list[tuple] = []
+    index_of: dict[str, list[int]] = {}
+    for name in (
+        "base", "island", "kept_floor", "retri_floor",
+        "walls", "surround2", "floor2", "walls2",
+    ):
+        index_of[name] = list(range(len(ordered), len(ordered) + len(parts[name])))
+        ordered.extend(parts[name])
+    _write_stl(ordered, decorated2)
+    return decorated, decorated2, index_of
+
+
+class TestChainedCarves:
+    def test_prior_carve_faces_carried_forward(self, carved_pair, chained_pair):
+        original, decorated, _ = carved_pair
+        _, decorated2, idx2 = chained_pair
+        record_decoration_faces(original, decorated)
+        record = record_decoration_faces(decorated, decorated2)
+        assert record is not None
+        faces = set(record["face_indices"])
+        # Second carve's own geometry is recorded...
+        assert set(idx2["floor2"]) <= faces
+        assert set(idx2["walls2"]) <= faces
+        # ...and the FIRST carve's preserved geometry is carried forward.
+        assert set(idx2["kept_floor"]) <= faces
+        assert set(idx2["walls"]) <= faces
+        # Untouched surface stays unclaimed.
+        assert not faces & set(idx2["island"])
+        assert not faces & set(idx2["surround2"])
+        assert not faces & set(idx2["base"])
+
+    def test_retriangulated_prior_floor_rescued(self, carved_pair, chained_pair):
+        original, decorated, _ = carved_pair
+        _, decorated2, idx2 = chained_pair
+        record_decoration_faces(original, decorated)
+        record = record_decoration_faces(decorated, decorated2)
+        # The re-cut ring floor quad lies ON the prior carve's surface —
+        # new by hash, distance ~0 to the pre-carve mesh.  It must be
+        # attributed to the decoration, not dropped as a fragment.
+        assert set(idx2["retri_floor"]) <= set(record["face_indices"])
+
+    def test_decoration_history_lists_both_steps(self, carved_pair, chained_pair):
+        original, decorated, _ = carved_pair
+        _, decorated2, _idx2 = chained_pair
+        record_decoration_faces(original, decorated, decoration={"text": "line 0"})
+        record = record_decoration_faces(
+            decorated, decorated2, decoration={"text": "line 1"}
+        )
+        steps = record.get("decorations")
+        assert isinstance(steps, list) and len(steps) == 2
+        assert steps[0]["decoration"] == {"text": "line 0"}
+        assert steps[1]["decoration"] == {"text": "line 1"}
+
+    def test_no_prior_sidecar_records_second_carve_only(self, carved_pair, chained_pair):
+        _original, decorated, _ = carved_pair
+        _, decorated2, idx2 = chained_pair
+        # First carve never recorded: nothing to carry, no invention.
+        record = record_decoration_faces(decorated, decorated2)
+        faces = set(record["face_indices"])
+        assert set(idx2["floor2"]) <= faces
+        assert not faces & set(idx2["kept_floor"])
+        assert not faces & set(idx2["walls"])
+
+    def test_floor_wall_split_merged_across_steps(self, carved_pair, chained_pair):
+        original, decorated, _ = carved_pair
+        _, decorated2, idx2 = chained_pair
+        record_decoration_faces(original, decorated, face_normal=(0, 0, 1))
+        record = record_decoration_faces(
+            decorated, decorated2, face_normal=(0, 0, 1)
+        )
+        floors = set(record["floor_indices"])
+        walls = set(record["wall_indices"])
+        assert set(idx2["floor2"]) <= floors
+        assert set(idx2["kept_floor"]) <= floors
+        assert set(idx2["retri_floor"]) <= floors
+        assert set(idx2["walls2"]) <= walls
+        assert set(idx2["walls"]) <= walls
+
+    def test_split_omitted_when_prior_step_lacks_it(self, carved_pair, chained_pair):
+        original, decorated, _ = carved_pair
+        _, decorated2, _idx2 = chained_pair
+        record_decoration_faces(original, decorated)  # no face_normal: no split
+        record = record_decoration_faces(
+            decorated, decorated2, face_normal=(0, 0, 1)
+        )
+        # Publishing a floors/walls split that silently omits the prior
+        # carve's floors would recreate the half-paint bug one target
+        # deeper — omit the split instead.
+        assert "floor_indices" not in record
+        assert "wall_indices" not in record
+
+    def test_chained_record_keeps_per_step_faces(self, carved_pair, chained_pair):
+        original, decorated, _ = carved_pair
+        _, decorated2, idx2 = chained_pair
+        record_decoration_faces(original, decorated)
+        record = record_decoration_faces(decorated, decorated2)
+        steps = record["decorations"]
+        step0 = set(steps[0]["face_indices"])
+        step1 = set(steps[1]["face_indices"])
+        # Step 0 owns the first carve's geometry — preserved AND re-cut.
+        assert set(idx2["kept_floor"]) <= step0
+        assert set(idx2["walls"]) <= step0
+        assert set(idx2["retri_floor"]) <= step0
+        # Step 1 owns the second carve's recess, and nothing of the first.
+        assert set(idx2["floor2"]) <= step1
+        assert set(idx2["walls2"]) <= step1
+        assert not step0 & step1
+        # The union is exactly the record's face set.
+        assert step0 | step1 == set(record["face_indices"])
+
+
+class TestStepColors:
+    def _chained_record(self, carved_pair, chained_pair):
+        original, decorated, _ = carved_pair
+        _, decorated2, idx2 = chained_pair
+        record_decoration_faces(original, decorated, decoration={"text": "ring"})
+        record = record_decoration_faces(
+            decorated, decorated2, decoration={"text": "recess"}
+        )
+        return decorated2, idx2, record
+
+    def test_each_step_painted_its_own_color(self, carved_pair, chained_pair, tmp_path):
+        decorated2, _idx2, record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2,
+            step_colors={"0": "#F72323", "1": "#FFFFFF"},
+            base_color="#161616",
+            output_path=str(tmp_path / "two_tone.3mf"),
+        )
+        assert result["success"] is True, result.get("error")
+        assert result["painted_triangles"] == len(record["face_indices"])
+        assert "#F72323" in result["colors"]
+        assert "#FFFFFF" in result["colors"]
+        listing = result["decorations"]
+        assert [s["color"] for s in listing] == ["#F72323", "#FFFFFF"]
+        assert listing[0]["decoration"] == {"text": "ring"}
+
+    def test_unnamed_steps_stay_base(self, carved_pair, chained_pair, tmp_path):
+        decorated2, _idx2, record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2,
+            step_colors={1: "#FFFFFF"},
+            output_path=str(tmp_path / "one_step.3mf"),
+        )
+        assert result["success"] is True, result.get("error")
+        step1 = record["decorations"][1]["face_indices"]
+        assert result["painted_triangles"] == len(step1)
+        assert result["decorations"][0]["color"] is None
+
+    def test_bad_step_index_lists_the_steps(self, carved_pair, chained_pair):
+        decorated2, _idx2, _record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2, step_colors={"7": "#FFFFFF"}
+        )
+        assert result["success"] is False
+        assert "2 decoration steps" in result["error"]
+        assert len(result["decorations"]) == 2
+
+    def test_step_colors_with_floors_target_refused(self, carved_pair, chained_pair):
+        decorated2, _idx2, _record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2,
+            target="floors",
+            step_colors={"0": "#FFFFFF"},
+        )
+        assert result["success"] is False
+        assert "floors/walls" in result["error"]
+
+    def test_bad_hex_refused(self, carved_pair, chained_pair):
+        decorated2, _idx2, _record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2, step_colors={"0": "red"}
+        )
+        assert result["success"] is False
+        assert "#RRGGBB" in result["error"]
+
+    def test_single_step_record_is_step_zero(self, carved_pair, tmp_path):
+        original, decorated, idx = carved_pair
+        record_decoration_faces(original, decorated)
+        result = _call_paint_tool(
+            model_path=decorated,
+            step_colors={"0": "#FFFFFF"},
+            output_path=str(tmp_path / "single.3mf"),
+        )
+        assert result["success"] is True, result.get("error")
+        assert result["painted_triangles"] == len(idx["floor"]) + len(idx["walls"])
+        assert len(result["decorations"]) == 1
+
+    def test_paint_event_records_step_colors(self, carved_pair, chained_pair, tmp_path):
+        decorated2, _idx2, _record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2,
+            step_colors={"0": "#F72323", "1": "#FFFFFF"},
+            output_path=str(tmp_path / "recorded.3mf"),
+        )
+        assert result["success"] is True
+        updated, err = load_decoration_faces(decorated2)
+        assert err is None
+        assert updated["painted"]["step_colors"] == {
+            "0": "#F72323", "1": "#FFFFFF",
+        }

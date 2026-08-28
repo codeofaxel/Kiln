@@ -2359,6 +2359,273 @@
     "max_hotend_temp": 370,
     "max_bed_temp": 120
   },
+  "qidi_plus5": {
+    "display_name": "QIDI Plus 5",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": true,
+    "build_volume_mm": [
+      320,
+      320,
+      300
+    ],
+    "max_hotend_temp": 370,
+    "max_bed_temp": 120,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 60,
+        "fan": 100
+      },
+      "PLA+": {
+        "hotend": 230,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 250,
+        "bed": 80,
+        "fan": 90
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 90,
+        "fan": 80
+      },
+      "ASA": {
+        "hotend": 255,
+        "bed": 90,
+        "fan": 50
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 60
+      },
+      "TPU": {
+        "hotend": 230,
+        "bed": 35,
+        "fan": 100
+      },
+      "PLA-CF": {
+        "hotend": 220,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG-CF": {
+        "hotend": 255,
+        "bed": 80,
+        "fan": 40
+      },
+      "PPS-CF": {
+        "hotend": 320,
+        "bed": 110,
+        "fan": 30
+      }
+    }
+  },
+  "qidi_q2c": {
+    "display_name": "QIDI Q2C",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": true,
+    "build_volume_mm": [
+      270,
+      270,
+      256
+    ],
+    "max_hotend_temp": 370,
+    "max_bed_temp": 120,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 60,
+        "fan": 100
+      },
+      "PLA+": {
+        "hotend": 230,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 250,
+        "bed": 80,
+        "fan": 90
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 90,
+        "fan": 80
+      },
+      "ASA": {
+        "hotend": 270,
+        "bed": 90,
+        "fan": 50
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 60
+      },
+      "TPU": {
+        "hotend": 230,
+        "bed": 35,
+        "fan": 100
+      },
+      "PLA-CF": {
+        "hotend": 220,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG-CF": {
+        "hotend": 255,
+        "bed": 80,
+        "fan": 40
+      },
+      "PPS-CF": {
+        "hotend": 320,
+        "bed": 110,
+        "fan": 30
+      }
+    }
+  },
+  "qidi_max4": {
+    "display_name": "QIDI Max 4",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": true,
+    "build_volume_mm": [
+      390,
+      390,
+      340
+    ],
+    "max_hotend_temp": 370,
+    "max_bed_temp": 120,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100
+      },
+      "PLA+": {
+        "hotend": 230,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 250,
+        "bed": 70,
+        "fan": 90
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 85,
+        "fan": 80
+      },
+      "ASA": {
+        "hotend": 250,
+        "bed": 90,
+        "fan": 50
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 60
+      },
+      "TPU": {
+        "hotend": 230,
+        "bed": 35,
+        "fan": 100
+      },
+      "PLA-CF": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG-CF": {
+        "hotend": 255,
+        "bed": 70,
+        "fan": 40
+      },
+      "PPS-CF": {
+        "hotend": 320,
+        "bed": 110,
+        "fan": 30
+      },
+      "PPS-GF": {
+        "hotend": 320,
+        "bed": 90,
+        "fan": 90
+      }
+    }
+  },
+  "qidi_x_smart3": {
+    "display_name": "QIDI X-Smart 3",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": true,
+    "build_volume_mm": [
+      175,
+      180,
+      170
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 120,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 60,
+        "fan": 100
+      },
+      "PLA+": {
+        "hotend": 230,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 250,
+        "bed": 80,
+        "fan": 90
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 90,
+        "fan": 80
+      },
+      "ASA": {
+        "hotend": 270,
+        "bed": 90,
+        "fan": 50
+      },
+      "TPU": {
+        "hotend": 230,
+        "bed": 35,
+        "fan": 100
+      },
+      "PLA-CF": {
+        "hotend": 230,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG-CF": {
+        "hotend": 255,
+        "bed": 80,
+        "fan": 40
+      }
+    }
+  },
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",
     "firmware": "marlin",

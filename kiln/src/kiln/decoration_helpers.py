@@ -962,8 +962,9 @@ def emboss_text_on_face(
     (face-normal-aware rotation + auto-sizing) and
     :func:`kiln.emboss_generator.compile_embossed_model` (compile to
     STL).  Detects the target face via
-    :func:`kiln.surface_intelligence.find_named_face` (when *face_name*
-    is given) or :func:`find_largest_flat_face` (auto).
+    :func:`kiln.surface_intelligence.resolve_decoratable_face` — the named
+    face when *face_name* is given, otherwise the largest flat face (the
+    canvas the calling product built).
 
     :param body_stl: Path to the host STL the text gets applied to.
     :param text: The text to emboss/deboss.  Single line only.  For
@@ -1014,7 +1015,7 @@ def emboss_text_on_face(
     :raises RuntimeError: If OpenSCAD compilation fails.
     """
     from kiln.emboss_generator import compile_embossed_model, generate_emboss_scad
-    from kiln.surface_intelligence import find_largest_flat_face, find_named_face
+    from kiln.surface_intelligence import resolve_decoratable_face
 
     if not os.path.isfile(body_stl):
         raise FileNotFoundError(f"Host STL not found: {body_stl}")
@@ -1034,11 +1035,11 @@ def emboss_text_on_face(
             nozzle_diameter_mm=nozzle_diameter_mm,
         )
 
-    # 1. Detect target face
-    if face_name:
-        face = find_named_face(body_stl, face_name)
-    else:
-        face = find_largest_flat_face(body_stl)
+    # 1. Detect target face.  Auto here means LARGEST, not top-first: the
+    # products calling this build a canvas and hand it over unnamed — a
+    # wedge nameplate's angled face is the whole product and is largest by
+    # area, while its literal top is a millimetre-tall edge.
+    face = resolve_decoratable_face(body_stl, face_name, auto="largest")
 
     # 2. Set up output paths
     if output_dir is None:
@@ -1226,16 +1227,9 @@ def emboss_text_lines_on_face(
 
     # Resolve the face once so the layout math sees the same face every
     # per-line emboss call will target.
-    from kiln.surface_intelligence import (
-        find_largest_flat_face,
-        find_named_face,
-    )
+    from kiln.surface_intelligence import resolve_decoratable_face
 
-    face = (
-        find_named_face(body_stl, face_name)
-        if face_name
-        else find_largest_flat_face(body_stl)
-    )
+    face = resolve_decoratable_face(body_stl, face_name, auto="largest")
 
     # All sizing decisions — measured glyph metrics, the 0.85 visual
     # margin, hierarchy ratios, elliptical-face inscribed fitting, and
@@ -1296,15 +1290,9 @@ def emboss_text_lines_on_face(
     ):
         # Resolve the actual face dict if we auto-detected, so the
         # aspect-ratio decision uses the real face's geometry.
-        from kiln.surface_intelligence import (
-            find_largest_flat_face,
-            find_named_face,
-        )
-        resolved_face = (
-            find_named_face(body_stl, face_name)
-            if face_name
-            else find_largest_flat_face(body_stl)
-        )
+        from kiln.surface_intelligence import resolve_decoratable_face
+
+        resolved_face = resolve_decoratable_face(body_stl, face_name, auto="largest")
         is_bottom_face = resolved_face.get("normal", [0, 0, 1])[2] < -0.9
         if is_bottom_face and output_dir:
             flip_decision = select_bottom_face_flip(

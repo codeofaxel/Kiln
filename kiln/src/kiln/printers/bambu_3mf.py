@@ -90,7 +90,7 @@ import logging
 import os
 import re
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -846,6 +846,89 @@ def _count_layers(gcode_body: str) -> int:
     return len(re.findall(r"^;LAYER_CHANGE", gcode_body, re.MULTILINE))
 
 
+#: A tool select at line start — the form every slicer in this family
+#: emits per filament change.  ``M104 T0 S200`` mid-line is heater
+#: targeting, not a tool change, and correctly does not match.
+_GCODE_TOOL_SELECT_RE = re.compile(r"^T(\d+)\b", re.MULTILINE)
+
+#: The per-filament settings blocks these slicers write into the gcode
+#: footer, semicolon-separated, one entry per loaded filament.
+_GCODE_FILAMENT_COLOUR_RE = re.compile(
+    r"^;\s*filament_colour\s*=\s*(.+)$", re.MULTILINE,
+)
+_GCODE_FILAMENT_TYPE_RE = re.compile(
+    r"^;\s*filament_type\s*=\s*(.+)$", re.MULTILINE,
+)
+
+
+#: The generator stamp these slicers write into their G-code header.
+#: OrcaSlicer and BambuStudio share the fork; PrusaSlicer and the other
+#: Slic3r derivatives write their own names.  Read from the head of the
+#: file only — a body can mention anything in a comment.
+_BAMBU_DIALECT_GENERATORS = ("orcaslicer", "bambustudio", "bambu studio")
+
+_GCODE_HEAD_CHARS = 4096
+
+
+def _gcode_is_bambu_dialect(gcode_body: str) -> bool:
+    """Whether this G-code came from OrcaSlicer / BambuStudio.
+
+    Used to decide whether a PrusaSlicer-calibrated time correction
+    applies.  An unrecognised generator reads as NOT the Bambu dialect,
+    which keeps the historical behaviour for every gcode Kiln was
+    already wrapping.
+    """
+    head = gcode_body[:_GCODE_HEAD_CHARS].lower()
+    return any(name in head for name in _BAMBU_DIALECT_GENERATORS)
+
+
+def _declared_filaments_in_gcode(
+    gcode_body: str,
+) -> tuple[int, list[str], list[str]] | None:
+    """What the gcode itself says about its filaments, or ``None``.
+
+    Returns ``(count, colors, types)`` when the gcode uses more than one
+    filament, so a wrapper can declare the same thing to the printer
+    instead of flattening a multicolor toolpath into a one-color file.
+
+    The count is a highest-tool-index, not a distinct count: a print
+    using T0 and T2 needs three trays declared, or T2 maps to nothing.
+    Colors and types come from the slicer's own ``; filament_colour =``
+    / ``; filament_type =`` footer lines when present, trimmed or padded
+    to the count so the caller always gets one entry per slot.
+
+    Never raises — a gcode this cannot read reads as single-filament,
+    which is exactly the behaviour every caller had before.
+    """
+    tools = {int(t) for t in _GCODE_TOOL_SELECT_RE.findall(gcode_body)}
+    if not tools:
+        return None
+    count = max(tools) + 1  # tools are 0-based
+    if count < 2:
+        return None
+
+    def _declared(pattern: re.Pattern[str]) -> list[str]:
+        match = pattern.search(gcode_body)
+        if not match:
+            return []
+        return [v.strip() for v in match.group(1).split(";") if v.strip()]
+
+    def _fit(values: list[str], filler: str) -> list[str]:
+        """Exactly *count* entries: declared ones kept, the rest filled.
+
+        A short declaration is the case that matters — the consumer
+        drops the list wholesale when it is shorter than the slot count,
+        which would throw away the real colors it DID state.
+        """
+        if not values:
+            return []
+        return (values + [filler] * count)[:count]
+
+    colors = _fit(_declared(_GCODE_FILAMENT_COLOUR_RE), "#FFFFFF")
+    types = _fit(_declared(_GCODE_FILAMENT_TYPE_RE), "PLA")
+    return count, colors, types
+
+
 def _find_max_z(gcode_body: str) -> float:
     """Find the maximum Z height from PrusaSlicer ``;Z:`` comments."""
     z_heights = re.findall(r";Z:(\d+\.?\d*)", gcode_body)
@@ -1502,6 +1585,29 @@ def build_bambu_3mf(
     if settings is None:
         settings = BambuPrintSettings()
 
+    # A multicolor gcode wrapped as a single-filament 3MF is a print that
+    # tool-changes 186 times into whatever is in tray 1: the toolpath is
+    # right and everything the PRINTER reads — the filament list, the AMS
+    # load blocks around each T command — says one color.  The gcode
+    # itself is the authority (Orca writes ``; filament_colour = a;b;c``
+    # and a ``T`` per change), so it is read here, at the one place every
+    # wrapping door passes through, rather than asked of each caller.
+    # An explicit multi-filament setting always wins.
+    if settings.num_filaments <= 1:
+        derived = _declared_filaments_in_gcode(gcode_body)
+        if derived is not None:
+            count, colors, types = derived
+            settings = replace(
+                settings,
+                num_filaments=count,
+                filament_colors=colors or settings.filament_colors,
+                filament_types=types or settings.filament_types,
+            )
+            logger.info(
+                "Gcode declares %d filaments (%s) — wrapping as multicolor.",
+                count, ", ".join(colors) if colors else "no colors declared",
+            )
+
     # Analyze the gcode body.
     total_layers = _count_layers(gcode_body)
     if total_layers == 0:
@@ -1526,13 +1632,23 @@ def build_bambu_3mf(
     # printers with input shaping because it doesn't model their actual
     # acceleration profiles.  This corrects the M73 R (remaining time)
     # values so the printer LCD shows accurate time from the first second.
-    try:
-        from kiln.printer_intelligence import get_slicer_time_factor
+    #
+    # PrusaSlicer's estimate ONLY.  The correction is calibrated against
+    # that slicer's motion model (see get_slicer_time_factor), and Orca /
+    # BambuStudio are Bambu's own fork: they model the input shaping this
+    # factor exists to compensate for, so halving their number reports a
+    # print as taking half as long as it does.  Measured 2026-08-27 on one
+    # model through one profile — PrusaSlicer 2h19m, OrcaSlicer 1h52m —
+    # Orca already lands BELOW the uncorrected Prusa figure, which is the
+    # correction the factor was approximating.
+    if not _gcode_is_bambu_dialect(gcode_body):
+        try:
+            from kiln.printer_intelligence import get_slicer_time_factor
 
-        time_factor = get_slicer_time_factor("bambu_a1")
-        est_time_sec = max(60, int(est_time_sec * time_factor))
-    except ImportError:
-        pass
+            time_factor = get_slicer_time_factor("bambu_a1")
+            est_time_sec = max(60, int(est_time_sec * time_factor))
+        except ImportError:
+            pass
 
     est_minutes = max(1, est_time_sec // 60)
 

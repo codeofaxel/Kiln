@@ -7,6 +7,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Four more QIDI printers.** The Plus 5, Max 4, Q2C and X-Smart 3. *Free tells
+  you a material won't work on your machine; Kiln Pro tells you why, and what to
+  run instead, plus more depth.* See https://kiln3d.com/pricing.
 - **Tell the Kiln team something.** A new Support page in the web app takes
   bugs, ideas, printers you want supported, and questions — or just say it to
   your agent, which can send any of them for you. A person reads every one, and
@@ -17,14 +20,42 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   logo with a closed outline keeps its middle in the body color instead of
   flooding solid.
 
+- **Give each carved decoration its own color.** A model with more than one
+  carved mark — a name and a title, a logo and a border — can now take a
+  different color per decoration in a single painted model, ready for a
+  multi-filament printer. Name the ones you want colored and the rest stay in
+  the body color.
+
 - **Ask for a bracket, get a bracket.** Kiln ships 65 ready-made
   parametric parts — brackets, bins, stands, cases, hooks, jigs,
   clamps — and nothing could find them until now. Describe what you
   need in your own dimensions and your agent offers one, then builds
   it. No API key needed.
 
+- **Your logo rides into the CAD file.** Put an SVG on a generated product and
+  the STEP export carries it as real CAD geometry — same size and depth as the
+  print, letter counters and enclosed islands intact. Photo reliefs still
+  refuse honestly.
+
 ### Fixed
 
+- **An SVG logo no longer vanishes from the print.** On a keychain front or a
+  pen cup's inside floor, an SVG was quietly skipped and the piece printed
+  plain. It now carves as crisp outlines, sized to the face.
+
+- **Multicolor models properly print in all their colors, and much faster.** A
+  model with several colors could come out in one. Now fixed. A hidden speed cap
+  is gone too. Needs OrcaSlicer or BambuStudio installed; Kiln finds it on its
+  own.
+
+- **Decorations land on the face you actually look at.** Ask for a texture,
+  logo, or engraving without saying where, and Kiln now picks the visible
+  side — a tray gets its top, not its hidden underside. Name a face yourself
+  and it still goes exactly there. Every decoration tool follows the same
+  rule, and it works on 3MF models as well as STL.
+
+- **Air-filter warnings on QIDI printers.** Several switch the filter off while
+  the chamber heats — exactly when ABS and ASA need it.
 - **Parts that printed beautifully now also work.** Twenty-three of
   the ready-made parts had flaws you'd only find after printing. All
   rebuilt and re-tested.
@@ -40,6 +71,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **A decoration that didn't take is reported as a failure, and doesn't cost
   you one.** Kiln no longer returns an unchanged model as a success, and your
   free monthly decorations are only counted when one actually lands.
+
+- **Paint every decoration on a model, not just the last one.** Carving a
+  second decoration onto an already-decorated model no longer forgets the
+  first — painting carved faces now covers every decoration, not just the
+  latest. A two-line nameplate used to come out with one line colored, and
+  said it had succeeded.
 
 - **Printability grades stopped failing models that print fine.** Grades now
   follow what your printer actually does.

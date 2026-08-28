@@ -925,7 +925,7 @@ def _drop_membrane_pairs(
             mate = None
             for other in pool:
                 n_other = _normalize(_triangle_normal(*triangles[other]))
-                dot = sum(a * b for a, b in zip(n_base, n_other))
+                dot = sum(a * b for a, b in zip(n_base, n_other, strict=True))
                 if dot < -0.999:      # opposing membrane pair
                     mate = other
                     drop.add(base)
@@ -2857,9 +2857,9 @@ def _volume_above_plane(
     volume = 0.0
     for tri in triangles:
         for piece in _clip_triangle_above(tri, z0):
-            p = tuple(c - a for c, a in zip(piece[0], apex))
-            q = tuple(c - a for c, a in zip(piece[1], apex))
-            r = tuple(c - a for c, a in zip(piece[2], apex))
+            p = tuple(c - a for c, a in zip(piece[0], apex, strict=True))
+            q = tuple(c - a for c, a in zip(piece[1], apex, strict=True))
+            r = tuple(c - a for c, a in zip(piece[2], apex, strict=True))
             volume += (
                 p[0] * (q[1] * r[2] - q[2] * r[1])
                 - p[1] * (q[0] * r[2] - q[2] * r[0])
