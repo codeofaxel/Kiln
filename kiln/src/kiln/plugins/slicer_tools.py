@@ -600,26 +600,15 @@ def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
 def _profile_filament_slots(profile_path: str | None) -> int:
     """How many filament slots the effective slicer config can express.
 
-    PrusaSlicer INI convention: per-extruder keys carry one
-    comma-separated value per extruder, so ``nozzle_diameter = 0.4,0.4``
-    is a two-extruder config.  No profile means the slicer's built-in
-    defaults, which are single-extruder — as is every bundled Kiln
-    profile today.  An unreadable profile reads as 1 (if it were truly
-    missing, ``slice_file`` would have failed before this runs).
+    One implementation, in the engine
+    (:func:`kiln.slicer.profile_filament_slots`), because the engine now
+    branches on the same number when it decides whether to expand
+    filament presets.  Two copies is how the advisory ends up reporting
+    a limit the backend no longer has.
     """
-    if not profile_path:
-        return 1
-    try:
-        with open(profile_path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                key, sep, value = line.partition("=")
-                if sep and key.strip() == "nozzle_diameter":
-                    return max(
-                        1, len([v for v in value.split(",") if v.strip()]),
-                    )
-    except OSError:
-        pass
-    return 1
+    from kiln.slicer import profile_filament_slots
+
+    return profile_filament_slots(profile_path)
 
 
 def _count_gcode_tools(gcode_path: str | None) -> tuple[int, int] | None:
@@ -681,10 +670,18 @@ def _multicolor_flatten_advisory(
         # onto the available tools), so partial flattening is silent too —
         # 6 colors quietly become 2.  Warn whenever colors are LOST, not
         # only when everything collapses to one.
-        colors_needed = max(
-            len(evidence.get("extruders") or ()),
-            int(evidence.get("paint_filaments") or 0),
-            int(evidence.get("palette_colors") or 0),
+        # The SAME number the engine expands filament presets to, so the
+        # advisory can never disagree with the slice about what the file
+        # asked for.  It is a highest-slot-index, not a distinct count:
+        # parts on extruders 1 and 3 need three slots, and a two-slot
+        # config genuinely cannot print them.
+        colors_needed = int(
+            evidence.get("filament_slots_needed")
+            or max(
+                len(evidence.get("extruders") or ()),
+                int(evidence.get("paint_filaments") or 0),
+                int(evidence.get("palette_colors") or 0),
+            )
         )
         slots = _profile_filament_slots(profile_path)
         counted = _count_gcode_tools(gcode_path)

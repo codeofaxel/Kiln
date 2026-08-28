@@ -1864,16 +1864,34 @@ _SIDECAR_EXTRUDER_RE = re.compile(rb'key="extruder"\s+value="(\d+)"')
 #: reads/writes this form).
 _ITEM_EXTRUDER_RE = re.compile(rb'slic3rpe:extruder="(\d+)"')
 
-#: One palette entry inside <m:colorgroup>, capturing its hex value so a
-#: consumer can put real colors on real filament slots.  The required
-#: ``color`` attribute is matched anywhere in the element, which is where
-#: both this module's writers and the slicers put it.
-_COLORGROUP_COLOR_RE = re.compile(rb'<m:color\s[^>]*?color="(#[0-9A-Fa-f]{6,8})"')
+#: One palette entry inside <m:colorgroup>.  The trailing whitespace class
+#: keeps ``<m:colorgroup`` itself from matching.  Deliberately loose: this
+#: COUNTS entries, and a palette entry spelled in a way the value pattern
+#: below cannot read is still a palette entry — narrowing the count would
+#: silently un-detect a multicolor file (measured: a bare ``FF0000`` or a
+#: single-quoted value drops from 2 to 0).
+_COLORGROUP_COLOR_RE = re.compile(rb"<m:color\s")
+
+#: The same entries with their hex VALUE captured, for putting real colors
+#: on real filament slots.  Strictly a bonus channel over the count above:
+#: display metadata only, so an unreadable spelling costs a nice-to-have
+#: rather than the detection itself.
+_COLORGROUP_VALUE_RE = re.compile(
+    rb"""<m:color\s[^>]*?color=["'](\#?[0-9A-Fa-f]{6,8})["']"""
+)
 
 _SIDECAR_CONFIG_NAMES = frozenset({
     "metadata/model_settings.config",
     "metadata/slic3r_pe_model.config",
 })
+
+#: Most filament slots a detected file is reported as needing.  Sixteen for
+#: two independent reasons that happen to agree: it is the painting wire
+#: format's ceiling (:data:`PAINTED_STATE_MAX`), and it is as many filament
+#: presets as any slicer Kiln drives will accept.  Named separately because
+#: a multi-OBJECT file's extruder numbers are not paint states — they share
+#: a limit, not a meaning.
+_MAX_FILAMENT_SLOTS = PAINTED_STATE_MAX
 
 
 def detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
@@ -1926,6 +1944,7 @@ def detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
         paint_attribute: str | None = None
         paint_states: set[int] = set()
         palette: list[str] = []
+        palette_colors = 0
         with zipfile.ZipFile(input_path) as zf:
             for member in zf.namelist():
                 low = member.lower()
@@ -1956,13 +1975,18 @@ def detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
                         if paint_states:
                             paint_attribute = marker.decode()
                         break
-                    if len(palette) < 2:
-                        found = [
-                            m.decode("ascii")
-                            for m in _COLORGROUP_COLOR_RE.findall(raw)
-                        ]
-                        if len(found) > len(palette):
-                            palette = found
+                    # Both taken as a MAX across model members: a 3MF may
+                    # carry several, and the richest palette is the one
+                    # the file is asking for.
+                    palette_colors = max(
+                        palette_colors, len(_COLORGROUP_COLOR_RE.findall(raw)),
+                    )
+                    palette_values = [
+                        "#" + m.decode("ascii").lstrip("#")[:6].upper()
+                        for m in _COLORGROUP_VALUE_RE.findall(raw)
+                    ]
+                    if len(palette_values) > len(palette):
+                        palette = palette_values
 
         # Distinct FILAMENTS the painting references: state k ≥ 1 is
         # filament k, and state 0 (unpainted) is the object's base
@@ -1975,22 +1999,24 @@ def detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
         if paint_attribute is not None and paint_filaments >= 2:
             evidence["paint_attribute"] = paint_attribute
             evidence["paint_filaments"] = paint_filaments
-        if len(palette) >= 2:
-            evidence["palette_colors"] = len(palette)
+        if palette_colors >= 2:
+            evidence["palette_colors"] = palette_colors
         if not evidence:
             return None
 
         if palette:
             evidence["palette"] = palette
         slots = max(
+            # Extruder numbers are 1-based slot NAMES, so the highest one
+            # is the slot count — parts on extruders 1 and 3 need three.
             max(extruders, default=0),
-            # State 0 is the BASE filament (slot 1); painted state k is
-            # filament k, so the highest state IS the slot count needed.
+            # Painted state k is "filament k", so likewise; state 0 means
+            # unpainted, which prints from the base filament in slot 1.
             max(paint_states, default=0),
             1 if 0 in paint_states else 0,
-            len(palette),
+            palette_colors,
         )
-        evidence["filament_slots_needed"] = min(slots, PAINTED_STATE_MAX)
+        evidence["filament_slots_needed"] = min(slots, _MAX_FILAMENT_SLOTS)
         return evidence
     except Exception:  # noqa: BLE001 — advisory only, never break slicing
         return None
@@ -2008,14 +2034,14 @@ def multicolor_filament_colors(
     with, so every slot stays visually distinct.  Display metadata only:
     a wrong hex never changes a toolpath.
     """
+    from kiln.threemf_parser import _PAINT_STATE_PALETTE
+
     palette = [c for c in (evidence.get("palette") or []) if c]
     colors: list[str] = []
     for i in range(max(slots, 0)):
         if i < len(palette):
             colors.append(palette[i])
             continue
-        from kiln.threemf_parser import _PAINT_STATE_PALETTE
-
         r, g, b = _PAINT_STATE_PALETTE[i % len(_PAINT_STATE_PALETTE)]
         colors.append(f"#{r:02X}{g:02X}{b:02X}")
     return colors

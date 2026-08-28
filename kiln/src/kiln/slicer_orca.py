@@ -3,9 +3,11 @@
 Kiln's bundled printer settings are one flat dict per printer
 (``data/slicer_profiles.json``), and :func:`kiln.slicer_profiles._settings_to_ini`
 turns that dict into the PrusaSlicer ``.ini`` that ``--load`` wants.  This
-module turns the SAME dict into what the other command line wants: three
-standalone JSON presets — machine, process, filament — that
-``--load-settings`` / ``--load-filaments`` accept.
+module turns the SAME dict into what the other command line wants:
+standalone JSON presets — one machine, one process, and one filament per
+loaded slot — that ``--load-settings`` / ``--load-filaments`` accept.  A
+plain slice emits the classic three; a multicolor input emits a filament
+preset per color (see the multicolor block below).
 
 It is a serializer, not a second source of truth.  A profile is authored once,
 in PrusaSlicer's vocabulary, and this file is the only place that knows how
@@ -374,12 +376,19 @@ def settings_to_orca_presets(
         width = f"{nozzle * _LINE_WIDTH_NOZZLE_FACTOR:.2f}"
         for key in _LINE_WIDTH_KEYS:
             process.setdefault(key, width)
-        # Prime tower, enabled and placed (finding 3).
-        process["enable_prime_tower"] = "1"
-        process["prime_tower_width"] = f"{PRIME_TOWER_WIDTH_MM:g}"
-        process["prime_volume"] = f"{_PRIME_VOLUME_MM3:g}"
-        process["prime_tower_brim_width"] = f"{_PRIME_TOWER_BRIM_MM:g}"
+        # Prime tower — enabled ONLY together with a placement (finding
+        # 3).  Both halves measured: with a placement the slice is clean;
+        # enabled without one, Orca's default spot can sit off the plate
+        # and fail the whole slice; and omitted entirely the file still
+        # slices with every color intact (3 tools, 232 changes), just
+        # purging into the object rather than a tower.  So a caller that
+        # cannot say where the tower goes gets the colors it asked for
+        # instead of an error about an area it never chose.
         if wipe_tower_xy is not None:
+            process["enable_prime_tower"] = "1"
+            process["prime_tower_width"] = f"{PRIME_TOWER_WIDTH_MM:g}"
+            process["prime_volume"] = f"{_PRIME_VOLUME_MM3:g}"
+            process["prime_tower_brim_width"] = f"{_PRIME_TOWER_BRIM_MM:g}"
             process["wipe_tower_x"] = f"{wipe_tower_xy[0]:.2f}"
             process["wipe_tower_y"] = f"{wipe_tower_xy[1]:.2f}"
 

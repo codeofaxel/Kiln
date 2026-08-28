@@ -451,7 +451,7 @@ def _parse_bed_shape(shape: str) -> tuple[float, float, float, float] | None:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def _profile_slot_count(profile: str | None) -> int:
+def profile_filament_slots(profile: str | None) -> int:
     """How many filament slots a PrusaSlicer profile ini can express.
 
     PrusaSlicer INI convention: per-extruder keys carry one
@@ -460,6 +460,11 @@ def _profile_slot_count(profile: str | None) -> int:
     single-extruder defaults — as is every bundled Kiln profile today.
     An unreadable profile reads as 1: if it were truly missing, the
     slice itself would fail on it moments later with the real error.
+
+    Lives here, with the engine that acts on the answer, and is what the
+    tool layer's flatten advisory calls too — the two used to carry a
+    copy each, which is how a backend gains a capability the advisory
+    still reports it lacking.
     """
     if not profile or not os.path.isfile(profile):
         return 1
@@ -498,15 +503,17 @@ def _wipe_tower_position(
 
     Orca's default placement can land off the plate, failing the whole
     slice with "found gcode in unprintable area" — so a multicolor slice
-    always states one.  Candidates are tried on each side of the model's
-    placed bbox (right, left, back, front), first one that fits the bed
-    wins; when no side has room, or the bbox cannot be read, the tower
-    goes to the back-right corner of the bed — on the plate for certain,
-    and the slicer itself is the honest judge of any remaining conflict.
+    states one whenever it can.  Candidates are tried on each side of the
+    model's placed bbox (right, left, back, front), first one that fits
+    the bed wins; when no side has room, or the bbox cannot be read, the
+    tower goes to the back-right corner of the bed.
 
-    Returns ``None`` only when the bed shape itself is unknown: with no
-    bed to reason about, an invented coordinate is worse than Orca's own
-    default.
+    Returns ``None`` when no honest position exists — an unknown bed
+    shape, or a bed too small to hold the tower at all.  The caller then
+    omits the tower rather than placing it off the plate, which keeps
+    every color (measured: a multicolor file slices fine with no tower,
+    purging into the object) instead of failing the whole slice.  An
+    invented coordinate is the one outcome worse than no tower.
     """
     bed = _parse_bed_shape(str(settings.get("bed_shape", "")))
     if bed is None:
@@ -514,6 +521,19 @@ def _wipe_tower_position(
     bed_x_min, bed_y_min, bed_x_max, bed_y_max = bed
     m = _PRIME_TOWER_MARGIN_MM
     w = tower_width_mm
+
+    # A bed that cannot hold the tower plus its margins has no position
+    # to offer — the corner formula would return one OFF the plate.
+    if (
+        bed_x_max - bed_x_min < w + 2 * m
+        or bed_y_max - bed_y_min < w + 2 * m
+    ):
+        logger.info(
+            "Bed %gx%gmm is too small for a %gmm prime tower; slicing "
+            "multicolor without one.",
+            bed_x_max - bed_x_min, bed_y_max - bed_y_min, w,
+        )
+        return None
 
     def _clamp(v: float, lo: float, hi: float) -> float:
         return max(lo, min(v, hi))
@@ -671,12 +691,14 @@ def _slice_with_orca(
     profile: str | None,
     extra_args: list[str] | None,
     timeout: int,
+    multicolor: dict[str, Any] | None = None,
 ) -> SliceResult:
     """Slice through the BambuStudio/OrcaSlicer command line.
 
     A different argv and a different preset format from
     :func:`slice_file`'s Slic3r path: ``--slice 0 --outputdir DIR
-    --load-settings "machine.json;process.json" --load-filaments "f.json"``,
+    --load-settings "machine.json;process.json"
+    --load-filaments "f1.json[;f2.json…]"``, one filament preset per slot,
     where the presets are the JSON that :mod:`kiln.slicer_orca` writes out of
     the same bundled settings the ``.ini`` is built from.
 
@@ -711,29 +733,25 @@ def _slice_with_orca(
 
         # A multicolor 3MF needs one filament preset PER SLOT, or Orca
         # slices every color with T0 — the exact flatten the advisory
-        # layer used to warn about after the fact.  Detection is the
-        # same scan that advisory runs, owned by kiln.multicolor_3mf;
-        # a failure of any kind reads as "not multicolor" and the slice
-        # proceeds single-filament, exactly as before.
+        # layer used to warn about after the fact.  *multicolor* is the
+        # evidence slice_file already gathered (one archive scan per
+        # slice, wherever the input entered); detecting here again would
+        # re-read the whole model XML.  Absent or below two slots, the
+        # slice proceeds single-filament, exactly as before.
         filament_colors: list[str] | None = None
         wipe_xy: tuple[float, float] | None = None
-        if input_abs.lower().endswith(".3mf"):
-            from kiln.multicolor_3mf import (
-                detect_3mf_multicolor,
-                multicolor_filament_colors,
-            )
+        slots = int((multicolor or {}).get("filament_slots_needed", 0))
+        if slots >= 2:
+            from kiln.multicolor_3mf import multicolor_filament_colors
 
-            evidence = detect_3mf_multicolor(input_abs)
-            slots = int((evidence or {}).get("filament_slots_needed", 0))
-            if slots >= 2:
-                filament_colors = multicolor_filament_colors(evidence, slots)
-                wipe_xy = _wipe_tower_position(
-                    settings, input_abs, PRIME_TOWER_WIDTH_MM,
-                )
-                logger.info(
-                    "Multicolor 3MF: emitting %d filament presets "
-                    "(prime tower at %s)", slots, wipe_xy,
-                )
+            filament_colors = multicolor_filament_colors(multicolor, slots)
+            wipe_xy = _wipe_tower_position(
+                settings, input_abs, PRIME_TOWER_WIDTH_MM,
+            )
+            logger.info(
+                "Multicolor 3MF: emitting %d filament presets "
+                "(prime tower at %s)", slots, wipe_xy,
+            )
 
         presets = write_orca_presets(
             settings,
@@ -884,6 +902,18 @@ def slice_file(
     # Find slicer
     slicer = find_slicer(slicer_path)
 
+    # Does this input ask for more than one filament?  Asked ONCE here,
+    # at the chokepoint every slicing door funnels through, and carried
+    # to whichever backend runs — the answer costs an archive scan, and
+    # both the backend choice below and the Orca preset expansion need
+    # it.  Never raises: no evidence reads as single-filament.
+    multicolor: dict[str, Any] | None = None
+    if ext == ".3mf":
+        from kiln.multicolor_3mf import detect_3mf_multicolor
+
+        multicolor = detect_3mf_multicolor(input_abs)
+    slots_needed = int((multicolor or {}).get("filament_slots_needed", 0))
+
     # A multicolor 3MF through the Slic3r dialect flattens to one filament:
     # Kiln's profiles are single-slot, and the PrusaSlicer command line has
     # no per-slot preset expansion the way the Orca dialect now does.  When
@@ -893,23 +923,19 @@ def slice_file(
     multicolor_switched = False
     if (
         slicer_path is None
-        and ext == ".3mf"
+        and slots_needed >= 2
         and slicer_cli_family(slicer) == _CLI_PRUSA
+        and profile_filament_slots(profile) < slots_needed
     ):
-        from kiln.multicolor_3mf import detect_3mf_multicolor
-
-        evidence = detect_3mf_multicolor(input_abs)
-        slots_needed = int((evidence or {}).get("filament_slots_needed", 0))
-        if slots_needed >= 2 and _profile_slot_count(profile) < slots_needed:
-            alt = _find_bambu_dialect_slicer()
-            if alt is not None:
-                logger.info(
-                    "Multicolor 3MF needs %d filaments; switching from %s "
-                    "to %s to keep the colors.",
-                    slots_needed, slicer.path, alt.path,
-                )
-                slicer = alt
-                multicolor_switched = True
+        alt = _find_bambu_dialect_slicer()
+        if alt is not None:
+            logger.info(
+                "Multicolor 3MF needs %d filaments; switching from %s "
+                "to %s to keep the colors.",
+                slots_needed, slicer.path, alt.path,
+            )
+            slicer = alt
+            multicolor_switched = True
 
     # Prepare output
     out_dir = output_dir or _DEFAULT_OUTPUT_DIR
@@ -953,6 +979,7 @@ def slice_file(
             profile=profile,
             extra_args=extra_args,
             timeout=timeout,
+            multicolor=multicolor,
         )
         if multicolor_switched:
             result.message += (

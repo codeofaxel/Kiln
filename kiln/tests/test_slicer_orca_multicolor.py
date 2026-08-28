@@ -37,8 +37,8 @@ from kiln.multicolor_3mf import (
 )
 from kiln.slicer import (
     SlicerInfo,
-    _profile_slot_count,
     _wipe_tower_position,
+    profile_filament_slots,
     slice_file,
 )
 from kiln.slicer_orca import (
@@ -117,7 +117,7 @@ def _profile_ini(tmp_path: Path) -> str:
 def _count_tools(gcode_path: str) -> tuple[list[str], int]:
     text = Path(gcode_path).read_text(errors="replace")
     tools = re.findall(r"^T(\d+)\b", text, re.M)
-    changes = sum(1 for a, b in zip(tools, tools[1:]) if a != b)
+    changes = sum(1 for a, b in zip(tools, tools[1:], strict=False) if a != b)
     return sorted(set(tools)), changes
 
 
@@ -189,6 +189,20 @@ class TestFilamentExpansion:
         assert p.process["wipe_tower_y"] == "60.00"
         assert float(p.process["prime_tower_width"]) == PRIME_TOWER_WIDTH_MM
 
+    def test_no_placement_means_no_tower_not_a_broken_one(self):
+        """A tower enabled without a placement is what fails the slice
+        (Orca's default spot can be off-plate).  Measured: with no tower
+        at all the file still slices with every color — so an unknown bed
+        costs the tower, never the colors."""
+        p = settings_to_orca_presets(
+            _SETTINGS, name="t", filament_colors=_COLORS, wipe_tower_xy=None,
+        )
+        assert "enable_prime_tower" not in p.process
+        assert "wipe_tower_x" not in p.process
+        # The rest of the multicolor emission is untouched.
+        assert len(p.filaments) == 3
+        assert p.process["line_width"] == "0.42"
+
     def test_single_filament_output_is_unchanged(self):
         """The regression guard: an unpainted slice emits exactly what it
         did before multicolor existed — no prime tower, no widths, one
@@ -234,6 +248,51 @@ class TestDetectionForSlicing:
         assert evidence["palette"] == _COLORS
         assert evidence["filament_slots_needed"] == 3
 
+    def test_palette_is_the_richest_across_model_members(self, tmp_path):
+        """A 3MF may carry several .model parts; the palette count must
+        be the MAX over them, not whichever one was read first."""
+        path = tmp_path / "two_members.3mf"
+        def group(n: int) -> str:
+            entries = "".join(
+                f'<m:color color="#{i:02X}0000"/>' for i in range(n)
+            )
+            return (
+                f'<model><resources><m:colorgroup id="9">{entries}'
+                "</m:colorgroup></resources></model>"
+            )
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/a.model", group(3))
+            zf.writestr("3D/b.model", group(5))
+        evidence = detect_3mf_multicolor(str(path))
+        assert evidence is not None
+        assert evidence["palette_colors"] == 5
+        assert evidence["filament_slots_needed"] == 5
+
+    @pytest.mark.parametrize(
+        "entries",
+        [
+            '<m:color color="FF0000"/><m:color color="00FF00"/>',
+            "<m:color color='#FF0000'/><m:color color='#00FF00'/>",
+            '<m:color id="1" color="#FF0000"/><m:color id="2" color="#00FF00"/>',
+        ],
+        ids=["no-hash", "single-quoted", "attrs-before-color"],
+    )
+    def test_palette_spellings_still_detect(self, tmp_path, entries):
+        """Detection must not narrow with the value-capturing regex: a
+        palette entry spelled unusually is still a palette entry, and
+        missing it would silently un-detect a multicolor file."""
+        path = tmp_path / "spelling.3mf"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr(
+                "3D/3dmodel.model",
+                f'<model><resources><m:colorgroup id="2">{entries}'
+                "</m:colorgroup></resources></model>",
+            )
+        evidence = detect_3mf_multicolor(str(path))
+        assert evidence is not None
+        assert evidence["palette_colors"] == 2
+        assert evidence["palette"] == ["#FF0000", "#00FF00"]
+
     def test_slots_are_a_max_not_a_count(self, tmp_path):
         """Paint states {1, 3} use two filaments but need THREE slots —
         state 3 is "filament 3", and T2 cannot exist with two presets."""
@@ -270,8 +329,8 @@ class TestWipeTowerPosition:
         xy = _wipe_tower_position(_SETTINGS, threemf, 30.0)
         assert xy is not None
         x, y = xy
-        assert 0 <= x and x + 30 <= 256
-        assert 0 <= y and y + 30 <= 256
+        assert x >= 0 and x + 30 <= 256
+        assert y >= 0 and y + 30 <= 256
         # The tetra bbox is placed mid-plate by compose_painted_3mf;
         # whichever side won, the tower's footprint must not intersect it.
         from kiln.printers.bed_fit import compute_3mf_geometry_bbox
@@ -286,13 +345,40 @@ class TestWipeTowerPosition:
     def test_no_bed_shape_means_no_position(self, tmp_path):
         assert _wipe_tower_position({}, _painted_3mf(tmp_path), 30.0) is None
 
+    def test_bed_too_small_gives_no_position_not_an_off_plate_one(
+        self, tmp_path,
+    ):
+        """The corner formula on a bed narrower than the tower yields a
+        NEGATIVE coordinate — an off-plate tower, which is exactly the
+        "unprintable area" failure this placement exists to avoid.  No
+        position means no tower, and the colors still print."""
+        xy = _wipe_tower_position(
+            {"bed_shape": "0x0,30x0,30x30,0x30"},
+            _painted_3mf(tmp_path),
+            30.0,
+        )
+        assert xy is None
+
+    def test_bed_exactly_large_enough_still_places(self, tmp_path):
+        xy = _wipe_tower_position(
+            {"bed_shape": "0x0,40x0,40x40,0x40"},
+            _painted_3mf(tmp_path),
+            30.0,
+        )
+        assert xy is not None
+        x, y = xy
+        assert x >= 0
+        assert y >= 0
+        assert x + 30 <= 40
+        assert y + 30 <= 40
+
     def test_unreadable_model_still_lands_on_bed(self, tmp_path):
         missing = str(tmp_path / "nope.3mf")
         xy = _wipe_tower_position(_SETTINGS, missing, 30.0)
         assert xy is not None
         x, y = xy
-        assert 0 <= x and x + 30 <= 256
-        assert 0 <= y and y + 30 <= 256
+        assert x >= 0 and x + 30 <= 256
+        assert y >= 0 and y + 30 <= 256
 
 
 # ---------------------------------------------------------------------------
@@ -384,8 +470,9 @@ class TestPrusaAutoSwitch:
         seen: dict = {}
 
         def fake_orca(slicer, input_abs, out_file, *, profile,
-                      extra_args, timeout):
+                      extra_args, timeout, multicolor=None):
             seen["slicer"] = slicer
+            seen["multicolor"] = multicolor
             from kiln.slicer import SliceResult
 
             Path(out_file).write_text("T0\n; filament used\n")
@@ -406,6 +493,9 @@ class TestPrusaAutoSwitch:
         assert seen["slicer"].name == "orcaslicer"
         assert result.success
         assert "auto-selected" in result.message
+        # The evidence is gathered once and handed on, so the backend
+        # never re-scans the archive to learn what slice_file already knew.
+        assert seen["multicolor"]["filament_slots_needed"] == 3
 
     def test_explicit_slicer_path_is_honoured(self, tmp_path):
         """An explicit slicer_path is the user's choice: no switch, even
@@ -489,12 +579,12 @@ class TestPrusaAutoSwitch:
 
 class TestProfileSlotCount:
     def test_no_profile_is_one(self):
-        assert _profile_slot_count(None) == 1
+        assert profile_filament_slots(None) == 1
 
     def test_three_values_are_three(self, tmp_path):
         ini = tmp_path / "p.ini"
         ini.write_text("nozzle_diameter = 0.4, 0.4, 0.6\n")
-        assert _profile_slot_count(str(ini)) == 3
+        assert profile_filament_slots(str(ini)) == 3
 
 
 # ---------------------------------------------------------------------------
