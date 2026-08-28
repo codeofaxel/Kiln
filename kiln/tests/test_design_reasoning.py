@@ -787,9 +787,15 @@ class TestSearchTemplates:
     """search_templates fuzzy keyword matching."""
 
     def test_empty_query_returns_empty(self):
+        from kiln.design_intelligence import list_generatable_design_templates
+
         result = search_templates("")
         assert result.matches == []
-        assert result.total_templates == 0
+        # total_templates is the CATALOG size, not the match count — an
+        # empty query matches nothing but the library still has entries.
+        # Derived from the catalog, never a hardcoded count: a literal
+        # here goes stale the next time a template lands.
+        assert result.total_templates == len(list_generatable_design_templates())
 
     def test_whitespace_query_returns_empty(self):
         result = search_templates("   ")

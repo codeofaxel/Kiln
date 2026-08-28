@@ -30,8 +30,10 @@ import math
 import os
 import struct
 
-from kiln.printability import analyze_printability
+import pytest
 
+from kiln import printability as P
+from kiln.printability import analyze_printability
 
 # ---------------------------------------------------------------------------
 # Mesh builders
@@ -363,24 +365,76 @@ class TestMembraneArtifacts:
         assert r.triangle_count == 12
 
 
+@pytest.fixture()
+def forgiving_material(monkeypatch):
+    """Pin a low-thermal-amplification material factor.
+
+    The slenderness gate only runs when the material's stress factor is
+    forgiving (``<= 0.8``), and that factor is a tier seam: the free
+    tier answers 1.0 for every material, kiln-pro's overlay supplies
+    curated values (PLA 0.6).  Pinning it here tests the GATE rather
+    than whether kiln-pro happens to be installed — these assertions
+    used to pass only on a developer machine that had it, and went red
+    in public CI, which blocks it.
+    """
+    monkeypatch.setattr(P, "_material_stress_factor", lambda material: 0.8)
+
+
 class TestThermalSlendernessGate:
     """The area-change ratio says how abrupt a transition is, not how
     fragile what continues above it is.  A chunky post and a thin fin
     carry the same ratio; only the fin is a genuine cracking risk."""
 
-    def test_thick_post_is_not_a_stress_risk(self, tmp_path):
+    def test_thick_post_is_not_a_stress_risk(self, tmp_path, forgiving_material):
+        # Exact level, not a range: the chunky branch maps critical ->
+        # moderate, the sturdy branch maps it -> high, and no gate at
+        # all leaves it critical.  A range spanning those answers would
+        # pass whether the gate ran or not.
         tris = _plate_with_post_triangles(120, 80, 5, 12, 12, 30)
         r = analyze_printability(
             _write_stl(tmp_path, "post.stl", tris), material="pla")
-        assert r.thermal_stress.risk_level in ("low", "moderate")
+        assert r.thermal_stress.risk_level == "moderate"
         assert r.thermal_stress.score_deduction >= -5
 
-    def test_thin_fin_keeps_full_risk(self, tmp_path):
+    def test_thin_fin_keeps_full_risk(self, tmp_path, forgiving_material):
+        # Same forgiving factor as the post above, so this proves the
+        # gate DISCRIMINATES by thickness.  Without the fixture the free
+        # tier's 1.0 factor skips the gate entirely and "full risk" is
+        # its answer for any geometry — the assertion would hold even if
+        # the gate were deleted.
         tris = _plate_with_post_triangles(120, 80, 5, 1.6, 30, 12)
         r = analyze_printability(
             _write_stl(tmp_path, "fin.stl", tris), material="pla")
-        assert r.thermal_stress.risk_level in ("high", "critical")
+        assert r.thermal_stress.risk_level == "critical"
         assert r.thermal_stress.score_deduction <= -10
+
+    def test_thickness_is_what_separates_them(self, tmp_path, forgiving_material):
+        """The class's whole claim, in one assertion: same abrupt
+        transition, different continuing thickness, and only the thin
+        one keeps the severe verdict.  Survives a threshold retune that
+        would move both absolute levels."""
+        order = {"low": 0, "moderate": 1, "high": 2, "critical": 3}
+        post = analyze_printability(
+            _write_stl(tmp_path, "post.stl",
+                       _plate_with_post_triangles(120, 80, 5, 12, 12, 30)),
+            material="pla").thermal_stress
+        fin = analyze_printability(
+            _write_stl(tmp_path, "fin.stl",
+                       _plate_with_post_triangles(120, 80, 5, 1.6, 30, 12)),
+            material="pla").thermal_stress
+        assert order[post.risk_level] < order[fin.risk_level]
+
+    def test_free_tier_keeps_the_conservative_verdict(self, tmp_path, monkeypatch):
+        """The seam itself, pinned: at the free tier's uniform 1.0 factor
+        the gate does not run, so a chunky post keeps the conservative
+        answer.  Deliberate (see ``_FORGIVING_STRESS_FACTOR``) — this
+        test exists so a change to that seam is visible rather than
+        silent."""
+        monkeypatch.setattr(P, "_material_stress_factor", lambda material: 1.0)
+        tris = _plate_with_post_triangles(120, 80, 5, 12, 12, 30)
+        r = analyze_printability(
+            _write_stl(tmp_path, "post.stl", tris), material="pla")
+        assert r.thermal_stress.risk_level == "critical"
 
 
 def _plate_with_bottom_recess_triangles(pw, pd, pt, rw, rd, depth):
