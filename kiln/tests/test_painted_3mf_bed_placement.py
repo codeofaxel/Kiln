@@ -285,6 +285,12 @@ class TestPreSliceBedGate:
         with patch(
             "kiln.slicer.find_slicer",
             return_value=SlicerInfo(path="/fake/prusa-slicer", name="prusa-slicer"),
+        ), patch(
+            # The painted input would otherwise trigger the multicolor
+            # auto-switch onto a REAL Orca binary on machines that have
+            # one — this test is about the bed gate, not slicer choice.
+            "kiln.slicer._find_bambu_dialect_slicer",
+            return_value=None,
         ), patch("subprocess.run", side_effect=fake_run):
             sliced = slice_file(
                 result["output_path"],

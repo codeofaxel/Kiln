@@ -3000,21 +3000,57 @@ class BambuAdapter(PrinterAdapter):
             if local_path and os.path.isfile(local_path):
                 file_md5 = self._compute_file_md5(local_path)
 
-            # Auto-detect filament count from 3MF plate metadata when
-            # the caller didn't specify ams_mapping explicitly.
-            if ams_mapping is None and local_path and os.path.isfile(local_path):
-                auto_mapping = self._build_ams_mapping_from_3mf(
-                    local_path, plate_num,
+            # Auto-detect filament count from 3MF plate metadata when the
+            # caller didn't specify ams_mapping — or specified one too
+            # SHORT to address every filament the plate declares.
+            #
+            # The short case is the one that bit: callers upstream
+            # auto-route to a single tray before they know the file
+            # (``_resolve_use_ams`` picks one loaded tray), and a
+            # one-entry mapping on a three-filament plate leaves
+            # filaments 2 and 3 pointing at nothing — every color after
+            # the first prints from whatever is in the mapped tray.  A
+            # mapping that cannot cover the plate is not a choice to
+            # respect, so the plate's own mapping supersedes it; an
+            # explicit mapping long enough to address every filament is
+            # left exactly as the caller gave it.
+            if local_path and os.path.isfile(local_path):
+                declared = self.filament_count_3mf(local_path, plate_num)
+                too_short = (
+                    ams_mapping is not None
+                    and declared is not None
+                    and len(ams_mapping) < declared
                 )
-                if auto_mapping is not None:
-                    ams_mapping = auto_mapping
-                    use_ams = True
-                    logger.info(
-                        "Auto-detected multi-material in plate %d — "
-                        "setting use_ams=True, ams_mapping=%s",
-                        plate_num,
-                        ams_mapping,
+                if ams_mapping is None or too_short:
+                    auto_mapping = self._build_ams_mapping_from_3mf(
+                        local_path, plate_num,
                     )
+                    if auto_mapping is not None:
+                        if too_short:
+                            logger.warning(
+                                "Plate %d declares %d filaments but the "
+                                "supplied ams_mapping %s covers %d — using "
+                                "the plate's own mapping %s so every color "
+                                "reaches its tray.",
+                                plate_num, declared, ams_mapping,
+                                len(ams_mapping), auto_mapping,
+                            )
+                            warnings.append(
+                                f"This plate uses {declared} filaments; the "
+                                f"requested AMS mapping covered only "
+                                f"{len(ams_mapping)}. Routed with the file's "
+                                f"own mapping {auto_mapping} — pass an "
+                                f"ams_mapping with {declared} entries to "
+                                f"choose the trays yourself."
+                            )
+                        ams_mapping = auto_mapping
+                        use_ams = True
+                        logger.info(
+                            "Auto-detected multi-material in plate %d — "
+                            "setting use_ams=True, ams_mapping=%s",
+                            plate_num,
+                            ams_mapping,
+                        )
 
             # Single-filament AMS auto-routing (defense in depth).
             #
