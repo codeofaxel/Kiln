@@ -32,7 +32,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   need in your own dimensions and your agent offers one, then builds
   it. No API key needed.
 
+- **Your logo rides into the CAD file.** Put an SVG on a generated product and
+  the STEP export carries it as real CAD geometry — same size and depth as the
+  print, letter counters and enclosed islands intact. Photo reliefs still
+  refuse honestly.
+
 ### Fixed
+
+- **An SVG logo no longer vanishes from the print.** On a keychain front or a
+  pen cup's inside floor, an SVG was quietly skipped and the piece printed
+  plain. It now carves as crisp outlines, sized to the face.
 
 - **Multicolor models properly print in all their colors, and much faster.** A
   model with several colors could come out in one. Now fixed. A hidden speed cap
