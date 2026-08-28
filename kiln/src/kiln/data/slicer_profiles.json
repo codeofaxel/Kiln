@@ -2230,7 +2230,7 @@
   "klipper_generic": {
     "display_name": "Generic Klipper Printer (Moonraker)",
     "slicer": "orcaslicer",
-    "notes": "Generic Klipper/Moonraker printer. Uses standard START_PRINT/END_PRINT macros. Adjust speeds and temps to match your hardware.",
+    "notes": "Generic Klipper/Moonraker printer. Uses standard START_PRINT/END_PRINT macros. Adjust speeds and temps to match your hardware. Temperatures in start_gcode are literal, not placeholders: PrusaSlicer and OrcaSlicer spell their template variables differently and Kiln passes G-code through untranslated, so a placeholder here fails to slice on one of them.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -2259,7 +2259,7 @@
       "retract_lift": "0.2",
       "bed_shape": "0x0,220x0,220x220,0x220",
       "max_print_height": "250",
-      "start_gcode": "START_PRINT EXTRUDER_TEMP={temperature} BED_TEMP={bed_temperature}",
+      "start_gcode": "START_PRINT EXTRUDER_TEMP=215 BED_TEMP=65",
       "end_gcode": "END_PRINT",
       "gcode_flavor": "klipper"
     },
