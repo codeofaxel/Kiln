@@ -34,6 +34,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Multicolor models properly print in all their colors, and much faster.** A
+  model with several colors could come out in one. Now fixed. A hidden speed cap
+  is gone too. Needs OrcaSlicer or BambuStudio installed; Kiln finds it on its
+  own.
+
 - **Decorations land on the face you actually look at.** Ask for a texture,
   logo, or engraving without saying where, and Kiln now picks the visible
   side — a tray gets its top, not its hidden underside. Name a face yourself
