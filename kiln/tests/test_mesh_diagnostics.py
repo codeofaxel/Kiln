@@ -59,6 +59,37 @@ def _write_sphere_stl(path: Path, *, subdivisions: int = 3) -> str:
     return str(path / "sphere.stl")
 
 
+def _write_box_3mf(path: Path) -> str:
+    """Write a clean, watertight cube as 3MF (12 triangles, 8 vertices)."""
+    mesh = trimesh.creation.box(extents=[10, 20, 30])
+    out = path / "cube.3mf"
+    mesh.export(str(out), file_type="3mf")
+    return str(out)
+
+
+def _write_open_3mf(path: Path) -> str:
+    """Write a 3MF with holes, so the defect path is exercised for real."""
+    mesh = trimesh.creation.icosphere(subdivisions=2)
+    mesh.vertices *= 10.0
+    keep = int(len(mesh.faces) * 0.8)
+    mesh.faces = mesh.faces[:keep]
+    mesh.remove_unreferenced_vertices()
+    out = path / "open.3mf"
+    mesh.export(str(out), file_type="3mf")
+    return str(out)
+
+
+def _write_two_object_3mf(path: Path) -> str:
+    """Write a 3MF holding TWO separate boxes — a multi-object plate."""
+    a = trimesh.creation.box(extents=[10, 10, 10])
+    b = trimesh.creation.box(extents=[10, 10, 10])
+    b.apply_translation([50, 0, 0])
+    scene = trimesh.Scene([a, b])
+    out = path / "plate.3mf"
+    scene.export(str(out), file_type="3mf")
+    return str(out)
+
+
 def _write_open_mesh_stl(path: Path) -> str:
     """Write a mesh with holes (remove some faces from a sphere)."""
     mesh = trimesh.creation.icosphere(subdivisions=2)
@@ -455,6 +486,43 @@ class TestFormatSupport:
         ply = _write_ply_file(tmp_dir)
         report = diagnose_mesh(ply)
         assert report.face_count > 0
+
+    def test_3mf_loads_and_diagnoses(self, tmp_dir):
+        """3MF is one of the two formats slicers primarily eat, and this
+        tool's advice is to run it BEFORE slicing — so refusing 3MF made
+        that advice unfollowable."""
+        path = _write_box_3mf(tmp_dir)
+        report = diagnose_mesh(path)
+        # A real diagnosis of a real box, not merely "it didn't raise":
+        # 12 triangles, watertight, no holes.
+        assert report.face_count == 12
+        assert report.vertex_count == 8
+        assert report.is_watertight is True
+        assert report.hole_count == 0
+        assert report.severity == "clean"
+
+    def test_3mf_defect_is_actually_detected(self, tmp_dir):
+        """The checkup must FIND the defect in a 3MF, not just open it.
+
+        A 3MF that opens cleanly and reports zero problems would be worse
+        than the old refusal — a green light on a broken plate.
+        """
+        path = _write_open_3mf(tmp_dir)
+        report = diagnose_mesh(path)
+        assert report.is_watertight is False
+        assert report.hole_count > 0
+        assert report.severity != "clean"
+
+    def test_multi_object_3mf_reads_as_one_body(self, tmp_dir):
+        """A plate holding two objects diagnoses as one body — the documented
+        reading, since the question is whether the PLATE is printable."""
+        path = _write_two_object_3mf(tmp_dir)
+        report = diagnose_mesh(path)
+        # Both boxes' triangles are present (12 each), and they surface as
+        # two disconnected fragments rather than one merged solid.
+        assert report.face_count == 24
+        assert report.component_count == 2
+        assert report.has_floating_fragments is True
 
 
 # ---------------------------------------------------------------------------

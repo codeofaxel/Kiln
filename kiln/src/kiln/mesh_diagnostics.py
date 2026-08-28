@@ -22,7 +22,17 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_SUPPORTED_EXTENSIONS = frozenset({".stl", ".obj", ".ply", ".off", ".glb", ".gltf"})
+# Every mesh container trimesh can hand back as a single body.  3MF belongs
+# here for a plain reason: this tool's own advice is to run it BEFORE slicing,
+# and 3MF is one of the two formats slicers primarily eat — so the checkup
+# refusing the file people are about to print was the one gap that made the
+# advice unfollowable.  A 3MF carrying several objects concatenates into one
+# body on load (``force="mesh"``), which is the right reading for diagnostics:
+# the question is whether the PLATE is printable, and a defect is a defect
+# whichever object on it holds the defect.
+_SUPPORTED_EXTENSIONS = frozenset(
+    {".stl", ".obj", ".ply", ".off", ".glb", ".gltf", ".3mf"}
+)
 
 # Degenerate face: area below this threshold (mm²) is considered zero-area.
 _DEGENERATE_AREA_THRESHOLD = 1e-10
@@ -770,7 +780,9 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
 
     Requires the ``trimesh`` package.
 
-    :param file_path: Path to a mesh file (STL, OBJ, PLY, OFF, GLB, GLTF).
+    :param file_path: Path to a mesh file (STL, 3MF, OBJ, PLY, OFF, GLB,
+        GLTF).  A multi-object 3MF is read as one body — see
+        :data:`_SUPPORTED_EXTENSIONS`.
     :returns: A :class:`MeshDiagnosticReport` with defects and recommendations.
     :raises ValueError: If the file cannot be loaded or has no geometry.
     :raises ImportError: If trimesh is not installed.
