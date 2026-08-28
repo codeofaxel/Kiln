@@ -947,3 +947,79 @@ class TestWhiteInkTransparency:
         assert sum(len(g) for g in white.groups) == sum(
             len(g) for g in dark.groups
         )
+
+
+class TestToContourGroups:
+    """Plain-data contours with resolved roles — the analytic consumers' door.
+
+    A B-rep emitter cannot use even-odd ``paths``: it needs each ring's
+    role decided.  The island case (a ring inside a hole is MATERIAL) is
+    the same shape that broke region-based painting on 2026-08-25.
+    """
+
+    NESTED = (
+        '<svg viewBox="0 0 100 100"><path fill-rule="evenodd" fill="#000" '
+        'd="M10 10 H90 V90 H10 Z M25 25 H75 V75 H25 Z '
+        'M40 40 H60 V60 H40 Z"/></svg>'
+    )
+
+    def test_nested_island_roles_and_order(self):
+        mark = parse_svg_to_mark(self.NESTED)
+        groups = mark.to_contour_groups()
+        assert groups is not None and len(groups) == 1
+        holes = [c["hole"] for c in groups[0]]
+        assert holes == [False, True, False]
+        # Ordered by nesting depth: outer is the largest ring.
+        areas = [
+            abs(_ring_area([tuple(p) for p in c["points"]]))
+            for c in groups[0]
+        ]
+        assert areas[0] > areas[1] > areas[2]
+
+    def test_disjoint_groups_stay_separate(self):
+        svg = (
+            '<svg viewBox="0 0 100 100">'
+            '<rect x="10" y="10" width="20" height="20" fill="#000"/>'
+            '<rect x="60" y="60" width="20" height="20" fill="#000"/>'
+            "</svg>"
+        )
+        groups = parse_svg_to_mark(svg).to_contour_groups()
+        assert groups is not None
+        assert all(
+            not c["hole"] for group in groups for c in group
+        )
+
+    def test_same_winding_overlap_unions(self):
+        """A glyph's crossing strokes (nonzero-fill intent) stay additive."""
+        svg = (
+            '<svg viewBox="0 0 100 100"><path fill="#000" '
+            'd="M10 40 H90 V60 H10 Z M40 10 H60 V90 H40 Z"/></svg>'
+        )
+        groups = parse_svg_to_mark(svg).to_contour_groups()
+        assert groups is not None
+        assert [c["hole"] for c in groups[0]] == [False, False]
+
+    def test_opposite_winding_partial_overlap_refuses(self):
+        """A hole crossing its outer boundary has no contour form — None."""
+        svg = (
+            '<svg viewBox="0 0 100 100"><path fill="#000" '
+            'd="M10 40 L90 40 L90 60 L10 60 Z '
+            'M40 90 L60 90 L60 10 L40 10 Z"/></svg>'
+        )
+        mark = parse_svg_to_mark(svg)
+        assert mark.to_contour_groups() is None
+
+    def test_empty_mark_returns_none(self):
+        assert MarkGeometry().to_contour_groups() is None
+
+    def test_prepare_svg_for_emboss_carries_contours(self, tmp_path):
+        from kiln.image_to_surface import prepare_svg_for_emboss
+
+        svg_path = tmp_path / "mark.svg"
+        svg_path.write_text(self.NESTED)
+        info = prepare_svg_for_emboss(str(svg_path), str(tmp_path))
+        groups = info.get("mark_contour_groups")
+        assert groups, "content_info must carry the resolved contours"
+        assert [c["hole"] for c in groups[0]] == [False, True, False]
+        # And the mesh rendering is untouched alongside it.
+        assert "polygon(points=" in info["openscad_polygons"]
