@@ -14,7 +14,6 @@ import logging
 import os
 import re
 import time
-import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -576,113 +575,26 @@ def _maybe_overlay_calibration(
 # kind reads as "not multicolor".
 # ---------------------------------------------------------------------------
 
-# Slicer-native painted-model attributes: BambuStudio/OrcaSlicer write
-# ``paint_color`` and PrusaSlicer writes ``slic3rpe:mmu_segmentation``
-# on <triangle> elements.
-_PAINT_ATTRIBUTE_MARKERS = (b"paint_color", b"mmu_segmentation")
-
-# Per-object extruder assignment in the slicer sidecars
-# (Metadata/model_settings.config for BambuStudio,
-# Metadata/Slic3r_PE_model.config for the PrusaSlicer family).
-_SIDECAR_EXTRUDER_RE = re.compile(rb'key="extruder"\s+value="(\d+)"')
-
-# Per-build-item extruder attribute in the model XML (PrusaSlicer also
-# reads/writes this form).
-_ITEM_EXTRUDER_RE = re.compile(rb'slic3rpe:extruder="(\d+)"')
-
-# One palette entry inside <m:colorgroup>.  The trailing whitespace
-# class keeps ``<m:colorgroup`` itself from matching.
-_COLORGROUP_COLOR_RE = re.compile(rb"<m:color\s")
-
 # A tool-select command at line start in G-code (``T0``, ``T1`` ...).
 # Word boundary so ``T1`` matches but a hypothetical ``T1x`` doesn't;
 # mid-line forms like ``M104 T0 S200`` are heater targeting, not tool
 # changes, and correctly don't match.
 _GCODE_TOOL_RE = re.compile(r"T(\d+)\b")
 
-_SIDECAR_CONFIG_NAMES = {
-    "metadata/model_settings.config",
-    "metadata/slic3r_pe_model.config",
-}
-
 
 def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
-    """Cheap structural scan: does this 3MF ask for more than one filament?
+    """Does this 3MF ask for more than one filament?
 
-    Detects both multicolor forms without a full model parse (mirrors the
-    byte-scan idiom in ``threemf_parser.object_display_colors``):
-
-    * **multi-object** — two-plus DISTINCT per-object extruder values in
-      the slicer sidecars or on ``slic3rpe:extruder`` build items;
-    * **painted single object** — two-plus distinct FILAMENTS referenced
-      by the painting channel (``paint_color`` / ``mmu_segmentation``
-      values decoded to their leaf states: a painting that references one
-      filament everywhere loses nothing when flattened, and state 0 — the
-      unpainted portion of a partially painted triangle — is the object's
-      base filament, so it counts) or a two-plus-color ``<m:colorgroup>``
-      palette in the model XML.  Distinct attribute STRINGS are not the
-      metric: sub-triangle painting multiplies split shapes without
-      touching a new filament, which made every correctly sliced painted
-      3MF warn that colors were lost, including on a profile that could
-      print them.
-
-    Returns an evidence dict when multicolor, else ``None``.  NEVER
-    raises: this feeds an advisory, so a corrupt archive, odd layout, or
-    any other trouble reads as "not multicolor" and slicing proceeds
-    untouched.
+    The detection itself lives with the format —
+    :func:`kiln.multicolor_3mf.detect_3mf_multicolor` — because the
+    slicing engine now acts on it (expanding filament presets on the
+    Orca dialect) and the engine cannot import from the tool layer.
+    This wrapper keeps the tool layer's advisory wiring and its tests
+    pointed at one name.
     """
-    try:
-        from kiln.threemf_parser import _decode_paint_states
+    from kiln.multicolor_3mf import detect_3mf_multicolor
 
-        extruders: set[int] = set()
-        paint_attribute: str | None = None
-        paint_filaments: set[int] = set()
-        palette_colors = 0
-        with zipfile.ZipFile(input_path) as zf:
-            for member in zf.namelist():
-                low = member.lower()
-                if low in _SIDECAR_CONFIG_NAMES:
-                    raw = zf.read(member)
-                    extruders.update(
-                        int(m) for m in _SIDECAR_EXTRUDER_RE.findall(raw)
-                    )
-                elif low.endswith(".model"):
-                    raw = zf.read(member)
-                    extruders.update(
-                        int(m) for m in _ITEM_EXTRUDER_RE.findall(raw)
-                    )
-                    for marker in _PAINT_ATTRIBUTE_MARKERS:
-                        values = set(
-                            re.findall(marker + b'="([^"]*)"', raw)
-                        )
-                        values.discard(b"")
-                        if not values:
-                            continue
-                        for value in values:
-                            decoded = _decode_paint_states(
-                                value.decode("ascii", errors="replace")
-                            )
-                            if decoded is None:
-                                continue  # malformed string = no evidence
-                            paint_filaments.update(decoded[0])
-                        if paint_filaments:
-                            paint_attribute = marker.decode()
-                        break
-                    palette_colors = max(
-                        palette_colors, len(_COLORGROUP_COLOR_RE.findall(raw)),
-                    )
-
-        evidence: dict[str, Any] = {}
-        if len(extruders) >= 2:
-            evidence["extruders"] = sorted(extruders)
-        if paint_attribute is not None and len(paint_filaments) >= 2:
-            evidence["paint_attribute"] = paint_attribute
-            evidence["paint_filaments"] = len(paint_filaments)
-        if palette_colors >= 2:
-            evidence["palette_colors"] = palette_colors
-        return evidence or None
-    except Exception:  # noqa: BLE001 — advisory only, never break slicing
-        return None
+    return detect_3mf_multicolor(input_path)
 
 
 def _profile_filament_slots(profile_path: str | None) -> int:
@@ -814,10 +726,12 @@ def _multicolor_flatten_advisory(
             )
         warning = (
             f"Multicolor flattened: this 3MF carries {carries}, but {lost}. "
-            "To keep the colors, slice this same 3MF in a multi-material "
-            "slicer (BambuStudio or OrcaSlicer with an AMS/multi-filament "
-            "printer profile) — the color-to-filament assignments are "
-            "already in the file — or rebuild the plate with the "
+            "Kiln keeps the colors automatically when it slices through an "
+            "OrcaSlicer or BambuStudio binary — the color-to-filament "
+            "assignments are already in the file.  Install one of those "
+            "slicers (or point slicer_path / KILN_SLICER_PATH at its "
+            "binary) and slice again; no slicer GUI involved.  "
+            "Alternatively, rebuild the plate with the "
             "multi_material_print tool to assign a material per part."
         )
         return block, warning

@@ -94,6 +94,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import shutil
 import struct
 import tempfile
@@ -1836,3 +1837,185 @@ def compose_painted_3mf(
             "keep their spec colors but slicers will not auto-paint them."
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Multicolor detection
+#
+# Lives here — with the writers whose output it recognises — so both the
+# slicing engine (kiln.slicer) and the tool surface (kiln.plugins.
+# slicer_tools) can ask "does this 3MF want more than one filament?"
+# without either importing from the other.  It used to be private to the
+# tool layer, which meant the engine could WARN about flattened colors
+# but never act on them.
+# ---------------------------------------------------------------------------
+
+#: Slicer-native painted-model attributes: BambuStudio/OrcaSlicer write
+#: ``paint_color`` and PrusaSlicer writes ``slic3rpe:mmu_segmentation``
+#: on <triangle> elements.
+_PAINT_ATTRIBUTE_MARKERS = (b"paint_color", b"mmu_segmentation")
+
+#: Per-object extruder assignment in the slicer sidecars
+#: (Metadata/model_settings.config for BambuStudio,
+#: Metadata/Slic3r_PE_model.config for the PrusaSlicer family).
+_SIDECAR_EXTRUDER_RE = re.compile(rb'key="extruder"\s+value="(\d+)"')
+
+#: Per-build-item extruder attribute in the model XML (PrusaSlicer also
+#: reads/writes this form).
+_ITEM_EXTRUDER_RE = re.compile(rb'slic3rpe:extruder="(\d+)"')
+
+#: One palette entry inside <m:colorgroup>, capturing its hex value so a
+#: consumer can put real colors on real filament slots.  The required
+#: ``color`` attribute is matched anywhere in the element, which is where
+#: both this module's writers and the slicers put it.
+_COLORGROUP_COLOR_RE = re.compile(rb'<m:color\s[^>]*?color="(#[0-9A-Fa-f]{6,8})"')
+
+_SIDECAR_CONFIG_NAMES = frozenset({
+    "metadata/model_settings.config",
+    "metadata/slic3r_pe_model.config",
+})
+
+
+def detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
+    """Cheap structural scan: does this 3MF ask for more than one filament?
+
+    Detects both multicolor forms without a full model parse (mirrors the
+    byte-scan idiom in ``threemf_parser.object_display_colors``):
+
+    * **multi-object** — two-plus DISTINCT per-object extruder values in
+      the slicer sidecars or on ``slic3rpe:extruder`` build items;
+    * **painted single object** — two-plus distinct FILAMENTS referenced
+      by the painting channel (``paint_color`` / ``mmu_segmentation``
+      values decoded to their leaf states: a painting that references one
+      filament everywhere loses nothing when flattened, and state 0 — the
+      unpainted portion of a partially painted triangle — is the object's
+      base filament, so it counts) or a two-plus-color ``<m:colorgroup>``
+      palette in the model XML.  Distinct attribute STRINGS are not the
+      metric: sub-triangle painting multiplies split shapes without
+      touching a new filament, which made every correctly sliced painted
+      3MF warn that colors were lost, including on a profile that could
+      print them.
+
+    Returns an evidence dict when multicolor, else ``None``.  Evidence
+    keys (each present only when its channel produced evidence):
+
+    * ``extruders`` — sorted distinct per-object extruder values;
+    * ``paint_attribute`` / ``paint_filaments`` — which painting channel
+      fired, and how many distinct filaments it references;
+    * ``palette_colors`` — ``<m:colorgroup>`` entry count;
+    * ``palette`` — the palette's hex values in model-XML order.  For
+      files this module writes, palette index ``i`` is filament ``i+1``
+      (:func:`compose_painted_3mf` maps palette index i to paint state
+      i+1), so this is the color-per-slot list a multi-filament slice
+      wants;
+    * ``filament_slots_needed`` — how many filament SLOTS a slicer must
+      offer so no reference dangles: the max over the highest extruder
+      value, the highest paint state (state k is "filament k"), and the
+      palette length, capped at :data:`PAINTED_STATE_MAX` (the shared
+      painting ceiling).  A max, not a count: paint states {1, 3} need
+      three slots even though only two are used.
+
+    NEVER raises: this feeds an advisory and a best-effort preset
+    expansion, so a corrupt archive, odd layout, or any other trouble
+    reads as "not multicolor" and slicing proceeds untouched.
+    """
+    try:
+        from kiln.threemf_parser import _decode_paint_states
+
+        extruders: set[int] = set()
+        paint_attribute: str | None = None
+        paint_states: set[int] = set()
+        palette: list[str] = []
+        with zipfile.ZipFile(input_path) as zf:
+            for member in zf.namelist():
+                low = member.lower()
+                if low in _SIDECAR_CONFIG_NAMES:
+                    raw = zf.read(member)
+                    extruders.update(
+                        int(m) for m in _SIDECAR_EXTRUDER_RE.findall(raw)
+                    )
+                elif low.endswith(".model"):
+                    raw = zf.read(member)
+                    extruders.update(
+                        int(m) for m in _ITEM_EXTRUDER_RE.findall(raw)
+                    )
+                    for marker in _PAINT_ATTRIBUTE_MARKERS:
+                        values = set(
+                            re.findall(marker + b'="([^"]*)"', raw)
+                        )
+                        values.discard(b"")
+                        if not values:
+                            continue
+                        for value in values:
+                            decoded = _decode_paint_states(
+                                value.decode("ascii", errors="replace")
+                            )
+                            if decoded is None:
+                                continue  # malformed string = no evidence
+                            paint_states.update(decoded[0])
+                        if paint_states:
+                            paint_attribute = marker.decode()
+                        break
+                    if len(palette) < 2:
+                        found = [
+                            m.decode("ascii")
+                            for m in _COLORGROUP_COLOR_RE.findall(raw)
+                        ]
+                        if len(found) > len(palette):
+                            palette = found
+
+        # Distinct FILAMENTS the painting references: state k ≥ 1 is
+        # filament k, and state 0 (unpainted) is the object's base
+        # filament, distinct from every painted one.
+        paint_filaments = len(paint_states)
+
+        evidence: dict[str, Any] = {}
+        if len(extruders) >= 2:
+            evidence["extruders"] = sorted(extruders)
+        if paint_attribute is not None and paint_filaments >= 2:
+            evidence["paint_attribute"] = paint_attribute
+            evidence["paint_filaments"] = paint_filaments
+        if len(palette) >= 2:
+            evidence["palette_colors"] = len(palette)
+        if not evidence:
+            return None
+
+        if palette:
+            evidence["palette"] = palette
+        slots = max(
+            max(extruders, default=0),
+            # State 0 is the BASE filament (slot 1); painted state k is
+            # filament k, so the highest state IS the slot count needed.
+            max(paint_states, default=0),
+            1 if 0 in paint_states else 0,
+            len(palette),
+        )
+        evidence["filament_slots_needed"] = min(slots, PAINTED_STATE_MAX)
+        return evidence
+    except Exception:  # noqa: BLE001 — advisory only, never break slicing
+        return None
+
+
+def multicolor_filament_colors(
+    evidence: dict[str, Any], slots: int,
+) -> list[str]:
+    """One display hex per filament slot, from *evidence*'s palette.
+
+    Slot ``i`` (0-based) takes palette entry ``i`` — the mapping
+    :func:`compose_painted_3mf` writes (palette index i ↔ paint state
+    i+1 ↔ filament i+1).  Slots past the palette fall back to the
+    deterministic painted-state palette ``kiln.threemf_parser`` renders
+    with, so every slot stays visually distinct.  Display metadata only:
+    a wrong hex never changes a toolpath.
+    """
+    palette = [c for c in (evidence.get("palette") or []) if c]
+    colors: list[str] = []
+    for i in range(max(slots, 0)):
+        if i < len(palette):
+            colors.append(palette[i])
+            continue
+        from kiln.threemf_parser import _PAINT_STATE_PALETTE
+
+        r, g, b = _PAINT_STATE_PALETTE[i % len(_PAINT_STATE_PALETTE)]
+        colors.append(f"#{r:02X}{g:02X}{b:02X}")
+    return colors
