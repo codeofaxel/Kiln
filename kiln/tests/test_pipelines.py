@@ -728,7 +728,7 @@ class TestResliceAndPrintPipeline:
         assert profile_steps[0].success is True
         assert "explicit" in profile_steps[0].message.lower()
 
-    @patch("kiln.server._registry")
+    @patch("kiln.server._resolve_adapter")
     @patch("kiln.gcode.scan_gcode_file")
     @patch("kiln.slicer.slice_file")
     @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini")
@@ -763,7 +763,7 @@ class TestResliceAndPrintPipeline:
         state.connected = True
         state.state.value = "idle"
         mock_adapter.get_state.return_value = state
-        mock_registry.get_adapter.return_value = mock_adapter
+        mock_registry.return_value = mock_adapter
 
         result = reslice_and_print(
             model_path="/tmp/model.stl",
@@ -784,7 +784,60 @@ class TestResliceAndPrintPipeline:
     @patch("kiln.gcode.scan_gcode_file")
     @patch("kiln.slicer.slice_file")
     @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/p.ini")
-    @patch("kiln.server._registry")
+    @patch("kiln.server._resolve_adapter")
+    def test_upload_resolves_adapter_through_shared_door(
+        self,
+        mock_resolve: MagicMock,
+        mock_profile: MagicMock,
+        mock_slice: MagicMock,
+        mock_gcode: MagicMock,
+    ) -> None:
+        """The upload step goes through kiln.server._resolve_adapter.
+
+        It used to reach for the raw registry global and call two
+        methods PrinterRegistry has never had; the AttributeError was
+        swallowed into "Upload failed", so every pipeline upload with a
+        registered printer failed — and the tests never noticed because
+        they mocked the registry into HAVING the fantasy methods.  This
+        test pins the real door and the name passed through it.
+        """
+        slice_result = MagicMock()
+        slice_result.output_path = "/tmp/out.gcode"
+        slice_result.message = "Sliced OK"
+        slice_result.slicer = "prusaslicer"
+        mock_slice.return_value = slice_result
+
+        gcode_result = MagicMock()
+        gcode_result.valid = True
+        gcode_result.commands = ["G28"]
+        gcode_result.blocked_commands = []
+        gcode_result.warnings = []
+        gcode_result.errors = []
+        mock_gcode.return_value = gcode_result
+
+        mock_adapter = MagicMock(spec=["upload_file", "get_state", "start_print"])
+        mock_adapter.upload_file.return_value = {"name": "out.gcode"}
+        state = MagicMock()
+        state.connected = True
+        state.state.value = "idle"
+        mock_adapter.get_state.return_value = state
+        mock_resolve.return_value = mock_adapter
+
+        result = reslice_and_print(
+            model_path="/tmp/model.stl",
+            printer_name="shop-x1",
+            printer_id="ender3",
+            overrides={"brim_width": "8"},
+            skip_validation=True,
+        )
+
+        assert result.success is True, [s.message for s in result.steps if not s.success]
+        mock_resolve.assert_called_with("shop-x1")
+
+    @patch("kiln.gcode.scan_gcode_file")
+    @patch("kiln.slicer.slice_file")
+    @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/p.ini")
+    @patch("kiln.server._resolve_adapter")
     def test_bambu_adapter_wraps_gcode_as_3mf(
         self,
         mock_registry: MagicMock,
@@ -815,7 +868,7 @@ class TestResliceAndPrintPipeline:
         state.connected = True
         state.state.value = "idle"
         mock_adapter.get_state.return_value = state
-        mock_registry.get_adapter.return_value = mock_adapter
+        mock_registry.return_value = mock_adapter
 
         result = reslice_and_print(
             model_path="/tmp/model.stl",
@@ -840,7 +893,7 @@ class TestResliceAndPrintPipeline:
         upload_step = [s for s in result.steps if s.name == "upload"][0]
         assert upload_step.data["wrapped_3mf"] is True
 
-    @patch("kiln.server._registry")
+    @patch("kiln.server._resolve_adapter")
     @patch("kiln.slicer.slice_file")
     def test_upload_failure_stops_pipeline(
         self,
@@ -857,7 +910,7 @@ class TestResliceAndPrintPipeline:
         # Setup adapter that fails on upload
         mock_adapter = MagicMock()
         mock_adapter.upload_file.side_effect = RuntimeError("Upload failed: connection timeout")
-        mock_registry.get_adapter.return_value = mock_adapter
+        mock_registry.return_value = mock_adapter
 
         result = reslice_and_print(
             model_path="/tmp/model.stl",
@@ -872,7 +925,7 @@ class TestResliceAndPrintPipeline:
         # Pipeline should stop — no preflight or start_print steps
         assert not any(s.name == "start_print" for s in result.steps)
 
-    @patch("kiln.server._registry")
+    @patch("kiln.server._resolve_adapter")
     @patch("kiln.slicer.slice_file")
     def test_printer_offline_at_preflight(
         self,
@@ -893,7 +946,7 @@ class TestResliceAndPrintPipeline:
         state.connected = False
         state.state.value = "offline"
         mock_adapter.get_state.return_value = state
-        mock_registry.get_adapter.return_value = mock_adapter
+        mock_registry.return_value = mock_adapter
 
         result = reslice_and_print(
             model_path="/tmp/model.stl",

@@ -56,6 +56,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   end to end: describe a part, get sliced G-code for your printer, warm-up
   included.
 
+- **Pipeline printing works with your registered printers again.** The
+  quick-print, reslice, calibrate, and benchmark pipelines all failed at the
+  upload step whenever a printer was registered — they looked the printer up
+  through an internal path that has never worked. They now use the same
+  printer lookup every other tool uses.
+
 
 - **An SVG logo no longer vanishes from the print.** On a keychain front or a
   pen cup's inside floor, an SVG was quietly skipped and the piece printed
