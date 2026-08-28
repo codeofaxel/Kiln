@@ -621,15 +621,24 @@ def find_named_face(stl_path: str, face_name: str) -> dict[str, Any]:
 
 
 def resolve_decoratable_face(
-    mesh_path: str, face_name: str | None = None
+    mesh_path: str, face_name: str | None = None, *, auto: str = "top_first"
 ) -> dict[str, Any]:
     """Resolve the face a decoration lands on — THE rule, stated once.
 
-    Auto selection (``face_name`` empty, None, or ``"auto"``) prefers the top
-    face and only falls back to the largest flat face when the mesh has no
-    top-facing geometry at all.  Bare largest-flat picked a tray's
-    UNDERSIDE — its biggest flat face — and carved where the user never
-    looks; a named face skips the preference entirely.
+    A named face always wins outright.  When nobody names one, *auto* says
+    which rule to apply, because "just decorate it" means two different
+    things depending on who is asking:
+
+    ``"top_first"`` (default) — prefer the top face, fall back to the
+    largest flat one only when the mesh has no top-facing geometry.  This
+    is what a user decorating an OBJECT means; bare largest-flat picked a
+    tray's UNDERSIDE, its biggest flat face, and carved where nobody looks.
+
+    ``"largest"`` — the biggest flat face, full stop.  This is what a
+    product BUILT AROUND a canvas means: a wedge nameplate's angled face
+    is its whole point and is the largest by area, while its literal top
+    is a millimetre-tall edge that cannot hold text.  Callers in that
+    position are not falling back to this rule, they are choosing it.
 
     Every consumer of "which face would the tool decorate?" must go
     through here: the decoration tools when they carve, and anything that
@@ -643,6 +652,12 @@ def resolve_decoratable_face(
     """
     if face_name and face_name != "auto":
         return find_named_face(mesh_path, face_name)
+    if auto == "largest":
+        return find_largest_flat_face(mesh_path)
+    if auto != "top_first":
+        raise ValueError(
+            f"Unknown auto rule {auto!r}; expected 'top_first' or 'largest'."
+        )
     try:
         return find_named_face(mesh_path, "top")
     except ValueError:

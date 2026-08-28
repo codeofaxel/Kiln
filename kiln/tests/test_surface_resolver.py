@@ -215,6 +215,32 @@ def test_auto_prefers_top_and_only_then_falls_back(tmp_path):
     assert face["area_mm2"] == pytest.approx(4800, abs=0.5)
 
 
+def test_auto_largest_is_a_choice_not_a_fallback(tmp_path):
+    # A product built around a canvas asks for the LARGEST face outright.
+    # A wedge nameplate is the case that proves it: its angled face is the
+    # whole product and the biggest by area, while its literal top is a
+    # sliver that cannot hold text.  Feeding such a product the top-first
+    # rule sized a line to 0.7mm and refused the make (measured 2026-08-27).
+    #
+    # Two upward-facing planes: a broad low canvas and a narrow high lip.
+    canvas = _upward_quad(0, 100, 0, 60, 2)
+    lip = _upward_quad(0, 100, 60, 61, 20)
+    path = _write_stl(tmp_path / "wedge.stl", canvas + lip)
+
+    largest = resolve_decoratable_face(path, auto="largest")
+    assert largest["area_mm2"] == pytest.approx(6000, abs=0.5)
+
+    # top_first applies the floor-vs-rim rule among top planes and takes
+    # the LOWER one, which here is the same broad canvas — the point is
+    # that the two rules are separately expressible, and that "largest"
+    # never consults the top preference at all.
+    top_first = resolve_decoratable_face(path, auto="top_first")
+    assert top_first["face_name"] == "top"
+
+    with pytest.raises(ValueError):
+        resolve_decoratable_face(path, auto="middle")
+
+
 def test_named_face_skips_the_top_preference(tmp_path):
     path = _tube(tmp_path)
     face = resolve_decoratable_face(path, "back")

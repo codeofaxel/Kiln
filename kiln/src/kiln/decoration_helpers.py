@@ -962,8 +962,9 @@ def emboss_text_on_face(
     (face-normal-aware rotation + auto-sizing) and
     :func:`kiln.emboss_generator.compile_embossed_model` (compile to
     STL).  Detects the target face via
-    :func:`kiln.surface_intelligence.resolve_decoratable_face` (named
-    when *face_name* is given, the top-preferring auto otherwise).
+    :func:`kiln.surface_intelligence.resolve_decoratable_face` — the named
+    face when *face_name* is given, otherwise the largest flat face (the
+    canvas the calling product built).
 
     :param body_stl: Path to the host STL the text gets applied to.
     :param text: The text to emboss/deboss.  Single line only.  For
@@ -1034,9 +1035,11 @@ def emboss_text_on_face(
             nozzle_diameter_mm=nozzle_diameter_mm,
         )
 
-    # 1. Detect target face — the shared door (named, or the top-preferring
-    # auto that every decoration entrance now walks).
-    face = resolve_decoratable_face(body_stl, face_name)
+    # 1. Detect target face.  Auto here means LARGEST, not top-first: the
+    # products calling this build a canvas and hand it over unnamed — a
+    # wedge nameplate's angled face is the whole product and is largest by
+    # area, while its literal top is a millimetre-tall edge.
+    face = resolve_decoratable_face(body_stl, face_name, auto="largest")
 
     # 2. Set up output paths
     if output_dir is None:
@@ -1226,7 +1229,7 @@ def emboss_text_lines_on_face(
     # per-line emboss call will target.
     from kiln.surface_intelligence import resolve_decoratable_face
 
-    face = resolve_decoratable_face(body_stl, face_name)
+    face = resolve_decoratable_face(body_stl, face_name, auto="largest")
 
     # All sizing decisions — measured glyph metrics, the 0.85 visual
     # margin, hierarchy ratios, elliptical-face inscribed fitting, and
@@ -1289,7 +1292,7 @@ def emboss_text_lines_on_face(
         # aspect-ratio decision uses the real face's geometry.
         from kiln.surface_intelligence import resolve_decoratable_face
 
-        resolved_face = resolve_decoratable_face(body_stl, face_name)
+        resolved_face = resolve_decoratable_face(body_stl, face_name, auto="largest")
         is_bottom_face = resolved_face.get("normal", [0, 0, 1])[2] < -0.9
         if is_bottom_face and output_dir:
             flip_decision = select_bottom_face_flip(
