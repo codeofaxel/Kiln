@@ -7,6 +7,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Your printer's own start-up routine, run automatically.** If your
+  Klipper printer (Voron, Creality K1/K2, QIDI, Sovol, and friends) has a
+  `PRINT_START` or `START_PRINT` routine set up — the one that heats the
+  chamber, levels the bed, and wipes the nozzle — Kiln now finds it by
+  asking the printer itself and uses it when slicing, with your exact
+  temperatures filled in. Requires kiln-pro; without it (or whenever the
+  routine can't be verified safe) Kiln keeps its built-in safe warm-up.
+  The result says which one was used.
+
+
 - **Four more QIDI printers.** The Plus 5, Max 4, Q2C and X-Smart 3. *Free tells
   you a material won't work on your machine; Kiln Pro tells you why, and what to
   run instead, plus more depth.* See https://kiln3d.com/pricing.

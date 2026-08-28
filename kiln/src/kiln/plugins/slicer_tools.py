@@ -1318,7 +1318,11 @@ class _SlicerToolsPlugin:
                 from kiln.printers import PrinterError
                 from kiln.registry import PrinterNotFoundError
                 from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
-                from kiln.slicer_profiles import profile_with_overrides, resolve_slicer_profile
+                from kiln.slicer_profiles import (
+                    profile_with_overrides,
+                    resolve_slicer_profile,
+                    start_gcode_override_from_printer,
+                )
 
                 effective_printer_id, effective_profile = _srv._resolve_slice_profile_context(
                     profile=profile,
@@ -1548,6 +1552,32 @@ class _SlicerToolsPlugin:
                         if k not in adhesion_overrides:  # don't override explicit user settings
                             adhesion_overrides[k] = v
 
+                # --- Printer's own start routine (kiln-pro handoff) ---
+                # When the registered machine's Klipper config defines a
+                # PRINT_START / START_PRINT macro whose parameters can be
+                # supplied safely, the start block becomes a call to that
+                # macro — its chamber heat, bed mesh and purge included —
+                # instead of the generic warm-up floor.  Free-tier no-op;
+                # declines (keeping the floor) on any doubt.  The Bambu
+                # block above already stated start_gcode explicitly, and a
+                # stated value outranks the handoff by contract.
+                start_handoff: str | None = None
+                try:
+                    _sg_adapter = _srv._resolve_adapter(printer_name)
+                except Exception:
+                    _sg_adapter = None
+                if _sg_adapter is not None:
+                    _sg_patch, _sg_reason = start_gcode_override_from_printer(
+                        _sg_adapter,
+                        effective_printer_id,
+                        {**parsed_overrides, **adhesion_overrides},
+                    )
+                    if _sg_patch:
+                        adhesion_overrides.update(_sg_patch)
+                        start_handoff = _sg_reason.removeprefix("handoff:")
+                    else:
+                        _logger.debug("start-gcode handoff declined: %s", _sg_reason)
+
                 # Re-resolve profile with adhesion overrides merged in.
                 # The printer-id path is the richer merge (bundled profile +
                 # overrides); the helper is the floor for everything else.
@@ -1759,6 +1789,10 @@ class _SlicerToolsPlugin:
                     resp["validation"] = validation_summary
                 if adhesion_rec:
                     resp["adhesion"] = adhesion_rec
+                if start_handoff:
+                    resp["start_gcode_source"] = (
+                        f"{start_handoff} — the printer's own start routine"
+                    )
                 if ams_routing is not None:
                     resp["ams_routing"] = ams_routing
                 if ams_routing_warnings:

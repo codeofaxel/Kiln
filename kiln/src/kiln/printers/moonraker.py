@@ -1676,6 +1676,37 @@ class MoonrakerAdapter(PrinterAdapter):
             return None
 
     # ------------------------------------------------------------------
+    # Klipper configuration
+    # ------------------------------------------------------------------
+
+    def get_printer_config(self) -> dict[str, Any] | None:
+        """Return the printer's parsed Klipper configuration sections.
+
+        Queries ``GET /printer/objects/query?configfile`` and returns the
+        ``configfile.config`` mapping — one entry per ``printer.cfg``
+        section, keyed by section header (``"extruder"``,
+        ``"gcode_macro START_PRINT"``, ...) with string values as written
+        in the file.  Multi-line values (macro ``gcode`` bodies) come back
+        as single strings containing newlines.
+
+        Unlike the discovery helpers above, a transport failure here
+        RAISES :class:`~kiln.printers.base.PrinterError` rather than
+        returning ``None``: callers that adapt their behavior to what the
+        printer's config contains need to distinguish "the printer says it
+        has no such section" from "the printer could not be asked".
+        Returns ``None`` only when Moonraker answered but exposed no
+        ``configfile`` object (some pre-release builds).
+        """
+        payload = self._get_json(
+            "/printer/objects/query",
+            params={"configfile": ""},
+        )
+        config = _safe_get(payload, "result", "status", "configfile", "config", default=None)
+        if not isinstance(config, dict):
+            return None
+        return config
+
+    # ------------------------------------------------------------------
     # PrinterAdapter -- bed mesh
     # ------------------------------------------------------------------
 

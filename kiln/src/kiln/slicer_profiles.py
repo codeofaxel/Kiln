@@ -444,6 +444,38 @@ def profile_with_overrides(
     return path
 
 
+def start_gcode_override_from_printer(
+    adapter: Any,
+    printer_id: str | None,
+    overrides: dict[str, str] | None,
+) -> tuple[dict[str, str] | None, str]:
+    """Ask kiln-pro for a start G-code that calls the printer's OWN macro.
+
+    The floor above (:func:`_ensure_start_temperatures`) guarantees a safe
+    minimum start; what it cannot supply is the machine's own warm-up —
+    the chamber heat, bed mesh and purge its Klipper config defines as a
+    ``PRINT_START`` / ``START_PRINT`` macro.  Kiln is connected to the
+    printer and can read that config; the logic that does so lives in
+    kiln-pro, and this is its one public seam.
+
+    Free-tier no-op: without kiln-pro installed this returns
+    ``(None, "kiln-pro-not-installed")`` and the floor stands.  A returned
+    patch is an ordinary ``start_gcode`` override — merged by the caller
+    into the overrides it was already resolving, where the floor's
+    "a stated start_gcode wins" rule makes the two mutually exclusive by
+    construction.  Never raises.
+    """
+    try:
+        from kiln_pro.bridge import pro_features
+    except Exception:
+        return None, "kiln-pro-not-installed"
+    try:
+        return pro_features.start_gcode_override(adapter, printer_id, overrides)
+    except Exception:
+        logger.debug("start-gcode handoff declined", exc_info=True)
+        return None, "handoff-error"
+
+
 def slicer_profile_to_dict(profile: SlicerProfile) -> dict[str, Any]:
     """Serialise a :class:`SlicerProfile` to a plain dict for MCP responses."""
     return {
