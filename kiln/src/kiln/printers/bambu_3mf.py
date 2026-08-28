@@ -861,6 +861,27 @@ _GCODE_FILAMENT_TYPE_RE = re.compile(
 )
 
 
+#: The generator stamp these slicers write into their G-code header.
+#: OrcaSlicer and BambuStudio share the fork; PrusaSlicer and the other
+#: Slic3r derivatives write their own names.  Read from the head of the
+#: file only — a body can mention anything in a comment.
+_BAMBU_DIALECT_GENERATORS = ("orcaslicer", "bambustudio", "bambu studio")
+
+_GCODE_HEAD_CHARS = 4096
+
+
+def _gcode_is_bambu_dialect(gcode_body: str) -> bool:
+    """Whether this G-code came from OrcaSlicer / BambuStudio.
+
+    Used to decide whether a PrusaSlicer-calibrated time correction
+    applies.  An unrecognised generator reads as NOT the Bambu dialect,
+    which keeps the historical behaviour for every gcode Kiln was
+    already wrapping.
+    """
+    head = gcode_body[:_GCODE_HEAD_CHARS].lower()
+    return any(name in head for name in _BAMBU_DIALECT_GENERATORS)
+
+
 def _declared_filaments_in_gcode(
     gcode_body: str,
 ) -> tuple[int, list[str], list[str]] | None:
@@ -1611,13 +1632,23 @@ def build_bambu_3mf(
     # printers with input shaping because it doesn't model their actual
     # acceleration profiles.  This corrects the M73 R (remaining time)
     # values so the printer LCD shows accurate time from the first second.
-    try:
-        from kiln.printer_intelligence import get_slicer_time_factor
+    #
+    # PrusaSlicer's estimate ONLY.  The correction is calibrated against
+    # that slicer's motion model (see get_slicer_time_factor), and Orca /
+    # BambuStudio are Bambu's own fork: they model the input shaping this
+    # factor exists to compensate for, so halving their number reports a
+    # print as taking half as long as it does.  Measured 2026-08-27 on one
+    # model through one profile — PrusaSlicer 2h19m, OrcaSlicer 1h52m —
+    # Orca already lands BELOW the uncorrected Prusa figure, which is the
+    # correction the factor was approximating.
+    if not _gcode_is_bambu_dialect(gcode_body):
+        try:
+            from kiln.printer_intelligence import get_slicer_time_factor
 
-        time_factor = get_slicer_time_factor("bambu_a1")
-        est_time_sec = max(60, int(est_time_sec * time_factor))
-    except ImportError:
-        pass
+            time_factor = get_slicer_time_factor("bambu_a1")
+            est_time_sec = max(60, int(est_time_sec * time_factor))
+        except ImportError:
+            pass
 
     est_minutes = max(1, est_time_sec // 60)
 
