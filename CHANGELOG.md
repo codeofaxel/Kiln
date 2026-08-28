@@ -39,6 +39,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Your calibrated print settings no longer vanish when Kiln adds a brim.**
+  When the auto-adhesion or per-printer speed logic adjusted a job, the
+  tuned values from your calibration profile (pressure advance, flow, and
+  friends) were silently dropped from the final slice — even though the
+  response said they were applied. They now survive every adjustment.
+
+
 - **An SVG logo no longer vanishes from the print.** On a keychain front or a
   pen cup's inside floor, an SVG was quietly skipped and the piece printed
   plain. It now carves as crisp outlines, sized to the face.

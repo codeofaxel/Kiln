@@ -855,3 +855,61 @@ class TestOverridesReachTheSlicer:
                 assert "end_gcode = " in body or "end_gcode =" in body, model
         finally:
             os.unlink(stl)
+
+
+class TestCalibrationSurvivesAdhesion:
+    """Calibration values must reach the profile the slicer actually gets.
+
+    ``slice_and_print`` resolves the profile twice: once with the Pro
+    calibration overrides, and again — REPLACING the first — whenever the
+    adhesion/speed path adds overrides of its own.  The second resolve
+    used to carry only its own keys, so the calibrated values silently
+    vanished from the final .ini while the response's ``calibration_used``
+    block still claimed they were applied.
+    """
+
+    @pytest.mark.skipif(not _slicer_available(), reason="no PrusaSlicer/OrcaSlicer installed")
+    def test_calibration_key_survives_final_reresolve(self, tmp_path: Path):
+        import kiln.slicer as _slicer
+        from kiln.plugins.slicer_tools import _SlicerToolsPlugin
+
+        tools = _register_plugin(_SlicerToolsPlugin)
+        stl = _make_box_stl(20.0, 20.0, 10.0)
+        seen: dict[str, Any] = {}
+        real_slice = _slicer.slice_file
+
+        def _spy(input_path, **kw):
+            seen["profile"] = kw.get("profile")
+            return real_slice(input_path, **kw)
+
+        def _fake_calibration(parsed, printer_id, *a, **kw):
+            merged = dict(parsed)
+            merged.setdefault("pressure_advance", "0.055")
+            return merged, {"applied": ["pressure_advance"]}
+
+        try:
+            with patch("kiln.server._check_auth", side_effect=_no_auth), \
+                    patch("kiln.server._PRINTER_TYPE", "prusalink"), \
+                    patch("kiln.server._PRINTER_MODEL", "ender3"), \
+                    patch(
+                        "kiln.plugins.slicer_tools._maybe_overlay_calibration",
+                        side_effect=_fake_calibration,
+                    ), \
+                    patch(
+                        "kiln.printer_intelligence.get_slicer_speed_overrides",
+                        return_value={"perimeter_speed": "55"},
+                    ), \
+                    patch("kiln.slicer.slice_file", side_effect=_spy):
+                tools["slice_and_print"](input_path=stl, skip_validation=True)
+
+            profile = seen.get("profile")
+            assert profile, "no profile reached the slicer"
+            body = Path(profile).read_text(encoding="utf-8")
+            # The adhesion/speed path fired...
+            assert "perimeter_speed = 55" in body, body[:400]
+            # ...and the calibration it used to erase is still there.
+            assert "pressure_advance = 0.055" in body, (
+                "calibration override missing from the final profile"
+            )
+        finally:
+            os.unlink(stl)

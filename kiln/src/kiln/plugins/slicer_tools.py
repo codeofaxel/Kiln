@@ -1561,16 +1561,28 @@ class _SlicerToolsPlugin:
                 # Bambu 3MF that assumes the opposite.  Wrong file, not
                 # untuned settings.
                 if adhesion_overrides:
+                    # Seeded with the calibration overrides, because this
+                    # re-resolve REPLACES the profile resolved above rather
+                    # than patching it: resolving from the bundled profile
+                    # with only adhesion_overrides silently dropped every
+                    # calibrated value (pressure_advance,
+                    # extrusion_multiplier, ...) whenever this block fired —
+                    # while the response's calibration_used block still
+                    # claimed they were applied.  Adhesion and the explicit
+                    # Bambu-wrap keys win any conflict; calibration only
+                    # fills the keys they did not set, same precedence it
+                    # had at the first resolve.
+                    final_overrides = {**parsed_overrides, **adhesion_overrides}
                     merged: str | None = None
                     if effective_printer_id:
                         try:
                             merged = resolve_slicer_profile(
-                                effective_printer_id, overrides=adhesion_overrides,
+                                effective_printer_id, overrides=final_overrides,
                             )
                         except Exception:
                             _logger.debug("Profile override injection failed", exc_info=True)
                     effective_profile = merged or profile_with_overrides(
-                        effective_profile, adhesion_overrides,
+                        effective_profile, final_overrides,
                     )
 
                 # --- Bed-fit safety gate (Layer 1) ---
