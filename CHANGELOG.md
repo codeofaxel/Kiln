@@ -20,6 +20,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   logo with a closed outline keeps its middle in the body color instead of
   flooding solid.
 
+- **Give each carved decoration its own color.** A model with more than one
+  carved mark — a name and a title, a logo and a border — can now take a
+  different color per decoration in a single painted model, ready for a
+  multi-filament printer. Name the ones you want colored and the rest stay in
+  the body color.
+
 - **Ask for a bracket, get a bracket.** Kiln ships 65 ready-made
   parametric parts — brackets, bins, stands, cases, hooks, jigs,
   clamps — and nothing could find them until now. Describe what you
@@ -51,6 +57,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **A decoration that didn't take is reported as a failure, and doesn't cost
   you one.** Kiln no longer returns an unchanged model as a success, and your
   free monthly decorations are only counted when one actually lands.
+
+- **Paint every decoration on a model, not just the last one.** Carving a
+  second decoration onto an already-decorated model no longer forgets the
+  first — painting carved faces now covers every decoration, not just the
+  latest. A two-line nameplate used to come out with one line colored, and
+  said it had succeeded.
 
 - **Printability grades stopped failing models that print fine.** Grades now
   follow what your printer actually does.
