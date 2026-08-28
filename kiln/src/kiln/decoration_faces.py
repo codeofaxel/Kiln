@@ -301,6 +301,16 @@ def compute_decoration_faces(
 
     :param original_mesh_path: The pre-carve mesh the boolean imported.
     :param decorated_mesh_path: The boolean's output mesh.
+    When the pre-carve mesh itself carries a valid face sidecar (it was
+    already decorated), the prior carve's faces are carried forward into
+    this result: preserved-verbatim prior faces are remapped by triangle
+    hash, and prior-carve geometry the new boolean merely re-triangulated
+    — new by hash but lying ON the prior decoration — is rescued by
+    distance.  Without the carry, only the LAST carve of a chain (a
+    two-line nameplate, a logo plus a border) survives in the final
+    record, and "paint everything I carved" paints half the plate while
+    reporting success.
+
     :param face_normal: Normal of the decorated face, when the caller
         knows it.  Enables the floors/walls split: decoration faces whose
         normal is near-(anti)parallel to it are floors (or emboss caps),
@@ -310,7 +320,10 @@ def compute_decoration_faces(
     :returns: ``{"face_indices": [...], "floor_indices": [...],
         "wall_indices": [...], "triangle_count": n, "stats": {...}}`` —
         indices address the decorated mesh's triangles in file order.
-        Raises on unreadable meshes; never mutates either file.
+        ``face_indices`` is the union of every carve in the chain; when
+        faces were carried forward, ``prior_decorations`` lists the
+        earlier steps.  Raises on unreadable meshes; never mutates either
+        file.
     """
     t0 = time.monotonic()
     original = load_mesh_triangles(original_mesh_path)
@@ -320,20 +333,38 @@ def compute_decoration_faces(
             f"empty mesh: original={len(original)} decorated={len(decorated)} triangles"
         )
 
-    original_keys = set(_triangle_keys(original, decimals))
+    original_keys = _triangle_keys(original, decimals)
+    original_key_set = set(original_keys)
     decorated_keys = _triangle_keys(decorated, decimals)
     new_idx = np.asarray(
-        [i for i, key in enumerate(decorated_keys) if key not in original_keys],
+        [i for i, key in enumerate(decorated_keys) if key not in original_key_set],
         dtype=np.int64,
     )
 
     if len(new_idx) == 0:
         face_indices = np.asarray([], dtype=np.int64)
-        distances = np.asarray([])
+        fragment_idx = np.asarray([], dtype=np.int64)
     else:
         centroids = decorated[new_idx].mean(axis=1)
         distances = _min_distance_to_mesh(centroids, original)
         face_indices = new_idx[distances > distance_eps]
+        fragment_idx = new_idx[distances <= distance_eps]
+
+    carried = _carry_forward_prior_faces(
+        original_mesh_path,
+        original,
+        original_keys,
+        decorated_keys,
+        decorated,
+        fragment_idx,
+        distance_eps=distance_eps,
+    )
+
+    own_count = int(len(face_indices))
+    if carried is not None and len(carried["face_indices"]):
+        face_indices = np.unique(
+            np.concatenate([face_indices, carried["face_indices"]])
+        )
 
     floor_indices: np.ndarray | None = None
     wall_indices: np.ndarray | None = None
@@ -346,6 +377,17 @@ def compute_decoration_faces(
             floor_mask = dots >= _FLOOR_NORMAL_DOT
             floor_indices = face_indices[floor_mask]
             wall_indices = face_indices[~floor_mask]
+    if (
+        carried is not None
+        and len(carried["face_indices"])
+        and not carried["prior_had_split"]
+        and floor_indices is not None
+    ):
+        # The prior step recorded no floors/walls split, so a split here
+        # would silently omit the prior carve's floors from a "floors"
+        # paint — the half-paint bug one target deeper.  Omit it.
+        floor_indices = None
+        wall_indices = None
 
     result: dict[str, Any] = {
         "face_indices": face_indices.tolist(),
@@ -353,7 +395,10 @@ def compute_decoration_faces(
         "stats": {
             "original_triangles": int(len(original)),
             "new_by_hash": int(len(new_idx)),
-            "resurfaced_fragments": int(len(new_idx) - len(face_indices)),
+            "resurfaced_fragments": int(
+                len(new_idx) - own_count
+                - (carried["rescued_count"] if carried is not None else 0)
+            ),
             "decoration_area_mm2": round(
                 float(_triangle_areas(decorated[face_indices]).sum()), 3
             ) if len(face_indices) else 0.0,
@@ -361,10 +406,87 @@ def compute_decoration_faces(
             "compute_seconds": round(time.monotonic() - t0, 3),
         },
     }
+    if carried is not None:
+        result["stats"]["carried_forward"] = int(len(carried["face_indices"]))
+        result["stats"]["own_faces"] = own_count
+        result["prior_decorations"] = carried["prior_decorations"]
     if floor_indices is not None:
         result["floor_indices"] = floor_indices.tolist()
         result["wall_indices"] = wall_indices.tolist()
     return result
+
+
+def _carry_forward_prior_faces(
+    original_mesh_path: str,
+    original: np.ndarray,
+    original_keys: list[bytes],
+    decorated_keys: list[bytes],
+    decorated: np.ndarray,
+    fragment_idx: np.ndarray,
+    *,
+    distance_eps: float,
+) -> dict[str, Any] | None:
+    """Map an earlier carve's recorded faces into the newly carved mesh.
+
+    ``None`` when the pre-carve mesh has no valid sidecar (single-step
+    carve — the common case, zero extra work).  Otherwise a dict with the
+    prior faces addressed in the NEW mesh's index space:
+
+    - *Hash remap*: prior decoration triangles the new boolean preserved
+      verbatim match by the same geometric key the diff's hash pass uses.
+    - *Fragment rescue*: new-by-hash triangles that lie ON the pre-carve
+      surface were classified as re-triangulation fragments — but a
+      fragment within ``distance_eps`` of the PRIOR DECORATION's own
+      triangles is prior-carve geometry the boolean re-cut, not original
+      surface.  Without the rescue those faces vanish from both records.
+    """
+    prior, _err = load_decoration_faces(original_mesh_path)
+    if prior is None or not prior.get("face_indices"):
+        return None
+    prior_faces = np.asarray(prior["face_indices"], dtype=np.int64)
+    prior_faces = prior_faces[(prior_faces >= 0) & (prior_faces < len(original))]
+    if len(prior_faces) == 0:
+        return None
+
+    decorated_idx_by_key: dict[bytes, list[int]] = defaultdict(list)
+    for i, key in enumerate(decorated_keys):
+        decorated_idx_by_key[key].append(i)
+    remapped = [
+        j
+        for fi in prior_faces
+        for j in decorated_idx_by_key.get(original_keys[fi], ())
+    ]
+
+    rescued = np.asarray([], dtype=np.int64)
+    if len(fragment_idx):
+        frag_centroids = decorated[fragment_idx].mean(axis=1)
+        d_prior = _min_distance_to_mesh(frag_centroids, original[prior_faces])
+        rescued = fragment_idx[d_prior <= distance_eps]
+
+    carried = np.unique(
+        np.concatenate([np.asarray(remapped, dtype=np.int64), rescued])
+    )
+
+    # Per-step history: a prior record that was itself a chained carve
+    # already lists its steps; a single-step record contributes one.
+    prior_chain = prior.get("decorations")
+    if isinstance(prior_chain, list) and prior_chain:
+        prior_steps: list[dict[str, Any]] = list(prior_chain)
+    else:
+        prior_steps = [
+            {
+                "decoration": prior.get("decoration") or {},
+                "face_count": int(len(prior_faces)),
+                "recorded_unix": (prior.get("_meta") or {}).get("created_unix"),
+            }
+        ]
+
+    return {
+        "face_indices": carried,
+        "rescued_count": int(len(rescued)),
+        "prior_decorations": prior_steps,
+        "prior_had_split": isinstance(prior.get("floor_indices"), list),
+    }
 
 
 def record_decoration_faces(
@@ -411,6 +533,20 @@ def record_decoration_faces(
             "decoration": decoration or {},
             **computed,
         }
+        prior_steps = record.pop("prior_decorations", None)
+        if prior_steps:
+            # Chained carve: the record's faces span every step, and the
+            # history says which carves contributed.
+            record["decorations"] = [
+                *prior_steps,
+                {
+                    "decoration": decoration or {},
+                    "face_count": record["stats"].get(
+                        "own_faces", len(record["face_indices"])
+                    ),
+                    "recorded_unix": record["_meta"]["created_unix"],
+                },
+            ]
         sidecar = sidecar_path_for(decorated_mesh_path)
         tmp = sidecar + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
