@@ -299,8 +299,28 @@ class TestProOverlayBridging:
     def test_pla_50mm_exceeds_limit_warns_and_penalizes_score(self, tmp_path):
         """A 50 mm PLA bridge exceeds the reliable limit (30 mm) and
         sits in the marginal zone — Pro fires the curated warning AND
-        the score reflects the penalty (carve-out from the standard
-        max() cap)."""
+        the penalty reaches the user-facing score instead of being
+        capped away.
+
+        The carve-out is measured against the score the overlay would
+        have published WITHOUT the bridging finding — ``max(recomputed
+        raw, free baseline)``, the standard "Pro never worse than free"
+        cap — not against the free score itself.
+
+        It used to be measured against the free score, and that stopped
+        being meaningful on 2026-08-25.  Before then the overlay read
+        the raw ``max_overhang_angle``, which reports 90° for any part
+        with a ceiling anywhere, so this U-channel's flat roof was
+        double-counted: once as a 90° overhang (a 30-point severe
+        penalty) and again as a bridge.  That penalty, not the bridging
+        carve-out, was what pushed Pro below free.  ``free-air span and
+        angle`` (public) plus its paired overlay seam now judge a flat
+        deck in the SPAN domain only, so the phantom overhang penalty is
+        gone and Pro legitimately scores this part ABOVE the
+        material-blind free model — while still charging it for the
+        bridge.  Asserting ``enriched < original`` would now only pass
+        by reinstating the double-count.
+        """
         p = str(tmp_path / "pla_50.stl")
         _write_u_channel_stl(p, span_mm=50.0)
         r_pro = analyze_printability(p, material="pla")
@@ -311,13 +331,29 @@ class TestProOverlayBridging:
             if "too long for pla" in x.lower()
         ]
         assert bridge_warns, "Pro should warn on 50mm PLA bridge"
-        # Score carve-out: enriched_score < original_score (free baseline)
-        original = r_pro.enrichment["original_score"]
+
         enriched = r_pro.enrichment["enriched_score"]
-        assert enriched < original, (
-            f"Pro score should reflect bridging penalty; got original={original}, enriched={enriched}"
+        # What the overlay would have published with no bridging finding.
+        uncapped = max(
+            r_pro.enrichment["recomputed_raw"],
+            r_pro.enrichment["original_score"],
         )
-        assert r_pro.enrichment["score_delta"] < 0
+        assert enriched < uncapped, (
+            "bridging penalty was capped away instead of reaching the "
+            f"user-facing score; uncapped={uncapped}, enriched={enriched}"
+        )
+
+        # And the charge is attributable to the bridge specifically: an
+        # otherwise-identical part whose span is inside the PLA limit
+        # keeps the points this one loses.
+        q = str(tmp_path / "pla_30.stl")
+        _write_u_channel_stl(q, span_mm=30.0)
+        compliant = analyze_printability(q, material="pla")
+        assert compliant.enrichment is not None
+        assert enriched < compliant.enrichment["enriched_score"], (
+            "a 50mm bridge should score below an otherwise-identical 30mm "
+            f"one; got {enriched} vs {compliant.enrichment['enriched_score']}"
+        )
 
     @_pro_overlay_required
     def test_petg_25mm_within_dry_reliable_limit_no_warning(self, tmp_path):
