@@ -160,6 +160,64 @@ class MarkGeometry:
             return f"offset(delta={eps:.4f}) union() {{\n    {body}\n}}"
         return f"union() {{\n    {body}\n}}"
 
+    def to_contour_groups(self) -> list[list[dict]] | None:
+        """The mark as plain-data contours with RESOLVED hole/island roles.
+
+        For consumers that rebuild the mark as explicit boolean geometry
+        (an analytic CAD kernel, a clipper library) rather than rendering
+        it through OpenSCAD's even-odd ``polygon(paths=...)``.  One inner
+        list per group, mirroring :meth:`to_scad`'s union-of-groups; each
+        entry is ``{"points": [[x, y], ...], "hole": bool}``, ordered by
+        nesting depth so applying them in sequence — add the ring when
+        ``hole`` is False, subtract when True — reproduces the group's
+        even-odd fill exactly: outer contour minus its counters, with an
+        enclosed island (a ring inside a hole) coming back as material.
+
+        A partial overlap between SAME-winding rings is a filled-stroke
+        crossing (a glyph's stem meeting its diagonal): SVG's nonzero
+        fill renders it solid, so both rings stay additive and their
+        union is the intent.  Returns ``None`` only when OPPOSITE-winding
+        rings partially overlap — a hole crossing its own outer boundary
+        — which neither nonzero fill nor nested contours can express
+        coherently.  Disjoint and strictly nested rings — every real
+        logo, wordmark, counter and island — resolve normally.
+        """
+        out_groups: list[list[dict]] = []
+        for rings in self.groups:
+            rings = [r for r in rings if len(r) >= 3]
+            if not rings:
+                continue
+            signed = [_ring_area(r) for r in rings]
+            areas = [abs(a) for a in signed]
+            n = len(rings)
+            depths = [0] * n
+            for i in range(n):
+                for j in range(n):
+                    if i == j or areas[j] < areas[i]:
+                        continue
+                    if areas[j] == areas[i] and j < i:
+                        continue  # equal-area pairs examined once
+                    rel = _ring_containment(rings[i], rings[j])
+                    if rel == "partial":
+                        if signed[i] * signed[j] < 0:
+                            return None
+                        continue  # same winding: union — both stay additive
+                    if rel == "inside" and areas[j] > areas[i]:
+                        depths[i] += 1
+            order = sorted(range(n), key=lambda k: depths[k])
+            out_groups.append(
+                [
+                    {
+                        "points": [
+                            [round(x, 4), round(y, 4)] for x, y in rings[k]
+                        ],
+                        "hole": depths[k] % 2 == 1,
+                    }
+                    for k in order
+                ]
+            )
+        return out_groups or None
+
 
 def _finalize(
     groups: list[list[Ring]], *, min_ring_area: float | None = None
@@ -212,6 +270,50 @@ def _ring_area(ring: Ring) -> float:
         x2, y2 = ring[(i + 1) % n]
         a += x1 * y2 - x2 * y1
     return a / 2
+
+
+def _point_in_ring(x: float, y: float, ring: Ring) -> bool:
+    """Even-odd ray cast — is (x, y) inside *ring*?"""
+    inside = False
+    n = len(ring)
+    for i in range(n):
+        x1, y1 = ring[i]
+        x2, y2 = ring[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            xt = x1 + (y - y1) / (y2 - y1) * (x2 - x1)
+            if x < xt:
+                inside = not inside
+    return inside
+
+
+def _ring_containment(inner: Ring, outer: Ring) -> str:
+    """``"inside"`` / ``"outside"`` / ``"partial"`` — *inner* vs *outer*.
+
+    Samples edge MIDPOINTS of *inner* (a shared vertex between tangent
+    contours sits exactly on the other ring's boundary, where a ray cast
+    is ambiguous; a midpoint generically does not).  All-in is nested,
+    all-out is disjoint, a genuine mix is a partial overlap — which
+    even-odd XORs and nested contours cannot express.  One or two
+    ambiguous samples out of many are tolerated as tangency noise.
+    """
+    n = len(inner)
+    step = max(1, n // 9)
+    hits = 0
+    total = 0
+    for i in range(0, n, step):
+        x1, y1 = inner[i]
+        x2, y2 = inner[(i + 1) % n]
+        if _point_in_ring((x1 + x2) / 2, (y1 + y2) / 2, outer):
+            hits += 1
+        total += 1
+    if total == 0:
+        return "outside"
+    frac = hits / total
+    if frac >= 0.8:
+        return "inside"
+    if frac <= 0.2:
+        return "outside"
+    return "partial"
 
 
 # ---------------------------------------------------------------------------

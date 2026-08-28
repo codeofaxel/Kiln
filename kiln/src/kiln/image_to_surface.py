@@ -1125,7 +1125,7 @@ def prepare_logo_image_for_emboss(
     mark = trace_image_to_mark(image_path, max_dim=max_dim)
     if mark is None or mark.is_empty:
         raise ValueError(f"No traceable mark found in image: {image_path}")
-    return {
+    result = {
         "type": "svg",
         # Provenance only — the polygons below carry all the geometry.
         "svg_path": os.path.abspath(image_path),
@@ -1138,6 +1138,13 @@ def prepare_logo_image_for_emboss(
         **mark.content_bounds_info(),
         "traced_from_raster": True,
     }
+    # Resolved-role contours for analytic consumers (B-rep emitters) —
+    # same mark, plain data; absent when the ring structure only has an
+    # even-odd rendering (partial overlaps).
+    contour_groups = mark.to_contour_groups()
+    if contour_groups:
+        result["mark_contour_groups"] = contour_groups
+    return result
 
 
 def _convert_strokes_to_fills(svg_content: str, min_stroke_width: float = 0.0) -> str:
@@ -1491,7 +1498,7 @@ def prepare_svg_for_emboss(svg_path: str, output_dir: str, *, min_physical_width
         _logger.warning("SVG mark parse crashed — using legacy path", exc_info=True)
         mark = None
     if mark is not None and not mark.is_empty:
-        return {
+        result = {
             "type": "svg",
             "svg_path": abs_path,
             "width": width,
@@ -1504,6 +1511,12 @@ def prepare_svg_for_emboss(svg_path: str, output_dir: str, *, min_physical_width
             "openscad_polygons_fill_safe": False,
             **mark.content_bounds_info(),
         }
+        # Resolved-role contours for analytic consumers (B-rep emitters);
+        # absent when the ring structure only has an even-odd rendering.
+        contour_groups = mark.to_contour_groups()
+        if contour_groups:
+            result["mark_contour_groups"] = contour_groups
+        return result
 
     # Convert strokes to fills for OpenSCAD compatibility
     has_strokes = "<line" in content or "stroke" in content
