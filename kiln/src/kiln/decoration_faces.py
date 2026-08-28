@@ -361,6 +361,7 @@ def compute_decoration_faces(
     )
 
     own_count = int(len(face_indices))
+    own_face_indices = face_indices
     if carried is not None and len(carried["face_indices"]):
         face_indices = np.unique(
             np.concatenate([face_indices, carried["face_indices"]])
@@ -410,6 +411,7 @@ def compute_decoration_faces(
         result["stats"]["carried_forward"] = int(len(carried["face_indices"]))
         result["stats"]["own_faces"] = own_count
         result["prior_decorations"] = carried["prior_decorations"]
+        result["own_face_indices"] = own_face_indices.tolist()
     if floor_indices is not None:
         result["floor_indices"] = floor_indices.tolist()
         result["wall_indices"] = wall_indices.tolist()
@@ -451,35 +453,87 @@ def _carry_forward_prior_faces(
     decorated_idx_by_key: dict[bytes, list[int]] = defaultdict(list)
     for i, key in enumerate(decorated_keys):
         decorated_idx_by_key[key].append(i)
-    remapped = [
-        j
-        for fi in prior_faces
-        for j in decorated_idx_by_key.get(original_keys[fi], ())
-    ]
+
+    def _remap(indices: np.ndarray) -> np.ndarray:
+        return np.asarray(
+            [
+                j
+                for fi in indices
+                for j in decorated_idx_by_key.get(original_keys[fi], ())
+            ],
+            dtype=np.int64,
+        )
+
+    # Per-step history: a prior record that was itself a chained carve
+    # lists its steps (each with its own face set); a single-step record
+    # contributes one.  Steps without per-step faces (older chained
+    # records) collapse into a single step over the prior union.
+    prior_chain = prior.get("decorations")
+    if (
+        isinstance(prior_chain, list)
+        and prior_chain
+        and all(isinstance(s.get("face_indices"), list) for s in prior_chain)
+    ):
+        step_sources = [
+            (
+                s,
+                np.asarray(s["face_indices"], dtype=np.int64),
+            )
+            for s in prior_chain
+        ]
+    else:
+        step_sources = [
+            (
+                {
+                    "decoration": prior.get("decoration") or {},
+                    "recorded_unix": (prior.get("_meta") or {}).get(
+                        "created_unix"
+                    ),
+                },
+                prior_faces,
+            )
+        ]
 
     rescued = np.asarray([], dtype=np.int64)
+    rescue_step = np.asarray([], dtype=np.int64)
     if len(fragment_idx):
         frag_centroids = decorated[fragment_idx].mean(axis=1)
         d_prior = _min_distance_to_mesh(frag_centroids, original[prior_faces])
         rescued = fragment_idx[d_prior <= distance_eps]
+        if len(rescued):
+            # Attribute each rescued fragment to the nearest prior step.
+            per_step = np.stack(
+                [
+                    _min_distance_to_mesh(
+                        decorated[rescued].mean(axis=1), original[src]
+                    )
+                    for _meta, src in step_sources
+                ]
+            )
+            rescue_step = per_step.argmin(axis=0)
 
-    carried = np.unique(
-        np.concatenate([np.asarray(remapped, dtype=np.int64), rescued])
-    )
-
-    # Per-step history: a prior record that was itself a chained carve
-    # already lists its steps; a single-step record contributes one.
-    prior_chain = prior.get("decorations")
-    if isinstance(prior_chain, list) and prior_chain:
-        prior_steps: list[dict[str, Any]] = list(prior_chain)
-    else:
-        prior_steps = [
+    prior_steps: list[dict[str, Any]] = []
+    carried_sets: list[np.ndarray] = []
+    for si, (meta, src_faces) in enumerate(step_sources):
+        step_faces = _remap(src_faces)
+        if len(rescued):
+            step_faces = np.concatenate([step_faces, rescued[rescue_step == si]])
+        step_faces = np.unique(step_faces)
+        carried_sets.append(step_faces)
+        prior_steps.append(
             {
-                "decoration": prior.get("decoration") or {},
-                "face_count": int(len(prior_faces)),
-                "recorded_unix": (prior.get("_meta") or {}).get("created_unix"),
+                "decoration": meta.get("decoration") or {},
+                "face_count": int(len(step_faces)),
+                "recorded_unix": meta.get("recorded_unix"),
+                "face_indices": step_faces.tolist(),
             }
-        ]
+        )
+
+    carried = (
+        np.unique(np.concatenate(carried_sets))
+        if carried_sets
+        else np.asarray([], dtype=np.int64)
+    )
 
     return {
         "face_indices": carried,
@@ -534,9 +588,12 @@ def record_decoration_faces(
             **computed,
         }
         prior_steps = record.pop("prior_decorations", None)
+        own_faces = record.pop("own_face_indices", None)
         if prior_steps:
             # Chained carve: the record's faces span every step, and the
-            # history says which carves contributed.
+            # history says which carves contributed — each step keeping
+            # its OWN face set (in this mesh's index space) so painting
+            # can give every decoration its own color.
             record["decorations"] = [
                 *prior_steps,
                 {
@@ -545,6 +602,11 @@ def record_decoration_faces(
                         "own_faces", len(record["face_indices"])
                     ),
                     "recorded_unix": record["_meta"]["created_unix"],
+                    "face_indices": (
+                        own_faces
+                        if own_faces is not None
+                        else record["face_indices"]
+                    ),
                 },
             ]
         sidecar = sidecar_path_for(decorated_mesh_path)
@@ -569,6 +631,7 @@ def record_paint_event(
     color: str,
     target: str,
     output_path: str,
+    step_colors: dict[int, str] | None = None,
 ) -> dict[str, Any] | None:
     """Record that the carve's faces were painted, in the same sidecar.
 
@@ -588,6 +651,8 @@ def record_paint_event(
     :param color: Hex color painted onto the carve faces.
     :param target: Which faces were painted (``all``/``floors``/``walls``).
     :param output_path: The painted 3MF that was produced.
+    :param step_colors: Per-decoration-step colors, when the paint gave
+        each step of a chained carve its own color.
     """
     try:
         record, err = load_decoration_faces(decorated_mesh_path)
@@ -602,6 +667,10 @@ def record_paint_event(
             "output": os.path.basename(output_path),
             "painted_at_unix": int(time.time()),
         }
+        if step_colors:
+            painted["step_colors"] = {
+                str(k): v for k, v in step_colors.items()
+            }
         if os.path.isfile(output_path):
             painted["output_sha256"] = mesh_sha256(output_path)
         record["painted"] = painted

@@ -578,3 +578,114 @@ class TestChainedCarves:
         # deeper — omit the split instead.
         assert "floor_indices" not in record
         assert "wall_indices" not in record
+
+    def test_chained_record_keeps_per_step_faces(self, carved_pair, chained_pair):
+        original, decorated, _ = carved_pair
+        _, decorated2, idx2 = chained_pair
+        record_decoration_faces(original, decorated)
+        record = record_decoration_faces(decorated, decorated2)
+        steps = record["decorations"]
+        step0 = set(steps[0]["face_indices"])
+        step1 = set(steps[1]["face_indices"])
+        # Step 0 owns the first carve's geometry — preserved AND re-cut.
+        assert set(idx2["kept_floor"]) <= step0
+        assert set(idx2["walls"]) <= step0
+        assert set(idx2["retri_floor"]) <= step0
+        # Step 1 owns the second carve's recess, and nothing of the first.
+        assert set(idx2["floor2"]) <= step1
+        assert set(idx2["walls2"]) <= step1
+        assert not step0 & step1
+        # The union is exactly the record's face set.
+        assert step0 | step1 == set(record["face_indices"])
+
+
+class TestStepColors:
+    def _chained_record(self, carved_pair, chained_pair):
+        original, decorated, _ = carved_pair
+        _, decorated2, idx2 = chained_pair
+        record_decoration_faces(original, decorated, decoration={"text": "ring"})
+        record = record_decoration_faces(
+            decorated, decorated2, decoration={"text": "recess"}
+        )
+        return decorated2, idx2, record
+
+    def test_each_step_painted_its_own_color(self, carved_pair, chained_pair, tmp_path):
+        decorated2, _idx2, record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2,
+            step_colors={"0": "#F72323", "1": "#FFFFFF"},
+            base_color="#161616",
+            output_path=str(tmp_path / "two_tone.3mf"),
+        )
+        assert result["success"] is True, result.get("error")
+        assert result["painted_triangles"] == len(record["face_indices"])
+        assert "#F72323" in result["colors"]
+        assert "#FFFFFF" in result["colors"]
+        listing = result["decorations"]
+        assert [s["color"] for s in listing] == ["#F72323", "#FFFFFF"]
+        assert listing[0]["decoration"] == {"text": "ring"}
+
+    def test_unnamed_steps_stay_base(self, carved_pair, chained_pair, tmp_path):
+        decorated2, _idx2, record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2,
+            step_colors={1: "#FFFFFF"},
+            output_path=str(tmp_path / "one_step.3mf"),
+        )
+        assert result["success"] is True, result.get("error")
+        step1 = record["decorations"][1]["face_indices"]
+        assert result["painted_triangles"] == len(step1)
+        assert result["decorations"][0]["color"] is None
+
+    def test_bad_step_index_lists_the_steps(self, carved_pair, chained_pair):
+        decorated2, _idx2, _record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2, step_colors={"7": "#FFFFFF"}
+        )
+        assert result["success"] is False
+        assert "2 decoration steps" in result["error"]
+        assert len(result["decorations"]) == 2
+
+    def test_step_colors_with_floors_target_refused(self, carved_pair, chained_pair):
+        decorated2, _idx2, _record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2,
+            target="floors",
+            step_colors={"0": "#FFFFFF"},
+        )
+        assert result["success"] is False
+        assert "floors/walls" in result["error"]
+
+    def test_bad_hex_refused(self, carved_pair, chained_pair):
+        decorated2, _idx2, _record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2, step_colors={"0": "red"}
+        )
+        assert result["success"] is False
+        assert "#RRGGBB" in result["error"]
+
+    def test_single_step_record_is_step_zero(self, carved_pair, tmp_path):
+        original, decorated, idx = carved_pair
+        record_decoration_faces(original, decorated)
+        result = _call_paint_tool(
+            model_path=decorated,
+            step_colors={"0": "#FFFFFF"},
+            output_path=str(tmp_path / "single.3mf"),
+        )
+        assert result["success"] is True, result.get("error")
+        assert result["painted_triangles"] == len(idx["floor"]) + len(idx["walls"])
+        assert len(result["decorations"]) == 1
+
+    def test_paint_event_records_step_colors(self, carved_pair, chained_pair, tmp_path):
+        decorated2, _idx2, _record = self._chained_record(carved_pair, chained_pair)
+        result = _call_paint_tool(
+            model_path=decorated2,
+            step_colors={"0": "#F72323", "1": "#FFFFFF"},
+            output_path=str(tmp_path / "recorded.3mf"),
+        )
+        assert result["success"] is True
+        updated, err = load_decoration_faces(decorated2)
+        assert err is None
+        assert updated["painted"]["step_colors"] == {
+            "0": "#F72323", "1": "#FFFFFF",
+        }
