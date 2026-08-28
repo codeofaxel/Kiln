@@ -39,6 +39,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **"Design this and print it" now actually prints it.** The one-call
+  design-to-G-code pipeline died quietly at three separate steps — template
+  values were never filled in, the 3D file was built through a function that
+  didn't exist, and the slicer was called through another one. It now runs
+  end to end: describe a part, get sliced G-code for your printer, warm-up
+  included.
+
+
 - **An SVG logo no longer vanishes from the print.** On a keychain front or a
   pen cup's inside floor, an SVG was quietly skipped and the piece printed
   plain. It now carves as crisp outlines, sized to the face.
