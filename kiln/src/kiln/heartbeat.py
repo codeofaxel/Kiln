@@ -540,11 +540,12 @@ def _send_heartbeat() -> None:
                 # that says whether the CLI, the local MCP server, or
                 # neither is what people actually run.  sessions is
                 # {surface: process starts}; events is
-                # {surface: {event_type: count}}.  Both use the closed
-                # vocabulary in kiln/surface.py plus "unknown" for a
-                # process that never declared a door; the dashboard
-                # must read absence (old clients) as unknown too, never
-                # as one of the real surfaces.
+                # {surface: {event_type: count}}.  Keys come from
+                # kiln/surface.py — the declared doors plus "unknown"
+                # for a process that never declared one; the dashboard
+                # whitelists what it renders and must read absence
+                # (old clients) as unknown too, never as a real
+                # surface.
                 "surface_sessions": stats.get("surface_sessions", {}),
                 "surface_events": stats.get("surface_events", {}),
                 # Model names of EVERY registered printer (deduped,

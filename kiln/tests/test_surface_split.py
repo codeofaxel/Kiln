@@ -40,6 +40,7 @@ def pipeline(tmp_path, monkeypatch):
     monkeypatch.setattr(heartbeat, "_sent_on", None)
     monkeypatch.setattr(heartbeat, "_LAST_BEAT_PATH", tmp_path / ".last_heartbeat")
     _FakeDate._today = real_date(2026, 8, 27)
+    monkeypatch.delenv("KILN_SURFACE", raising=False)
     surface.reset_surface()
 
     sent: list[dict] = []
@@ -83,8 +84,29 @@ def test_kiln_serve_ends_up_mcp_not_cli(pipeline):
 
 def test_garbage_declaration_is_dropped_not_raised(pipeline):
     surface.set_surface("cli")
-    surface.set_surface("desktop-app-v2")  # not in the closed vocabulary
+    surface.set_surface("/tmp/pp-fuzz")   # not a surface token
+    surface.set_surface("Web Browser!")   # shape matters
+    surface.set_surface("unknown")        # the absence, not a door
     assert surface.get_surface() == "cli"
+
+
+def test_an_embedding_launcher_can_declare_its_own_door(pipeline):
+    """Acceptance is by shape, not a closed set: a launcher that embeds
+    Kiln declares a door this file has never heard of, and the token is
+    carried as-is rather than collapsed into "unknown".  The dashboard
+    whitelists what it renders, so junk can't mint a row there."""
+    surface.set_surface("kiosk")
+    assert surface.get_surface() == "kiosk"
+
+
+def test_env_override_outranks_the_entry_point(pipeline, monkeypatch):
+    """A launcher that spawns `kiln serve` as a child knows the child's
+    real door better than the child's own entry point does."""
+    surface.set_surface("mcp")
+    monkeypatch.setenv("KILN_SURFACE", "kiosk")
+    assert surface.get_surface() == "kiosk"
+    monkeypatch.setenv("KILN_SURFACE", "Not A Token")
+    assert surface.get_surface() == "mcp"
 
 
 # ---------------------------------------------------------------------------
@@ -195,5 +217,5 @@ def test_vocabulary_matches_the_kiln_pro_side(pipeline):
     """The shared words must mean the same doors on both sides.  kiln-pro's
     presence vocabulary owns "web"; this repo never sets it but must not
     invent a different spelling for the same surface."""
-    assert surface.SURFACES == frozenset({"cli", "mcp", "web"})
+    assert surface.KNOWN_SURFACES == frozenset({"cli", "mcp", "web"})
     assert surface.UNKNOWN == "unknown"
