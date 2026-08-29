@@ -327,6 +327,23 @@ class PlacementAnalysis:
 
     faults: list[PlacementFault] = field(default_factory=list)
 
+    #: The verdict this part would have received if it were placed
+    #: correctly -- score, grade and printable flag as they stood before
+    #: the floor clamped them.
+    #:
+    #: Without these a reader cannot tell a badly SHAPED part from one
+    #: that is merely in the wrong PLACE: the floor writes both outcomes
+    #: into the same ``score``, ``grade`` and ``printable``.  That
+    #: conflation is not academic -- a caller deciding what to say to the
+    #: user needs to know whether moving the part onto the plate would
+    #: end the problem, and the clamped fields cannot answer it.
+    #:
+    #: ``None`` on a report built before this block existed.  Equal to
+    #: the clamped values when there are no faults.
+    score_if_placed: int | None = None
+    grade_if_placed: str | None = None
+    printable_if_placed: bool | None = None
+
     @property
     def fault_names(self) -> list[str]:
         """Fault names, worst first.  Empty when the part sits fine."""
@@ -4228,6 +4245,10 @@ def analyze_printability(
     # The validation pipeline's bundle-sourced path calls this same
     # helper, so a report read from a bundle cannot reach a different
     # placement verdict than one analyzed here.
+    # Read before the clamp: this is the verdict on the part's SHAPE,
+    # which the floor is about to overwrite with a verdict on its shape
+    # AND its placement.  Recomputing it afterwards is impossible.
+    score_if_placed = score
     score, grade, printable, placement_faults = _apply_placement_check(
         score,
         recommendations,
@@ -4242,6 +4263,9 @@ def analyze_printability(
         faults=_placement_fault_records(
             bbox, build_volume=build_volume, printer_id=printer_id,
         ),
+        score_if_placed=score_if_placed,
+        grade_if_placed=_score_to_grade(score_if_placed),
+        printable_if_placed=score_if_placed >= _PRINTABLE_SCORE_MIN,
     )
 
     model_height = bbox["z_max"] - bbox["z_min"]
