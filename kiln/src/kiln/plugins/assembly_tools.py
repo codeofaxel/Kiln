@@ -283,6 +283,12 @@ class _AssemblyToolsPlugin:
                 assembly = Assembly.from_dict(json.loads(assembly_json))
                 result = compose_assembly(assembly, output_path)
                 response = {"success": True, "data": result}
+                # Assemblies are legitimately multi-body, but parts that
+                # TOUCH (or all but touch) are not assembled — they are
+                # unfused pieces that will print as separate shells.
+                from kiln.fusion_check import attach_fusion_report
+
+                response = attach_fusion_report(response, output_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,

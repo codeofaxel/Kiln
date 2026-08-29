@@ -5,6 +5,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Kiln catches a handle that didn't actually join the body.** A part built
+  flush against a curved wall only touches it — it looks attached, then
+  prints as two loose pieces. Kiln now measures the join and tells you how
+  far to sink the part in.
+
+- **A printability report now names its placement fault, and says what the
+  part's shape scored on its own.** When a part is judged unprintable for
+  hanging below the plate or overrunning the bed, the report carries a
+  stable name for that fault beside the sentence describing it, plus the
+  grade the part would have earned sitting correctly. The wording you
+  already see is unchanged, word for word — this is what lets a viewer say
+  "hangs below the bed" instead of just turning red, and lets anything
+  reading the report tell a badly made part from a well made one in the
+  wrong place.
+
 ### Added
 
 - **Your printer's own start-up routine, run automatically.** If your
@@ -61,6 +78,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Resuming a print no longer homes the nozzle into the part.** Recovery
   and resume sequences lift clear first and never home downward onto an
   occupied plate. Bed leveling and calibration wait for a clear plate too.
+
+- **Repair and split keep your model's colors and parts.**
 
 - **Tell Kiln which printer, and it slices for that printer.** With more than
   one machine registered, naming one could use your default printer's settings.

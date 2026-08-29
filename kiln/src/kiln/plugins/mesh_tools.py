@@ -1126,6 +1126,11 @@ class _MeshToolsPlugin:
 
                 result = compose_stls(file_paths, output_path)
                 response = {"success": True, **result}
+                # Concatenation welds nothing: two pieces that touch or
+                # all-but-touch stay separate shells.  Flag those pairs.
+                from kiln.fusion_check import attach_fusion_report
+
+                response = attach_fusion_report(response, result.get("path"))
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
@@ -1161,6 +1166,10 @@ class _MeshToolsPlugin:
                 from kiln.generation.validation import merge_stl_files
 
                 response = {"success": True, **merge_stl_files(file_paths, output_path=output_path)}
+                # Concatenation welds nothing — flag touching/near pairs.
+                from kiln.fusion_check import attach_fusion_report
+
+                response = attach_fusion_report(response, response.get("path"))
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
@@ -1214,6 +1223,14 @@ class _MeshToolsPlugin:
                         output_path=output_path or None,
                     ),
                 }
+                # A union that leaves multiple bodies did not weld its
+                # inputs — tangent/flush contact survives CSG untouched.
+                if operation == "union":
+                    from kiln.fusion_check import attach_fusion_report
+
+                    response = attach_fusion_report(
+                        response, response.get("path"), expect_single_body=True,
+                    )
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
@@ -1337,6 +1354,13 @@ class _MeshToolsPlugin:
                             response.setdefault("warnings", []).append(
                                 f"bed-centering failed: {exc}"
                             )
+                # One part was asked for — a multi-body result means some
+                # primitive ended flush/tangent instead of overlapping.
+                from kiln.fusion_check import attach_fusion_report
+
+                response = attach_fusion_report(
+                    response, response.get("path"), expect_single_body=True,
+                )
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,

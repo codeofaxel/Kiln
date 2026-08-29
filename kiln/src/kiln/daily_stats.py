@@ -291,6 +291,26 @@ def _empty_day() -> dict[str, Any]:
         # was previously invisible for anyone not signed in.  Names +
         # counts only, never arguments or paths.
         "tool_calls": {},          # {"generate_coaster": 4, "slice_model": 2}
+        # Per-surface splits of the day's activity.  The counters above
+        # cannot say whether anyone still uses the CLI: every engine
+        # chokepoint is shared between the CLI and the MCP server, so a
+        # slice recorded at ``slicer.slice_file`` looks identical from
+        # both doors — which is how the CLI's profile-mapping fork
+        # stayed broken for ~6 months with nobody able to tell whether
+        # that surface had users at all.  The surface is resolved ONCE,
+        # at the process entry point (kiln/surface.py), never guessed
+        # per call site.
+        #
+        # surface_sessions: {surface: process starts today}.  A CLI run
+        # that records no event (``kiln status``, ``kiln --help``) is
+        # still a person using the CLI, and for the "does the CLI have
+        # users" question the bare invocation IS the signal.
+        # surface_events: {surface: {event_type: count}} — the same
+        # increments as the scalar counters above, attributed.  A
+        # process that never declared a door records under "unknown";
+        # that absence must never be bucketed as a real surface.
+        "surface_sessions": {},   # {"cli": 2, "mcp": 1}
+        "surface_events": {},     # {"mcp": {"slices": 3}, "cli": {"slices": 1}}
         # Which parametric design templates got built today —
         # {template_id: count}.  The `generations` scalar counts ~25
         # tools that make a model and cannot say whether any of them was
@@ -325,6 +345,7 @@ _ROLLOVER_MAPS = (
     "update_nudge",
     "texture_names", "decoration_types", "slicer_profiles",
     "marketplace_sources", "template_uses",
+    "surface_sessions", "surface_events",
 )
 
 
@@ -398,6 +419,63 @@ def _write(data: dict[str, Any]) -> None:
         _logger.debug("Could not write daily stats: %s", exc)
 
 
+def _bump_surface_event(data: dict[str, Any], event_type: str) -> None:
+    """Attribute one counter increment to this process's surface.
+
+    Called under ``_lock`` from :func:`record_event`, once per scalar
+    increment, so the per-surface maps sum to the scalar counters —
+    including the textures→decorations double-count, mirrored so the
+    invariant holds per key rather than only in aggregate.
+    """
+    from kiln.surface import get_surface
+
+    per_surface = data.get("surface_events")
+    if not isinstance(per_surface, dict):
+        per_surface = {}
+    bucket = per_surface.get(get_surface())
+    if not isinstance(bucket, dict):
+        bucket = {}
+    bucket[event_type] = int(bucket.get(event_type, 0)) + 1
+    per_surface[get_surface()] = bucket
+    data["surface_events"] = per_surface
+
+
+# Once per process, like the surface declaration it counts.  The flag is
+# deliberately NOT reset by the day rollover: a process that straddles
+# midnight still started exactly once.
+_surface_session_recorded = False
+
+
+def record_surface_session() -> None:
+    """Count one process start on today's surface.  Never raises.
+
+    Called by the same entry points that declare the surface (the CLI
+    group callback and the MCP server's startup).  This is the signal
+    :func:`record_event` cannot provide: a CLI invocation that records
+    no event — ``kiln status``, ``kiln --help`` — is still a person
+    using the CLI, and "does the CLI have users at all" is the question
+    this file exists to answer.  Idempotent per process.
+    """
+    global _surface_session_recorded  # noqa: PLW0603
+    if _surface_session_recorded:
+        return
+    try:
+        from kiln.surface import get_surface
+
+        with _lock:
+            data = _read()
+            sessions = data.get("surface_sessions")
+            if not isinstance(sessions, dict):
+                sessions = {}
+            surface = get_surface()
+            sessions[surface] = int(sessions.get(surface, 0)) + 1
+            data["surface_sessions"] = sessions
+            _write(data)
+        _surface_session_recorded = True
+    except Exception as exc:
+        _logger.debug("record_surface_session failed: %s", exc)
+
+
 def record_event(event_type: str, *, detail: str | None = None) -> None:
     """Increment a daily counter.  Thread-safe, never raises.
 
@@ -423,10 +501,12 @@ def record_event(event_type: str, *, detail: str | None = None) -> None:
             data = _read()
             # Increment top-level counter
             data[event_type] = data.get(event_type, 0) + 1
+            _bump_surface_event(data, event_type)
 
             # Textures are a decoration subtype — also increment decorations
             if event_type == "textures":
                 data["decorations"] = data.get("decorations", 0) + 1
+                _bump_surface_event(data, "decorations")
                 dec_types = data.get("decoration_types", {})
                 if not isinstance(dec_types, dict):
                     dec_types = {}
@@ -859,6 +939,11 @@ def get_daily_stats() -> dict[str, Any]:
         # reads {} in every heartbeat forever — exactly how tool_failures
         # shipped nothing on 1,000 production rows.
         "template_uses": data.get("template_uses", {}),
+        # Per-surface session and event splits (see _empty_day).  Same
+        # contract as every map above: recorded, rolled over, returned —
+        # a map missing any leg of that chain ships {} forever.
+        "surface_sessions": data.get("surface_sessions", {}),
+        "surface_events": data.get("surface_events", {}),
         # The last COMPLETE day's counters (see _archive_completed_day).
         # The heartbeat reports these because the same-day counters it
         # can see at server startup are structurally near-empty.
