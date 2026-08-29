@@ -893,7 +893,48 @@ class _RecoveryToolsPlugin:
                     )
                 plan = engine.plan_recovery(failure)
                 plan.plan_id = plan_id
-                session = engine.start_recovery(plan, failure)
+                # Best-effort PROVEN park route for aborts.  Every fact is
+                # asked, none assumed: home position from the machine's own
+                # config, occupancy from the job's own gcode.  Any missing
+                # fact -> no park (the abort just stays at the homing
+                # position, the pre-park behaviour) — never a guessed move.
+                park_route = None
+                try:
+                    from kiln.print_recovery import RecoveryStrategy
+                    from kiln.printer_model_resolver import (
+                        resolve_printer_model_for,
+                    )
+                    from kiln.printers.safe_motion import (
+                        bed_rect_from_config,
+                        home_xy_from_config,
+                        occupied_regions_for_job,
+                        plan_live_park,
+                    )
+
+                    if (
+                        plan.strategy == RecoveryStrategy.SAFE_ABORT
+                        and failure.gcode_path
+                    ):
+                        adapter = _srv._get_registry().get(failure.printer_name)
+                        config = (
+                            adapter.get_printer_config()
+                            if hasattr(adapter, "get_printer_config")
+                            else None
+                        )
+                        park_route = plan_live_park(
+                            resolve_printer_model_for(failure.printer_name),
+                            home_xy_from_config(config),
+                            occupied_regions_for_job(failure.gcode_path),
+                            bed_rect=bed_rect_from_config(config),
+                        )
+                except Exception:
+                    _logger.debug(
+                        "park-route planning skipped (non-fatal)", exc_info=True
+                    )
+                    park_route = None
+                session = engine.start_recovery(
+                    plan, failure, park_route=park_route
+                )
                 response = {
                     "success": True,
                     "session": session.to_dict(),

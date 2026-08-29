@@ -33,6 +33,8 @@ from unittest import mock
 import pytest
 
 from kiln.print_recovery import (
+    _CRITICAL_MONITORING_CHECKS,
+    _MIN_MONITORING_CHECKS,
     FailureReport,
     FailureType,
     MonitoringThresholdNotMet,
@@ -42,8 +44,6 @@ from kiln.print_recovery import (
     RecoverySession,
     RecoveryStatus,
     RecoveryStrategy,
-    _CRITICAL_MONITORING_CHECKS,
-    _MIN_MONITORING_CHECKS,
     _required_monitoring_checks,
     get_recovery_engine,
 )
@@ -835,6 +835,40 @@ class TestMidPrintMotionSafety:
         heat_idx = next(i for i, c in enumerate(commands) if "M104" in c)
         home_idx = next(i for i, c in enumerate(commands) if "G28" in c)
         assert heat_idx < home_idx
+
+    def test_abort_threads_a_proven_park_route(self):
+        # A caller with live-machine facts hands the engine a PROVEN park
+        # route; the abort parks along it, before M84 (after which
+        # nothing moves).  Without one, the abort is byte-identical to
+        # the legacy stay-at-home sequence.
+        from kiln.printers.safe_motion import TravelPlan
+
+        engine = PrintRecovery()
+        failure = FailureReport(
+            failure_id="f-park",
+            failure_type=FailureType.THERMAL_RUNAWAY,
+            detected_at="2026-08-29T00:00:00+00:00",
+            printer_name="test-printer",
+        )
+        plan = RecoveryPlan(
+            plan_id="p-park",
+            failure_id="f-park",
+            strategy=RecoveryStrategy.SAFE_ABORT,
+            confidence=RecoveryConfidence.HIGH,
+            requires_confirmation=False,
+        )
+        route = TravelPlan(
+            ok=True, reason="r", strategy="direct",
+            waypoints=[(0.0, 0.0), (215.0, 215.0)],
+        )
+        session = engine.start_recovery(plan, failure, park_route=route)
+        steps = engine.get_recovery_steps(session.session_id)
+        park_idx = next(i for i, c in enumerate(steps) if "park clear" in c)
+        assert park_idx < steps.index("M84")
+
+        # No route -> no park line, same as before the wiring.
+        no_route = _sequence_for(RecoveryStrategy.SAFE_ABORT)
+        assert not any("park" in c.lower() for c in no_route)
 
     def test_resume_gcode_includes_prime(self, engine: PrintRecovery):
         telemetry = _make_telemetry(

@@ -648,8 +648,16 @@ class PrintRecovery:
         self,
         plan: RecoveryPlan,
         failure: FailureReport,
+        *,
+        park_route: Any = None,
     ) -> RecoverySession:
         """Begin executing a recovery plan.
+
+        ``park_route`` is an optional PROVEN park route
+        (:func:`kiln.printers.safe_motion.plan_live_park`) computed by a
+        caller that can ask the live machine where it homes.  The engine
+        itself stays offline and never guesses one: without it, an abort
+        simply leaves the nozzle at the homing position.
 
         If the plan requires confirmation, the session starts in
         AWAITING_CONFIRMATION status.  Otherwise, it starts in
@@ -668,7 +676,9 @@ class PrintRecovery:
             else RecoveryStatus.EXECUTING
         )
 
-        recovery_steps = self._generate_recovery_gcode(plan, failure)
+        recovery_steps = self._generate_recovery_gcode(
+            plan, failure, park_route=park_route
+        )
 
         session = RecoverySession(
             session_id=session_id,
@@ -1771,6 +1781,8 @@ class PrintRecovery:
         self,
         plan: RecoveryPlan,
         failure: FailureReport,
+        *,
+        park_route: Any = None,
     ) -> list[str]:
         """Generate G-code commands for the recovery.
 
@@ -1789,7 +1801,7 @@ class PrintRecovery:
         commands: list[str] = []
 
         if plan.strategy == RecoveryStrategy.SAFE_ABORT:
-            commands = build_safe_abort_sequence()
+            commands = build_safe_abort_sequence(park_route=park_route)
 
         elif plan.strategy == RecoveryStrategy.RESUME_FROM_LAYER:
             resume_z = plan.parameter_adjustments.get("resume_z_mm", 0)

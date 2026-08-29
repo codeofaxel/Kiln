@@ -230,9 +230,23 @@ def occupied_regions_for_job(
     job_path: str,
     *,
     margin_mm: float = DEFAULT_OCCUPIED_MARGIN_MM,
+    stop_after_line: int | None = None,
 ) -> list[OccupiedRegion] | None:
     """Per-object occupied regions, with per-object heights where the
     gcode reveals them.
+
+    ``stop_after_line`` scans only the first N lines, which answers a
+    different and often more useful question than the whole file:
+    *how tall is each object RIGHT NOW*, as of some point in the print.
+    Pass the line the print was interrupted at and each region's
+    ``z_top_mm`` is that object's height as actually standing on the
+    plate — full height for one finished under sequential (by-object)
+    printing, roughly the interrupt Z for every object under normal
+    layer-by-layer printing.  Reading the whole file instead reports
+    every object at its FINAL height, which over-states what is
+    physically there mid-print.  A stopped scan is deliberately not
+    treated as truncation: stopping where the caller asked is the
+    answer, not a partial one.
 
     Two sources, merged per object name:
 
@@ -266,6 +280,8 @@ def occupied_regions_for_job(
             last_z: float | None = None
             anon = 0
             for i, line in enumerate(lines):
+                if stop_after_line is not None and i >= stop_after_line:
+                    break  # asked-for stop, NOT truncation
                 if i > _OCCUPANCY_MAX_LINES:
                     truncated = True
                     break
@@ -455,6 +471,33 @@ def occupied_region_for_job(
     )
 
 
+def regions_not_cleared_at(
+    regions: list[OccupiedRegion] | None,
+    travel_z_mm: float,
+    *,
+    clearance_mm: float = 0.0,
+    ignore_names: set[str] | None = None,
+) -> list[OccupiedRegion] | None:
+    """Regions a nozzle at ``travel_z_mm`` would NOT provably fly over.
+
+    A region is cleared only when its ``z_top_mm`` is KNOWN and sits
+    below ``travel_z_mm - clearance_mm``.  An unknown height is never
+    cleared — proof, not optimism.  Returns ``None`` when *regions* is
+    ``None`` (occupancy unknown), which callers must distinguish from an
+    empty list (occupancy known, everything cleared).
+    """
+    if regions is None:
+        return None
+    blocked: list[OccupiedRegion] = []
+    for region in regions:
+        if ignore_names and region.name in ignore_names:
+            continue
+        top = region.z_top_mm
+        if top is None or top >= travel_z_mm - clearance_mm:
+            blocked.append(region)
+    return blocked
+
+
 # ---------------------------------------------------------------------------
 # Homing behaviour (per-machine, not per-family)
 # ---------------------------------------------------------------------------
@@ -515,6 +558,30 @@ def bed_rect_from_config(
     if x_max <= x_min or y_max <= y_min:
         return None
     return (x_min, x_max, y_min, y_max)
+
+
+def home_xy_from_config(
+    config: dict | None,
+) -> tuple[float, float] | None:
+    """Where ``G28 X Y`` leaves the toolhead, read from the machine's OWN
+    config (``stepper_x``/``stepper_y`` ``position_endstop``).
+
+    Machines home at whichever end their endstops sit — origin corner on
+    most bedslingers, back-right on many CoreXY builds — so this is a
+    per-machine fact, never a brand assumption.  ``None`` when the config
+    doesn't state both endstops; callers must then treat the post-home
+    position as unknown and skip any move that needs it proven.
+    """
+    sx = _config_section(config, "stepper_x")
+    sy = _config_section(config, "stepper_y")
+    if sx is None or sy is None:
+        return None
+    try:
+        hx = float(str(sx["position_endstop"]).strip())
+        hy = float(str(sy["position_endstop"]).strip())
+    except (KeyError, ValueError, TypeError):
+        return None
+    return (hx, hy)
 
 
 def _resolve_bed_rect(
@@ -918,6 +985,95 @@ def plan_travel(
     )
 
 
+def plan_live_park(
+    printer_id: str | None,
+    start_xy: tuple[float, float] | None,
+    occupied: list[OccupiedRegion] | OccupiedRegion | None,
+    *,
+    bed_rect: tuple[float, float, float, float] | None = None,
+    edge_inset_mm: float = DEFAULT_EDGE_INSET_MM,
+    ignore_names: set[str] | None = None,
+) -> TravelPlan:
+    """A PROVEN route from *start_xy* to the best clear park corner.
+
+    Tries the corners that clear every occupied region, farthest from the
+    nearest part first, and returns the first one reachable by a route
+    :func:`plan_travel` can prove.  Refuses when the start position is
+    unknown, occupancy is unknown, no corner clears, or no clear corner
+    is provably reachable — a park move is a convenience, and an unproven
+    convenience move over an occupied bed is how conveniences melt parts.
+    """
+    if start_xy is None:
+        return TravelPlan(
+            ok=False,
+            reason=(
+                "post-home toolhead position unknown (machine config does "
+                "not state its endstop positions) — cannot prove any park "
+                "route"
+            ),
+        )
+    park = plan_park_point(
+        printer_id, occupied, edge_inset_mm=edge_inset_mm, bed_rect=bed_rect
+    )
+    if not park.ok:
+        return TravelPlan(ok=False, reason=park.reason)
+
+    # plan_park_point already validated geometry; rank every clear corner
+    # (not just its winner) so a blocked best corner falls through to the
+    # next-best instead of a refusal.
+    regions = (
+        [occupied] if isinstance(occupied, OccupiedRegion) else list(occupied or [])
+    )
+    rect = _resolve_bed_rect(printer_id, bed_rect)
+    bx0, bx1, by0, by1 = rect  # non-None: plan_park_point succeeded above
+    inset = edge_inset_mm
+    corners = [
+        (bx0 + inset, by0 + inset),
+        (bx1 - inset, by0 + inset),
+        (bx0 + inset, by1 - inset),
+        (bx1 - inset, by1 - inset),
+    ]
+
+    def _distance_to_nearest_part(corner: tuple[float, float]) -> float:
+        px, py = corner
+        return min(
+            (px - (r.x_min + r.x_max) / 2.0) ** 2
+            + (py - (r.y_min + r.y_max) / 2.0) ** 2
+            for r in regions
+        )
+
+    clear = sorted(
+        (c for c in corners if not any(r.contains(*c) for r in regions)),
+        key=_distance_to_nearest_part,
+        reverse=True,
+    )
+    for corner in clear:
+        route = plan_travel(
+            printer_id,
+            start_xy,
+            corner,
+            regions,
+            ignore_names=ignore_names,
+            bed_rect=bed_rect,
+        )
+        if route.ok:
+            return TravelPlan(
+                ok=True,
+                reason=(
+                    f"park at ({corner[0]:g}, {corner[1]:g}) — {route.reason}"
+                ),
+                waypoints=route.waypoints,
+                strategy=route.strategy,
+            )
+    return TravelPlan(
+        ok=False,
+        reason=(
+            "no clear park corner is reachable by a provable route from "
+            f"({start_xy[0]:g}, {start_xy[1]:g})"
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Sequence builders — the one copy of the proven shape
 # ---------------------------------------------------------------------------
@@ -989,15 +1145,49 @@ def build_resume_preamble(
     return commands
 
 
-def build_safe_abort_sequence(*, lift_mm: float = 10.0) -> list[str]:
-    """Abort with the part still on the bed: heaters off, lift, park at
-    the X/Y home corner, release steppers."""
-    return [
+def build_safe_abort_sequence(
+    *,
+    lift_mm: float = 10.0,
+    park_route: TravelPlan | None = None,
+) -> list[str]:
+    """Abort with the part still on the bed: heaters off, lift, home X/Y,
+    optionally park clear of the part, release steppers.
+
+    *park_route* is a PROVEN route (:func:`plan_live_park`) from the
+    post-home position.  A refused or absent route is recorded as a
+    comment and the nozzle simply stays where homing put it — the
+    pre-park behaviour.  The park moves are emitted BEFORE ``M84``:
+    after the steppers are disabled no move happens at all.
+    """
+    commands = [
         "M104 S0",  # Hotend heater off
         "M140 S0",  # Bed heater off
         *build_lift_and_home_xy(lift_mm=lift_mm, feedrate=1000),
-        "M84",  # Disable steppers
     ]
+    if park_route is not None:
+        commands.extend(build_park_moves(park_route))
+    commands.append("M84")  # Disable steppers — nothing moves after this
+    return commands
+
+
+def build_park_moves(
+    route: TravelPlan, *, feedrate: int = _TRAVEL_FEEDRATE
+) -> list[str]:
+    """Absolute XY moves along a proven park route (first waypoint is the
+    current position and is skipped).
+
+    A refused route yields a comment stating why, never a coordinate:
+    parking the hot nozzle somewhere unproven is worse than leaving it
+    where homing put it.
+    """
+    if not route.ok or len(route.waypoints) < 2:
+        return [f"; park skipped — {route.reason}"]
+    moves = [
+        f"G1 X{x:.1f} Y{y:.1f} F{feedrate}"
+        for x, y in route.waypoints[1:]
+    ]
+    moves[-1] += "  ; park clear of the part"
+    return moves
 
 
 def build_firmware_resume_positioning(

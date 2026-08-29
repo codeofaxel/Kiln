@@ -28,14 +28,18 @@ from kiln.printers.safe_motion import (
     bed_rect_from_config,
     build_firmware_resume_positioning,
     build_lift_and_home_xy,
+    build_park_moves,
     build_resume_preamble,
     build_safe_abort_sequence,
     check_mid_print_sequence,
+    home_xy_from_config,
     homes_z,
     occupied_region_for_job,
     occupied_regions_for_job,
+    plan_live_park,
     plan_park_point,
     plan_travel,
+    regions_not_cleared_at,
 )
 
 # ---------------------------------------------------------------------------
@@ -603,6 +607,143 @@ class TestTruncationRefusal:
         gcode.write_text(_MARKER_BLOCK_GCODE)
         monkeypatch.setattr(safe_motion, "_OCCUPANCY_MAX_LINES", 3)
         assert occupied_regions_for_job(str(gcode)) is None
+
+
+# ---------------------------------------------------------------------------
+# Live park planning — a proven route or no move at all
+# ---------------------------------------------------------------------------
+
+_PARK_CONFIG = {
+    "stepper_x": {"position_max": "220", "position_endstop": "0"},
+    "stepper_y": {"position_max": "220", "position_endstop": "0"},
+}
+
+
+class TestPlanLivePark:
+    def test_proven_route_to_far_corner(self):
+        # Part in the centre; home at origin corner (from config).
+        region = _region(80, 140, 80, 140)
+        route = plan_live_park(
+            "ender3", home_xy_from_config(_PARK_CONFIG), region,
+            bed_rect=bed_rect_from_config(_PARK_CONFIG),
+        )
+        assert route.ok, route.reason
+        _assert_route_proven_clear(route, [region])
+        # Ends at a corner clear of the part, starting from home.
+        assert route.waypoints[0] == (0.0, 0.0)
+        assert not region.contains(*route.waypoints[-1])
+
+    def test_unknown_home_refuses(self):
+        route = plan_live_park("ender3", None, _region(80, 140, 80, 140))
+        assert route.ok is False
+        assert "position unknown" in route.reason
+
+    def test_home_corner_under_part_refuses(self):
+        # Part covers the home corner: no provable escape, no move.
+        route = plan_live_park(
+            "ender3", (0.0, 0.0), _region(0, 60, 0, 60),
+            bed_rect=bed_rect_from_config(_PARK_CONFIG),
+        )
+        assert route.ok is False
+
+    def test_blocked_best_corner_falls_through(self):
+        # Two parts leave only one reachable clear corner; the route must
+        # still be found rather than refused when the farthest is blocked.
+        walls = [
+            _region(0, 160, 120, 160),   # wall with a gap on the right
+            _region(120, 220, 30, 70),
+        ]
+        route = plan_live_park(
+            "ender3", (0.0, 0.0), walls,
+            bed_rect=bed_rect_from_config(_PARK_CONFIG),
+        )
+        if route.ok:
+            _assert_route_proven_clear(route, walls)
+        else:
+            assert "no clear park corner" in route.reason
+
+    def test_unknown_occupancy_refuses(self):
+        route = plan_live_park("ender3", (0.0, 0.0), None)
+        assert route.ok is False
+
+
+class TestParkMoves:
+    def test_refused_route_is_a_comment(self):
+        from kiln.printers.safe_motion import TravelPlan
+
+        moves = build_park_moves(TravelPlan(ok=False, reason="because"))
+        assert moves == ["; park skipped — because"]
+
+    def test_abort_parks_before_m84(self):
+        from kiln.printers.safe_motion import TravelPlan
+
+        route = TravelPlan(
+            ok=True, reason="r", strategy="direct",
+            waypoints=[(0.0, 0.0), (215.0, 215.0)],
+        )
+        seq = build_safe_abort_sequence(park_route=route)
+        park_idx = next(i for i, c in enumerate(seq) if "park clear" in c)
+        assert park_idx < seq.index("M84")
+        assert seq.index("G28 X Y") < park_idx
+        assert check_mid_print_sequence(seq) == []
+
+    def test_abort_without_route_is_legacy(self):
+        assert "park" not in " ".join(build_safe_abort_sequence()).lower()
+
+
+class TestHomeXyFromConfig:
+    def test_reads_endstops(self):
+        assert home_xy_from_config(_PARK_CONFIG) == (0.0, 0.0)
+        assert home_xy_from_config(
+            {
+                "stepper_x": {"position_endstop": "350"},
+                "stepper_y": {"position_endstop": "357"},
+            }
+        ) == (350.0, 357.0)
+
+    def test_missing_is_none(self):
+        assert home_xy_from_config(None) is None
+        assert home_xy_from_config({"stepper_x": {"position_endstop": "0"}}) is None
+
+
+class TestRegionsNotClearedAt:
+    def test_unknown_height_is_never_cleared(self):
+        known = OccupiedRegion(
+            x_min=0, x_max=10, y_min=0, y_max=10,
+            margin_mm=5, z_top_mm=4.0, source="t", name="short",
+        )
+        unknown = OccupiedRegion(
+            x_min=20, x_max=30, y_min=0, y_max=10,
+            margin_mm=5, source="t", name="mystery",
+        )
+        blocked = regions_not_cleared_at([known, unknown], 10.0)
+        assert [r.name for r in blocked] == ["mystery"]
+
+    def test_clearance_margin_counts(self):
+        tall = OccupiedRegion(
+            x_min=0, x_max=10, y_min=0, y_max=10,
+            margin_mm=5, z_top_mm=8.0, source="t", name="tall",
+        )
+        assert regions_not_cleared_at([tall], 10.0, clearance_mm=3.0) == [tall]
+        assert regions_not_cleared_at([tall], 12.0, clearance_mm=3.0) == []
+
+    def test_unknown_occupancy_stays_unknown(self):
+        assert regions_not_cleared_at(None, 10.0) is None
+
+
+class TestStopAfterLine:
+    def test_heights_as_of_the_interrupt(self, tmp_path: Path):
+        # Whole file: tall_part tops at 42.  Stopping the scan before the
+        # Z42 block reports its height AS STANDING at that point (0.2).
+        gcode = tmp_path / "plate.gcode"
+        gcode.write_text(_MARKER_BLOCK_GCODE)
+        full = {r.name: r for r in occupied_regions_for_job(str(gcode))}
+        early = {
+            r.name: r
+            for r in occupied_regions_for_job(str(gcode), stop_after_line=13)
+        }
+        assert full["tall_part"].z_top_mm == pytest.approx(42.0)
+        assert early["tall_part"].z_top_mm == pytest.approx(0.2)
 
 
 # ---------------------------------------------------------------------------
