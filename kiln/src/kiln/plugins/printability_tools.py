@@ -455,9 +455,11 @@ class _PrintabilityToolsPlugin:
                         _logger.debug("Could not analyze model: %s", exc)
 
                 # 3. Printer intelligence (optional)
-                effective_pid = printer_id
-                if not effective_pid:
-                    effective_pid = _srv._map_printer_hint_to_profile_id(_srv._PRINTER_MODEL)
+                # Diagnose with the intelligence of the machine being
+                # diagnosed: an aimed call fell back to the default
+                # printer's model, so a second machine's failure was read
+                # against another printer's enclosure and failure modes.
+                effective_pid = _srv._resolve_printer_profile_id(printer_id, printer_name)
                 if effective_pid:
                     try:
                         from kiln.printer_intelligence import (
