@@ -777,6 +777,17 @@ class CrealityAdapter(PrinterAdapter):
         super().set_safety_profile(profile_id)
         self._backend.set_safety_profile(profile_id)
 
+    def get_printer_config(self) -> dict | None:
+        """Klipper config sections, via the Moonraker backend.
+
+        K1/K2/Hi machines run Klipper-derived firmware, so their
+        ``printer.cfg`` — including any ``gcode_macro`` sections — is
+        readable exactly as on a stock Moonraker printer.  Delegated so
+        every consumer of "what does this machine's config say" treats a
+        Creality-branded registration the same as a Moonraker one.
+        """
+        return self._backend.get_printer_config()
+
     def _resolve_moonraker_url(self) -> str:
         diagnostics = diagnose_creality_moonraker(
             self._input_host,

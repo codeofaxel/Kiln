@@ -162,6 +162,102 @@ def _ensure_layer_e_reset(settings: dict[str, str]) -> None:
     settings["layer_gcode"] = f"{_E_RESET}\\n{existing}" if existing else _E_RESET
 
 
+# The warm-up floor, and the form both slicers agree on.  Measured against
+# PrusaSlicer 2.9.4 and OrcaSlicer 2.3.2 on 2026-08-27 by slicing a 10 mm cube
+# from these profiles and reading the emitted start block back.
+#
+# Literal temperatures, not placeholders, and that is deliberate.  Kiln authors
+# a profile once in PrusaSlicer's vocabulary and :mod:`kiln.slicer_orca`
+# translates the KEYS -- but it passes G-code VALUES through untouched, so a
+# placeholder is read by whichever slicer runs and the two spell their
+# variables differently.  ``klipper_generic`` is the standing proof: its
+# ``{temperature}`` is a vector in both dialects, and both refuse to slice.
+# A number means the same thing to both.
+_START_FLOOR_BED = "M190 S{bed}"
+_START_FLOOR_HOME = "G28"
+_START_FLOOR_HOTEND = "M109 S{hotend}"
+
+
+def _ensure_start_temperatures(settings: dict[str, str]) -> None:
+    """Give a profile with no start routine the warm-up floor, in place.
+
+    A profile that declares no ``start_gcode`` leaves the start of the print
+    entirely to the slicer's own defaults, and the two slicers disagree about
+    what those are.  Measured, slicing the same profile through both command
+    lines:
+
+    * PrusaSlicer, marlin flavour, emits ``M190`` (bed, wait), ``M104``
+      (hotend, set), ``G28``, then ``M109`` (hotend, wait) -- safe.  Its
+      reprapfirmware flavour stops short of the ``M109``, so the one RRF
+      profile gained its hotend wait from the floor on BOTH slicers.
+    * OrcaSlicer, for a **klipper**-flavour profile, emits no temperature
+      command at all before the first extrusion.  It homes at line 18 and
+      extrudes at line 39, while ``M104``/``M140`` do not appear until line
+      151.  The machine is asked to push filament through a cold nozzle.
+      At that measurement thirty-one bundled profiles were klipper-flavour --
+      every K1, K2, QIDI, Voron and Ender V3 Kiln ships -- and four more
+      arrived the next day, covered by this floor without being touched.
+    * OrcaSlicer, for a marlin-flavour profile, waits on the bed but only
+      *sets* the hotend, so the first extrusion can begin while the nozzle is
+      still climbing.
+
+    So the floor is applied to every profile that does not state a start
+    routine, whatever its flavour: the klipper profiles gain the temperature
+    commands they had none of, and the marlin ones gain the hotend wait.
+
+    ``G28`` is part of the floor and must be.  Both slicers stop emitting
+    their own homing move the moment a custom ``start_gcode`` exists, so a
+    floor of ``M190``/``M109`` alone buys a temperature guarantee at the cost
+    of never homing -- the printer would start from wherever it believed it
+    was.  Measured both ways; the three-line form is the one that homes.
+
+    The order is bed to temperature, home, then bring the nozzle up and
+    hold before any extrusion.  It is PrusaSlicer's own order minus one line,
+    deliberately: PrusaSlicer also *sets* the hotend (``M104``) before homing
+    so the nozzle warms during the ``G28``.  The floor omits that, trading a
+    few seconds of overlap for a nozzle that is still cold while it travels
+    over the plate and cannot ooze onto it -- the same bed/home/nozzle
+    sequence most vendor ``PRINT_START`` macros use.
+
+    A profile that *states* a ``start_gcode`` is left alone, including one
+    that states the empty string.  That is not an oversight to be repaired:
+    the nine Bambu profiles set it empty on purpose, because
+    :mod:`kiln.printers.bambu_3mf` injects Bambu's own initialisation into the
+    3MF afterwards, and a floor prepended here would fight it.  Key present is
+    the author speaking; key absent is the author never having been asked.
+
+    This is a floor, not a vendor start routine.  It does not heat a chamber,
+    run a bed mesh, or purge -- those live in the manufacturer's own macro and
+    Kiln cannot know whether the machine in front of it defines one.  What it
+    guarantees is the part that is unsafe to get wrong.
+    """
+    if "start_gcode" in settings:
+        return
+
+    bed = settings.get("first_layer_bed_temperature") or settings.get("bed_temperature")
+    hotend = settings.get("first_layer_temperature") or settings.get("temperature")
+
+    # Both or neither -- measured, not assumed.  Slicing with a start_gcode
+    # of just ``M109``: PrusaSlicer (and Orca on marlin) auto-added the
+    # missing ``M190``, but Orca on a klipper profile added nothing -- the
+    # bed would never heat -- and every dialect dropped its automatic
+    # ``G28``.  A half-floor is worse than none, so a profile that does not
+    # name both temperatures is left to the slicer entirely.
+    if not (bed and hotend):
+        return
+
+    lines = [
+        _START_FLOOR_BED.format(bed=str(bed).strip()),
+        _START_FLOOR_HOME,
+        _START_FLOOR_HOTEND.format(hotend=str(hotend).strip()),
+    ]
+
+    # ``\n`` stays escaped: PrusaSlicer reads a literal backslash-n in an INI
+    # value as a newline, and a real one would end the key.  Same rule the
+    # E-reset follows.
+    settings["start_gcode"] = "\\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -231,6 +327,9 @@ def resolve_slicer_profile(
     # After the merge: an override can switch relative-E on, or replace the
     # layer_gcode that was satisfying the rule.
     _ensure_layer_e_reset(merged)
+    # Likewise after the merge, so the floor quotes the temperatures this job
+    # will actually print at rather than the ones the profile shipped with.
+    _ensure_start_temperatures(merged)
 
     # Build a cache key from the effective settings.
     cache_key = f"{profile.id}:{_settings_hash(merged)}"
@@ -314,10 +413,13 @@ def profile_with_overrides(
     }
     patched = dict(effective)
     _ensure_layer_e_reset(patched)
-    if patched.get("layer_gcode") != effective.get("layer_gcode"):
-        patched_line = f"layer_gcode = {patched['layer_gcode']}"
+    _ensure_start_temperatures(patched)
+    for key in ("layer_gcode", "start_gcode"):
+        if patched.get(key) == effective.get(key):
+            continue
+        patched_line = f"{key} = {patched[key]}"
         for idx, raw in enumerate(lines):
-            if "=" in raw and raw.split("=", 1)[0].strip() == "layer_gcode":
+            if "=" in raw and raw.split("=", 1)[0].strip() == key:
                 lines[idx] = patched_line
                 break
         else:
@@ -340,6 +442,38 @@ def profile_with_overrides(
     _temp_cache[cache_key] = path
     logger.debug("Wrote override profile (base=%s) → %s", base_profile, path)
     return path
+
+
+def start_gcode_override_from_printer(
+    adapter: Any,
+    printer_id: str | None,
+    overrides: dict[str, str] | None,
+) -> tuple[dict[str, str] | None, str]:
+    """Ask kiln-pro for a start G-code that calls the printer's OWN macro.
+
+    The floor above (:func:`_ensure_start_temperatures`) guarantees a safe
+    minimum start; what it cannot supply is the machine's own warm-up —
+    the chamber heat, bed mesh and purge its Klipper config defines as a
+    ``PRINT_START`` / ``START_PRINT`` macro.  Kiln is connected to the
+    printer and can read that config; the logic that does so lives in
+    kiln-pro, and this is its one public seam.
+
+    Free-tier no-op: without kiln-pro installed this returns
+    ``(None, "kiln-pro-not-installed")`` and the floor stands.  A returned
+    patch is an ordinary ``start_gcode`` override — merged by the caller
+    into the overrides it was already resolving, where the floor's
+    "a stated start_gcode wins" rule makes the two mutually exclusive by
+    construction.  Never raises.
+    """
+    try:
+        from kiln_pro.bridge import pro_features
+    except Exception:
+        return None, "kiln-pro-not-installed"
+    try:
+        return pro_features.start_gcode_override(adapter, printer_id, overrides)
+    except Exception:
+        logger.debug("start-gcode handoff declined", exc_info=True)
+        return None, "handoff-error"
 
 
 def slicer_profile_to_dict(profile: SlicerProfile) -> dict[str, Any]:
@@ -565,6 +699,7 @@ def resolve_multiextruder_profile(
     # for the Bambu profiles it is used with and wrong for anything with
     # absolute E.  The shared invariant checks before it writes.
     _ensure_layer_e_reset(merged)
+    _ensure_start_temperatures(merged)
 
     cache_key = f"{profile.id}_mme{num_extruders}:{_settings_hash(merged)}"
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):

@@ -322,6 +322,27 @@ def list_executions() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_pipeline_adapter(printer_name: str | None) -> Any:
+    """Resolve the adapter a pipeline step should talk to.
+
+    Every upload step here used to reach for the raw ``kiln.server``
+    registry global directly and call a pair of methods on it that
+    ``PrinterRegistry`` has never had (its API is ``get(name)``) — and
+    the global itself stays ``None`` until the server's registry
+    initialiser runs.  Both branches raised, the exception was swallowed
+    into a failed "Upload failed" step, and every pipeline upload with a
+    registered printer failed.  The same mistake was already found and
+    fixed at its other occurrence (``retry_print_with_fix`` — see the
+    note in smart_print_tools); this is the shared door for the
+    pipelines: ``_resolve_adapter`` initialises the registry, handles
+    the default-printer case for a falsy name, and falls back to
+    config.yaml.
+    """
+    from kiln.server import _resolve_adapter
+
+    return _resolve_adapter(printer_name)
+
+
 def _run_stability_check(model_path: str, ctx: dict[str, Any]) -> PipelineStep:
     """Check model stability and warn if orientation is risky.
 
@@ -655,9 +676,7 @@ def quick_print(
     def _upload() -> PipelineStep:
         step_start = time.time()
         try:
-            from kiln.server import _registry
-
-            adapter = _registry.get_adapter(printer_name) if printer_name else _registry.get_default_adapter()
+            adapter = _resolve_pipeline_adapter(printer_name)
             ctx["adapter"] = adapter
             upload_result = adapter.upload_file(ctx["gcode_path"])
             remote_name = getattr(upload_result, "file_name", None) or os.path.basename(ctx["gcode_path"])
@@ -1077,9 +1096,7 @@ def reslice_and_print(
     def _upload() -> PipelineStep:
         step_start = time.time()
         try:
-            from kiln.server import _registry
-
-            adapter = _registry.get_adapter(printer_name) if printer_name else _registry.get_default_adapter()
+            adapter = _resolve_pipeline_adapter(printer_name)
             ctx["adapter"] = adapter
 
             # Bambu printers need gcode wrapped in a 3MF with proprietary
@@ -1304,9 +1321,7 @@ def calibrate(
     # Step 1: Get adapter
     step_start = time.time()
     try:
-        from kiln.server import _registry
-
-        adapter = _registry.get_adapter(printer_name) if printer_name else _registry.get_default_adapter()
+        adapter = _resolve_pipeline_adapter(printer_name)
         state = adapter.get_state()
         steps.append(
             PipelineStep(
@@ -1665,9 +1680,7 @@ def benchmark(
     # Step 4: Upload
     step_start = time.time()
     try:
-        from kiln.server import _registry
-
-        adapter = _registry.get_adapter(printer_name) if printer_name else _registry.get_default_adapter()
+        adapter = _resolve_pipeline_adapter(printer_name)
         upload_result = adapter.upload_file(gcode_path)
         remote_name = getattr(upload_result, "file_name", None) or os.path.basename(gcode_path)
         steps.append(

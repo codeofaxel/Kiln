@@ -96,7 +96,10 @@ class _SmartPrintToolsPlugin:
                 diagnose_from_signals,
             )
             from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
-            from kiln.slicer_profiles import resolve_slicer_profile
+            from kiln.slicer_profiles import (
+                resolve_slicer_profile,
+                start_gcode_override_from_printer,
+            )
 
             # ------------------------------------------------------------------
             # 0. Parse custom_overrides early so we can fail fast on bad JSON.
@@ -267,6 +270,19 @@ class _SmartPrintToolsPlugin:
             # 4. Merge overrides: diagnosis first, custom_overrides win.
             # ------------------------------------------------------------------
             merged_overrides: dict[str, str] = {**diagnosis_overrides, **extra_overrides}
+
+            # Printer's own start routine (kiln-pro handoff): the adapter is
+            # already in hand from step 1, and a retry is precisely where the
+            # machine's own PRINT_START — chamber, mesh, purge — matters most.
+            start_handoff: str | None = None
+            _sg_patch, _sg_reason = start_gcode_override_from_printer(
+                adapter, effective_pid, merged_overrides
+            )
+            if _sg_patch:
+                merged_overrides.update(_sg_patch)
+                start_handoff = _sg_reason.removeprefix("handoff:")
+            else:
+                _logger.debug("start-gcode handoff declined: %s", _sg_reason)
 
             # ------------------------------------------------------------------
             # 5. Resolve slicer profile with merged overrides.
@@ -513,6 +529,10 @@ class _SmartPrintToolsPlugin:
                 result["printer_id"] = effective_pid
             if effective_profile:
                 result["profile_path"] = effective_profile
+            if start_handoff:
+                result["start_gcode_source"] = (
+                    f"{start_handoff} — the printer's own start routine"
+                )
             return result
 
         _logger.debug("Registered smart print tools")

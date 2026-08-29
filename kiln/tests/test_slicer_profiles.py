@@ -558,3 +558,167 @@ class TestRelativeExtrusionNeedsLayerReset:
         """The AMS builder used to inject the reset unconditionally."""
         emitted = self._ini(resolve_multiextruder_profile("prusa_mk4", 2))
         assert "layer_gcode" not in emitted
+
+
+# ===================================================================
+# Start G-code: every profile warms up before it extrudes
+# ===================================================================
+
+# The profiles allowed to ship without a warm-up, and the reason each one is
+# allowed.  An entry here is a claim about another piece of code, so it names
+# the code that makes the claim true.
+_START_GCODE_EXEMPT: dict[str, str] = {
+    pid: (
+        "kiln.printers.bambu_3mf injects Bambu's own initialisation into the "
+        "3MF after slicing; a start routine here would fight it."
+    )
+    for pid in (
+        "bambu_x1c", "bambu_x1e", "bambu_p1s", "bambu_p2s", "bambu_a1",
+        "bambu_a2l", "bambu_h2s", "bambu_p1p", "bambu_a1_mini",
+    )
+}
+
+
+class TestStartGcodeWarmsUpBeforeExtruding:
+    """No bundled profile may reach a printer without a warm-up.
+
+    ``start_gcode`` arrived as a Bambu implementation detail — nine profiles
+    that had to set it EMPTY so :mod:`kiln.printers.bambu_3mf` could inject
+    Bambu's own initialisation — and was never promoted into the profile
+    contract.  Fifty-two profiles were then added over time, none of them
+    declaring one, and every test passed the whole way.
+
+    What that cost, measured 2026-08-27 by slicing a 10 mm cube through Kiln's
+    own profile code into both command lines:
+
+    * OrcaSlicer, klipper flavour, no ``start_gcode``: **no temperature
+      command of any kind** before the first extrusion.  On ``k1_max`` it
+      homed at line 18 and extruded at line 39, while ``M104``/``M140`` did
+      not appear until line 151.  Thirty-one bundled profiles were klipper
+      flavour at that measurement — every K1, K2, QIDI, Voron and Ender V3
+      Kiln ships — and the guard below is why the count aging does not
+      matter: a new profile passes by declaring a routine or taking the
+      floor, never by slipping through.
+    * OrcaSlicer, marlin flavour: waits on the bed, only *sets* the hotend.
+    * PrusaSlicer: safe on its own, and this is why nobody reported it —
+      :func:`kiln.slicer.find_slicer` probes PrusaSlicer first.
+
+    So the assertion is on the EFFECTIVE profile, the one that reaches the
+    slicer, not on the JSON — a profile satisfies it by declaring a routine
+    of its own or by taking the floor, and the point is that it cannot
+    reach a printer having done neither.
+    """
+
+    def _ini(self, path: str) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for raw in Path(path).read_text(encoding="utf-8").splitlines():
+            if "=" in raw and not raw.lstrip().startswith("#"):
+                key, val = raw.split("=", 1)
+                out[key.strip()] = val.strip()
+        return out
+
+    def test_every_profile_waits_for_temperature_or_is_exempt(self) -> None:
+        """The guard that would have caught this, and catches printer 63."""
+        offenders: list[str] = []
+        for pid in list_slicer_profiles():
+            emitted = self._ini(resolve_slicer_profile(pid)).get("start_gcode", "")
+            if pid in _START_GCODE_EXEMPT:
+                assert emitted == "", (
+                    f"{pid} is exempt because {_START_GCODE_EXEMPT[pid]} "
+                    f"Its start_gcode must stay empty; got {emitted!r}."
+                )
+                continue
+            flat = "".join(emitted.split()).upper()
+            # Either it waits itself, or it hands off to a firmware macro —
+            # an undefined macro aborts the print, which fails safe.
+            if not any(n in flat for n in ("M109", "M190", "PRINT_START", "START_PRINT")):
+                offenders.append(f"{pid}: {emitted!r}")
+        assert not offenders, (
+            "These profiles reach a slicer with no warm-up. Give the printer a "
+            "start routine, or add it to _START_GCODE_EXEMPT with the reason:\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_floor_homes_as_well_as_heats(self) -> None:
+        """``G28`` is load-bearing, not decoration.
+
+        Both slicers stop emitting their own homing move as soon as a custom
+        ``start_gcode`` exists — measured on PrusaSlicer 2.9.4, where adding
+        ``M190``/``M109`` alone removed the ``G28`` the profile used to get.
+        A floor without homing would trade a cold nozzle for a printer that
+        starts from wherever it thinks it is.
+        """
+        emitted = self._ini(resolve_slicer_profile("k1_max"))["start_gcode"]
+        assert "G28" in emitted, emitted
+        # Bed, then home while the nozzle is cold and cannot ooze, then nozzle.
+        assert emitted.index("M190") < emitted.index("G28") < emitted.index("M109")
+
+    def test_bambu_profiles_keep_their_empty_start_gcode(self) -> None:
+        """The floor must read a stated empty string as a decision."""
+        for pid in _START_GCODE_EXEMPT:
+            assert self._ini(resolve_slicer_profile(pid))["start_gcode"] == ""
+
+    def test_no_bundled_start_gcode_uses_a_template_placeholder(self) -> None:
+        """A placeholder means different things to the two slicers.
+
+        ``klipper_generic`` shipped ``EXTRUDER_TEMP={temperature}``, and
+        ``temperature`` is a VECTOR variable in both dialects: PrusaSlicer and
+        OrcaSlicer each refused to slice it — "Referencing a vector variable
+        when scalar is expected" — so the one non-Bambu profile that declared
+        a start routine produced no G-code at all, on either slicer.
+
+        :mod:`kiln.slicer_orca` translates profile KEYS but passes G-code
+        VALUES through untouched, so there is no spelling of a placeholder
+        that is correct on both sides.  Bundled start G-code uses literals.
+        """
+        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        offenders = [
+            f"{pid}: {sg!r}"
+            for pid, body in raw.items()
+            if not pid.startswith("_")
+            for sg in [body.get("settings", {}).get("start_gcode", "")]
+            if "{" in sg or "[" in sg
+        ]
+        assert not offenders, (
+            "Bundled start_gcode must use literal values, not placeholders:\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_floor_follows_an_override_temperature(self) -> None:
+        """The floor runs after the merge, so it quotes the real values."""
+        emitted = self._ini(
+            resolve_slicer_profile(
+                "k1_max",
+                overrides={"first_layer_temperature": "245",
+                           "first_layer_bed_temperature": "110"},
+            )
+        )["start_gcode"]
+        assert "M109 S245" in emitted and "M190 S110" in emitted, emitted
+
+    def test_multiextruder_door_is_covered(self) -> None:
+        """The AMS builder writes an .ini too."""
+        emitted = self._ini(resolve_multiextruder_profile("k1_max", 2))
+        assert "M109" in emitted["start_gcode"]
+
+    def test_overrides_door_is_covered(self) -> None:
+        """A printer whose model is unmappable still goes through a door."""
+        from kiln.slicer_profiles import profile_with_overrides
+
+        path = profile_with_overrides(
+            None, {"first_layer_temperature": "230", "first_layer_bed_temperature": "70"}
+        )
+        assert path is not None
+        emitted = self._ini(path)["start_gcode"]
+        assert "M190 S70" in emitted and "M109 S230" in emitted, emitted
+
+    def test_overrides_door_respects_a_stated_empty_start_gcode(self) -> None:
+        """The Bambu path pushes an explicit empty start/end through here."""
+        from kiln.slicer_profiles import profile_with_overrides
+
+        path = profile_with_overrides(
+            None,
+            {"use_relative_e_distances": "1", "start_gcode": "", "end_gcode": "",
+             "first_layer_temperature": "220"},
+        )
+        assert path is not None
+        assert self._ini(path)["start_gcode"] == ""

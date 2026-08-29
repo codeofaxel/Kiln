@@ -2991,6 +2991,7 @@ def design_to_gcode(
     """
     import json as _json
     import tempfile
+    from string import Template
 
     result = DesignToGCodeResult(description=description)
 
@@ -3022,25 +3023,45 @@ def design_to_gcode(
         result.errors.append(f"Template '{template_id}' has no scad_template.")
         return result
 
-    # Write SCAD file
+    # Write SCAD file.
+    #
+    # Templates are ``string.Template`` sources — ``pegs = ${pegs};`` —
+    # so the defaults must be SUBSTITUTED, the same way
+    # :func:`optimize_template_params` renders the same templates above.
+    # This step used to prepend ``k = v;`` assignments instead, leaving
+    # every ``${...}`` in place, and the resulting file failed OpenSCAD's
+    # parser on line one of the first placeholder — no template ever
+    # compiled through this pipeline.
     scad_path = out_dir / f"{template_id}.scad"
-    scad_code = tmpl["scad_template"]
-    # Apply default params
-    params = tmpl.get("default_params", {})
-    for k, v in params.items():
-        if isinstance(v, (int, float)):
-            scad_code = f"{k} = {v};\n" + scad_code
+    # The schema is ``parameters: {name: {default, min, max, ...}}`` —
+    # the ``default_params`` key the old code read has never existed in
+    # design_templates.json, so no default ever reached a template.
+    params = {
+        name: spec.get("default")
+        for name, spec in tmpl.get("parameters", {}).items()
+        if isinstance(spec, dict) and spec.get("default") is not None
+    }
+    scad_code = Template(tmpl["scad_template"]).safe_substitute(params)
     scad_path.write_text(scad_code)
     result.scad_file = str(scad_path)
     result.steps_completed.append("scad_generation")
 
-    # Try to render STL via OpenSCAD
+    # Try to render STL via OpenSCAD.
+    #
+    # This step called an ``OpenSCADProvider.render`` that has never
+    # existed (the provider's API is ``generate``); the AttributeError
+    # was caught below and every run of this pipeline ended right here
+    # with "STL rendering failed" — so the dead slicer import in Step 5
+    # went unnoticed for the same reason it went unreached.
+    # :func:`kiln.parametric.compile_scad_code` is the engine every
+    # other SCAD door compiles through; it takes the source (which is
+    # already in hand), honours the bundled libraries, and returns the
+    # STL path.
     stl_path = out_dir / f"{template_id}.stl"
     try:
-        from kiln.generation.openscad import OpenSCADProvider
+        from kiln.parametric import compile_scad_code
 
-        provider = OpenSCADProvider()
-        provider.render(str(scad_path), str(stl_path))
+        compile_scad_code(scad_code, output_path=str(stl_path))
         result.stl_file = str(stl_path)
         result.steps_completed.append("stl_rendering")
     except Exception as exc:
@@ -3069,19 +3090,31 @@ def design_to_gcode(
         result.errors.append(f"Weight estimation failed: {exc}")
 
     # Step 5: Slice to G-code
-    gcode_path = out_dir / f"{template_id}.gcode"
+    #
+    # This step imported a ``slice_stl`` that has never existed in
+    # ``kiln.slicer`` (the entry point is ``slice_file``), so the
+    # ImportError below fired on every run and the pipeline reported
+    # "Slicer module not available" on machines with a working slicer —
+    # and ``printer_model`` was never consulted at all.  The import is
+    # now module-level-shaped and exercised by a test, so a renamed
+    # slicer entry point fails the suite instead of a runtime fallback.
     try:
-        from kiln.slicer import slice_stl
+        from kiln.slicer import SlicerNotFoundError, slice_file
+        from kiln.slicer_profiles import resolve_slicer_profile
 
-        slice_stl(
+        profile = resolve_slicer_profile(printer_model) if printer_model else None
+        slice_result = slice_file(
             str(stl_path),
-            str(gcode_path),
-            printer_model=printer_model,
+            output_dir=str(out_dir),
+            output_name=f"{template_id}.gcode",
+            profile=profile,
         )
-        result.gcode_file = str(gcode_path)
+        result.gcode_file = slice_result.output_path
         result.steps_completed.append("slicing")
-    except ImportError:
-        result.errors.append("Slicer module not available.")
+    except SlicerNotFoundError:
+        result.errors.append(
+            "No slicer installed — install PrusaSlicer or OrcaSlicer to get G-code."
+        )
     except Exception as exc:
         result.errors.append(f"Slicing failed: {exc}")
 

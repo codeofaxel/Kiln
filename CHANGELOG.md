@@ -7,6 +7,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Your printer's own start-up routine, run automatically.** If your
+  Klipper printer (Voron, Creality K1/K2, QIDI, Sovol, and friends) has a
+  `PRINT_START` or `START_PRINT` routine set up — the one that heats the
+  chamber, levels the bed, and wipes the nozzle — Kiln now finds it by
+  asking the printer itself and uses it when slicing, with your exact
+  temperatures filled in. Requires kiln-pro; without it (or whenever the
+  routine can't be verified safe) Kiln keeps its built-in safe warm-up.
+  The result says which one was used.
+
+
 - **Four more QIDI printers.** The Plus 5, Max 4, Q2C and X-Smart 3. *Free tells
   you a material won't work on your machine; Kiln Pro tells you why, and what to
   run instead, plus more depth.* See https://kiln3d.com/pricing.
@@ -39,6 +49,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **"Design this and print it" now actually prints it.** The one-call
+  design-to-G-code pipeline died quietly at three separate steps — template
+  values were never filled in, the 3D file was built through a function that
+  didn't exist, and the slicer was called through another one. It now runs
+  end to end: describe a part, get sliced G-code for your printer, warm-up
+  included.
+
+- **Pipeline printing works with your registered printers again.** The
+  quick-print, reslice, calibrate, and benchmark pipelines all failed at the
+  upload step whenever a printer was registered — they looked the printer up
+  through an internal path that has never worked. They now use the same
+  printer lookup every other tool uses.
+
+- **Your calibrated print settings no longer vanish when Kiln adds a brim.**
+  When the auto-adhesion or per-printer speed logic adjusted a job, the
+  tuned values from your calibration profile (pressure advance, flow, and
+  friends) were silently dropped from the final slice — even though the
+  response said they were applied. They now survive every adjustment.
+
+
 - **An SVG logo no longer vanishes from the print.** On a keychain front or a
   pen cup's inside floor, an SVG was quietly skipped and the piece printed
   plain. It now carves as crisp outlines, sized to the face.
@@ -56,6 +86,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Air-filter warnings on QIDI printers.** Several switch the filter off while
   the chamber heats — exactly when ABS and ASA need it.
+- **Your printer heats up before it starts printing.** On OrcaSlicer, a print
+  sliced for a Klipper machine — every K1, K2, QIDI, Voron and Ender V3 Kiln
+  knows about — went straight from homing to laying down plastic without ever
+  being told to heat. Kiln now guarantees the bed and nozzle are up to
+  temperature, and the machine has homed, before anything extrudes. On
+  PrusaSlicer only one machine was affected — the Vision Miner 22 IDEX, which
+  was missing its nozzle wait there too and gained it from the same fix.
+
+- **The generic Klipper profile can slice again.** It produced no file at all,
+  on either slicer, because its start G-code referred to a temperature setting
+  in a form neither one accepts.
+
 - **Parts that printed beautifully now also work.** Twenty-three of
   the ready-made parts had flaws you'd only find after printing. All
   rebuilt and re-tested.
