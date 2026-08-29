@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Kiln catches a handle that didn't actually join the body.** A part built
+  flush against a curved wall only touches it — it looks attached, then
+  prints as two loose pieces. Kiln now measures the join and tells you how
+  far to sink the part in.
+
 - **A printability report now names its placement fault, and says what the
   part's shape scored on its own.** When a part is judged unprintable for
   hanging below the plate or overrunning the bed, the report carries a
