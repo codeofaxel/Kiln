@@ -1313,6 +1313,26 @@ def cli(ctx: click.Context, printer: str | None) -> None:
     except Exception as exc:
         logger.debug("Update check skipped: %s", exc)
 
+    # Count this CLI invocation as a CLI session, and give the day's
+    # counters a ride to the dashboard.  A CLI-only install never runs
+    # the MCP server, so without this beat its telemetry NEVER uploads —
+    # "does the CLI have users at all" stays unanswerable, which is the
+    # question the surface split exists to answer.  The daemon
+    # subcommands are excluded: `serve` is the MCP door (kiln.server.main
+    # declares "mcp" and records its own session) and `rest` (kiln-pro)
+    # is a server whose callers are not this terminal.  Both the session
+    # record and the heartbeat are best-effort, daily-deduped, and
+    # CI/container/test-suppressed by their own guards.
+    if invoked not in ("serve", "rest"):
+        try:
+            from kiln.daily_stats import record_surface_session
+            from kiln.heartbeat import send_heartbeat_async
+
+            record_surface_session()
+            send_heartbeat_async()
+        except Exception as exc:
+            logger.debug("Surface session record skipped: %s", exc)
+
 
 # Commands that must run BEFORE terms acceptance — onboarding, identity, config,
 # maintenance, the accept action itself, and the long-running server daemons
@@ -11894,6 +11914,15 @@ def main() -> None:
     Forces stdout/stderr to UTF-8 before Click parses ``argv`` so help
     text and status glyphs render on legacy-code-page Windows consoles.
     """
+    # This process entered through the CLI door.  Declared HERE, at the
+    # console-script entry point, not guessed at call time — the surface
+    # is a fact about how the process started (see kiln/surface.py).
+    # ``kiln serve`` also passes through here; kiln.server.main()
+    # re-declares "mcp" before any tool can dispatch.
+    with contextlib.suppress(Exception):
+        from kiln.surface import set_surface
+
+        set_surface("cli")
     _ensure_utf8_streams()
     cli()
 

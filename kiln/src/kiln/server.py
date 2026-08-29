@@ -14710,6 +14710,21 @@ def main() -> None:
     out of the recovery server entirely for anyone who would rather
     crash-loop than serve a server that cannot print.
     """
+    # This process is the MCP server, whichever door reached it — `kiln
+    # serve` (which passed through the CLI entry point and declared
+    # "cli" there), `python -m kiln.server`, or the mcpb bundle.  The
+    # surface is a fact about the process, declared once at its entry
+    # point and read at every recording chokepoint (kiln/surface.py) —
+    # never guessed per call site.
+    try:
+        from kiln.surface import set_surface
+
+        set_surface("mcp")
+        from kiln.daily_stats import record_surface_session
+
+        record_surface_session()
+    except Exception:
+        pass  # telemetry never affects startup
     try:
         _start()
     except Exception as exc:  # noqa: BLE001 — the whole point is to catch it

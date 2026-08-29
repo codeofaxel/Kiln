@@ -536,6 +536,17 @@ def _send_heartbeat() -> None:
                 # only: never the parameter values, which are the
                 # user's own dimensions.
                 "template_uses": _top_n(stats.get("template_uses", {}), 100),
+                # Which door the process came in through — the split
+                # that says whether the CLI, the local MCP server, or
+                # neither is what people actually run.  sessions is
+                # {surface: process starts}; events is
+                # {surface: {event_type: count}}.  Both use the closed
+                # vocabulary in kiln/surface.py plus "unknown" for a
+                # process that never declared a door; the dashboard
+                # must read absence (old clients) as unknown too, never
+                # as one of the real surfaces.
+                "surface_sessions": stats.get("surface_sessions", {}),
+                "surface_events": stats.get("surface_events", {}),
                 # Model names of EVERY registered printer (deduped,
                 # capped) — the top-level printer_model field only ever
                 # names the default machine, which made second printers
