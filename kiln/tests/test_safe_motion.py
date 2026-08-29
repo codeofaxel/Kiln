@@ -732,9 +732,9 @@ class TestRegionsNotClearedAt:
 
 
 class TestStopAfterLine:
-    def test_heights_as_of_the_interrupt(self, tmp_path: Path):
-        # Whole file: tall_part tops at 42.  Stopping the scan before the
-        # Z42 block reports its height AS STANDING at that point (0.2).
+    def test_bounded_scan_reports_only_what_it_read(self, tmp_path: Path):
+        # Whole file: tall_part tops at 42.  Bounding the scan before the
+        # Z42 block reports only the height reached by that line (0.2).
         gcode = tmp_path / "plate.gcode"
         gcode.write_text(_MARKER_BLOCK_GCODE)
         full = {r.name: r for r in occupied_regions_for_job(str(gcode))}

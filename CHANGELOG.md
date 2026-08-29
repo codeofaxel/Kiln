@@ -58,6 +58,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Resuming a print no longer homes the nozzle into the part.** Recovery
+  and resume sequences lift clear first and never home downward onto an
+  occupied plate. Bed leveling and calibration wait for a clear plate too.
+
 - **Tell Kiln which printer, and it slices for that printer.** With more than
   one machine registered, naming one could use your default printer's settings.
   Fixed.

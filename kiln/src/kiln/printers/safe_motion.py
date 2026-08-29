@@ -235,18 +235,10 @@ def occupied_regions_for_job(
     """Per-object occupied regions, with per-object heights where the
     gcode reveals them.
 
-    ``stop_after_line`` scans only the first N lines, which answers a
-    different and often more useful question than the whole file:
-    *how tall is each object RIGHT NOW*, as of some point in the print.
-    Pass the line the print was interrupted at and each region's
-    ``z_top_mm`` is that object's height as actually standing on the
-    plate — full height for one finished under sequential (by-object)
-    printing, roughly the interrupt Z for every object under normal
-    layer-by-layer printing.  Reading the whole file instead reports
-    every object at its FINAL height, which over-states what is
-    physically there mid-print.  A stopped scan is deliberately not
-    treated as truncation: stopping where the caller asked is the
-    answer, not a partial one.
+    ``stop_after_line`` bounds the scan to the first N lines, so each
+    region describes the job only up to that point rather than the whole
+    file.  A bounded scan is deliberately not treated as truncation:
+    stopping where the caller asked is the answer, not a partial one.
 
     Two sources, merged per object name:
 
