@@ -81,6 +81,7 @@ class _EstimateToolsPlugin:
             printer_id: str | None = None,
             profile: str | None = None,
             material: str = "PLA",
+            printer_name: str | None = None,
         ) -> dict:
             """Primary estimation tool — slice a 3D model and return time, filament, cost, and printability analysis.
 
@@ -104,6 +105,10 @@ class _EstimateToolsPlugin:
                 material: Filament material for weight and adhesion estimates
                     (e.g. ``"PLA"``, ``"PETG"``, ``"ABS"``).  Default is
                     ``"PLA"``.
+                printer_name: Registered printer this estimate is FOR.  Omit
+                    for the default printer.  An estimate is only as true as
+                    the profile behind it, so naming a second machine costs
+                    the job on that machine rather than on the default.
             """
             import kiln.server as _srv
             from kiln.gcode_metadata import extract_metadata
@@ -119,6 +124,7 @@ class _EstimateToolsPlugin:
                 effective_printer_id, effective_profile = _srv._resolve_slice_profile_context(
                     profile=profile,
                     printer_id=printer_id,
+                    printer_name=printer_name,
                 )
 
                 # 2. Slice the model

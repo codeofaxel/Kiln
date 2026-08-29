@@ -16,6 +16,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   routine can't be verified safe) Kiln keeps its built-in safe warm-up.
   The result says which one was used.
 
+- **When Kiln changes your file's format, it says so.** If what comes back
+  isn't the format you handed over, the result names what changed, what the
+  new format can't hold, and where your untouched original still is.
+
+- **The web workshop takes OBJ files now.** A dropped OBJ used to render fine
+  and then offer no way in — it now goes through the same door as STL and 3MF.
+
+- **The mesh checkup reads 3MF.** diagnose_mesh said "run this before slicing"
+  and then refused one of the two formats slicers eat.
 
 - **Four more QIDI printers.** The Plus 5, Max 4, Q2C and X-Smart 3. *Free tells
   you a material won't work on your machine; Kiln Pro tells you why, and what to
@@ -48,6 +57,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **Tell Kiln which printer, and it slices for that printer.** With more than
+  one machine registered, naming one could use your default printer's settings.
+  Fixed.
 
 - **"Design this and print it" now actually prints it.** The one-call
   design-to-G-code pipeline died quietly at three separate steps — template

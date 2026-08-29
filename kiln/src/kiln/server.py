@@ -9894,100 +9894,144 @@ def download_and_upload(
 
 
 def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
-    """Map free-form model hints to bundled slicer profile IDs."""
-    if not raw:
+    """Map free-form model hints to bundled slicer profile IDs.
+
+    Delegates to :mod:`kiln.printer_profile_ids`, which the ``kiln`` CLI
+    imports too.  This used to be one of two hand-maintained copies of
+    the same table; the other one knew no Bambu.
+    """
+    from kiln.printer_profile_ids import map_printer_hint_to_profile_id
+
+    return map_printer_hint_to_profile_id(raw)
+
+
+def _targets_default_printer(printer_name: str | None) -> bool:
+    """Is a call naming *printer_name* aimed at the DEFAULT printer?
+
+    This is the question that licenses reading a process global.
+    ``_PRINTER_MODEL`` and ``_PRINTER_TYPE`` are frozen at startup from
+    the ACTIVE config entry (or the ``KILN_PRINTER_*`` env vars), so
+    they describe exactly one machine.  Applying them to a second
+    registered machine is how an aimed call ends up sliced, wrapped or
+    routed for hardware it will never reach.
+
+    ``config.yaml``'s ``active_printer`` is the authority, because it is
+    the same entry ``_reload_env_config`` read those globals from — not
+    the registry's notion of a default, which can name a runtime-only
+    printer the globals were never about.
+
+    Used by the TYPE resolver.  The MODEL chain runs through
+    :func:`_resolve_printer_model_live`, which makes the same refusal
+    with the registry's default name; the two agree except on an install
+    whose registry default is not its config's active printer, where
+    this reading is the conservative one.
+    """
+    if not printer_name or printer_name == "default":
+        return True
+    try:
+        from kiln.printer_model_resolver import resolve_active_printer_name
+
+        return printer_name == resolve_active_printer_name()
+    except Exception as exc:  # noqa: BLE001 — config read is best-effort
+        logger.debug("Active-printer resolution failed for %r: %s", printer_name, exc)
+        return False
+
+
+def _resolve_target_printer_model(printer_name: str | None = None) -> str | None:
+    """The printer MODEL of the machine a call is aimed at.
+
+    The chain itself is :func:`_resolve_printer_model_live`, which the
+    safety gates already use — one answer for "what machine is this",
+    so the profile a job is sliced with and the bed and temperature
+    limits it is checked against cannot name different printers.
+
+    This adds one step the safety gates don't need: a named machine with
+    no config-declared model is asked through its adapter, which knows
+    what it is.  Returning ``None`` is the honest end of the chain — the
+    safety stack already soft-passes on an unknown model, and a skipped
+    check is recoverable where a check passed against the wrong hardware
+    is not.
+    """
+    model = _resolve_printer_model_live(printer_name)
+    if model:
+        return model
+    if _targets_default_printer(printer_name):
+        # The live resolver already consulted config and _PRINTER_MODEL.
         return None
-    hint = raw.strip().lower().replace("-", "_").replace(" ", "_")
-    if not hint:
+    try:
+        from kiln.community_autofire import resolve_adapter_model
+
+        return resolve_adapter_model(_resolve_adapter(printer_name))
+    except Exception as exc:  # noqa: BLE001 — the adapter is a fallback
+        logger.debug("Adapter model probe failed for %r: %s", printer_name, exc)
         return None
-    hint_compact = hint.replace("_", "")
 
-    if (
-        hint in {"prusa_mini", "prusamini"}
-        or hint_compact.startswith("prusamini")
-        or ("prusa" in hint and "mini" in hint)
-    ):
-        return "prusa_mini"
-    if "mk4" in hint:
-        return "prusa_mk4"
-    if "mk3" in hint:
-        return "prusa_mk3s"
-    if "prusa_xl" in hint or hint.endswith("_xl") or hint == "xl" or ("prusa" in hint and "xl" in hint):
-        return "prusa_xl"
-    if "sparkxi7" in hint_compact or "sparkx" in hint_compact:
-        return "sparkx_i7"
-    if "ender3" in hint_compact:
-        if "v4" in hint_compact:
-            return "ender3_v4"
-        if "v3ke" in hint_compact:
-            return "ender3_v3_ke"
-        if "v3se" in hint_compact:
-            return "ender3_v3_se"
-        if "v3" in hint_compact:
-            return "ender3_v3"
-        if "v2" in hint_compact:
-            return "ender3_v2"
-        return "ender3"
-    if "k1max" in hint_compact:
-        return "k1_max"
-    if "k1c" in hint_compact:
-        return "k1c"
-    if "k1se" in hint_compact:
-        return "k1_se"
-    if hint_compact == "k1" or "crealityk1" in hint_compact:
-        return "k1"
-    if "k2plus" in hint_compact:
-        return "k2_plus"
-    if "k2pro" in hint_compact:
-        return "k2_pro"
-    if "k2se" in hint_compact:
-        return "k2_se"
-    if hint_compact == "k2" or "crealityk2" in hint_compact:
-        return "k2"
-    if hint_compact in {"hi", "crealityhi"}:
-        return "creality_hi"
-    if "ender5max" in hint_compact:
-        return "ender5_max"
-    if "cr10se" in hint_compact:
-        return "cr10_se"
-    if hint in {"klipper", "moonraker"}:
-        return "klipper_generic"
 
-    # Bambu Lab printers
-    if "a1" in hint and "mini" in hint:
-        return "bambu_a1_mini"
-    if hint in {"bambu_a1", "a1", "a1_combo"} or ("bambu" in hint and "a1" in hint):
-        return "bambu_a1"
-    if "a2l" in hint:
-        return "bambu_a2l"
-    if "h2s" in hint:
-        return "bambu_h2s"
-    if "x1e" in hint or "x1e" in hint_compact:
-        return "bambu_x1e"
-    if "x1c" in hint or "x1_carbon" in hint_compact or ("bambu" in hint and "x1" in hint):
-        return "bambu_x1c"
-    if "p2s" in hint:
-        return "bambu_p2s"
-    if "p1s" in hint or ("bambu" in hint and "p1" in hint and "s" in hint):
-        return "bambu_p1s"
-    if "p1p" in hint or ("bambu" in hint and "p1" in hint):
-        return "bambu_p1p"
+def _resolve_target_printer_type(
+    printer_name: str | None = None,
+    adapter: PrinterAdapter | None = None,
+) -> str:
+    """The connection TYPE (``"bambu"``, ``"octoprint"`` …) of the target.
 
-    return None
+    Type decides more than tuning: it decides whether a slice is given
+    relative extrusion and an empty start block for a Bambu 3MF wrap.
+    Reading the default connection's type while aimed elsewhere either
+    strips homing and heat-up from a slice bound for a machine that
+    needed them, or hands a Bambu a file wrapped against the opposite
+    contract.
+
+    A live *adapter* answers for itself (``adapter.name`` is the type it
+    declares); otherwise the named entry's ``type`` in config.yaml.
+    ``_PRINTER_TYPE`` is used only when the call is aimed at the default
+    printer — never as a guess for a machine we can't identify, which
+    resolves to ``""`` so callers skip type-specific handling.
+    """
+    if adapter is not None:
+        declared = str(getattr(adapter, "name", "") or "").strip().lower()
+        if declared:
+            return _normalize_printer_type(declared)
+    if _targets_default_printer(printer_name):
+        return _PRINTER_TYPE
+    entry = _read_config_printers().get(printer_name or "", {})
+    raw = str(entry.get("type") or entry.get("printer_type") or "").strip().lower()
+    return _normalize_printer_type(raw) if raw else ""
+
+
+def _resolve_printer_profile_id(
+    printer_id: str | None,
+    printer_name: str | None = None,
+) -> str | None:
+    """The bundled profile / printer-intelligence id for the target machine.
+
+    An explicit ``printer_id`` wins; otherwise the id follows the model
+    of the machine the call names (see
+    :func:`_resolve_target_printer_model`).  A named second machine
+    whose model can't be determined resolves to ``None`` — slicer
+    defaults, not the default machine's profile.
+    """
+    if printer_id:
+        # An explicit ask is honored (mapped when we recognize the hint,
+        # verbatim otherwise) — never silently replaced by another machine.
+        return _map_printer_hint_to_profile_id(printer_id) or printer_id
+    return _map_printer_hint_to_profile_id(
+        _resolve_target_printer_model(printer_name)
+    )
 
 
 def _resolve_slice_profile_context(
     profile: str | None,
     printer_id: str | None,
+    printer_name: str | None = None,
+    overrides: dict[str, str] | None = None,
 ) -> tuple[str | None, str | None]:
     """Resolve effective profile path for slicing."""
-    effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _map_printer_hint_to_profile_id(
-        _PRINTER_MODEL
-    )
+    effective_printer_id = _resolve_printer_profile_id(printer_id, printer_name)
     effective_profile = profile
     if effective_profile is None and effective_printer_id:
         try:
-            effective_profile = resolve_slicer_profile(effective_printer_id)
+            effective_profile = resolve_slicer_profile(
+                effective_printer_id, overrides=overrides or None
+            )
         except Exception as exc:
             logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
     return effective_printer_id, effective_profile
@@ -12197,7 +12241,10 @@ def print_plate_object(
     # Wrapping also avoids false-positive safety blocks (e.g. M500 in the
     # standard Bambu start gcode) since the scanner skips 3MF archives.
     upload_path = extracted_path
-    if _PRINTER_TYPE == "bambu":
+    # Wrap for the machine this job is aimed at.  Reading the default
+    # connection's type sent a raw .gcode to a named Bambu (whose firmware
+    # ignores it) or a Bambu-wrapped 3MF to a printer that cannot open one.
+    if _resolve_target_printer_type(printer_name) == "bambu":
         try:
             from kiln.printers.bambu_3mf import repackage_gcode_as_bambu_3mf
 
@@ -13293,12 +13340,15 @@ def run_reslice_and_print(
                     code="VALIDATION_ERROR",
                 )
 
-        # Prefer per-model speeds when printer_id is available
-        if printer_id:
+        # Prefer per-model speeds for the machine this print is FOR — an
+        # unnamed printer_id used to mean "no model speeds", and the type
+        # fallback below then spoke for whichever printer was the default.
+        _speed_pid = _resolve_printer_profile_id(printer_id, printer_name)
+        if _speed_pid:
             try:
                 from kiln.printer_intelligence import get_slicer_speed_overrides
 
-                model_speeds = get_slicer_speed_overrides(printer_id)
+                model_speeds = get_slicer_speed_overrides(_speed_pid)
                 if model_speeds:
                     if parsed_overrides is None:
                         parsed_overrides = {}
@@ -13309,10 +13359,11 @@ def run_reslice_and_print(
                 pass  # fall through to per-type defaults below
 
         # Inject printer-aware speed overrides (don't override explicit user settings)
-        if _PRINTER_TYPE in _PRINTER_SPEED_OVERRIDES:
+        _target_type = _resolve_target_printer_type(printer_name)
+        if _target_type in _PRINTER_SPEED_OVERRIDES:
             if parsed_overrides is None:
                 parsed_overrides = {}
-            for k, v in _PRINTER_SPEED_OVERRIDES[_PRINTER_TYPE].items():
+            for k, v in _PRINTER_SPEED_OVERRIDES[_target_type].items():
                 if k not in parsed_overrides:
                     parsed_overrides[k] = v
 
@@ -17948,6 +17999,18 @@ def decorate_surface(
             "compile_time_seconds": compile_result.get("compile_time_seconds"),
             "scad_path": scad_result["scad_path"],
         }
+        if model_ext == ".obj":
+            # An OBJ went in and an STL came out — the one silent format
+            # change on this path.  The receipt says so, and names the
+            # untouched source (this tool never deletes its input).
+            from kiln.format_conversion import format_conversion_record
+
+            result_dict["conversion"] = format_conversion_record(
+                from_path=model_path,
+                to_path=output_stl,
+                tool="decorate_surface",
+                reason="decorated through the OpenSCAD pipeline, which writes STL",
+            )
         if compile_result.get("decoration_faces"):
             # Which output triangles this carve created, recorded beside the
             # STL — paint_decoration_faces consumes this to color exactly

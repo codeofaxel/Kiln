@@ -25,6 +25,7 @@ from kiln.printability import (
     _analyze_thin_walls,
     _compute_score,
     _label_mesh_components,
+    _PRINTABLE_SCORE_MIN,
     _score_to_grade,
     _triangle_area,
     _triangle_centroid,
@@ -2483,3 +2484,136 @@ class TestPlacementCheck:
 
             assert baseline.printable is True  # shape alone is fine
             assert report.printable is False   # placement is not
+
+
+class TestPlacementIsStructuredNotOnlyProse:
+    """The placement fault carries a NAME, not only an English sentence.
+
+    ``recommendations`` reaches the chat/agent path intact, but every
+    viewer that renders a compact verdict drops prose by design — so a
+    part hanging through the plate turned the rim red with nothing able
+    to say why.  A stable name beside the same text is what lets a
+    client name the fault without parsing the sentence.
+    """
+
+    def test_below_the_plate_names_the_fault(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(
+                tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
+            )
+            report = analyze_printability(path)
+
+            assert report.placement is not None
+            assert report.placement.fault_names == ["off_bed"]
+            assert report.placement.off_bed is True
+            assert report.placement.exceeds_bed is False
+
+    def test_bigger_than_the_bed_names_the_fault(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(400.0))
+            report = analyze_printability(
+                path, build_volume=(256.0, 256.0, 256.0),
+            )
+
+            assert report.placement is not None
+            assert report.placement.fault_names == ["exceeds_bed"]
+            assert report.placement.exceeds_bed is True
+            assert report.placement.off_bed is False
+
+    def test_a_well_shaped_part_in_the_wrong_place_says_so(self):
+        """The question a caller actually needs answered: would moving
+        this part onto the plate end the problem?
+
+        The floor writes "badly shaped" and "in the wrong place" into the
+        same score, grade and printable flag, so the clamped fields
+        cannot answer it.  A cube is a clean print; sink it 40 mm and the
+        verdict must record that the SHAPE was fine all along.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            seated = _write_stl(tmpdir, _outward_cube_triangles(20.0))
+            seated_report = analyze_printability(seated)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sunk = _write_stl(
+                tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
+            )
+            report = analyze_printability(sunk)
+
+        # The clamped verdict refuses the part, as it must.
+        assert report.printable is False
+        assert report.placement.fault_names == ["off_bed"]
+        # ...and the verdict-without-placement says the shape was never
+        # the problem, matching the same cube sitting on the plate.
+        assert report.placement.printable_if_placed is True
+        assert report.placement.grade_if_placed == seated_report.grade
+        assert report.placement.score_if_placed == seated_report.score
+        assert report.placement.score_if_placed > report.score
+
+    def test_a_part_that_is_ALSO_badly_shaped_does_not_claim_otherwise(self):
+        """The mirror case, and the one that keeps this honest: a part
+        whose shape would fail on its own must not report that placement
+        was its only problem just because placement is also wrong."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(
+                tmpdir, _sunk_below_bed(_make_slope_wedge_triangles(70.0), 40.0),
+            )
+            report = analyze_printability(path)
+
+            assert report.placement.off_bed is True
+            # Whatever the shape verdict is, it is REPORTED, not assumed
+            # clean -- and it is the seated verdict, not the clamped one.
+            assert report.placement.score_if_placed is not None
+            assert report.placement.grade_if_placed == _score_to_grade(
+                report.placement.score_if_placed
+            )
+            assert report.placement.printable_if_placed == (
+                report.placement.score_if_placed >= _PRINTABLE_SCORE_MIN
+            )
+            # The wedge IS badly shaped: its seated verdict is a fail on
+            # its own, so nothing here can claim placement was the only
+            # problem.  That is the whole point of the mirror case.
+            assert report.placement.grade_if_placed == "F"
+
+    def test_a_placed_part_reports_the_same_verdict_either_way(self):
+        """No faults, no divergence: the two views agree exactly, so a
+        reader never has to special-case the clean path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(20.0))
+            report = analyze_printability(path)
+
+            assert report.placement.fault_names == []
+            assert report.placement.score_if_placed == report.score
+            assert report.placement.grade_if_placed == report.grade
+            assert report.placement.printable_if_placed == report.printable
+
+    def test_named_fault_carries_the_same_words_as_the_recommendation(self):
+        """One detector, two views — the words and the name cannot drift."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(
+                tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
+            )
+            report = analyze_printability(path)
+
+            messages = [f.message for f in report.placement.faults]
+            assert messages
+            for message in messages:
+                assert message in report.recommendations
+
+    def test_a_part_that_sits_fine_is_checked_and_clean(self):
+        """Empty is not absent: the block says "checked, nothing wrong"."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(20.0))
+            report = analyze_printability(path)
+
+            assert report.placement is not None
+            assert report.placement.fault_names == []
+
+    def test_the_block_survives_to_dict(self):
+        """Dict consumers see the name too, not only dataclass readers."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(
+                tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
+            )
+            block = analyze_printability(path).to_dict()["placement"]
+
+            assert [f["name"] for f in block["faults"]] == ["off_bed"]

@@ -52,14 +52,17 @@ class _MeshDiagnosticToolsPlugin:
             actionable fix recommendations (specific MeshLab/Blender steps).
 
             Requires the optional ``trimesh`` package (``pip install trimesh``).
-            Supports STL, OBJ, PLY, OFF, GLB, and GLTF formats.
+            Supports STL, 3MF, OBJ, PLY, OFF, GLB, and GLTF formats.  A 3MF
+            holding several objects is read as one body — the report describes
+            the whole plate.
 
             Use this BEFORE slicing to catch problems that would cause print
             failures or slicer errors.  Complements ``validate_generated_mesh``
             (basic checks) and ``analyze_printability`` (print-readiness scoring).
 
             Args:
-                file_path: Path to a mesh file (STL, OBJ, PLY, OFF, GLB, GLTF).
+                file_path: Path to a mesh file (STL, 3MF, OBJ, PLY, OFF, GLB,
+                    GLTF).
             """
             import kiln.server as _srv
 
