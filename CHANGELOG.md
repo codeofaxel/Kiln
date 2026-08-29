@@ -24,6 +24,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Watch your model change, and see what a conversion loses (Pro+).** A
+  repair, split, or format change plays out on the object itself — and when
+  colors can't survive the new format, you watch them leave instead of
+  quietly getting a grey file back.
+
 - **Your printer's own start-up routine, run automatically.** If your
   Klipper printer (Voron, Creality K1/K2, QIDI, Sovol, and friends) has a
   `PRINT_START` or `START_PRINT` routine set up — the one that heats the
