@@ -17933,6 +17933,18 @@ def decorate_surface(
             "compile_time_seconds": compile_result.get("compile_time_seconds"),
             "scad_path": scad_result["scad_path"],
         }
+        if model_ext == ".obj":
+            # An OBJ went in and an STL came out — the one silent format
+            # change on this path.  The receipt says so, and names the
+            # untouched source (this tool never deletes its input).
+            from kiln.format_conversion import format_conversion_record
+
+            result_dict["conversion"] = format_conversion_record(
+                from_path=model_path,
+                to_path=output_stl,
+                tool="decorate_surface",
+                reason="decorated through the OpenSCAD pipeline, which writes STL",
+            )
         if compile_result.get("decoration_faces"):
             # Which output triangles this carve created, recorded beside the
             # STL — paint_decoration_faces consumes this to color exactly

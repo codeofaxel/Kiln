@@ -1012,7 +1012,6 @@ def generate_original_design(
         GenerationStatus,
         GenerationTimeoutError,
         GenerationValidationError,
-        convert_to_stl,
     )
 
     if max_attempts < 1:
@@ -1095,8 +1094,14 @@ def generate_original_design(
                 output_dir=effective_output_dir,
             )
 
+            conversion = None
             if result.format == "obj":
-                stl_path = convert_to_stl(result.local_path)
+                from kiln.format_conversion import convert_to_stl_recorded
+
+                stl_path, conversion = convert_to_stl_recorded(
+                    result.local_path,
+                    tool="audit_original_design",
+                )
                 result = type(result)(
                     job_id=result.job_id,
                     provider=result.provider,
@@ -1113,6 +1118,10 @@ def generate_original_design(
                 )
 
             attempt.result = result.to_dict()
+            if conversion is not None:
+                # The receipt rides the attempt record like every other fact
+                # about how this candidate came to be.
+                attempt.result["conversion"] = conversion
             validation = validate_mesh(result.local_path)
             attempt.mesh_validation = validation.to_dict()
 
