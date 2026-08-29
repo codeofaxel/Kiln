@@ -327,3 +327,56 @@ class TestBedLevelManagerTrigger:
         mgr = BedLevelManager(db=None, event_bus=None)
         result = mgr.trigger_level("p1", mock_adapter)
         assert result["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# Mid-print refusal — probing needs a clear plate
+# ---------------------------------------------------------------------------
+
+class TestTriggerRefusesMidPrint:
+    """G29 / BED_MESH_CALIBRATE drive the probe into a part if the plate
+    isn't clear.  Every trigger source passes through trigger_level, so
+    the refusal lives there."""
+
+    def _adapter_in(self, status):
+        from kiln.printers.base import PrinterState
+
+        adapter = MagicMock()
+        adapter.get_state.return_value = PrinterState(connected=True, state=status)
+        adapter.send_gcode.return_value = True
+        adapter.get_bed_mesh.return_value = None
+        return adapter
+
+    def test_refused_while_printing(self, mgr):
+        from kiln.printers.base import PrinterStatus
+
+        adapter = self._adapter_in(PrinterStatus.PRINTING)
+        result = mgr.trigger_level("p1", adapter)
+        assert result["success"] is False
+        assert "carries a print" in result["message"]
+        adapter.send_gcode.assert_not_called()
+
+    def test_refused_while_paused(self, mgr):
+        from kiln.printers.base import PrinterStatus
+
+        adapter = self._adapter_in(PrinterStatus.PAUSED)
+        result = mgr.trigger_level("p1", adapter)
+        assert result["success"] is False
+        adapter.send_gcode.assert_not_called()
+
+    def test_idle_proceeds(self, mgr):
+        from kiln.printers.base import PrinterStatus
+
+        adapter = self._adapter_in(PrinterStatus.IDLE)
+        result = mgr.trigger_level("p1", adapter)
+        assert result["success"] is True
+        adapter.send_gcode.assert_called_once()
+
+    def test_unreachable_state_fails_open(self, mgr):
+        adapter = MagicMock()
+        adapter.get_state.side_effect = RuntimeError("cannot be asked")
+        adapter.send_gcode.return_value = True
+        adapter.get_bed_mesh.return_value = None
+        result = mgr.trigger_level("p1", adapter)
+        assert result["success"] is True
+        adapter.send_gcode.assert_called_once()

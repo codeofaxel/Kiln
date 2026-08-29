@@ -7,6 +7,7 @@ trigger.  Integrates with the event bus and persistence layer.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import time
@@ -253,6 +254,29 @@ class BedLevelManager:
         Returns:
             Dict with ``success``, ``message``, and timing info.
         """
+        # Probing needs a CLEAR bed: while a job is printing or paused the
+        # plate carries a part, and G29 / BED_MESH_CALIBRATE would drive
+        # the probe into it.  Every trigger source (manual tool, auto
+        # policy, future callers) passes through here, so the refusal
+        # lives here.  Unknown state fails open — this gate stops a
+        # proven hazard, it doesn't add a new way to be offline.
+        from kiln.printers.base import PrinterStatus
+
+        live_state = None
+        with contextlib.suppress(Exception):
+            live_state = adapter.get_state().state
+        if live_state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+            return {
+                "success": False,
+                "message": (
+                    f"Refused to level the bed: printer '{printer_name}' is "
+                    f"{live_state.value} and the plate carries a print — "
+                    f"probing would drive the nozzle into it.  Level after "
+                    f"the job finishes and the plate is clear."
+                ),
+                "state": live_state.value,
+            }
+
         policy = self.get_policy(printer_name)
         command = policy.gcode_command
 

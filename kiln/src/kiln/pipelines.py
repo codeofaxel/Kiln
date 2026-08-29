@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kiln.print_start_verdict import resolve_print_start
+from kiln.printers.base import PrinterStatus
 
 logger = logging.getLogger(__name__)
 
@@ -1337,6 +1338,33 @@ def calibrate(
                 pipeline="calibrate",
                 success=False,
                 message="Printer is not connected.",
+                steps=steps,
+                total_duration_seconds=time.time() - start,
+            )
+        # Calibration homes ALL axes and probes the bed — both need a
+        # clear plate.  While a job is printing or paused the plate
+        # carries a part, and the G28's Z descent (and the probe pass
+        # after it) would drive the nozzle into it.
+        if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+            steps.append(
+                PipelineStep(
+                    name="connect",
+                    success=False,
+                    message=(
+                        f"Printer is {state.state.value} — calibration "
+                        "homes Z and probes the bed, which needs a clear "
+                        "plate. Finish or cancel the job first."
+                    ),
+                    duration_seconds=time.time() - step_start,
+                )
+            )
+            return PipelineResult(
+                pipeline="calibrate",
+                success=False,
+                message=(
+                    f"Refused: printer is {state.state.value} and the bed "
+                    "carries a print. Calibrate only on a clear plate."
+                ),
                 steps=steps,
                 total_duration_seconds=time.time() - start,
             )

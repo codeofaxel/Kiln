@@ -1247,3 +1247,56 @@ class TestRunResliceAndPrintTool:
         assert call_kwargs["printer_id"] is None
         # overrides may be None or a dict with auto-injected speed
         # overrides from printer type detection — both are valid.
+
+
+# ---------------------------------------------------------------------------
+# Calibrate pipeline — mid-print refusal
+# ---------------------------------------------------------------------------
+
+class TestCalibrateRefusesMidPrint:
+    """Calibration homes ALL axes and probes the bed; both need a clear
+    plate.  While a job is printing or paused the pipeline must refuse
+    before any motion is sent."""
+
+    def _adapter_in(self, status):
+        from kiln.printers.base import PrinterState
+
+        adapter = MagicMock()
+        adapter.get_state.return_value = PrinterState(connected=True, state=status)
+        adapter.send_gcode.return_value = True
+        return adapter
+
+    @patch("kiln.pipelines._resolve_pipeline_adapter")
+    def test_refused_while_printing(self, mock_resolve: MagicMock) -> None:
+        from kiln.pipelines import calibrate
+        from kiln.printers.base import PrinterStatus
+
+        adapter = self._adapter_in(PrinterStatus.PRINTING)
+        mock_resolve.return_value = adapter
+        result = calibrate(printer_name="p1")
+        assert result.success is False
+        assert "carries a print" in result.message
+        adapter.send_gcode.assert_not_called()
+
+    @patch("kiln.pipelines._resolve_pipeline_adapter")
+    def test_refused_while_paused(self, mock_resolve: MagicMock) -> None:
+        from kiln.pipelines import calibrate
+        from kiln.printers.base import PrinterStatus
+
+        adapter = self._adapter_in(PrinterStatus.PAUSED)
+        mock_resolve.return_value = adapter
+        result = calibrate(printer_name="p1")
+        assert result.success is False
+        adapter.send_gcode.assert_not_called()
+
+    @patch("kiln.pipelines._resolve_pipeline_adapter")
+    def test_idle_proceeds_to_homing(self, mock_resolve: MagicMock) -> None:
+        from kiln.pipelines import calibrate
+        from kiln.printers.base import PrinterStatus
+
+        adapter = self._adapter_in(PrinterStatus.IDLE)
+        mock_resolve.return_value = adapter
+        result = calibrate(printer_name="p1")
+        # The pipeline proceeds past the state gate and sends motion.
+        assert adapter.send_gcode.called
+        assert result.steps[0].name == "connect"

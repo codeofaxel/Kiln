@@ -46,6 +46,7 @@ of answering with a coordinate.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -61,6 +62,12 @@ DEFAULT_LIFT_MM = 5.0
 DEFAULT_OCCUPIED_MARGIN_MM = 10.0
 # How far inside the bed rectangle a park corner is placed.
 DEFAULT_EDGE_INSET_MM = 5.0
+
+# Line cap for occupancy scans.  Far above any realistic sliced file
+# (a multi-day 100MB print is ~2.5M lines); a scan that still hits this
+# is treated as unparseable, because a PARTIAL footprint under-covers
+# the plate — the one direction occupancy must never err in.
+_OCCUPANCY_MAX_LINES = 5_000_000
 
 _LIFT_FEEDRATE = 600  # mm/min — deliberate, not a travel move
 _TRAVEL_FEEDRATE = 6000
@@ -96,9 +103,14 @@ def check_mid_print_sequence(commands: list[str]) -> list[str]:
 
     Returns a list of violation strings (empty = clean).  Used by tests
     and available to any door that assembles a sequence by hand.
+
+    "Lift" is counted strictly: a POSITIVE relative Z move (inside
+    G91).  An absolute Z move before homing proves nothing — with an
+    untrusted position it could just as well be a descent.
     """
     violations: list[str] = []
     lift_seen = False
+    relative = False
     for i, cmd in enumerate(commands):
         stripped = cmd.split(";", 1)[0].strip().upper()
         if not stripped:
@@ -107,11 +119,17 @@ def check_mid_print_sequence(commands: list[str]) -> list[str]:
             violations.append(
                 f"line {i}: {cmd.strip()!r} homes Z with a part on the bed"
             )
-        if re.match(r"^G[01]\b", stripped) and re.search(r"\bZ", stripped):
-            lift_seen = True
+        if stripped.startswith("G91"):
+            relative = True
+        elif stripped.startswith("G90"):
+            relative = False
+        if relative and re.match(r"^G[01]\b", stripped):
+            zm = re.search(r"\bZ(-?\d+\.?\d*)", stripped)
+            if zm and float(zm.group(1)) > 0:
+                lift_seen = True
         if _G28_RE.match(stripped) and not lift_seen:
             violations.append(
-                f"line {i}: {cmd.strip()!r} homes before any Z lift"
+                f"line {i}: {cmd.strip()!r} homes before any relative Z lift"
             )
     return violations
 
@@ -158,63 +176,224 @@ _EXCLUDE_OBJECT_RE = re.compile(
 _NAME_PARAM_RE = re.compile(r"\bNAME=(?P<name>\S+)", re.IGNORECASE)
 _POLYGON_PARAM_RE = re.compile(r"\bPOLYGON=(?P<poly>\[\[.*?\]\])", re.IGNORECASE)
 
+# Per-object print-block markers, one dialect per slicer family.  A line
+# matching a start pattern opens an object's block; moves until the
+# matching end line belong to that object.  Order matters: Bambu/Orca's
+# "; start printing object, id: N" must be tried before PrusaSlicer's
+# "; printing object NAME id:0 copy 0" would ever see it.
+_OBJECT_START_RES = (
+    re.compile(r"^EXCLUDE_OBJECT_START\s+NAME=(?P<name>\S+)", re.IGNORECASE),
+    re.compile(r"^;\s*start printing object\s*,?\s*id:\s*(?P<name>\S+)", re.IGNORECASE),
+    re.compile(r"^;\s*printing object\s+(?P<name>.+?)\s*$", re.IGNORECASE),
+)
+_OBJECT_END_RES = (
+    re.compile(r"^EXCLUDE_OBJECT_END\b", re.IGNORECASE),
+    re.compile(r"^;\s*stop printing object\b", re.IGNORECASE),
+)
+
+_MOVE_X_RE = re.compile(r"\bX(-?\d+\.?\d*)")
+_MOVE_Y_RE = re.compile(r"\bY(-?\d+\.?\d*)")
+_MOVE_Z_RE = re.compile(r"\bZ(-?\d+\.?\d*)")
+_MOVE_E_RE = re.compile(r"\bE(-?\d+\.?\d*)")
+
+
+def _job_gcode_lines(job_path: str):
+    """Iterator over the job's gcode lines, or ``None`` for non-gcode files.
+
+    ``.gcode`` streams the file; ``.3mf`` yields the first embedded
+    ``Metadata/plate_*.gcode`` (the Bambu layout).
+    """
+    import io
+    import zipfile
+
+    path = Path(job_path)
+    ext = path.suffix.lower()
+    if ext == ".gcode":
+        return open(path, encoding="utf-8", errors="replace")
+    if ext == ".3mf":
+        try:
+            with zipfile.ZipFile(path) as zf:
+                names = [
+                    n for n in zf.namelist()
+                    if n.startswith("Metadata/plate_") and n.endswith(".gcode")
+                ]
+                if not names:
+                    return None
+                data = zf.read(names[0]).decode("utf-8", errors="replace")
+            return io.StringIO(data)
+        except (zipfile.BadZipFile, KeyError, OSError):
+            return None
+    return None
+
 
 def occupied_regions_for_job(
     job_path: str,
     *,
     margin_mm: float = DEFAULT_OCCUPIED_MARGIN_MM,
 ) -> list[OccupiedRegion] | None:
-    """Per-object occupied regions when the gcode declares them.
+    """Per-object occupied regions, with per-object heights where the
+    gcode reveals them.
 
-    Parses ``EXCLUDE_OBJECT_DEFINE`` lines (the Klipper exclude-object
-    convention every major slicer can emit) into one region per object —
-    each the bbox of the object's declared polygon, which over-approximates
-    that object exactly the way the whole-plate bbox over-approximates the
-    plate.  Falls back to a single whole-job region when the file declares
-    no objects.  Returns ``None`` when occupancy cannot be derived at all.
+    Two sources, merged per object name:
+
+    - ``EXCLUDE_OBJECT_DEFINE`` polygons (footprint declarations) —
+      bbox of the declared polygon, a safe over-approximation.
+    - Per-object print blocks (``EXCLUDE_OBJECT_START/END``, Bambu/Orca
+      ``; start/stop printing object``, PrusaSlicer ``; printing
+      object``) — the extruding moves inside a block give that object's
+      observed footprint AND its top Z in the file.  The file's top is
+      at or above the part's current top mid-print, so a fly-over
+      planned against it can only over-clear.
+
+    Falls back to a single whole-job region when the file declares no
+    objects.  Returns ``None`` when occupancy cannot be derived — which
+    callers must treat as "unknown", never "clear".  A scan that hits
+    the line cap also returns ``None``: a partial footprint under-covers
+    the plate.
     """
     path = Path(job_path)
     if not path.is_file():
         return None
-    regions: list[OccupiedRegion] = []
-    if path.suffix.lower() == ".gcode":
-        try:
-            with open(path, encoding="utf-8", errors="replace") as f:
-                for i, line in enumerate(f):
-                    if i > 5000:  # declarations live in the file header
-                        break
-                    m = _EXCLUDE_OBJECT_RE.match(line.strip())
-                    if not m:
-                        continue
-                    params = m.group("params")
-                    poly_m = _POLYGON_PARAM_RE.search(params)
-                    if not poly_m:
-                        continue
-                    try:
-                        import json
 
-                        points = json.loads(poly_m.group("poly"))
-                        xs = [float(p[0]) for p in points]
-                        ys = [float(p[1]) for p in points]
-                    except (ValueError, TypeError, IndexError):
+    lines = _job_gcode_lines(job_path)
+    define_boxes: dict[str, tuple[float, float, float, float]] = {}
+    observed: dict[str, dict[str, float]] = {}
+    truncated = False
+    if lines is not None:
+        try:
+            current: str | None = None
+            relative = False
+            last_z: float | None = None
+            anon = 0
+            for i, line in enumerate(lines):
+                if i > _OCCUPANCY_MAX_LINES:
+                    truncated = True
+                    break
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                first = stripped[0]
+                if first in ";Ee":  # comment or EXCLUDE_OBJECT_*
+                    matched = False
+                    for pat in _OBJECT_START_RES:
+                        m = pat.match(stripped)
+                        if m:
+                            name = m.group("name").strip()
+                            if not name:
+                                anon += 1
+                                name = f"object_{anon}"
+                            current = name
+                            matched = True
+                            break
+                    if matched:
                         continue
-                    if not xs or not ys:
-                        continue
-                    name_m = _NAME_PARAM_RE.search(params)
-                    regions.append(
-                        OccupiedRegion(
-                            x_min=min(xs),
-                            x_max=max(xs),
-                            y_min=min(ys),
-                            y_max=max(ys),
-                            margin_mm=margin_mm,
-                            source="exclude_object",
-                            name=name_m.group("name") if name_m else None,
-                        )
-                    )
+                    for pat in _OBJECT_END_RES:
+                        if pat.match(stripped):
+                            current = None
+                            break
+                    m = _EXCLUDE_OBJECT_RE.match(stripped)
+                    if m:
+                        params = m.group("params")
+                        poly_m = _POLYGON_PARAM_RE.search(params)
+                        if poly_m:
+                            try:
+                                import json
+
+                                pts = json.loads(poly_m.group("poly"))
+                                xs = [float(p[0]) for p in pts]
+                                ys = [float(p[1]) for p in pts]
+                            except (ValueError, TypeError, IndexError):
+                                xs = ys = []
+                            if xs and ys:
+                                name_m = _NAME_PARAM_RE.search(params)
+                                anon += 0 if name_m else 1
+                                key = (
+                                    name_m.group("name")
+                                    if name_m
+                                    else f"object_{anon}"
+                                )
+                                define_boxes[key] = (
+                                    min(xs), max(xs), min(ys), max(ys),
+                                )
+                    continue
+                if not (stripped.startswith("G0") or stripped.startswith("G1")):
+                    if stripped.startswith("G91"):
+                        relative = True
+                    elif stripped.startswith("G90"):
+                        relative = False
+                    continue
+                code = stripped.split(";", 1)[0]
+                zm = _MOVE_Z_RE.search(code)
+                if zm and not relative:
+                    last_z = float(zm.group(1))
+                if current is None:
+                    continue
+                if _MOVE_E_RE.search(code) is None:
+                    continue
+                xm = _MOVE_X_RE.search(code)
+                ym = _MOVE_Y_RE.search(code)
+                if xm is None and ym is None:
+                    continue
+                box = observed.setdefault(
+                    current,
+                    {
+                        "x_min": float("inf"), "x_max": float("-inf"),
+                        "y_min": float("inf"), "y_max": float("-inf"),
+                        "z_max": float("-inf"),
+                    },
+                )
+                if xm:
+                    v = float(xm.group(1))
+                    box["x_min"] = min(box["x_min"], v)
+                    box["x_max"] = max(box["x_max"], v)
+                if ym:
+                    v = float(ym.group(1))
+                    box["y_min"] = min(box["y_min"], v)
+                    box["y_max"] = max(box["y_max"], v)
+                if last_z is not None:
+                    box["z_max"] = max(box["z_max"], last_z)
         except OSError as exc:
-            logger.warning("occupied_regions_for_job failed for %s: %s", job_path, exc)
+            logger.warning(
+                "occupied_regions_for_job failed for %s: %s", job_path, exc
+            )
             return None
+        finally:
+            with contextlib.suppress(Exception):
+                lines.close()
+
+    if truncated:
+        logger.warning(
+            "occupied_regions_for_job: scan truncated for %s — "
+            "treating occupancy as unknown", job_path,
+        )
+        return None
+
+    regions: list[OccupiedRegion] = []
+    for name in sorted(set(define_boxes) | set(observed)):
+        seen = observed.get(name)
+        declared = define_boxes.get(name)
+        boxes = []
+        if seen is not None and seen["x_min"] <= seen["x_max"]:
+            boxes.append((seen["x_min"], seen["x_max"], seen["y_min"], seen["y_max"]))
+        if declared is not None:
+            boxes.append(declared)
+        if not boxes:
+            continue
+        z_top = None
+        if seen is not None and seen["z_max"] > float("-inf"):
+            z_top = seen["z_max"]
+        regions.append(
+            OccupiedRegion(
+                x_min=min(b[0] for b in boxes),
+                x_max=max(b[1] for b in boxes),
+                y_min=min(b[2] for b in boxes),
+                y_max=max(b[3] for b in boxes),
+                margin_mm=margin_mm,
+                z_top_mm=z_top,
+                source="object_markers" if seen is not None else "exclude_object",
+                name=name,
+            )
+        )
     if regions:
         return regions
     single = occupied_region_for_job(job_path, margin_mm=margin_mm)
@@ -243,10 +422,10 @@ def occupied_region_for_job(
     bbox = None
     source = ""
     if ext == ".gcode":
-        bbox = bed_fit.compute_gcode_bbox(job_path)
+        bbox = bed_fit.compute_gcode_bbox(job_path, max_lines=_OCCUPANCY_MAX_LINES)
         source = "gcode_bbox"
     elif ext == ".3mf":
-        bbox = bed_fit.compute_3mf_bbox(job_path)
+        bbox = bed_fit.compute_3mf_bbox(job_path, max_lines=_OCCUPANCY_MAX_LINES)
         source = "3mf_gcode_bbox"
         if bbox is None:
             bbox = bed_fit.compute_mesh_bbox(job_path)
@@ -255,6 +434,15 @@ def occupied_region_for_job(
         bbox = bed_fit.compute_mesh_bbox(job_path)
         source = "mesh_bbox"
     if bbox is None:
+        return None
+    if bbox.get("truncated"):
+        # The scan stopped before the end of the file: later moves are
+        # unseen, so this bbox may UNDER-cover the plate.  For occupancy
+        # an incomplete footprint is worse than none — refuse.
+        logger.warning(
+            "occupied_region_for_job: bbox scan truncated for %s — "
+            "treating occupancy as unknown", job_path,
+        )
         return None
     return OccupiedRegion(
         x_min=bbox["x_min"],
@@ -291,6 +479,59 @@ class HomingBehavior:
     notes: list[str] = field(default_factory=list)
 
 
+def _config_section(config: dict | None, name: str) -> dict | None:
+    """Case-insensitive section lookup in a parsed Klipper config."""
+    if not isinstance(config, dict):
+        return None
+    for key, value in config.items():
+        if key.strip().lower() == name and isinstance(value, dict):
+            return value
+    return None
+
+
+def bed_rect_from_config(
+    config: dict | None,
+) -> tuple[float, float, float, float] | None:
+    """Usable XY rectangle read from the machine's OWN Klipper config.
+
+    Returns ``(x_min, x_max, y_min, y_max)`` from ``stepper_x`` /
+    ``stepper_y`` ``position_min``/``position_max`` (min defaults to 0,
+    as Klipper does), or ``None`` when the config doesn't state both
+    maxima.  This is how a printer that isn't in the catalogue — or one
+    with a negative-X wipe area — still gets provable planning: its own
+    firmware config is the primary source.
+    """
+    sx = _config_section(config, "stepper_x")
+    sy = _config_section(config, "stepper_y")
+    if sx is None or sy is None:
+        return None
+    try:
+        x_max = float(str(sx["position_max"]).strip())
+        y_max = float(str(sy["position_max"]).strip())
+        x_min = float(str(sx.get("position_min", 0.0)).strip() or 0.0)
+        y_min = float(str(sy.get("position_min", 0.0)).strip() or 0.0)
+    except (KeyError, ValueError, TypeError):
+        return None
+    if x_max <= x_min or y_max <= y_min:
+        return None
+    return (x_min, x_max, y_min, y_max)
+
+
+def _resolve_bed_rect(
+    printer_id: str | None,
+    bed_rect: tuple[float, float, float, float] | None,
+) -> tuple[float, float, float, float] | None:
+    """The planning rectangle: explicit override first, then catalogue."""
+    if bed_rect is not None:
+        return bed_rect
+    from kiln.printers import bed_fit
+
+    volume = bed_fit.get_build_volume(printer_id)
+    if volume is None:
+        return None
+    return (0.0, volume[0], 0.0, volume[1])
+
+
 def analyze_homing_config(config: dict | None) -> HomingBehavior:
     """Derive homing behaviour from a parsed Klipper config.
 
@@ -303,10 +544,7 @@ def analyze_homing_config(config: dict | None) -> HomingBehavior:
         return HomingBehavior()
 
     def _section(name: str) -> dict | None:
-        for key, value in config.items():
-            if key.strip().lower() == name and isinstance(value, dict):
-                return value
-        return None
+        return _config_section(config, name)
 
     notes: list[str] = []
     safe_z = _section("safe_z_home")
@@ -363,22 +601,23 @@ def plan_park_point(
     occupied: OccupiedRegion | list[OccupiedRegion] | None,
     *,
     edge_inset_mm: float = DEFAULT_EDGE_INSET_MM,
+    bed_rect: tuple[float, float, float, float] | None = None,
 ) -> ParkPlan:
     """Choose a park point PROVABLY outside every occupied region.
 
-    Candidates are the four bed corners inset by *edge_inset_mm*
-    (corner-origin convention — every printer in the catalogue,
-    consistent with :mod:`kiln.printers.bed_fit`).  Among corners that
-    clear ALL regions (margins included), the one farthest from its
-    nearest part wins.
+    Candidates are the four bed corners inset by *edge_inset_mm*.  The
+    bed rectangle comes from *bed_rect* when given — pass
+    :func:`bed_rect_from_config` output so the machine's own firmware
+    config wins over the catalogue (and printers the catalogue has
+    never heard of still get planning) — else from the catalogue's
+    corner-origin volume.  Among corners that clear ALL regions
+    (margins included), the one farthest from its nearest part wins.
 
     Refuses — rather than guessing — when the bed geometry is unknown,
     when occupancy is unknown, or when no candidate clears every region.
     """
-    from kiln.printers import bed_fit
-
-    volume = bed_fit.get_build_volume(printer_id)
-    if volume is None:
+    rect = _resolve_bed_rect(printer_id, bed_rect)
+    if rect is None:
         return ParkPlan(
             ok=False,
             reason=(
@@ -400,13 +639,13 @@ def plan_park_point(
             ok=False,
             reason="empty occupied-region list — occupancy was not derived",
         )
-    bed_x, bed_y, _ = volume
+    bx0, bx1, by0, by1 = rect
     inset = edge_inset_mm
     corners = [
-        (inset, inset),
-        (bed_x - inset, inset),
-        (inset, bed_y - inset),
-        (bed_x - inset, bed_y - inset),
+        (bx0 + inset, by0 + inset),
+        (bx1 - inset, by0 + inset),
+        (bx0 + inset, by1 - inset),
+        (bx1 - inset, by1 - inset),
     ]
     clear = [
         c for c in corners if not any(r.contains(*c) for r in regions)
@@ -516,6 +755,7 @@ def plan_travel(
     *,
     travel_z_mm: float | None = None,
     ignore_names: set[str] | None = None,
+    bed_rect: tuple[float, float, float, float] | None = None,
 ) -> TravelPlan:
     """Plan an XY route from *start_xy* to *goal_xy* that provably avoids
     every obstacle region (margin included), or refuse.
@@ -535,12 +775,13 @@ def plan_travel(
        is off-bed or inside a keep-out box, or no clear route exists.
 
     ``ignore_names`` exempts named regions (e.g. the object a mid-print
-    decoration is deliberately approaching).
+    decoration is deliberately approaching).  ``bed_rect`` overrides the
+    catalogue bed rectangle — pass :func:`bed_rect_from_config` output
+    so the machine's own firmware config wins, including printers the
+    catalogue has never heard of.
     """
-    from kiln.printers import bed_fit
-
-    volume = bed_fit.get_build_volume(printer_id)
-    if volume is None:
+    rect_bounds = _resolve_bed_rect(printer_id, bed_rect)
+    if rect_bounds is None:
         return TravelPlan(
             ok=False,
             reason=(
@@ -561,12 +802,15 @@ def plan_travel(
     if ignore_names:
         obstacles = [o for o in obstacles if o.name not in ignore_names]
 
-    bed_x, bed_y, _ = volume
+    bx0, bx1, by0, by1 = rect_bounds
     for label, (x, y) in (("start", start_xy), ("goal", goal_xy)):
-        if not (0.0 <= x <= bed_x and 0.0 <= y <= bed_y):
+        if not (bx0 <= x <= bx1 and by0 <= y <= by1):
             return TravelPlan(
                 ok=False,
-                reason=f"{label} ({x:g}, {y:g}) is outside the {bed_x:g}x{bed_y:g} bed",
+                reason=(
+                    f"{label} ({x:g}, {y:g}) is outside the usable bed "
+                    f"[{bx0:g}..{bx1:g}] x [{by0:g}..{by1:g}]"
+                ),
             )
 
     # 1. Fly-over: proven only when EVERY obstacle's height is known and
@@ -621,7 +865,7 @@ def plan_travel(
             (x0 - _CORNER_EPS_MM, y1 + _CORNER_EPS_MM),
             (x1 + _CORNER_EPS_MM, y1 + _CORNER_EPS_MM),
         ):
-            if 0.0 <= cx <= bed_x and 0.0 <= cy <= bed_y:
+            if bx0 <= cx <= bx1 and by0 <= cy <= by1:
                 nodes.append((cx, cy))
 
     import heapq
@@ -713,6 +957,11 @@ def build_resume_preamble(
     Descent from ``resume_z + lift`` to the exact resume Z is the resumed
     gcode body's first move; the preamble deliberately stops one lift
     above it.
+
+    When ``resume_z_mm`` is not a positive height the resume Z is
+    UNKNOWN, and an absolute descent could dive below the part's top at
+    the homed corner — so the preamble stays at the lifted height and
+    says so, leaving the descent to a caller that actually knows Z.
     """
     commands: list[str] = []
     if header_comment:
@@ -723,8 +972,16 @@ def build_resume_preamble(
         *build_lift_and_home_xy(lift_mm=lift_mm),
         f"M109 S{hotend_temp}",  # Wait for hotend
         f"M190 S{bed_temp}",  # Wait for bed
-        f"G1 Z{resume_z_mm + lift_mm:.1f} F{_LIFT_FEEDRATE}",  # Safe Z above resume layer
     ]
+    if resume_z_mm > 0:
+        commands.append(
+            f"G1 Z{resume_z_mm + lift_mm:.1f} F{_LIFT_FEEDRATE}"  # Safe Z above resume layer
+        )
+    else:
+        commands.append(
+            "; resume Z unknown — staying at the lifted height; descend "
+            "only once the resume Z is known"
+        )
     if prime_mm > 0:
         commands.append(f"G1 E{prime_mm:g} F300")  # Prime nozzle
     if retract_mm > 0:

@@ -257,7 +257,7 @@ _GCODE_MOVE_RE = re.compile(
 
 def compute_gcode_bbox(
     gcode_path: str, *, skip_initial_lines: int = 0, max_lines: int = 200_000
-) -> dict[str, float] | None:
+) -> dict[str, Any] | None:
     """Scan a gcode file for G0/G1 X/Y moves in the PRINT region and
     return their bbox.
 
@@ -271,6 +271,12 @@ def compute_gcode_bbox(
     ``skip_initial_lines`` (caller-controlled).
 
     Returns None if no print moves found.
+
+    The result carries a ``truncated`` key: ``True`` when the scan hit
+    ``max_lines`` before the end of the file, i.e. the bbox may MISS
+    later moves.  Fit checks can ignore it (layer 1 decides fit);
+    occupancy callers must treat a truncated bbox as unknown, never as
+    a complete keep-out footprint.
     """
     path = Path(gcode_path)
     if not path.is_file():
@@ -278,6 +284,7 @@ def compute_gcode_bbox(
     x_min = y_min = float("inf")
     x_max = y_max = float("-inf")
     found = False
+    truncated = False
     in_print_region = False
     # If the file has no LAYER_CHANGE marker, scan everything starting
     # at skip_initial_lines (legacy behaviour).  We detect that up front.
@@ -296,6 +303,7 @@ def compute_gcode_bbox(
         with open(path, encoding="utf-8", errors="replace") as f:
             for i, line in enumerate(f):
                 if i > max_lines:
+                    truncated = True
                     break
                 if not in_print_region:
                     stripped = line.strip()
@@ -345,10 +353,13 @@ def compute_gcode_bbox(
         "x_min": x_min, "x_max": x_max,
         "y_min": y_min, "y_max": y_max,
         "z_min": 0.0, "z_max": 0.0,
+        "truncated": truncated,
     }
 
 
-def compute_3mf_bbox(threemf_path: str) -> dict[str, float] | None:
+def compute_3mf_bbox(
+    threemf_path: str, *, max_lines: int = 200_000
+) -> dict[str, Any] | None:
     """Extract embedded gcode from a Bambu .gcode.3mf and compute its
     XY bounding box from the G0/G1 moves.
 
@@ -382,7 +393,7 @@ def compute_3mf_bbox(threemf_path: str) -> dict[str, float] | None:
         tf.write(gcode_bytes)
         tmp_path = tf.name
     try:
-        return compute_gcode_bbox(tmp_path)
+        return compute_gcode_bbox(tmp_path, max_lines=max_lines)
     finally:
         with contextlib.suppress(OSError):
             os.unlink(tmp_path)
