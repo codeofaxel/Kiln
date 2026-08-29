@@ -132,7 +132,7 @@ class _SmartPrintToolsPlugin:
                     code="PRINTER_UNAVAILABLE",
                 )
 
-            effective_pid: str | None = _srv._resolve_slice_printer_id(
+            effective_pid: str | None = _srv._resolve_printer_profile_id(
                 printer_id, printer_name
             )
 

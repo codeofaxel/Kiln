@@ -809,66 +809,17 @@ def _coerce_bool(value: Any) -> bool:
 
 
 def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
-    """Map free-form printer model hints to bundled slicer profile IDs."""
-    if not raw:
-        return None
-    hint = raw.strip().lower().replace("-", "_").replace(" ", "_")
-    if not hint:
-        return None
-    hint_compact = hint.replace("_", "")
+    """Map free-form printer model hints to bundled slicer profile IDs.
 
-    if (
-        hint in {"prusa_mini", "prusamini"}
-        or hint_compact.startswith("prusamini")
-        or ("prusa" in hint and "mini" in hint)
-    ):
-        return "prusa_mini"
-    if "mk4" in hint:
-        return "prusa_mk4"
-    if "mk3" in hint:
-        return "prusa_mk3s"
-    if "prusa_xl" in hint or hint.endswith("_xl") or hint == "xl" or "prusa" in hint and "xl" in hint:
-        return "prusa_xl"
-    if hint in {"sparkx_i7", "creality_sparkx_i7"} or "sparkxi7" in hint_compact:
-        return "sparkx_i7"
-    if "k1max" in hint_compact:
-        return "k1_max"
-    if hint_compact in {"k1c", "crealityk1c"}:
-        return "k1c"
-    if hint_compact in {"k1se", "crealityk1se"}:
-        return "k1_se"
-    if hint_compact in {"k1", "crealityk1"}:
-        return "k1"
-    if "k2plus" in hint_compact:
-        return "k2_plus"
-    if "k2pro" in hint_compact:
-        return "k2_pro"
-    if "k2se" in hint_compact:
-        return "k2_se"
-    if hint_compact in {"k2", "crealityk2"}:
-        return "k2"
-    if hint in {"creality_hi", "hi"} or hint_compact in {"crealityhi"}:
-        return "creality_hi"
-    if "ender3v4" in hint_compact:
-        return "ender3_v4"
-    if "ender3v3ke" in hint_compact:
-        return "ender3_v3_ke"
-    if "ender3v3se" in hint_compact:
-        return "ender3_v3_se"
-    if "ender3v3plus" in hint_compact:
-        return "ender3_v3_plus"
-    if "ender3v3" in hint_compact:
-        return "ender3_v3"
-    if "ender3" in hint_compact:
-        return "ender3"
-    if "ender5max" in hint_compact:
-        return "ender5_max"
-    if "cr10se" in hint_compact:
-        return "cr10_se"
-    if hint in {"klipper", "moonraker"}:
-        return "klipper_generic"
+    Delegates to :mod:`kiln.printer_profile_ids`, the table the MCP
+    server reads.  The CLI's own copy of this table never learned the
+    Bambu models the server's copy gained in 2026-03, so ``kiln slice``
+    resolved no profile for a Bambu and ``kiln print`` then wrapped
+    generic-default gcode into a 3MF that assumes otherwise.
+    """
+    from kiln.printer_profile_ids import map_printer_hint_to_profile_id
 
-    return None
+    return map_printer_hint_to_profile_id(raw)
 
 
 def _extract_model_hints(payload: dict[str, Any]) -> list[str]:
@@ -904,14 +855,22 @@ def _extract_model_hints(payload: dict[str, Any]) -> list[str]:
 
 def _autodetect_printer_profile_id(ctx: click.Context) -> str | None:
     """Best-effort profile auto-detection from env, config, and backend APIs."""
+    aimed = ctx.obj.get("printer") if ctx.obj else None
     env_model = os.environ.get("KILN_PRINTER_MODEL")
-    mapped = _map_printer_hint_to_profile_id(env_model)
-    if mapped:
-        return mapped
+    # ``KILN_PRINTER_MODEL`` states the DEFAULT machine's model, so when
+    # ``--printer`` names another one, that machine's own config entry has
+    # the better claim.  Env-first stays for an unaimed call, where the
+    # variable is about the printer being asked after.
+    if not aimed:
+        mapped = _map_printer_hint_to_profile_id(env_model)
+        if mapped:
+            return mapped
 
     try:
-        cfg = load_printer_config(ctx.obj.get("printer"))
+        cfg = load_printer_config(aimed)
     except Exception:
+        # An aimed call that can't read its target's config has no model —
+        # falling back to the env var here would be the same borrow.
         return None
 
     for key in ("printer_id", "printer_model", "model", "profile"):

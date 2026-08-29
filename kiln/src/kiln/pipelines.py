@@ -378,6 +378,30 @@ def _run_stability_check(model_path: str, ctx: dict[str, Any]) -> PipelineStep:
         )
 
 
+def _target_printer_id(printer_id: str | None, printer_name: str | None) -> str | None:
+    """The printer-model id EVERY step of an aimed pipeline should use.
+
+    A pipeline is one job aimed at one machine, so the profile it slices
+    with, the bed it is measured against and the firmware limits its
+    G-code is scanned for have to name the same printer.  Callers who
+    aim by ``printer_name`` never passed ``printer_id``, which left the
+    bed-fit and safety steps with nothing to check against — they
+    silently skipped while the slice went ahead.
+
+    Resolved through the server's one resolver so a pipeline and a
+    single-shot tool cannot disagree about what a printer is.  Falls
+    back to the caller's own ``printer_id`` if the server module is
+    unavailable (import cycles during partial initialisation).
+    """
+    try:
+        import kiln.server as _server
+
+        return _server._resolve_printer_profile_id(printer_id, printer_name)
+    except Exception as exc:  # noqa: BLE001 — resolution is best-effort
+        logger.debug("Target printer resolution failed: %s", exc)
+        return printer_id
+
+
 # ---------------------------------------------------------------------------
 # quick_print pipeline
 # ---------------------------------------------------------------------------
@@ -435,6 +459,7 @@ def quick_print(
         "model_path": model_path,
         "validation_report": None,
     }
+    effective_pid = _target_printer_id(printer_id, printer_name)
 
     def _validate_mesh() -> PipelineStep:
         step_start = time.time()
@@ -474,7 +499,7 @@ def quick_print(
         try:
             report = run_full_validation_pipeline(
                 model_path,
-                printer_id=printer_id or "",
+                printer_id=effective_pid or "",
                 material="",
             )
         except Exception as exc:
@@ -541,9 +566,6 @@ def quick_print(
                 success=True,
                 message="Using explicit profile",
             )
-        import kiln.server as _server
-
-        effective_pid = _server._resolve_slice_printer_id(printer_id, printer_name)
         if not effective_pid:
             return PipelineStep(
                 name="resolve_profile",
@@ -597,7 +619,7 @@ def quick_print(
             )
 
     def _safety_check() -> PipelineStep:
-        if not printer_id or not ctx["gcode_path"]:
+        if not effective_pid or not ctx["gcode_path"]:
             return PipelineStep(
                 name="safety_check",
                 success=True,
@@ -607,7 +629,7 @@ def quick_print(
         try:
             from kiln.gcode import scan_gcode_file
 
-            vr = scan_gcode_file(ctx["gcode_path"], printer_id=printer_id)
+            vr = scan_gcode_file(ctx["gcode_path"], printer_id=effective_pid)
             return PipelineStep(
                 name="safety_check",
                 success=vr.valid,
@@ -852,6 +874,7 @@ def reslice_and_print(
         "model_path": model_path,
         "validation_report": None,
     }
+    effective_pid = _target_printer_id(printer_id, printer_name)
 
     def _validate_mesh() -> PipelineStep:
         step_start = time.time()
@@ -891,7 +914,7 @@ def reslice_and_print(
         try:
             report = run_full_validation_pipeline(
                 model_path,
-                printer_id=printer_id or "",
+                printer_id=effective_pid or "",
                 material="",
             )
         except Exception as exc:
@@ -957,9 +980,6 @@ def reslice_and_print(
                 success=True,
                 message="Using explicit profile",
             )
-        import kiln.server as _server
-
-        effective_pid = _server._resolve_slice_printer_id(printer_id, printer_name)
         if not effective_pid:
             return PipelineStep(
                 name="resolve_profile",
@@ -1021,7 +1041,7 @@ def reslice_and_print(
             )
 
     def _safety_check() -> PipelineStep:
-        if not printer_id or not ctx["gcode_path"]:
+        if not effective_pid or not ctx["gcode_path"]:
             return PipelineStep(
                 name="safety_check",
                 success=True,
@@ -1031,7 +1051,7 @@ def reslice_and_print(
         try:
             from kiln.gcode import scan_gcode_file
 
-            vr = scan_gcode_file(ctx["gcode_path"], printer_id=printer_id)
+            vr = scan_gcode_file(ctx["gcode_path"], printer_id=effective_pid)
             return PipelineStep(
                 name="safety_check",
                 success=vr.valid,
@@ -1443,6 +1463,7 @@ def benchmark(
     """
     start = time.time()
     steps: list[PipelineStep] = []
+    effective_pid = _target_printer_id(printer_id, printer_name)
 
     # Step 1: Verify we have a model
     if not model_path:
@@ -1501,7 +1522,7 @@ def benchmark(
                 try:
                     report = run_full_validation_pipeline(
                         model_path,
-                        printer_id=printer_id or "",
+                        printer_id=effective_pid or "",
                         material="",
                     )
                 except Exception as exc:
@@ -1583,12 +1604,6 @@ def benchmark(
 
     # Step 2: Resolve profile
     effective_profile = profile_path
-    if not effective_profile:
-        import kiln.server as _server
-
-        effective_pid = _server._resolve_slice_printer_id(printer_id, printer_name)
-    else:
-        effective_pid = None
     if not effective_profile and effective_pid:
         step_start = time.time()
         try:

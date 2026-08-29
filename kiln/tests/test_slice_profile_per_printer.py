@@ -11,7 +11,7 @@ with the A1 profile, then uploaded the result to the X1C.
 
 WHAT THIS PINS
 --------------
-``_resolve_slice_printer_id`` — the one resolver every door now goes
+``_resolve_printer_profile_id`` — the one resolver every door now goes
 through — follows the target machine: explicit ``printer_id`` first,
 then the named printer's config-declared model, then its adapter's
 self-reported model, and falls back to ``_PRINTER_MODEL`` only when
@@ -80,7 +80,7 @@ class TestResolveSlicePrinterId:
         _use_config(tmp_path, monkeypatch, TWO_BAMBUS)
         monkeypatch.setattr(srv, "_PRINTER_MODEL", "bambu_a1")
 
-        assert srv._resolve_slice_printer_id(None, "shop-x1") == "bambu_x1c"
+        assert srv._resolve_printer_profile_id(None, "shop-x1") == "bambu_x1c"
 
     def test_default_target_still_uses_the_global_model(
         self, tmp_path, monkeypatch, _no_live_adapter
@@ -90,8 +90,8 @@ class TestResolveSlicePrinterId:
         _use_config(tmp_path, monkeypatch, TWO_BAMBUS)
         monkeypatch.setattr(srv, "_PRINTER_MODEL", "bambu_a1")
 
-        assert srv._resolve_slice_printer_id(None, None) == "bambu_a1"
-        assert srv._resolve_slice_printer_id(None, "default") == "bambu_a1"
+        assert srv._resolve_printer_profile_id(None, None) == "bambu_a1"
+        assert srv._resolve_printer_profile_id(None, "default") == "bambu_a1"
 
     def test_explicit_printer_id_beats_the_named_printer(
         self, tmp_path, monkeypatch, _no_live_adapter
@@ -101,7 +101,7 @@ class TestResolveSlicePrinterId:
         _use_config(tmp_path, monkeypatch, TWO_BAMBUS)
         monkeypatch.setattr(srv, "_PRINTER_MODEL", "bambu_a1")
 
-        assert srv._resolve_slice_printer_id("prusa_mini", "shop-x1") == "prusa_mini"
+        assert srv._resolve_printer_profile_id("prusa_mini", "shop-x1") == "prusa_mini"
 
     def test_named_printer_without_model_never_borrows_the_defaults(
         self, tmp_path, monkeypatch, _no_live_adapter
@@ -125,7 +125,7 @@ printers:
 """)
         monkeypatch.setattr(srv, "_PRINTER_MODEL", "bambu_a1")
 
-        assert srv._resolve_slice_printer_id(None, "shop-x1") is None
+        assert srv._resolve_printer_profile_id(None, "shop-x1") is None
 
     def test_named_printer_falls_back_to_its_adapters_model(
         self, tmp_path, monkeypatch
@@ -142,7 +142,7 @@ printers:
 
         monkeypatch.setattr(srv, "_resolve_adapter", mock.Mock(return_value=_Adapter()))
 
-        assert srv._resolve_slice_printer_id(None, "runtime-x1") == "bambu_x1c"
+        assert srv._resolve_printer_profile_id(None, "runtime-x1") == "bambu_x1c"
 
 
 class TestProfileContextFollowsTheTarget:
