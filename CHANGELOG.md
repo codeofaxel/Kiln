@@ -5,6 +5,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **A printability report now names its placement fault, and says what the
+  part's shape scored on its own.** When a part is judged unprintable for
+  hanging below the plate or overrunning the bed, the report carries a
+  stable name for that fault beside the sentence describing it, plus the
+  grade the part would have earned sitting correctly. The wording you
+  already see is unchanged, word for word — this is what lets a viewer say
+  "hangs below the bed" instead of just turning red, and lets anything
+  reading the report tell a badly made part from a well made one in the
+  wrong place.
+
 ### Added
 
 - **Your printer's own start-up routine, run automatically.** If your
