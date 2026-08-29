@@ -12628,6 +12628,11 @@ def merge_stl(
         if result.errors:
             return _error_dict("; ".join(result.errors), code="MERGE_FAILED")
         response = {"success": True, **result.to_dict()}
+        # Concatenation welds nothing — flag pieces that touch or all
+        # but touch, since those will print as separate shells.
+        from kiln.fusion_check import attach_fusion_report
+
+        response = attach_fusion_report(response, response.get("output_path"))
         try:
             from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
             return attach_inspect_bundle(response, level="quick")
