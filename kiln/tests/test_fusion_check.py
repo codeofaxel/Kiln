@@ -23,7 +23,6 @@ from kiln.fusion_check import (  # noqa: E402
     embedment_floor_mm,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixture geometry: box host + cylinder "attachment" at a chosen gap
 # ---------------------------------------------------------------------------
@@ -195,5 +194,98 @@ class TestComposeDoorSurfacesFusion:
 
         assert result["success"] is True
         assert result["fusion"]["fused"] is False
+        assert result["fusion"]["findings"][0]["relation"] == "touching"
+        assert any("unfused geometry" in w for w in result["warnings"])
+
+
+# ---------------------------------------------------------------------------
+# diagnose_mesh: a detached ATTACHMENT is not debris (the misdiagnosis fix)
+# ---------------------------------------------------------------------------
+
+class TestDiagnoseMeshDetachedAttachment:
+    def test_substantial_touching_component_reads_as_unfused_attachment(
+        self, tmp_path
+    ) -> None:
+        from kiln.mesh_diagnostics import diagnose_mesh
+
+        p = _box_and_cylinder_stl(tmp_path / "tangent.stl", gap_mm=0.0)
+        report = diagnose_mesh(str(p))
+        assert report.detached_attachment is True
+        assert any("never fused" in d for d in report.defects)
+        recs = " ".join(report.recommendations)
+        assert "Fuse the detached attachment" in recs
+        # The old advice — delete everything but the largest component —
+        # must not be the headline for a substantial near-touching body.
+        assert "Keep only the largest component" not in recs
+
+    def test_tiny_far_fragment_still_reads_as_debris(self, tmp_path) -> None:
+        from kiln.mesh_diagnostics import diagnose_mesh
+
+        box = trimesh.creation.box(extents=(10, 10, 10))
+        sliver = trimesh.creation.box(extents=(0.5, 0.5, 0.5))
+        sliver.apply_translation((30.0, 0.0, 0.0))
+        p = tmp_path / "debris.stl"
+        trimesh.util.concatenate([box, sliver]).export(p)
+        report = diagnose_mesh(str(p))
+        assert report.detached_attachment is False
+        assert any("Remove floating fragments" in r for r in report.recommendations)
+
+
+# ---------------------------------------------------------------------------
+# No-scipy fallback: the check must not silently no-op on a clean install
+# ---------------------------------------------------------------------------
+
+class TestNoScipyFallback:
+    def test_tangent_still_flagged_without_scipy(self, tmp_path, monkeypatch) -> None:
+        import sys
+
+        p = _box_and_cylinder_stl(tmp_path / "tangent.stl", gap_mm=0.0)
+        # Blocking the module makes `from scipy.spatial import cKDTree`
+        # raise ImportError, forcing the pure-numpy shortlist path.
+        monkeypatch.setitem(sys.modules, "scipy", None)
+        monkeypatch.setitem(sys.modules, "scipy.spatial", None)
+        report = check_fusion(str(p))
+        assert report["fused"] is False
+        assert report["findings"][0]["relation"] == "touching"
+        assert "gap_unmeasured" not in report
+
+
+# ---------------------------------------------------------------------------
+# compile_scad door: agent-authored SCAD is where the incident came from
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def design_tools():
+    from kiln.plugins.design_tools import plugin
+
+    fake = _FakeMCP()
+    plugin.register(fake)
+    return fake.tools
+
+
+class TestCompileScadDoorSurfacesFusion:
+    def test_compile_scad_flags_tangent_result(
+        self, design_tools, tmp_path
+    ) -> None:
+        stl = _box_and_cylinder_stl(tmp_path / "tangent.stl", gap_mm=0.0)
+
+        try:
+            bundle_patch = patch(
+                "kiln_pro.plugins.git_render_tools.attach_inspect_bundle",
+                side_effect=_identity_bundle,
+            )
+            bundle_patch.start()
+        except (ImportError, ModuleNotFoundError):
+            bundle_patch = None
+        try:
+            with patch(
+                "kiln.parametric.compile_scad_code", return_value=str(stl)
+            ):
+                result = design_tools["compile_scad"](scad_code="cube(1);")
+        finally:
+            if bundle_patch is not None:
+                bundle_patch.stop()
+
+        assert result["success"] is True
         assert result["fusion"]["findings"][0]["relation"] == "touching"
         assert any("unfused geometry" in w for w in result["warnings"])

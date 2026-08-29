@@ -142,6 +142,12 @@ class MeshDiagnosticReport:
     defects: list[str]
     recommendations: list[str]
 
+    # A substantial secondary component sitting within a fraction of a
+    # millimeter of the main body: an attachment that never fused, NOT
+    # debris to delete.  Telling the user to "remove isolated pieces"
+    # here would delete their handle (2026-08-29 audit).
+    detached_attachment: bool = False
+
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         return d
@@ -597,6 +603,47 @@ def _assess_polygon_count(face_count: int, vertex_count: int) -> PolygonCountAss
     )
 
 
+def _detect_detached_attachment(
+    file_path: str,
+    components: list[ComponentInfo],
+    has_fragments: bool,
+) -> bool:
+    """Is a secondary component an unfused ATTACHMENT rather than debris?
+
+    Two signals together: a non-largest component that is substantial
+    (not a support sliver or internal fragment), and some body pair that
+    touches or all but touches (the fusion check's exact gap
+    measurement).  Either alone stays classified as ordinary floating
+    fragments; both together means "remove the isolated piece" would
+    delete part of the user's model.
+    """
+    if not has_fragments or len(components) < 2:
+        return False
+    # Substantial by VOLUME first (a coarse primitive host can have very
+    # few faces), face count as the fallback for unclosed components.
+    vols = sorted((c.volume_mm3 or 0.0 for c in components), reverse=True)
+    faces = sorted((c.face_count for c in components), reverse=True)
+    substantial = (
+        vols[1] >= max(25.0, 0.005 * vols[0])
+        or faces[1] >= max(50, 0.03 * faces[0])
+    )
+    if not substantial:
+        return False
+    try:
+        from kiln.fusion_check import check_fusion
+
+        report = check_fusion(file_path)
+    except Exception as exc:  # noqa: BLE001 — diagnostics must not crash
+        logger.debug("detached-attachment gap check skipped: %s", exc)
+        return False
+    if not report.get("checked"):
+        return False
+    return any(
+        f.get("relation") in ("touching", "near")
+        for f in report.get("findings", [])
+    )
+
+
 def _compute_severity(
     *,
     degenerate_count: int,
@@ -605,6 +652,7 @@ def _compute_severity(
     hole_count: int,
     has_fragments: bool,
     is_watertight: bool,
+    detached_attachment: bool = False,
 ) -> str:
     """Compute overall severity level."""
     issues = 0
@@ -623,7 +671,10 @@ def _compute_severity(
         issues += 2
     elif degenerate_count > 0:
         issues += 1
-    if has_fragments:
+    if detached_attachment:
+        # Part of the model itself is unfused — worse than stray debris.
+        issues += 2
+    elif has_fragments:
         issues += 1
     if not is_watertight:
         issues += 1
@@ -648,6 +699,7 @@ def _build_defects(
     component_count: int,
     is_watertight: bool,
     polygon_assessment: PolygonCountAssessment,
+    detached_attachment: bool = False,
 ) -> list[str]:
     """Build a list of human-readable defect descriptions."""
     defects: list[str] = []
@@ -682,7 +734,14 @@ def _build_defects(
             "Decimate first, then re-run diagnostics."
         )
 
-    if has_fragments:
+    if has_fragments and detached_attachment:
+        defects.append(
+            f"{component_count} disconnected components found — a substantial "
+            "component sits within a fraction of a millimeter of the main "
+            "body. It reads as an attachment that never fused: flush/tangent "
+            "contact welds nothing, and it will print as a separate shell."
+        )
+    elif has_fragments:
         defects.append(
             f"{component_count} disconnected components found — "
             f"{component_count - 1} floating fragment(s) should be removed."
@@ -704,6 +763,7 @@ def _build_recommendations(
     has_fragments: bool,
     is_watertight: bool,
     polygon_assessment: PolygonCountAssessment,
+    detached_attachment: bool = False,
 ) -> list[str]:
     """Build actionable recommendations for fixing detected defects."""
     recs: list[str] = []
@@ -744,7 +804,15 @@ def _build_recommendations(
             "Make Solid operation."
         )
 
-    if has_fragments:
+    if has_fragments and detached_attachment:
+        recs.append(
+            "Fuse the detached attachment: sink it at least 0.4mm into the "
+            "main body and re-compose — a boolean union of parts that merely "
+            "touch does not weld them. Only if the extra piece is genuinely "
+            "leftover support or debris, remove it instead (MeshLab: "
+            "Filters > Cleaning and Repairing > Remove Isolated pieces)."
+        )
+    elif has_fragments:
         recs.append(
             "Remove floating fragments: In MeshLab, use Filters > Cleaning and Repairing > "
             "Remove Isolated pieces (by face count). Keep only the largest component."
@@ -824,6 +892,9 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
 
     # Components
     component_count, components, has_fragments = _analyze_components(mesh)
+    detached_attachment = _detect_detached_attachment(
+        file_path, components, has_fragments
+    )
 
     # Build report
     severity = _compute_severity(
@@ -833,6 +904,7 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
         hole_count=hole_count,
         has_fragments=has_fragments,
         is_watertight=is_watertight,
+        detached_attachment=detached_attachment,
     )
 
     defects = _build_defects(
@@ -845,6 +917,7 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
         component_count=component_count,
         is_watertight=is_watertight,
         polygon_assessment=polygon_assessment,
+        detached_attachment=detached_attachment,
     )
 
     recommendations = _build_recommendations(
@@ -856,6 +929,7 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
         has_fragments=has_fragments,
         is_watertight=is_watertight,
         polygon_assessment=polygon_assessment,
+        detached_attachment=detached_attachment,
     )
 
     return MeshDiagnosticReport(
@@ -880,4 +954,5 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
         severity=severity,
         defects=defects,
         recommendations=recommendations,
+        detached_attachment=detached_attachment,
     )

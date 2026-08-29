@@ -35,7 +35,7 @@ TOUCH_GAP_MM = 0.05
 NEAR_GAP_MM = 0.8
 # Minimum overlap that makes a weld real: about two extrusion widths.
 EMBEDMENT_FLOOR_MM = 0.4
-# Points sampled per body for the gap measurement fallback.
+# Surface points sampled per body for the gap measurement.
 _GAP_SAMPLES = 1500
 # Bound the pairwise gap work on pathological many-body meshes.
 _MAX_PAIRS = 8
@@ -74,23 +74,46 @@ def _sample_points(mesh: Any) -> Any:
     return pts
 
 
+def _nearest_centroid_ids(points: Any, centroids: Any, k: int) -> Any:
+    """Indices of the ``k`` nearest triangle centroids per point.
+
+    scipy's KD-tree when available; otherwise a chunked brute-force
+    numpy pass (scipy is not a base dependency of this package, and the
+    check must not silently no-op on a clean install).  Chunk size caps
+    the temporary distance matrix at a few million elements.
+    """
+    import numpy as np
+
+    try:
+        from scipy.spatial import cKDTree
+
+        _dist, idx = cKDTree(centroids).query(points, k=k)
+        return idx.reshape(len(points), -1)
+    except ImportError:
+        idx = np.empty((len(points), k), dtype=np.int64)
+        chunk = max(1, int(4_000_000 // max(len(centroids), 1)))
+        for s in range(0, len(points), chunk):
+            d2 = (
+                (points[s : s + chunk, None, :] - centroids[None, :, :]) ** 2
+            ).sum(axis=2)
+            idx[s : s + chunk] = np.argpartition(d2, k - 1, axis=1)[:, :k]
+        return idx
+
+
 def _points_to_surface_min_mm(points: Any, mesh: Any, k: int = 24) -> float:
     """Exact min distance from sample points to a mesh's surface.
 
-    KD-tree on triangle centroids shortlists ``k`` candidate triangles
-    per point, then exact point-to-triangle distance on the shortlist —
-    the same shape of measurement the assembly contact analysis uses.
-    Requires scipy (raises to the caller when unavailable).
+    ``k`` candidate triangles per point (nearest centroids), then exact
+    point-to-triangle distance on the shortlist — the same shape of
+    measurement the assembly contact analysis uses.
     """
     import numpy as np
-    from scipy.spatial import cKDTree
     from trimesh.triangles import closest_point as _tri_closest
 
     triangles = mesh.triangles
     centroids = triangles.mean(axis=1)
     k = min(k, len(centroids))
-    _dist, idx = cKDTree(centroids).query(points, k=k)
-    idx = idx.reshape(len(points), -1)
+    idx = _nearest_centroid_ids(points, centroids, k)
     flat_tris = triangles[idx.ravel()]
     flat_pts = np.repeat(points, idx.shape[1], axis=0)
     closest = _tri_closest(flat_tris, flat_pts)
@@ -155,7 +178,7 @@ def check_fusion(
     # largest first, then adjacent pairs while the budget lasts.
     order = sorted(range(len(bodies)), key=lambda i: -abs(float(bodies[i].area)))
     pairs = [(order[0], i) for i in order[1:]]
-    pairs += [(a, b) for a, b in zip(order[1:], order[2:])]
+    pairs += [(a, b) for a, b in zip(order[1:], order[2:], strict=False)]
     for a, b in pairs[:max_pairs]:
         try:
             gap = _pair_gap_mm(bodies[a], bodies[b])

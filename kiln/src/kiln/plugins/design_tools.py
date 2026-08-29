@@ -1623,6 +1623,14 @@ class _DesignToolsPlugin:
                             "fastener advice skipped on compile",
                             exc_info=True,
                         )
+                # Agent-authored SCAD is the door where a flush attachment
+                # (a handle ending exactly on a curved wall) slips through:
+                # the union compiles clean but never welds.  Flag pieces
+                # that touch or all but touch; real designed clearances
+                # (print-in-place joints) are wider and stay silent.
+                from kiln.fusion_check import attach_fusion_report
+
+                response = attach_fusion_report(response, stl_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
@@ -1671,6 +1679,13 @@ class _DesignToolsPlugin:
                         f"Updated {parameter_name}={new_value}, compiled to STL{suffix}."
                     ),
                 }
+                # Same flush-attachment door as compile_scad: a tweak can
+                # slide a part to exact tangency; flag unfused contact.
+                from kiln.fusion_check import attach_fusion_report
+
+                response = attach_fusion_report(
+                    response, response.get("stl_path"),
+                )
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
