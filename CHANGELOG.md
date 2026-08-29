@@ -58,6 +58,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Tell Kiln which printer, and it slices for that printer.** With more than
+  one machine registered, naming one could use your default printer's settings.
+  Fixed.
+
 - **"Design this and print it" now actually prints it.** The one-call
   design-to-G-code pipeline died quietly at three separate steps — template
   values were never filled in, the 3D file was built through a function that
