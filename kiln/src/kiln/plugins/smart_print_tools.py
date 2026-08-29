@@ -135,9 +135,9 @@ class _SmartPrintToolsPlugin:
                     code="PRINTER_UNAVAILABLE",
                 )
 
-            effective_pid: str | None = _srv._map_printer_hint_to_profile_id(
-                printer_id
-            ) or _srv._map_printer_hint_to_profile_id(_srv._PRINTER_MODEL)
+            effective_pid: str | None = _srv._resolve_printer_profile_id(
+                printer_id, printer_name
+            )
 
             # ------------------------------------------------------------------
             # 2. Auto-detect material from AMS when not supplied.

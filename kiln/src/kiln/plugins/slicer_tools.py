@@ -773,6 +773,7 @@ class _SlicerToolsPlugin:
             printer_id: str | None = None,
             slicer_path: str | None = None,
             auto_center: bool = True,
+            printer_name: str | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
 
@@ -792,6 +793,11 @@ class _SlicerToolsPlugin:
                     sliced gcode with negative X/Y moves that drive the
                     nozzle into the printer frame.  Set False only if you've
                     verified the input is already correctly positioned.
+                printer_name: Registered printer this slice is FOR.  Omit for
+                    the default printer.  Naming a second machine resolves
+                    its profile, its bed and its safety limits — without it,
+                    a multi-printer install slices everything for whichever
+                    printer is the default.
 
             Returns a JSON object with the output G-code path.  The output file
             can then be uploaded to a printer with ``upload_file`` and printed
@@ -807,6 +813,7 @@ class _SlicerToolsPlugin:
                 effective_printer_id, effective_profile = _srv._resolve_slice_profile_context(
                     profile=profile,
                     printer_id=printer_id,
+                    printer_name=printer_name,
                 )
 
                 # Bed-fit safety gate (Layer 1).  Blocks off-bed / oversized
@@ -888,17 +895,21 @@ class _SlicerToolsPlugin:
                 if gate_info.get("gate") != "skipped_no_printer":
                     response["bed_fit"] = gate_info
 
-                # Cross-check slicer profile against printer safety limits
-                if _srv._PRINTER_MODEL and effective_profile:
+                # Cross-check slicer profile against printer safety limits.
+                # The limits belong to the machine this slice is FOR: checking
+                # an aimed slice against the default printer's hotend either
+                # invents an incompatibility or misses a real one.
+                _target_model = _srv._resolve_target_printer_model(printer_name)
+                if _target_model and effective_profile:
                     # Extract profile_id from the profile path or use printer model
                     _profile_id = effective_printer_id or os.path.basename(effective_profile).split("_")[0]
                     if _profile_id:
-                        validation = validate_profile_for_printer(_profile_id, _srv._PRINTER_MODEL)
+                        validation = validate_profile_for_printer(_profile_id, _target_model)
                         if validation["warnings"] or validation["errors"]:
                             response["profile_validation"] = validation
                             if validation["errors"]:
                                 response["profile_validation_warning"] = (
-                                    f"Slicer profile may be incompatible with {_srv._PRINTER_MODEL}: "
+                                    f"Slicer profile may be incompatible with {_target_model}: "
                                     + "; ".join(validation["errors"])
                                 )
                             elif validation["warnings"]:
@@ -949,6 +960,7 @@ class _SlicerToolsPlugin:
             output_dir: str | None = None,
             slicer_path: str | None = None,
             auto_center: bool = True,
+            printer_name: str | None = None,
         ) -> dict[str, Any]:
             """Reslice a 3D model with custom slicer parameter overrides.
 
@@ -981,6 +993,10 @@ class _SlicerToolsPlugin:
                     system temp directory.
                 slicer_path: Explicit path to the slicer binary.  Auto-detected
                     if omitted.
+                printer_name: Registered printer this reslice is FOR.  Omit
+                    for the default printer.  Naming a second machine
+                    resolves its profile, its bed and its temperature
+                    ceilings instead of the default printer's.
             """
             if err := _srv._check_auth("slicer"):
                 return err
@@ -1031,9 +1047,9 @@ class _SlicerToolsPlugin:
                 from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
                 # -- Resolve profile with overrides --
-                effective_printer_id = _srv._map_printer_hint_to_profile_id(
-                    printer_id
-                ) or _srv._map_printer_hint_to_profile_id(_srv._PRINTER_MODEL)
+                effective_printer_id = _srv._resolve_printer_profile_id(
+                    printer_id, printer_name,
+                )
 
                 # -- Calibration overlay: when kiln-pro is installed and the
                 # user has a calibrated slicer profile for (printer, material),
@@ -1091,8 +1107,12 @@ class _SlicerToolsPlugin:
                 }
                 has_temp_overrides = bool(parsed_overrides and _temp_keys & parsed_overrides.keys())
 
-                if has_temp_overrides and effective_printer_id and _srv._PRINTER_MODEL:
-                    validation_result = validate_profile_for_printer(effective_printer_id, _srv._PRINTER_MODEL)
+                # Temperature ceilings belong to the TARGET machine — an
+                # override checked against the default printer's hotend is
+                # the wrong ceiling for the machine that will heat it.
+                _target_model = _srv._resolve_target_printer_model(printer_name)
+                if has_temp_overrides and effective_printer_id and _target_model:
+                    validation_result = validate_profile_for_printer(effective_printer_id, _target_model)
 
                 # -- Bed-fit safety gate (Layer 1) --
                 effective_input, gate_err, gate_info = _apply_bed_fit_gate(
@@ -1166,7 +1186,7 @@ class _SlicerToolsPlugin:
                     response["profile_validation"] = validation_result
                     if validation_result["errors"]:
                         response["profile_validation_warning"] = (
-                            f"Temperature overrides may be unsafe for {_srv._PRINTER_MODEL}: "
+                            f"Temperature overrides may be unsafe for {_target_model}: "
                             + "; ".join(validation_result["errors"])
                         )
                     elif validation_result["warnings"]:
@@ -1327,6 +1347,7 @@ class _SlicerToolsPlugin:
                 effective_printer_id, effective_profile = _srv._resolve_slice_profile_context(
                     profile=profile,
                     printer_id=printer_id,
+                    printer_name=printer_name,
                 )
 
                 # The as-given input, for the multicolor-flatten advisory:
@@ -1528,7 +1549,15 @@ class _SlicerToolsPlugin:
 
                 # Bambu printers: wrap_gcode_as_3mf expects M83 (relative extrusion)
                 # and provides its own start/end gcode, so override PrusaSlicer defaults.
-                if _srv._PRINTER_TYPE == "bambu":
+                #
+                # Read the TARGET's type, not the default connection's.  The
+                # wrap decision below is made per-adapter; deciding this half
+                # from a global meant an aimed slice could have its start
+                # block emptied for a machine that is never wrapped (no
+                # homing, no heat-up), or be wrapped for a Bambu while still
+                # carrying absolute E and PrusaSlicer's own start gcode.
+                target_type = _srv._resolve_target_printer_type(printer_name)
+                if target_type == "bambu":
                     adhesion_overrides["use_relative_e_distances"] = "1"
                     adhesion_overrides["start_gcode"] = ""
                     adhesion_overrides["end_gcode"] = ""
@@ -1546,9 +1575,11 @@ class _SlicerToolsPlugin:
                     except (ImportError, Exception):
                         pass  # fall through to per-type defaults below
 
-                # Inject printer-aware speed overrides
-                if _srv._PRINTER_TYPE in _srv._PRINTER_SPEED_OVERRIDES:
-                    for k, v in _srv._PRINTER_SPEED_OVERRIDES[_srv._PRINTER_TYPE].items():
+                # Inject printer-aware speed overrides — again for the target:
+                # a Bambu's 250mm/s infill is not a speed to hand an Ender 3
+                # just because a Bambu happens to be the default printer.
+                if target_type in _srv._PRINTER_SPEED_OVERRIDES:
+                    for k, v in _srv._PRINTER_SPEED_OVERRIDES[target_type].items():
                         if k not in adhesion_overrides:  # don't override explicit user settings
                             adhesion_overrides[k] = v
 
@@ -1707,7 +1738,11 @@ class _SlicerToolsPlugin:
                 print_kwargs: dict[str, Any] = {}
                 ams_routing: dict[str, Any] | None = None
                 ams_routing_warnings: list[str] = []
-                if _srv._PRINTER_TYPE == "bambu":
+                # Ask the adapter that will receive the job what it is: an
+                # aimed print at a Bambu skipped AMS routing entirely when
+                # the default connection was not a Bambu — the silent
+                # external-spool fallthrough this block exists to prevent.
+                if _srv._resolve_target_printer_type(printer_name, adapter) == "bambu":
                     ams_decision = _srv._resolve_use_ams(
                         "auto", None, adapter, material=material,
                     )
