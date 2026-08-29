@@ -70,6 +70,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Repair and split keep your model's colors and parts.**
+
 - **Tell Kiln which printer, and it slices for that printer.** With more than
   one machine registered, naming one could use your default printer's settings.
   Fixed.
