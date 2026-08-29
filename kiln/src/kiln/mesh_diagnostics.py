@@ -611,11 +611,18 @@ def _detect_detached_attachment(
     """Is a secondary component an unfused ATTACHMENT rather than debris?
 
     Two signals together: a non-largest component that is substantial
-    (not a support sliver or internal fragment), and some body pair that
-    touches or all but touches (the fusion check's exact gap
+    (not a support sliver or internal fragment), and a body pair that
+    TOUCHES — a gap no printer can resolve (the fusion check's exact
     measurement).  Either alone stays classified as ordinary floating
-    fragments; both together means "remove the isolated piece" would
+    fragments; both together mean "remove the isolated piece" would
     delete part of the user's model.
+
+    Deliberately narrower than the fusion check's ``near`` band, which
+    also covers designed clearances: a print-in-place hinge sits a few
+    tenths of a millimeter from its housing on purpose, and telling
+    someone to fuse it would destroy the design.  A pair at ~0mm cannot
+    be a designed clearance — nothing prints at that gap — so this is
+    the one relation that carries fix-it advice unqualified.
     """
     if not has_fragments or len(components) < 2:
         return False
@@ -639,8 +646,7 @@ def _detect_detached_attachment(
     if not report.get("checked"):
         return False
     return any(
-        f.get("relation") in ("touching", "near")
-        for f in report.get("findings", [])
+        f.get("relation") == "touching" for f in report.get("findings", [])
     )
 
 
@@ -672,8 +678,11 @@ def _compute_severity(
     elif degenerate_count > 0:
         issues += 1
     if detached_attachment:
-        # Part of the model itself is unfused — worse than stray debris.
-        issues += 2
+        # Part of the MODEL is unfused — the object prints in pieces and
+        # the junction the user drew does not exist.  Worse than stray
+        # debris (which prints fine once removed), so this alone must
+        # clear "minor": a handle that falls off is not a cosmetic note.
+        issues += 3
     elif has_fragments:
         issues += 1
     if not is_watertight:

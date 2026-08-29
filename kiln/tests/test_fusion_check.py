@@ -217,6 +217,8 @@ class TestDiagnoseMeshDetachedAttachment:
         # The old advice — delete everything but the largest component —
         # must not be the headline for a substantial near-touching body.
         assert "Keep only the largest component" not in recs
+        # An object that prints in pieces is never a cosmetic note.
+        assert report.severity in ("moderate", "severe")
 
     def test_tiny_far_fragment_still_reads_as_debris(self, tmp_path) -> None:
         from kiln.mesh_diagnostics import diagnose_mesh
@@ -289,3 +291,31 @@ class TestCompileScadDoorSurfacesFusion:
         assert result["success"] is True
         assert result["fusion"]["findings"][0]["relation"] == "touching"
         assert any("unfused geometry" in w for w in result["warnings"])
+
+
+class TestPrintInPlaceIsNotMisdiagnosed:
+    """A designed clearance must never be told to fuse itself shut."""
+
+    def test_hinge_clearance_is_not_called_a_detached_attachment(
+        self, tmp_path
+    ) -> None:
+        from kiln.mesh_diagnostics import diagnose_mesh
+
+        # Two substantial bodies 0.35mm apart — a print-in-place hinge
+        # clearance, well inside the fusion check's "near" band.
+        p = _box_and_cylinder_stl(tmp_path / "hinge.stl", gap_mm=0.35)
+        report = diagnose_mesh(str(p))
+        assert report.detached_attachment is False
+        recs = " ".join(report.recommendations)
+        assert "Fuse the detached attachment" not in recs
+
+    def test_compose_door_still_mentions_it_with_a_caveat(
+        self, tmp_path
+    ) -> None:
+        # The compose side DOES surface a near gap, because there the
+        # caller asked to build one part — but says a designed clearance
+        # needs no action, rather than ordering a fix.
+        p = _box_and_cylinder_stl(tmp_path / "near.stl", gap_mm=0.35)
+        response = attach_fusion_report({"success": True}, str(p))
+        message = response["fusion"]["findings"][0]["message"]
+        assert "designed clearance" in message
