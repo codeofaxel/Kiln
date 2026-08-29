@@ -29,6 +29,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   colors can't survive the new format, you watch them leave instead of
   quietly getting a grey file back.
 
+- **Kiln parks clear of your print.** When a recovery stops a job, the nozzle
+  now moves to a spot proven clear of what's on the plate instead of sitting
+  over it — and stays put if it can't prove one.
+
 - **Your printer's own start-up routine, run automatically.** If your
   Klipper printer (Voron, Creality K1/K2, QIDI, Sovol, and friends) has a
   `PRINT_START` or `START_PRINT` routine set up — the one that heats the
@@ -83,6 +87,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Resuming a print no longer homes the nozzle into the part.** Recovery
   and resume sequences lift clear first and never home downward onto an
   occupied plate. Bed leveling and calibration wait for a clear plate too.
+
+- **Kiln Pro won't resume a print into a crash (Pro).** If picking up where
+  the job stopped would hit what's already printed, it refuses and tells you
+  to reprint. Resuming is the Pro part — a fresh print is free and just as
+  safe. See https://kiln3d.com/pricing.
 
 - **Repair and split keep your model's colors and parts.**
 
