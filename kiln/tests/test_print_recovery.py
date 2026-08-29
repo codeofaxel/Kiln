@@ -737,7 +737,9 @@ class TestRecoveryGcodeGeneration:
         failure, plan = _detect_and_plan(engine, telemetry)
         session = engine.start_recovery(plan, failure)
         steps = engine.get_recovery_steps(session.session_id)
-        assert "G28" in steps
+        # X/Y only — a bare G28 would descend Z onto the partial print.
+        assert "G28 X Y" in steps
+        assert "G28" not in steps
 
     def test_resume_gcode_includes_temp_commands(self, engine: PrintRecovery):
         telemetry = _make_telemetry(
@@ -748,6 +750,91 @@ class TestRecoveryGcodeGeneration:
         steps = engine.get_recovery_steps(session.session_id)
         has_temp = any("M104" in s or "M109" in s for s in steps)
         assert has_temp
+
+
+# ---------------------------------------------------------------------------
+# 11b. Mid-print motion safety — every recovery sequence runs with a partial
+# print on the bed, so none of them may home Z or move in X/Y before a lift.
+# (Deliberately does not import kiln.printers.safe_motion: these assertions
+# must run — and fail — against code that predates that module.)
+# ---------------------------------------------------------------------------
+
+
+def _sequence_for(strategy: RecoveryStrategy) -> list[str]:
+    """Recovery gcode for *strategy* via the real engine path."""
+    engine = PrintRecovery()
+    failure = FailureReport(
+        failure_id="f-motion",
+        failure_type=FailureType.POWER_LOSS,
+        detected_at="2026-08-28T00:00:00+00:00",
+        printer_name="test-printer",
+        telemetry_snapshot={"hotend_temp": 210, "bed_temp": 60},
+    )
+    plan = RecoveryPlan(
+        plan_id="p-motion",
+        failure_id="f-motion",
+        strategy=strategy,
+        confidence=RecoveryConfidence.MEDIUM,
+        resume_layer=42,
+        parameter_adjustments={"resume_z_mm": 8.4, "overlap_layers": 2},
+        requires_confirmation=False,
+    )
+    session = engine.start_recovery(plan, failure)
+    return engine.get_recovery_steps(session.session_id)
+
+
+_MID_PRINT_STRATEGIES = [
+    RecoveryStrategy.RESUME_FROM_LAYER,
+    RecoveryStrategy.PARTIAL_RECOVERY,
+    RecoveryStrategy.SAFE_ABORT,
+    RecoveryStrategy.RESTART_WITH_COMPENSATION,
+]
+
+
+class TestMidPrintMotionSafety:
+    """No recovery sequence may home Z with a part on the bed."""
+
+    @pytest.mark.parametrize("strategy", _MID_PRINT_STRATEGIES)
+    def test_no_bare_g28(self, strategy: RecoveryStrategy):
+        commands = _sequence_for(strategy)
+        for cmd in commands:
+            code = cmd.split(";", 1)[0].strip().upper()
+            assert code != "G28", (
+                f"{strategy.value}: bare G28 homes ALL axes — Z descends "
+                f"toward a bed that still carries the partial print"
+            )
+            if code.startswith("G28"):
+                assert "Z" not in code, (
+                    f"{strategy.value}: {cmd!r} homes Z with a part on the bed"
+                )
+
+    @pytest.mark.parametrize("strategy", _MID_PRINT_STRATEGIES)
+    def test_z_lift_precedes_homing(self, strategy: RecoveryStrategy):
+        commands = _sequence_for(strategy)
+        home_idx = next(
+            (
+                i
+                for i, c in enumerate(commands)
+                if c.split(";", 1)[0].strip().upper().startswith("G28")
+            ),
+            None,
+        )
+        if home_idx is None:
+            return  # No homing in this sequence — nothing to order
+        lifted_before = any(
+            c.split(";", 1)[0].strip().upper().startswith(("G0 Z", "G1 Z"))
+            for c in commands[:home_idx]
+        )
+        assert lifted_before, (
+            f"{strategy.value}: homing at index {home_idx} with no Z lift "
+            f"before it — the nozzle travels at part height: {commands}"
+        )
+
+    def test_resume_starts_heating_before_homing(self):
+        commands = _sequence_for(RecoveryStrategy.RESUME_FROM_LAYER)
+        heat_idx = next(i for i, c in enumerate(commands) if "M104" in c)
+        home_idx = next(i for i, c in enumerate(commands) if "G28" in c)
+        assert heat_idx < home_idx
 
     def test_resume_gcode_includes_prime(self, engine: PrintRecovery):
         telemetry = _make_telemetry(

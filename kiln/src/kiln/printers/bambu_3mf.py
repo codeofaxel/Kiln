@@ -1742,10 +1742,13 @@ def build_bambu_3mf(
         # Resume-mode: suppress Bambu's proprietary start sequence and initial
         # M73.  The resume gcode body carries its own safety preamble (heat →
         # Z+5 lift → G28 X Y only → travel Z → optional filament prime →
-        # descend to resume Z).  Running Bambu's start-gcode on a bed with a
-        # partial print would re-home Z (nozzle collision risk), re-probe bed
-        # (impossible with print on it), and waste ~18 min on AMS load +
-        # calibration before the resume preamble ever executes.
+        # descend to resume Z — the canonical shape lives in
+        # kiln.printers.safe_motion.build_resume_preamble; preamble builders
+        # should call it rather than hand-writing the sequence).  Running
+        # Bambu's start-gcode on a bed with a partial print would re-home Z
+        # (nozzle collision risk), re-probe bed (impossible with print on
+        # it), and waste ~18 min on AMS load + calibration before the resume
+        # preamble ever executes.
         complete_gcode = header + processed_body + "\n" + end_gcode
     else:
         complete_gcode = initial_m73 + header + start_gcode + "\n" + processed_body + "\n" + end_gcode

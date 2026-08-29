@@ -36,6 +36,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from kiln.printers.safe_motion import build_firmware_resume_positioning
 
 # websocket-client is an optional dependency; the adapter works without it
 # but push monitoring requires it.
@@ -1221,24 +1222,19 @@ class OctoPrintAdapter(PrinterAdapter):
             raise PrinterError(f"z_clearance_mm must be > 0 and <= 10, got {z_clearance_mm}.")
 
         # -- build G-code sequence -----------------------------------------
+        # Shared safe-motion shape: relative Z lift BEFORE the X/Y home,
+        # so homing travel happens above the part rather than dragging
+        # the nozzle through its top layer.
         fan_pwm = int(fan_speed_pct * 2.55)
-        commands = [
-            "M413 S0",  # Disable Marlin power-loss recovery
-            "G28 X Y",  # Home X/Y only (NEVER Z)
-            f"M140 S{bed_temp_c}",  # Start heating bed (non-blocking)
-            f"M104 S{hotend_temp_c}",  # Start heating hotend (non-blocking)
-            f"M190 S{bed_temp_c}",  # Wait for bed temp
-            f"M109 S{hotend_temp_c}",  # Wait for hotend temp
-            "G92 E0",  # Reset extruder position
-            f"G92 Z{z_height_mm}",  # Set Z position without moving
-            "G91",  # Relative positioning
-            f"G1 Z{z_clearance_mm} F300",  # Raise nozzle above part
-            "G90",  # Absolute positioning
-            f"G1 E{prime_length_mm} F200",  # Prime nozzle
-            "G92 E0",  # Reset extruder again
-            f"M106 S{fan_pwm}",  # Set fan speed (0-255)
-            f"M221 S{int(flow_rate_pct)}",  # Set flow rate multiplier
-        ]
+        commands = build_firmware_resume_positioning(
+            z_height_mm=z_height_mm,
+            hotend_temp_c=hotend_temp_c,
+            bed_temp_c=bed_temp_c,
+            fan_pwm=fan_pwm,
+            flow_rate_pct=flow_rate_pct,
+            prime_length_mm=prime_length_mm,
+            z_clearance_mm=z_clearance_mm,
+        )
 
         self.send_gcode(commands)
 

@@ -84,8 +84,15 @@ class TestFirmwareResumePrint:
         hotend_wait_idx = next(i for i, c in enumerate(commands) if "M109" in c)
         assert bed_heat_idx < hotend_wait_idx
 
-        # 5. Z is set via G92, not movement
-        assert any("G92 Z22.4" in cmd for cmd in commands)
+        # 5. Z is set via G92, not movement — to the LIFTED height
+        #    (part top 22.4 + default 2.0 clearance)
+        assert any("G92 Z24.4" in cmd for cmd in commands)
+
+        # 6. The relative Z lift comes BEFORE the X/Y home: homing travel
+        #    must happen above the part, not through its top layer.
+        lift_idx = next(i for i, c in enumerate(commands) if c.startswith("G1 Z"))
+        home_idx = next(i for i, c in enumerate(commands) if "G28" in c)
+        assert lift_idx < home_idx, "Z lift must precede X/Y homing"
 
     @responses.activate
     def test_full_command_list(self, adapter):
@@ -110,16 +117,16 @@ class TestFirmwareResumePrint:
         commands = _extract_commands()
         assert commands == [
             "M413 S0",
+            "G91",
+            "G1 Z2.0 F300",
+            "G90",
             "G28 X Y",
             "M140 S60.0",
             "M104 S200.0",
             "M190 S60.0",
             "M109 S200.0",
             "G92 E0",
-            "G92 Z10.0",
-            "G91",
-            "G1 Z2.0 F300",
-            "G90",
+            "G92 Z12.0",
             "G1 E30.0 F200",
             "G92 E0",
             "M106 S254",

@@ -45,6 +45,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from kiln.events import Event, EventBus, EventType
+from kiln.printers.safe_motion import (
+    build_lift_and_home_xy,
+    build_resume_preamble,
+    build_safe_abort_sequence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1680,7 +1685,8 @@ class PrintRecovery:
                 "Pause current print (if still running)",
                 "Inspect print surface for damage or debris",
                 "Remove any loose material or blobs from the part",
-                "Re-home all axes (G28)",
+                "Lift nozzle clear of the part, then re-home X/Y only "
+                "(never home Z with a part on the bed)",
                 "Heat hotend and bed to target temperatures",
                 "Prime nozzle with a small extrusion",
                 "Resume print from calculated resume layer",
@@ -1783,33 +1789,23 @@ class PrintRecovery:
         commands: list[str] = []
 
         if plan.strategy == RecoveryStrategy.SAFE_ABORT:
-            commands = [
-                "M104 S0",  # Hotend heater off
-                "M140 S0",  # Bed heater off
-                "G91",  # Relative positioning
-                "G1 Z10 F1000",  # Move up 10mm
-                "G90",  # Absolute positioning
-                "G28 X Y",  # Home X and Y (away from part)
-                "M84",  # Disable steppers
-            ]
+            commands = build_safe_abort_sequence()
 
         elif plan.strategy == RecoveryStrategy.RESUME_FROM_LAYER:
             resume_z = plan.parameter_adjustments.get("resume_z_mm", 0)
-            safe_z = resume_z + 5  # 5mm above resume layer
             overlap = plan.parameter_adjustments.get("overlap_layers", plan.layer_overlap)
             material = plan.parameter_adjustments.get("material_type", "unknown")
 
             commands = [
-                f"; Recovery: resume from layer {plan.resume_layer} "
-                f"with {overlap}-layer overlap (material: {material})",
-                "G28",  # Home all axes
-                f"M104 S{hotend_temp}",  # Heat hotend to job temp
-                f"M140 S{bed_temp}",  # Heat bed to job temp
-                f"M109 S{hotend_temp}",  # Wait for hotend to stabilize
-                f"M190 S{bed_temp}",  # Wait for bed to stabilize
-                f"G1 Z{safe_z:.1f} F1000",  # Move to safe Z above resume
-                "G1 E5 F300",  # Prime nozzle
-                "G1 E-2 F2400",  # Small retract to prevent ooze during travel
+                *build_resume_preamble(
+                    hotend_temp=hotend_temp,
+                    bed_temp=bed_temp,
+                    resume_z_mm=float(resume_z),
+                    header_comment=(
+                        f"Recovery: resume from layer {plan.resume_layer} "
+                        f"with {overlap}-layer overlap (material: {material})"
+                    ),
+                ),
                 f"; Begin overlap bonding zone: layers {plan.resume_layer} to "
                 f"{plan.resume_layer + overlap}",
                 f"; Resume from layer {plan.resume_layer}, Z={resume_z:.2f}mm",
@@ -1819,7 +1815,10 @@ class PrintRecovery:
             commands = [
                 "M104 S0",  # Cool down first
                 "M140 S0",
-                "G28",  # Home all
+                # Home X/Y only — the failed print is still on the plate
+                # when these commands run.  Z homes in the new print's own
+                # start gcode, after the operator has cleared the bed.
+                *build_lift_and_home_xy(),
                 "; Apply compensated parameters before starting new print",
             ]
             if plan.parameter_adjustments.get("bed_temp_offset"):
@@ -1855,7 +1854,8 @@ class PrintRecovery:
 
         elif plan.strategy == RecoveryStrategy.PARTIAL_RECOVERY:
             commands = [
-                "G28",
+                # The paused part is on the plate: lift, then home X/Y only.
+                *build_lift_and_home_xy(),
                 f"; Split G-code at layer {plan.resume_layer}",
                 "; Load partial G-code file",
             ]

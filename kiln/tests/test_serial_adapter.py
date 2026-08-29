@@ -1252,7 +1252,11 @@ class TestFirmwareResumePrint:
         assert "G28 X Y" in commands_sent
         assert "M140 S60.0" in commands_sent
         assert "M104 S200.0" in commands_sent
-        assert "G92 Z10.0" in commands_sent
+        # G92 teaches the LIFTED Z (part top 10.0 + default 2.0 clearance):
+        # the lift now happens BEFORE the X/Y home, so homing travel
+        # clears the part instead of dragging through its top layer.
+        assert "G92 Z12.0" in commands_sent
+        assert commands_sent.index("G1 Z2.0 F300") < commands_sent.index("G28 X Y")
 
 
 # ---------------------------------------------------------------------------
