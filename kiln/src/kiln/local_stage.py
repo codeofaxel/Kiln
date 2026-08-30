@@ -13,24 +13,58 @@ serves it from a local ``kiln serve``, using nothing but public Kiln: the
 stage document comes from :mod:`kiln.stage_cache`, the geometry from
 :mod:`kiln.mesh_payload`.  A free install gets the same stage as a paid one.
 
-WHY THE GEOMETRY RIDES THE RESULT
----------------------------------
+WHY THE GEOMETRY DOES NOT RIDE THE RESULT
+-----------------------------------------
 There are two ways to get a mesh into a rendered panel.  The lean one is a
 small token in the result plus a tool the panel calls back to fetch the
-geometry — that is what the hosted connector does, and it costs the
-conversation nothing.  Measured, on a local stdio server: the panel does
-NOT get permission to call tools back through the host, so that path leaves
-the stage sitting on its waiting animation forever with no way to say why.
+geometry — that is what the hosted connector has always done, and it costs
+the conversation nothing.  The other inlines the whole mesh as base64 in
+``structuredContent``.
 
-So the payload rides the result.  That is not free — an 80k-triangle mesh
-is ~1.9 MB of base64, and geometry nobody draws is fed straight into the
-model's context.  Hence the TWO gates below, both of which must pass: the
-host has actually shown it supports MCP Apps (else no panel ever opens),
-and the called tool is stamped to open the stage (else the host draws
-nothing for this result either — a slicer echoing the path it just sliced
-must not pay for a panel it cannot have).  Everyone else gets the ordinary
-result they get today, plus a resource and some ``_meta`` they will never
-look at.
+Inlining was the default until 2026-08-30, on the reasoning that a panel
+on a local stdio server could not call tools back.  Two facts retired it:
+
+* **The hosts that render this panel also feed ``structuredContent`` to the
+  model as text.**  So a stamped make spent ~25k tokens on geometry no
+  model can read — and, the part that actually breaks the make, TRUNCATED
+  the tool's own result at the client's output cap, so ``mesh_path``, the
+  fit verdict and the self-check bundle never reached the agent that had to
+  act on them.  Paying the entire result to draw a panel is not a trade any
+  user would choose.  (Measured 2026-08-19; hit again live 2026-08-30 on
+  ``build_organic_mesh``, whose result truncated mid-payload.)
+* **The lazy fetch is not theoretical.**  ``kiln_viewer_payload`` is
+  registered on this door the moment a host reads the stage document, and
+  serving geometry through it — never in the result — is the only way the
+  hosted door has ever worked.
+
+So the token rides the result and the geometry does not.  The View fetches
+through the host's ``tools/call`` proxy where the host offers one, and
+shows an honest card where it does not; the conversation's PNG carries that
+case, as it always did.  The gates below still decide whether the *token*
+buys a panel: the host has shown it supports MCP Apps, and the called tool
+is stamped to open the stage (a slicer echoing the path it just sliced must
+not pay for a panel it cannot have).
+
+``KILN_STAGE_INLINE_GEOMETRY=1`` restores the inline payload, for a host
+that renders panels, cannot proxy tools back, and whose operator has
+decided the context is worth it.  It is an opt-in to a measured cost, not a
+tuning knob.
+
+The hosted door already carries this rule in its own words, about its own
+camera frame: a base64 blob in ``structuredContent`` is a token bomb that
+says nothing.  This is the same rule, on the other door.
+
+WHAT LEAN COSTS, SAID OUT LOUD
+------------------------------
+Geometry that rode the result lived in the transcript forever; a token
+resolves only while this process holds it.  So a panel re-rendered from
+scrollback after ``_TOKENS_MAX`` further makes — or after any restart —
+fetches a dead token and shows its "preview unavailable" card over the
+PNG that is still sitting in the conversation.  That is the trade, and it
+is the right one: the alternative was truncating every make's result so a
+scrolled-back panel could redraw.  The hosted door has always paid it
+(its artifact tokens expire), and the ceiling is set high enough below
+that a live session never meets it.
 
 The still image is the floor under all of it, always.
 """
@@ -216,11 +250,23 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-#: token -> mesh path.  Bounded; oldest dropped first.  In-memory only: a
-#: stage token is meaningless across a restart because the conversation that
-#: held it is gone too.
+#: token -> mesh path.  Bounded; oldest dropped first.  In-memory only —
+#: and since the result went lean, that is a REACHABILITY decision, not a
+#: bookkeeping one: the token is the panel's whole route to the mesh, so a
+#: restart is what ends a scrolled-back panel's ability to redraw.  (It
+#: used to be free: the geometry had already ridden the result, so a dead
+#: token cost nothing.)  Still not persisted, because the paths it holds
+#: are this machine's temp files and outliving them would only trade a
+#: "preview unavailable" card for a broken one.  See WHAT LEAN COSTS.
 _tokens: dict[str, str] = {}
-_TOKENS_MAX = 64
+#: How many makes back a panel can still fetch its mesh.  Raised from 64
+#: when the result went lean: an evicted token used to cost nothing (the
+#: geometry had already ridden the result), and now it is the whole route
+#: to the mesh, so the ceiling is what decides whether a panel re-rendered
+#: from scrollback still draws.  512 entries measure 107 KB against 13 KB
+#: at 64 — a rounding error next to one 1.9 MB payload this change stopped
+#: sending, and about a full day of makes rather than an hour.
+_TOKENS_MAX = 512
 _lock = threading.Lock()
 
 _MESH_SUFFIXES = frozenset({".stl", ".3mf", ".obj"})
@@ -253,21 +299,25 @@ def enabled() -> bool:
 def inline_geometry_enabled() -> bool:
     """Whether geometry rides the RESULT, or only the token does.
 
-    Default ON — the lean alternative (token-only result; the panel
-    lazy-fetches through the host's ``tools/call`` proxy) depends on the
-    host declaring ``serverTools``, which the server cannot see at attach
-    time.  Measured 2026-08-19 on the host most installs run: the inline
-    payload (~1.9 MB base64 in structuredContent) is ALSO surfaced to the
-    agent as tool-result text, truncating at the client's output cap and
-    spending ~25k tokens of the agent's context per stamped make on
-    geometry the agent cannot read.  ``KILN_STAGE_INLINE_GEOMETRY=0`` is
-    the experiment lever: flip it, and if the panel's lazy fetch works on
-    that host, the lean result should become the default there.
+    Default OFF — the reasoning is in the module docstring, and it is not a
+    preference: a host that renders the panel also hands
+    ``structuredContent`` to the model, so inlining costs ~25k tokens per
+    make AND truncates the tool's own output at the client's cap, which is
+    the half that breaks the make.  The panel fetches the geometry itself
+    through ``kiln_viewer_payload``, exactly as the hosted door has always
+    served it.
+
+    ``KILN_STAGE_INLINE_GEOMETRY=1`` opts a host back in — it renders
+    panels, it cannot proxy ``tools/call`` back to this server, and its
+    operator would rather spend the context than lose the panel.  Anything
+    else reads as off, the bare-value spellings included, so the old
+    ``=0`` that used to mean "lean" still means lean.
     """
-    return (os.environ.get("KILN_STAGE_INLINE_GEOMETRY") or "").strip().lower() not in {
-        "0",
-        "false",
-        "no",
+    return (os.environ.get("KILN_STAGE_INLINE_GEOMETRY") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
     }
 
 
@@ -354,8 +404,14 @@ def host_renders_apps(mcp: Any, ctx: Any = None) -> bool:
     return MCP_APPS_EXTENSION_ID in _declared_extensions(mcp, ctx)
 
 
-def _log_signal_once(mcp: Any, attaching: bool, ctx: Any = None) -> None:
-    """State, once, what this host declared and what we did about it."""
+def _log_signal_once(mcp: Any, renders: bool, ctx: Any = None) -> None:
+    """State, once, what this host declared and what the panel gets.
+
+    ``renders`` is the panel verdict, not the geometry verdict: the result
+    is lean by default whatever the host declared, so this line reports the
+    mesh route — the View's own fetch, or the opted-in inline payload —
+    rather than claiming an attach that no longer happens.
+    """
     global _signal_logged
     if _signal_logged:
         return
@@ -368,12 +424,18 @@ def _log_signal_once(mcp: Any, attaching: bool, ctx: Any = None) -> None:
         who = f"{getattr(info, 'name', '?')}/{getattr(info, 'version', '?')}"
     except Exception:  # noqa: BLE001
         who = "unknown host"
+    if not renders:
+        route = "no panel (still image only)"
+    elif inline_geometry_enabled():
+        route = "inlined into the result (KILN_STAGE_INLINE_GEOMETRY opt-in)"
+    else:
+        route = "panel fetches it via kiln_viewer_payload"
     logger.info(
         "inline stage: host=%s declared=%s read_stage=%s -> geometry %s",
         who,
         sorted(_declared_extensions(mcp, ctx)) or "none",
         _host_read_the_stage,
-        "attached" if attaching else "withheld (still image only)",
+        route,
     )
 
 
@@ -595,7 +657,7 @@ def _register_resource(mcp: Any) -> bool:
     from kiln import stage_cache
     from kiln.mcp_compat import FunctionResource
 
-    def _document() -> str:
+    async def _document() -> str:
         global _host_read_the_stage
         doc = stage_cache.document()
         if not doc:
@@ -613,7 +675,14 @@ def _register_resource(mcp: Any) -> bool:
         # tools/call — so registering here keeps the verb off the standing
         # tool surface for hosts that never render panels, while a host
         # that does render can never call into a missing verb.
-        _register_payload_verb(mcp)
+        #
+        # Announced only on the TRANSITION: _register_payload_verb answers
+        # "is the verb available", which is True on every later read too,
+        # and notifying there would tell the host to re-list its tools once
+        # per panel for a list that did not change.
+        had_verb = _payload_verb_registered(mcp)
+        if _register_payload_verb(mcp) and not had_verb:
+            await _announce_tool_list_changed(mcp)
         return doc
 
     mcp.add_resource(
@@ -636,6 +705,20 @@ def _register_resource(mcp: Any) -> bool:
     return True
 
 
+def _payload_verb_registered(mcp: Any) -> bool:
+    """Whether ``kiln_viewer_payload`` is already on this server.
+
+    Its own function because two callers need the same unreadable-registry
+    tolerance: an exotic server object reads as "not registered", which
+    makes the register call a no-op rather than an exception.
+    """
+    try:
+        registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
+        return isinstance(registry, dict) and "kiln_viewer_payload" in registry
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _register_payload_verb(mcp: Any) -> bool:
     """Register ``kiln_viewer_payload`` — the View's lazy mesh fetch.
 
@@ -648,8 +731,7 @@ def _register_payload_verb(mcp: Any) -> bool:
     a local token resolves only to a mesh this machine already made.
     """
     try:
-        registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
-        if isinstance(registry, dict) and "kiln_viewer_payload" in registry:
+        if _payload_verb_registered(mcp):
             return True
 
         @mcp.tool(
@@ -677,6 +759,42 @@ def _register_payload_verb(mcp: Any) -> bool:
     except Exception:
         logger.warning("local stage: payload tool failed", exc_info=True)
         return False
+
+
+async def _announce_tool_list_changed(mcp: Any) -> None:
+    """Tell the connected host its tool list just grew.
+
+    ``kiln_viewer_payload`` is registered LATE on purpose — a verb only a
+    rendered panel calls does not belong on the standing tool surface — and
+    FastMCP does not send ``notifications/tools/list_changed`` when a tool
+    is added after connect (measured on SDK 1.x: neither ``add_tool`` nor
+    the tool manager notifies).  Registration alone is therefore only half
+    the promise: the SERVER can find the verb, and a host that validates a
+    ``tools/call`` name against the list it cached at initialize cannot.
+
+    That gap was survivable while geometry rode the result and this fetch
+    was a fallback.  It is load-bearing now: the lean result means EVERY
+    panel reaches its mesh through this verb, so a host that will not proxy
+    an unannounced name would show "Preview unavailable" on every make.
+
+    Awaited before the document is returned, not fired into the background:
+    the host then knows the verb exists before it can possibly render the
+    View, and there is no loop or task lifetime to get wrong.  The session
+    is read where :func:`kiln.mcp_compat.client_capabilities` reads it —
+    one opinion about where a session lives, not a second.
+
+    Never raises.  A panel that fails to open beats a stage document that
+    fails to arrive.
+    """
+    try:
+        session = lowlevel_server(mcp).request_context.session
+    except Exception:  # noqa: BLE001 — no session is a legitimate answer
+        logger.debug("local stage: no session to announce the verb to")
+        return
+    try:
+        await session.send_tool_list_changed()
+    except Exception:  # noqa: BLE001 — a host that hung up mid-read
+        logger.debug("local stage: tool-list notice not delivered", exc_info=True)
 
 
 def _register_diagnostics(mcp: Any, out: dict[str, Any]) -> None:
@@ -784,9 +902,14 @@ def _install_result_hook(mcp: Any) -> bool:
     value there is already a list of content blocks and a dict mutation is
     silently lost — measured, after writing it the other way first.
 
-    The geometry rides only when BOTH gates pass: the host renders MCP Apps
-    (else nobody draws it), and the tool is stamped to open the stage (else
-    the host draws nothing for this result either).  The token always rides.
+    The token always rides — it is a short string, and it is what the View
+    presents to fetch the mesh.  The geometry rides only when an operator
+    has opted in with ``KILN_STAGE_INLINE_GEOMETRY=1`` AND both stage gates
+    pass: the host renders MCP Apps (else nobody draws it), and the tool is
+    stamped to open the stage (else the host draws nothing for this result
+    either).  Off by default, because on the hosts that render the panel
+    the geometry lands in the model's context and truncates the tool's own
+    output there — see the module docstring.
     """
     def _attach(inner: Any, ctx: Any, name: str | None) -> None:
         """Mutate one tool result in place.  Deliberately knows no SDK detail —
@@ -813,9 +936,12 @@ def _install_result_hook(mcp: Any) -> bool:
             artifact = dict(sc.get("artifact") or {})
             artifact["artifact_token"] = token
             sc["artifact"] = artifact
-            attaching = host_renders_apps(mcp, ctx)
-            _log_signal_once(mcp, attaching, ctx)
-            if attaching and _tool_opens_stage(mcp, name) and inline_geometry_enabled():
+            renders = host_renders_apps(mcp, ctx)
+            _log_signal_once(mcp, renders, ctx)
+            # Opt-in FIRST: with inline geometry off — the default — there is
+            # nothing to decide and no mesh to read off disk, so the ordinary
+            # path never pays for an encode whose result it would discard.
+            if inline_geometry_enabled() and renders and _tool_opens_stage(mcp, name):
                 payload = _inline_payload(token)
                 if payload is not None:
                     # A STEP import's analytic truth rides the payload so

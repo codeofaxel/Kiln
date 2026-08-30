@@ -37,6 +37,22 @@ def _real_cube(path):
     return str(path)
 
 
+def _real_mesh_worth_truncating(path):
+    """A mesh whose payload is big enough to be the bug.
+
+    A 12-triangle cube encodes to a few hundred bytes, which cannot
+    demonstrate a size gate in either direction — measured, when the
+    opt-in half of ``TestTheResultIsLean`` first asserted the gate could
+    fire and could not.  This is a real make's order of magnitude: an
+    icosphere at ~5k triangles encodes past every threshold in that class,
+    and it is what the incident's own recipe produced at its LOWEST
+    resolution.
+    """
+    trimesh = pytest.importorskip("trimesh")
+    trimesh.creation.icosphere(subdivisions=4, radius=10.0).export(str(path))
+    return str(path)
+
+
 class _Block:
     def __init__(self, text):
         self.text = text
@@ -384,10 +400,32 @@ class TestOnlyAnAppsHostGetsTheGeometry:
             "handed ~MBs of base64 to a host that will never draw it"
         )
 
-    def test_the_payload_rides_for_an_apps_host(self, tmp_path):
+    def test_the_payload_rides_for_an_apps_host_that_opted_in(
+        self, tmp_path, monkeypatch
+    ):
+        """The host gate still decides the geometry — under the opt-in.
+
+        Inline geometry is off by default now (see ``TestTheResultIsLean``),
+        so this asserts the gate it was written for: with the operator's
+        opt-in set, an Apps host is the one that gets the payload.
+        """
+        monkeypatch.setenv("KILN_STAGE_INLINE_GEOMETRY", "1")
         sc = _run_hook(_Host(_Caps(extensions={self.UI: {}})), _real_cube(tmp_path / "c.stl"))
         assert sc["kiln_viewer"]["kind"] == "kiln.mesh.v1"
         assert sc["kiln_viewer"]["counts"]["triangles"] == 12
+
+    def test_the_payload_is_withheld_from_an_apps_host_by_default(self, tmp_path):
+        """No opt-in, no geometry — even from the host that would draw it.
+
+        This is the 2026-08-30 incident in one line: an Apps host is
+        exactly the host that also feeds structuredContent to the model, so
+        "it renders the panel" is not a licence to spend the agent's
+        context and truncate the tool's own output.
+        """
+        sc = _run_hook(_Host(_Caps(extensions={self.UI: {}})), _real_cube(tmp_path / "c.stl"))
+        assert sc["artifact"]["artifact_token"], "the token is the lazy fetch's key"
+        assert "kiln_viewer" not in sc
+        assert sc["success"] is True, "the tool's own output must survive"
 
     def test_the_tools_own_output_survives_the_hook(self, tmp_path):
         """A host that prefers structuredContent shows THAT and nothing else;
@@ -548,6 +586,13 @@ class TestPayloadFollowsTheStamp:
 
     UI = local_stage.MCP_APPS_EXTENSION_ID
 
+    @pytest.fixture(autouse=True)
+    def _opted_in(self, monkeypatch):
+        """The stamp gate only has an effect where geometry could ride at
+        all, so this class exercises it under the operator opt-in.  What the
+        DEFAULT does is ``TestTheResultIsLean``'s question, not this one's."""
+        monkeypatch.setenv("KILN_STAGE_INLINE_GEOMETRY", "1")
+
     def _apps_host(self):
         return _Host(_Caps(extensions={self.UI: {}}))
 
@@ -584,6 +629,14 @@ class TestCadFactsRideTheInlinePayload:
     half of "no stage shows a STEP as a bare mesh with no facts"."""
 
     UI = local_stage.MCP_APPS_EXTENSION_ID
+
+    @pytest.fixture(autouse=True)
+    def _opted_in(self, monkeypatch):
+        """Grades what the payload CONTAINS, which needs a payload — so it
+        runs under the operator opt-in.  The same facts reach the panel on
+        the default path through ``kiln_viewer_payload``, which builds the
+        payload from the identical ``_payload_for_mesh`` door."""
+        monkeypatch.setenv("KILN_STAGE_INLINE_GEOMETRY", "1")
 
     def test_import_facts_reach_the_stage_payload(self, tmp_path):
         facts = {
@@ -629,39 +682,208 @@ class TestCadFactsRideTheInlinePayload:
         assert payload["source"]["format"] == "stl"
 
 
-class TestInlineGeometryLever:
-    """KILN_STAGE_INLINE_GEOMETRY=0 makes results lean: token only.
+class TestTheResultIsLean:
+    """A tool result never carries the mesh.  The token does.
 
-    The inline payload (~1.9 MB of base64 riding structuredContent) is
-    surfaced to the AGENT as tool-result text on some hosts, truncating at
-    the client's output cap and spending ~25k tokens of context per make
-    on geometry the agent cannot read (measured 2026-08-19).  The panel
-    already carries a lazy-fetch path for token-only results; this env is
-    the live-experiment lever for hosts where that fetch works.  Default
-    unchanged: inline stays on.
+    THE INCIDENT.  ``build_organic_mesh`` returned a success payload whose
+    ``kiln_viewer`` block held the whole mesh as base64 — ~1 MB for a 20k
+    triangle make.  The client surfaced ``structuredContent`` to the model
+    as text, so the result blew past the 25k-token output cap and TRUNCATED:
+    ``mesh_path``, the fit verdict and the self-check bundle never reached
+    the agent that had to act on them.  The panel gained nothing it could
+    not have fetched itself.  (Measured 2026-08-19, hit live 2026-08-30.)
+
+    THIS CLASS ASSERTS THE INVERSE OF WHAT IT USED TO.  It replaced
+    ``TestInlineGeometryLever``, whose ``test_default_is_inline_geometry``
+    guarded the old default with "that is a decision for the live host
+    experiment, not a side effect."  It was: the experiment ran, and the
+    decision is recorded here rather than in a deleted test, because a
+    green test asserting the opposite of the shipped rule is how a decision
+    gets reversed by accident.
     """
 
     UI = local_stage.MCP_APPS_EXTENSION_ID
 
+    #: Nothing in a lean result should be anywhere near this.  A cube's
+    #: whole envelope is a few hundred bytes; the payload this guards
+    #: against starts in the hundreds of kilobytes.  Sized to catch the
+    #: incident with room to spare rather than to bless a smaller leak.
+    MAX_VALUE_BYTES = 8192
+
     def _apps_host(self):
         return _Host(_Caps(extensions={self.UI: {}}))
 
-    def test_lean_mode_ships_the_token_without_the_geometry(
-        self, tmp_path, monkeypatch
-    ):
-        monkeypatch.setenv("KILN_STAGE_INLINE_GEOMETRY", "0")
-        sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
-                       tool_name="compile_scad")
-        assert sc["artifact"]["artifact_token"], (
-            "lean mode must still mint the token — it is the lazy fetch's key"
-        )
-        assert "kiln_viewer" not in sc, "lean mode still inlined the geometry"
-
-    def test_default_is_inline_geometry(self, tmp_path, monkeypatch):
+    def test_the_default_is_lean(self, tmp_path, monkeypatch):
         monkeypatch.delenv("KILN_STAGE_INLINE_GEOMETRY", raising=False)
         sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
                        tool_name="compile_scad")
-        assert "kiln_viewer" in sc, (
-            "the default flipped to lean — that is a decision for the live "
-            "host experiment, not a side effect"
+        assert sc["artifact"]["artifact_token"], (
+            "lean still mints the token — it is the panel's fetch key"
         )
+        assert "kiln_viewer" not in sc, (
+            "geometry rode a result again; the panel fetches it itself"
+        )
+
+    def test_the_tools_own_output_survives_intact(self, tmp_path, monkeypatch):
+        """The half of the incident that actually broke the make.
+
+        Truncation is not a cosmetic cost: an agent that cannot read
+        ``mesh_path`` back cannot continue the design it just built.
+        """
+        monkeypatch.delenv("KILN_STAGE_INLINE_GEOMETRY", raising=False)
+        mesh = _real_cube(tmp_path / "c.stl")
+        sc = _run_hook(self._apps_host(), mesh, tool_name="compile_scad")
+        assert sc["success"] is True
+        assert sc["message"] == "made a thing"
+        assert sc["stl_path"] == mesh
+
+    def test_no_value_in_the_result_is_a_geometry_buffer(
+        self, tmp_path, monkeypatch
+    ):
+        """THE REGRESSION GATE — anchored on SIZE, not on a key name.
+
+        ``kiln_viewer`` is the key that did it once.  The rule is bigger
+        than that key: no tool result may carry a base64 buffer, under any
+        name, at any nesting depth.  A future door that spells the payload
+        differently fails here on the first mesh it ships, which the
+        name-anchored check above would sail past.
+        """
+        monkeypatch.delenv("KILN_STAGE_INLINE_GEOMETRY", raising=False)
+        sc = _run_hook(self._apps_host(),
+                       _real_mesh_worth_truncating(tmp_path / "s.stl"),
+                       tool_name="compile_scad")
+        for path, value in _walk_strings(sc):
+            assert len(value) <= self.MAX_VALUE_BYTES, (
+                f"{path} carries {len(value)} bytes of payload into the "
+                f"model's context — a tool result is not a mesh transport"
+            )
+
+    def test_the_opt_in_restores_the_inline_payload(self, tmp_path, monkeypatch):
+        """The escape hatch is real, and this is what proves the gate above
+        can fail: the same call, same mesh, opted in, DOES carry the buffer
+        the lean assertions forbid."""
+        monkeypatch.setenv("KILN_STAGE_INLINE_GEOMETRY", "1")
+        sc = _run_hook(self._apps_host(),
+                       _real_mesh_worth_truncating(tmp_path / "s.stl"),
+                       tool_name="compile_scad")
+        assert sc["kiln_viewer"]["kind"] == "kiln.mesh.v1"
+        assert any(
+            len(value) > self.MAX_VALUE_BYTES for _, value in _walk_strings(sc)
+        ), (
+            "the opt-in produced nothing oversized, so the size gate above "
+            "was never in a position to catch anything"
+        )
+
+    @pytest.mark.parametrize("value", ["0", "false", "no", "", "  "])
+    def test_the_old_off_spellings_still_read_as_lean(
+        self, value, tmp_path, monkeypatch
+    ):
+        """An install carrying the old ``=0`` must not be surprised into
+        the inline path by the inversion."""
+        monkeypatch.setenv("KILN_STAGE_INLINE_GEOMETRY", value)
+        sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
+                       tool_name="compile_scad")
+        assert "kiln_viewer" not in sc
+
+
+def _walk_strings(node, path="result"):
+    """Every string in a nested result, with the path that reaches it.
+
+    Deliberately blind to key NAMES: the gate above is about how many bytes
+    a result hands the model, and a buffer is no cheaper for being called
+    something else.
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _walk_strings(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            yield from _walk_strings(value, f"{path}[{i}]")
+    elif isinstance(node, str):
+        yield path, node
+
+
+class TestTheHostIsToldTheVerbArrived:
+    """Registering the fetch verb late is only half the promise.
+
+    ``kiln_viewer_payload`` is registered at the stage read rather than at
+    install, so it stays off the standing tool surface of every host that
+    never renders a panel.  Measured on SDK 1.x: FastMCP sends no
+    ``notifications/tools/list_changed`` for a tool added after connect —
+    so the SERVER can find the verb and a host validating a ``tools/call``
+    name against the list it cached at initialize cannot.
+
+    That was survivable while geometry rode the result and this fetch was a
+    fallback.  With the lean result it is the ONLY route to a mesh, so a
+    host that will not proxy an unannounced name would show "Preview
+    unavailable" on every make.  Hence the explicit notification.
+    """
+
+    def _session(self, sent, fail=False):
+        class _Session:
+            async def send_tool_list_changed(_self):
+                if fail:
+                    raise RuntimeError("host hung up")
+                sent.append(True)
+
+        return _Session()
+
+    def _read_with_session(self, mcp, session):
+        """Read the stage document with *session* in the lowlevel context —
+        where the real server puts it."""
+        from types import SimpleNamespace
+
+        import anyio
+        from mcp.server.lowlevel.server import request_ctx
+
+        async def _go():
+            token = request_ctx.set(SimpleNamespace(session=session))
+            try:
+                return await mcp.read_resource(local_stage.MESH_VIEWER_RESOURCE_URI)
+            finally:
+                request_ctx.reset(token)
+
+        return anyio.run(_go)
+
+    def test_the_first_stage_read_announces_the_new_verb(self):
+        _cache_the_stage()
+        mcp = _fastmcp()
+        local_stage.install(mcp)
+        sent = []
+        self._read_with_session(mcp, self._session(sent))
+        assert "kiln_viewer_payload" in mcp._tool_manager._tools
+        assert sent == [True], (
+            "the verb was registered and the host was never told — a host "
+            "that validates tool names cannot call what it has not listed"
+        )
+
+    def test_a_second_read_announces_nothing(self):
+        """The list did not change, so saying it did would make a host
+        re-list its tools once per panel."""
+        _cache_the_stage()
+        mcp = _fastmcp()
+        local_stage.install(mcp)
+        sent = []
+        self._read_with_session(mcp, self._session(sent))
+        self._read_with_session(mcp, self._session(sent))
+        assert sent == [True]
+
+    def test_a_failed_notice_never_sinks_the_document_read(self):
+        """This runs inside the read that hands the host its stage.  A
+        panel that fails to open beats a document that fails to arrive."""
+        _cache_the_stage()
+        mcp = _fastmcp()
+        local_stage.install(mcp)
+        doc = self._read_with_session(mcp, self._session([], fail=True))
+        assert doc, "a refused notification took the stage document with it"
+        assert "kiln_viewer_payload" in mcp._tool_manager._tools
+
+    def test_no_session_is_not_a_crash(self):
+        """The diagnostics path and the tests read the document with no
+        lowlevel context at all."""
+        import anyio
+
+        _cache_the_stage()
+        mcp = _fastmcp()
+        local_stage.install(mcp)
+        assert anyio.run(mcp.read_resource, local_stage.MESH_VIEWER_RESOURCE_URI)
