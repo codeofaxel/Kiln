@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-19T23:54:34.049873+00:00",
+  "generated": "2026-08-30T18:36:32.452126+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -3699,12 +3699,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_library_v1",
+        "copy_version": "design_library_v2",
         "variant": "design_library",
-        "feature": "Saved design library",
-        "headline": "Keep this work in a library you can come back to.",
-        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
-        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
+        "feature": "Reusable features & decoration presets",
+        "headline": "Save this once, reuse it on every future design.",
+        "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
+        "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
       }
     },
     {
@@ -4527,12 +4527,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_library_v1",
+        "copy_version": "design_library_v2",
         "variant": "design_library",
-        "feature": "Saved design library",
-        "headline": "Keep this work in a library you can come back to.",
-        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
-        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
+        "feature": "Reusable features & decoration presets",
+        "headline": "Save this once, reuse it on every future design.",
+        "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
+        "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
       }
     },
     {
@@ -4632,12 +4632,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_library_v1",
+        "copy_version": "design_library_v2",
         "variant": "design_library",
-        "feature": "Saved design library",
-        "headline": "Keep this work in a library you can come back to.",
-        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
-        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
+        "feature": "Reusable features & decoration presets",
+        "headline": "Save this once, reuse it on every future design.",
+        "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
+        "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
       }
     },
     {
@@ -5114,19 +5114,19 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_library_v1",
+        "copy_version": "design_library_v2",
         "variant": "design_library",
-        "feature": "Saved design library",
-        "headline": "Keep this work in a library you can come back to.",
-        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
-        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
+        "feature": "Reusable features & decoration presets",
+        "headline": "Save this once, reuse it on every future design.",
+        "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
+        "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
       }
     },
     {
       "name": "get_design",
-      "description": "Fetch a single design's summary + branch list for the workshop detail view.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Fetch a single design's summary + branch list for the workshop detail view.",
+      "tier": "free",
+      "access": "free",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -5140,15 +5140,6 @@
         ],
         "title": "get_designArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "design_library_v1",
-        "variant": "design_library",
-        "feature": "Saved design library",
-        "headline": "Keep this work in a library you can come back to.",
-        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
-        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5235,12 +5226,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_library_v1",
+        "copy_version": "design_library_v2",
         "variant": "design_library",
-        "feature": "Saved design library",
-        "headline": "Keep this work in a library you can come back to.",
-        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
-        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
+        "feature": "Reusable features & decoration presets",
+        "headline": "Save this once, reuse it on every future design.",
+        "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
+        "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
       }
     },
     {
@@ -5676,12 +5667,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_library_v1",
+        "copy_version": "design_library_v2",
         "variant": "design_library",
-        "feature": "Saved design library",
-        "headline": "Keep this work in a library you can come back to.",
-        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
-        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
+        "feature": "Reusable features & decoration presets",
+        "headline": "Save this once, reuse it on every future design.",
+        "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
+        "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
       }
     },
     {
@@ -5796,9 +5787,9 @@
     },
     {
       "name": "list_designs",
-      "description": "List every design the user has saved \u2014 id, name, branches, last-updated.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List every design the user has saved \u2014 id, name, branches, last-updated.",
+      "tier": "free",
+      "access": "free",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -5820,15 +5811,6 @@
         },
         "title": "list_designsArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "design_library_v1",
-        "variant": "design_library",
-        "feature": "Saved design library",
-        "headline": "Keep this work in a library you can come back to.",
-        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
-        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
       }
     },
     {
@@ -5979,12 +5961,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_library_v1",
+        "copy_version": "design_library_v2",
         "variant": "design_library",
-        "feature": "Saved design library",
-        "headline": "Keep this work in a library you can come back to.",
-        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
-        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
+        "feature": "Reusable features & decoration presets",
+        "headline": "Save this once, reuse it on every future design.",
+        "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
+        "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
       }
     },
     {
@@ -6903,9 +6885,9 @@
     },
     {
       "name": "rename_design",
-      "description": "Rename a design \u2014 change its id and display name across every version while keeping branches, outcomes, and parent_version chains intact.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Rename a design \u2014 change its id and display name across every version while keeping branches, outcomes, and parent_version chains intact.",
+      "tier": "free",
+      "access": "free",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -7462,12 +7444,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_library_v1",
+        "copy_version": "design_library_v2",
         "variant": "design_library",
-        "feature": "Saved design library",
-        "headline": "Keep this work in a library you can come back to.",
-        "outcome_preview": "Kiln Pro would turn the designs you make into a library you can list and reopen, with reusable features and decoration presets saved beside them.",
-        "free_included": "Making designs and downloading each result stays free \u2014 the file is yours either way."
+        "feature": "Reusable features & decoration presets",
+        "headline": "Save this once, reuse it on every future design.",
+        "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
+        "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
       }
     },
     {
