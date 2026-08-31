@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-30T18:36:32.452126+00:00",
+  "generated": "2026-08-31T18:34:24.657185+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -3315,6 +3315,24 @@
             "default": "",
             "title": "Output Dir",
             "type": "string"
+          },
+          "reference_images": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reference Images"
           }
         },
         "required": [
@@ -3428,6 +3446,24 @@
             ],
             "default": null,
             "title": "Spec Numbers"
+          },
+          "reference_images": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reference Images"
           }
         },
         "required": [
