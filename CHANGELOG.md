@@ -89,6 +89,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **A part resting flat on the plate is no longer failed for sitting below
+  it.** A hair of rounding under zero used to trip the placement check and
+  drag an otherwise clean report to zero, on a part that was fine.
+
 - **A finished make comes back whole.** The 3D panel fetches the model on
   its own now, instead of packing it into your reply.
 
