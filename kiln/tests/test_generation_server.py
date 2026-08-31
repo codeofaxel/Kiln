@@ -11,6 +11,7 @@ Covers:
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -735,92 +736,119 @@ class TestDownloadDimensions:
 # ---------------------------------------------------------------------------
 
 
+#: A minimal but genuine OBJ: one tetrahedron, four triangles.  Real
+#: geometry rather than a mocked return value, so these tests convert an
+#: actual file and read the actual bytes back out.
+_TETRAHEDRON_OBJ = """\
+v 0.0 0.0 0.0
+v 10.0 0.0 0.0
+v 0.0 10.0 0.0
+v 0.0 0.0 10.0
+f 1 3 2
+f 1 2 4
+f 1 4 3
+f 2 3 4
+"""
+
+
 class TestObjToStlAutoConversion:
-    """Tests for auto-convert OBJ to STL in download_generated_model."""
+    """Auto-conversion of a downloaded OBJ into STL.
+
+    These run the REAL converter over a REAL file in ``tmp_path``, and
+    name no patch target for the conversion at all.  They used to mock
+    ``kiln.generation.convert_to_stl`` and assert it was called, which
+    stopped meaning anything the day the call site moved to
+    ``format_conversion.convert_to_stl_recorded``: that name survives as a
+    re-export, so the patch kept succeeding against code nothing reaches,
+    the real converter ran against a path in ``/tmp`` that no test ever
+    created, and the failure surfaced as a bare mock assertion.  A test
+    that owns its input file and checks the output bytes cannot rot that
+    way — there is no name in it left to go stale.
+    """
 
     @_AUTH_PATCH
-    @patch("kiln.server.os.path.getsize", return_value=50000)
-    @patch("kiln.generation.convert_to_stl")
     @patch("kiln.generation.validate_mesh")
     @patch("kiln.server._get_generation_provider")
     def test_obj_auto_converted_to_stl(
-        self, mock_get_provider, mock_validate, mock_convert, mock_getsize, _auth,
+        self, mock_get_provider, mock_validate, _auth, tmp_path,
     ):
-        """When provider returns OBJ, it is automatically converted to STL."""
+        """A downloaded OBJ arrives at the caller as a real STL."""
+        obj_path = tmp_path / "model.obj"
+        obj_path.write_text(_TETRAHEDRON_OBJ)
+
         provider = MagicMock()
         provider.download_result.return_value = _make_result(
-            fmt="obj", local_path="/tmp/kiln_generated/model.obj",
+            fmt="obj", local_path=str(obj_path),
         )
-        mock_get_provider.return_value = provider
-        mock_convert.return_value = "/tmp/kiln_generated/model.stl"
-        mock_validate.return_value = MeshValidationResult(
-            valid=True,
-            errors=[],
-            warnings=[],
-            triangle_count=100,
-            vertex_count=50,
-            is_manifold=True,
-            bounding_box={
-                "x_min": 0.0, "x_max": 10.0,
-                "y_min": 0.0, "y_max": 10.0,
-                "z_min": 0.0, "z_max": 10.0,
-            },
-        )
-
-        result = download_generated_model("test-job-123")
-        assert result["success"] is True
-        mock_convert.assert_called_once_with("/tmp/kiln_generated/model.obj")
-        # After conversion, the result should reference the STL.
-        assert result["result"]["format"] == "stl"
-        assert result["result"]["local_path"] == "/tmp/kiln_generated/model.stl"
-
-    @_AUTH_PATCH
-    @patch("kiln.generation.convert_to_stl")
-    @patch("kiln.generation.validate_mesh")
-    @patch("kiln.server._get_generation_provider")
-    def test_obj_conversion_failure_keeps_obj(
-        self, mock_get_provider, mock_validate, mock_convert, _auth,
-    ):
-        """If OBJ->STL conversion fails, the original OBJ is kept."""
-        provider = MagicMock()
-        provider.download_result.return_value = _make_result(
-            fmt="obj", local_path="/tmp/kiln_generated/model.obj",
-        )
-        mock_get_provider.return_value = provider
-        mock_convert.side_effect = ValueError("parse error")
-        mock_validate.return_value = MeshValidationResult(
-            valid=True,
-            errors=[],
-            warnings=[],
-            triangle_count=100,
-            vertex_count=50,
-            is_manifold=True,
-            bounding_box={
-                "x_min": 0.0, "x_max": 10.0,
-                "y_min": 0.0, "y_max": 10.0,
-                "z_min": 0.0, "z_max": 10.0,
-            },
-        )
-
-        result = download_generated_model("test-job-123")
-        assert result["success"] is True
-        # Should fall back to OBJ.
-        assert result["result"]["format"] == "obj"
-        assert result["result"]["local_path"] == "/tmp/kiln_generated/model.obj"
-
-    @_AUTH_PATCH
-    @patch("kiln.generation.convert_to_stl")
-    @patch("kiln.generation.validate_mesh")
-    @patch("kiln.server._get_generation_provider")
-    def test_stl_format_not_converted(
-        self, mock_get_provider, mock_validate, mock_convert, _auth,
-    ):
-        """STL results are not passed through convert_to_stl."""
-        provider = MagicMock()
-        provider.download_result.return_value = _make_result(fmt="stl")
         mock_get_provider.return_value = provider
         mock_validate.return_value = _make_validation(valid=True)
 
         result = download_generated_model("test-job-123")
+
         assert result["success"] is True
-        mock_convert.assert_not_called()
+        assert result["result"]["format"] == "stl"
+        stl_path = Path(result["result"]["local_path"])
+        assert stl_path == obj_path.with_suffix(".stl")
+        # the conversion actually happened: a binary STL of four facets
+        assert stl_path.is_file()
+        assert stl_path.stat().st_size > 0
+        assert int.from_bytes(stl_path.read_bytes()[80:84], "little") == 4
+        # and the source is retained, not consumed
+        assert obj_path.is_file()
+
+    @_AUTH_PATCH
+    @patch("kiln.generation.validate_mesh")
+    @patch("kiln.server._get_generation_provider")
+    def test_obj_conversion_failure_keeps_obj(
+        self, mock_get_provider, mock_validate, _auth, tmp_path,
+    ):
+        """An OBJ the converter cannot read is handed back unchanged.
+
+        Fed a genuinely unparseable file rather than a mock raising on
+        cue, so this exercises the real failure path.  It previously
+        passed for the wrong reason: the mocked converter was never
+        called, and the real one failed only because the hardcoded
+        ``/tmp`` path did not exist.
+        """
+        obj_path = tmp_path / "model.obj"
+        obj_path.write_text("this is not geometry\n")
+
+        provider = MagicMock()
+        provider.download_result.return_value = _make_result(
+            fmt="obj", local_path=str(obj_path),
+        )
+        mock_get_provider.return_value = provider
+        mock_validate.return_value = _make_validation(valid=True)
+
+        result = download_generated_model("test-job-123")
+
+        assert result["success"] is True
+        assert result["result"]["format"] == "obj"
+        assert result["result"]["local_path"] == str(obj_path)
+        assert not obj_path.with_suffix(".stl").exists()
+
+    @_AUTH_PATCH
+    @patch("kiln.generation.validate_mesh")
+    @patch("kiln.server._get_generation_provider")
+    def test_stl_format_not_converted(
+        self, mock_get_provider, mock_validate, _auth, tmp_path,
+    ):
+        """An STL is already in the target format and is left alone."""
+        stl_path = tmp_path / "model.stl"
+        stl_path.write_bytes(b"\0" * 84)
+
+        provider = MagicMock()
+        provider.download_result.return_value = _make_result(
+            fmt="stl", local_path=str(stl_path),
+        )
+        mock_get_provider.return_value = provider
+        mock_validate.return_value = _make_validation(valid=True)
+
+        result = download_generated_model("test-job-123")
+
+        assert result["success"] is True
+        assert result["result"]["format"] == "stl"
+        assert result["result"]["local_path"] == str(stl_path)
+        # nothing was re-written or re-converted beside it
+        assert stl_path.read_bytes() == b"\0" * 84
+        assert list(tmp_path.iterdir()) == [stl_path]
