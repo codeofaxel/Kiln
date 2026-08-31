@@ -1567,3 +1567,57 @@ def test_placement_helper_degrades_without_a_bbox():
     recs: list[str] = []
     assert _apply_placement_check(90, recs, None) == (90, "A", True, [])
     assert recs == []
+
+
+def test_sub_layer_dip_below_the_plate_is_not_an_off_bed_fault():
+    """A generated mesh sitting microns low still prints.
+
+    A voxel-extracted, smoothed surface lands its vertices on interpolated
+    positions, so a statue that visually rests on the plate measures a few
+    hundredths of a millimetre under it.  Judged against float precision
+    that was a fatal: 0 / F, unprintable, over a dip more than twice as
+    thin as the finest layer any supported machine can lay down.  The
+    tolerance is sized against the process instead.
+    """
+    from kiln.printability import _apply_placement_check
+
+    recs: list[str] = []
+    # the depth actually measured on the mesh that provoked this
+    bbox = {
+        "x_min": 0.0, "x_max": 40.0,
+        "y_min": 0.0, "y_max": 40.0,
+        "z_min": -0.014, "z_max": 90.0,
+    }
+    score, grade, printable, faults = _apply_placement_check(
+        95, recs, bbox, build_volume=(256.0, 256.0, 256.0),
+    )
+
+    assert faults == []
+    assert (score, grade, printable) == (95, "A", True)
+    assert recs == []
+
+
+def test_a_real_off_bed_drop_is_still_fatal_and_states_its_depth():
+    """The loosened tolerance must not blunt the fault it exists for.
+
+    Half a millimetre under the plate is real lost geometry, and the
+    message has to carry a depth a reader can act on — at one decimal
+    place every fault shallower than 0.05mm printed as "0.0 mm below the
+    build plate", a verdict that argues against itself.
+    """
+    from kiln.printability import _apply_placement_check
+
+    recs: list[str] = []
+    bbox = {
+        "x_min": 0.0, "x_max": 40.0,
+        "y_min": 0.0, "y_max": 40.0,
+        "z_min": -0.5, "z_max": 90.0,
+    }
+    score, grade, printable, faults = _apply_placement_check(
+        95, recs, bbox, build_volume=(256.0, 256.0, 256.0),
+    )
+
+    assert len(faults) == 1
+    assert printable is False
+    assert "0.50 mm below the build plate" in recs[0]
+    assert "0.0 mm below" not in recs[0]

@@ -3436,9 +3436,25 @@ def _score_to_grade(score: int) -> str:
 #: print at all, so an otherwise clean A must not still read printable.
 _PLACEMENT_PENALTY = 50
 
-#: Slack allowed below z=0 before the part counts as off the bed.  Mesh
-#: coordinates carry float noise; a vertex at -1e-9 mm is on the bed.
-_PLACEMENT_Z_TOLERANCE_MM = 0.001
+#: Slack allowed below z=0 before the part counts as off the bed.
+#:
+#: Sized against the PROCESS, not against float precision.  The old 0.001mm
+#: was written for float noise, but a mesh does not arrive carrying float
+#: noise — it arrives carrying GEOMETRIC noise, orders of magnitude larger:
+#: a surface extracted on a voxel grid and then smoothed lands its vertices
+#: wherever the interpolation put them.  A generated statue measured 0.014mm
+#: below the plate and was failed as "off the bed" at 0 / F, with a message
+#: that rounded to "0.0 mm below the build plate" — a fatal verdict on a
+#: part that prints perfectly.
+#:
+#: The floor that matters is the thinnest layer any supported machine can
+#: lay down, which this repo's own slicer catalogue puts at 0.08mm
+#: (``adaptive_slicer`` min_layer_height_mm).  Half of that is material the
+#: process cannot resolve in the first place, so clipping it costs nothing
+#: real.  Deliberately loose in the safe direction: a part 0.03mm low loses
+#: a slab far under one layer, while a false fatal teaches users that the
+#: printability grade is noise.
+_PLACEMENT_Z_TOLERANCE_MM = 0.04
 
 #: Minimum score for a report to call itself printable.
 _PRINTABLE_SCORE_MIN = 50
@@ -3552,8 +3568,12 @@ def _placement_fault_records(
             PlacementFault(
                 name=PLACEMENT_FAULT_OFF_BED,
                 message=(
-                    f"Part sits {abs(z_min):.1f} mm below the build plate "
-                    f"(z_min = {z_min:.1f} mm) — anything under the plate is lost "
+                    # 2 decimals, not 1: at 1 decimal every fault within a
+                    # tenth of the plate printed as "0.0 mm below the build
+                    # plate", which reads as no depth at all and made the
+                    # verdict look like a bug even when it was right.
+                    f"Part sits {abs(z_min):.2f} mm below the build plate "
+                    f"(z_min = {z_min:.2f} mm) — anything under the plate is lost "
                     f"when it slices. Drop it onto the plate first "
                     f"(center_model_on_bed)."
                 ),
