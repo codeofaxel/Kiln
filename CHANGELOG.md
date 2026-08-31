@@ -24,6 +24,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Show Kiln a photo and it checks its work against your photo, every round.**
+  Kiln keeps the reference you gave it with the design, so the fifth attempt is
+  still measured against what you actually showed it — not against its own
+  previous attempt.
+
 - **Watch your model change, and see what a conversion loses (Pro+).** A
   repair, split, or format change plays out on the object itself — and when
   colors can't survive the new format, you watch them leave instead of
