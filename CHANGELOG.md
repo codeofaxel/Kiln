@@ -89,6 +89,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **A finished make comes back whole.** The 3D panel fetches the model on
+  its own now, instead of packing it into your reply.
+
 - **Resuming a print no longer homes the nozzle into the part.** Recovery
   and resume sequences lift clear first and never home downward onto an
   occupied plate. Bed leveling and calibration wait for a clear plate too.
