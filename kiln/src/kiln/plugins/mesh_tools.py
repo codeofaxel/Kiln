@@ -656,6 +656,10 @@ class _MeshToolsPlugin:
                 a millionth of the part diagonal); "0" disables welding.
             :returns: Dict with repair statistics and residual-defect report.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             return _repair_mesh_impl(
                 file_path, output_path,
                 deep=close_holes, close_holes=close_holes,
@@ -682,6 +686,10 @@ class _MeshToolsPlugin:
                 disables welding.
             :returns: Dict with repair statistics.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             return _repair_mesh_impl(
                 file_path, output_path,
                 deep=True, close_holes=close_holes,

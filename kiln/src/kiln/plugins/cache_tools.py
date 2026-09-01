@@ -262,6 +262,9 @@ class _CacheToolsPlugin:
                 material: Filter by material (e.g. "PLA", "PETG").
                 limit: Maximum number of results.
             """
+            if err := _srv._check_auth("cache"):
+                return err
+
             try:
                 from kiln.design_cache import get_design_cache
 
@@ -287,6 +290,9 @@ class _CacheToolsPlugin:
             Args:
                 design_id: The cached design's identifier.
             """
+            if err := _srv._check_auth("cache"):
+                return err
+
             try:
                 from kiln.design_cache import get_design_cache
 

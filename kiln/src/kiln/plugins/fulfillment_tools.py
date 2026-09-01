@@ -334,6 +334,8 @@ class _FulfillmentToolsPlugin:
                     consent gate for storing personal contact/address data.
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("write"):
+                return err
 
             if not consent_to_store:
                 return _srv._error_dict(
@@ -399,6 +401,8 @@ class _FulfillmentToolsPlugin:
                 name: Profile name to delete.
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("write"):
+                return err
 
             try:
                 deleted = _delete_shipping_profile(name)
@@ -456,6 +460,8 @@ class _FulfillmentToolsPlugin:
                 ttl_seconds: Token lifetime, default 10 minutes.
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("write"):
+                return err
 
             try:
                 address = _resolve_shipping_address(

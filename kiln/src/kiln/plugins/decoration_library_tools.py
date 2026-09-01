@@ -95,6 +95,10 @@ class _DecorationLibraryPlugin:
             :param tags: Comma-separated tags for filtering.
             :returns: Dict with saved decoration details and library path.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("cache"):
+                return err
+
             import json
             import os
 
@@ -265,6 +269,10 @@ class _DecorationLibraryPlugin:
             :param printer_id: Optional printer ID for material detection.
             :returns: Dict with decorated model path and settings used.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             import os
 
             from kiln.decoration_library import (

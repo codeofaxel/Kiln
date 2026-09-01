@@ -450,6 +450,10 @@ class _ValidationPipelinePlugin:
             :returns: Dict with pass/fail status, per-check details, recommendations,
                 ``printability_score`` (0-100), and ``score_breakdown``.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             return run_full_validation_pipeline(
                 input_path, printer_id=printer_id, material=material,
             )
@@ -494,6 +498,10 @@ class _ValidationPipelinePlugin:
             :returns: Dict with original/prepared comparison, actions taken,
                 recommendations, and next_action for slicing.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             actions_taken: list[str] = []
             recommendations: list[str] = []
 

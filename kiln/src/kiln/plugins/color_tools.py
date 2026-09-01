@@ -1571,6 +1571,10 @@ class _ColorToolsPlugin:
                 the input's), per-zone ``watertight`` verdicts, AMS slot
                 mapping, weight estimates, and optional 3MF path.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             path = Path(input_path)
             if not path.exists():
                 return {"success": False, "error": f"File not found: {input_path}"}
@@ -1666,6 +1670,10 @@ class _ColorToolsPlugin:
             :returns: Dict with zone STL paths, hex colors, face counts,
                 AMS slot mapping, weight estimates, and optional 3MF path.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             valid_methods = {"z_height", "normal", "random"}
             if method not in valid_methods:
                 return {
@@ -1810,6 +1818,10 @@ class _ColorToolsPlugin:
                 missing, malformed, or STALE (mesh content changed since
                 the decoration was recorded).
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             from kiln.decoration_faces import (
                 load_decoration_faces,
                 load_mesh_triangles,

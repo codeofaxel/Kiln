@@ -62,6 +62,10 @@ class _NetworkToolsPlugin:
             Registers this printer with the configured partner provider
             integration (currently 3DOS).
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("config"):
+                return err
+
             from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
 
@@ -99,6 +103,10 @@ class _NetworkToolsPlugin:
             If ``printer_id`` and ``available`` are provided, updates that
             listing first, then returns the current provider-side capacity view.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("config"):
+                return err
+
             from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
 
@@ -197,6 +205,10 @@ class _NetworkToolsPlugin:
             Returns a provider-managed job reference. Use
             ``provider_job_status`` to track progress.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("queue"):
+                return err
+
             from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
 

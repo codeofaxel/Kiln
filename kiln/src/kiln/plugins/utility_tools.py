@@ -131,6 +131,8 @@ class _UtilityToolsPlugin:
                     explicitly insists.
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("admin"):
+                return err
 
             try:
                 from kiln import self_update
@@ -238,6 +240,10 @@ class _UtilityToolsPlugin:
                     Only when the user explicitly insists, knowing that
                     monitoring for that job may stop.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("admin"):
+                return err
+
             from kiln.serve_siblings import perform_trim, plan_trim, printing_now
 
             if not confirm:

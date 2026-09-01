@@ -207,6 +207,10 @@ class _VersionToolsPlugin:
                 parent information.  Pro users also get provenance,
                 mesh_fingerprint, and mesh_diff with regression warnings.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("cache"):
+                return err
+
             import difflib
 
             from kiln.design_recipe import (
@@ -446,6 +450,10 @@ class _VersionToolsPlugin:
             Returns:
                 The newly created rollback version record.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("cache"):
+                return err
+
             from kiln.design_recipe import (
                 create_new_version,
                 find_recipe,

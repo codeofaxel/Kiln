@@ -277,6 +277,10 @@ class _AssemblyToolsPlugin:
                 assembly_json: JSON string of the current assembly state.
                 output_path: File path where the composed STL will be written.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             try:
                 from kiln.assembly import Assembly, compose_assembly
 

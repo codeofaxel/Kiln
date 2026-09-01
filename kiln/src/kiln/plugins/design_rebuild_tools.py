@@ -76,6 +76,10 @@ class _DesignRebuildPlugin:
             :returns: Dict with the print artifact, the mode used, and
                 per-part or per-parameter results.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             from kiln.design_rebuild import (
                 apply_brief_to_recipe,
                 rebuild_design_from_recipe,

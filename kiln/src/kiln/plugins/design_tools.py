@@ -1556,6 +1556,10 @@ class _DesignToolsPlugin:
                     OpenSCAD looking for screw holes; guessing intent out of
                     geometry would be wrong often. No argument, no advisory.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             import os
 
             from kiln.parametric import compile_scad_code
@@ -1664,6 +1668,10 @@ class _DesignToolsPlugin:
                 new_value: New numeric value.
                 material: Optional material for limit validation (e.g. "pla").
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             from kiln.parametric import tweak_and_compile
 
             try:
@@ -1830,6 +1838,10 @@ class _DesignToolsPlugin:
                 tags: Optional tags for search.
                 filament_type: Material type (e.g. "PLA", "PETG").
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("cache"):
+                return err
+
             from kiln.design_cache import get_design_cache
 
             try:

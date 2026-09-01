@@ -87,6 +87,10 @@ class _StepToolsPlugin:
                 output_dir: Directory for output files.  Defaults to
                     the STEP file's parent directory.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("files"):
+                return err
+
             if output_format not in ("auto", "stl", "3mf"):
                 return {
                     "error": (

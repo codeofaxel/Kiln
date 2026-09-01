@@ -151,6 +151,8 @@ class _IntelligenceToolsPlugin:
                     separated from that design later.
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("learning"):
+                return err
 
             try:
                 from kiln.print_dna import ModelFingerprint
@@ -467,6 +469,8 @@ class _IntelligenceToolsPlugin:
                     design that shares the older signature.
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("learning"):
+                return err
 
             try:
                 from kiln.community_registry import (

@@ -111,6 +111,9 @@ class _EstimateToolsPlugin:
                     the job on that machine rather than on the default.
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("slicer"):
+                return err
+
             from kiln.gcode_metadata import extract_metadata
             from kiln.printability import (
                 analyze_printability,

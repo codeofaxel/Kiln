@@ -369,6 +369,8 @@ class _GenerationToolsPlugin:
                 min_printability_score: Minimum score (0-100) to pass (default 40).
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
 
             # A STEP file is B-rep, not a mesh.  Without this the pipeline
             # tried to REPAIR the CAD file as a mesh and reported a valid
