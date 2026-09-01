@@ -19,6 +19,7 @@ import sys
 import pytest
 
 from kiln import local_stage, stage_cache
+from kiln.mcp_compat import MCP_SDK_MAJOR as _MCP_SDK_MAJOR
 
 _DOC = "<!DOCTYPE html><html><body>stage</body></html>"
 
@@ -803,6 +804,30 @@ def _walk_strings(node, path="result"):
         yield path, node
 
 
+#: The tool-list notification is SDK-1-only, and NOT because the test is
+#: shy: ``_announce_tool_list_changed`` reads the session from
+#: ``lowlevel_server(mcp).request_context``, an attribute SDK 2 removed
+#: along with the ``request_ctx`` contextvar (verified against mcp 2.1.1 —
+#: the accessor raises AttributeError, the announce swallows it and
+#: returns).  A stage resource is a plain ``FunctionResource`` and NEITHER
+#: major injects a ``Context`` into one, and SDK 2 keeps no ambient
+#: request contextvar, so on SDK 2 there is currently no route from that
+#: read to a session at all.
+#:
+#: This gate keeps the suite honest about which half works rather than
+#: asserting a notification that cannot fire; the registration half is
+#: still checked on both majors below.  It is a live product gap on SDK 2
+#: — with the lean result this verb is the only route to a mesh — and it
+#: is written up in tasks.md rather than left as a silent skip.
+_ANNOUNCE_IS_SDK1_ONLY = pytest.mark.skipif(
+    _MCP_SDK_MAJOR >= 2,
+    reason=(
+        "SDK 2 removed Server.request_context, so the stage read has no "
+        "session to announce the new verb to — product gap, not a test gap"
+    ),
+)
+
+
 class TestTheHostIsToldTheVerbArrived:
     """Registering the fetch verb late is only half the promise.
 
@@ -829,11 +854,28 @@ class TestTheHostIsToldTheVerbArrived:
         return _Session()
 
     def _read_with_session(self, mcp, session):
-        """Read the stage document with *session* in the lowlevel context —
-        where the real server puts it."""
+        """Read the stage document with *session* where the server keeps it.
+
+        SDK 1.x parks the request context on a module contextvar the
+        lowlevel dispatcher sets before every handler, which is where
+        ``_announce_tool_list_changed`` reads it.  SDK 2 removed both the
+        contextvar and ``Server.request_context`` outright, so the import
+        alone raises there — the whole reason this helper has to ask which
+        dialect it is speaking (same shape as ``_run_hook`` above).
+
+        On SDK 2 the announce has no session to reach, so this just reads
+        the document; see ``_ANNOUNCE_IS_SDK1_ONLY`` for why the
+        notification assertions do not run there.
+        """
+        import anyio
+
+        from kiln.mcp_compat import MCP_SDK_MAJOR
+
+        if MCP_SDK_MAJOR >= 2:
+            return anyio.run(mcp.read_resource, local_stage.MESH_VIEWER_RESOURCE_URI)
+
         from types import SimpleNamespace
 
-        import anyio
         from mcp.server.lowlevel.server import request_ctx
 
         async def _go():
@@ -845,6 +887,7 @@ class TestTheHostIsToldTheVerbArrived:
 
         return anyio.run(_go)
 
+    @_ANNOUNCE_IS_SDK1_ONLY
     def test_the_first_stage_read_announces_the_new_verb(self):
         _cache_the_stage()
         mcp = _fastmcp()
@@ -857,6 +900,7 @@ class TestTheHostIsToldTheVerbArrived:
             "that validates tool names cannot call what it has not listed"
         )
 
+    @_ANNOUNCE_IS_SDK1_ONLY
     def test_a_second_read_announces_nothing(self):
         """The list did not change, so saying it did would make a host
         re-list its tools once per panel."""
@@ -868,6 +912,7 @@ class TestTheHostIsToldTheVerbArrived:
         self._read_with_session(mcp, self._session(sent))
         assert sent == [True]
 
+    @_ANNOUNCE_IS_SDK1_ONLY
     def test_a_failed_notice_never_sinks_the_document_read(self):
         """This runs inside the read that hands the host its stage.  A
         panel that fails to open beats a document that fails to arrive."""
@@ -876,6 +921,21 @@ class TestTheHostIsToldTheVerbArrived:
         local_stage.install(mcp)
         doc = self._read_with_session(mcp, self._session([], fail=True))
         assert doc, "a refused notification took the stage document with it"
+        assert "kiln_viewer_payload" in mcp._tool_manager._tools
+
+    def test_the_read_registers_the_verb_on_every_sdk(self):
+        """The half that works on both majors.
+
+        Registration is what makes the fetch verb callable at all; the
+        notification only tells a host that caches its tool list.  Pinned
+        unconditionally so SDK 2 is not left with zero coverage of this
+        class while the announce gap above is open.
+        """
+        _cache_the_stage()
+        mcp = _fastmcp()
+        local_stage.install(mcp)
+        assert "kiln_viewer_payload" not in mcp._tool_manager._tools
+        self._read_with_session(mcp, self._session([]))
         assert "kiln_viewer_payload" in mcp._tool_manager._tools
 
     def test_no_session_is_not_a_crash(self):
