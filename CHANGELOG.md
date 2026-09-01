@@ -231,6 +231,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   to the local cache worked, but listing them — or filtering by material —
   always failed; both now return your designs, most recently used first.
 
+- **Saving a model again updates what you told Kiln about it.** Re-saving a
+  file already in your library kept the original notes and quietly ignored
+  new tags or a better prompt; it now takes the new ones.
+
 ## [1.4.1.1] - 2026-08-19
 
 ### Added
