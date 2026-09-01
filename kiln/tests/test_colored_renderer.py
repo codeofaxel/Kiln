@@ -654,3 +654,210 @@ class TestSilhouetteContourStaysOnTheOutline:
             f"{len(strays)} contour pixel(s) drawn inside the object, "
             f"e.g. {strays[:5]} — the contour must only mark the outline"
         )
+
+
+# ---------------------------------------------------------------------------
+# Diagram shading — the render modes an image whose colours are LABELS uses
+# ---------------------------------------------------------------------------
+
+
+def _make_flat_ring(
+    *,
+    sections: int = 96,
+    inner: float = 10.0,
+    outer: float = 20.0,
+    color: tuple[int, int, int] = (120, 140, 170),
+) -> list[ColoredTriangle]:
+    """A flat annulus in the Z=0 plane, normals +Z.
+
+    Its area-weighted centroid is the middle of the HOLE, which is what
+    makes it the shape that catches a callout anchor placed by averaging.
+    """
+    tris: list[ColoredTriangle] = []
+    for k in range(sections):
+        a0 = 2 * math.pi * k / sections
+        a1 = 2 * math.pi * (k + 1) / sections
+        i0 = (inner * math.cos(a0), inner * math.sin(a0), 0.0)
+        i1 = (inner * math.cos(a1), inner * math.sin(a1), 0.0)
+        o0 = (outer * math.cos(a0), outer * math.sin(a0), 0.0)
+        o1 = (outer * math.cos(a1), outer * math.sin(a1), 0.0)
+        tris.append(ColoredTriangle(v0=i0, v1=o0, v2=o1, color=color))
+        tris.append(ColoredTriangle(v0=i0, v1=o1, v2=i1, color=color))
+    return tris
+
+
+class TestMatteShading:
+    """``shading="matte"``: lambert only, no rim, no highlight."""
+
+    def test_matte_shade_depends_only_on_the_light_angle(self) -> None:
+        # Two normals with the SAME angle to the light but different
+        # angles to the CAMERA.  The rim term keys off the camera angle,
+        # so studio separates them; matte, having no rim, must not.
+        light = colored_renderer._normalize((0.0, -0.6, 0.8))
+        # Equal angle to the light; the first is edge-on to the camera
+        # (where the rim fires), the second turned toward it.
+        at_silhouette = colored_renderer._normalize((0.9682, 0.0, 0.25))
+        toward_camera = colored_renderer._normalize((0.857, -0.5, -0.125))
+        assert abs(_dot(at_silhouette, light) - _dot(toward_camera, light)) < 1e-3
+        assert abs(abs(at_silhouette[1]) - abs(toward_camera[1])) > 0.4
+
+        studio_rim = _compute_brightness(at_silhouette, light, face_luminance=40.0)
+        studio_plain = _compute_brightness(toward_camera, light, face_luminance=40.0)
+        assert studio_rim - studio_plain > 0.05, (
+            "fixture sanity: the studio path must actually apply a rim here"
+        )
+
+        matte_rim = colored_renderer._matte_shade(at_silhouette, light)
+        matte_plain = colored_renderer._matte_shade(toward_camera, light)
+        # Only the 1e-3 slack in the two dot products, versus the studio
+        # path's 0.2 of pure camera-angle highlight.
+        assert matte_rim == pytest.approx(matte_plain, abs=1e-3)
+
+    def test_matte_stays_close_to_the_declared_color(self) -> None:
+        # A legend swatch is drawn in the raw colour; the pixels it names
+        # are drawn shaded.  If shading can drive a fill far from its own
+        # colour, the legend stops describing the picture.
+        assert colored_renderer._matte_shade((0.0, 0.0, 1.0), (0.0, 0.0, -1.0)) >= 0.7
+
+    def test_rendered_matte_has_no_silhouette_lift(self, tmp_path: Path) -> None:
+        # A dark cylinder is where the adaptive rim is strongest.  Scan a
+        # mid-row across the wall: under studio lighting the columns next
+        # to the silhouette are LIFTED above the row's darkest pixel;
+        # under matte they are the darkest thing in the row.
+        # Both renders sit on the same flat pale field, so shading is the
+        # only thing that can differ.  A dark object on a light field also
+        # keeps "object" and "background" cleanly separable by luminance,
+        # which a lifted edge pixel must not be able to blur.
+        tris = _make_capped_cylinder(color=(55, 58, 70))
+        kwargs = dict(
+            width=240, height=240, elevation=10, azimuth=30, supersample=1,
+            background=(250, 250, 250), background_gradient=False,
+        )
+
+        def _edge_lift(path: str) -> float:
+            from PIL import Image
+
+            with Image.open(path) as img:
+                row = img.height // 2
+                lums = [
+                    (px[0] * 299 + px[1] * 587 + px[2] * 114) / 1000
+                    for x in range(img.width)
+                    for px in [img.getpixel((x, row))[:3]]
+                ]
+            # Object pixels only; trim the antialiased silhouette itself.
+            wall = [v for v in lums if v < 180][3:-3]
+            return min(wall[0], wall[-1]) - min(wall)
+
+        studio = str(tmp_path / "studio.png")
+        render_colored_mesh(tris, output_path=studio, **kwargs)
+        matte = str(tmp_path / "matte.png")
+        render_colored_mesh(tris, output_path=matte, shading="matte", **kwargs)
+
+        # The regression twin: the metric CAN separate the two paths.
+        assert _edge_lift(studio) > 2.0
+        assert _edge_lift(matte) <= 0.5
+
+    def test_unknown_shading_refuses(self) -> None:
+        with pytest.raises(ValueError, match="unknown shading"):
+            render_colored_mesh(_make_colored_box(), shading="glossy")
+
+
+class TestBackgroundGradient:
+    """``background_gradient=False``: no implied ground plane."""
+
+    def _corners(self, path: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        from PIL import Image
+
+        with Image.open(path) as img:
+            return (
+                img.getpixel((2, 2))[:3],
+                img.getpixel((2, img.height - 3))[:3],
+            )
+
+    def test_off_is_flat_and_on_is_not(self, tmp_path: Path) -> None:
+        tris = _make_colored_box()
+        kwargs = dict(width=200, height=200, supersample=1, background=(60, 60, 60))
+
+        on = str(tmp_path / "gradient.png")
+        render_colored_mesh(tris, output_path=on, **kwargs)
+        top_on, bottom_on = self._corners(on)
+        # The twin: with the gradient the two ends of the field differ.
+        assert top_on != bottom_on
+
+        off = str(tmp_path / "flat.png")
+        render_colored_mesh(tris, output_path=off, background_gradient=False, **kwargs)
+        top_off, bottom_off = self._corners(off)
+        assert top_off == bottom_off == (60, 60, 60)
+
+
+class TestFaceLabels:
+    """``face_labels``: ask the renderer where a group landed."""
+
+    def test_reports_an_anchor_and_a_size_per_label(self, tmp_path: Path) -> None:
+        tris = _make_capped_cylinder(color=(200, 60, 60), top_color=(60, 60, 200))
+        labels = [0 if tri.color == (200, 60, 60) else 1 for tri in tris]
+        out = str(tmp_path / "labelled.png")
+        result = render_colored_mesh(
+            tris, output_path=out, width=200, height=200, supersample=1,
+            face_labels=labels,
+        )
+        assert result.label_anchors is not None
+        assert result.label_pixels is not None
+        assert set(result.label_anchors) == {0, 1}
+        assert all(v > 100 for v in result.label_pixels.values())
+        for x, y in result.label_anchors.values():
+            assert 0 <= x < 200 and 0 <= y < 200
+
+    def test_anchor_lands_on_the_label_not_in_its_hole(self, tmp_path: Path) -> None:
+        # A ring: every pixel it owns is far from its own average.  The
+        # anchor must be a pixel the label actually owns, so it lands on
+        # the ring — an unsnapped mean would sit in the empty middle.
+        tris = _make_flat_ring()
+        out = str(tmp_path / "ring.png")
+        result = render_colored_mesh(
+            tris, output_path=out, width=240, height=240, supersample=1,
+            elevation=90, azimuth=0, face_labels=[0] * len(tris),
+        )
+        assert result.label_anchors is not None
+        ax, ay = result.label_anchors[0]
+
+        # Measure the unsnapped mean from the image itself — that is the
+        # value the anchor must NOT be.
+        from PIL import Image
+
+        with Image.open(out) as img:
+            owned = [
+                (x, y)
+                for y in range(img.height)
+                for x in range(img.width)
+                if img.getpixel((x, y))[:3] != (30, 30, 30)
+                and abs(img.getpixel((x, y))[0] - img.getpixel((x, y))[2]) > 10
+            ]
+        mx = sum(p[0] for p in owned) / len(owned)
+        my = sum(p[1] for p in owned) / len(owned)
+        # The twin: the mean really does fall in the hole.
+        assert math.dist((mx, my), (120, 120)) < 12
+        assert math.dist((ax, ay), (mx, my)) > 20
+
+    def test_hidden_label_gets_no_anchor(self, tmp_path: Path) -> None:
+        # A label made only of down-facing faces is culled away entirely.
+        # It must report nothing rather than a made-up point — a callout
+        # drawn for a region nobody can see points at another region.
+        tris = _make_capped_cylinder()
+        labels = [
+            9 if (tri.v0[2] == 0.0 and tri.v1[2] == 0.0 and tri.v2[2] == 0.0) else 0
+            for tri in tris
+        ]
+        assert labels.count(9) > 10, "fixture sanity: the bottom cap exists"
+        result = render_colored_mesh(
+            tris, output_path=str(tmp_path / "cyl.png"),
+            width=200, height=200, elevation=60, azimuth=45, supersample=1,
+            face_labels=labels,
+        )
+        assert result.label_anchors is not None
+        assert 0 in result.label_anchors
+        assert 9 not in result.label_anchors
+
+    def test_length_mismatch_refuses(self) -> None:
+        with pytest.raises(ValueError, match="face_labels has"):
+            render_colored_mesh(_make_colored_box(), face_labels=[0, 1])
