@@ -94,6 +94,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Turning on authentication no longer locks you out of your own tools.**
+  Printer fan, light and speed, print recovery, print-service orders,
+  publishing and revenue logging refused every request while it was enabled
+  — even from a full-access key.
+
 - **Your print history comes back after a restart.** Finished jobs are read
   from your machine's own records now, so restarting Kiln no longer makes a
   full history look empty.
