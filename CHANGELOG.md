@@ -195,6 +195,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   genuinely doesn't fit, says so plainly instead of failing silently. An
   off-plate 3MF is caught before slicing now, with how far to move it.
 
+- **Your cached designs come back when you ask for them.** Saving a design
+  to the local cache worked, but listing them — or filtering by material —
+  always failed; both now return your designs, most recently used first.
+
 ## [1.4.1.1] - 2026-08-19
 
 ### Added
