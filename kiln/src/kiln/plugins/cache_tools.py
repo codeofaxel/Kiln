@@ -259,7 +259,11 @@ class _CacheToolsPlugin:
                 from kiln.design_cache import get_design_cache
 
                 cache = get_design_cache()
-                entry = cache.add(file_path, label=label, material=material)
+                entry = cache.add(
+                    file_path,
+                    filament_type=material,
+                    metadata={"label": label} if label else None,
+                )
                 return {"success": True, "cached_design": entry.to_dict()}
             except Exception as exc:
                 _logger.exception("Error in cache_design")
@@ -281,6 +285,8 @@ class _CacheToolsPlugin:
                 material: Filter by material (e.g. "PLA", "PETG").
                 limit: Maximum number of results.
 
+            Most recently used designs come first.
+
             The response declares its ``scope``: which store was read,
             and whether the user's cloud-side designs are included.
             Read ``scope`` before treating ``count`` as everything they
@@ -291,7 +297,7 @@ class _CacheToolsPlugin:
                 from kiln.store_scope import DESIGN_CACHE, scoped_store_response
 
                 cache = get_design_cache()
-                designs = cache.list_designs(material=material, limit=limit)
+                designs = cache.search(filament_type=material, limit=limit)
                 return scoped_store_response(
                     {
                         "success": True,
