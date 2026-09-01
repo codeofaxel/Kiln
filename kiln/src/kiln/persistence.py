@@ -2227,6 +2227,30 @@ class KilnDB:
             results.append(d)
         return results
 
+    def count_print_history(
+        self,
+        printer_name: str | None = None,
+        status: str | None = None,
+    ) -> int:
+        """Count print history rows matching the same filters as the listing.
+
+        Lets a limited listing say "20 of 400" instead of presenting its
+        page as the whole story.
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
+        if printer_name is not None:
+            clauses.append("printer_name = ?")
+            params.append(printer_name)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        row = self._conn.execute(
+            f"SELECT COUNT(*) FROM print_history {where}", params
+        ).fetchone()
+        return int(row[0]) if row else 0
+
     def get_printer_stats(self, printer_name: str) -> dict[str, Any]:
         """Aggregate statistics for a printer.
 

@@ -28,6 +28,28 @@ So the honest answer depends on the caller's tier:
   top-level ``warning``, so neither an agent nor a person can mistake it
   for a complete listing.
 
+A second way to be a fragment
+-----------------------------
+The split above is about tiers.  A door can also fail to read its OWN
+local store: it answers out of an in-process cache that holds less than
+the file on disk, and the shortfall has nothing to do with licences.
+``job_history`` is that case — the queue reloads only non-terminal rows
+at startup, so every job that FINISHED before this server process began
+is in ``~/.kiln/queue.db`` and missing from the answer.  Restart the
+server and a full history reports ``{"success": true, "count": 0}``.
+
+Such a door passes a :class:`LocalRead` saying so.  The response is then
+marked ``incomplete`` for that reason on its own, free tier included,
+and the two shortfalls are listed separately in ``scope`` because they
+are different failures with different fixes.
+
+Stores that are one MACHINE's record of events rather than a curated
+library (print history, job history) additionally set
+``per_machine=True``.  Kiln has no cross-install read at any tier, so
+that flag does not make an answer incomplete — an unmeasurable gap is
+not a countable one — it only forbids the "this is all of it" sentence,
+which for a fleet spread across machines is false.
+
 Usage — one call, at the end of the tool, over the response it already
 built::
 
@@ -102,12 +124,20 @@ class LocalStore:
         or ``None`` when the store has no cloud counterpart at ANY tier
         (a machine-local cache).  ``None`` is a claim: it says a paid
         caller is missing nothing, so only set it when that is true.
+    :param per_machine: True when the store records what happened on
+        THIS machine, so a second Kiln install keeps a second one and no
+        local read can see it.  It does not make an answer incomplete —
+        a gap that cannot be measured is not a gap that can be counted —
+        but it does forbid the "this is all of it" sentence a curated
+        library gets, because for a fleet spread across machines that
+        sentence is false.
     """
 
     id: str
     label: str
     location: str
     cloud_capability: str | None = None
+    per_machine: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -115,7 +145,66 @@ class LocalStore:
             "label": self.label,
             "location": self.location,
             "has_cloud_half": self.cloud_capability is not None,
+            "per_machine": self.per_machine,
         }
+
+
+@dataclass
+class LocalRead:
+    """How much of the LOCAL half the tool's own read actually covered.
+
+    Most doors read their local store directly, so the local half is
+    whole by construction and this defaults to ``whole()``.  Some can
+    fail to: a door may fall back to an in-process cache when the
+    durable store on disk cannot be read, and that answer is a fragment
+    for a reason that has nothing to do with tiers or the cloud.
+    ``job_history`` is the shape this exists for — it once served
+    finished jobs from the queue's in-memory dict alone, which reloads
+    only NON-terminal rows on startup, so after every restart a full
+    history returned ``{"success": true, "count": 0}``.  The door now
+    reads ``~/.kiln/queue.db`` directly and passes ``partial`` only
+    when that read fails.
+
+    A listing the caller truncated with ``limit`` is NOT partial — a
+    page of a store the door fully read is pagination, not a gap, and
+    crying incomplete over it teaches callers to ignore the flag.  The
+    door discloses the store's total via ``local_total`` instead.
+
+    :param status: ``"whole"`` (the read covered the local store) or
+        ``"partial"`` (it did not).
+    :param detail: Plain sentence naming what the read missed and where
+        it still lives, so the caller can go and get it.
+    :param missing: How many local records are known to be absent, when
+        that can be counted.  ``None`` means "some, count unknown" —
+        never round it to zero.
+    """
+
+    status: str = "whole"
+    detail: str = ""
+    missing: int | None = None
+
+    @property
+    def complete(self) -> bool:
+        """Did this read cover the local store it answers for?"""
+        return self.status == "whole"
+
+    @classmethod
+    def whole(cls) -> LocalRead:
+        """The read covered the local store — the ordinary case."""
+        return cls()
+
+    @classmethod
+    def partial(cls, detail: str, missing: int | None = None) -> LocalRead:
+        """The read did NOT cover the local store; say so and where the rest is."""
+        return cls(status="partial", detail=detail, missing=missing)
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"status": self.status}
+        if self.detail:
+            d["detail"] = self.detail
+        if self.missing is not None:
+            d["records_not_listed"] = self.missing
+        return d
 
 
 @dataclass
@@ -189,6 +278,43 @@ MODEL_CACHE = LocalStore(
     label="local model cache",
     location="~/.kiln/model_cache/",
     cloud_capability=None,
+)
+
+
+# What this machine recorded about prints it ran.  A second Kiln
+# install keeps a second one and neither can see the other, so this is
+# marked per-machine: "your print history" spans the fleet, and one
+# machine's database is a slice of it.
+#
+# No cloud capability, and that is a verified claim, not an assumption:
+# cloud_sync pushes COPIES of job and event rows (the local rows are
+# only marked synced, never removed) to a user-configured endpoint that
+# nothing in Kiln or kiln-pro can read back — kiln-pro has no ingest
+# for those pushes and no history library behind the seam.  So a cloud
+# sink may hold duplicates of rows this answer already includes, and
+# rows from OTHER machines, which is exactly the boundary per_machine
+# already names.  The one real gap — rows retention pruned locally
+# after a year that survive in a user's own sink — is unmeasurable
+# from here and belongs to the endpoint's owner, not to this answer.
+PRINT_HISTORY = LocalStore(
+    id="print_history",
+    label="print history",
+    location="~/.kiln/kiln.db",
+    per_machine=True,
+)
+
+# The queue's record of finished jobs.  Same machine boundary and the
+# same verified no-cloud-half reasoning as the print history.  Its own
+# hazard is local: the queue's in-memory dict reloads only non-terminal
+# rows at startup, so a door serving history from memory alone answers
+# "none" after a restart while ~/.kiln/queue.db holds every row.  The
+# door reads the durable store; LocalRead exists for the day that read
+# fails.
+JOB_HISTORY = LocalStore(
+    id="job_history",
+    label="print job history",
+    location="~/.kiln/queue.db",
+    per_machine=True,
 )
 
 
@@ -382,31 +508,103 @@ def _normalise_cloud_result(raw: Any, store: LocalStore) -> CloudRead:
 # ---------------------------------------------------------------------------
 
 
-def _summary(store: LocalStore, cloud: CloudRead) -> str:
-    """One plain sentence saying what this answer covers."""
+def _local_sentence(store: LocalStore, local: LocalRead, complete: bool) -> str:
+    """What the tool's own read covered, and whether that is the whole local half."""
     where = f"your local {store.label} on this machine ({store.location})"
 
+    if not local.complete:
+        counted = ""
+        if local.missing:
+            plural = "" if local.missing == 1 else "s"
+            verb = "is" if local.missing == 1 else "are"
+            counted = (
+                f" {local.missing} record{plural} held there {verb} not in "
+                "this list."
+            )
+        return (
+            f"INCOMPLETE — this did not even read all of {where}: "
+            f"{local.detail}{counted}"
+        )
+    if not complete:
+        return f"INCOMPLETE — read from {where}, and nowhere else."
+    return f"Read from {where}."
+
+
+def _cloud_sentence(store: LocalStore, cloud: CloudRead) -> str:
+    """What happened to the cloud half."""
     if cloud.status == "ok":
         return (
-            f"Read from {where} AND your cloud {store.label}; each item says "
-            "which one it came from."
+            f"Your cloud {store.label} was read too; each item says which one "
+            "it came from."
         )
     if cloud.status == "no_cloud_half":
-        return (
-            f"Read from {where}. This store is local-only — there is no "
-            "cloud copy, so this is all of it."
-        )
+        return "This store has no cloud half Kiln can read."
     if cloud.status == "tier_local_only":
         return (
-            f"Read from {where}. Cloud libraries are a kiln-pro feature "
-            f"({_PRICING_URL}); on the free tier this local store is your "
-            f"whole {store.label}."
+            f"Cloud libraries are a kiln-pro feature ({_PRICING_URL}); on the "
+            "free tier there is no cloud half to read."
         )
     return (
-        f"INCOMPLETE — this is {where} ONLY. Your cloud {store.label} was "
-        f"not read: {cloud.detail} Anything saved there is missing from this "
-        "list, and the count is not your whole library."
+        f"Your cloud {store.label} was not read: {cloud.detail} Anything saved "
+        "there is missing from this list, and the count is not your whole "
+        "library."
     )
+
+
+def _summary(
+    store: LocalStore,
+    local: LocalRead,
+    cloud: CloudRead,
+    *,
+    local_total: int | None = None,
+    local_listed: int = 0,
+) -> str:
+    """Plain sentences saying exactly what this answer covers.
+
+    Assembled from three independent facts — how much of the local half
+    was read, what happened to the cloud half, and whether the store is
+    one machine's record of events rather than a library — rather than
+    from one branch per combination.  A door that gains a new kind of
+    gap gains a sentence, not a new matrix of wordings.
+    """
+    complete = local.complete and cloud.complete
+    sentences = [
+        _local_sentence(store, local, complete),
+        _cloud_sentence(store, cloud),
+    ]
+
+    if local_total is not None and local_total > local_listed:
+        # A page, not a gap: the store was read in full and the caller's
+        # limit chose how much of it to carry.  Said plainly so a count
+        # of 20 is never mistaken for a library of 20.
+        sentences.append(
+            f"{local_total} matching records are stored on this machine; "
+            f"this answer lists {local_listed} of them."
+        )
+
+    if store.per_machine:
+        # Never claim totality for a store that only ever held one
+        # machine's events.  Kiln has no cross-install read at any tier,
+        # so the honest move is to name the boundary, not to count past
+        # it.  A cloud half that DID answer may already span machines —
+        # public Kiln cannot tell — so the boundary is stated about the
+        # local half rather than about the whole answer.
+        if cloud.status == "ok":
+            sentences.append(
+                f"The local half is only THIS machine's {store.label}; "
+                "whether the cloud half covers your other machines is up to "
+                "what it stores."
+            )
+        else:
+            sentences.append(
+                f"It covers THIS machine only: any other computer running "
+                f"Kiln keeps its own {store.label}, which no local read can "
+                "see."
+            )
+    elif complete:
+        sentences.append(f"That is all of your {store.label}.")
+
+    return " ".join(sentences)
 
 
 def _tag_items(items: list[Any], source: str, source_key: str) -> list[Any]:
@@ -427,6 +625,8 @@ def scoped_store_response(
     count_key: str = "count",
     source_key: str = "store",
     filters: dict[str, Any] | None = None,
+    local: LocalRead | None = None,
+    local_total: int | None = None,
 ) -> dict[str, Any]:
     """Merge in the cloud half and disclose what this answer covers.
 
@@ -447,6 +647,19 @@ def scoped_store_response(
         ``content_type``, a search ``query``), forwarded so the cloud
         half answers the same question.  Drop a filter here and the two
         halves stop describing the same list.
+    :param local: How much of the LOCAL half the caller's own read
+        covered.  Defaults to :meth:`LocalRead.whole` — a door that
+        reads its store directly needs nothing here.  A door whose
+        durable read failed and fell back to a cache passes
+        :meth:`LocalRead.partial`, and the answer is marked incomplete
+        for that reason alone, at any tier, with or without a cloud
+        half.
+    :param local_total: How many records match in the local store as a
+        whole, when the door measured it.  A listing capped by the
+        caller's own ``limit`` is a page, not a fragment — the total is
+        disclosed in ``scope.local.total_records`` and in the summary,
+        and the answer stays complete.  ``None`` means unmeasured, and
+        an unmeasured total is simply not stated.
     :returns: The same dict, annotated.
     """
     if not isinstance(response, dict):
@@ -458,7 +671,9 @@ def scoped_store_response(
             local_items = []
 
         tier = current_tier()
+        local_read = local or LocalRead.whole()
         cloud = read_cloud_half(store, tier=tier, filters=filters)
+        complete = local_read.complete and cloud.complete
 
         items = _tag_items(local_items, "local", source_key)
         if cloud.status == "ok":
@@ -469,20 +684,38 @@ def scoped_store_response(
             response[count_key] = len(items)
 
         stores_read = ["local"] + (["cloud"] if cloud.status == "ok" else [])
+        local_dict = local_read.to_dict()
+        if local_total is not None:
+            local_dict["total_records"] = local_total
         scope: dict[str, Any] = {
-            "complete": cloud.complete,
+            "complete": complete,
             "store": store.to_dict(),
             "stores_read": stores_read,
             "tier": tier,
+            "local": local_dict,
             "cloud": cloud.to_dict(),
             "count_covers": ", ".join(stores_read),
-            "summary": _summary(store, cloud),
+            "summary": _summary(
+                store,
+                local_read,
+                cloud,
+                local_total=local_total,
+                local_listed=len(local_items),
+            ),
         }
-        if not cloud.complete:
-            scope["stores_missing"] = ["cloud"]
+        # Named separately because they are different failures with
+        # different fixes: the local half is missing because this
+        # process never loaded it, the cloud half because it could not
+        # be reached.  Collapsing them would hide the one a restart
+        # cannot explain.
+        missing = (["local (durable)"] if not local_read.complete else []) + (
+            ["cloud"] if not cloud.complete else []
+        )
+        if missing:
+            scope["stores_missing"] = missing
         response["scope"] = scope
 
-        if not cloud.complete:
+        if not complete:
             response["incomplete"] = True
             response["warning"] = scope["summary"]
         return response
