@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **History answers say what they cover.** Your print, job, failure and model
+  histories now say they're this machine's records, and how many entries
+  exist in total — so a page of twenty is never mistaken for everything
+  you've printed.
+
 - **Kiln catches a handle that didn't actually join the body.** A part built
   flush against a curved wall only touches it — it looks attached, then
   prints as two loose pieces. Kiln now measures the join and tells you how
@@ -23,6 +28,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   wrong place.
 
 ### Added
+
+- **Your cloud library shows up on your machine.** Designs saved to your Kiln
+  account appear next to your local ones, each entry saying which one it came
+  from, and can be pulled back down on any machine you're signed in on. Saved
+  decorations and reusable features join the listing on Kiln Pro. Served via
+  kiln-pro; see https://kiln3d.com/pricing.
+
+- **Saved decorations can't hide anymore.** The decoration library's listing now
+  says when you also have saved decoration presets, and how to see them.
 
 - **Show Kiln a photo and it checks its work against your photo, every round.**
   Kiln keeps the reference you gave it with the design, so the fifth attempt is
@@ -88,6 +102,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **Your print history comes back after a restart.** Finished jobs are read
+  from your machine's own records now, so restarting Kiln no longer makes a
+  full history look empty.
+
+- **A busy queue no longer hides finished prints.** Recent history counts
+  back through finished jobs only, instead of stopping at whatever the queue
+  happened to be holding.
 
 - **A part resting flat on the plate is no longer failed for sitting below
   it.** A hair of rounding under zero used to trip the placement check and
@@ -194,6 +216,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   slice. Kiln now places it on your printer's actual plate, and when something
   genuinely doesn't fit, says so plainly instead of failing silently. An
   off-plate 3MF is caught before slicing now, with how far to move it.
+
+- **Your cached designs come back when you ask for them.** Saving a design
+  to the local cache worked, but listing them — or filtering by material —
+  always failed; both now return your designs, most recently used first.
 
 ## [1.4.1.1] - 2026-08-19
 

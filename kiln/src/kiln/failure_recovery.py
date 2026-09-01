@@ -650,6 +650,33 @@ def analyze_failure(
 # ---------------------------------------------------------------------------
 
 
+def count_failure_records(
+    *,
+    printer_name: str | None = None,
+    failure_type: str | None = None,
+) -> int:
+    """Count failure records matching the same filters as the listing.
+
+    Lets a limited listing say "20 of 400" instead of presenting its
+    page as the whole story.
+    """
+    from kiln.persistence import get_db
+
+    query = "SELECT COUNT(*) FROM failure_records"
+    conditions: list[str] = []
+    params: list[Any] = []
+    if printer_name:
+        conditions.append("printer_name = ?")
+        params.append(printer_name)
+    if failure_type:
+        conditions.append("failure_type = ?")
+        params.append(failure_type)
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    row = get_db()._conn.execute(query, params).fetchone()
+    return int(row[0]) if row else 0
+
+
 def get_failure_history(
     *,
     printer_name: str | None = None,

@@ -112,6 +112,10 @@ class _CredentialToolsPlugin:
             Args:
                 credential_id: The credential's unique identifier.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("admin"):
+                return err
+
             try:
                 from kiln.credential_store import retrieve_credential as _retrieve
 

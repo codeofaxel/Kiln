@@ -66,6 +66,10 @@ class _MonitorTwinToolsPlugin:
                 "gcode_url"|null, "file_name", "expires_in"}`` on success;
                 ``{"success": False, "code", "message"}`` otherwise.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("monitoring"):
+                return err
+
             try:
                 from kiln.monitor_twin import publish
 

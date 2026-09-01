@@ -657,6 +657,144 @@ class PrintQueue:
         with self._lock:
             return len(self._jobs)
 
+    @property
+    def has_durable_store(self) -> bool:
+        """Whether a SQLite database backs this queue.
+
+        Readers use this to tell "memory is the whole store" apart from
+        "the durable store exists but could not be read" — the two cases
+        a ``None`` from the disk readers below would otherwise conflate.
+        """
+        return self._db is not None
+
+    def list_finished_jobs(
+        self,
+        status: JobStatus | None = None,
+        limit: int = 100,
+    ) -> list[PrintJob]:
+        """Return finished jobs from the DURABLE store, newest first.
+
+        :meth:`list_jobs` serves the live queue and reads memory, which
+        is correct for it and wrong for history: :meth:`_reload_from_db`
+        reloads only non-terminal rows at startup, so memory forgets
+        every job that finished before this process began while the
+        database keeps them all.  History readers call this instead.
+
+        The union of the database and memory is returned, deduplicated
+        by job id with the in-memory copy winning — a just-finished job
+        whose database write failed still appears.  Ordered by
+        completion time, newest first (jobs missing a completion stamp
+        sort by creation time).  A database read failure degrades to the
+        in-memory view rather than raising; callers can detect the
+        degradation by comparing against :meth:`count_finished_on_disk`.
+
+        Args:
+            status: Only this terminal status, or ``None`` for all three.
+            limit: Maximum jobs to return, applied AFTER filtering and
+                sorting — a limit of 20 returns the 20 newest finished
+                jobs, not whatever finished jobs survive in the first 20
+                rows of an unrelated ordering.
+        """
+        terminal = (
+            {status}
+            if status is not None
+            else {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
+        )
+        with self._lock:
+            merged: dict[str, PrintJob] = {
+                j.id: j for j in self._jobs.values() if j.status in terminal
+            }
+
+        if self._db is not None:
+            values = tuple(t.value for t in terminal)
+            placeholders = ",".join("?" for _ in values)
+            try:
+                rows = self._db.execute(
+                    f"""SELECT id, file_name, printer_name, status,
+                               submitted_by, priority, created_at,
+                               started_at, completed_at, error, metadata,
+                               idempotency_key
+                        FROM jobs WHERE status IN ({placeholders})""",
+                    values,
+                ).fetchall()
+            except sqlite3.Error:
+                logger.warning(
+                    "could not read finished jobs from the queue database; "
+                    "listing the in-memory view only",
+                    exc_info=True,
+                )
+                rows = []
+            for row in rows:
+                if row[0] in merged:
+                    continue  # memory wins: it may be newer than the row
+                merged[row[0]] = PrintJob(
+                    id=row[0],
+                    file_name=row[1],
+                    printer_name=row[2],
+                    status=JobStatus(row[3]),
+                    submitted_by=row[4],
+                    priority=row[5],
+                    created_at=row[6],
+                    started_at=row[7],
+                    completed_at=row[8],
+                    error=row[9],
+                    metadata=json.loads(row[10]) if row[10] else {},
+                    idempotency_key=row[11],
+                )
+
+        finished = sorted(
+            merged.values(),
+            key=lambda j: j.completed_at if j.completed_at is not None else j.created_at,
+            reverse=True,
+        )
+        return finished[:limit]
+
+    def count_finished_on_disk(self, status: JobStatus | None = None) -> int | None:
+        """How many FINISHED jobs the queue database holds.
+
+        Read-only, and deliberately not routed through :attr:`_jobs`:
+        :meth:`_reload_from_db` reloads only non-terminal rows, so the
+        in-memory dict forgets every job that finished before this
+        process started while the database keeps them all.  A history
+        listing built from memory alone therefore answers "none" after
+        a restart with no way to tell that apart from "you have never
+        printed".  This is how a reader measures the difference and
+        says so.
+
+        Args:
+            status: Count only this terminal status, or ``None`` for all
+                three.
+
+        Returns:
+            The row count, or ``None`` for an in-memory queue with no
+            database behind it — there, memory IS the whole store and
+            there is no shortfall to report.  ``None`` also covers a
+            database that cannot be read: "I could not look" is not
+            zero, and rounding it to zero is the failure this exists to
+            prevent.
+        """
+        if self._db is None:
+            return None
+        terminal = (
+            (status.value,)
+            if status is not None
+            else (
+                JobStatus.COMPLETED.value,
+                JobStatus.FAILED.value,
+                JobStatus.CANCELLED.value,
+            )
+        )
+        placeholders = ",".join("?" for _ in terminal)
+        try:
+            row = self._db.execute(
+                f"SELECT COUNT(*) FROM jobs WHERE status IN ({placeholders})",
+                terminal,
+            ).fetchone()
+        except sqlite3.Error:
+            logger.warning("could not count finished jobs on disk", exc_info=True)
+            return None
+        return int(row[0]) if row else 0
+
     def summary(self) -> dict[str, int]:
         """Return a count of jobs per status."""
         with self._lock:

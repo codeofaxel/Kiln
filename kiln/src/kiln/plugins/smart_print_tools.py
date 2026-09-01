@@ -91,6 +91,9 @@ class _SmartPrintToolsPlugin:
                     the printer.
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("print"):
+                return err
+
             from kiln.printability import (
                 analyze_printability,
                 diagnose_from_signals,

@@ -191,6 +191,10 @@ class _PrintabilityToolsPlugin:
                     when ``apply`` is True.  Defaults to
                     ``<input>_oriented.stl``.
             """
+            import kiln.server as _srv
+            if err := _srv._check_auth("generate"):
+                return err
+
             # STEP in, mesh out — the one shared door, never a per-tool
             # branch, so the CAD format engineering customers actually send
             # works here instead of failing several layers down.

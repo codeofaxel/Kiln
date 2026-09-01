@@ -151,6 +151,8 @@ class _IntelligenceToolsPlugin:
                     separated from that design later.
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("learning"):
+                return err
 
             try:
                 from kiln.print_dna import ModelFingerprint
@@ -424,7 +426,19 @@ class _IntelligenceToolsPlugin:
                         "file and not the design. Pass model_path for the "
                         "part's full history."
                     )
-                return result
+                from kiln.store_scope import PRINT_DNA, scoped_store_response
+
+                return scoped_store_response(
+                    result,
+                    store=PRINT_DNA,
+                    items_key="history",
+                    filters={
+                        "file_hash": file_hash or None,
+                        "material": material or None,
+                        "geometric_signature": geometric_signature or None,
+                        "geometric_signature_v2": geometric_signature_v2 or None,
+                    },
+                )
             except Exception as exc:
                 _logger.exception("Unexpected error in get_model_print_history")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
@@ -467,6 +481,8 @@ class _IntelligenceToolsPlugin:
                     design that shares the older signature.
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("learning"):
+                return err
 
             try:
                 from kiln.community_registry import (
