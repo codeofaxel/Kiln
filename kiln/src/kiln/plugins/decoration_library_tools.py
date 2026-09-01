@@ -229,14 +229,11 @@ class _DecorationLibraryPlugin:
             applied by ``apply_decoration_preset``.  The library adapts, the
             preset remembers — if what you want isn't here, look there.
 
-            The response declares its own SCOPE.  Free installs have a
-            local library only; paid tiers also have a cloud library
-            (what the web's /decorations pages show), and this call
-            returns the union of the two with every row saying which
-            one it came from.  When the cloud half cannot be read the
-            response says so and marks itself ``incomplete`` — read
-            ``scope`` before treating ``count`` as everything the user
-            has saved.
+            The response declares its own SCOPE.  The library is
+            local-only at every tier — the web's /decorations pages are
+            the decoration PRESET store above, not a cloud copy of this
+            one — so a complete local read here is the whole library,
+            and ``scope`` says exactly that.
             """
             from kiln.decoration_library import (
                 list_decorations as _list,

@@ -245,11 +245,20 @@ class CloudRead:
 # doors onto one store cannot describe it two different ways.
 # ---------------------------------------------------------------------------
 
+# No cloud capability, and that is a verified claim, not an assumption:
+# nothing in kiln-pro stores decoration-LIBRARY entries — the web's
+# /decorations pages are the decoration PRESET store, a different
+# artifact family (id-keyed, versioned, signed) with a different row
+# shape, and merging preset rows into a library listing would be the
+# "different wrong answer" DESIGN_CACHE's note below warns about.  The
+# preset store has its own doors (list_decoration_presets), and a miss
+# in either store already redirects to the other by name.  If a cloud
+# library sync ever ships, set the capability and add its seam handler
+# in the same commit.
 DECORATION_LIBRARY = LocalStore(
     id="decoration_library",
     label="decoration library",
     location="~/.kiln/decorations/",
-    cloud_capability="decoration_library",
 )
 
 DESIGN_VERSIONS = LocalStore(
@@ -259,15 +268,18 @@ DESIGN_VERSIONS = LocalStore(
     cloud_capability="design_versions",
 )
 
-# Its own capability key rather than sharing the design library's: a
-# cached-design row and a design-VERSION row are different shapes, and
+# A cached-design row and a design-VERSION row are different shapes, and
 # merging one list into the other would be a new wrong answer rather
-# than a completed one.
+# than a completed one.  No cloud capability — verified: the cache is a
+# reuse store for generated/downloaded files, content-addressed and
+# regenerable, and kiln-pro keeps no cloud copy of it.  A paid caller is
+# missing nothing.  (The location was previously advertised as
+# ``~/.kiln/design_cache/``, a directory that does not exist —
+# ``design_cache.py`` writes ``~/.kiln/cache/designs/``.)
 DESIGN_CACHE = LocalStore(
     id="design_cache",
     label="cached design library",
-    location="~/.kiln/design_cache/",
-    cloud_capability="design_cache",
+    location="~/.kiln/cache/designs/",
 )
 
 # A download/generation cache, not a library the user curates: nothing on
@@ -364,7 +376,7 @@ def current_tier() -> str:
     ``kiln.licensing`` is a shim kiln-pro registers when it is imported,
     so a plain ``from kiln.licensing import ...`` answers only in a
     process that has already touched kiln-pro.  Resolving straight to
-    ``"free"`` on that miss is how a founder-key holder gets told a
+    ``"free"`` on that miss is how a paid-key holder gets told a
     local store is their whole library, so the miss is retried after
     importing kiln-pro, and only a genuinely absent kiln-pro means free:
 
