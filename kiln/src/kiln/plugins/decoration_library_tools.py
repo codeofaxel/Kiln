@@ -234,11 +234,38 @@ class _DecorationLibraryPlugin:
                 category=category or None,
                 tag=tag or None,
             )
-            return {
+            result = {
                 "success": True,
                 "count": len(decorations),
                 "decorations": [d.to_dict() for d in decorations],
             }
+            # Cross-store hint: when kiln-pro's decoration PRESETS hold
+            # entries, say so — an agent that only checks here would
+            # otherwise conclude a saved logo preset doesn't exist.  A
+            # hint, not a merge: the two stores stay separate (the
+            # library adapts, the preset remembers), and without
+            # kiln-pro this listing is exactly what it always was.
+            try:
+                from kiln_pro.design_versions.decoration_presets import (
+                    DecorationPresetStore,
+                )
+
+                _presets = DecorationPresetStore()
+                try:
+                    n = len(_presets.list_presets())
+                finally:
+                    _presets.close()
+                if n:
+                    result["presets_hint"] = (
+                        f"{n} decoration preset(s) also saved — the "
+                        "versioned kind the web's /decorations pages "
+                        "show. List them with list_decoration_presets."
+                    )
+            except Exception:
+                # No kiln-pro, or its store is unavailable — the hint
+                # must never break a free listing.
+                pass
+            return result
 
         @mcp.tool()
         def apply_decoration(
