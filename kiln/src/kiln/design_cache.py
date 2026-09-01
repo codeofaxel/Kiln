@@ -288,6 +288,7 @@ class DesignCache:
 
             # Design DNA columns — migration-safe additions for existing DBs.
             import contextlib
+
             for col in ("scad_source TEXT", "generation_prompt TEXT", "provider TEXT"):
                 with contextlib.suppress(sqlite3.OperationalError):
                     self._conn.execute(f"ALTER TABLE designs ADD COLUMN {col}")
@@ -349,7 +350,8 @@ class DesignCache:
 
         Computes SHA-256, copies to cache dir, records metadata.
         If a file with the same hash already exists, the existing
-        entry is returned without re-copying (deduplication).
+        entry is returned without re-copying (deduplication) -- updated
+        with any annotations explicitly supplied on this call.
 
         :param file_path: Path to the design file on disk.
         :param printer_type: Printer type (``"fdm"``).
@@ -382,7 +384,11 @@ class DesignCache:
 
         file_hash = _compute_sha256(file_path)
 
-        # Dedup check -- return existing entry if the same content is cached.
+        # Dedup check -- the file is deduplicated, the intent is not.
+        # Re-adding identical bytes returns the existing entry, updated
+        # with whatever annotations the caller explicitly supplied, so a
+        # repeat add can never report success carrying values the caller
+        # just contradicted.  Omitted (None) fields keep stored values.
         existing = self.get_by_hash(file_hash)
         if existing is not None:
             self._hits += 1
@@ -391,7 +397,19 @@ class DesignCache:
                 file_hash[:12],
                 existing.id,
             )
-            return existing
+            return self._update_annotations(
+                existing,
+                tags=tags,
+                source=source,
+                filament_type=filament_type,
+                estimated_print_time_s=estimated_print_time_s,
+                dimensions_mm=dimensions_mm,
+                slicer_used=slicer_used,
+                metadata=metadata,
+                scad_source=scad_source,
+                generation_prompt=generation_prompt,
+                provider=provider,
+            )
 
         self._misses += 1
 
@@ -474,6 +492,62 @@ class DesignCache:
         )
         return entry
 
+    def _update_annotations(
+        self,
+        existing: CachedDesign,
+        *,
+        tags: list[str] | None,
+        source: str | None,
+        filament_type: str | None,
+        estimated_print_time_s: float | None,
+        dimensions_mm: dict[str, float] | None,
+        slicer_used: str | None,
+        metadata: dict[str, Any] | None,
+        scad_source: str | None,
+        generation_prompt: str | None,
+        provider: str | None,
+    ) -> CachedDesign:
+        """Overwrite an entry's annotations with explicitly supplied values.
+
+        Called on the dedup path of :meth:`add`.  ``None`` means "not
+        specified" and leaves the stored value alone; the ``metadata``
+        dict is shallow-merged.  Returns the refreshed entry.
+        """
+        columns: dict[str, Any] = {}
+        if tags is not None:
+            columns["tags_json"] = json.dumps(tags)
+        if source is not None:
+            columns["source"] = source
+        if filament_type is not None:
+            columns["filament_type"] = filament_type
+        if estimated_print_time_s is not None:
+            columns["estimated_print_time_s"] = estimated_print_time_s
+        if dimensions_mm is not None:
+            columns["dimensions_json"] = json.dumps(dimensions_mm)
+        if slicer_used is not None:
+            columns["slicer_used"] = slicer_used
+        if metadata is not None:
+            columns["metadata_json"] = json.dumps({**existing.metadata, **metadata})
+        if scad_source is not None:
+            columns["scad_source"] = scad_source
+        if generation_prompt is not None:
+            columns["generation_prompt"] = generation_prompt
+        if provider is not None:
+            columns["provider"] = provider
+
+        if not columns:
+            return existing
+
+        assignments = ", ".join(f"{c} = ?" for c in columns)
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE designs SET {assignments} WHERE id = ?",
+                [*columns.values(), existing.id],
+            )
+            self._conn.commit()
+        refreshed = self.get(existing.id)
+        return refreshed if refreshed is not None else existing
+
     def get(self, design_id: str) -> CachedDesign | None:
         """Look up a cached design by ID.
 
@@ -511,7 +585,7 @@ class DesignCache:
 
         :param printer_type: Filter by printer type.
         :param file_format: Filter by file format extension.
-        :param filament_type: Filter by filament material.
+        :param filament_type: Filter by filament material (case-insensitive).
         :param slicer_used: Filter by slicer name (substring match).
         :param tags: Filter entries that contain ALL of these tags.
         :param query: Free-text search against file name and tags.
@@ -527,7 +601,7 @@ class DesignCache:
             clauses.append("file_format = ?")
             params.append(file_format)
         if filament_type is not None:
-            clauses.append("filament_type = ?")
+            clauses.append("filament_type = ? COLLATE NOCASE")
             params.append(filament_type)
         if slicer_used is not None:
             clauses.append("slicer_used LIKE ?")

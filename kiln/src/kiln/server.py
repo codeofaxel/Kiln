@@ -11432,21 +11432,25 @@ def resource_queue() -> str:
     """Current job queue summary and recent jobs."""
     import json
 
-    summary = _get_queue().summary()
-    next_job = _get_queue().next_job()
-    recent = _get_queue().list_jobs(limit=20)
+    queue = _get_queue()
+    summary = queue.summary()
+    next_job = queue.next_job()
+    recent = queue.list_jobs(limit=20)
 
-    return json.dumps(
-        {
-            "counts": summary,
-            "pending": _get_queue().pending_count(),
-            "active": _get_queue().active_count(),
-            "total": _get_queue().total_count,
-            "next_job": next_job.to_dict() if next_job else None,
-            "recent_jobs": [j.to_dict() for j in recent],
-        },
-        default=str,
-    )
+    payload = {
+        "counts": summary,
+        "pending": queue.pending_count(),
+        "active": queue.active_count(),
+        "total": queue.total_count,
+        "next_job": next_job.to_dict() if next_job else None,
+        "recent_jobs": [j.to_dict() for j in recent],
+    }
+    # Live-queue view; the durable count keeps a post-restart snapshot
+    # from reading as a machine that has never finished a job.
+    finished_on_record = queue.count_finished_on_disk()
+    if finished_on_record is not None:
+        payload["finished_jobs_on_record"] = finished_on_record
+    return json.dumps(payload, default=str)
 
 
 @mcp.resource("kiln://queue/{job_id}")
@@ -12895,17 +12899,36 @@ def print_history(
         printer_name: Filter by printer name, or all printers if omitted.
         status: Filter by status (``"completed"`` or ``"failed"``).
         limit: Maximum records to return (default 20).
+
+    The response declares its own SCOPE.  These are the prints THIS
+    machine recorded — another computer running Kiln keeps its own
+    history — and ``scope.local.total_records`` gives the store's full
+    matching count when ``limit`` truncated the page.
     """
     if err := _check_auth("history"):
         return err
     try:
+        from kiln.store_scope import PRINT_HISTORY, scoped_store_response
+
         capped = min(max(limit, 1), 200)
         records = get_db().list_print_history(
             printer_name=printer_name,
             status=status,
             limit=capped,
         )
-        return {"success": True, "records": records, "count": len(records)}
+        return scoped_store_response(
+            {"success": True, "records": records, "count": len(records)},
+            store=PRINT_HISTORY,
+            items_key="records",
+            filters={
+                "printer_name": printer_name or None,
+                "status": status or None,
+                "limit": capped,
+            },
+            local_total=get_db().count_print_history(
+                printer_name=printer_name, status=status
+            ),
+        )
     except Exception as exc:
         logger.exception("Unexpected error in print_history")
         return _error_dict(f"Unexpected error in print_history: {exc}", code="INTERNAL_ERROR")

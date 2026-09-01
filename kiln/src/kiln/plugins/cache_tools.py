@@ -122,20 +122,29 @@ class _CacheToolsPlugin:
                 source: Filter by source (e.g. ``"thingiverse"``).
                 tags: Comma-separated tags to filter by.
                 limit: Maximum results (default 20).
+
+            The response declares its ``scope``: this cache is local to
+            this machine, so the count is what THIS install has cached,
+            not everything the user has ever downloaded or generated.
             """
             if err := _srv._check_auth("cache"):
                 return err
             try:
                 from kiln.model_cache import get_model_cache
+                from kiln.store_scope import MODEL_CACHE, scoped_store_response
 
                 tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
                 cache = get_model_cache()
                 entries = cache.search(query=query, source=source, tags=tag_list, limit=limit)
-                return {
-                    "success": True,
-                    "entries": [e.to_dict() for e in entries],
-                    "count": len(entries),
-                }
+                return scoped_store_response(
+                    {
+                        "success": True,
+                        "entries": [e.to_dict() for e in entries],
+                        "count": len(entries),
+                    },
+                    store=MODEL_CACHE,
+                    items_key="entries",
+                )
             except Exception as exc:
                 _logger.exception("Unexpected error in search_cached_models")
                 return _srv._error_dict(f"Unexpected error in search_cached_models: {exc}", code="INTERNAL_ERROR")
@@ -175,18 +184,28 @@ class _CacheToolsPlugin:
             Args:
                 limit: Maximum results (default 50).
                 offset: Number of entries to skip for pagination.
+
+            The response declares its ``scope``: this cache is local to
+            this machine, so the count is what THIS install has cached,
+            not everything the user has ever downloaded or generated.
+            It is also a page — ``limit``/``offset`` bound it further.
             """
             if err := _srv._check_auth("cache"):
                 return err
             try:
                 from kiln.model_cache import get_model_cache
+                from kiln.store_scope import MODEL_CACHE, scoped_store_response
 
                 entries = get_model_cache().list_all(limit=limit, offset=offset)
-                return {
-                    "success": True,
-                    "entries": [e.to_dict() for e in entries],
-                    "count": len(entries),
-                }
+                return scoped_store_response(
+                    {
+                        "success": True,
+                        "entries": [e.to_dict() for e in entries],
+                        "count": len(entries),
+                    },
+                    store=MODEL_CACHE,
+                    items_key="entries",
+                )
             except Exception as exc:
                 _logger.exception("Unexpected error in list_cached_models")
                 return _srv._error_dict(f"Unexpected error in list_cached_models: {exc}", code="INTERNAL_ERROR")
@@ -240,7 +259,11 @@ class _CacheToolsPlugin:
                 from kiln.design_cache import get_design_cache
 
                 cache = get_design_cache()
-                entry = cache.add(file_path, label=label, material=material)
+                entry = cache.add(
+                    file_path,
+                    filament_type=(material or "").strip() or None,
+                    metadata={"label": label} if label else None,
+                )
                 return {"success": True, "cached_design": entry.to_dict()}
             except Exception as exc:
                 _logger.exception("Error in cache_design")
@@ -261,20 +284,32 @@ class _CacheToolsPlugin:
             Args:
                 material: Filter by material (e.g. "PLA", "PETG").
                 limit: Maximum number of results.
+
+            Most recently used designs come first.
+
+            The response declares its ``scope``: which store was read,
+            and whether the user's cloud-side designs are included.
+            Read ``scope`` before treating ``count`` as everything they
+            have saved.
             """
             if err := _srv._check_auth("cache"):
                 return err
-
             try:
                 from kiln.design_cache import get_design_cache
+                from kiln.store_scope import DESIGN_CACHE, scoped_store_response
 
                 cache = get_design_cache()
-                designs = cache.list_designs(material=material, limit=limit)
-                return {
-                    "success": True,
-                    "designs": [d.to_dict() for d in designs],
-                    "count": len(designs),
-                }
+                material = (material or "").strip() or None
+                designs = cache.search(filament_type=material, limit=limit)
+                return scoped_store_response(
+                    {
+                        "success": True,
+                        "designs": [d.to_dict() for d in designs],
+                        "count": len(designs),
+                    },
+                    store=DESIGN_CACHE,
+                    items_key="designs",
+                )
             except Exception as exc:
                 _logger.exception("Error in list_cached_designs")
                 return _srv._error_dict(f"Failed to list cached designs: {exc}", code="CACHE_ERROR")
@@ -292,7 +327,6 @@ class _CacheToolsPlugin:
             """
             if err := _srv._check_auth("cache"):
                 return err
-
             try:
                 from kiln.design_cache import get_design_cache
 

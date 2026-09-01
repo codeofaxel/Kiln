@@ -365,21 +365,31 @@ class _VersionToolsPlugin:
                 limit: Maximum number of versions to return (default 20).
 
             Returns:
-                A list of version records ordered by version number descending.
+                A list of version records ordered by version number
+                descending, plus a ``scope`` block saying which store
+                was read and whether the user's cloud-side versions are
+                included.  Read ``scope`` before treating ``count`` as
+                the design's whole history.
             """
             from kiln.design_recipe import list_recipe_versions
+            from kiln.store_scope import DESIGN_VERSIONS, scoped_store_response
 
             try:
                 design_directory = _design_dir(design_id)
                 versions = list_recipe_versions(design_directory)
                 # newest first, then apply limit
                 versions = list(reversed(versions))[:limit]
-                return {
-                    "ok": True,
-                    "design_id": design_id,
-                    "count": len(versions),
-                    "versions": versions,
-                }
+                return scoped_store_response(
+                    {
+                        "ok": True,
+                        "design_id": design_id,
+                        "count": len(versions),
+                        "versions": versions,
+                    },
+                    store=DESIGN_VERSIONS,
+                    items_key="versions",
+                    filters={"design_id": design_id, "limit": limit},
+                )
             except HostedUnavailableError as exc:
                 return {"ok": False, "error": str(exc)}
             except Exception as exc:
@@ -587,11 +597,15 @@ class _VersionToolsPlugin:
                 limit: Maximum number of results to return (default 10).
 
             Returns:
-                A list of matching version records, newest first.
+                A list of matching version records, newest first, plus a
+                ``scope`` block saying which store was searched and
+                whether the user's cloud-side versions were included.  A
+                miss here is only a miss in the stores ``scope`` names.
             """
             import os
 
             from kiln.design_recipe import load_recipe
+            from kiln.store_scope import DESIGN_VERSIONS, scoped_store_response
 
             try:
                 # Through the shared resolver, not expanduser again: this
@@ -603,7 +617,16 @@ class _VersionToolsPlugin:
                 q = query.lower()
 
                 if not os.path.isdir(root):
-                    return {"ok": True, "query": query, "count": 0, "versions": []}
+                    # An empty local root is the most dangerous shape this
+                    # tool can return — a clean success and a zero.  It goes
+                    # through the same disclosure as a hit, so "nothing here"
+                    # can never be read as "nothing anywhere".
+                    return scoped_store_response(
+                        {"ok": True, "query": query, "count": 0, "versions": []},
+                        store=DESIGN_VERSIONS,
+                        items_key="versions",
+                        filters={"query": query, "limit": limit},
+                    )
 
                 for design_id in sorted(os.listdir(root)):
                     design_directory = os.path.join(root, design_id)
@@ -649,12 +672,17 @@ class _VersionToolsPlugin:
                 matches.sort(key=lambda r: r.get("created", ""), reverse=True)
                 matches = matches[:limit]
 
-                return {
-                    "ok": True,
-                    "query": query,
-                    "count": len(matches),
-                    "versions": matches,
-                }
+                return scoped_store_response(
+                    {
+                        "ok": True,
+                        "query": query,
+                        "count": len(matches),
+                        "versions": matches,
+                    },
+                    store=DESIGN_VERSIONS,
+                    items_key="versions",
+                    filters={"query": query, "limit": limit},
+                )
             except HostedUnavailableError as exc:
                 return {"ok": False, "error": str(exc)}
             except Exception as exc:

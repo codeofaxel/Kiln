@@ -282,9 +282,18 @@ class _RecoveryToolsPlugin:
                 printer_name: Filter by printer name.
                 failure_type: Filter by failure type.
                 limit: Maximum records to return (default 20).
+
+            The response declares its own SCOPE: these are the failures
+            THIS machine recorded, and ``scope.local.total_records``
+            gives the store's full matching count when ``limit``
+            truncated the page.
             """
             import kiln.server as _srv
-            from kiln.failure_recovery import get_failure_history
+            from kiln.failure_recovery import (
+                count_failure_records,
+                get_failure_history,
+            )
+            from kiln.store_scope import FAILURE_HISTORY, scoped_store_response
 
             if err := _srv._check_auth("read"):
                 return err
@@ -294,11 +303,23 @@ class _RecoveryToolsPlugin:
                     failure_type=failure_type,
                     limit=limit,
                 )
-                return {
-                    "success": True,
-                    "records": records,
-                    "count": len(records),
-                }
+                return scoped_store_response(
+                    {
+                        "success": True,
+                        "records": records,
+                        "count": len(records),
+                    },
+                    store=FAILURE_HISTORY,
+                    items_key="records",
+                    filters={
+                        "printer_name": printer_name or None,
+                        "failure_type": failure_type or None,
+                        "limit": limit,
+                    },
+                    local_total=count_failure_records(
+                        printer_name=printer_name, failure_type=failure_type
+                    ),
+                )
             except Exception as exc:
                 _logger.exception("Unexpected error in failure_history")
                 return _srv._error_dict(

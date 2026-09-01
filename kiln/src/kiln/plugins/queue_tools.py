@@ -11,9 +11,13 @@ Discovered and registered automatically by
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kiln.events import Event, EventType
+
+if TYPE_CHECKING:  # imported lazily everywhere else in this module
+    from kiln.queue import PrintQueue
+    from kiln.store_scope import LocalRead
 
 _logger = logging.getLogger(__name__)
 
@@ -231,12 +235,13 @@ def queue_summary() -> dict:
     import kiln.server as _srv
 
     try:
-        summary = _srv._get_queue().summary()
-        next_job = _srv._get_queue().next_job()
-        recent = _srv._get_queue().list_jobs(limit=10)
-        pending = _srv._get_queue().pending_count()
-        active = _srv._get_queue().active_count()
-        total = _srv._get_queue().total_count
+        queue = _srv._get_queue()
+        summary = queue.summary()
+        next_job = queue.next_job()
+        recent = queue.list_jobs(limit=10)
+        pending = queue.pending_count()
+        active = queue.active_count()
+        total = queue.total_count
         registry = _srv._get_registry()
         registered_printers = registry.count
         emergency_latched_printers: list[str] = []
@@ -271,7 +276,13 @@ def queue_summary() -> dict:
             )
         else:
             dispatch_block_reason = None
-        return {
+        # counts/recent_jobs describe the RUNNING server's queue — the
+        # live view this tool exists for.  The durable store also holds
+        # jobs that finished before this process started; without the
+        # line below, a post-restart summary reads "completed: 0" to a
+        # user whose machine has printed for months.
+        finished_on_record = queue.count_finished_on_disk()
+        response = {
             "success": True,
             "counts": summary,
             "pending": pending,
@@ -284,6 +295,18 @@ def queue_summary() -> dict:
             "dispatch_block_reason": dispatch_block_reason,
             "emergency_latched_printers": emergency_latched_printers,
         }
+        if finished_on_record is not None:
+            response["finished_jobs_on_record"] = finished_on_record
+            in_memory_finished = sum(
+                summary.get(k, 0) for k in ("completed", "failed", "cancelled")
+            )
+            if finished_on_record > in_memory_finished:
+                response["counts_note"] = (
+                    "counts cover the running server's queue; "
+                    f"{finished_on_record} finished job(s) are on record on "
+                    "this machine — job_history lists them."
+                )
+        return response
     except Exception as exc:
         _logger.exception("Unexpected error in queue_summary")
         return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
@@ -468,6 +491,29 @@ def cancel_queued_jobs(
     }
 
 
+def _history_local_read(queue: PrintQueue, total: int | None) -> LocalRead:
+    """Describe whether the durable job history was actually read.
+
+    The listing reads ``~/.kiln/queue.db`` directly
+    (``list_finished_jobs``), so the ordinary answer is whole —
+    including for an in-memory queue, where memory IS the store.  The
+    one degraded case left is a queue with a database behind it whose
+    read failed and fell back to the in-memory view.  *total* is the
+    ``count_finished_on_disk`` result the caller already fetched: it is
+    ``None`` on exactly that failure, and "I could not look" is never
+    rounded down to a clean answer.
+    """
+    from kiln.store_scope import LocalRead
+
+    if queue.has_durable_store and total is None:
+        return LocalRead.partial(
+            "the durable job store at ~/.kiln/queue.db could not be read, "
+            "so this lists only the jobs the running server holds in "
+            "memory."
+        )
+    return LocalRead.whole()
+
+
 def _job_history(limit: int = 20, status: str | None = None) -> dict:
     """Get history of completed, failed, and cancelled print jobs.
 
@@ -477,15 +523,24 @@ def _job_history(limit: int = 20, status: str | None = None) -> dict:
             "cancelled".  Omit to show all finished jobs.
 
     Returns recent job records from newest to oldest.
+
+    Reads the durable job store (``~/.kiln/queue.db``), so jobs that
+    finished before the current server process started are listed like
+    any other.  The response declares its own SCOPE: these are THIS
+    machine's jobs, ``scope.local.total_records`` gives the store's
+    full matching count when ``limit`` truncated the page, and the
+    response marks itself ``incomplete`` if the durable store could not
+    be read.
     """
     import kiln.server as _srv
     from kiln.queue import JobStatus
+    from kiln.store_scope import JOB_HISTORY, scoped_store_response
 
     try:
         capped = min(max(limit, 1), 100)
-        all_jobs = _srv._get_queue().list_jobs(limit=capped)
+        queue = _srv._get_queue()
 
-        finished_statuses = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
+        target = None
         if status:
             status_map = {
                 "completed": JobStatus.COMPLETED,
@@ -498,15 +553,30 @@ def _job_history(limit: int = 20, status: str | None = None) -> dict:
                     f"Invalid status filter: {status!r}. Use 'completed', 'failed', or 'cancelled'.",
                     code="INVALID_ARGS",
                 )
-            jobs = [j for j in all_jobs if j.status == target]
-        else:
-            jobs = [j for j in all_jobs if j.status in finished_statuses]
 
-        return {
-            "success": True,
-            "jobs": [j.to_dict() for j in jobs],
-            "count": len(jobs),
-        }
+        jobs = queue.list_finished_jobs(status=target, limit=capped)
+        total = queue.count_finished_on_disk(status=target)
+        local = _history_local_read(queue, total)
+        if total is None and not queue.has_durable_store:
+            total = len(jobs)  # memory IS the store; its count is the total
+        elif total is not None:
+            # The listing is a DB+memory union: a job whose terminal DB
+            # write failed exists in memory but not in the disk count,
+            # and a total smaller than the page would read as nonsense.
+            total = max(total, len(jobs))
+
+        return scoped_store_response(
+            {
+                "success": True,
+                "jobs": [j.to_dict() for j in jobs],
+                "count": len(jobs),
+            },
+            store=JOB_HISTORY,
+            items_key="jobs",
+            filters={"status": status or None, "limit": capped},
+            local=local,
+            local_total=total,
+        )
     except Exception as exc:
         _logger.exception("Unexpected error in job_history")
         return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
@@ -550,7 +620,14 @@ class _QueueToolsPlugin:
                 status: Optional filter by status -- "completed", "failed", or
                     "cancelled".  Omit to show all finished jobs.
 
-            Returns recent job records from newest to oldest.
+            Returns recent job records from newest to oldest, read from
+            the durable job store on THIS machine (``~/.kiln/queue.db``)
+            — a server restart does not shorten it.  The response
+            declares its own SCOPE: ``scope.local.total_records`` gives
+            the store's full matching count when ``limit`` truncated the
+            page, other machines running Kiln keep their own histories,
+            and the response marks itself ``incomplete`` if the durable
+            store could not be read.
             """
             return _job_history(limit=limit, status=status)
 

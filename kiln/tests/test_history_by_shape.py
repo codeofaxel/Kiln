@@ -42,6 +42,13 @@ def db(tmp_path: Path) -> KilnDB:
 
 @pytest.fixture(autouse=True)
 def _patch_db(db: KilnDB) -> None:
+    # Import kiln.server BEFORE patching: its module-level
+    # ``from kiln.persistence import get_db`` otherwise captures the mock
+    # if the tool tests below trigger the first server import inside this
+    # window — leaving every later test in the process reading this
+    # fixture's closed database through kiln.server.get_db.
+    import kiln.server  # noqa: F401
+
     with patch("kiln.persistence.get_db", return_value=db):
         yield
 
