@@ -162,3 +162,70 @@ class TestAuthGate:
         assert listed["count"] == 1
         assert fetched["success"] is True, fetched
         assert fetched["design"]["id"] == entry.id
+
+
+class TestMaterialFilterForgiveness:
+    """The material filter is called by agents with arbitrary casing and
+    padding; "pla" and "PLA " must mean PLA."""
+
+    def test_filter_is_case_insensitive(self, registered_tools, cache, tmp_path) -> None:
+        cache.add(_write_design(tmp_path, "bracket.stl", "bracket"), filament_type="PLA")
+
+        for probe in ("PLA", "pla", "Pla"):
+            result = registered_tools["list_cached_designs"](material=probe)
+            assert result["success"] is True, result
+            assert result["count"] == 1, f"material={probe!r} missed the PLA design"
+
+    def test_filter_tolerates_padding(self, registered_tools, cache, tmp_path) -> None:
+        cache.add(_write_design(tmp_path, "bracket.stl", "bracket"), filament_type="PLA")
+
+        result = registered_tools["list_cached_designs"](material=" pla ")
+        assert result["success"] is True, result
+        assert result["count"] == 1
+
+    def test_blank_material_means_no_filter(self, registered_tools, cache, tmp_path) -> None:
+        cache.add(_write_design(tmp_path, "bracket.stl", "bracket"), filament_type="PLA")
+
+        result = registered_tools["list_cached_designs"](material="   ")
+        assert result["success"] is True, result
+        assert result["count"] == 1
+
+
+class TestRecacheUpdatesAnnotations:
+    """Re-caching identical bytes dedups the file but must honor the new
+    annotations -- success can never carry values the caller contradicted."""
+
+    def test_new_material_and_label_stick(self, registered_tools, cache, tmp_path) -> None:
+        path = _write_design(tmp_path, "bracket.stl", "bracket")
+        first = registered_tools["cache_design"](path, label="v1", material="PLA")
+        assert first["success"] is True, first
+
+        second = registered_tools["cache_design"](path, label="v2", material="PETG")
+
+        assert second["success"] is True, second
+        assert second["cached_design"]["id"] == first["cached_design"]["id"]
+        assert second["cached_design"]["filament_type"] == "PETG"
+        assert second["cached_design"]["metadata"]["label"] == "v2"
+
+        listed = registered_tools["list_cached_designs"](material="PETG")
+        assert listed["count"] == 1, listed
+        assert registered_tools["list_cached_designs"](material="PLA")["count"] == 0
+
+    def test_omitted_fields_keep_stored_values(self, cache, tmp_path) -> None:
+        path = _write_design(tmp_path, "bracket.stl", "bracket")
+        cache.add(path, filament_type="PLA", tags=["calibration"], provider="meshy")
+
+        again = cache.add(path, slicer_used="PrusaSlicer 2.7.1")
+
+        assert again.filament_type == "PLA"
+        assert again.tags == ["calibration"]
+        assert again.provider == "meshy"
+        assert again.slicer_used == "PrusaSlicer 2.7.1"
+
+    def test_metadata_is_merged_not_replaced(self, cache, tmp_path) -> None:
+        path = _write_design(tmp_path, "bracket.stl", "bracket")
+        cache.add(path, metadata={"label": "v1", "infill_percent": 20})
+
+        again = cache.add(path, metadata={"label": "v2"})
+
+        assert again.metadata == {"label": "v2", "infill_percent": 20}

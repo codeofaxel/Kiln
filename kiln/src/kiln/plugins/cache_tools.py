@@ -261,7 +261,7 @@ class _CacheToolsPlugin:
                 cache = get_design_cache()
                 entry = cache.add(
                     file_path,
-                    filament_type=material,
+                    filament_type=(material or "").strip() or None,
                     metadata={"label": label} if label else None,
                 )
                 return {"success": True, "cached_design": entry.to_dict()}
@@ -299,6 +299,7 @@ class _CacheToolsPlugin:
                 from kiln.store_scope import DESIGN_CACHE, scoped_store_response
 
                 cache = get_design_cache()
+                material = (material or "").strip() or None
                 designs = cache.search(filament_type=material, limit=limit)
                 return scoped_store_response(
                     {
