@@ -18,6 +18,61 @@ permissions:
   contents: read
 
 jobs:
+  # Is there anything here the Python matrix could possibly have an opinion
+  # about?  A CHANGELOG or README commit used to pay for a full 3.10-3.13
+  # matrix plus a clean-install audit — ~25 minutes of runner time to test
+  # source nobody touched.
+  #
+  # Deliberately NOT `paths-ignore` on the trigger: that would skip the
+  # whole workflow, and public-language is precisely the gate a docs-only
+  # commit needs (it reads wording in the files being changed).  So the
+  # filter is per-job, and public-language never carries it.
+  #
+  # FAIL-OPEN by construction.  Every path where the comparison cannot be
+  # trusted — no base, a base this clone does not have, an empty diff —
+  # reports `code=true` and runs everything.  A wrong "skip" hides a real
+  # failure; a wrong "run" costs minutes.  Only one of those is a bug.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Did anything but Markdown change?
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_PR: ${{ github.event.pull_request.base.sha }}
+          BASE_PUSH: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          run_everything() {
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$1 — running the full matrix."
+            exit 0
+          }
+          if [ "$EVENT" = "pull_request" ]; then BASE="$BASE_PR"; else BASE="$BASE_PUSH"; fi
+          case "$BASE" in
+            ""|0000000000000000000000000000000000000000) run_everything "No usable base commit" ;;
+          esac
+          git cat-file -e "${BASE}^{commit}" 2>/dev/null || run_everything "Base $BASE not in this clone"
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD_SHA") || run_everything "Could not diff"
+          [ -n "$CHANGED" ] || run_everything "Empty diff"
+          echo "Changed files:"; echo "$CHANGED"
+          # Only a pure-Markdown change may skip.  Anything else — a .astro
+          # page, a JSON data file, a workflow, source — runs the matrix.
+          if echo "$CHANGED" | grep -qvE '\.md$'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Markdown-only change — skipping the Python matrix."
+          fi
+
   public-language:
     runs-on: ubuntu-latest
     steps:
@@ -40,6 +95,8 @@ jobs:
   # engine served them.  v1.4.1 shipped the studio-look renderer inert for
   # everyone who installed the documented way because nothing asked that.
   clean-install:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -54,6 +111,8 @@ jobs:
         run: python3 scripts/audit_clean_install.py
 
   test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
