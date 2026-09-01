@@ -335,6 +335,8 @@ class _EstimateToolsPlugin:
             :returns: Dict with time, filament, and layer estimates.
             """
             import kiln.server as _srv
+            if err := _srv._check_auth("slicer"):
+                return err
 
             try:
                 from kiln.slicer import _parse_gcode_estimates, derive_filament_weight

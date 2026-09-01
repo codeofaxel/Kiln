@@ -73,6 +73,13 @@ _SCOPE_ALIAS_TO_CANONICAL: dict[str, str] = {
     "cache": "write",
     "config": "write",
     "calibrate": "write",
+    "queue": "write",
+    "memory": "write",
+    "learning": "write",
+    "printer_control": "write",
+    "print_service": "write",
+    "publish": "write",
+    "revenue": "write",
 }
 
 

@@ -14,16 +14,20 @@ in ``KNOWN_UNSCOPED_MUTATING_TOOLS``.  Each one should be migrated to use
 2. An entry in READ_ONLY_TOOLS gains an auth check (misclassified).
 3. A stale entry exists in either allowlist (tool was renamed/removed).
 4. A tool in KNOWN_UNSCOPED_MUTATING_TOOLS gains auth (remove from set).
+5. A tool is gated with a scope no key can satisfy (an unreachable tool
+   is as broken as an ungated one -- see test_every_scope_is_satisfiable).
 
 Coverage areas:
 - Every @mcp.tool() function in server.py AND kiln/plugins/*.py is accounted for
 - Mutating tools have a _check_auth or _check_billing_auth call
 - No new tool is silently added without scope assignment
+- Every scope in use is resolvable by kiln.auth
 """
 
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -80,6 +84,13 @@ def _extract_all_tools() -> dict[str, str]:
 def _tool_has_auth_check(body: str) -> bool:
     """Return True if the tool body calls _check_auth or _check_billing_auth."""
     return "_check_auth(" in body or "_check_billing_auth(" in body
+
+
+def _scopes_used(body: str) -> set[str]:
+    """Return the scope strings a tool body passes to the auth checks."""
+    return set(
+        re.findall(r"_check_(?:billing_)?auth\(\s*['\"]([a-z_]+)['\"]", body)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -263,13 +274,13 @@ READ_ONLY_TOOLS: set[str] = {
     # enterprise_tools.py -- status query (SELECT COUNT only)
     "database_status",
 
-    # estimate_tools.py -- estimates (slice_and_estimate runs the
-    # slicer and is gated)
+    # estimate_tools.py -- estimates from geometry or already-sliced
+    # G-code.  The two doors that actually invoke the slicer
+    # (slice_and_estimate, estimate_print_time) are gated instead.
     "estimate_before_design",
     "estimate_cost",
     "estimate_material_cost",
     "estimate_print_progress",
-    "estimate_print_time",
     "list_multi_material_addons",
 
     # firmware_tools.py -- status queries
@@ -543,6 +554,35 @@ class TestAuthScopeAudit:
         assert auth_count >= 200, (
             f"Expected at least 200 tools with auth scopes, found {auth_count}. "
             f"The source parser may be broken."
+        )
+
+    def test_every_scope_is_satisfiable(self, tools: dict[str, str]):
+        """A gate that denies everyone is as broken as a missing gate.
+
+        ``_check_auth`` normalizes an unrecognized scope to itself, and an
+        unrecognized scope is in no key's expanded scope set -- so a tool
+        gated with a scope missing from ``_SCOPE_ALIAS_TO_CANONICAL`` is
+        unreachable for EVERY key, including a full admin key.  Every scope
+        a tool actually passes must be satisfiable by an admin key.
+        """
+        from kiln.auth import _scope_satisfied
+
+        admin_key_scopes = {"read", "write", "admin"}
+        unsatisfiable: dict[str, list[str]] = {}
+        for name, body in tools.items():
+            for scope in _scopes_used(body):
+                if not _scope_satisfied(scope, admin_key_scopes):
+                    unsatisfiable.setdefault(scope, []).append(name)
+
+        assert not unsatisfiable, (
+            "Tools are gated with scopes that no key can satisfy -- these "
+            "tools are unreachable whenever auth is enabled. Add the scope "
+            "to _SCOPE_ALIAS_TO_CANONICAL in kiln/auth.py (mapping it to "
+            "'write' for mutating tools, 'read' for queries): "
+            + ", ".join(
+                f"{scope} ({len(names)} tools, e.g. {sorted(names)[0]})"
+                for scope, names in sorted(unsatisfiable.items())
+            )
         )
 
     def test_plugin_tools_are_scanned(self, tools: dict[str, str]):
