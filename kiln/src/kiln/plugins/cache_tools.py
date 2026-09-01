@@ -292,6 +292,8 @@ class _CacheToolsPlugin:
             Read ``scope`` before treating ``count`` as everything they
             have saved.
             """
+            if err := _srv._check_auth("cache"):
+                return err
             try:
                 from kiln.design_cache import get_design_cache
                 from kiln.store_scope import DESIGN_CACHE, scoped_store_response
@@ -322,6 +324,8 @@ class _CacheToolsPlugin:
             Args:
                 design_id: The cached design's identifier.
             """
+            if err := _srv._check_auth("cache"):
+                return err
             try:
                 from kiln.design_cache import get_design_cache
 

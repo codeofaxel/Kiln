@@ -11,6 +11,7 @@ against a real cache so the wiring cannot silently rot again.
 from __future__ import annotations
 
 import time
+from unittest import mock
 
 import pytest
 
@@ -118,3 +119,46 @@ class TestCacheDesign:
         listed = registered_tools["list_cached_designs"](material="PETG")
         assert listed["success"] is True, listed
         assert [d["file_name"] for d in listed["designs"]] == ["bracket.stl"]
+
+
+class TestAuthGate:
+    """The design-cache reads sit behind the same "cache" scope as their six
+    siblings.  They return absolute ``file_path`` values plus ``scad_source``
+    and ``generation_prompt`` -- the user's own design DNA -- so an auth-enabled
+    deployment must not serve them unauthenticated.
+    """
+
+    DENIED = {"success": False, "error": {"code": "AUTH_ERROR", "message": "nope"}}
+
+    def test_list_cached_designs_refuses_when_auth_denies(self, registered_tools, cache, tmp_path) -> None:
+        cache.add(_write_design(tmp_path, "secret.stl", "secret"), filament_type="PLA")
+
+        with mock.patch("kiln.server._check_auth", return_value=self.DENIED):
+            result = registered_tools["list_cached_designs"]()
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "AUTH_ERROR"
+        assert "designs" not in result
+
+    def test_get_cached_design_refuses_when_auth_denies(self, registered_tools, cache, tmp_path) -> None:
+        entry = cache.add(_write_design(tmp_path, "secret.stl", "secret"), filament_type="PLA")
+
+        with mock.patch("kiln.server._check_auth", return_value=self.DENIED):
+            result = registered_tools["get_cached_design"](entry.id)
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "AUTH_ERROR"
+        assert "design" not in result
+
+    def test_reads_still_work_when_auth_allows(self, registered_tools, cache, tmp_path) -> None:
+        """The gate must not break the ungated (auth-disabled) default."""
+        entry = cache.add(_write_design(tmp_path, "bracket.stl", "bracket"), filament_type="PLA")
+
+        with mock.patch("kiln.server._check_auth", return_value=None):
+            listed = registered_tools["list_cached_designs"]()
+            fetched = registered_tools["get_cached_design"](entry.id)
+
+        assert listed["success"] is True, listed
+        assert listed["count"] == 1
+        assert fetched["success"] is True, fetched
+        assert fetched["design"]["id"] == entry.id
