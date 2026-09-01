@@ -29,6 +29,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from kiln import _fonts
 from kiln.emboss_generator import _openscad_version_year, get_openscad_version
 from kiln.openscad_runner import run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
@@ -1210,7 +1211,7 @@ def compare_renders(
 
     # --- Stitch into a single comparison image -----------------------------
     try:
-        from PIL import Image, ImageDraw, ImageFont  # noqa: I001
+        from PIL import Image, ImageDraw  # noqa: I001
     except ImportError:
         # PIL not available — return individual paths as fallback
         return {
@@ -1243,20 +1244,9 @@ def compare_renders(
     canvas = Image.new("RGB", (canvas_w, canvas_h), color=(0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
-    # Load a default font for labels — try platform-appropriate paths
-    font = None
-    for font_name in (
-        "/System/Library/Fonts/Helvetica.ttc",  # macOS
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Linux
-        "Arial",  # Windows / fallback
-    ):
-        try:
-            font = ImageFont.truetype(font_name, 16)
-            break
-        except OSError:
-            continue
-    if font is None:
-        font = ImageFont.load_default()
+    # Labels must draw even on a host with no real face, so load_font,
+    # which falls back to PIL's built-in one.
+    font = _fonts.load_font(16)
 
     for idx in range(n):
         if n == 4:

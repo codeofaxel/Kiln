@@ -69,6 +69,8 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+from kiln import _fonts
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["try_paint_stage_views"]
@@ -318,7 +320,7 @@ def _plate_texture(footprint):
     *footprint* is ``(cx, cz, dx, dz)`` of the model in plate coordinates
     (mm, origin at plate centre), or ``None`` for no blob.
     """
-    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+    from PIL import Image, ImageDraw, ImageFilter
 
     # Drawn 4x oversampled and Lanczos-reduced: the browser canvas draws
     # its minor lines at 0.6 px with sub-pixel AA coverage, which a 1 px
@@ -350,18 +352,10 @@ def _plate_texture(footprint):
                    outline=_RIM, width=2 * ov)
 
     font_px = max(14, min(28, round(tex_px / 36))) * ov
-    font = None
-    for cand in (
-        "/System/Library/Fonts/HelveticaNeue.ttc",
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "C:\\Windows\\Fonts\\arialbd.ttf",
-    ):
-        try:
-            font = ImageFont.truetype(cand, font_px)
-            break
-        except OSError:
-            continue
+    # find_font, not load_font: the stamp is laid out against font_px, so
+    # PIL's fixed-size fallback face would smudge the corner rather than
+    # spell "K I L N".  No real face on the host means no stamp.
+    font = _fonts.find_font(font_px, bold=True)
     if font is not None:
         margin = max(10 * ov, int(font_px * 0.7))
         text = "K I L N"  # letterSpacing: 3px, spelled out
