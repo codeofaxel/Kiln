@@ -371,6 +371,21 @@ class TestJobHistoryDeclaresItsScope:
         assert result["jobs"][0]["status"] == "failed"
         assert result["scope"]["local"]["total_records"] == 1
 
+    def test_total_never_reads_smaller_than_the_page(self, tmp_path, monkeypatch):
+        # A job whose terminal DB write failed lives in memory but not in
+        # the disk count; the union listing must not report a total
+        # smaller than what it just listed.
+        _free(monkeypatch)
+        queue = PrintQueue(db_path=str(tmp_path / "queue.db"))
+        _finished_job(queue)
+        monkeypatch.setattr(queue, "count_finished_on_disk", lambda status=None: 0)
+        _bind_queue(monkeypatch, queue)
+
+        result = _job_history()
+
+        assert result["count"] == 1
+        assert result["scope"]["local"]["total_records"] == 1
+
     def test_jobs_are_not_rewritten(self, tmp_path, monkeypatch):
         _free(monkeypatch)
         queue = PrintQueue(db_path=str(tmp_path / "queue.db"))
@@ -521,8 +536,21 @@ def _history_doors() -> list[tuple[str, str, bool]]:
     its scope.
     """
     src = pathlib.Path(__file__).resolve().parents[1] / "src/kiln"
-    targets = [src / "server.py", src / "plugins/queue_tools.py"]
-    reads_a_history = ("list_print_history", "list_finished_jobs", "list_jobs")
+    targets = [
+        src / "server.py",
+        src / "plugins/queue_tools.py",
+        src / "plugins/recovery_tools.py",
+        src / "plugins/intelligence_tools.py",
+    ]
+    # Attribute-style readers (methods on a db/queue object).  list_jobs
+    # is shared with live-queue views, so it additionally needs the
+    # COMPLETED-plus-count shape below to count as a history door.
+    attr_readers = {"list_print_history", "list_finished_jobs"}
+    # Plain-name readers whose PURPOSE is a history listing — any tool
+    # calling one is a history door, count key or not.  (The recovery
+    # engine's method of the same name is an attribute call on a live
+    # engine and deliberately does not match.)
+    name_readers = {"get_failure_history", "get_model_history"}
     found: list[tuple[str, str, bool]] = []
 
     for path in targets:
@@ -530,36 +558,35 @@ def _history_doors() -> list[tuple[str, str, bool]]:
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            called = {
+            attr_calls = {
                 c.func.attr
                 for c in ast.walk(node)
                 if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
             }
-            if not called & set(reads_a_history):
-                continue
-            # Only doors that answer with a COUNT of finished records —
-            # a live-queue summary is a different question.
-            names = {n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)}
-            if (
-                "list_finished_jobs" not in called
-                and "list_print_history" not in called
-                and "COMPLETED" not in names
-            ):
-                continue
-            answers_a_count = any(
-                isinstance(d, ast.Dict)
-                and any(
-                    isinstance(k, ast.Constant) and k.value == "count" for k in d.keys
-                )
-                for d in ast.walk(node)
-            )
-            if not answers_a_count:
-                continue
             plain_calls = {
                 c.func.id
                 for c in ast.walk(node)
                 if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
             }
+
+            is_door = bool(attr_calls & attr_readers or plain_calls & name_readers)
+            if not is_door and "list_jobs" in attr_calls:
+                # A live-queue reader is a history door only when it
+                # filters to finished jobs AND answers with a count.
+                names = {
+                    n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)
+                }
+                answers_a_count = any(
+                    isinstance(d, ast.Dict)
+                    and any(
+                        isinstance(k, ast.Constant) and k.value == "count"
+                        for k in d.keys
+                    )
+                    for d in ast.walk(node)
+                )
+                is_door = "COMPLETED" in names and answers_a_count
+            if not is_door:
+                continue
             found.append((path.name, node.name, "scoped_store_response" in plain_calls))
     return found
 
@@ -571,6 +598,8 @@ class TestEveryHistoryDoorIsWired:
         names = {name for _f, name, _w in _history_doors()}
         assert "print_history" in names
         assert "_job_history" in names
+        assert "failure_history" in names
+        assert "get_model_print_history" in names
 
     def test_every_door_calls_the_shared_helper(self):
         unwired = [
@@ -580,3 +609,191 @@ class TestEveryHistoryDoorIsWired:
             "these list finished prints/jobs and answer with a count but do "
             f"not declare their scope: {unwired}"
         )
+
+
+# ---------------------------------------------------------------------------
+# The other history engines: failure records and print DNA
+#
+# Different stores, same defect class: a per-machine record presenting
+# as a whole library, and (for failure_history) a page presenting as
+# the whole store.
+# ---------------------------------------------------------------------------
+
+
+class _MockMcp:
+    def __init__(self) -> None:
+        self.tools: dict = {}
+
+    def tool(self):
+        def decorator(fn):
+            self.tools[fn.__name__] = fn
+            return fn
+
+        return decorator
+
+    def resource(self, *_a, **_kw):
+        return self.tool()
+
+    def __getitem__(self, name: str):
+        return self.tools[name]
+
+
+def _record_failure(printer: str = "a1", failure_type: str = "spaghetti") -> None:
+    from kiln.failure_recovery import (
+        FailureClassification,
+        FailureType,
+        RecoveryAction,
+        RecoveryPlan,
+        record_failure,
+    )
+
+    record_failure(
+        FailureClassification(
+            failure_type=FailureType(failure_type),
+            confidence=0.9,
+            evidence=["detached extrusion"],
+            progress_at_failure=0.4,
+            time_printing_seconds=600,
+            material_wasted_grams=12.0,
+        ),
+        RecoveryPlan(
+            action=RecoveryAction.RESTART,
+            steps=["clear the bed"],
+            automated=False,
+            estimated_time_minutes=5,
+            risk_level="low",
+            settings_adjustments={},
+            prevent_recurrence=["dry the filament"],
+        ),
+        printer_name=printer,
+        job_id="job-1",
+    )
+
+
+class TestFailureHistoryDeclaresItsScope:
+    @staticmethod
+    def _tool():
+        from kiln.plugins.recovery_tools import plugin
+
+        mcp = _MockMcp()
+        plugin.register(mcp)
+        return mcp["failure_history"]
+
+    def test_names_the_machine_boundary(self, monkeypatch):
+        _free(monkeypatch)
+        _record_failure()
+
+        result = self._tool()()
+
+        assert result["count"] == 1
+        assert result["scope"]["store"]["id"] == "failure_history"
+        assert result["scope"]["store"]["per_machine"] is True
+        assert "THIS machine" in result["scope"]["summary"]
+
+    def test_a_page_carries_the_store_total(self, monkeypatch):
+        _free(monkeypatch)
+        for _ in range(5):
+            _record_failure()
+
+        result = self._tool()(limit=2)
+
+        assert result["count"] == 2
+        assert "incomplete" not in result
+        assert result["scope"]["local"]["total_records"] == 5
+        assert "5 matching records" in result["scope"]["summary"]
+
+    def test_the_total_respects_the_filters(self, monkeypatch):
+        _free(monkeypatch)
+        _record_failure(failure_type="spaghetti")
+        _record_failure(failure_type="layer_shift")
+
+        result = self._tool()(failure_type="layer_shift")
+
+        assert result["count"] == 1
+        assert result["scope"]["local"]["total_records"] == 1
+
+    def test_paid_install_is_not_falsely_flagged_incomplete(self, monkeypatch):
+        _paid(monkeypatch, reader=None)
+        _record_failure()
+
+        result = self._tool()()
+
+        assert result["scope"]["store"]["has_cloud_half"] is False
+        assert result["scope"]["complete"] is True
+        assert "incomplete" not in result
+
+    def test_records_are_not_rewritten(self, monkeypatch):
+        _free(monkeypatch)
+        _record_failure(printer="voron")
+
+        result = self._tool()()
+
+        assert result["records"][0]["printer_name"] == "voron"
+
+
+def _record_dna(outcome: str = "success") -> str:
+    """Write one print DNA attempt; returns the file hash."""
+    from kiln.print_dna import ModelFingerprint, record_print_dna
+
+    file_hash = "a" * 64
+    record_print_dna(
+        ModelFingerprint(
+            file_hash=file_hash,
+            triangle_count=100,
+            vertex_count=50,
+            bounding_box={"min_x": 0.0, "max_x": 10.0, "min_y": 0.0,
+                          "max_y": 10.0, "min_z": 0.0, "max_z": 10.0},
+            surface_area_mm2=1000.0,
+            volume_mm3=500.0,
+            overhang_ratio=0.1,
+            complexity_score=0.3,
+            geometric_signature="sig-test-1",
+        ),
+        printer_model="A1",
+        material="PLA",
+        settings={"nozzle_temp": 220},
+        outcome=outcome,
+    )
+    return file_hash
+
+
+class TestModelPrintHistoryDeclaresItsScope:
+    @staticmethod
+    def _tool():
+        from kiln.plugins.intelligence_tools import plugin
+
+        mcp = _MockMcp()
+        plugin.register(mcp)
+        return mcp["get_model_print_history"]
+
+    def test_names_the_machine_boundary(self, monkeypatch):
+        _free(monkeypatch)
+        file_hash = _record_dna()
+
+        result = self._tool()(file_hash=file_hash)
+
+        assert result["success"] is True
+        assert len(result["history"]) == 1
+        assert result["scope"]["store"]["id"] == "print_dna"
+        assert result["scope"]["store"]["per_machine"] is True
+        assert "THIS machine" in result["scope"]["summary"]
+
+    def test_paid_install_is_not_falsely_flagged_incomplete(self, monkeypatch):
+        _paid(monkeypatch, reader=None)
+        file_hash = _record_dna()
+
+        result = self._tool()(file_hash=file_hash)
+
+        assert result["scope"]["store"]["has_cloud_half"] is False
+        assert result["scope"]["complete"] is True
+        assert "incomplete" not in result
+
+    def test_metrics_are_not_rewritten(self, monkeypatch):
+        _free(monkeypatch)
+        file_hash = _record_dna()
+
+        result = self._tool()(file_hash=file_hash)
+
+        assert result["total_prints"] == 1
+        assert result["success_rate"] == 1.0
+        assert result["identified_by"] in ("file", "shape")

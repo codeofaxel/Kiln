@@ -559,6 +559,11 @@ def _job_history(limit: int = 20, status: str | None = None) -> dict:
         local = _history_local_read(queue, total)
         if total is None and not queue.has_durable_store:
             total = len(jobs)  # memory IS the store; its count is the total
+        elif total is not None:
+            # The listing is a DB+memory union: a job whose terminal DB
+            # write failed exists in memory but not in the disk count,
+            # and a total smaller than the page would read as nonsense.
+            total = max(total, len(jobs))
 
         return scoped_store_response(
             {

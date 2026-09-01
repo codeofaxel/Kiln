@@ -318,6 +318,27 @@ JOB_HISTORY = LocalStore(
 )
 
 
+# What this machine learned from prints that went wrong.  Same verified
+# no-cloud-half reasoning as the print history: nothing pushes failure
+# records anywhere readable.
+FAILURE_HISTORY = LocalStore(
+    id="failure_history",
+    label="print failure history",
+    location="~/.kiln/kiln.db",
+    per_machine=True,
+)
+
+# This machine's print attempts per model (print DNA).  The community
+# registry exchanges anonymised aggregates, not these rows — a user's
+# own attempt log has no readable cloud half, and another install's
+# attempts on the same model are exactly the per-machine boundary.
+PRINT_DNA = LocalStore(
+    id="print_dna",
+    label="model print history",
+    location="~/.kiln/kiln.db",
+    per_machine=True,
+)
+
 # ---------------------------------------------------------------------------
 # Tier
 # ---------------------------------------------------------------------------
