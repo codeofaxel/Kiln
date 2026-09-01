@@ -3,6 +3,14 @@
 Synchronises printer configurations, job history, and events to a
 remote REST API.  Runs as a background daemon thread that periodically
 pushes local SQLite changes and optionally pulls remote config.
+
+This module carries printer-side state only: printer configs, job
+history, and events.  It carries no designs.  Saved designs, decoration
+presets, and features travel over a different module, ``kiln_pro.cloud.sync``
+in kiln-pro (https://kiln3d.com), which pushes, pulls, and clones their
+branches and releases between a local install and the cloud library.  The
+two modules share a noun and nothing else; finding only this one says
+nothing about whether designs can be read back from the cloud.
 """
 
 from __future__ import annotations
