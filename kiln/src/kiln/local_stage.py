@@ -80,7 +80,13 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from kiln.mcp_compat import client_capabilities, lowlevel_server, wrap_call_tool_result
+from kiln.mcp_compat import (
+    capture_request_context,
+    client_capabilities,
+    current_session,
+    lowlevel_server,
+    wrap_call_tool_result,
+)
 from kiln.mesh_payload import VIEWER_STRUCTURED_CONTENT_KEY, mesh_to_viewer_payload
 
 logger = logging.getLogger(__name__)
@@ -685,6 +691,12 @@ def _register_resource(mcp: Any) -> bool:
             await _announce_tool_list_changed(mcp)
         return doc
 
+    # SDK 2 hands the request ctx to the handler and nowhere else, and a
+    # FunctionResource function takes no ctx on either major — so without
+    # this the read above has no route to the session it must notify.
+    # No-op on 1.x, whose dispatcher already sets an equivalent ambient.
+    capture_request_context(mcp, "resources/read")
+
     mcp.add_resource(
         FunctionResource(
             # A plain str on purpose: SDK 1.x declares this ``AnyUrl`` and
@@ -780,15 +792,22 @@ async def _announce_tool_list_changed(mcp: Any) -> None:
     Awaited before the document is returned, not fired into the background:
     the host then knows the verb exists before it can possibly render the
     View, and there is no loop or task lifetime to get wrong.  The session
-    is read where :func:`kiln.mcp_compat.client_capabilities` reads it —
-    one opinion about where a session lives, not a second.
+    comes from :func:`kiln.mcp_compat.current_session` — one opinion about
+    where a session lives, not a second.
+
+    That accessor is why this works on SDK 2 at all.  Reading the 1.x
+    location directly (``lowlevel_server(mcp).request_context.session``)
+    raised ``AttributeError`` on 2.x, which the ``except`` below caught and
+    turned into "no session" — so the notification was never sent, on every
+    make, and nothing said so.  With the lean result this verb is the only
+    route to a mesh, so a host that validates a ``tools/call`` name against
+    its cached tool list would have shown "Preview unavailable" every time.
 
     Never raises.  A panel that fails to open beats a stage document that
     fails to arrive.
     """
-    try:
-        session = lowlevel_server(mcp).request_context.session
-    except Exception:  # noqa: BLE001 — no session is a legitimate answer
+    session = current_session(mcp)
+    if session is None:
         logger.debug("local stage: no session to announce the verb to")
         return
     try:

@@ -38,6 +38,7 @@ actually on the wire.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from typing import Any
 
@@ -69,7 +70,9 @@ __all__ = [
     "Image",
     "MCP_SDK_MAJOR",
     "ask_user_to_confirm",
+    "capture_request_context",
     "client_capabilities",
+    "current_session",
     "host_can_ask_the_user",
     "lowlevel_server",
     "set_instructions",
@@ -105,6 +108,92 @@ def client_capabilities(mcp: Any, ctx: Any = None) -> Any | None:
         return lowlevel_server(mcp).request_context.session.client_params.capabilities
     except Exception:  # noqa: BLE001 — "no session" is a legitimate answer
         return None
+
+
+#: The handler ctx made ambient by :func:`capture_request_context`, so a
+#: callee too deep to be handed one can still find the session.  SDK 1
+#: never needs it: its lowlevel dispatcher sets an equivalent contextvar
+#: before every handler, and ``current_session`` reads that instead.
+_AMBIENT_CTX: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
+    "kiln_mcp_request_ctx", default=None
+)
+
+
+def current_session(mcp: Any, ctx: Any = None) -> Any | None:
+    """The connected host's session, or None.
+
+    The session is what server-to-client notifications go out on
+    (``send_tool_list_changed`` and friends), and the two majors disagree
+    about where it lives — so they disagree HERE, once, rather than at
+    each call site.  Same precedence as :func:`client_capabilities`, which
+    answers a different question about the same object:
+
+    1. a ``ctx`` the handler was invoked with — on SDK 2 the
+       ``ServerRequestContext`` carries the session as a field, and it is
+       the only place the session lives;
+    2. the ambient ctx from :func:`capture_request_context`, for code
+       (like the stage's resource read) that runs inside a request but is
+       handed no ctx by the SDK;
+    3. the 1.x location, where the lowlevel server carries the request
+       context as an attribute — an attribute SDK 2 removed outright.
+
+    Never raises: "no session" is a legitimate answer.  Diagnostics read
+    resources with no request in flight at all, and the REST proxy runs
+    tools with no connected host to notify.
+    """
+    for candidate in (ctx, _AMBIENT_CTX.get()):
+        session = getattr(candidate, "session", None)
+        if session is not None:
+            return session
+    try:
+        return lowlevel_server(mcp).request_context.session
+    except Exception:  # noqa: BLE001 — no session is a legitimate answer
+        return None
+
+
+def capture_request_context(mcp: Any, method: str) -> bool:
+    """Make *method*'s handler ctx ambient for the duration of the call.
+
+    SDK 1 does this itself — its lowlevel dispatcher sets a contextvar
+    before every handler, which is why the 1.x fallback in
+    :func:`current_session` finds a session at all — so this is a no-op
+    there and returns False.
+
+    SDK 2 removed both that contextvar and ``Server.request_context``,
+    handing the ``ServerRequestContext`` to the handler as an argument
+    instead.  That is fine for a handler, and useless to anything the
+    handler calls that the SDK does not thread a ctx through: a
+    ``FunctionResource`` function takes no ctx on EITHER major (neither
+    injects one), so a resource that needs the session had no route to it
+    on 2.x.  Wrapping the one handler restores the ambient the rest of
+    the code was already written against.
+
+    Idempotent per method: wrapping twice would nest two identical
+    context sets, and the second install is how a feature that runs
+    ``install()`` again pays for the same wire twice.
+
+    :returns: True when this call installed the capture.
+    """
+    if MCP_SDK_MAJOR < 2:
+        return False
+    server = lowlevel_server(mcp)
+    entry = server.get_request_handler(method)
+    if entry is None:
+        return False
+    previous, params_type = entry.handler, entry.params_type
+    if getattr(previous, _CAPTURES, False):
+        return False
+
+    async def _wrapped(ctx: Any, params: Any) -> Any:
+        token = _AMBIENT_CTX.set(ctx)
+        try:
+            return await previous(ctx, params)
+        finally:
+            _AMBIENT_CTX.reset(token)
+
+    setattr(_wrapped, _CAPTURES, True)
+    server.add_request_handler(method, params_type, _wrapped)
+    return True
 
 
 def host_can_ask_the_user(mcp: Any, ctx: Any = None) -> bool:
@@ -195,6 +284,9 @@ def set_instructions(mcp: Any, text: str) -> None:
 
 
 #: Marks our wrapper so a second install is a no-op rather than a second layer.
+#: Marks a handler already wrapped by :func:`capture_request_context`.
+_CAPTURES = "_kiln_captures_request_ctx"
+
 _WRAPPED = "_kiln_wrapped_call_tool"
 # The mutator list carried by an installed wrapper.  A SECOND caller
 # appends to it instead of being turned away: before this existed the
