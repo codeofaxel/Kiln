@@ -22,6 +22,8 @@ import pytest
 
 from kiln.store_scope import (
     DECORATION_LIBRARY,
+    DESIGN_CACHE,
+    DESIGN_VERSIONS,
     DESIGN_VERSIONS,
     MODEL_CACHE,
     CloudRead,
@@ -130,21 +132,29 @@ class TestCurrentTier:
 
 
 class TestReadCloudHalf:
-    def test_store_without_cloud_half(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "store", [MODEL_CACHE, DECORATION_LIBRARY, DESIGN_CACHE]
+    )
+    def test_store_without_cloud_half(self, monkeypatch, store):
+        # DECORATION_LIBRARY and DESIGN_CACHE claim no cloud half on
+        # purpose: kiln-pro keeps no cloud copy of either — the web's
+        # /decorations pages are the decoration PRESET store, a different
+        # artifact family — so a paid caller is missing nothing and a
+        # seam read here would only invent a library that does not exist.
         _paid(monkeypatch, reader=lambda _c, **_kw: {"status": "ok", "items": [{"a": 1}]})
-        result = read_cloud_half(MODEL_CACHE)
+        result = read_cloud_half(store)
         assert result.status == "no_cloud_half"
         assert result.complete is True
 
     def test_free_tier_never_reads_cloud(self, monkeypatch):
         _no_kiln_pro(monkeypatch)
-        result = read_cloud_half(DECORATION_LIBRARY)
+        result = read_cloud_half(DESIGN_VERSIONS)
         assert result.status == "tier_local_only"
         assert result.complete is True
 
     def test_paid_without_seam_is_unavailable(self, monkeypatch):
         _paid(monkeypatch, reader=None)
-        result = read_cloud_half(DECORATION_LIBRARY)
+        result = read_cloud_half(DESIGN_VERSIONS)
         assert result.status == "unavailable"
         assert result.complete is False
         assert "list_cloud_store" in result.detail
@@ -154,35 +164,35 @@ class TestReadCloudHalf:
             raise TimeoutError("cloud unreachable")
 
         _paid(monkeypatch, reader=_boom)
-        result = read_cloud_half(DECORATION_LIBRARY)
+        result = read_cloud_half(DESIGN_VERSIONS)
         assert result.status == "error"
         assert result.complete is False
         assert result.items == []
 
     def test_unauthenticated_is_reported(self, monkeypatch):
         _paid(monkeypatch, reader=lambda _c, **_kw: {"status": "unauthenticated"})
-        result = read_cloud_half(DECORATION_LIBRARY)
+        result = read_cloud_half(DESIGN_VERSIONS)
         assert result.status == "unauthenticated"
         assert result.complete is False
 
     def test_unparseable_response_is_an_error(self, monkeypatch):
         _paid(monkeypatch, reader=lambda _c, **_kw: "sorry")
-        assert read_cloud_half(DECORATION_LIBRARY).status == "error"
+        assert read_cloud_half(DESIGN_VERSIONS).status == "error"
 
     def test_ok_without_a_list_is_an_error(self, monkeypatch):
         _paid(monkeypatch, reader=lambda _c, **_kw: {"status": "ok"})
-        assert read_cloud_half(DECORATION_LIBRARY).status == "error"
+        assert read_cloud_half(DESIGN_VERSIONS).status == "error"
 
     def test_unknown_status_is_an_error(self, monkeypatch):
         _paid(monkeypatch, reader=lambda _c, **_kw: {"status": "partially-ish"})
-        assert read_cloud_half(DECORATION_LIBRARY).status == "error"
+        assert read_cloud_half(DESIGN_VERSIONS).status == "error"
 
     def test_ok_returns_items(self, monkeypatch):
         _paid(
             monkeypatch,
             reader=lambda _c, **_kw: {"status": "ok", "items": [{"name": "Kiln Logo"}]},
         )
-        result = read_cloud_half(DECORATION_LIBRARY)
+        result = read_cloud_half(DESIGN_VERSIONS)
         assert result.status == "ok"
         assert result.complete is True
         assert result.items == [{"name": "Kiln Logo"}]
@@ -213,7 +223,7 @@ class TestReadCloudHalf:
         # A seam that cannot take the filters is a seam that cannot answer
         # the same question — reported, not quietly treated as empty.
         _paid(monkeypatch, reader=lambda _capability: {"status": "ok", "items": []})
-        result = read_cloud_half(DECORATION_LIBRARY)
+        result = read_cloud_half(DESIGN_VERSIONS)
         assert result.status == "error"
         assert result.complete is False
 
@@ -232,7 +242,7 @@ class TestScopedStoreResponse:
             "decorations": [{"name": "Test Coaster"}],
         }
         return scoped_store_response(
-            response, store=DECORATION_LIBRARY, items_key="decorations", **kwargs
+            response, store=DESIGN_VERSIONS, items_key="decorations", **kwargs
         )
 
     def test_free_tier_is_complete_and_names_the_store(self, monkeypatch):
@@ -242,11 +252,11 @@ class TestScopedStoreResponse:
         assert result["scope"]["stores_read"] == ["local"]
         assert "incomplete" not in result
         assert "warning" not in result
-        assert "local decoration library" in result["scope"]["summary"]
+        assert "local design version history" in result["scope"]["summary"]
 
     def test_free_tier_summary_names_the_local_location(self, monkeypatch):
         _no_kiln_pro(monkeypatch)
-        assert "~/.kiln/decorations/" in self._call()["scope"]["summary"]
+        assert "~/.kiln/designs/" in self._call()["scope"]["summary"]
 
     def test_paid_without_cloud_read_is_loud(self, monkeypatch):
         # THE regression: a paid caller whose cloud library cannot be read
@@ -291,7 +301,7 @@ class TestScopedStoreResponse:
         _no_kiln_pro(monkeypatch)
         response = {"count": 1, "rows": [{"name": "x", "store": "elsewhere"}]}
         result = scoped_store_response(
-            response, store=DECORATION_LIBRARY, items_key="rows"
+            response, store=DESIGN_VERSIONS, items_key="rows"
         )
         assert result["rows"][0]["store"] == "elsewhere"
 
@@ -299,7 +309,7 @@ class TestScopedStoreResponse:
         _no_kiln_pro(monkeypatch)
         response = {"count": 2, "names": ["a", "b"]}
         result = scoped_store_response(
-            response, store=DECORATION_LIBRARY, items_key="names"
+            response, store=DESIGN_VERSIONS, items_key="names"
         )
         assert result["names"] == ["a", "b"]
 
@@ -307,7 +317,7 @@ class TestScopedStoreResponse:
         _no_kiln_pro(monkeypatch)
         response = {"rows": []}
         result = scoped_store_response(
-            response, store=DECORATION_LIBRARY, items_key="rows"
+            response, store=DESIGN_VERSIONS, items_key="rows"
         )
         assert "count" not in result
 
@@ -316,7 +326,7 @@ class TestScopedStoreResponse:
         _paid(monkeypatch, reader=None)
         response = {"success": True, "count": 0, "decorations": []}
         result = scoped_store_response(
-            response, store=DECORATION_LIBRARY, items_key="decorations"
+            response, store=DESIGN_VERSIONS, items_key="decorations"
         )
         assert result["count"] == 0
         assert result["incomplete"] is True
@@ -333,7 +343,7 @@ class TestScopedStoreResponse:
     def test_non_dict_response_passes_through(self):
         assert (
             scoped_store_response(
-                "nope", store=DECORATION_LIBRARY, items_key="x"
+                "nope", store=DESIGN_VERSIONS, items_key="x"
             )
             == "nope"
         )
@@ -395,27 +405,42 @@ class TestListDecorationsDeclaresItsScope:
         assert result["scope"]["stores_read"] == ["local"]
         assert "local decoration library" in result["scope"]["summary"]
 
-    def test_paid_install_without_cloud_read_is_marked_incomplete(
+    def test_paid_install_is_complete_without_a_cloud_read(
         self, tmp_path, monkeypatch
     ):
-        # The reproduced defect: a paid holder whose cloud library holds a
-        # saved decoration got {"success": true, "count": 1} with nothing
-        # saying the cloud half had never been read.
+        """Inverted 2026-09-01 — this used to assert the OPPOSITE.
+
+        The original test called a paid install without a cloud read
+        incomplete, on the premise that the web's /decorations pages
+        are this library's cloud half.  They are the decoration PRESET
+        store — a different artifact family with different rows and its
+        own doors — and kiln-pro keeps no cloud copy of the library
+        itself.  So a paid caller's local library IS the whole library,
+        and the loud-incomplete warning the old premise demanded would
+        have fired on every paid listing forever, about rows that do
+        not exist.  Inverted rather than deleted so the decision is on
+        the record; if a cloud library sync ever ships, flip the
+        constant's capability and this test with it.
+        """
         _paid(monkeypatch, reader=None)
         result = self._tool(tmp_path, monkeypatch)()
-        assert result["incomplete"] is True
-        assert "warning" in result
-        assert result["scope"]["complete"] is False
+        assert "incomplete" not in result
+        assert result["scope"]["complete"] is True
+        assert result["scope"]["store"]["has_cloud_half"] is False
 
-    def test_paid_install_merges_the_cloud_half(self, tmp_path, monkeypatch):
-        _paid(
-            monkeypatch,
-            reader=lambda _c, **_kw: {"status": "ok", "items": [{"name": "Kiln Logo"}]},
-        )
+    def test_the_seam_is_never_consulted_for_the_library(
+        self, tmp_path, monkeypatch
+    ):
+        calls: list = []
+
+        def _reader(*a, **kw):
+            calls.append(a)
+            return {"status": "ok", "items": [{"name": "Kiln Logo"}]}
+
+        _paid(monkeypatch, reader=_reader)
         result = self._tool(tmp_path, monkeypatch)()
-        assert result["count"] == 1
-        assert result["decorations"][0]["name"] == "Kiln Logo"
-        assert result["decorations"][0]["store"] == "cloud"
+        assert calls == []
+        assert result["count"] == 0
         assert result["scope"]["complete"] is True
 
 
@@ -479,6 +504,19 @@ class TestCacheToolsDeclareTheirScope:
         assert result["scope"]["store"]["has_cloud_half"] is False
         assert result["scope"]["complete"] is True
         assert "incomplete" not in result
+
+    def test_design_cache_has_no_cloud_half_and_names_its_real_path(
+        self, monkeypatch, tmp_path
+    ):
+        # The location once advertised ~/.kiln/design_cache/, a directory
+        # nothing writes; the store lives at ~/.kiln/cache/designs/.
+        monkeypatch.setenv("KILN_CACHE_DIR", str(tmp_path / "cache"))
+        _paid(monkeypatch, reader=None)
+        result = self._mcp()["list_cached_designs"]()
+        assert result["scope"]["store"]["has_cloud_half"] is False
+        assert result["scope"]["complete"] is True
+        assert "incomplete" not in result
+        assert result["scope"]["store"]["location"] == "~/.kiln/cache/designs/"
 
 
 # ---------------------------------------------------------------------------

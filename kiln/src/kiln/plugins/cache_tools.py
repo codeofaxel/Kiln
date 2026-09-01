@@ -287,10 +287,10 @@ class _CacheToolsPlugin:
 
             Most recently used designs come first.
 
-            The response declares its ``scope``: which store was read,
-            and whether the user's cloud-side designs are included.
-            Read ``scope`` before treating ``count`` as everything they
-            have saved.
+            The response declares its ``scope``: which store was read.
+            The cache is local-only at every tier (regenerable files,
+            no cloud copy), so a complete local read is the whole
+            cache.
             """
             if err := _srv._check_auth("cache"):
                 return err
