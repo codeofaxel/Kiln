@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **History answers say what they cover.** Your print, job, failure and model
+  histories now say they're this machine's records, and how many entries
+  exist in total — so a page of twenty is never mistaken for everything
+  you've printed.
+
 - **Kiln catches a handle that didn't actually join the body.** A part built
   flush against a curved wall only touches it — it looks attached, then
   prints as two loose pieces. Kiln now measures the join and tells you how
@@ -88,6 +93,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **Your print history comes back after a restart.** Finished jobs are read
+  from your machine's own records now, so restarting Kiln no longer makes a
+  full history look empty.
+
+- **A busy queue no longer hides finished prints.** Recent history counts
+  back through finished jobs only, instead of stopping at whatever the queue
+  happened to be holding.
 
 - **A part resting flat on the plate is no longer failed for sitting below
   it.** A hair of rounding under zero used to trip the placement check and
