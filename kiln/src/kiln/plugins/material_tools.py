@@ -113,10 +113,7 @@ class _MaterialToolsPlugin:
             from kiln.registry import PrinterNotFoundError
 
             try:
-                if printer_name:
-                    adapter = _srv._registry.get(printer_name)
-                else:
-                    adapter = _srv._get_adapter()
+                adapter = _srv._resolve_adapter(printer_name)
             except PrinterNotFoundError:
                 return _srv._error_dict(
                     f"Printer '{printer_name}' not found in registry.",
@@ -308,10 +305,7 @@ class _MaterialToolsPlugin:
             # 1. Resolve adapter
             # ------------------------------------------------------------------
             try:
-                if printer_name:
-                    adapter = _srv._registry.get(printer_name)
-                else:
-                    adapter = _srv._get_adapter()
+                adapter = _srv._resolve_adapter(printer_name)
             except PrinterNotFoundError:
                 return _srv._error_dict(
                     f"Printer '{printer_name}' not found in registry.",

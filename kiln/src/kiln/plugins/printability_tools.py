@@ -421,10 +421,7 @@ class _PrintabilityToolsPlugin:
                 # 1. Printer state (mandatory if printer available)
                 state_data: dict[str, Any] | None = None
                 try:
-                    if printer_name:
-                        adapter = _srv._registry.get(printer_name)
-                    else:
-                        adapter = _srv._get_adapter()
+                    adapter = _srv._resolve_adapter(printer_name)
                     state = adapter.get_state()
                     state_data = state.to_dict()
                     signals["tool_temp_actual"] = state.tool_temp_actual

@@ -1209,18 +1209,18 @@ def resolve_printer_generation_context(
         ctx.material = material
         ctx.material_source = "user"
 
-    # Adapter resolution is best-effort: when the server registry has no
-    # matching adapter (e.g. offline tests, fresh install) we still want
-    # the downstream outcome-history and community-intelligence blend to
-    # run, so we carry on with ``adapter = None`` instead of bailing out.
+    # Adapter resolution is best-effort: when no adapter answers to the
+    # name (e.g. offline tests, fresh install) we still want the downstream
+    # outcome-history and community-intelligence blend to run, so we carry
+    # on with ``adapter = None`` instead of bailing out.  Resolved through
+    # the shared door, which initialises the registry and falls back to
+    # config.yaml — the raw ``_registry`` global is ``None`` in a fresh
+    # process and made a configured printer look absent.
     adapter: Any = None
     try:
         import kiln.server as _srv
 
-        if printer_name:
-            adapter = _srv._registry.get(printer_name)
-        else:
-            adapter = _srv._get_adapter()
+        adapter = _srv._resolve_adapter(printer_name)
     except Exception:
         logger.debug("No adapter available for context resolution", exc_info=True)
 

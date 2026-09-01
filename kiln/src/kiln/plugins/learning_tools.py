@@ -162,8 +162,8 @@ def _material_from_printer(printer_name: str | None) -> str | None:
             _loaded_ams_trays,
         )
 
-        adapter = _srv._registry.get(printer_name)
-        if adapter is None or not hasattr(adapter, "get_ams_status"):
+        adapter = _srv._resolve_adapter(printer_name)
+        if not hasattr(adapter, "get_ams_status"):
             return None
         ams = adapter.get_ams_status()
         if not isinstance(ams, dict):
@@ -548,7 +548,7 @@ def record_print_outcome(
                     from kiln.community_autofire import resolve_adapter_model
 
                     resolved_model = resolve_adapter_model(
-                        _srv._registry.get(printer_name)
+                        _srv._resolve_adapter(printer_name)
                     )
                 except Exception:
                     _logger.debug("Could not resolve printer_model for community push", exc_info=True)

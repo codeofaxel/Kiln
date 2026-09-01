@@ -306,8 +306,10 @@ class TestGetActiveMaterial:
         from kiln.registry import PrinterNotFoundError
 
         fn = material_tools_fns["get_active_material"]
-        with mock.patch("kiln.server._registry") as mock_reg:
-            mock_reg.get.side_effect = PrinterNotFoundError("no-such")
+        with mock.patch("kiln.server._get_registry") as get_reg, mock.patch(
+            "kiln.server._read_config_printers", return_value={}
+        ):
+            get_reg.return_value.get.side_effect = PrinterNotFoundError("no-such")
             result = fn(printer_name="no-such")
         assert result["success"] is False
         assert result["error"]["code"] == "NOT_FOUND"

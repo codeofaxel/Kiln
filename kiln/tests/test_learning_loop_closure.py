@@ -120,8 +120,9 @@ class TestWireA_LocalLoop:
         ), patch(
             "kiln.printer_intelligence.intel_to_dict",
             return_value=fake_intel_dict,
-        ), patch("kiln.server._registry") as reg, \
+        ), patch("kiln.server._get_registry") as get_reg, \
              patch("kiln.server._get_adapter") as ga:
+            reg = get_reg.return_value
             info = MagicMock()
             info.model = "bambu_x1c"
             info.build_volume = {"x": 256, "y": 256, "z": 256}
