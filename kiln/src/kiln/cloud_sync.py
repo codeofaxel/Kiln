@@ -2,7 +2,7 @@
 
 Synchronises printer configurations, job history, and events to a
 remote REST API.  Runs as a background daemon thread that periodically
-pushes local SQLite changes and optionally pulls remote config.
+pushes local SQLite changes.
 
 This module carries printer-side state only: printer configs, job
 history, and events.  It carries no designs.  Saved designs, decoration
@@ -46,7 +46,6 @@ class SyncConfig:
     sync_jobs: bool = True
     sync_events: bool = True
     sync_printers: bool = True
-    sync_settings: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -189,7 +188,7 @@ class CloudSyncManager:
             self._stop_event.wait(timeout=self._config.sync_interval_seconds)
 
     def _sync_cycle(self) -> dict[str, Any]:
-        """Execute one push/pull sync cycle."""
+        """Execute one push cycle."""
         if not self.enabled or self._db is None:
             return {"error": "Sync not configured"}
 
