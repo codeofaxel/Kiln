@@ -103,6 +103,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **The 3D preview opens again on a fresh install.** Kiln set up the panel's
+  request line but never announced it, so apps that check first showed
+  "Preview unavailable" on every make — new installs were affected, existing
+  ones were not.
+
 - **Turning on authentication no longer locks you out of your own tools.**
   Printer fan, light and speed, print recovery, print-service orders,
   publishing and revenue logging refused every request while it was enabled
