@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-31T18:34:24.657185+00:00",
-  "tool_count": 415,
+  "generated": "2026-09-01T23:28:28.871577+00:00",
+  "tool_count": 417,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1696,6 +1696,31 @@
       }
     },
     {
+      "name": "cloud_clone_feature",
+      "description": "Bootstrap local storage for a remote-only feature.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id"
+        ],
+        "title": "cloud_clone_featureArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "cloud_clone_preset",
       "description": "Bootstrap local storage for a remote-only decoration preset.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -1781,9 +1806,9 @@
     },
     {
       "name": "cloud_pull_branch",
-      "description": "Pull a remote branch head into the local BranchStore.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Bring a design you saved to your Kiln account down to this machine.",
+      "tier": "free",
+      "access": "free",
       "category": "cloud_sync",
       "parameters": {
         "properties": {
@@ -1838,15 +1863,6 @@
         ],
         "title": "cloud_pull_branchArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
-        "variant": "cloud_workspace",
-        "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
       }
     },
     {
@@ -1914,6 +1930,55 @@
           }
         },
         "title": "cloud_pull_fair_recordsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_pull_feature_branch",
+      "description": "Pull one feature branch's new versions from a remote.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Id"
+          },
+          "branch_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Name"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id"
+        ],
+        "title": "cloud_pull_feature_branchArguments",
         "type": "object"
       }
     },
