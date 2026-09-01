@@ -3006,7 +3006,7 @@ class KilnDB:
             params.extend([like_q, like_q, like_q])
 
         if source:
-            clauses.append("source = ?")
+            clauses.append("source = ? COLLATE NOCASE")
             params.append(source)
 
         if tags:

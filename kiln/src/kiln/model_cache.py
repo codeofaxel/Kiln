@@ -17,7 +17,7 @@ import os
 import secrets
 import shutil
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -98,7 +98,9 @@ class ModelCache:
         The file is copied into the cache directory under a subdirectory
         named after its SHA-256 hash (enabling automatic deduplication).
         If a file with the same hash already exists, the existing entry
-        is returned without re-copying.
+        is returned without re-copying -- folding in any annotations
+        supplied on this call, so a repeat add never reports success
+        carrying values the caller just contradicted.
 
         Args:
             file_path: Path to the model file on disk.
@@ -124,7 +126,7 @@ class ModelCache:
 
         file_hash = _compute_sha256(file_path)
 
-        # Dedup check — return existing entry if the same file is cached.
+        # Dedup check — the file is deduplicated, the caller's intent is not.
         existing = self.get_by_hash(file_hash)
         if existing is not None:
             logger.info(
@@ -132,7 +134,15 @@ class ModelCache:
                 file_hash[:12],
                 existing.cache_id,
             )
-            return existing
+            return self._merge_annotations(
+                existing,
+                source=source,
+                source_id=source_id,
+                prompt=prompt,
+                tags=tags,
+                dimensions=dimensions,
+                metadata=metadata,
+            )
 
         # Copy file into cache directory.
         file_name = os.path.basename(file_path)
@@ -165,6 +175,60 @@ class ModelCache:
         self._db.save_cache_entry(entry)
         logger.info("Cached model %s (%s, %d bytes)", cache_id, file_name, file_size)
         return entry
+
+    def _merge_annotations(
+        self,
+        existing: ModelCacheEntry,
+        *,
+        source: str,
+        source_id: str | None,
+        prompt: str | None,
+        tags: list[str] | None,
+        dimensions: dict[str, float] | None,
+        metadata: dict[str, Any] | None,
+    ) -> ModelCacheEntry:
+        """Fold a repeat add's annotations into the entry it deduplicated against.
+
+        ``None`` means "not specified" and leaves the stored value alone;
+        ``metadata`` is shallow-merged.  ``source`` and ``source_id`` move
+        together, because an id only means something next to the origin that
+        issued it -- naming a genuinely different origin replaces the pair, so
+        an entry can never claim one marketplace while holding another's id.
+        Differing only in casing is the same origin, and keeps the stored
+        spelling.  File identity, print history and ``created_at`` are never
+        touched.
+
+        Returns the refreshed entry, or *existing* when nothing changed.
+        """
+        changes: dict[str, Any] = {}
+
+        same_origin = source.strip().lower() == (existing.source or "").strip().lower()
+        if not same_origin:
+            changes["source"] = source
+            changes["source_id"] = source_id
+        elif source_id is not None:
+            changes["source_id"] = source_id
+
+        if prompt is not None:
+            changes["prompt"] = prompt
+        if tags is not None:
+            changes["tags"] = tags
+        if dimensions is not None:
+            changes["dimensions"] = dimensions
+        if metadata is not None:
+            changes["metadata"] = {**existing.metadata, **metadata}
+
+        if not changes:
+            return existing
+
+        updated = replace(existing, **changes)
+        self._db.save_cache_entry(updated)
+        logger.info(
+            "Updated cached model %s (%s)",
+            updated.cache_id,
+            ", ".join(sorted(changes)),
+        )
+        return updated
 
     def get(self, cache_id: str) -> ModelCacheEntry | None:
         """Return a cache entry by ID, or ``None`` if not found."""

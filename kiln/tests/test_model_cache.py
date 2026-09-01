@@ -297,3 +297,100 @@ class TestModelCacheListAll:
         assert len(page1) == 2
         assert len(page2) == 2
         assert page1[0].cache_id != page2[0].cache_id
+
+
+class TestDedupUpdatesAnnotations:
+    """Re-adding a file whose bytes are already cached dedups the FILE; the
+    annotations supplied on that call are the caller's current intent and
+    must not come back as the stale values they just contradicted.
+    """
+
+    def test_new_prompt_and_tags_stick(self, cache, sample_stl):
+        first = cache.add(sample_stl, source="meshy", prompt="a boat", tags=["v1"])
+
+        second = cache.add(sample_stl, source="meshy", prompt="a tugboat", tags=["v2"])
+
+        assert second.cache_id == first.cache_id
+        assert second.prompt == "a tugboat"
+        assert second.tags == ["v2"]
+        assert cache.get(first.cache_id).prompt == "a tugboat", "not persisted"
+
+    def test_omitted_fields_keep_stored_values(self, cache, sample_stl):
+        first = cache.add(
+            sample_stl,
+            source="thingiverse",
+            source_id="763622",
+            tags=["calibration"],
+            dimensions={"x": 60.0, "y": 31.0, "z": 48.0},
+        )
+
+        second = cache.add(sample_stl, source="thingiverse", prompt="added later")
+
+        assert second.cache_id == first.cache_id
+        assert second.source_id == "763622"
+        assert second.tags == ["calibration"]
+        assert second.dimensions["z"] == 48.0
+        assert second.prompt == "added later"
+
+    def test_metadata_is_merged_not_replaced(self, cache, sample_stl):
+        cache.add(sample_stl, source="upload", metadata={"license": "CC-BY", "rating": 5})
+
+        second = cache.add(sample_stl, source="upload", metadata={"rating": 4})
+
+        assert second.metadata == {"license": "CC-BY", "rating": 4}
+
+    def test_print_history_and_creation_time_are_never_touched(self, cache, sample_stl):
+        first = cache.add(sample_stl, source="upload")
+        cache.record_print(first.cache_id)
+        printed = cache.get(first.cache_id)
+
+        second = cache.add(sample_stl, source="upload", tags=["rescanned"])
+
+        assert second.print_count == printed.print_count == 1
+        assert second.last_printed_at == printed.last_printed_at
+        assert second.created_at == first.created_at
+
+    def test_a_different_origin_replaces_the_id_that_belonged_to_the_old_one(self, cache, sample_stl):
+        """source and source_id travel together -- an entry must never claim
+        one marketplace while holding another's id."""
+        first = cache.add(sample_stl, source="thingiverse", source_id="763622")
+
+        second = cache.add(sample_stl, source="upload")
+
+        assert second.cache_id == first.cache_id
+        assert second.source == "upload"
+        assert second.source_id is None, "kept thingiverse's id under a different source"
+
+    def test_same_origin_differing_only_in_case_keeps_its_id(self, cache, sample_stl):
+        cache.add(sample_stl, source="thingiverse", source_id="763622")
+
+        second = cache.add(sample_stl, source="Thingiverse")
+
+        assert second.source == "thingiverse", "casing churned the stored spelling"
+        assert second.source_id == "763622", "same origin lost its id over casing"
+
+    def test_repeat_add_with_nothing_new_changes_nothing(self, cache, sample_stl):
+        first = cache.add(sample_stl, source="upload", tags=["a"])
+
+        second = cache.add(sample_stl, source="upload")
+
+        assert second == first
+
+
+class TestSearchSourceFilterForgiveness:
+    """The source filter is called with whatever casing the caller has."""
+
+    def test_source_filter_is_case_insensitive(self, cache, sample_stl):
+        cache.add(sample_stl, source="thingiverse")
+
+        for probe in ("thingiverse", "Thingiverse", "THINGIVERSE"):
+            found = cache.search(source=probe)
+            assert len(found) == 1, f"source={probe!r} missed the entry"
+
+    def test_source_filter_still_discriminates(self, cache, sample_stl, another_stl):
+        cache.add(sample_stl, source="thingiverse")
+        cache.add(another_stl, source="meshy")
+
+        assert len(cache.search(source="THINGIVERSE")) == 1
+        assert len(cache.search(source="meshy")) == 1
+        assert len(cache.search(source="printables")) == 0
