@@ -224,21 +224,40 @@ class _DecorationLibraryPlugin:
             adapting to the material.  Listed by ``list_decoration_presets``,
             applied by ``apply_decoration_preset``.  The library adapts, the
             preset remembers — if what you want isn't here, look there.
+
+            The response declares its own SCOPE.  Free installs have a
+            local library only; paid tiers also have a cloud library
+            (what the web's /decorations pages show), and this call
+            returns the union of the two with every row saying which
+            one it came from.  When the cloud half cannot be read the
+            response says so and marks itself ``incomplete`` — read
+            ``scope`` before treating ``count`` as everything the user
+            has saved.
             """
             from kiln.decoration_library import (
                 list_decorations as _list,
             )
+            from kiln.store_scope import DECORATION_LIBRARY, scoped_store_response
 
             decorations = _list(
                 content_type=content_type or None,
                 category=category or None,
                 tag=tag or None,
             )
-            return {
-                "success": True,
-                "count": len(decorations),
-                "decorations": [d.to_dict() for d in decorations],
-            }
+            return scoped_store_response(
+                {
+                    "success": True,
+                    "count": len(decorations),
+                    "decorations": [d.to_dict() for d in decorations],
+                },
+                store=DECORATION_LIBRARY,
+                items_key="decorations",
+                filters={
+                    "content_type": content_type or None,
+                    "category": category or None,
+                    "tag": tag or None,
+                },
+            )
 
         @mcp.tool()
         def apply_decoration(
