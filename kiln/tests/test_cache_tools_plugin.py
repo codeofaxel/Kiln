@@ -229,3 +229,33 @@ class TestRecacheUpdatesAnnotations:
         again = cache.add(path, metadata={"label": "v2"})
 
         assert again.metadata == {"label": "v2", "infill_percent": 20}
+
+
+class TestScopeDisclosureSurvives:
+    """The listing carries a store-scope disclosure.  The fix that made it
+    return rows must not cost the caller the boundary those rows came from.
+    """
+
+    def test_listing_still_declares_its_scope(self, registered_tools, cache, tmp_path) -> None:
+        cache.add(_write_design(tmp_path, "bracket.stl", "bracket"), filament_type="PLA")
+
+        result = registered_tools["list_cached_designs"]()
+
+        assert result["success"] is True, result
+        assert result["count"] == 1
+        assert "scope" in result, "store-scope disclosure was dropped"
+        assert result["scope"]["store"]["id"] == "design_cache"
+
+    def test_scope_tagging_leaves_a_designs_own_source_alone(self, registered_tools, cache, tmp_path) -> None:
+        """Items are tagged with the store they came from; a design's own
+        ``source`` field is different data and must survive intact."""
+        cache.add(
+            _write_design(tmp_path, "bracket.stl", "bracket"),
+            filament_type="PLA",
+            source="thingiverse:12345",
+        )
+
+        design = registered_tools["list_cached_designs"]()["designs"][0]
+
+        assert design["source"] == "thingiverse:12345"
+        assert design["filament_type"] == "PLA"
