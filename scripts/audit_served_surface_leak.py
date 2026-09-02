@@ -48,9 +48,17 @@ if str(_SRC) not in sys.path:
 # ── The rules ──────────────────────────────────────────────────────────────
 # Each pattern names HOW the paid depth is built (a leak), never WHAT a tier
 # unlocks (fine).  Tier names, outcomes, and the pricing URL never trip these.
+#
+# DO NOT reword the literals below to avoid the words they catch.  Here the
+# word IS the rule, not prose about the rule: a cleanup pass that "tidies"
+# them turns the matching check into a no-op, and a blinded gate reports
+# clean forever without ever saying it stopped looking.  The sibling gate
+# exempts this file for exactly that reason (``_SELF`` in
+# ``audit_moat_comment_leak.py``).  Change a pattern only to make it catch
+# MORE, and prove the new shape fails before trusting it.
 RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Branding the curated data in text a client reads.
-    ("moat self-label", re.compile(r"\bmoat\b", re.IGNORECASE)),
+    ("private-tier self-label", re.compile(r"\bmoat\b", re.IGNORECASE)),
     # A private module / file path or overlay filename.
     ("private module or file path",
      re.compile(r"\bkiln_pro[./][\w./-]+|\b\w+_pro_overlay\.json\b")),
