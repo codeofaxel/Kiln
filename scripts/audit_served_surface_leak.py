@@ -58,7 +58,7 @@ if str(_SRC) not in sys.path:
 # MORE, and prove the new shape fails before trusting it.
 RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Branding the curated data in text a client reads.
-    ("moat self-label", re.compile(r"\bmoat\b", re.IGNORECASE)),
+    ("private-tier self-label", re.compile(r"\bmoat\b", re.IGNORECASE)),
     # A private module / file path or overlay filename.
     ("private module or file path",
      re.compile(r"\bkiln_pro[./][\w./-]+|\b\w+_pro_overlay\.json\b")),
