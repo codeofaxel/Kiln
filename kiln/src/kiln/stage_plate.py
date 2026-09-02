@@ -47,6 +47,7 @@ Never raises: a stage that cannot name the bed still has to draw one.
 
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Any
 
@@ -130,13 +131,85 @@ def resolve_stage_plate(printer_id: str | None = None) -> dict[str, Any]:
 def attach_stage_plate(
     payload: dict[str, Any] | None, printer_id: str | None = None
 ) -> dict[str, Any] | None:
-    """Stamp the resolved plate onto a ``kiln.mesh.v1`` *payload*, in place.
+    """Stand a ``kiln.mesh.v1`` *payload* on the plate and stamp the plate on.
 
     The single call every payload-producing door makes, so a door added later
-    cannot ship a stage with no bed under it.  A ``None`` payload (no geometry
-    to show) passes straight through.
+    cannot ship a stage with no bed under it — or, the same mistake from the
+    other side, a correct bed with the part parked in a corner of it.  The
+    stage draws the bed centred on the origin; geometry arrives wherever its
+    file put it (a slicer-placed 3MF sits at the bed's centre in ITS bed
+    coordinates, 128 mm from the origin).  Measured 2026-09-01 on the hosted
+    view: a painted jar centred on the printer's plate rendered at the far
+    corner of the stage's, because that door stamped no plate and centred
+    nothing.  Centring lives here so the plate and the placement cannot
+    come apart again.
+
+    A ``None`` payload (no geometry to show) passes straight through.
     """
     if not isinstance(payload, dict):
         return payload
+    stand_on_plate(payload)
     payload["plate"] = resolve_stage_plate(printer_id)
     return payload
+
+
+def stand_on_plate(payload: dict | None) -> dict | None:
+    """Slide the geometry to the middle of the plate in X and Y, in place.
+
+    WHY THIS IS HERE.  Geometry arrives in whatever coordinates its source
+    wrote, and a parametric model's origin is almost always a CORNER of the
+    part rather than its middle — a 120 x 150 SCAD panel occupies x 0..120,
+    y 0..150.  The stage, meanwhile, draws the print bed CENTERED on the
+    origin.  Left alone, most of Kiln's templates render parked in one
+    quadrant of the plate or hanging off its edge, which reads as a part
+    that will not print rather than as the coordinate convention it is.
+
+    Z is deliberately untouched.  The part rests ON the bed; lifting or
+    sinking it would be a claim about the print that isn't true.
+
+    ``positions`` (viewer space, where x = mesh x and z = -mesh y) and
+    ``bbox`` (mesh space) move by the SAME offset, so the payload can never
+    describe the part somewhere its vertices are not.  A downgraded payload
+    carries a bbox and no geometry — there is nothing to move, and moving
+    the bbox alone would invent exactly that disagreement — so it passes
+    through untouched.
+
+    Never raises: an off-centre part on the plate beats a tool call that
+    died over furniture.
+    """
+    try:
+        if not isinstance(payload, dict) or payload.get("downgraded"):
+            return payload
+        positions = payload.get("positions")
+        bbox = payload.get("bbox")
+        if not isinstance(positions, str) or not isinstance(bbox, dict):
+            return payload
+        lo, hi = bbox.get("min"), bbox.get("max")
+        if not (isinstance(lo, list) and isinstance(hi, list)):
+            return payload
+        if len(lo) != 3 or len(hi) != 3:
+            return payload
+        dx = -(float(lo[0]) + float(hi[0])) / 2.0
+        dy = -(float(lo[1]) + float(hi[1])) / 2.0
+        if not dx and not dy:
+            return payload  # already centred — nothing to re-encode
+
+        import numpy as np
+
+        xyz = (
+            np.frombuffer(base64.b64decode(positions), dtype="<f4")
+            .reshape(-1, 3)
+            .copy()
+        )
+        xyz[:, 0] += dx  # viewer x IS mesh x
+        xyz[:, 2] -= dy  # viewer z is -mesh y, so mesh +y moves viewer -z
+        payload["positions"] = base64.b64encode(
+            xyz.astype("<f4", copy=False).tobytes()
+        ).decode("ascii")
+        bbox["min"] = [round(float(lo[0]) + dx, 4), round(float(lo[1]) + dy, 4), lo[2]]
+        bbox["max"] = [round(float(hi[0]) + dx, 4), round(float(hi[1]) + dy, 4), hi[2]]
+    except Exception:  # noqa: BLE001 — the stage may be off-centre, never broken
+        logger.debug("stage centring skipped", exc_info=True)
+    return payload
+
+

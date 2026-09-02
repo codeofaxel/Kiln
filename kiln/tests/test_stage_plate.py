@@ -299,3 +299,55 @@ class TestEveryDoorGoesThroughThePayloadBuilder:
 
         assert "_payload_for_mesh(" in still
         assert "mesh_to_viewer_payload(" not in still
+
+
+class TestAttachStandsThePartOnThePlate:
+    """The stage draws its bed centred on the origin.  A slicer-placed 3MF
+    sits at ITS bed's centre, 128 mm from the origin, and rendered at the
+    corner of the stage's plate on the hosted view (2026-09-01), because
+    that door stamped no plate and centred nothing.  Plate and placement
+    now arrive from one call."""
+
+    def _payload(self, lo, hi):
+        import base64
+
+        import numpy as np
+
+        # viewer space: x = mesh x, y = mesh z, z = -mesh y
+        pts = np.array(
+            [[lo[0], lo[2], -lo[1]], [hi[0], hi[2], -hi[1]]], dtype="<f4"
+        )
+        return {
+            "kind": "kiln.mesh.v1",
+            "positions": base64.b64encode(pts.tobytes()).decode("ascii"),
+            "bbox": {"min": list(lo), "max": list(hi), "size": [hi[i] - lo[i] for i in range(3)]},
+        }
+
+    def test_an_off_origin_part_comes_back_centred_in_x_and_y(self):
+        from kiln.stage_plate import attach_stage_plate
+
+        p = attach_stage_plate(self._payload([60.75, 96.65, 0.0], [195.25, 159.35, 55.0]))
+        assert p["bbox"]["min"][0] == -p["bbox"]["max"][0]
+        assert p["bbox"]["min"][1] == -p["bbox"]["max"][1]
+        assert p["bbox"]["min"][2] == 0.0 and p["bbox"]["max"][2] == 55.0, "Z is never moved"
+        assert p["plate"]["x_mm"] > 0
+
+    def test_the_vertices_move_with_the_bbox(self):
+        import base64
+
+        import numpy as np
+
+        from kiln.stage_plate import attach_stage_plate
+
+        p = attach_stage_plate(self._payload([100.0, 100.0, 0.0], [160.0, 140.0, 10.0]))
+        xyz = np.frombuffer(base64.b64decode(p["positions"]), dtype="<f4").reshape(-1, 3)
+        assert float(xyz[:, 0].min()) == -30.0 and float(xyz[:, 0].max()) == 30.0
+        # mesh +y is viewer -z
+        assert float(xyz[:, 2].min()) == -20.0 and float(xyz[:, 2].max()) == 20.0
+
+    def test_a_centred_part_is_left_byte_identical(self):
+        from kiln.stage_plate import attach_stage_plate
+
+        raw = self._payload([-5.0, -5.0, 0.0], [5.0, 5.0, 2.0])
+        before = raw["positions"]
+        assert attach_stage_plate(raw)["positions"] == before
