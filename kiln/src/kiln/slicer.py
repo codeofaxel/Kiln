@@ -31,7 +31,6 @@ import logging
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -40,6 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kiln.openscad_runner import present_signals
 from kiln.slicer_orca import (
     PRIME_TOWER_WIDTH_MM,
     ini_to_settings,
@@ -405,9 +405,9 @@ _ORCA_SIGSEGV_RETURNCODES = frozenset({-11, 139})
 # retried.  SIGSEGV/SIGBUS ride along because the OpenSCAD twin showed
 # one underlying race spelling itself as either a libc guard trap or a
 # wild read, depending on where the torn pointer lands.
-_SLIC3R_STARTUP_CRASH_RETURNCODES = frozenset({
-    -int(signal.SIGTRAP), -int(signal.SIGSEGV), -int(signal.SIGBUS),
-})
+_SLIC3R_STARTUP_CRASH_RETURNCODES = frozenset(
+    -sig for sig in present_signals("SIGTRAP", "SIGSEGV", "SIGBUS")
+)
 
 # The Orca dialect keeps SIGSEGV out of its retry set on purpose: -11 on
 # that path is the deterministic Bambu-preset crash above, a real verdict
@@ -416,9 +416,9 @@ _SLIC3R_STARTUP_CRASH_RETURNCODES = frozenset({
 # not retrying real answers).  The locale race has not been captured on
 # an Orca binary; TRAP/BUS are covered so that if it ever is, the user
 # gets the re-draw instead of the failure.
-_ORCA_STARTUP_CRASH_RETURNCODES = frozenset({
-    -int(signal.SIGTRAP), -int(signal.SIGBUS),
-})
+_ORCA_STARTUP_CRASH_RETURNCODES = frozenset(
+    -sig for sig in present_signals("SIGTRAP", "SIGBUS")
+)
 
 #: A crash later than this is blamed on the model, not on startup.  The
 #: observed crashes die in the first ~0.1s; ten seconds is far past any
