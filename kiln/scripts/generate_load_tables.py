@@ -184,8 +184,9 @@ def build() -> dict:
             ),
             "_split_note": (
                 "Safety-floor profile for AI-controlled FDM printing.  "
-                "Engineering depth (per-material SME caveats) is available "
-                "in Kiln Pro; see https://kiln3d.com/pricing."
+                "Engineering depth (the per-material caveats behind these "
+                "numbers) is available in Kiln Pro; see "
+                "https://kiln3d.com/pricing."
             ),
         },
     }

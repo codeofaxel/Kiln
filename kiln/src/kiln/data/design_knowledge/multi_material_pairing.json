@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "domain": "fdm",
     "description": "Dual-extrusion and multi-material compatibility rules. Which materials can be printed together, support dissolution methods, and interface adhesion.",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Per-pair printing guidance is available in Kiln Pro; see https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (how each pair behaves together and when to avoid one) is available in Kiln Pro; see https://kiln3d.com/pricing."
   },
   "support_pairs": [
     {
