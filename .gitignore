@@ -66,6 +66,10 @@ scripts/*
 # test so public source can never ship a curated cross-vendor capability /
 # SME table (the moat belongs in the private tier or a pro overlay).
 !scripts/audit_public_sme_leak.py
+# …and for the tool-description dump, which writes every tool / prompt /
+# resource description the MCP server hands to clients to one file so the
+# public-surface sweeps have something to grep.
+!scripts/dump_tool_descriptions.py
 # …and for the public-language gate, which checks tracked text and new
 # commit messages for private editorial context before it reaches GitHub.
 !scripts/check_public_language.py
