@@ -1178,7 +1178,7 @@ class _DesignReasoningToolsPlugin:
             Analyzes overhang triangles and projects them to the build plate
             to estimate the volume and weight of support material required.
 
-            :param file_path: Path to .stl, .obj, or .glb file.
+            :param file_path: Path to a .stl, .obj, .glb, or .3mf file.
             :returns: Dict with support volume (mm\u00b3), weight (g), and overhang stats.
             """
             # STEP in, mesh out — the one shared door, never a per-tool

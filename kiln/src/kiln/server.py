@@ -12696,7 +12696,7 @@ def predict_print_failure(
     non-manifold issues.  Returns a risk score (0-100) and
     per-failure details with fix suggestions.
 
-    :param file_path: Path to mesh file (.stl, .obj, or .glb).
+    :param file_path: Path to mesh file (.stl, .obj, .glb, or .3mf).
     :param min_wall_mm: Minimum printable wall thickness (default 0.8).
     :param max_bridge_mm: Maximum unsupported bridge length (default 15).
     :param max_overhang_deg: Maximum overhang angle before failure (default 55).

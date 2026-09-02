@@ -1926,7 +1926,7 @@ class _DesignToolsPlugin:
             - recommendations: actionable mitigation advice
 
             Args:
-                file_path: Path to STL or OBJ file to analyze.
+                file_path: Path to STL, OBJ, GLB, or 3MF file to analyze.
                 material: Material ID (e.g. "pla", "abs", "petg"). Defaults to PLA.
                     Used to look up thermal warping tendency.
                 printer_id: Optional registered printer whose real geometry

@@ -123,12 +123,12 @@ class _MeshToolsPlugin:
         def validate_generated_mesh(file_path: str) -> dict:
             """Validate a 3D mesh file for printing readiness.
 
-            Checks that the file is a valid STL, OBJ, or GLB, has reasonable
+            Checks that the file is a valid STL, OBJ, GLB, or 3MF, has reasonable
             dimensions, an acceptable polygon count, and is manifold
             (watertight).
 
             Args:
-                file_path: Path to an STL, OBJ, or GLB file.
+                file_path: Path to an STL, OBJ, GLB, or 3MF file.
             """
             from kiln.generation.validation import validate_mesh
             from kiln.server import _error_dict, logger
@@ -249,8 +249,8 @@ class _MeshToolsPlugin:
             a user how big their CAD part is.  ``mesh_quality_scorecard``
             gives the same file a fuller intake report.
 
-            :param file_path: Path to a mesh (.stl, .obj, .glb) or a CAD file
-                (.step, .stp), which is converted automatically.
+            :param file_path: Path to a mesh (.stl, .obj, .glb, .3mf) or a CAD
+                file (.step, .stp), which is converted automatically.
             :returns: Dict with full mesh analysis metrics, plus ``exact``
                 for CAD input.
             """

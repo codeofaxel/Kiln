@@ -374,7 +374,7 @@ class CostEstimator:
         length, support/adhesion costs, electricity, and total cost.  Uses
         only stdlib-based mesh parsing — no external dependencies required.
 
-        :param file_path: Path to an STL, OBJ, or 3MF mesh file.
+        :param file_path: Path to an STL, OBJ, GLB, or 3MF mesh file.
         :param material: Filament material name (case-insensitive).
         :param infill_percent: Interior infill density (0-100).
         :param wall_layers: Number of perimeter wall layers.
