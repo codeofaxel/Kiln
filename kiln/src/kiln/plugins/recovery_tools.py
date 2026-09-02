@@ -574,8 +574,7 @@ class _RecoveryToolsPlugin:
             printability and structural issues, without modifying the
             creative intent.
 
-            Patent KILN-010 claim 51 — the improved prompt is run
-            through a three-check sanity gate (no contradictions, fits
+            The improved prompt is run through a three-check sanity gate (no contradictions, fits
             the provider budget, ≥70% original-token overlap so intent
             is preserved).  When ``enforce_sanity=True`` (default) and
             the gate fails, this tool refuses with
@@ -651,7 +650,7 @@ class _RecoveryToolsPlugin:
                     iteration=iteration,
                 )
 
-                # KILN-010 claim 51: refuse contradictory / over-budget /
+                # Sanity gate: refuse contradictory / over-budget /
                 # intent-drifted prompts before they reach the generator.
                 # The agent gets the failure list and the would-be
                 # prompt so it can pick a repair strategy (drop a
@@ -1160,7 +1159,7 @@ class _RecoveryToolsPlugin:
                     ``build_volume_mm``, ``success_rate``).  When
                     supplied alongside ``success=False``, the response
                     will include a ``reroute_recommendation`` from the
-                    pro rerouter (patent KILN-003 claim 5).  Single-printer
+                    Pro rerouter.  Single-printer
                     setups can omit this.
                 completion_pct_at_failure: How far the failed print got
                     (0.0–1.0).  Below 10% the rerouter prefers
@@ -1280,7 +1279,7 @@ class _RecoveryToolsPlugin:
                 except ImportError:
                     return response
             except MonitoringThresholdNotMet as exc:
-                # Patent claim 79: structured error includes the deficit
+                # The structured error includes the deficit
                 # so the orchestrator/UI can prompt for additional checks.
                 err = _srv._error_dict(str(exc), code=exc.to_dict()["code"])
                 err.update(exc.to_dict())

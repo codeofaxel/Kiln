@@ -127,7 +127,7 @@ SIGNIN_COMMAND = "kiln signin"
 #: paid-side denial payloads: the public SME-leak gate counts
 #: ``agent_guidance`` as a curated-data field marker, and ``server.py`` — the
 #: biggest consumer of this constant — already names every printer vendor, so
-#: the pair trips a moat check that has nothing to do with refusal copy.
+#: the pair trips a leak check that has nothing to do with refusal copy.
 #: Cheaper to pick another word than to weaken a security gate over wording.
 AGENT_SIGNIN_HINT = (
     "Run `kiln signin` for the user — it opens a browser and finishes on its "

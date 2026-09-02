@@ -1275,7 +1275,7 @@ class PrintHealthMonitor:
                         pause_fired_this_tick = True
 
                 # Pro-tier predictive risk — score the recent health
-                # reports against KILN-003 thermal/flow/layer-time
+                # reports against the thermal/flow/layer-time
                 # heuristics.  Red signals get surfaced into the issue
                 # stream so they sit alongside vision-based and
                 # health-based detections.  Best-effort and signal-only:

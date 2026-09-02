@@ -903,8 +903,8 @@ class _DesignKnowledgeBase:
         self._multi_material: dict[str, Any] = {}
         self._skin_contact: dict[str, dict[str, Any]] = {}
         # Each table's ``_meta`` block, keyed by table attribute.  The tables
-        # themselves drop every underscore key (that rule keeps meta and moat
-        # out of the merged material dicts), so curated table-level policy —
+        # themselves drop every underscore key (that rule keeps metadata and
+        # paid-tier fields out of the merged material dicts), so curated table-level policy —
         # which is legitimately public — would otherwise be unreachable.
         self._table_meta: dict[str, dict[str, Any]] = {}
         #: Overlay kind -> ``(the overlay payload that was merged, the merged
@@ -1075,7 +1075,7 @@ class _DesignKnowledgeBase:
     @property
     def skin_contact_meta(self) -> dict[str, Any]:
         """Table-level skin-contact policy: family inheritance + the generic
-        uncharacterized floor.  Public curated copy, not moat."""
+        uncharacterized floor.  Public curated copy; ships at every tier."""
         self._load()
         return self._table_meta.get("_skin_contact", {})
 

@@ -25,11 +25,11 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Prompt sanity gate (KILN-010 claim 51)
+# Prompt sanity gate
 # ---------------------------------------------------------------------------
 
 # Minimum fraction of original-prompt tokens that must survive into the
-# improved prompt, per claim 51's "at least 70 percent token overlap".
+# improved prompt, so the improved prompt still carries the original intent.
 _MIN_TOKEN_OVERLAP_PCT = 0.70
 
 # Detects "minimum X 2.5mm" / "max X 30 degrees" style numeric clauses.
@@ -312,7 +312,7 @@ class PrintFeedback:
 
 
 class SanityFailureKind(str, enum.Enum):
-    """Categories of sanity-gate violations (KILN-010 claim 51)."""
+    """Categories of sanity-gate violations."""
 
     CONTRADICTION = "contradiction"
     BUDGET = "budget"
@@ -337,7 +337,7 @@ class SanityFailure:
 
 @dataclass
 class SanityResult:
-    """Sanity-gate verdict for an improved prompt (KILN-010 claim 51).
+    """Sanity-gate verdict for an improved prompt.
 
     Three checks: no contradictions between constraints, prompt fits the
     provider budget, and at least 70% token overlap between the improved
@@ -521,9 +521,9 @@ def check_prompt_sanity(
     budget: int,
     min_token_overlap: float = _MIN_TOKEN_OVERLAP_PCT,
 ) -> SanityResult:
-    """Run the three-check sanity gate from KILN-010 claim 51.
+    """Run the three-check sanity gate.
 
-    The gate is a deterministic stand-in for the patent's "second model"
+    The gate is a deterministic stand-in for a second reviewing model
     — it catches the contradiction shapes a model would catch, plus the
     cheaper budget and intent-overlap checks.  Callers re-generate when
     the result is not ``passed``.
@@ -533,7 +533,7 @@ def check_prompt_sanity(
     :param budget: Maximum prompt length the provider will accept.
     :param min_token_overlap: Minimum fraction of original tokens that
         must appear in the improved prompt's intent prefix.  Defaults to
-        the patent's 0.70 threshold.
+        0.70.
     :returns: A :class:`SanityResult` summarising the verdict.
     """
     failures: list[SanityFailure] = []
@@ -1398,7 +1398,7 @@ def enhance_prompt_with_design_intelligence(
         auto-resolved material and printer-specific failure mitigations
         are included in the prompt.
     :param anti_patterns: Optional list of explicit anti-pattern clauses
-        to inject as ``Avoid:`` guidance (KILN-010 claim 62).  When
+        to inject as ``Avoid:`` guidance.  When
         omitted, anti-patterns are derived from
         ``printer_context.common_failures`` via
         :func:`kiln.failure_vocabulary.anti_pattern_for`.
@@ -1619,7 +1619,7 @@ def enhance_prompt_with_design_intelligence(
     else:
         constraints = core_constraints
 
-    # Negative-constraint anti-patterns (KILN-010 claim 62) — explicit
+    # Negative-constraint anti-patterns — explicit
     # exclusions of patterns known to cause failures for the current
     # (material, printer) context.  Caller-supplied ``anti_patterns``
     # take precedence; otherwise derive from the printer's recurring
