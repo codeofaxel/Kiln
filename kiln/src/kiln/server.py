@@ -17347,17 +17347,23 @@ def decorate_surface(
         unaddressed by the placement fix); on ``left``/``right`` the
         carve lands but the offset axis scaling is less verified.  Prefer
         the front-facing three when exact placement matters.
-        ``"wall"`` wraps TEXT around the upright round wall of a cup,
-        vase or bowl (STL, text + deboss only).  Letters stay legible and
-        read correctly from outside; size and carve depth may be adjusted
-        to keep them readable and the wall sound, and the response
-        reports what was actually used.  On the wall, *scale* sets letter
-        height as a share of the wall and *absolute_size_mm* pins it
-        exactly; *offset_x/y_mm* and *placement* do not apply (the line
-        sits centred on the front at mid-height).  The wrap engine ships
-        with kiln-pro and is included on the hosted service
-        (api.kiln3d.com) on every tier; without it locally, use a flat
-        face.
+        ``"wall"`` wraps content around the upright round wall of a cup,
+        jar, vase or bowl (STL, deboss only).  TEXT wraps letter by
+        letter; an SVG logo or a bi-level raster mark (line art, a
+        wordmark, a traced logo) wraps as a radial carve — equal arc
+        length along the wall, uniform depth, placed on the plain band of
+        the wall clear of any thread band, rim bead or rib.
+        Continuous-tone photo relief is not wrapped (use a flat face such
+        as a lid).  Content reads correctly from outside; size and carve
+        depth may be adjusted to keep it readable and the wall sound, and
+        the response reports what was actually used.  On the wall,
+        *scale* sets letter height as a share of the wall (text) or the
+        mark's width as a share of the readable 120° arc (marks), and
+        *absolute_size_mm* pins the letter height / mark width exactly;
+        *offset_x/y_mm* and *placement* do not apply (content sits
+        centred on the front at mid-band).  The wrap engines ship with
+        kiln-pro and are included on the hosted service (api.kiln3d.com)
+        on every tier; without them locally, use a flat face.
     :param depth_mm: Emboss/deboss depth in mm.  ``0`` = auto based on
         *material* (e.g. 0.6 mm for PLA, 1.2 mm for TPU).
     :param mode: ``"deboss"`` (cut into surface) or ``"emboss"`` (raised).
@@ -17510,35 +17516,60 @@ def decorate_surface(
                     code="INVALID_CONTENT",
                 )
 
-        # --- Curved-wall path: face="wall" wraps TEXT around the upright
-        # round wall of a cup, vase or bowl.  The wrap engine ships with
-        # kiln-pro; the hosted service (api.kiln3d.com) includes it on
-        # every tier.  Text + deboss only by design: images and repeating
-        # patterns on curved walls route through apply_image_texture /
-        # apply_procedural_texture, which own curved-surface projection.
+        # --- Curved-wall path: face="wall" wraps content around the
+        # upright round wall of a cup, jar, vase or bowl.  Text wraps letter
+        # by letter; an SVG logo or a bi-level raster mark wraps as a radial
+        # carve (equal arc length, uniform depth, on the plain band of the
+        # wall).  Both engines ship with kiln-pro; the hosted service
+        # (api.kiln3d.com) includes them on every tier.  Deboss only by
+        # design, and continuous-tone photo relief stays on flat faces —
+        # repeating patterns on curved walls route through
+        # apply_image_texture / apply_procedural_texture.
         if face.lower().strip() == "wall":
-            if ctype != "text":
+            if ctype not in ("text", "svg", "image"):
                 _refund_decoration_quota(quota_consumed)
                 return _error_dict(
-                    "face='wall' supports text content only ('text:...'). "
-                    "For images or patterns on curved walls use "
-                    "apply_image_texture or apply_procedural_texture.",
+                    "face='wall' takes text ('text:...'), an SVG logo, or a "
+                    "bi-level raster mark. For repeating patterns on curved "
+                    "walls use apply_image_texture or apply_procedural_texture.",
                     code="INVALID_CONTENT",
                 )
             if mode != "deboss":
                 _refund_decoration_quota(quota_consumed)
                 return _error_dict(
-                    "face='wall' text is deboss-only (carved into the "
-                    "wall); emboss on a curved wall is not supported yet.",
+                    "face='wall' is deboss-only (carved into the wall); "
+                    "emboss on a curved wall is not supported yet.",
                     code="INVALID_MODE",
                 )
-            wall_text_val = content.split(":", 1)[1].strip()
-            if not wall_text_val:
-                _refund_decoration_quota(quota_consumed)
-                return _error_dict(
-                    "No text to wrap — pass content='text:YOUR TEXT'.",
-                    code="INVALID_CONTENT",
-                )
+            wall_text_val = ""
+            if ctype == "text":
+                wall_text_val = content.split(":", 1)[1].strip()
+                if not wall_text_val:
+                    _refund_decoration_quota(quota_consumed)
+                    return _error_dict(
+                        "No text to wrap — pass content='text:YOUR TEXT'.",
+                        code="INVALID_CONTENT",
+                    )
+            elif ctype == "image":
+                # A wall mark is a traced bi-level image.  A photo has no
+                # strokes to trace, and heightmap relief cannot wrap a
+                # curve honestly — say so instead of carving a smear.
+                _is_mark = False
+                try:
+                    from kiln.mark_geometry import is_bilevel_image
+
+                    _is_mark = image_style in ("stencil", "logo") or is_bilevel_image(content)
+                except Exception:  # noqa: BLE001 — detector never blocks a decorate
+                    _is_mark = image_style in ("stencil", "logo")
+                if not _is_mark:
+                    _refund_decoration_quota(quota_consumed)
+                    return _error_dict(
+                        "face='wall' carves line-art marks, not photo relief: "
+                        "pass an SVG or a bi-level image (a logo, a wordmark, "
+                        "line art), or put the photo on a flat face such as a "
+                        "lid or base.",
+                        code="INVALID_CONTENT",
+                    )
             # The wrap engine works from the mesh geometry, so it needs an
             # STL.  The generic check above admits OBJ for the flat path.
             if os.path.splitext(model_path)[1].lower() != ".stl":
@@ -17555,15 +17586,16 @@ def decorate_surface(
 
                 wall_engine = getattr(pro_features, "wall_text", None)
                 if wall_engine is None:
-                    raise ImportError("wall-text engine unavailable")
+                    raise ImportError("wall engine unavailable")
+                if ctype != "text" and not hasattr(wall_engine, "wrap_mark_on_mesh_wall"):
+                    raise ImportError("wall-mark engine unavailable")
             except ImportError:
                 _refund_decoration_quota(quota_consumed)
                 return _error_dict(
-                    "Curved-wall text wrapping runs on the engine that "
-                    "ships with kiln-pro — included on the hosted service "
+                    "Curved-wall wrapping runs on the engine that ships "
+                    "with kiln-pro — included on the hosted service "
                     "(api.kiln3d.com) on every tier. Locally without it, "
-                    "place text on a flat face instead (face='front', "
-                    "'top', ...).",
+                    "decorate a flat face instead (face='front', 'top', ...).",
                     code="ENGINE_UNAVAILABLE",
                 )
 
@@ -17574,54 +17606,155 @@ def decorate_surface(
             # say so rather than accepting them and doing nothing.
             if offset_x_mm or offset_y_mm or placement != "center":
                 warnings.append(
-                    "offset_x_mm / offset_y_mm / placement don't apply to "
-                    "wall text yet — it wraps centred on the front of the "
-                    "wall at mid-height."
+                    "offset_x_mm / offset_y_mm / placement don't apply on "
+                    "the wall yet — content wraps centred on the front of "
+                    "the wall at mid-band."
                 )
-            # scale is "fraction of the face to cover"; on a wall that reads
-            # as a share of the wall's height.  The 0.5 factor keeps the
-            # default scale (0.7) on the engine's own default band share.
-            wall_kwargs: dict[str, Any] = {}
-            if absolute_size_mm > 0:
-                wall_kwargs["target_size_mm"] = absolute_size_mm
-            elif scale > 0:
-                wall_kwargs["band_fraction"] = min(0.9, scale * 0.5)
+            _no_round_wall = getattr(wall_engine, "NoRoundWallError", ValueError)
+            _mark_does_not_fit = getattr(wall_engine, "MarkDoesNotFitError", ValueError)
 
-            try:
-                wall_result = wall_engine.wrap_text_on_mesh_wall(
-                    model_path,
-                    wall_text_val,
-                    depth_mm=wall_depth,
-                    output_dir=work_dir,
-                    **wall_kwargs,
-                )
-            except TextDoesNotFitError as exc:
-                err = _error_dict(
-                    "Wall text won't fit legibly.  "
-                    + "; ".join(exc.verdict.get("warnings", [])),
-                    code="TEXT_DOES_NOT_FIT",
-                )
-                err["suggestions"] = exc.verdict.get("suggestions", [])
-                _refund_decoration_quota(quota_consumed)
-                return err
-            except getattr(
-                wall_engine, "NoRoundWallError", ValueError
-            ) as exc:
-                _refund_decoration_quota(quota_consumed)
-                return _error_dict(str(exc), code="NO_ROUND_WALL")
-            except ValueError as exc:
-                _refund_decoration_quota(quota_consumed)
-                return _error_dict(str(exc), code="INVALID_MODEL")
+            if ctype == "text":
+                # scale is "fraction of the face to cover"; on a wall that
+                # reads as a share of the wall's height.  The 0.5 factor
+                # keeps the default scale (0.7) on the engine's own default
+                # band share.
+                wall_kwargs: dict[str, Any] = {}
+                if absolute_size_mm > 0:
+                    wall_kwargs["target_size_mm"] = absolute_size_mm
+                elif scale > 0:
+                    wall_kwargs["band_fraction"] = min(0.9, scale * 0.5)
 
-            output_stl = wall_result["stl_path"]
-            result_dict = {
-                "success": True,
-                "message": (
+                try:
+                    wall_result = wall_engine.wrap_text_on_mesh_wall(
+                        model_path,
+                        wall_text_val,
+                        depth_mm=wall_depth,
+                        output_dir=work_dir,
+                        **wall_kwargs,
+                    )
+                except TextDoesNotFitError as exc:
+                    err = _error_dict(
+                        "Wall text won't fit legibly.  "
+                        + "; ".join(exc.verdict.get("warnings", [])),
+                        code="TEXT_DOES_NOT_FIT",
+                    )
+                    err["suggestions"] = exc.verdict.get("suggestions", [])
+                    _refund_decoration_quota(quota_consumed)
+                    return err
+                except _no_round_wall as exc:
+                    _refund_decoration_quota(quota_consumed)
+                    return _error_dict(str(exc), code="NO_ROUND_WALL")
+                except ValueError as exc:
+                    _refund_decoration_quota(quota_consumed)
+                    return _error_dict(str(exc), code="INVALID_MODEL")
+
+                wall_message = (
                     f"Wrapped text around the wall of "
                     f"{os.path.basename(model_path)} "
                     f"({wall_result['wrapped_deg']:.0f}° of arc at "
                     f"{wall_result['size_mm']:.1f}mm letters)."
-                ),
+                )
+                wall_decoration = {
+                    "content_type": "text",
+                    "mode": "deboss",
+                    # What was actually carved, not what was asked for —
+                    # size and depth may be adjusted to keep the text
+                    # readable and the wall sound.
+                    "depth_mm": wall_result["meta"].get("depth_mm", wall_depth),
+                    "requested_depth_mm": wall_depth,
+                    "text_size_mm": wall_result["size_mm"],
+                    "material": material,
+                }
+                wall_event = "text_wall"
+            else:
+                # A MARK: trace/parse the artwork into polygon geometry, plan
+                # the placement (plain band, radius, size), then prepare the
+                # artwork at its final width so SVG stroke floors scale to
+                # printable widths, and wrap.
+                from kiln.image_to_surface import (
+                    prepare_logo_image_for_emboss,
+                    prepare_svg_for_emboss,
+                )
+
+                mark_kwargs: dict[str, Any] = {}
+                if absolute_size_mm > 0:
+                    mark_kwargs["target_width_mm"] = absolute_size_mm
+                elif scale > 0:
+                    mark_kwargs["width_fraction"] = min(0.95, scale)
+                try:
+                    if ctype == "svg":
+                        probe = prepare_svg_for_emboss(
+                            content, work_dir, min_physical_width_mm=1.5, target_size_mm=0,
+                        )
+                        _pw = float(probe.get("content_width") or probe.get("width") or 0)
+                        _ph = float(probe.get("content_height") or probe.get("height") or 0)
+                        if _pw <= 0 or _ph <= 0 or not probe.get("openscad_polygons"):
+                            raise ValueError(
+                                f"No carvable geometry found in {os.path.basename(content)}."
+                            )
+                        mark_plan = wall_engine.plan_mark_on_mesh_wall(
+                            model_path, aspect_ratio=_ph / _pw, depth_mm=wall_depth, **mark_kwargs,
+                        )
+                        wall_result = wall_engine.wrap_mark_on_mesh_wall(
+                            model_path,
+                            None,
+                            depth_mm=wall_depth,
+                            plan=mark_plan,
+                            prepare=lambda w, _c=content, _d=work_dir: prepare_svg_for_emboss(
+                                _c, _d, min_physical_width_mm=1.5, target_size_mm=w,
+                            ),
+                            output_dir=work_dir,
+                            decoration_meta={"content_type": "svg", "image_style": "stencil"},
+                        )
+                    else:
+                        mark_info = prepare_logo_image_for_emboss(content, work_dir)
+                        wall_result = wall_engine.wrap_mark_on_mesh_wall(
+                            model_path,
+                            mark_info,
+                            depth_mm=wall_depth,
+                            output_dir=work_dir,
+                            decoration_meta={"content_type": "image", "image_style": "stencil"},
+                            **mark_kwargs,
+                        )
+                except _mark_does_not_fit as exc:
+                    verdict = getattr(exc, "verdict", {}) or {}
+                    err = _error_dict(
+                        "The mark won't fit the wall at a printable size.  "
+                        + "; ".join(verdict.get("warnings", [])),
+                        code="MARK_DOES_NOT_FIT",
+                    )
+                    err["suggestions"] = verdict.get("suggestions", [])
+                    _refund_decoration_quota(quota_consumed)
+                    return err
+                except _no_round_wall as exc:
+                    _refund_decoration_quota(quota_consumed)
+                    return _error_dict(str(exc), code="NO_ROUND_WALL")
+                except ValueError as exc:
+                    _refund_decoration_quota(quota_consumed)
+                    return _error_dict(str(exc), code="INVALID_CONTENT")
+
+                wall_message = (
+                    f"Wrapped the mark around the wall of "
+                    f"{os.path.basename(model_path)} "
+                    f"({wall_result['wrapped_deg']:.0f}° of arc, "
+                    f"{wall_result['width_mm']:.1f}mm wide)."
+                )
+                wall_decoration = {
+                    "content_type": ctype,
+                    "mode": "deboss",
+                    "image_style": "stencil",
+                    "depth_mm": wall_result["meta"].get("depth_mm", wall_depth),
+                    "requested_depth_mm": wall_depth,
+                    "width_mm": wall_result["width_mm"],
+                    "height_mm": wall_result["height_mm"],
+                    "material": material,
+                }
+                wall_event = "mark_wall"
+
+            output_stl = wall_result["stl_path"]
+            result_dict = {
+                "success": True,
+                "message": wall_message,
                 "output_stl": output_stl,
                 "file_size_bytes": (
                     os.path.getsize(output_stl)
@@ -17634,22 +17767,16 @@ def decorate_surface(
                     "z_mm": wall_result["z_mm"],
                     "wrapped_deg": wall_result["wrapped_deg"],
                 },
-                "decoration": {
-                    "content_type": "text",
-                    "mode": "deboss",
-                    # What was actually carved, not what was asked for —
-                    # size and depth may be adjusted to keep the text
-                    # readable and the wall sound.
-                    "depth_mm": wall_result["meta"].get("depth_mm", wall_depth),
-                    "requested_depth_mm": wall_depth,
-                    "text_size_mm": wall_result["size_mm"],
-                    "material": material,
-                },
+                "decoration": wall_decoration,
                 "compile_time_seconds": wall_result.get(
                     "compile_time_seconds"
                 ),
                 "scad_path": wall_result["scad_path"],
             }
+            if wall_result.get("plain_band_mm"):
+                result_dict["face"]["plain_band_mm"] = wall_result["plain_band_mm"]
+            if wall_result.get("decoration_faces"):
+                result_dict["decoration_faces"] = wall_result["decoration_faces"]
             combined_warnings = [*warnings, *wall_result.get("warnings", [])]
             if combined_warnings:
                 result_dict["warnings"] = combined_warnings
@@ -17660,7 +17787,7 @@ def decorate_surface(
             try:
                 from kiln.daily_stats import record_event
 
-                record_event("decorations", detail="text_wall")
+                record_event("decorations", detail=wall_event)
             except Exception:
                 pass
             return _finish_decoration_result(result_dict, content=content)
