@@ -216,17 +216,7 @@ jobs:
         # 2026-06-27; extended to the test suite after a 2026-09-02 sweep found
         # paid-tier tables and ~50 private module paths there while every
         # existing gate stayed green.  Exit 2 = leak.
-        #
-        # TODO(fix/public-tests-close-doors): the sibling branch removes the
-        # findings this step reports on today's tree (paid-tier tables, private
-        # paths, self-labels, and strategy-narrating docstrings in kiln/tests).
-        # Until it merges this step is reported but not blocking.  Drop the
-        # `continue-on-error` line — and the matching xfail marker in
-        # kiln/tests/test_moat_comment_leak.py — in the same commit that lands
-        # the cleanup.  The `--staged` chain in check_public_language.py already
-        # refuses NEW leaks at commit time regardless of this flag.
         run: python3 scripts/audit_moat_comment_leak.py
-        continue-on-error: true
 
       - name: Run kiln tests
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}

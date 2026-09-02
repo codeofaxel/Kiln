@@ -31,8 +31,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 
 def _load_gate():
     root = Path(__file__).resolve().parents[2]
@@ -65,19 +63,6 @@ def _live_run() -> subprocess.CompletedProcess:
 
 # ── The live gate stays green (the in-suite backstop) ───────────────────────
 
-# TODO(fix/public-tests-close-doors): today's tree carries the findings this
-# gate was extended to catch — paid-tier ``_PRO_*`` tables, ``kiln_pro/data``
-# paths, self-labels, and strategy-narrating docstrings in kiln/tests.  The
-# sibling branch removes them.  ``strict=True`` means this test FAILS the
-# moment the tree is clean,
-# which forces the marker (and the matching ``continue-on-error`` in
-# .github/workflows/ci.yml) to be removed in the same commit — the interim
-# can't silently outlive the cleanup.
-@pytest.mark.xfail(
-    strict=True,
-    reason="pending fix/public-tests-close-doors: the tree still carries the "
-    "leaks this gate now catches; remove this marker with the cleanup",
-)
 def test_no_moat_comment_leak() -> None:
     result = _live_run()
     assert result.returncode == 0, (
