@@ -5,16 +5,15 @@ field over Moonraker's JSON-RPC ``notify_status_update`` push channel.
 When ``state`` transitions to ``"error"`` with a message that names a
 filament / extruder issue (filament_switch_sensor or
 filament_motion_sensor runout, extruder shutdown), the Moonraker
-adapter feeds that signal into kiln-pro's ``record_extrusion_event_for_printer``
-so the wear cross-check can correlate flow signals against gram-count
-wear estimates.
+adapter hands that signal to kiln-pro's
+``record_extrusion_event_for_printer``.  What kiln-pro does with it is
+its own concern; this file covers the wire.
 
 Tests cover:
 - Classifier returns the right (event_type, severity) tuple per
   Klipper message substring.
 - Non-error states and unrelated error messages return None — the
-  wire skips them so generic firmware faults don't poison the wear
-  signal.
+  wire skips them so generic firmware faults don't reach the wire.
 - De-duplication: the same (state, message) fires once per session
   even when Klipper repeats the status push.
 - The wire path falls through cleanly when kiln-pro is not installed
@@ -52,7 +51,7 @@ class TestClassifyFlowAnomaly:
     def test_error_with_unrelated_message_returns_none(self):
         # Generic Klipper shutdown — could be MCU loss, thermal runaway,
         # endstop fault.  None of these are flow signals, so the wire
-        # MUST drop them to avoid poisoning the wear cross-check.
+        # MUST drop them.
         assert _classify_flow_anomaly("error", "MCU 'mcu' shutdown") is None
         assert _classify_flow_anomaly("error", "Thermal runaway detected") is None
         assert _classify_flow_anomaly(

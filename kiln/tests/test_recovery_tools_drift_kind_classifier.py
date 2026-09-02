@@ -1,17 +1,14 @@
-"""Coverage for the symptom-keyword classifier used by the kiln-pro
-wear-hypothesis hooks.
+"""Coverage for the symptom-keyword classifier read by the kiln-pro hooks.
 
 ``_classify_drift_kind_from_failure`` maps a free-form failure context
 (error message + classified analysis) to one of three ``drift_kind``
-values that drive per-component attribution inside the kiln-pro wear
-hypothesis:
+values, which it passes on:
 
-- ``"dimensional"`` — tip-wear failure modes (first-layer thickness
-  drift, dimensional drift, fine-detail loss).
-- ``"flow"`` — bore-wear modes (under-extrusion, layer-adhesion
-  failures, clog / starved extruder).
-- ``"unknown"`` — neither vocabulary matched; the wear hypothesis
-  falls back to a single-scalar verdict.
+- ``"dimensional"`` — first-layer thickness drift, dimensional drift,
+  fine-detail loss.
+- ``"flow"`` — under-extrusion, layer-adhesion failures, clog /
+  starved extruder.
+- ``"unknown"`` — neither vocabulary matched.
 
 Flow keywords take precedence over dimensional keywords because flow
 symptoms are typically more specific signals (under-extrusion

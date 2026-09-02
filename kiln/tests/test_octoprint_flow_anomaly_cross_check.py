@@ -4,9 +4,9 @@ When OctoPrint reports a flow / extrusion anomaly (``FilamentChange``
 event, ``Error`` event whose payload mentions the filament path,
 filament-sensor / under-extrusion plugin events, or a ``state.flags.
 filament_change`` transition from the REST poll), the OctoPrint
-adapter feeds the signal into kiln-pro's ``record_extrusion_event_for_printer``
-so the nozzle wear cross-check can correlate flow signals against
-gram-count wear estimates.
+adapter hands the signal to kiln-pro's
+``record_extrusion_event_for_printer``.  What kiln-pro does with it is
+its own concern; this file covers the wire.
 
 Tests cover:
 
@@ -85,8 +85,7 @@ class TestClassifyFlowAnomaly:
         assert _classify_flow_anomaly("Error", {}) is None
 
     def test_error_without_filament_keyword_returns_none(self) -> None:
-        # Thermal-runaway / generic errors must NOT poison the wear-rate
-        # signal.
+        # Thermal-runaway / generic errors must NOT reach the wire.
         result = _classify_flow_anomaly(
             "Error",
             {"error": "Thermal runaway on tool 0"},

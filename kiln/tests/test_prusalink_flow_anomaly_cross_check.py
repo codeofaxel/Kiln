@@ -3,9 +3,9 @@
 When Prusa Link's ``/api/v1/status`` reports a transition into an
 ATTENTION / ERROR state whose message text implicates the filament
 path (jam, runout, MMU error, blocked extruder), the Prusa Link
-adapter feeds that signal into kiln-pro's
-``record_extrusion_event_for_printer`` so the wear cross-check can correlate
-flow signals against gram-count wear estimates.
+adapter hands that signal to kiln-pro's
+``record_extrusion_event_for_printer``.  What kiln-pro does with it is
+its own concern; this file covers the wire.
 
 Tests cover:
 - Classifier returns the right ``(event_type, severity)`` tuple per
@@ -14,7 +14,7 @@ Tests cover:
   READY, STOPPED) return None — the wire skips them.
 - Generic ATTENTION / ERROR without a filament-path message hint
   returns None — bed-leveling / user-pause / first-layer-calibration
-  attentions don't poison the wear-rate signal.
+  attentions don't reach the wire.
 - Transition-only firing — the adapter does NOT fire on steady-state
   ATTENTION across consecutive polls.
 - The wire path falls through cleanly when kiln-pro is not

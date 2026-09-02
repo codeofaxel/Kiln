@@ -2,9 +2,9 @@
 
 When Bambu's MQTT push_status carries an HMS error code in the
 flow-anomaly bucket (extruder feed failure, filament broken at
-extruder, AMS jam, etc.), the bambu adapter feeds that signal into
-kiln-pro's ``record_extrusion_event_for_printer`` so the wear cross-check can
-correlate flow signals against gram-count wear estimates.
+extruder, AMS jam, etc.), the bambu adapter hands that signal to
+kiln-pro's ``record_extrusion_event_for_printer``.  What kiln-pro does
+with it is its own concern; this file covers the wire.
 
 Tests cover:
 - Classifier returns the right (event_type, severity) tuple per

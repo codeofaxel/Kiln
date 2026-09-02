@@ -1,0 +1,3 @@
+# The test suite is for the repository, not the package: keep it out of
+# the sdist so `pip download --no-binary` ships the same tree as the wheel.
+prune tests

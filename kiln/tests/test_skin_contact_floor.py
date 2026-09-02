@@ -3,8 +3,8 @@
 The kiln-pro sector carries the cited depth; this public floor is what reaches
 EVERY install (offline, free, pip) so a worn-against-skin make never ships
 without the honest caution.  These tests pin the floor's presence, its
-free-only shape (no moat can leak through the public record even when the
-kiln-pro overlay is merged in on a server), and the wearable detector.
+free-only shape (nothing from the overlay reaches the public record even
+when it is merged in on a server), and the wearable detector.
 """
 from __future__ import annotations
 
@@ -18,11 +18,11 @@ import kiln.design_intelligence as di
 
 _DATA = Path(kiln.__file__).parent / "data" / "design_knowledge"
 
-# Fields that are FREE floor (public); anything else in the overlay is moat.
+# Fields that are FREE floor (public); anything else belongs to the overlay.
 _FREE_KEYS = {
     "display_name", "base_state", "concern_level", "concern_basis", "safety_floor",
 }
-_MOAT_KEYS = {
+_OVERLAY_ONLY_KEYS = {
     "business_depth", "enterprise_depth", "exposure", "_provenance_internal",
     "remediation", "compliance", "standards_reference",
 }
@@ -46,9 +46,9 @@ def test_skin_contact_json_ships_and_is_free_only():
     materials = {k: v for k, v in raw.items() if not k.startswith("_")}
     assert len(materials) >= 12, "the floor should cover the common FDM families"
     for mid, rec in materials.items():
-        # No moat field is ever written into the PUBLIC file.
-        leaked = _MOAT_KEYS & set(rec.keys())
-        assert not leaked, f"MOAT LEAK in public skin_contact.json[{mid}]: {leaked}"
+        # No overlay-only field is ever written into the PUBLIC file.
+        leaked = _OVERLAY_ONLY_KEYS & set(rec.keys())
+        assert not leaked, f"overlay-only field in public skin_contact.json[{mid}]: {leaked}"
         floor = rec.get("safety_floor") or {}
         assert floor.get("honesty_note"), f"{mid} missing honesty_note"
         assert floor.get("refer_to_medical"), f"{mid} missing refer_to_medical"
@@ -75,12 +75,12 @@ def test_public_file_never_affirms_skin_safe():
 
 def test_get_skin_contact_floor_is_free_only_after_merge():
     # _get_kb()._load() runs the pro-overlay merge if kiln-pro is importable;
-    # the raw record may then carry moat, but the accessor must expose free
-    # fields ONLY.
+    # the raw record may then carry overlay fields, but the accessor must
+    # expose free fields ONLY.
     floor = di.get_skin_contact_floor("pla")
     assert floor is not None
     d = floor.to_dict()
-    assert _MOAT_KEYS.isdisjoint(d.keys()), f"moat leaked through accessor: {d.keys()}"
+    assert _OVERLAY_ONLY_KEYS.isdisjoint(d.keys()), f"overlay field leaked through accessor: {d.keys()}"
     assert floor.has_engineering_data() is False
     assert floor.honesty_note and floor.refer_to_medical
 
