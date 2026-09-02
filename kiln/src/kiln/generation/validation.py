@@ -55,7 +55,7 @@ _COMPONENT_FMT: dict[int, tuple[str, int]] = {
 
 
 def convert_to_stl(input_path: str, output_path: str | None = None) -> str:
-    """Convert an OBJ or GLB file to binary STL.
+    """Convert an OBJ, GLB, or 3MF file to binary STL.
 
     Parses the input geometry and writes a binary STL with the same
     triangles.  Quads and higher polygons are triangulated.  Only
@@ -63,7 +63,7 @@ def convert_to_stl(input_path: str, output_path: str | None = None) -> str:
     discarded (not needed for 3D printing).
 
     Args:
-        input_path: Path to the input file (``.obj`` or ``.glb``).
+        input_path: Path to the input file (``.obj``, ``.glb``, or ``.3mf``).
         output_path: Path for the output STL file.  Defaults to
             replacing the input extension with ``.stl``.
 
@@ -78,31 +78,32 @@ def convert_to_stl(input_path: str, output_path: str | None = None) -> str:
 
     if ext == ".glb":
         return _convert_glb_to_stl(path, output_path)
-    if ext == ".obj":
+    if ext in (".obj", ".3mf"):
+        label = ext[1:].upper()
         errors: list[str] = []
-        triangles, vertices = _parse_obj(path, errors)
+        triangles, vertices = _parse_mesh_file(path, errors)
         if errors:
-            raise ValueError(f"Failed to parse OBJ: {'; '.join(errors)}")
+            raise ValueError(f"Failed to parse {label}: {'; '.join(errors)}")
         if not triangles:
-            raise ValueError("OBJ file contains no geometry to convert.")
+            raise ValueError(f"{label} file contains no geometry to convert.")
         if output_path is None:
             output_path = str(path.with_suffix(".stl"))
         _write_binary_stl(triangles, output_path)
         return output_path
 
     raise ValueError(
-        f"convert_to_stl expects .obj or .glb input, got {ext!r}"
+        f"convert_to_stl expects .obj, .glb, or .3mf input, got {ext!r}"
     )
 
 
 def validate_mesh(file_path: str) -> MeshValidationResult:
-    """Validate an STL or OBJ file for 3D printing readiness.
+    """Validate an STL, OBJ, GLB, or 3MF file for 3D printing readiness.
 
     Checks performed:
 
     1. File exists and is non-empty.
     2. Extension is ``.stl`` or ``.obj``.
-    3. Geometry is parseable (binary/ASCII STL or OBJ).
+    3. Geometry is parseable (binary/ASCII STL, OBJ, GLB, or 3MF).
     4. Triangle count is within printable range.
     5. Bounding box dimensions are reasonable.
     6. Basic manifold (watertight) check via edge analysis.
@@ -133,20 +134,18 @@ def validate_mesh(file_path: str) -> MeshValidationResult:
         )
 
     ext = path.suffix.lower()
-    if ext not in (".stl", ".obj", ".glb"):
+    if ext not in _SUPPORTED_MESH_FORMATS:
         return MeshValidationResult(
             valid=False,
-            errors=[f"Unsupported file type: {ext!r}.  Expected .stl, .obj, or .glb."],
+            errors=[
+                f"Unsupported file type: {ext!r}.  "
+                f"Expected one of {', '.join(_SUPPORTED_MESH_FORMATS)}."
+            ],
         )
 
     # --- parse geometry ---
     try:
-        if ext == ".stl":
-            triangles, vertices = _parse_stl(path, errors)
-        elif ext == ".glb":
-            triangles, vertices = _parse_glb(path, errors)
-        else:
-            triangles, vertices = _parse_obj(path, errors)
+        triangles, vertices = _parse_mesh_file(path, errors)
     except Exception as exc:
         return MeshValidationResult(
             valid=False,
@@ -1044,6 +1043,130 @@ def _convert_glb_to_stl(path: Path, output_path: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 3MF parsing
+# ---------------------------------------------------------------------------
+
+def _parse_3mf(
+    path: Path,
+    errors: list[str],
+) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
+    """Parse the geometry of a 3MF archive (stdlib only).
+
+    Walks every ``<build>`` item, and every ``<component>`` beneath it,
+    applying the build-item and component transforms so the triangles
+    land where a slicer would place them, and scaling by the model
+    ``unit`` so the result is in millimetres.  An object placed twice on
+    the plate contributes its triangles twice — this is the geometry
+    that gets printed, not the resource list.  Objects that live in
+    other model parts of the archive (``p:path``) are followed.  The walk
+    itself is :class:`kiln.threemf_parser._ModelArchive`, shared with the
+    colour parser so both readers see the same plate; colors, paint
+    states, and slicer metadata are not read here.
+
+    Returns:
+        (triangles, unique_vertices) in the same shape as :func:`_parse_stl`.
+    """
+    triangles: list[tuple[tuple[float, ...], ...]] = []
+    vertex_set: set[tuple[float, ...]] = set()
+    for _placed, _verts, tris in _placed_3mf_meshes(path, errors):
+        for triangle in tris:
+            triangles.append(triangle)
+            vertex_set.update(triangle)
+    return triangles, list(vertex_set)
+
+
+def _placed_3mf_meshes(
+    path: Path,
+    errors: list[str],
+) -> list[tuple[Any, list[tuple[float, float, float]], list[tuple[tuple[float, ...], ...]]]]:
+    """Every mesh the build places, in millimetres, as
+    ``(placed_object, vertices, triangles)`` — the plate as a slicer sees it.
+
+    The 3MF readers in this module (:func:`_parse_3mf`,
+    :func:`extract_model_from_3mf`) share this so they cannot disagree
+    about what the file contains.  Trouble is reported through *errors*
+    and reads as an empty list.
+    """
+    from kiln.threemf_parser import (
+        _CORE_NS,
+        _IDENTITY_3MF,
+        _apply_3mf_transform,
+        _ModelArchive,
+        _parse_vertices,
+    )
+
+    ns = f"{{{_CORE_NS}}}"
+    out: list[tuple[Any, list[tuple[float, float, float]], list[tuple[tuple[float, ...], ...]]]] = []
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            archive = _ModelArchive(zf, errors)
+            to_mm = archive.root_transform_mm()
+            if to_mm is None:
+                return []
+            for placed in archive.placements(root_transform=to_mm):
+                mesh_el = placed.element.find(f"{ns}mesh")
+                if mesh_el is None:
+                    continue
+                verts = _parse_vertices(mesh_el)
+                if placed.transform is not _IDENTITY_3MF:
+                    verts = [_apply_3mf_transform(placed.transform, v) for v in verts]
+                tris: list[tuple[tuple[float, ...], ...]] = []
+                tris_el = mesh_el.find(f"{ns}triangles")
+                n_verts = len(verts)
+                for tri in (tris_el.findall(f"{ns}triangle") if tris_el is not None else ()):
+                    try:
+                        i0 = int(tri.get("v1", ""))
+                        i1 = int(tri.get("v2", ""))
+                        i2 = int(tri.get("v3", ""))
+                    except ValueError:
+                        continue
+                    if not (0 <= i0 < n_verts and 0 <= i1 < n_verts and 0 <= i2 < n_verts):
+                        continue
+                    tris.append((verts[i0], verts[i1], verts[i2]))
+                out.append((placed, verts, tris))
+    except zipfile.BadZipFile:
+        errors.append("Not a valid 3MF: the file is not a ZIP archive.")
+        return []
+    except (ValueError, KeyError, OSError) as exc:
+        errors.append(f"Not a valid 3MF: {exc}")
+        return []
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Format dispatch
+# ---------------------------------------------------------------------------
+
+#: Every mesh format the validation engine reads.  Each door in this
+#: module that accepts a file goes through :func:`_parse_mesh_file`, so a
+#: format added here is read by every tool at once.
+_SUPPORTED_MESH_FORMATS: tuple[str, ...] = (".stl", ".obj", ".glb", ".3mf")
+
+
+def _parse_mesh_file(
+    path: Path,
+    errors: list[str],
+) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
+    """Parse any supported mesh format into ``(triangles, unique_vertices)``.
+
+    An unsupported extension is reported through *errors*, the same
+    channel a malformed file uses, so every caller handles both the
+    same way.
+    """
+    ext = path.suffix.lower()
+    if ext == ".stl":
+        return _parse_stl(path, errors)
+    if ext == ".obj":
+        return _parse_obj(path, errors)
+    if ext == ".glb":
+        return _parse_glb(path, errors)
+    if ext == ".3mf":
+        return _parse_3mf(path, errors)
+    errors.append(f"Unsupported format: {ext}")
+    return [], []
+
+
+# ---------------------------------------------------------------------------
 # Mesh rescaling
 # ---------------------------------------------------------------------------
 
@@ -1055,26 +1178,18 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     connected components, and a composite printability score.
 
     Args:
-        file_path: Path to .stl, .obj, or .glb file.
+        file_path: Path to a .stl, .obj, .glb, or .3mf file.
 
     Returns:
         :class:`MeshAnalysis` with full metrics.
     """
     path = Path(file_path)
-    ext = path.suffix.lower()
 
     if not path.is_file():
         return MeshAnalysis(printability_issues=["File not found"])
 
     errors: list[str] = []
-    if ext == ".stl":
-        triangles, vertices = _parse_stl(path, errors)
-    elif ext == ".obj":
-        triangles, vertices = _parse_obj(path, errors)
-    elif ext == ".glb":
-        triangles, vertices = _parse_glb(path, errors)
-    else:
-        return MeshAnalysis(printability_issues=[f"Unsupported format: {ext}"])
+    triangles, vertices = _parse_mesh_file(path, errors)
 
     if errors or not triangles:
         return MeshAnalysis(printability_issues=errors or ["No geometry found"])
@@ -1500,14 +1615,9 @@ def compose_stls(
         path = Path(fp)
         errors: list[str] = []
         ext = path.suffix.lower()
-        if ext == ".stl":
-            triangles, _ = _parse_stl(path, errors)
-        elif ext == ".obj":
-            triangles, _ = _parse_obj(path, errors)
-        elif ext == ".glb":
-            triangles, _ = _parse_glb(path, errors)
-        else:
+        if ext not in _SUPPORTED_MESH_FORMATS:
             raise ValueError(f"Unsupported format for composition: {ext}")
+        triangles, _ = _parse_mesh_file(path, errors)
 
         if errors:
             raise ValueError(f"Failed to parse {fp}: {'; '.join(errors)}")
@@ -1546,14 +1656,9 @@ def export_3mf(
     ext = path.suffix.lower()
     errors: list[str] = []
 
-    if ext == ".stl":
-        triangles, vertices = _parse_stl(path, errors)
-    elif ext == ".obj":
-        triangles, vertices = _parse_obj(path, errors)
-    elif ext == ".glb":
-        triangles, vertices = _parse_glb(path, errors)
-    else:
+    if ext not in _SUPPORTED_MESH_FORMATS:
         raise ValueError(f"Unsupported format for 3MF export: {ext}")
+    triangles, vertices = _parse_mesh_file(path, errors)
 
     if errors:
         raise ValueError(f"Failed to parse {file_path}: {'; '.join(errors)}")
@@ -1953,7 +2058,7 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
     support generation is more sophisticated.
 
     Args:
-        file_path: Path to .stl, .obj, or .glb file.
+        file_path: Path to a .stl, .obj, .glb, or .3mf file.
 
     Returns:
         Dict with support volume estimate and overhang statistics.
@@ -1962,14 +2067,9 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
     ext = path.suffix.lower()
     errors: list[str] = []
 
-    if ext == ".stl":
-        triangles, _ = _parse_stl(path, errors)
-    elif ext == ".obj":
-        triangles, _ = _parse_obj(path, errors)
-    elif ext == ".glb":
-        triangles, _ = _parse_glb(path, errors)
-    else:
+    if ext not in _SUPPORTED_MESH_FORMATS:
         raise ValueError(f"Unsupported format: {ext}")
+    triangles, _ = _parse_mesh_file(path, errors)
 
     if errors:
         raise ValueError(f"Failed to parse: {'; '.join(errors)}")
@@ -2379,16 +2479,7 @@ def _load_triangles(
     path: Path, errors: list[str]
 ) -> list[tuple[tuple[float, ...], ...]]:
     """Load triangles from any supported format."""
-    ext = path.suffix.lower()
-    if ext == ".stl":
-        tris, _ = _parse_stl(path, errors)
-    elif ext == ".obj":
-        tris, _ = _parse_obj(path, errors)
-    elif ext == ".glb":
-        tris, _ = _parse_glb(path, errors)
-    else:
-        errors.append(f"Unsupported format: {ext}")
-        return []
+    tris, _ = _parse_mesh_file(path, errors)
     return tris
 
 
@@ -4427,18 +4518,16 @@ def extract_model_from_3mf(
     """Extract embedded 3D model geometry from a .3mf file to STL.
 
     3MF files (including .gcode.3mf from Bambu Studio) are ZIP archives
-    containing an XML model file at ``3D/3dmodel.model``.  This function
-    parses the XML, extracts all mesh objects (vertices + triangles), and
-    writes a binary STL.
+    holding one or more XML model parts.  This function walks the build —
+    every item and component, following the production extension's
+    ``p:path`` into the ``3D/Objects/object_N.model`` parts a BambuStudio /
+    OrcaSlicer project keeps its meshes in — and writes the placed
+    geometry as one binary STL, in millimetres.
 
-    Handles both standard 3MF and Bambu-style .gcode.3mf files.  When
-    multiple objects exist they are merged into a single STL.
-
-    .. note::
-        3MF item/component transforms are not applied — geometry is
-        extracted as stored.  This is correct for single-model files
-        and Bambu .gcode.3mf files where geometry is already in world
-        coordinates.
+    Build-item and component transforms and the model ``unit`` ARE
+    applied: the STL is the plate as the slicer would place it, so a
+    project whose item scales or rotates its mesh extracts at print size.
+    An object placed twice is written twice.
 
     Args:
         file_path: Path to the .3mf or .gcode.3mf file.
@@ -4452,8 +4541,6 @@ def extract_model_from_3mf(
         ValueError: If the file is not a valid 3MF or contains no geometry.
         FileNotFoundError: If the input file does not exist.
     """
-    import xml.etree.ElementTree as ET
-
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
@@ -4461,89 +4548,27 @@ def extract_model_from_3mf(
     if not zipfile.is_zipfile(file_path):
         raise ValueError(f"Not a valid ZIP/3MF file: {file_path}")
 
-    # Locate the model XML inside the archive.
-    model_xml: str | None = None
+    from kiln.threemf_parser import _find_model_xml
+
     with zipfile.ZipFile(file_path, "r") as zf:
-        names = zf.namelist()
+        try:
+            _find_model_xml(zf)
+        except ValueError as exc:
+            raise ValueError(f"No 3D model found in {file_path}. {exc}") from exc
 
-        # Prefer the standard path; fall back to any .model file.
-        candidates = [
-            "3D/3dmodel.model",
-            "3d/3dmodel.model",  # case-insensitive fallback
-        ]
-        for candidate in candidates:
-            if candidate in names:
-                model_xml = zf.read(candidate).decode("utf-8")
-                break
+    errors: list[str] = []
+    placed_meshes = _placed_3mf_meshes(path, errors)
 
-        if model_xml is None:
-            # Broader search for any .model file in the archive.
-            for name in names:
-                if name.lower().endswith(".model"):
-                    model_xml = zf.read(name).decode("utf-8")
-                    break
-
-    if model_xml is None:
-        raise ValueError(
-            f"No 3D model found in {file_path}. "
-            f"Archive contains: {', '.join(names[:20])}"
-        )
-
-    # Parse the XML model.
-    root = ET.fromstring(model_xml)
-
-    # Handle XML namespace — 3MF uses a default namespace.
-    ns = ""
-    if root.tag.startswith("{"):
-        ns = root.tag.split("}")[0] + "}"
-
-    # Collect all mesh objects (a 3MF can have multiple objects).
     all_triangles: list[tuple[tuple[float, ...], ...]] = []
     total_vertices = 0
-
-    for obj in root.iter(f"{ns}object"):
-        mesh_el = obj.find(f"{ns}mesh")
-        if mesh_el is None:
-            continue
-
-        verts_el = mesh_el.find(f"{ns}vertices")
-        tris_el = mesh_el.find(f"{ns}triangles")
-        if verts_el is None or tris_el is None:
-            continue
-
-        # Parse vertices.
-        vertices: list[tuple[float, ...]] = []
-        for v_el in verts_el.findall(f"{ns}vertex"):
-            x = float(v_el.get("x", "0"))
-            y = float(v_el.get("y", "0"))
-            z = float(v_el.get("z", "0"))
-            vertices.append((x, y, z))
-
-        total_vertices += len(vertices)
-
-        # Parse triangles (index references into vertices).
-        for t_el in tris_el.findall(f"{ns}triangle"):
-            v1_idx = int(t_el.get("v1", "0"))
-            v2_idx = int(t_el.get("v2", "0"))
-            v3_idx = int(t_el.get("v3", "0"))
-
-            if (
-                v1_idx < 0
-                or v2_idx < 0
-                or v3_idx < 0
-                or v1_idx >= len(vertices)
-                or v2_idx >= len(vertices)
-                or v3_idx >= len(vertices)
-            ):
-                continue  # Skip invalid index references.
-
-            all_triangles.append(
-                (vertices[v1_idx], vertices[v2_idx], vertices[v3_idx])
-            )
+    for _placed, verts, tris in placed_meshes:
+        total_vertices += len(verts)
+        all_triangles.extend(tris)
 
     if not all_triangles:
+        detail = f" ({'; '.join(errors)})" if errors else ""
         raise ValueError(
-            f"3MF file contains no mesh geometry: {file_path}"
+            f"3MF file contains no mesh geometry: {file_path}{detail}"
         )
 
     # Determine output path.

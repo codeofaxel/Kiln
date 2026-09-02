@@ -689,3 +689,25 @@ class TestStepColors:
         assert updated["painted"]["step_colors"] == {
             "0": "#F72323", "1": "#FFFFFF",
         }
+
+
+class TestPaintSaysWhetherTheColourIsLoaded:
+    def test_paint_door_carries_the_advisory(self, carved_pair, tmp_path, monkeypatch):
+        from kiln import server
+
+        original, decorated, idx = carved_pair
+        record_decoration_faces(original, decorated, face_normal=(0, 0, 1))
+        seen: dict[str, Any] = {}
+
+        def fake(colours, *, printer_name=None, adapter=None):
+            seen["colours"] = list(colours)
+            return {"verdict": "mismatch", "message": "No red loaded on default."}
+
+        monkeypatch.setattr(server, "_spool_advisory", fake)
+        result = _call_paint_tool(
+            model_path=decorated, color="#F72323", base_color="#FFFFFF",
+            output_path=str(tmp_path / "painted.3mf"),
+        )
+        assert result["success"] is True, result.get("error")
+        assert result["ams_advisory"]["verdict"] == "mismatch"
+        assert seen["colours"] == ["#F72323", "#FFFFFF"]

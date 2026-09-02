@@ -26,11 +26,11 @@ import numpy as np
 
 from kiln import _vec
 from kiln.generation.validation import (
+    _SUPPORTED_MESH_FORMATS,
     _bed_threshold_z,
     _is_bed_supported_triangle,
     _mesh_bed_z,
-    _parse_obj,
-    _parse_stl,
+    _parse_mesh_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -1136,7 +1136,7 @@ def _normalize_triangle_winding(
 def _parse_mesh(
     file_path: str,
 ) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
-    """Parse an STL or OBJ file, returning (triangles, vertices).
+    """Parse an STL, OBJ, GLB, or 3MF file, returning (triangles, vertices).
 
     :raises ValueError: If the file is not a supported format or cannot
         be parsed.
@@ -1148,12 +1148,12 @@ def _parse_mesh(
     ext = path.suffix.lower()
     errors: list[str] = []
 
-    if ext == ".stl":
-        triangles, vertices = _parse_stl(path, errors)
-    elif ext == ".obj":
-        triangles, vertices = _parse_obj(path, errors)
-    else:
-        raise ValueError(f"Unsupported file type: {ext!r}.  Expected .stl or .obj.")
+    if ext not in _SUPPORTED_MESH_FORMATS:
+        raise ValueError(
+            f"Unsupported file type: {ext!r}.  "
+            f"Expected one of {', '.join(_SUPPORTED_MESH_FORMATS)}."
+        )
+    triangles, vertices = _parse_mesh_file(path, errors)
 
     if errors:
         raise ValueError(f"Failed to parse mesh: {'; '.join(errors)}")

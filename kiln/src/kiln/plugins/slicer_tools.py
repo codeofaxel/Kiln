@@ -1745,8 +1745,18 @@ class _SlicerToolsPlugin:
                 if _srv._resolve_target_printer_type(printer_name, adapter) == "bambu":
                     ams_decision = _srv._resolve_use_ams(
                         "auto", None, adapter, material=material,
+                        # The sliced file says which colours it wants, so
+                        # each extruder routes to the tray of that colour.
+                        file_path=upload_path,
                     )
                     ams_routing_warnings = list(ams_decision.get("warnings") or [])
+                    if ams_decision.get("blocked"):
+                        return _srv._error_dict(
+                            " ".join(ams_routing_warnings) or "AMS routing blocked.",
+                            code="AMS_COLOR_MISMATCH",
+                            retryable=False,
+                            extra={"ams_plan": ams_decision.get("plan")},
+                        )
                     # Refuse to silent-route when AMS state is ambiguous
                     # (hardware bits say AMS present but no tray state, or
                     # probe errored out).  Returning an error envelope
@@ -1777,6 +1787,8 @@ class _SlicerToolsPlugin:
                             "ams_mapping": mapping,
                             "warnings": ams_routing_warnings,
                         }
+                        if ams_decision.get("plan"):
+                            ams_routing["plan"] = ams_decision["plan"]
                     else:
                         ams_routing = {
                             "routed": "external_spool",
