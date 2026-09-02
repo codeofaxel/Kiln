@@ -101,13 +101,94 @@ def test_horizontal_caps_selects_top_face(mesh, image):
     assert ds.call_args.kwargs["face"] == "top"
 
 
-def test_vertical_walls_falls_back_to_auto_face(mesh, image):
+def _refused(code: str, message: str = "nope"):
+    return {"success": False, "error": {"code": code, "message": message}}
+
+
+def test_vertical_walls_asks_for_the_curved_wall(mesh, image):
+    """The selection names the walls, so the carve must go there.  It used
+    to resolve to "auto", which on a round body picks the largest FLAT
+    face — the cap the selection explicitly excludes."""
     with patch("kiln.server.decorate_surface", return_value=_ok()) as ds:
-        apply_decoration_spec(
+        result = apply_decoration_spec(
             host_mesh_path=mesh, pattern_family="custom_image",
             image_asset_path=image, surface_selection="vertical_walls",
         )
-    assert ds.call_args.kwargs["face"] == "auto"
+    assert ds.call_args.kwargs["face"] == "wall"
+    assert ds.call_count == 1
+    assert not result.get("warnings")
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "NO_ROUND_WALL", "INVALID_CONTENT", "INVALID_MODE",
+        "UNSUPPORTED_FORMAT", "ENGINE_UNAVAILABLE", "MARK_DOES_NOT_FIT",
+        "TEXT_DOES_NOT_FIT",
+    ],
+)
+def test_vertical_walls_degrades_to_the_flat_face_and_says_so(mesh, image, code):
+    """A box, a photo, an emboss family, a public-only install: the wall
+    cannot take the carve, so the preset lands flat rather than failing —
+    the old behaviour, minus the silence."""
+    with patch(
+        "kiln.server.decorate_surface",
+        side_effect=[_refused(code, "because reasons"), _ok()],
+    ) as ds:
+        result = apply_decoration_spec(
+            host_mesh_path=mesh, pattern_family="custom_image",
+            image_asset_path=image, surface_selection="vertical_walls",
+        )
+    assert [c.kwargs["face"] for c in ds.call_args_list] == ["wall", "auto"]
+    assert result["success"] is True
+    assert result["decorated_model_path"] == "/tmp/out.stl"
+    note = " ".join(result["warnings"])
+    assert "vertical_walls" in note and "flat face" in note
+    assert "because reasons" in note, "the refusal's own reason must survive"
+
+
+def test_vertical_walls_does_not_retry_a_malformed_request(mesh, image):
+    """Only wall-capability refusals fall back.  A different failure is a
+    real failure and must surface, not be retried into a flat carve."""
+    with patch(
+        "kiln.server.decorate_surface", return_value=_refused("PRO_REQUIRED"),
+    ) as ds:
+        result = apply_decoration_spec(
+            host_mesh_path=mesh, pattern_family="custom_image",
+            image_asset_path=image, surface_selection="vertical_walls",
+        )
+    assert ds.call_count == 1
+    assert result["success"] is False
+
+
+def test_explicit_wall_face_gets_the_honest_error(mesh, image):
+    """A caller who asked for the wall by name is told the wall refused —
+    landing somewhere else while reporting success is the silently-wrong
+    result this whole path exists to avoid."""
+    with patch(
+        "kiln.server.decorate_surface", return_value=_refused("NO_ROUND_WALL"),
+    ) as ds:
+        result = apply_decoration_spec(
+            host_mesh_path=mesh, pattern_family="custom_image",
+            image_asset_path=image, surface_selection="vertical_walls",
+            face="wall",
+        )
+    assert ds.call_count == 1
+    assert result["success"] is False
+    assert result["error"]["code"] == "NO_ROUND_WALL"
+
+
+def test_other_selections_are_unchanged(mesh, image):
+    for selection, expected in (
+        ("outer_faces", "auto"), ("all_faces", "auto"), ("horizontal_caps", "top"),
+    ):
+        with patch("kiln.server.decorate_surface", return_value=_ok()) as ds:
+            apply_decoration_spec(
+                host_mesh_path=mesh, pattern_family="custom_image",
+                image_asset_path=image, surface_selection=selection,
+            )
+        assert ds.call_args.kwargs["face"] == expected
+        assert ds.call_count == 1
 
 
 def test_fastmcp_list_shape_unwraps_to_payload_dict(mesh, image):
