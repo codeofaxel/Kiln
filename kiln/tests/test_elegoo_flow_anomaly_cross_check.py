@@ -3,9 +3,9 @@
 When an Elegoo Centauri Carbon SDCP V3 status push carries an
 ``ErrorStatusReason`` (SDCP_PRINT_CAUSE_*) that the firmware
 classifies as a filament-path failure — runout or jam — the
-Elegoo adapter feeds that signal into kiln-pro's
-``record_extrusion_event_for_printer`` so the wear cross-check can correlate
-flow signals against gram-count wear estimates.
+Elegoo adapter hands that signal to kiln-pro's
+``record_extrusion_event_for_printer``.  What kiln-pro does with it is
+its own concern; this file covers the wire.
 
 Tests cover:
 
