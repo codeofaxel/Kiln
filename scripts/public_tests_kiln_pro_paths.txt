@@ -1,0 +1,55 @@
+# Frozen inventory of dotted kiln_pro.<module> references in kiln/tests/.
+# Read by scripts/audit_moat_comment_leak.py: a path in the tests that is
+# not listed here fails the gate.  The free-tier fallback tests stub these
+# in sys.modules on purpose; this file makes GROWTH of that exposure a
+# reviewed diff rather than a side effect.  Regenerate with
+#     python3 scripts/audit_moat_comment_leak.py --freeze-kiln-pro-paths
+# and commit the diff.  Shrinking it needs no ceremony.
+kiln_pro.bridge
+kiln_pro.bridge.pro_features
+kiln_pro.data_overlays
+kiln_pro.data_overlays.load_overlay
+kiln_pro.design_brief
+kiln_pro.design_brief.context
+kiln_pro.design_brief.explicit_attach
+kiln_pro.design_versions.decoration_presets
+kiln_pro.engineering.calibration_coach
+kiln_pro.engineering.running_clearance
+kiln_pro.enterprise
+kiln_pro.enterprise.licensing
+kiln_pro.enterprise.licensing.verify_license_key
+kiln_pro.fasteners_intelligence
+kiln_pro.hosted_intelligence
+kiln_pro.intent_verification
+kiln_pro.intent_verification.load_intent_sidecar
+kiln_pro.nozzle_intelligence
+kiln_pro.nozzle_intelligence.capacity
+kiln_pro.nozzle_intelligence.sensor_signal
+kiln_pro.nozzle_intelligence.store_resolver
+kiln_pro.nozzle_intelligence.verdicts
+kiln_pro.payments
+kiln_pro.payments.base
+kiln_pro.payments.manager.PaymentManager
+kiln_pro.payments.stripe_provider
+kiln_pro.payments.stripe_provider.StripeProvider
+kiln_pro.plugins.git_render_tools
+kiln_pro.plugins.git_render_tools.attach_inspect_bundle
+kiln_pro.print_fix.engine
+kiln_pro.print_learning
+kiln_pro.print_learning.auto_record
+kiln_pro.printability_overlay
+kiln_pro.pro_gate
+kiln_pro.recovery
+kiln_pro.recovery.auto_recover_engine
+kiln_pro.recovery.failure_rerouter
+kiln_pro.recovery.nozzle_wear_hypothesis
+kiln_pro.recovery.outcome_learning
+kiln_pro.recovery.outcome_learning.record_outcome
+kiln_pro.recovery.predictive
+kiln_pro.step_facts
+kiln_pro.tax
+kiln_pro.tax.TaxCalculator
+kiln_pro.urls.checkout_success_url
+kiln_pro.wall_mark
+kiln_pro.wall_text
+kiln_pro.x

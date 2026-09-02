@@ -206,11 +206,16 @@ jobs:
         # Stdlib-only and reads the checkout, so it is gated on `!cancelled()`
         # alone — no install can take this one dark.
         if: ${{ !cancelled() }}
-        # Public Kiln must not, in code OR shipped data JSON: narrate HOW the
-        # kiln-pro overlay reasons, name its research PROVENANCE / source
-        # bibliography, brand it "the moat", or name a private overlay PATH.
-        # A first-class gate (not just a buried test) after a datasheet-source
-        # enumeration slipped a detection gap on 2026-06-27.  Exit 2 = leak.
+        # Public Kiln must not, in code, tests, docs, scripts OR shipped data
+        # JSON: narrate HOW the kiln-pro overlay reasons, name its research
+        # PROVENANCE, self-label the private tier, inline a paid-tier answer
+        # key (`_PRO_*` tables), name a private kiln_pro path, or ship
+        # kiln/tests in the sdist.  Rules are listed in
+        # the script's docstring.  A first-class gate (not just a buried test)
+        # after a datasheet-source enumeration slipped a detection gap on
+        # 2026-06-27; extended to the test suite after a 2026-09-02 sweep found
+        # paid-tier tables and ~50 private module paths there while every
+        # existing gate stayed green.  Exit 2 = leak.
         run: python3 scripts/audit_moat_comment_leak.py
 
       # Parallel, and quiet.  The suite is ~14.4k tests; run serially with

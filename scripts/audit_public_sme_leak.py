@@ -2,7 +2,7 @@
 """Public-source SME-table leak gate — public Kiln must not ship a curated
 cross-vendor capability / SME table.
 
-The kiln-pro moat is curated intelligence: per-vendor, per-model behaviour
+The private tier is curated intelligence: per-vendor, per-model behaviour
 compiled from many sources over a long time.  Three gates already protect
 it — the wheel-exclusion and design-knowledge-split gates guard *where a
 file lives* (user disk / public repo), and ``audit_moat_comment_leak.py``
@@ -22,7 +22,7 @@ comment gate ignored it).
 This gate closes that blind spot.  It flags any public-source file carrying
 the signature of a compiled cross-vendor SME table — several distinct
 printer-vendor names AND multiple curated-intelligence data fields — unless
-the file is consciously allowlisted as a non-moat floor.  The right fix for
+the file is consciously allowlisted as a public floor.  The right fix for
 a flagged file is to MOVE the table to the private tier (kiln-pro) or a pro
 overlay, never to allowlist it.
 
@@ -59,7 +59,7 @@ _VENDORS: tuple[str, ...] = (
 # (``"field":``), never as an incidental word in prose, so a dispatcher
 # that merely branches on printer type does not trip the gate.  Extend this
 # list whenever a new curated-field type is introduced (it is the same
-# moat-field vocabulary the design-knowledge-split gate uses).
+# private-tier field vocabulary the design-knowledge-split gate uses).
 _SME_FIELDS: tuple[str, ...] = (
     "limitations",
     "recovery_methods",
@@ -89,10 +89,10 @@ _VENDOR_MIN = 3   # distinct vendor names → looks like a cross-vendor table
 _FIELD_MIN = 2    # distinct curated data fields → looks like an SME table
 
 # Structural exoneration: a file that routes through the design-knowledge
-# split — it declares the moat fields as empty-by-default dataclass fields
+# split — it declares the private-tier fields as empty-by-default dataclass fields
 # and pulls the curated VALUES from the private kiln-pro overlay at runtime
 # (``_merge_pro_overlay_if_available`` / ``load_overlay``).  By construction
-# such a file holds the public safety-floor only; the moat lives in the
+# such a file holds the public safety-floor only; the curated values live in the
 # overlay.  This is the SANCTIONED pattern (``design_intelligence.py``,
 # ``printer_intelligence.py``) and the opposite of a standalone hardcoded
 # table like the ``resume_capabilities.py`` leak, which had no overlay merge.
@@ -102,9 +102,9 @@ _OVERLAY_LOADER_MARKERS: tuple[str, ...] = (
 )
 
 # Reviewed public-safe files: (relative-path substring, reason).  A file
-# here carries the signature but is genuinely NOT moat — a datasheet floor,
+# here carries the signature but is genuinely NOT private-tier data — a datasheet floor,
 # schema boilerplate, or the tool-manifest mirror.  Adding an entry is a
-# conscious moat decision, reviewed the same way the other leak-gate
+# conscious tier decision, reviewed the same way the other leak-gate
 # allowlists are.  Default to MOVING the table private instead.
 _ALLOWLIST: tuple[tuple[str, str], ...] = ()
 
@@ -120,7 +120,7 @@ def _allowlisted(rel: str) -> bool:
 
 
 def _is_overlay_loader(text: str) -> bool:
-    """True when the file routes its moat fields through the pro-overlay
+    """True when the file routes its private-tier fields through the pro-overlay
     split — a sanctioned loader holding only the public floor."""
     return any(m in text for m in _OVERLAY_LOADER_MARKERS)
 
@@ -203,8 +203,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "\nFix: MOVE the table to the private tier (kiln-pro) or a pro "
         "overlay — do not allowlist it.  A curated cross-vendor capability / "
-        "SME table is moat; public source must not ship it.  If the file is "
-        "genuinely a non-moat floor (datasheet, schema, manifest mirror), add "
+        "SME table is private-tier data; public source must not ship it.  If the file is "
+        "genuinely a public floor (datasheet, schema, manifest mirror), add "
         "a reviewed (path, reason) entry to _ALLOWLIST."
     )
     return 2

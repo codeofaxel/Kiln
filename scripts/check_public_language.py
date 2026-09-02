@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Reject private editorial context from public repository surfaces."""
+"""Reject private editorial context from public repository surfaces.
+
+In ``--staged`` mode (the commit-time hook) this also runs
+``scripts/audit_moat_comment_leak.py --staged`` over the same index, so a
+paid-tier table, a private ``kiln_pro`` path, a self-label, or an internal
+persona name in a staged test / doc / script is refused at the commit, not
+at the PR.  (The gate skips itself during a merge or rebase, where the index
+carries files the committer did not author; the full-tree CI step covers
+those.)  Full-tree runs of that gate stay with its own CI step and the
+pre-push hook; this file only closes the commit-time door.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +23,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SELF = Path(__file__).relative_to(_ROOT).as_posix()
+_LEAK_GATE = _ROOT / "scripts" / "audit_moat_comment_leak.py"
 _SKIP_PREFIXES = (
     "kiln/src/kiln/data/scad_libraries/",
 )
@@ -76,10 +87,17 @@ _PUBLIC_RULES = (
             re.IGNORECASE,
         ),
     ),
+    # Phrases, never bare words: "panel" alone is an MCP Apps panel and
+    # "judges" alone is a verb ("the composer judges the layout"); only the
+    # review-persona forms — possessive, "the judges", the panel / room /
+    # gate phrases — are private editorial context.
     Rule(
         "internal review process",
         re.compile(
-            r"\b(?:judges?[- ]panel|war[- ]room|panel-approved|judge-voted|"
+            r"\bjudges['’]|\bjudges\s*:|"
+            r"\b(?:the|our|three|four|from the|per the) judges\b|"
+            r"\b(?:judges?[- ]panel|war[- ]room|ship[- ]gate|panel(?:['’]s)? verdicts?|"
+            r"panel-approved|judge-voted|"
             r"gap analysis|sme flagged|internal thinking|session shorthand)\b",
             re.IGNORECASE,
         ),
@@ -220,6 +238,24 @@ def _tracked_content(*, staged: bool) -> list[tuple[str, str]]:
     return content
 
 
+def _staged_leak_gate() -> tuple[int, str]:
+    """Run the private-tier leak gate over the staged index.
+
+    Returns ``(exit_code, report)``.  A missing gate script is not an error —
+    this checker also runs in trees that never carried it.
+    """
+    if not _LEAK_GATE.is_file():
+        return 0, ""
+    result = subprocess.run(
+        [sys.executable, str(_LEAK_GATE), "--staged"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env={k: v for k, v in os.environ.items() if k not in _GIT_ENV_OVERRIDES},
+    )
+    return result.returncode, result.stdout
+
+
 def _range_messages(revision_range: str) -> list[tuple[str, str]]:
     raw = _git("log", "--format=%H%x00%B%x00", revision_range)
     fields = raw.decode("utf-8", errors="replace").split("\0")
@@ -271,16 +307,21 @@ def main(argv: list[str] | None = None) -> int:
                 find_violations(message, source=source, commit_message=True)
             )
 
-    if not findings:
+    leak_rc, leak_report = _staged_leak_gate() if args.staged else (0, "")
+
+    if not findings and leak_rc == 0:
         print("Public-language audit: clean.")
         return 0
 
-    print("PUBLIC-LANGUAGE VIOLATION — private editorial context in public output:")
-    for finding in findings:
-        print(
-            f"  {finding.source}:{finding.line}: {finding.rule}\n"
-            f"    {finding.text}"
-        )
+    if findings:
+        print("PUBLIC-LANGUAGE VIOLATION — private editorial context in public output:")
+        for finding in findings:
+            print(
+                f"  {finding.source}:{finding.line}: {finding.rule}\n"
+                f"    {finding.text}"
+            )
+    if leak_rc != 0:
+        print(leak_report.rstrip() or f"leak gate exited {leak_rc} with no output")
     return 2
 
 
