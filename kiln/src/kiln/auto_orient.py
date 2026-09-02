@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kiln.generation.validation import _parse_obj, _parse_stl
+from kiln.generation.validation import _SUPPORTED_MESH_FORMATS, _parse_mesh_file
 from kiln.printability import (
     _analyze_bed_adhesion,
     _analyze_overhangs,
@@ -312,7 +312,7 @@ def _apply_orientation_scoring(
 def _parse_mesh(
     file_path: str,
 ) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
-    """Parse an STL or OBJ file."""
+    """Parse an STL, OBJ, GLB, or 3MF file."""
     path = Path(file_path)
     if not path.is_file():
         raise ValueError(f"File not found: {file_path}")
@@ -320,12 +320,9 @@ def _parse_mesh(
     ext = path.suffix.lower()
     errors: list[str] = []
 
-    if ext == ".stl":
-        triangles, vertices = _parse_stl(path, errors)
-    elif ext == ".obj":
-        triangles, vertices = _parse_obj(path, errors)
-    else:
+    if ext not in _SUPPORTED_MESH_FORMATS:
         raise ValueError(f"Unsupported file type: {ext!r}.")
+    triangles, vertices = _parse_mesh_file(path, errors)
 
     if errors:
         raise ValueError(f"Failed to parse mesh: {'; '.join(errors)}")
@@ -504,20 +501,13 @@ def check_stability(
     the bed contact footprint area) to detect tall, narrow orientations that
     are prone to wobble or topple mid-print.
 
-    :param file_path: Path to an STL or OBJ file.
+    :param file_path: Path to an STL, OBJ, GLB, or 3MF file.
     :param max_height_to_base_ratio: Ratio at or above which the model is
         considered high-risk.  Defaults to ``3.0``.
     :returns: A :class:`StabilityResult`.
     :raises ValueError: If the file cannot be parsed or is an unsupported
-        format (e.g. 3MF).
+        format.
     """
-    ext = Path(file_path).suffix.lower()
-    if ext == ".3mf":
-        raise ValueError(
-            "3MF stability analysis is not yet supported. "
-            "Export the model as STL or OBJ first."
-        )
-
     triangles, vertices = _parse_mesh(file_path)
 
     # Translate so the lowest Z sits at Z=0.

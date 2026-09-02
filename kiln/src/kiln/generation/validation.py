@@ -56,7 +56,7 @@ _COMPONENT_FMT: dict[int, tuple[str, int]] = {
 
 
 def convert_to_stl(input_path: str, output_path: str | None = None) -> str:
-    """Convert an OBJ or GLB file to binary STL.
+    """Convert an OBJ, GLB, or 3MF file to binary STL.
 
     Parses the input geometry and writes a binary STL with the same
     triangles.  Quads and higher polygons are triangulated.  Only
@@ -64,7 +64,7 @@ def convert_to_stl(input_path: str, output_path: str | None = None) -> str:
     discarded (not needed for 3D printing).
 
     Args:
-        input_path: Path to the input file (``.obj`` or ``.glb``).
+        input_path: Path to the input file (``.obj``, ``.glb``, or ``.3mf``).
         output_path: Path for the output STL file.  Defaults to
             replacing the input extension with ``.stl``.
 
@@ -98,13 +98,13 @@ def convert_to_stl(input_path: str, output_path: str | None = None) -> str:
 
 
 def validate_mesh(file_path: str) -> MeshValidationResult:
-    """Validate an STL or OBJ file for 3D printing readiness.
+    """Validate an STL, OBJ, GLB, or 3MF file for 3D printing readiness.
 
     Checks performed:
 
     1. File exists and is non-empty.
     2. Extension is ``.stl`` or ``.obj``.
-    3. Geometry is parseable (binary/ASCII STL or OBJ).
+    3. Geometry is parseable (binary/ASCII STL, OBJ, GLB, or 3MF).
     4. Triangle count is within printable range.
     5. Bounding box dimensions are reasonable.
     6. Basic manifold (watertight) check via edge analysis.
@@ -1109,6 +1109,24 @@ def _compose_3mf_transforms(
     return rotation + translation
 
 
+#: The 3MF production extension: build items and components may point at
+#: an object in ANOTHER model part of the archive through ``p:path``.
+#: BambuStudio / OrcaSlicer project files (every MakerWorld download) keep
+#: each mesh in its own ``3D/Objects/object_N.model`` this way, so a
+#: reader that only opens the root model sees an empty plate.
+_PRODUCTION_NS = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
+
+#: Millimetres per model unit — the ``unit`` attribute of ``<model>``.
+_3MF_UNIT_TO_MM: dict[str, float] = {
+    "micron": 0.001,
+    "millimeter": 1.0,
+    "centimeter": 10.0,
+    "inch": 25.4,
+    "foot": 304.8,
+    "meter": 1000.0,
+}
+
+
 def _parse_3mf(
     path: Path,
     errors: list[str],
@@ -1117,95 +1135,151 @@ def _parse_3mf(
 
     Walks every ``<build>`` item, and every ``<component>`` beneath it,
     applying the build-item and component transforms so the triangles
-    land where a slicer would place them.  An object placed twice on the
-    plate contributes its triangles twice — this is the geometry that
-    gets printed, not the resource list.  Colors, paint states, and
-    slicer metadata are not read here; :mod:`kiln.threemf_parser` owns
-    those.
+    land where a slicer would place them, and scaling by the model
+    ``unit`` so the result is in millimetres.  An object placed twice on
+    the plate contributes its triangles twice — this is the geometry
+    that gets printed, not the resource list.  Objects that live in
+    other model parts of the archive (``p:path``) are followed.  Colors,
+    paint states, and slicer metadata are not read here;
+    :mod:`kiln.threemf_parser` owns those.
 
     Returns:
         (triangles, unique_vertices) in the same shape as :func:`_parse_stl`.
     """
     from kiln.threemf_parser import _CORE_NS, _find_model_xml, _parse_vertices
 
+    ns = f"{{{_CORE_NS}}}"
+    path_attr = f"{{{_PRODUCTION_NS}}}path"
+
+    triangles: list[tuple[tuple[float, ...], ...]] = []
+    vertex_set: set[tuple[float, ...]] = set()
+
     try:
         with zipfile.ZipFile(path, "r") as zf:
-            xml_bytes = zf.read(_find_model_xml(zf))
+            root_part = _find_model_xml(zf)
+            archive_names = {name.lower(): name for name in zf.namelist()}
+            # Every model part opened so far, keyed by archive name:
+            # (model element, objects by id).  Object ids are scoped to
+            # their part — two parts may both hold an object 1.  A part
+            # that failed to load is cached as None so it is reported once.
+            parts: dict[str, tuple[ET.Element, dict[int, ET.Element]] | None] = {}
+
+            def _load_part(part: str) -> tuple[ET.Element, dict[int, ET.Element]] | None:
+                if part in parts:
+                    return parts[part]
+                parts[part] = None
+                try:
+                    model_el = ET.fromstring(zf.read(part))
+                except KeyError:
+                    errors.append(f"3MF references a model part missing from the archive: {part!r}")
+                    return None
+                except ET.ParseError as exc:
+                    errors.append(f"Corrupt 3MF model XML in {part!r}: {exc}")
+                    return None
+                objects: dict[int, ET.Element] = {}
+                resources_el = model_el.find(f"{ns}resources")
+                if resources_el is not None:
+                    for obj_el in resources_el.findall(f"{ns}object"):
+                        try:
+                            objects[int(obj_el.get("id", ""))] = obj_el
+                        except ValueError:
+                            continue
+                parts[part] = (model_el, objects)
+                return parts[part]
+
+            def _resolve_part(el: ET.Element, current_part: str) -> str:
+                """The model part *el* points at through ``p:path``, else its own."""
+                ref = el.get(path_attr)
+                if not ref:
+                    return current_part
+                return archive_names.get(ref.lstrip("/").lower(), ref.lstrip("/"))
+
+            def _walk(
+                part: str,
+                obj_id: int,
+                transform: _Transform3mf,
+                ancestry: frozenset[tuple[str, int]],
+            ) -> None:
+                loaded = _load_part(part)
+                if loaded is None:
+                    return
+                obj_el = loaded[1].get(obj_id)
+                if obj_el is None or (part, obj_id) in ancestry:
+                    return
+
+                mesh_el = obj_el.find(f"{ns}mesh")
+                if mesh_el is not None:
+                    verts: list[tuple[float, ...]] = _parse_vertices(mesh_el)
+                    if transform is not _IDENTITY_3MF:
+                        verts = [_apply_3mf_transform(transform, v) for v in verts]
+                    tris_el = mesh_el.find(f"{ns}triangles")
+                    n_verts = len(verts)
+                    for tri in (tris_el.findall(f"{ns}triangle") if tris_el is not None else ()):
+                        try:
+                            i0 = int(tri.get("v1", ""))
+                            i1 = int(tri.get("v2", ""))
+                            i2 = int(tri.get("v3", ""))
+                        except ValueError:
+                            continue
+                        if not (0 <= i0 < n_verts and 0 <= i1 < n_verts and 0 <= i2 < n_verts):
+                            continue
+                        triangle = (verts[i0], verts[i1], verts[i2])
+                        triangles.append(triangle)
+                        vertex_set.update(triangle)
+
+                components_el = obj_el.find(f"{ns}components")
+                if components_el is not None:
+                    for comp in components_el.findall(f"{ns}component"):
+                        try:
+                            child_id = int(comp.get("objectid", ""))
+                        except ValueError:
+                            continue
+                        local = _parse_3mf_transform(comp.get("transform"), errors)
+                        _walk(
+                            _resolve_part(comp, part),
+                            child_id,
+                            _compose_3mf_transforms(local, transform),
+                            ancestry | {(part, obj_id)},
+                        )
+
+            root_loaded = _load_part(root_part)
+            if root_loaded is None:
+                return [], []
+            model_root, root_objects = root_loaded
+
+            unit = (model_root.get("unit") or "millimeter").strip().lower()
+            scale = _3MF_UNIT_TO_MM.get(unit)
+            if scale is None:
+                errors.append(f"Unknown 3MF model unit {unit!r}.")
+                return [], []
+            to_mm: _Transform3mf = (
+                _IDENTITY_3MF
+                if scale == 1.0
+                else (scale, 0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0)
+            )
+
+            build_el = model_root.find(f"{ns}build")
+            if build_el is not None:
+                placements = [
+                    (_resolve_part(item, root_part), item.get("objectid", ""), item.get("transform"))
+                    for item in build_el.findall(f"{ns}item")
+                ]
+            else:
+                placements = [(root_part, str(oid), None) for oid in root_objects]
+
+            for part, object_id, transform_attr in placements:
+                try:
+                    root_id = int(object_id)
+                except ValueError:
+                    continue
+                placement = _parse_3mf_transform(transform_attr, errors)
+                _walk(part, root_id, _compose_3mf_transforms(placement, to_mm), frozenset())
     except zipfile.BadZipFile:
         errors.append("Not a valid 3MF: the file is not a ZIP archive.")
         return [], []
     except (ValueError, KeyError, OSError) as exc:
         errors.append(f"Not a valid 3MF: {exc}")
         return [], []
-
-    try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError as exc:
-        errors.append(f"Corrupt 3MF model XML: {exc}")
-        return [], []
-
-    ns = f"{{{_CORE_NS}}}"
-    objects: dict[int, ET.Element] = {}
-    resources_el = root.find(f"{ns}resources")
-    if resources_el is not None:
-        for obj_el in resources_el.findall(f"{ns}object"):
-            try:
-                objects[int(obj_el.get("id", ""))] = obj_el
-            except ValueError:
-                continue
-
-    build_el = root.find(f"{ns}build")
-    if build_el is not None:
-        placements = [
-            (item.get("objectid", ""), item.get("transform"))
-            for item in build_el.findall(f"{ns}item")
-        ]
-    else:
-        placements = [(str(oid), None) for oid in objects]
-
-    triangles: list[tuple[tuple[float, ...], ...]] = []
-    vertex_set: set[tuple[float, ...]] = set()
-
-    def _walk(obj_id: int, transform: _Transform3mf, ancestry: frozenset[int]) -> None:
-        obj_el = objects.get(obj_id)
-        if obj_el is None or obj_id in ancestry:
-            return
-
-        mesh_el = obj_el.find(f"{ns}mesh")
-        if mesh_el is not None:
-            verts: list[tuple[float, ...]] = _parse_vertices(mesh_el)
-            if transform is not _IDENTITY_3MF:
-                verts = [_apply_3mf_transform(transform, v) for v in verts]
-            tris_el = mesh_el.find(f"{ns}triangles")
-            for tri in (tris_el.findall(f"{ns}triangle") if tris_el is not None else ()):
-                try:
-                    i0 = int(tri.get("v1", ""))
-                    i1 = int(tri.get("v2", ""))
-                    i2 = int(tri.get("v3", ""))
-                except ValueError:
-                    continue
-                if not (0 <= i0 < len(verts) and 0 <= i1 < len(verts) and 0 <= i2 < len(verts)):
-                    continue
-                triangle = (verts[i0], verts[i1], verts[i2])
-                triangles.append(triangle)
-                vertex_set.update(triangle)
-
-        components_el = obj_el.find(f"{ns}components")
-        if components_el is not None:
-            for comp in components_el.findall(f"{ns}component"):
-                try:
-                    child_id = int(comp.get("objectid", ""))
-                except ValueError:
-                    continue
-                local = _parse_3mf_transform(comp.get("transform"), errors)
-                _walk(child_id, _compose_3mf_transforms(local, transform), ancestry | {obj_id})
-
-    for object_id, transform_attr in placements:
-        try:
-            root_id = int(object_id)
-        except ValueError:
-            continue
-        _walk(root_id, _parse_3mf_transform(transform_attr, errors), frozenset())
 
     return triangles, list(vertex_set)
 
@@ -1255,7 +1329,7 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     connected components, and a composite printability score.
 
     Args:
-        file_path: Path to .stl, .obj, or .glb file.
+        file_path: Path to a .stl, .obj, .glb, or .3mf file.
 
     Returns:
         :class:`MeshAnalysis` with full metrics.
@@ -2135,7 +2209,7 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
     support generation is more sophisticated.
 
     Args:
-        file_path: Path to .stl, .obj, or .glb file.
+        file_path: Path to a .stl, .obj, .glb, or .3mf file.
 
     Returns:
         Dict with support volume estimate and overhang statistics.
