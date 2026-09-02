@@ -103,6 +103,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Kiln starts on Windows again.** 1.4.1.1 failed on every command before it ran — `serve`, `doctor`, even `--help` — because of a Unix-only signal read at startup. Slicing on Windows had the same fault one step further in; both are fixed.
+
 - **The 3D stage opens painted and multicolor 3MF results on every install.** It used to need extra packages most installs never had, so the panel said "preview unavailable" over a file the preview image had already shown correctly.
 - **The 3D preview opens again on a fresh install.** Kiln set up the panel's
   request line but never announced it, so apps that check first showed
