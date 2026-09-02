@@ -29,12 +29,15 @@ def _make_3mf(
     *,
     name: str = "test.3mf",
     settings_xml: str | None = None,
+    parts: dict[str, str] | None = None,
 ) -> str:
     """Create a 3MF ZIP with the given model XML and return its path.
 
     *settings_xml*, when given, lands at ``Metadata/model_settings.config`` —
     the slicer sidecar where the BambuStudio family (and Kiln's own composer)
-    records per-object colors.
+    records per-object colors.  *parts* adds further model parts by archive
+    name — the ``3D/Objects/object_N.model`` files a BambuStudio project
+    reaches through the production extension's ``p:path``.
     """
     fpath = tmp_path / name
     buf = io.BytesIO()
@@ -42,6 +45,8 @@ def _make_3mf(
         zf.writestr("3D/3dmodel.model", model_xml)
         if settings_xml is not None:
             zf.writestr("Metadata/model_settings.config", settings_xml)
+        for part_name, part_xml in (parts or {}).items():
+            zf.writestr(part_name, part_xml)
     fpath.write_bytes(buf.getvalue())
     return str(fpath)
 
@@ -1088,3 +1093,222 @@ class TestObjectDisplayColorsPaintedChannel:
         assert object_display_colors(_make_3mf(tmp_path, xml)) == {
             "zone_0": _PAINT_STATE_PALETTE[0],
         }
+
+
+# ---------------------------------------------------------------------------
+# Model parts reached through the production extension (p:path)
+# ---------------------------------------------------------------------------
+
+
+_PRODUCTION_NS = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
+_PART = "3D/Objects/object_1.model"
+
+
+def _root_model(resources: str, build: str) -> str:
+    return f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+       xmlns:p="{_PRODUCTION_NS}" unit="millimeter">
+  <resources>
+{resources}
+  </resources>
+  <build>{build}</build>
+</model>"""
+
+
+def _part_model(resources: str) -> str:
+    """A ``3D/Objects/object_N.model`` part: resources only, empty build."""
+    return f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+       xmlns:p="{_PRODUCTION_NS}" unit="millimeter">
+  <resources>
+{resources}
+  </resources>
+  <build />
+</model>"""
+
+
+_RED_PALETTE = """\
+    <basematerials id="9">
+      <base name="Red" displaycolor="#FF0000" />
+    </basematerials>"""
+
+_TWO_TRIANGLES = f"""\
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" />
+          <triangle v1="1" v2="3" v3="2" />
+        </triangles>
+      </mesh>"""
+
+#: The BambuStudio / OrcaSlicer layout: the root model holds only an
+#: assembly object whose single component points into another part.
+_BAMBU_ROOT = _root_model(
+    f"""\
+    <object id="2" type="model">
+      <components>
+        <component p:path="/{_PART}" objectid="1" />
+      </components>
+    </object>""",
+    '<item objectid="2" />',
+)
+
+_RED_PART = _part_model(
+    f"""\
+{_RED_PALETTE}
+    <object id="1" type="model" pid="9" pindex="0">
+{_TWO_TRIANGLES}
+    </object>""",
+)
+
+
+class TestModelPartsViaProductionPath:
+    """Every MakerWorld download keeps its meshes in ``3D/Objects/*.model``
+    and reaches them through ``p:path``; a reader that only opens the root
+    model sees an empty plate and renders without part colours."""
+
+    def test_component_in_other_part_is_followed(self, tmp_path: Path) -> None:
+        path = _make_3mf(tmp_path, _BAMBU_ROOT, parts={_PART: _RED_PART})
+        mesh = parse_colored_3mf(path)
+
+        assert len(mesh.triangles) == 2
+        assert mesh.colors_found is True
+        assert {t.color for t in mesh.triangles} == {(255, 0, 0)}
+        # The segment names the MESH object, keyed the way trimesh keys the
+        # geometry it reads through the same component: the id it carries.
+        assert [
+            (s.object_id, s.name, s.start, s.count) for s in mesh.segments
+        ] == [(1, None, 0, 2)]
+        assert mesh.segments[0].key == "1"
+
+    def test_build_item_in_other_part_is_followed(self, tmp_path: Path) -> None:
+        root = _root_model("", f'<item objectid="1" p:path="/{_PART}" />')
+        mesh = parse_colored_3mf(_make_3mf(tmp_path, root, parts={_PART: _RED_PART}))
+
+        assert len(mesh.triangles) == 2
+        assert {t.color for t in mesh.triangles} == {(255, 0, 0)}
+        assert [(s.object_id, s.count) for s in mesh.segments] == [(1, 2)]
+
+    def test_object_ids_and_palettes_are_scoped_to_their_part(
+        self, tmp_path: Path
+    ) -> None:
+        """Two parts may both hold an object 1 and a palette 9 — each
+        reference resolves inside the part that made it."""
+        root = _root_model(
+            f"""\
+    <basematerials id="9">
+      <base name="Blue" displaycolor="#0000FF" />
+    </basematerials>
+    <object id="1" type="model">
+      <components>
+        <component p:path="/{_PART}" objectid="1" />
+      </components>
+    </object>""",
+            '<item objectid="1" />',
+        )
+        mesh = parse_colored_3mf(_make_3mf(tmp_path, root, parts={_PART: _RED_PART}))
+
+        assert len(mesh.triangles) == 2
+        assert {t.color for t in mesh.triangles} == {(255, 0, 0)}
+
+    def test_segment_name_follows_the_object_that_placed_it(
+        self, tmp_path: Path
+    ) -> None:
+        """trimesh names a geometry reached through ``p:path`` after the
+        object holding the component, so the segment key must too."""
+        root = _root_model(
+            f"""\
+    <object id="2" type="model" name="shell">
+      <components>
+        <component p:path="/{_PART}" objectid="1" />
+      </components>
+    </object>""",
+            '<item objectid="2" />',
+        )
+        mesh = parse_colored_3mf(_make_3mf(tmp_path, root, parts={_PART: _RED_PART}))
+
+        assert [(s.object_id, s.name, s.key) for s in mesh.segments] == [
+            (1, "shell", "shell"),
+        ]
+
+    def test_sidecar_color_on_the_assembly_reaches_its_part(
+        self, tmp_path: Path
+    ) -> None:
+        """The slicer sidecar keys colour by the ROOT object's id; the mesh
+        in the part inherits it through the assembly."""
+        part = _part_model(
+            f"""\
+    <object id="1" type="model">
+{_TWO_TRIANGLES}
+    </object>""",
+        )
+        settings = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="2">
+    <metadata key="color" value="#00FF00"/>
+  </object>
+</config>"""
+        mesh = parse_colored_3mf(_make_3mf(
+            tmp_path, _BAMBU_ROOT, settings_xml=settings, parts={_PART: part},
+        ))
+
+        assert len(mesh.triangles) == 2
+        assert mesh.colors_found is True
+        assert {t.color for t in mesh.triangles} == {(0, 255, 0)}
+
+    def test_object_placed_twice_is_one_segment(self, tmp_path: Path) -> None:
+        """Two build items placing one object are two instances of ONE
+        geometry — the colour reader describes objects, not placements."""
+        root = _root_model(
+            f"""\
+    <object id="2" type="model">
+      <components>
+        <component p:path="/{_PART}" objectid="1" />
+      </components>
+    </object>""",
+            '<item objectid="2" /><item objectid="2" transform="1 0 0 0 1 0 0 0 1 50 0 0" />',
+        )
+        mesh = parse_colored_3mf(_make_3mf(tmp_path, root, parts={_PART: _RED_PART}))
+
+        assert len(mesh.triangles) == 2
+        assert [(s.object_id, s.count) for s in mesh.segments] == [(1, 2)]
+
+    def test_missing_part_reads_as_no_geometry(self, tmp_path: Path) -> None:
+        mesh = parse_colored_3mf(_make_3mf(tmp_path, _BAMBU_ROOT))
+
+        assert mesh.triangles == []
+        assert mesh.segments == []
+
+    def test_object_display_colors_follows_parts(self, tmp_path: Path) -> None:
+        colors = object_display_colors(
+            _make_3mf(tmp_path, _BAMBU_ROOT, parts={_PART: _RED_PART})
+        )
+
+        assert colors == {"1": (255, 0, 0)}
+
+    def test_object_display_colors_sees_painting_inside_a_part(
+        self, tmp_path: Path
+    ) -> None:
+        """A painted MakerWorld model carries its ``paint_color`` attributes
+        in the part, not the root — the byte scan that turns away colourless
+        files must look there too."""
+        part = _part_model(
+            f"""\
+    <object id="1" type="model">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" paint_color="4" />
+          <triangle v1="1" v2="3" v3="2" paint_color="4" />
+        </triangles>
+      </mesh>
+    </object>""",
+        )
+        colors = object_display_colors(
+            _make_3mf(tmp_path, _BAMBU_ROOT, parts={_PART: part})
+        )
+
+        assert colors == {"1": _PAINT_STATE_PALETTE[0]}

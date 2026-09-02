@@ -14,7 +14,7 @@ import contextlib
 import re
 import xml.etree.ElementTree as ET
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,6 +25,13 @@ from typing import Any
 _CORE_NS = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
 _MATERIAL_NS = "http://schemas.microsoft.com/3dmanufacturing/material/2015/02"
 _SLIC3RPE_NS = "http://schemas.slic3r.org/3mf/2017/06"
+#: The 3MF production extension: build items and components may point at
+#: an object in ANOTHER model part of the archive through ``p:path``.
+#: BambuStudio / OrcaSlicer project files (every MakerWorld download) keep
+#: each mesh in its own ``3D/Objects/object_N.model`` this way, so a
+#: reader that only opens the root model sees an empty plate.
+_PRODUCTION_NS = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
+_PATH_ATTR = f"{{{_PRODUCTION_NS}}}path"
 
 _HEX_COLOR_RE = re.compile(r"^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$")
 
@@ -515,6 +522,312 @@ def _find_model_xml(zf: zipfile.ZipFile) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Archive walk — every model part, every build placement
+# ---------------------------------------------------------------------------
+#
+# The one reader of a 3MF's object graph.  Both the colour parser below and
+# the geometry reader in ``kiln.generation.validation`` walk the archive
+# through it, so a layout one of them understands the other cannot miss.
+
+#: A 3MF ``transform`` attribute: twelve numbers, row-major ``m00 m01 m02
+#: m10 m11 m12 m20 m21 m22`` followed by the translation ``m30 m31 m32``.
+#: Points transform as row vectors, ``[x y z 1] * M``.
+_Transform3mf = tuple[float, ...]
+_IDENTITY_3MF: _Transform3mf = (
+    1.0, 0.0, 0.0,
+    0.0, 1.0, 0.0,
+    0.0, 0.0, 1.0,
+    0.0, 0.0, 0.0,
+)
+
+#: Millimetres per model unit — the ``unit`` attribute of ``<model>``.
+_3MF_UNIT_TO_MM: dict[str, float] = {
+    "micron": 0.001,
+    "millimeter": 1.0,
+    "centimeter": 10.0,
+    "inch": 25.4,
+    "foot": 304.8,
+    "meter": 1000.0,
+}
+
+
+def _parse_3mf_transform(value: str | None, errors: list[str]) -> _Transform3mf:
+    """Read a build-item / component ``transform`` attribute."""
+    if not value or not value.strip():
+        return _IDENTITY_3MF
+    try:
+        floats = tuple(float(p) for p in value.split())
+    except ValueError:
+        floats = ()
+    if len(floats) != 12:
+        errors.append(
+            f"Malformed 3MF transform {value!r}: expected 12 numbers."
+        )
+        return _IDENTITY_3MF
+    return floats
+
+
+def _apply_3mf_transform(
+    m: _Transform3mf, p: tuple[float, ...]
+) -> tuple[float, float, float]:
+    x, y, z = p
+    return (
+        x * m[0] + y * m[3] + z * m[6] + m[9],
+        x * m[1] + y * m[4] + z * m[7] + m[10],
+        x * m[2] + y * m[5] + z * m[8] + m[11],
+    )
+
+
+def _compose_3mf_transforms(
+    inner: _Transform3mf, outer: _Transform3mf
+) -> _Transform3mf:
+    """The transform that applies *inner* first, then *outer*.
+
+    A component's own transform is *inner*; the transform of the object
+    (or build item) that placed it is *outer*.
+    """
+    if inner is _IDENTITY_3MF:
+        return outer
+    if outer is _IDENTITY_3MF:
+        return inner
+    rotation = tuple(
+        inner[3 * i + 0] * outer[3 * 0 + j]
+        + inner[3 * i + 1] * outer[3 * 1 + j]
+        + inner[3 * i + 2] * outer[3 * 2 + j]
+        for i in range(3)
+        for j in range(3)
+    )
+    translation = _apply_3mf_transform(outer, (inner[9], inner[10], inner[11]))
+    return rotation + translation
+
+
+@dataclass
+class _ModelPart:
+    """One parsed model part of the archive, its objects indexed by id.
+
+    Object ids — and the ``pid`` palette ids the objects reference — are
+    scoped to their part: two parts may both hold an object 1.
+    """
+
+    name: str
+    model_el: ET.Element
+    objects: dict[int, ET.Element]
+
+    @property
+    def resources_el(self) -> ET.Element | None:
+        return self.model_el.find(f"{{{_CORE_NS}}}resources")
+
+
+@dataclass
+class _PlacedObject:
+    """An object the build reaches, with everything the walk learned on
+    the way down to it."""
+
+    part: str
+    object_id: int
+    element: ET.Element
+    #: The name trimesh gives this object's Scene geometry: an object
+    #: reached through a ``p:path`` component is named after the object
+    #: holding the component (trimesh never reads the part's own object
+    #: attributes); any other object carries its own ``name``.  ``None``
+    #: when neither names it — the key then falls back to the id.
+    name: str | None
+    #: Build-item and component transforms composed down to this object,
+    #: on top of whatever root transform the caller started the walk with.
+    transform: _Transform3mf
+    #: ``(part, object id)`` of every object that placed this one, the
+    #: build item's object first and the immediate parent last.
+    ancestry: tuple[tuple[str, int], ...]
+
+    @property
+    def key(self) -> str:
+        return self.name or str(self.object_id)
+
+
+class _ModelArchive:
+    """The model parts of one open 3MF archive, loaded on first use.
+
+    Trouble short of a corrupt root part — a part missing from the
+    archive, a malformed transform — is reported through *errors* and the
+    walk continues, so one bad reference costs one object, not the file.
+    A part that failed to load is remembered so it is reported once.
+
+    :raises ValueError: when the archive names no root model at all.
+    """
+
+    def __init__(self, zf: zipfile.ZipFile, errors: list[str]) -> None:
+        self._zf = zf
+        self.errors = errors
+        self.root_part = _find_model_xml(zf)
+        self._names = {name.lower(): name for name in zf.namelist()}
+        self._parts: dict[str, _ModelPart | None] = {}
+
+    def part(self, name: str) -> _ModelPart | None:
+        if name in self._parts:
+            return self._parts[name]
+        self._parts[name] = None
+        try:
+            model_el = ET.fromstring(self._zf.read(name))
+        except KeyError:
+            self.errors.append(
+                f"3MF references a model part missing from the archive: {name!r}"
+            )
+            return None
+        except ET.ParseError as exc:
+            self.errors.append(f"Corrupt 3MF model XML in {name!r}: {exc}")
+            return None
+        objects: dict[int, ET.Element] = {}
+        resources_el = model_el.find(f"{{{_CORE_NS}}}resources")
+        if resources_el is not None:
+            for obj_el in resources_el.findall(f"{{{_CORE_NS}}}object"):
+                with contextlib.suppress(ValueError, TypeError):
+                    objects[int(obj_el.get("id", ""))] = obj_el
+        loaded = _ModelPart(name=name, model_el=model_el, objects=objects)
+        self._parts[name] = loaded
+        return loaded
+
+    @property
+    def root(self) -> _ModelPart | None:
+        return self.part(self.root_part)
+
+    def resolve_part(self, el: ET.Element, current: str) -> str:
+        """The model part *el* points at through ``p:path``, else *current*."""
+        ref = el.get(_PATH_ATTR)
+        if not ref:
+            return current
+        stripped = ref.lstrip("/")
+        return self._names.get(stripped.lower(), stripped)
+
+    def placements(
+        self, *, root_transform: _Transform3mf = _IDENTITY_3MF
+    ) -> Iterator[_PlacedObject]:
+        """Every object the build reaches, depth-first in build order.
+
+        An object placed twice is yielded twice — this is the plate as a
+        slicer sees it.  A reader that describes objects rather than
+        placements dedupes on ``(part, object_id)``.  Components that
+        loop back onto an ancestor are cut there.
+        """
+        root = self.root
+        if root is None:
+            return
+        build_el = root.model_el.find(f"{{{_CORE_NS}}}build")
+        if build_el is not None:
+            items = [
+                (
+                    self.resolve_part(item, self.root_part),
+                    item.get("objectid", ""),
+                    item.get("transform"),
+                )
+                for item in build_el.findall(f"{{{_CORE_NS}}}item")
+            ]
+        else:
+            items = [(self.root_part, str(oid), None) for oid in root.objects]
+
+        for part, object_id, transform_attr in items:
+            try:
+                root_id = int(object_id)
+            except ValueError:
+                continue
+            placement = _parse_3mf_transform(transform_attr, self.errors)
+            yield from self._walk(
+                part,
+                root_id,
+                None,
+                _compose_3mf_transforms(placement, root_transform),
+                (),
+            )
+
+    def _walk(
+        self,
+        part: str,
+        object_id: int,
+        name: str | None,
+        transform: _Transform3mf,
+        ancestry: tuple[tuple[str, int], ...],
+    ) -> Iterator[_PlacedObject]:
+        loaded = self.part(part)
+        if loaded is None:
+            return
+        obj_el = loaded.objects.get(object_id)
+        if obj_el is None or (part, object_id) in ancestry:
+            return
+        if name is None:
+            name = obj_el.get("name") or None
+
+        yield _PlacedObject(
+            part=part,
+            object_id=object_id,
+            element=obj_el,
+            name=name,
+            transform=transform,
+            ancestry=ancestry,
+        )
+
+        components_el = obj_el.find(f"{{{_CORE_NS}}}components")
+        if components_el is None:
+            return
+        child_ancestry = ancestry + ((part, object_id),)
+        for comp in components_el.findall(f"{{{_CORE_NS}}}component"):
+            try:
+                child_id = int(comp.get("objectid", ""))
+            except ValueError:
+                continue
+            child_part = self.resolve_part(comp, part)
+            local = _parse_3mf_transform(comp.get("transform"), self.errors)
+            yield from self._walk(
+                child_part,
+                child_id,
+                # trimesh names a geometry behind ``p:path`` after the
+                # object holding the component, not the part's object.
+                (obj_el.get("name") or None) if child_part != part else None,
+                _compose_3mf_transforms(local, transform),
+                child_ancestry,
+            )
+
+
+def _model_part_members(zf: zipfile.ZipFile) -> list[str]:
+    """Every ``.model`` member of the archive, the root part first."""
+    names = zf.namelist()
+    root = next((n for n in names if n.lower() == "3d/3dmodel.model"), None)
+    rest = sorted(
+        n for n in names
+        if n.lower().endswith(".model") and n.lower().startswith("3d/") and n != root
+    )
+    return ([root] if root else []) + rest
+
+
+def _scan_color_constructs(zf: zipfile.ZipFile) -> tuple[bool, bool]:
+    """Byte scan: ``(has_palette_or_sidecar_color, has_paint)``.
+
+    Every 3MF headed for the stage passes through the colour readers, and
+    an XML parse is real money on a large mesh — this turns away the files
+    that carry no colour construct at all before one is spent.  It looks in
+    every model part, not just the root: a painted MakerWorld model keeps
+    its ``paint_color`` attributes in ``3D/Objects/object_N.model``.
+    """
+    has_palette = False
+    has_paint = False
+    for member in _model_part_members(zf):
+        try:
+            raw = zf.read(member)
+        except KeyError:
+            continue
+        if b"colorgroup" in raw or b"basematerials" in raw:
+            has_palette = True
+        if _bytes_have_paint(raw):
+            has_paint = True
+        if has_palette and has_paint:
+            break
+    if not has_palette:
+        for member in zf.namelist():
+            if member.lower() == _SLICER_SETTINGS_PATH.lower():
+                has_palette = b'key="color"' in zf.read(member)
+                break
+    return has_palette, has_paint
+
+
 #: The BambuStudio / PrusaSlicer-family per-object settings sidecar — and
 #: where Kiln's own :func:`kiln.multicolor_3mf.compose_multicolor_3mf`
 #: records each part's color.  The core 3MF spec never sees these values.
@@ -568,6 +881,26 @@ def _slicer_config_colors(zf: zipfile.ZipFile) -> dict[int, tuple[int, int, int]
     return out
 
 
+def _sidecar_color_for(
+    placed: _PlacedObject, sidecar_colors: dict[int, tuple[int, int, int]]
+) -> tuple[int, int, int] | None:
+    """The sidecar colour that applies to *placed*: its own id first, then
+    the nearest assembly that placed it.
+
+    The BambuStudio sidecar keys by the ROOT object — the assembly whose
+    component points into the part — so a mesh object inherits the colour
+    written against the object that placed it.
+    """
+    own = sidecar_colors.get(placed.object_id)
+    if own is not None:
+        return own
+    for _part, ancestor_id in reversed(placed.ancestry):
+        color = sidecar_colors.get(ancestor_id)
+        if color is not None:
+            return color
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -607,101 +940,65 @@ def parse_colored_3mf(
     :raises zipfile.BadZipFile: If *file_path* is not a valid ZIP.
     :raises FileNotFoundError: If *file_path* does not exist.
     """
-    with zipfile.ZipFile(file_path, "r") as zf:
-        model_path = _find_model_xml(zf)
-        try:
-            xml_bytes = zf.read(model_path)
-        except KeyError as exc:
-            raise ValueError(
-                f"Model XML path '{model_path}' found in rels but missing from archive"
-            ) from exc
-        sidecar_colors = _slicer_config_colors(zf)
-
-    try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError as exc:
-        raise ValueError(
-            f"Failed to parse 3MF model XML in '{file_path}': {exc}"
-        ) from exc
-
-    resources_el = root.find(f"{{{_CORE_NS}}}resources")
-    if resources_el is None:
-        return ColoredMesh(triangles=[], colors_found=False, color_count=0)
-
-    color_lookup = _build_color_lookup(resources_el)
-
-    # Index all objects by id for component assembly resolution
-    objects: dict[int, ET.Element] = {}
-    for obj in resources_el.findall(f"{{{_CORE_NS}}}object"):
-        obj_id = obj.get("id")
-        if obj_id is not None:
-            with contextlib.suppress(ValueError, TypeError):
-                objects[int(obj_id)] = obj
-
-    # Determine root objects: objects referenced by <build> items,
-    # or all objects if no <build> section exists.
-    build_el = root.find(f"{{{_CORE_NS}}}build")
-    if build_el is not None:
-        root_ids: list[int] = []
-        for item in build_el.findall(f"{{{_CORE_NS}}}item"):
-            oid = item.get("objectid")
-            if oid is not None:
-                with contextlib.suppress(ValueError, TypeError):
-                    root_ids.append(int(oid))
-    else:
-        root_ids = list(objects.keys())
-
-    # Collect triangles, walking component assemblies
     all_triangles: list[ColoredTriangle] = []
     segments: list[ObjectSegment] = []
     states_seen: set[int] = set()
     split_count = 0
-    visited: set[int] = set()
+    #: Palette lookups per model part — ``pid`` ids are scoped to the part.
+    lookups: dict[str, dict[int, list[tuple[int, int, int]]]] = {}
+    seen: set[tuple[str, int]] = set()
 
-    def _collect_from_object(obj_id: int) -> None:
-        nonlocal split_count
-        if obj_id in visited:
-            return
-        visited.add(obj_id)
-        obj_el = objects.get(obj_id)
-        if obj_el is None:
-            return
+    with zipfile.ZipFile(file_path, "r") as zf:
+        errors: list[str] = []
+        archive = _ModelArchive(zf, errors)
+        sidecar_colors = _slicer_config_colors(zf)
+        if archive.root is None:
+            raise ValueError(
+                f"Failed to parse 3MF model XML in '{file_path}': "
+                + "; ".join(errors)
+            )
 
-        # Collect direct mesh triangles
-        tris, states, splits = _collect_object_triangles(
-            obj_el,
-            color_lookup,
-            default_color=default_color,
-            fallback_color=sidecar_colors.get(obj_id),
-        )
-        if tris:
-            segments.append(ObjectSegment(
-                object_id=obj_id,
-                name=obj_el.get("name"),
-                start=len(all_triangles),
-                count=len(tris),
-            ))
-        all_triangles.extend(tris)
-        states_seen.update(states)
-        split_count += splits
+        for placed in archive.placements():
+            # An object placed twice is ONE object — one segment, in file
+            # coordinates.  Build transforms are the geometry reader's
+            # business; a consumer lining this soup up with trimesh's
+            # Scene applies the node transform itself.
+            if (placed.part, placed.object_id) in seen:
+                continue
+            seen.add((placed.part, placed.object_id))
 
-        # Walk <components> for assemblies
-        components_el = obj_el.find(f"{{{_CORE_NS}}}components")
-        if components_el is not None:
-            for comp in components_el.findall(f"{{{_CORE_NS}}}component"):
-                comp_oid = comp.get("objectid")
-                if comp_oid is not None:
-                    with contextlib.suppress(ValueError, TypeError):
-                        _collect_from_object(int(comp_oid))
+            lookup = lookups.get(placed.part)
+            if lookup is None:
+                part = archive.part(placed.part)
+                resources_el = part.resources_el if part is not None else None
+                lookup = (
+                    _build_color_lookup(resources_el)
+                    if resources_el is not None else {}
+                )
+                lookups[placed.part] = lookup
 
-    for rid in root_ids:
-        _collect_from_object(rid)
+            tris, states, splits = _collect_object_triangles(
+                placed.element,
+                lookup,
+                default_color=default_color,
+                fallback_color=_sidecar_color_for(placed, sidecar_colors),
+            )
+            if tris:
+                segments.append(ObjectSegment(
+                    object_id=placed.object_id,
+                    name=placed.name,
+                    start=len(all_triangles),
+                    count=len(tris),
+                ))
+            all_triangles.extend(tris)
+            states_seen.update(states)
+            split_count += splits
 
     # Compute color metadata
     distinct_colors = {t.color for t in all_triangles}
     has_non_default = any(c != default_color for c in distinct_colors)
     colors_found = (
-        bool(color_lookup) or bool(sidecar_colors) or bool(states_seen)
+        any(lookups.values()) or bool(sidecar_colors) or bool(states_seen)
     ) and has_non_default
 
     return ColoredMesh(
@@ -802,89 +1099,96 @@ def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
     Never raises: color is enrichment (the caller keeps its mesh either way),
     so any archive trouble reads as ``{}``.
     """
+    out: dict[str, tuple[int, int, int]] = {}
+    lookups: dict[str, dict[int, list[tuple[int, int, int]]]] = {}
+    seen: set[tuple[str, int]] = set()
     try:
         with zipfile.ZipFile(file_path, "r") as zf:
-            xml_bytes = zf.read(_find_model_xml(zf))
-            # Every 3MF headed for the stage passes through here, and an XML
-            # parse is real money on a large mesh — a byte scan turns away
-            # the files that carry no color construct at all.  Painting
-            # attributes count (a painted object must be SEEN to be
-            # refused, and a single-filament paint is honestly uniform);
-            # sidecar-only colors still need the parse, so the sidecar is
-            # scanned too.
-            if (
-                b"colorgroup" not in xml_bytes
-                and b"basematerials" not in xml_bytes
-                and not _bytes_have_paint(xml_bytes)
-            ):
-                sidecar_raw = b""
-                for member in zf.namelist():
-                    if member.lower() == _SLICER_SETTINGS_PATH.lower():
-                        sidecar_raw = zf.read(member)
-                        break
-                if b'key="color"' not in sidecar_raw:
-                    return {}
+            # A byte scan over every model part turns away the files that
+            # carry no color construct at all before an XML parse is spent
+            # on a large mesh.  Painting attributes count (a painted object
+            # must be SEEN to be refused, and a single-filament paint is
+            # honestly uniform); sidecar-only colors are scanned for too.
+            has_palette, has_paint = _scan_color_constructs(zf)
+            if not has_palette and not has_paint:
+                return {}
             sidecar_colors = _slicer_config_colors(zf)
-        root = ET.fromstring(xml_bytes)
+            archive = _ModelArchive(zf, [])
+            for placed in archive.placements():
+                if (placed.part, placed.object_id) in seen:
+                    continue
+                seen.add((placed.part, placed.object_id))
+                mesh_el = placed.element.find(f"{{{_CORE_NS}}}mesh")
+                if mesh_el is None:
+                    continue
+                if placed.key in out:
+                    return {}  # duplicate names — refuse to guess which part is which
+
+                lookup = lookups.get(placed.part)
+                if lookup is None:
+                    part = archive.part(placed.part)
+                    resources_el = part.resources_el if part is not None else None
+                    lookup = (
+                        _build_color_lookup(resources_el)
+                        if resources_el is not None else {}
+                    )
+                    lookups[placed.part] = lookup
+                color = _object_uniform_color(
+                    placed, mesh_el, lookup, sidecar_colors,
+                )
+                if color is not None:
+                    out[placed.key] = color
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, ET.ParseError):
         return {}
-
-    resources_el = root.find(f"{{{_CORE_NS}}}resources")
-    if resources_el is None:
-        return {}
-    color_lookup = _build_color_lookup(resources_el)
-
-    out: dict[str, tuple[int, int, int]] = {}
-    for obj_el in resources_el.findall(f"{{{_CORE_NS}}}object"):
-        oid = obj_el.get("id")
-        mesh_el = obj_el.find(f"{{{_CORE_NS}}}mesh")
-        if oid is None or mesh_el is None:
-            continue
-        key = obj_el.get("name") or oid
-        if key in out:
-            return {}  # duplicate names — refuse to guess which part is which
-
-        base = _resolve_color(
-            color_lookup, obj_el.get("pid"), obj_el.get("pindex"), default=None,
-        )
-        if base is None:
-            with contextlib.suppress(ValueError, TypeError):
-                base = sidecar_colors.get(int(oid))
-
-        # Per-triangle property references resolve against the object's own
-        # color; painting attributes contribute every leaf state's palette
-        # color (state 0 = the base).  One effective color is a uniform
-        # part; more than one is a painted object no single color can
-        # honestly stand for.
-        effective: set[tuple[int, int, int] | None] = set()
-        triangles_el = mesh_el.find(f"{{{_CORE_NS}}}triangles")
-        triangle_els = (
-            [] if triangles_el is None
-            else triangles_el.findall(f"{{{_CORE_NS}}}triangle")
-        )
-        for tri in triangle_els:
-            tri_pid, tri_p1 = tri.get("pid"), tri.get("p1")
-            if tri_pid is not None or tri_p1 is not None:
-                effective.add(_resolve_color(
-                    color_lookup,
-                    tri_pid if tri_pid is not None else obj_el.get("pid"),
-                    tri_p1,
-                    default=base,
-                ))
-                continue
-            paint = _triangle_paint_attr(tri)
-            decoded = _decode_paint_states(paint) if paint else None
-            if decoded is None:
-                effective.add(base)
-                continue
-            weights, _is_split = decoded
-            effective.update(
-                base if state == 0 else _paint_state_color(state)
-                for state in weights
-            )
-        if len(effective) > 1:
-            continue
-        color = effective.pop() if effective else base
-        if color is not None:
-            out[key] = color
     return out
+
+
+def _object_uniform_color(
+    placed: _PlacedObject,
+    mesh_el: ET.Element,
+    color_lookup: dict[int, list[tuple[int, int, int]]],
+    sidecar_colors: dict[int, tuple[int, int, int]],
+) -> tuple[int, int, int] | None:
+    """The ONE color of *placed*, or ``None`` when no single color can
+    honestly stand for it (see :func:`object_display_colors`)."""
+    obj_el = placed.element
+    base = _resolve_color(
+        color_lookup, obj_el.get("pid"), obj_el.get("pindex"), default=None,
+    )
+    if base is None:
+        base = _sidecar_color_for(placed, sidecar_colors)
+
+    # Per-triangle property references resolve against the object's own
+    # color; painting attributes contribute every leaf state's palette
+    # color (state 0 = the base).  One effective color is a uniform
+    # part; more than one is a painted object no single color can
+    # honestly stand for.
+    effective: set[tuple[int, int, int] | None] = set()
+    triangles_el = mesh_el.find(f"{{{_CORE_NS}}}triangles")
+    triangle_els = (
+        [] if triangles_el is None
+        else triangles_el.findall(f"{{{_CORE_NS}}}triangle")
+    )
+    for tri in triangle_els:
+        tri_pid, tri_p1 = tri.get("pid"), tri.get("p1")
+        if tri_pid is not None or tri_p1 is not None:
+            effective.add(_resolve_color(
+                color_lookup,
+                tri_pid if tri_pid is not None else obj_el.get("pid"),
+                tri_p1,
+                default=base,
+            ))
+            continue
+        paint = _triangle_paint_attr(tri)
+        decoded = _decode_paint_states(paint) if paint else None
+        if decoded is None:
+            effective.add(base)
+            continue
+        weights, _is_split = decoded
+        effective.update(
+            base if state == 0 else _paint_state_color(state)
+            for state in weights
+        )
+    if len(effective) > 1:
+        return None
+    return effective.pop() if effective else base
