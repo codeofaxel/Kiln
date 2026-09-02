@@ -22,7 +22,8 @@ What the gate scans
   git would commit (tracked or untracked-but-not-ignored), for the
   plain-text rules below.  Third-party OpenSCAD libraries under
   ``kiln/src/kiln/data/scad_libraries/`` are not ours to police and are
-  skipped.
+  skipped, as are the sibling leak gates, which have to spell out the
+  literals they catch (``_SELF``).
 * ``kiln/MANIFEST.in`` — the sdist recipe.
 
 The rules, in plain language
@@ -46,9 +47,10 @@ The rules, in plain language
    rewrites the file from the current tree; commit the diff).
 4. **Self-label** (all scanned text): the word "moat", any case,
    anywhere in public text.  There is no functional reason for the word
-   in a public tree; every use points a reader at the jewels.  The gate
-   script and its own test are the only exceptions (they must name the
-   thing they catch), and the gate's own file name is not a hit.
+   in a public tree; every use points a reader at the jewels.  The only
+   exceptions are the leak gates themselves and their fixture tests, which
+   must carry the literal they catch (``_SELF``); a gate's own file NAME,
+   quoted in prose, is never a hit.
 5. **sdist prune**: ``kiln/MANIFEST.in`` must exist and ``prune tests``
    (or ``recursive-exclude tests *``) so the test suite never ships in
    the PyPI sdist.  Checked in full-tree mode, and in ``--staged`` mode
@@ -109,15 +111,25 @@ _BINARY_SUFFIXES = frozenset({
     ".gcode", ".svg",
 })
 
-# The gate and its own test are the only files allowed to spell out the
-# patterns they catch.  They are skipped by every content rule.
+# A leak gate has to spell out the literal it catches, so the gates and their
+# fixture tests are skipped by every content rule here.  This is an exemption
+# for PATTERN OWNERS, not a general allowlist: each of these files exists to
+# carry the pattern, is reviewed as a gate, and is itself scanned by a sibling
+# gate.  Ordinary source earns no such pass — trim the wording instead.  Add a
+# file here only when its literal IS the rule (a regex, a token tuple, a
+# fixture string asserting the rule fires).
 _SELF = frozenset({
     "scripts/audit_moat_comment_leak.py",
     "kiln/tests/test_moat_comment_leak.py",
+    # The served-surface gate carries `\bmoat\b` and a kiln_pro path regex.
+    "scripts/audit_served_surface_leak.py",
 })
-# The gate's own file name is not a self-label: CI, .gitignore, and sibling
-# gates have to be able to reference it.
-_SELF_NAME_TOKENS = ("audit_moat_comment_leak", "test_moat_comment_leak")
+# A gate's own file NAME is not a self-label: CI, .gitignore, and sibling gates
+# have to be able to reference it in ordinary prose.
+_SELF_NAME_TOKENS = (
+    "audit_moat_comment_leak",
+    "test_moat_comment_leak",
+)
 
 # A comment/docstring that names the private overlay surface.
 _OVERLAY_MENTIONS = ("overlay", "kiln-pro", "kiln_pro")

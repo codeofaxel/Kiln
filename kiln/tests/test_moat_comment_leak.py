@@ -264,11 +264,32 @@ def test_catches_moat_label_in_every_public_surface() -> None:
     ):
         assert "self-label" in _rules(rel, "the private moat\n"), rel
         assert _rules(rel, "the private tier\n") == [], rel
-    # Only the gate and its test may say the word.
-    assert _rules("scripts/audit_moat_comment_leak.py", "moat\n") == []
-    assert _rules("kiln/tests/test_moat_comment_leak.py", "moat\n") == []
     # Surfaces outside the public tree are not this gate's job.
     assert _rules(".github/workflows/ci.yml", "moat\n") == []
+
+
+def test_exempts_pattern_owners_only() -> None:
+    """A leak gate must be able to carry the literal it catches; nothing else."""
+    literal = 'RULES = (("self-label", re.compile(r"\\bmoat\\b")),)  # kiln_pro/data/x.json\n'
+    for owner in sorted(_GATE._SELF):
+        assert _rules(owner, literal) == [], owner
+    # Every exempt file is a gate script or its fixture test, and each one
+    # really does carry the literal — an exemption for a file that no longer
+    # needs it is an exemption that has rotted.
+    root = Path(__file__).resolve().parents[2]
+    for owner in sorted(_GATE._SELF):
+        path = root / owner
+        assert path.is_file(), f"exempt path no longer exists: {owner}"
+        assert "moat" in path.read_text(encoding="utf-8").lower(), (
+            f"{owner} no longer carries the literal — drop it from _SELF"
+        )
+    # Ordinary source gets no such pass, gate-shaped name or not.
+    assert _rules("scripts/some_other_tool.py", literal) == [
+        "self-label", "private kiln_pro path"
+    ]
+    assert _rules("kiln/src/kiln/printability.py", literal) == [
+        "self-label", "private kiln_pro path"
+    ]
 
 
 # ── Rule 5: the sdist must not ship the test suite ──────────────────────────
