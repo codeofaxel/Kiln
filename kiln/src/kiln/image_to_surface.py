@@ -1772,9 +1772,6 @@ def generate_qr_data(content: str, output_dir: str) -> dict:
     QR code decoration is a paid feature. The implementation lives in
     the kiln-pro package. This stub raises ImportError to direct users
     to the tier that actually includes it.
-
-    See ``kiln_pro.decoration.qr_decorator.generate_qr_data`` for the
-    real implementation.
     """
     raise ImportError(
         "QR code decoration is a Business feature. "

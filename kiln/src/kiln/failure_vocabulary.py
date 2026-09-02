@@ -280,7 +280,7 @@ def mitigation_for(mode: str | None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Negative-constraint anti-patterns (KILN-010 claim 62)
+# Negative-constraint anti-patterns
 # ---------------------------------------------------------------------------
 
 # Symmetric counterpart to MITIGATIONS: short clauses describing what

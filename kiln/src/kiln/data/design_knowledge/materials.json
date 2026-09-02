@@ -13,7 +13,7 @@
       "update_cadence": "annual for established materials (PLA, PETG, ABS), semi-annual for newer composites (CF-Nylon, PA6-GF, PET-CF); high-performance polymers (PEI, PEEK, PEKK, PPSU, PPS) annual — their datasheets change rarely, but vendor process windows do",
       "methodology": "Conservative/worst-case values used for composites where manufacturer specs vary. Mechanical values represent typical FDM-printed properties (not injection-molded datasheets). Design limits empirically validated where possible."
     },
-    "_split_note": "Safety-floor profiles for AI-controlled FDM printing.  Engineering-grade properties (mechanical, design limits, use-case ratings, brand tuning, curated guidance) are available in Kiln Pro.  See https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profiles for AI-controlled FDM printing.  Engineering-grade material depth is available in Kiln Pro.  See https://kiln3d.com/pricing."
   },
   "pla": {
     "display_name": "PLA (Polylactic Acid)",

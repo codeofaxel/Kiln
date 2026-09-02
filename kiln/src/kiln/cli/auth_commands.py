@@ -383,8 +383,8 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
 def auth_logout() -> None:
     """Delete the locally-stored Kiln session token.
 
-    This does not revoke the token upstream — Supabase-side revocation
-    lives in the workshop (``/settings/account → Sign out of all
+    This does not revoke the session everywhere — to sign out of every
+    device, use the web app (``Settings → Account → Sign out of all
     sessions``).  For most users this command is what they want: it
     forgets the session on this laptop without touching the others.
     """

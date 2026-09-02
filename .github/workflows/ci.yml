@@ -221,6 +221,19 @@ jobs:
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: cd octoprint-cli && python -m pytest tests/ -v --cov=octoprint_cli --cov-report=term-missing
 
+      - name: Served-surface leak gate
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        # Builds the free-install MCP registry in-process (kiln-pro blocked, so
+        # the paid-tool discovery stubs appear as a free user gets them), walks
+        # `kiln --help`, and reads the bundled manifest and data notes — every
+        # text a client receives verbatim.  Fails on wording that names how the
+        # paid depth is built (private paths, docket numbers, bibliographies,
+        # field inventories, the internal label) rather than what a tier
+        # unlocks.  Added after the 2026-09-02 sweep found 91 served tool
+        # descriptions carrying exactly that while the source gates stayed
+        # green.  Exit 2 = leak, 3 = registry failed to load.
+        run: cd kiln && PYTHONPATH=src python ../scripts/audit_served_surface_leak.py
+
       - name: Generate SBOM (CycloneDX)
         if: ${{ !cancelled() && steps.deps.outcome == 'success' && matrix.python-version == '3.12' }}
         run: |

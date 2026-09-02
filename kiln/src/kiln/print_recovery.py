@@ -65,7 +65,7 @@ _TEMP_DROP_ADHESION_THRESHOLD = 10.0
 _SPAGHETTI_EXTRUSION_RATIO_MIN = 0.2
 _WARPING_TEMP_GRADIENT_MAX = 5.0  # degrees across bed
 
-# Per patent claim 78: the monitoring-checks-required threshold is
+# The monitoring-checks-required threshold is
 # resolved from the failure severity at session-creation time.
 # Critical failures (thermal runaway, bed adhesion) demand more passing
 # observations before recovery may be declared COMPLETED.
@@ -340,11 +340,10 @@ class RecoverySession:
 
 class MonitoringThresholdNotMet(ValueError):
     """Raised when ``complete_recovery(success=True)`` is called before
-    ``monitoring_passed >= monitoring_required`` (patent claim 76).
+    ``monitoring_passed >= monitoring_required``.
 
     Subclasses :class:`ValueError` so existing handlers still catch it,
-    but exposes structured fields for the MCP tool wrapper to surface
-    per claim 79.
+    but exposes structured fields for the MCP tool wrapper to surface.
     """
 
     def __init__(
@@ -819,7 +818,7 @@ class PrintRecovery:
                 raise ValueError(
                     f"Session {session_id!r} is already in terminal state: {session.status.value}"
                 )
-            # Patent claim 76: success completion requires the
+            # Success completion requires the
             # monitoring-checks threshold to be met. Failure completion is
             # always allowed (operator may give up at any time).
             if success and session.monitoring_passed < session.monitoring_required:

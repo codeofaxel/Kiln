@@ -69,6 +69,12 @@ scripts/*
 # …and for the public-language gate, which checks tracked text and new
 # commit messages for private editorial context before it reaches GitHub.
 !scripts/check_public_language.py
+# …and for the served-surface leak gate plus the dump it is built on: every
+# tool / prompt / resource description, CLI help text, manifest entry, and
+# data note a client or `kiln --help` reader receives, judged for wording
+# that names how the paid depth is built instead of what a tier unlocks.
+!scripts/audit_served_surface_leak.py
+!scripts/dump_tool_descriptions.py
 # …and for the tool-door param-parity gate, which is run by a CI-collected
 # test so a tuned engine axis (material, printer_id) can never be silently
 # unreachable through the @mcp.tool() door an agent actually calls.

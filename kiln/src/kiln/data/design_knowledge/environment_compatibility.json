@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "domain": "fdm",
     "description": "Material survival matrix for environment and exposure checks. Ratings are qualitative and intended for fast agent triage before geometry generation.",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (per-block notes + cycle_life_estimates) is available in Kiln Pro; see https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Deeper per-material guidance is available in Kiln Pro; see https://kiln3d.com/pricing."
   },
   "pla": {
     "uv_resistance": {

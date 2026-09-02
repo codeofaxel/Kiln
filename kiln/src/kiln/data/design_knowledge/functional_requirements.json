@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "domain": "fdm",
     "description": "Maps functional requirements to design constraints. When an agent describes what an object needs to DO, these rules translate into what the design needs to BE.",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (agent_guidance worked examples) is available in Kiln Pro; see https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Worked design guidance is available in Kiln Pro; see https://kiln3d.com/pricing."
   },
   "load_bearing": {
     "display_name": "Supports Weight / Load-Bearing",

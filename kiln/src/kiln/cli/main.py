@@ -9033,7 +9033,7 @@ def local_first_cmd(apply: bool, write_env: bool, json_mode: bool) -> None:
         "env_file": env_file_path,
         "notes": [
             "This profile is privacy-first and local-first by default.",
-            "No print content or model payloads are sent to Supabase licensing tables.",
+            "No print content or model payloads are sent to Kiln's licensing service.",
             "If you use cloud LLMs, set KILN_OPENROUTER_KEY explicitly.",
         ],
     }
@@ -11035,16 +11035,15 @@ def goals_list(filter_status: str, limit: int, json_mode: bool) -> None:
     inbox: shows what you've committed and which prints have honored
     each goal.
 
-    Requires kiln-pro (the design_session lifecycle lives there).
+    Requires Kiln Pro.
     """
     try:
         from kiln_pro.design_brief import list_briefs
     except ImportError:
         click.echo(
             format_error(
-                "Saved goals require Kiln Pro (the design_session lifecycle "
-                "and its DesignBrief store live in kiln-pro). Install with: "
-                "pip install kiln-pro — or upgrade at https://kiln3d.com/pricing",
+                "Saved goals are a Kiln Pro feature. Already subscribed? Run "
+                "`kiln signin` on this machine. New? https://kiln3d.com/pricing",
                 code="REQUIRES_KILN_PRO",
                 json_mode=json_mode,
             )
