@@ -87,10 +87,11 @@ class CavityAnalysis:
     pocketed/inset features — produce signal.
 
     ``min_cavity_width_mm`` is the smallest measured cavity (or 0.0
-    sentinel when no cavities are detected on the mesh).  Sub-perimeter
-    cavities flag as 'unprintable' in the kiln-pro overlay (the slicer
-    cannot reproduce a sub-extrusion gap; the feature closes up during
-    printing).  A void narrower than the slicer's crack-closing width,
+    sentinel when no cavities are detected on the mesh).  The kiln-pro
+    overlay (https://kiln3d.com) flags a cavity narrower than the
+    material's printable floor as a recess too fine to resolve — the
+    feature fills in or loses its edges during printing.  It is never
+    a wall verdict.  A void narrower than the slicer's crack-closing width,
     or one that tapers to nothing within the face it is measured from,
     is a tessellation crack rather than a cavity and does not register.
     """
