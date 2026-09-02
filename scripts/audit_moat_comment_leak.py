@@ -1,34 +1,131 @@
 #!/usr/bin/env python3
-"""Moat-comment leak gate — public Kiln must not narrate the kiln-pro
-overlay's internal strategy.
+"""Moat-comment leak gate — public Kiln must not narrate, inline, or name
+the private kiln-pro tier.
 
 Public Kiln is open source.  A comment or docstring may say a field is
 "exposed for the kiln-pro overlay" (a contract note) but must NOT
 describe HOW the overlay reasons — its classifiers, the signals it
 combines, the verdict logic it routes through.  That hands a competitor
-the methodology of the private moat for free, even though the curated
-*values* stay private.
+the methodology of the private tier for free, even though the curated
+*values* stay private.  The same is true of the public TEST SUITE: it is
+part of the open-source tree and (until pruned) part of the sdist on PyPI,
+so a paid-tier expectation table or a private module path inlined into a
+test is exactly as public as one inlined into ``src/``.
 
-This gate scans public-Kiln comments + docstrings for an overlay mention
-co-occurring with strategy-narration language, and fails on anything not
-consciously allowlisted.  The right fix for a flagged block is almost
-always to TRIM the moat reasoning (keep the math + the "exposed for the
-kiln-pro overlay" contract), not to allowlist it.
+What the gate scans
+-------------------
+* ``kiln/src/kiln/**/*.py`` and ``kiln/tests/**/*.py`` — comments and
+  docstrings (via ``tokenize``) plus every raw line.
+* ``kiln/src/kiln/data/**/*.json`` and ``kiln/tests/**/*.json`` — every
+  string line (shipped data has no comments to hide in).
+* ``docs/``, ``README.md``, ``scripts/`` — every line of every tracked
+  text file, for the plain-text rules below.
+* ``kiln/MANIFEST.in`` — the sdist recipe.
 
-    python3 scripts/audit_moat_comment_leak.py        # exit 0 clean, 2 leak
+The rules, in plain language
+----------------------------
+1. **Overlay narration** (comments / docstrings, src AND tests): an
+   overlay / kiln-pro mention in the same block as strategy vocabulary
+   ("strut classifier", "weights tip wear", …), datasheet provenance,
+   or a private overlay file path.
+2. **Inlined Pro values** (tests only): a module-level ``_PRO_*`` name
+   bound to a non-empty dict / list / set literal is the paid tier's
+   answer key copied into public.  So is any comment or docstring that
+   says a value "mirrors" / "matches the shipped" / "is the real
+   shipped" kiln-pro data.
+3. **Private paths** (all scanned text): ``kiln_pro/data/...`` or a
+   ``kiln_pro/*.md`` / ``*.json`` / ``*.sql`` path is a leak wherever it
+   appears.  DOTTED ``kiln_pro.<module>`` references are NOT blocked
+   outright — the free-tier fallback tests legitimately stub ``kiln_pro``
+   in ``sys.modules`` — but their inventory is FROZEN: every distinct
+   dotted path found in ``kiln/tests`` must already be listed in
+   ``scripts/public_tests_kiln_pro_paths.txt``.  A new path fails the
+   gate until it is added there on purpose (``--freeze-kiln-pro-paths``
+   rewrites the file from the current tree; commit the diff).
+4. **Self-label** (all scanned text): the word "moat", any case,
+   anywhere in public text.  There is no functional reason for the word
+   in a public tree; every use points a reader at the jewels.  The gate
+   script and its own test are the only exceptions (they must name the
+   thing they catch), and the gate's own file name is not a hit.
+5. **Internal persona / process names** (all scanned text): "the
+   judges", "judges' verdict", "judges panel", "war-room", "ship-gate",
+   "panel verdict".  These are phrase matches — bare "panel" (MCP Apps
+   panels) and "judges" as a verb are legitimate and never trip.
+6. **sdist prune**: ``kiln/MANIFEST.in`` must exist and ``prune tests``
+   (or ``recursive-exclude tests *``) so the test suite never ships in
+   the PyPI sdist.  Checked in full-tree mode, and in ``--staged`` mode
+   only when the manifest or ``pyproject.toml`` is part of the commit.
+
+The right fix for a flagged block is almost always to TRIM the private
+reasoning / values / path (keep the math + the "exposed for the kiln-pro
+overlay" contract), not to allowlist it.
+
+    python3 scripts/audit_moat_comment_leak.py             # full tree; 0 clean, 2 leak
+    python3 scripts/audit_moat_comment_leak.py --staged    # only the git index (commit hook)
+    python3 scripts/audit_moat_comment_leak.py --files a b # only these repo-relative paths
+    python3 scripts/audit_moat_comment_leak.py --sweep     # advisory broad heuristic
+    python3 scripts/audit_moat_comment_leak.py --freeze-kiln-pro-paths
+
+Runs from CI (the same job as the test matrix), from the pre-push hook,
+and — via ``scripts/check_public_language.py --staged`` — from the
+commit-time hook, so a leak is refused at the commit, not at the PR.
+Stdlib only.
 
 Pairs with the wheel-exclusion + overlay-payload gates that protect the
-curated values; this one protects the *method*.
+curated values; this one protects the *method*, the *answer key*, and
+the *map* to the private tree.
 """
 
 from __future__ import annotations
 
+import io
+import os
 import re
+import subprocess
 import sys
 import tokenize
 from pathlib import Path
 
-_SRC = Path(__file__).resolve().parent.parent / "kiln" / "src" / "kiln"
+_ROOT = Path(__file__).resolve().parent.parent
+_SRC = _ROOT / "kiln" / "src" / "kiln"
+_TESTS = _ROOT / "kiln" / "tests"
+_MANIFEST = _ROOT / "kiln" / "MANIFEST.in"
+_FROZEN_PATHS_FILE = _ROOT / "scripts" / "public_tests_kiln_pro_paths.txt"
+
+# Repo-relative prefixes the gate walks.  ``kiln/src/kiln`` and
+# ``kiln/tests`` get the code rules; everything here gets the text rules.
+_SURFACES = ("kiln/src/kiln", "kiln/tests", "docs", "README.md", "scripts")
+
+# The gate and its own test are the only files allowed to spell out the
+# patterns they catch.  They are skipped by every content rule.
+_SELF = frozenset({
+    "scripts/audit_moat_comment_leak.py",
+    "kiln/tests/test_moat_comment_leak.py",
+})
+# The gate's own file name is not a self-label: CI, .gitignore, and sibling
+# gates have to be able to reference it.
+_SELF_NAME_TOKENS = ("audit_moat_comment_leak", "test_moat_comment_leak")
+# The public-language gate and its test spell out the persona phrases they
+# catch; they are exempt from rule 5 only.
+_PERSONA_PATTERN_OWNERS = frozenset({
+    "scripts/check_public_language.py",
+    "kiln/tests/test_public_language.py",
+})
+# Cheap whole-file prefilter for the line rules: a file with none of these
+# substrings cannot trip any of them, so its lines are never iterated.
+_LINE_PREFILTER = re.compile(
+    r"moat|kiln_pro/|_pro_overlay\.json|judge|war[- ]room|ship[- ]gate|panel|^_PRO_",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+_SKIP_DIRS = frozenset({"node_modules", "__pycache__", ".venv", "dist", ".astro", "build"})
+_BINARY_SUFFIXES = frozenset({
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".icns", ".pdf", ".zip",
+    ".tar", ".gz", ".tgz", ".xz", ".bz2", ".7z", ".dmg", ".so", ".dylib",
+    ".a", ".o", ".bin", ".woff", ".woff2", ".ttf", ".otf", ".eot", ".mp3",
+    ".mp4", ".mov", ".wav", ".webm", ".pyc", ".stl", ".3mf", ".step", ".stp",
+    ".gcode", ".svg",
+})
 
 # A comment/docstring that names the private overlay surface.
 _OVERLAY_MENTIONS = ("overlay", "kiln-pro", "kiln_pro")
@@ -38,10 +135,10 @@ _OVERLAY_MENTIONS = ("overlay", "kiln-pro", "kiln_pro")
 # mention in the same comment/docstring block is the leak signal.  Keep
 # this list tuned to *strategy narration*, not incidental vocabulary.
 #
-# NOTE: tuned to *moat-strategy vocabulary*, not generic words.  Broad
+# NOTE: tuned to *strategy vocabulary*, not generic words.  Broad
 # tokens like "classifies" were removed — the firmware and public-tier
 # classifiers legitimately "classify", so that word is not a leak signal.
-# Extend this list when a NEW moat subsystem's narration vocabulary
+# Extend this list when a NEW private subsystem's narration vocabulary
 # appears (the gate flags for review; trim the block or, rarely, allowlist).
 _STRATEGY_TOKENS = (
     # lattice / strut topology routing (printability overlay)
@@ -78,15 +175,14 @@ _STRATEGY_TOKENS = (
 # ── Provenance leak: naming the SOURCES the curated overlay is grounded in ──
 # Public Kiln may say a value is "tuned by the kiln-pro overlay" (contract),
 # but naming WHERE the private overlay's numbers came from — vendor datasheets,
-# specific manufacturers, TDS docs — hands a competitor the research method,
-# which is the moat itself.  (Public STANDARDS — ASTM / ISO / IEC — are fine;
-# those are textbook, not our research.  These tokens target vendor/datasheet
-# provenance, not standards, so a "grounded in ASTM D638" note never trips.)
+# specific manufacturers, TDS docs — hands a competitor the research method.
+# (Public STANDARDS — ASTM / ISO / IEC — are fine; those are textbook, not
+# our research.  These tokens target vendor/datasheet provenance, not
+# standards, so a "grounded in ASTM D638" note never trips.)
 # DATASHEET phrasing is the precise signal: it only appears when narrating
 # where the PRIVATE overlay's numbers came from.  A bare vendor name is NOT
 # enough — brand names appear legitimately as material examples ("Polymaker
-# PETG on brass"); only "datasheet-grounded against X" is provenance.  Public
-# STANDARDS (ASTM / ISO / IEC) are textbook, not datasheets, so they never trip.
+# PETG on brass"); only "datasheet-grounded against X" is provenance.
 _PROVENANCE_TOKENS = (
     "datasheet-grounded",
     "datasheet grounded",
@@ -95,34 +191,84 @@ _PROVENANCE_TOKENS = (
     "vendor datasheet",
     "vendor datasheets",
     "tds-derived",
+    "against datasheets",
+    "curated against datasheet",
 )
 
-# ── Self-labeling the moat in PUBLIC source points a competitor at the jewels ─
-# A public comment describes the CONTRACT ("Pro overlay supplies curated
-# values"); it must never BRAND that overlay "the moat".  The bare word in an
-# overlay-context comment is always the self-label — there's no other reason to
-# write "moat" in public source — so one token catches every variant
-# ("engineering moat", "moat overlay", "moat split", …).
+# ── Self-labeling the private tier in PUBLIC text points a competitor at
+# the jewels.  A public comment describes the CONTRACT ("Pro overlay supplies
+# curated values"); it must never BRAND that overlay with the word below.
+# There is no other reason to write it in public text — so one token catches
+# every variant ("engineering …", "… overlay", "… split", …).
 _MOAT_LABEL_TOKENS = ("moat",)
+_MOAT_LABEL = re.compile("moat", re.IGNORECASE)
 
-# ── A private kiln_pro data file PATH named in a public comment over-shares ──
+# ── A private kiln_pro data / doc file PATH named in public text over-shares ──
 # The loader references the overlay KIND ("printability_judgment") in CODE —
-# the necessary public contract; the full private path / `*_pro_overlay.json`
-# filename in a COMMENT is not.  (Module refs like ``kiln_pro/data_overlays.py``
-# end in .py and don't match — only data files do.)
+# the necessary public contract; the private path, the ``kiln_pro/data/``
+# tree, a ``*_pro_overlay.json`` filename, or a private ``.md`` is not.
+# (Module refs like ``kiln_pro/data_overlays.py`` end in .py and don't
+# match — the ``/`` after ``data`` is required.)
 _PRIVATE_OVERLAY_REF = re.compile(
-    r"kiln_pro/[\w/]*\.(?:json|sql)\b|\b\w*_pro_overlay\.json\b",
+    r"kiln_pro/data/|kiln_pro/[\w/.-]*\.(?:json|sql|md)\b|\b\w*_pro_overlay\.json\b",
     re.IGNORECASE,
+)
+
+# ── Dotted ``kiln_pro.<module>`` references: inventoried, not blocked ──
+_DOTTED_PRO_PATH = re.compile(r"\bkiln_pro(?:\.[A-Za-z_][A-Za-z0-9_]*)+")
+
+# ── Inlined Pro values in a public test ──
+# A module-level ``_PRO_*`` name bound to a NON-EMPTY dict / list / set
+# literal (or constructor) is the paid tier's expectation table.  ``src``
+# legitimately declares empty ``_PRO_TOOL_TIERS: dict = {}`` slots that the
+# private plugin fills at runtime, so the rule is tests-only and an empty
+# literal never trips.
+_PRO_LITERAL_ASSIGN = re.compile(
+    r"^_PRO_[A-Z0-9_]*\s*(?::[^=]*)?=\s*"
+    r"(?:\{(?!\s*\})|\[(?!\s*\])|(?:dict|list|set|frozenset)\((?!\s*\)))"
+)
+# A comment / docstring that admits the value IS the private data.  Only
+# meaningful in a block that also mentions the overlay / kiln-pro / Pro tier.
+_PRO_MENTION = re.compile(
+    r"overlay|kiln[-_ ]pro|\bpro[- ]tier|\bpaid[- ]tier|\bpro data|\bpro values",
+    re.IGNORECASE,
+)
+_PRO_MIRROR_NOTE = re.compile(
+    r"\breal shipped\b|\bshipped (?:pro |kiln[-_ ]pro |overlay )?(?:values?|numbers?|thresholds?|weights?|table)\b|"
+    r"\bis the real (?:shipped |pro |kiln[-_ ]pro |overlay )?(?:values?|numbers?|data|table|overlay)\b|"
+    r"\bmirrors? (?:the )?(?:real|shipped|live|actual|curated|private|pro|kiln[-_ ]pro)"
+    r"[\w' -]{0,30}?(?:values?|numbers?|thresholds?|weights?|expectations?|table|verdicts?)\b|"
+    r"\b(?:same|identical) (?:values?|numbers?|thresholds?|weights?) as (?:the )?"
+    r"(?:real|shipped|live|pro|kiln[-_ ]pro|private|overlay)\b|"
+    r"\b(?:copied|lifted|taken) (?:verbatim )?from (?:the )?(?:kiln[-_ ]pro|pro overlay|private tier|overlay)\b|"
+    r"\b(?:match(?:es)?|compared? against) the (?:real|shipped|live|actual|curated|private) "
+    r"(?:pro |kiln[-_ ]pro )?(?:values?|numbers?|data|table|thresholds?|weights?)\b",
+    re.IGNORECASE,
+)
+
+# ── Internal persona / process names ──
+# Phrase matches only: bare "panel" (MCP Apps panels) and "judges" as a verb
+# ("the composer judges the layout") are legitimate and never trip.
+_PERSONA_PHRASE = re.compile(
+    r"\bjudges['’]|\bjudges\s*:|\b(?:the|our|three|four|from the|per the) judges\b|"
+    r"\bjudges?[- ]panel\b|\bjudge[- ]voted\b|\bwar[- ]room\b|\bship[- ]gate\b|"
+    r"\bpanel(?:['’]s)? verdicts?\b",
+    re.IGNORECASE,
+)
+
+# ── sdist prune ──
+_MANIFEST_PRUNES_TESTS = re.compile(
+    r"^\s*(?:prune\s+tests\s*$|recursive-exclude\s+tests\s+\*\s*$)", re.MULTILINE
 )
 
 # ── Research-source bibliography in PUBLIC data: the sourcing playbook ──
 # A public data file's _meta/sources block naming the SPECIFIC sources a curated
-# knowledge base is grounded in is the research method (the moat) — even when
-# each source is individually public, the COMPILATION is the work.  These are
-# research / material-database sources, never product data, so they're safe to
-# flag in shipped JSON.  (The product-brand fields — "vendor": "Polymaker",
-# "amazon": "Prusament+…" — are a different, legitimate thing: product
-# identification.  That's why product brands aren't in this list.)
+# knowledge base is grounded in is the research method — even when each source
+# is individually public, the COMPILATION is the work.  These are research /
+# material-database sources, never product data, so they're safe to flag in
+# shipped JSON.  (The product-brand fields — "vendor": "Polymaker", "amazon":
+# "Prusament+…" — are a different, legitimate thing: product identification.
+# That's why product brands aren't in this list.)
 _JSON_RESEARCH_SOURCES = (
     "cnc kitchen", "makersmuse", "hackaday", "/r/3dprinting",
     "natureworks", "basf", "stratasys", "solvay", "passive-components",
@@ -134,11 +280,11 @@ _JSON_RESEARCH_SOURCES = (
 # which carries no year and is the allowed trust signal).
 _DATASHEET_CITATION = re.compile(r"data ?sheets?\s*\(20\d\d", re.IGNORECASE)
 
-# Consciously reviewed blocks that trip the detector but are CONTRACT /
-# architecture notes (merge mechanism, public-floor fallback, upgrade
-# nudge, bundle/resume wiring) — NOT narration of how the overlay reasons.
-# Keyed by (filename, a stable marker phrase from the block).  Only add a
-# block after confirming it describes the boundary, not the method.
+# Consciously reviewed blocks / lines that trip a detector but are CONTRACT /
+# architecture notes (merge mechanism, public-floor fallback, upgrade nudge,
+# bundle/resume wiring, an MCP Apps panel) — NOT narration of the private
+# method.  Keyed by (filename, a stable marker phrase from the block).  Only
+# add an entry after confirming it describes the boundary, not the method.
 _ALLOWLIST: tuple[tuple[str, str], ...] = (
     ("design_intelligence.py", "Recommend a material using ONLY safety-floor fields"),
     ("design_intelligence.py", "Always attach the upgrade nudge when the load detector tripped"),
@@ -146,19 +292,20 @@ _ALLOWLIST: tuple[tuple[str, str], ...] = (
     ("original_design.py", "Run a harsh audit of an original design"),
     ("slicer_tools.py", "Attach Pro+ enrichment to an EXCEEDS_BED"),
     ("print_recovery.py", "Stamp gcode_path so kiln-pro's resume engine"),
+    # "panel" here is the MCP Apps stage panel, not a review persona.
+    ("local_stage.py", "is the panel verdict, not the geometry verdict"),
 )
 
 
-def _allowlisted(path: Path, text: str) -> bool:
-    name = path.name
+def _allowlisted(path: Path | str, text: str) -> bool:
+    name = Path(path).name
     return any(fn in name and marker in text for fn, marker in _ALLOWLIST)
 
 
-def _blocks(path: Path):
+def _blocks_from_bytes(data: bytes):
     """Yield ``(start_line, text)`` for each comment block and docstring."""
     try:
-        with open(path, "rb") as fh:
-            tokens = list(tokenize.tokenize(fh.readline))
+        tokens = list(tokenize.tokenize(io.BytesIO(data).readline))
     except (tokenize.TokenError, SyntaxError, ValueError):
         return
 
@@ -181,6 +328,15 @@ def _blocks(path: Path):
                 yield tok.start[0], tok.string
     if block:
         yield block_line, "\n".join(block)
+
+
+def _blocks(path: Path):
+    """Yield ``(start_line, text)`` for each comment block and docstring."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        return
+    yield from _blocks_from_bytes(data)
 
 
 # Beyond the curated vocabulary, catch the GENERAL narration signature:
@@ -206,38 +362,44 @@ _OVERLAY_PURPOSE = re.compile(
 )
 
 
-def _is_leak(text: str, *, broad: bool = False) -> bool:
+# ── Rule 1: overlay narration in a comment / docstring block ────────────────
+def _leak_reason(text: str, *, broad: bool = False) -> str | None:
+    """Why a comment / docstring block leaks, or ``None`` when it doesn't."""
     low = text.lower()
     if not any(m in low for m in _OVERLAY_MENTIONS):
-        return False
+        return None
     if any(tok in low for tok in _STRATEGY_TOKENS):
-        return True
+        return "strategy"
     # Provenance: naming the curated overlay's research SOURCES via datasheet
-    # phrasing — the research method is the moat.
+    # phrasing — the research method is the private tier.
     if any(tok in low for tok in _PROVENANCE_TOKENS):
-        return True
-    # Self-labeling the overlay "the moat" in public source.
+        return "provenance"
+    # Self-labeling the overlay in public source.
     if any(tok in low for tok in _MOAT_LABEL_TOKENS):
-        return True
+        return "self-label"
     # A private kiln_pro data path / `*_pro_overlay.json` filename in a comment.
     if _PRIVATE_OVERLAY_REF.search(text):
-        return True
+        return "private path"
     # The broad subject-verb heuristic ("the overlay routes/reads/flags X")
     # catches NOVEL narration, but it also trips legitimate seam / contract /
     # marketed-feature notes — so it is advisory-only (``--sweep``), never
     # part of the hard CI gate.  Run it periodically and review by hand.
-    if broad:
-        return bool(_OVERLAY_ACTION.search(text) or _OVERLAY_PURPOSE.search(text))
-    return False
+    if broad and (_OVERLAY_ACTION.search(text) or _OVERLAY_PURPOSE.search(text)):
+        return "broad"
+    return None
+
+
+def _is_leak(text: str, *, broad: bool = False) -> bool:
+    return _leak_reason(text, broad=broad) is not None
 
 
 def _is_json_leak(text: str) -> bool:
     """Public data JSONs ship verbatim to every user but have no comments — so
-    scan a string LINE for the same leaks.  A bare 'moat' in shipped data is
-    always the self-label (there is no functional reason for the word in a data
+    scan a string LINE for the same leaks.  A bare self-label in shipped data is
+    always the leak (there is no functional reason for the word in a data
     file), so no overlay-context gate is needed here."""
     low = text.lower()
-    if "moat" in low:
+    if any(tok in low for tok in _MOAT_LABEL_TOKENS):
         return True
     if any(tok in low for tok in _PROVENANCE_TOKENS):
         return True
@@ -251,43 +413,333 @@ def _is_json_leak(text: str) -> bool:
     return False
 
 
-def main() -> int:
-    broad = "--sweep" in sys.argv
-    leaks: list[tuple[Path, int, str]] = []
-    for path in sorted(_SRC.rglob("*.py")):
-        for line, text in _blocks(path):
-            if _is_leak(text, broad=broad) and not _allowlisted(path, text):
-                leaks.append((path, line, text))
+# ── Rule 2: inlined Pro values in a public test ─────────────────────────────
+def _is_inlined_pro_literal(line: str) -> bool:
+    """A module-level ``_PRO_*`` name bound to a non-empty container literal."""
+    return bool(_PRO_LITERAL_ASSIGN.match(line))
 
-    # Public data JSONs ship verbatim to every user — scan their string content
-    # line by line for the same self-label / provenance / private-path leaks.
-    for path in sorted((_SRC / "data").rglob("*.json")):
+
+def _is_pro_mirror_note(block: str) -> bool:
+    """A comment / docstring admitting a value IS the private tier's data."""
+    return bool(_PRO_MENTION.search(block) and _PRO_MIRROR_NOTE.search(block))
+
+
+# ── Rule 3: private paths ───────────────────────────────────────────────────
+def _names_private_pro_path(text: str) -> bool:
+    return bool(_PRIVATE_OVERLAY_REF.search(text))
+
+
+def _dotted_pro_paths(text: str) -> set[str]:
+    return set(_DOTTED_PRO_PATH.findall(text))
+
+
+def _load_frozen_paths(path: Path = _FROZEN_PATHS_FILE) -> set[str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return set()
+    return {ln.strip() for ln in lines if ln.strip() and not ln.lstrip().startswith("#")}
+
+
+def _new_pro_paths(found: set[str], frozen: set[str]) -> set[str]:
+    return found - frozen
+
+
+# ── Rule 4: self-label ──────────────────────────────────────────────────────
+def _is_moat_label(line: str) -> bool:
+    if not _MOAT_LABEL.search(line):
+        return False
+    scrubbed = line
+    for tok in _SELF_NAME_TOKENS:
+        scrubbed = scrubbed.replace(tok, "")
+    return bool(_MOAT_LABEL.search(scrubbed))
+
+
+# ── Rule 5: internal persona / process names ────────────────────────────────
+def _is_persona_phrase(line: str) -> bool:
+    return bool(_PERSONA_PHRASE.search(line))
+
+
+# ── Rule 6: sdist prune ─────────────────────────────────────────────────────
+def _manifest_prunes_tests(text: str | None) -> bool:
+    return bool(text) and bool(_MANIFEST_PRUNES_TESTS.search(text))
+
+
+# ── File classification + the per-file scan ─────────────────────────────────
+Leak = tuple[str, int, str, str]  # (repo-relative path, line, rule, text)
+
+
+def _decode(data: bytes) -> str | None:
+    if b"\0" in data:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _in_scope(rel: str) -> bool:
+    if rel in _SELF:
+        return False
+    parts = rel.split("/")
+    if any(p in _SKIP_DIRS for p in parts):
+        return False
+    if Path(rel).suffix.lower() in _BINARY_SUFFIXES:
+        return False
+    return rel == "README.md" or any(rel.startswith(s + "/") for s in _SURFACES if s != "README.md")
+
+
+def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak], set[str]]:
+    """Apply every rule that applies to one file.
+
+    Returns ``(leaks, dotted_kiln_pro_paths)``; the dotted paths are the
+    inventory input for rule 3 and are reconciled by the caller.
+    """
+    leaks: list[Leak] = []
+    dotted: set[str] = set()
+    if not _in_scope(rel):
+        return leaks, dotted
+    text = _decode(data)
+    if text is None:
+        return leaks, dotted
+
+    name = rel.rsplit("/", 1)[-1]
+    is_py = rel.endswith(".py")
+    is_json = rel.endswith(".json")
+    is_test = rel.startswith("kiln/tests/")
+    is_src = rel.startswith("kiln/src/kiln/")
+    is_shipped_json = is_json and (rel.startswith("kiln/src/kiln/data/") or is_test)
+    persona_ok = rel in _PERSONA_PATTERN_OWNERS
+
+    def hit(line: int, rule: str, snippet: str) -> None:
+        if not _allowlisted(name, snippet):
+            leaks.append((rel, line, rule, snippet.strip()))
+
+    # Text rules — every line of every scanned file (skipped wholesale when
+    # the file contains no candidate substring at all).
+    if _LINE_PREFILTER.search(text):
+        for i, ln in enumerate(text.splitlines(), 1):
+            if _is_moat_label(ln):
+                hit(i, "self-label", ln)
+            if _names_private_pro_path(ln):
+                hit(i, "private kiln_pro path", ln)
+            if not persona_ok and _is_persona_phrase(ln):
+                hit(i, "internal persona", ln)
+            if is_test and is_py and _is_inlined_pro_literal(ln):
+                hit(i, "inlined Pro values", ln)
+
+    if is_test and is_py:
+        dotted = _dotted_pro_paths(text)
+
+    # Comment / docstring rules — src and test .py, tokenized only when the
+    # file mentions the private tier at all (a block can't trip otherwise).
+    # Self-label and private-path reasons are already reported line by line.
+    if is_py and (is_src or is_test) and (_PRO_MENTION.search(text) or broad):
+        for line, block in _blocks_from_bytes(data):
+            reason = _leak_reason(block, broad=broad)
+            if reason in ("strategy", "provenance", "broad"):
+                hit(line, "overlay narration", block)
+            elif reason is None and _is_pro_mirror_note(block):
+                hit(line, "Pro-data mirror note", block)
+
+    # Shipped-data rules — data JSON (and test JSON fixtures) line by line.
+    if is_shipped_json:
+        for i, ln in enumerate(text.splitlines(), 1):
+            if _is_json_leak(ln):
+                hit(i, "shipped data", ln)
+
+    return leaks, dotted
+
+
+# ── Walkers ─────────────────────────────────────────────────────────────────
+# Git exports these into hook environments to pin a command to the invoking
+# repository, and every one of them OUTRANKS `git -C <dir>`.  This module is
+# loaded by kiln/tests/test_moat_comment_leak.py, so it runs inside the test
+# suite — and the suite is started from the pre-push hook.  Inherited, they
+# would make every read below resolve against whichever repo git pinned
+# instead of _ROOT.
+_GIT_ENV_OVERRIDES = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+    "GIT_PREFIX", "GIT_INDEX_VERSION", "GIT_QUARANTINE_PATH",
+)
+
+
+def _git(*args: str) -> bytes:
+    return subprocess.run(
+        ["git", "-C", str(_ROOT), *args],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        env={k: v for k, v in os.environ.items() if k not in _GIT_ENV_OVERRIDES},
+    ).stdout
+
+
+def _tree_paths() -> list[str]:
+    """Every public-surface file git would commit: tracked + untracked-but-
+    not-ignored.  Respects .gitignore (a developer's local, ignored scripts
+    are not public).  Falls back to a plain walk outside a git checkout."""
+    try:
+        raw = _git("ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *_SURFACES)
+        names = [n.decode("utf-8", "surrogateescape") for n in raw.split(b"\0") if n]
+    except (OSError, subprocess.CalledProcessError):
+        names = []
+        for surface in _SURFACES:
+            base = _ROOT / surface
+            if base.is_file():
+                names.append(surface)
+            elif base.is_dir():
+                names.extend(p.relative_to(_ROOT).as_posix() for p in base.rglob("*") if p.is_file())
+    return sorted(set(n for n in names if (_ROOT / n).is_file()))
+
+
+def _staged() -> tuple[list[tuple[str, bytes]], list[str]]:
+    """Staged (added/copied/modified) content from the index, plus the names
+    of every staged path including deletions."""
+    raw = _git("diff", "--cached", "--name-only", "--diff-filter=ACMD", "-z")
+    names = [n.decode("utf-8", "surrogateescape") for n in raw.split(b"\0") if n]
+    content: list[tuple[str, bytes]] = []
+    for rel in names:
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeDecodeError):
-            continue
-        for i, ln in enumerate(lines, 1):
-            if _is_json_leak(ln) and not _allowlisted(path, ln):
-                leaks.append((path, i, ln.strip()))
+            content.append((rel, _git("show", f":{rel}")))
+        except subprocess.CalledProcessError:
+            continue  # deleted in the index — nothing to scan
+    return content, names
 
-    if not leaks:
-        print("Moat-comment audit: clean." + (" (--sweep)" if broad else ""))
+
+def _read_manifest() -> str | None:
+    try:
+        return _MANIFEST.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+# ── Main ────────────────────────────────────────────────────────────────────
+def run(
+    content: list[tuple[str, bytes]],
+    *,
+    broad: bool = False,
+    check_manifest: bool = True,
+    frozen: set[str] | None = None,
+) -> tuple[list[Leak], dict[str, int]]:
+    """Scan ``content`` and reconcile the kiln_pro path inventory."""
+    leaks: list[Leak] = []
+    found: set[str] = set()
+    for rel, data in content:
+        file_leaks, dotted = scan_file(rel, data, broad=broad)
+        leaks.extend(file_leaks)
+        found |= dotted
+
+    frozen = _load_frozen_paths() if frozen is None else frozen
+    new = _new_pro_paths(found, frozen)
+    where = _occurrences(content, new)
+    for p in sorted(new):
+        rel, line = where.get(p, ("kiln/tests", 0))
+        leaks.append((rel, line, "new kiln_pro path", p))
+
+    if check_manifest and not _manifest_prunes_tests(_read_manifest()):
+        leaks.append((
+            "kiln/MANIFEST.in", 0, "sdist prune",
+            "missing `prune tests` — the PyPI sdist would ship kiln/tests/",
+        ))
+
+    stats = {
+        "kiln_pro_paths_found": len(found),
+        "kiln_pro_paths_frozen": len(frozen),
+        "kiln_pro_paths_new": len(new),
+        "kiln_pro_paths_unused": len(frozen - found),
+    }
+    return leaks, stats
+
+
+def _occurrences(content: list[tuple[str, bytes]], needles: set[str]) -> dict[str, tuple[str, int]]:
+    """First ``(path, line)`` in the public tests where each dotted path appears."""
+    where: dict[str, tuple[str, int]] = {}
+    if not needles:
+        return where
+    for rel, data in content:
+        if not rel.startswith("kiln/tests/"):
+            continue
+        for i, ln in enumerate((_decode(data) or "").splitlines(), 1):
+            for p in _DOTTED_PRO_PATH.findall(ln):
+                if p in needles and p not in where:
+                    where[p] = (rel, i)
+    return where
+
+
+def _freeze_paths(content: list[tuple[str, bytes]]) -> int:
+    found: set[str] = set()
+    for rel, data in content:
+        if rel.startswith("kiln/tests/") and rel.endswith(".py") and rel not in _SELF:
+            found |= _dotted_pro_paths(_decode(data) or "")
+    header = (
+        "# Frozen inventory of dotted kiln_pro.<module> references in kiln/tests/.\n"
+        "# Read by scripts/audit_moat_comment_leak.py: a path in the tests that is\n"
+        "# not listed here fails the gate.  The free-tier fallback tests stub these\n"
+        "# in sys.modules on purpose; this file makes GROWTH of that exposure a\n"
+        "# reviewed diff rather than a side effect.  Regenerate with\n"
+        "#     python3 scripts/audit_moat_comment_leak.py --freeze-kiln-pro-paths\n"
+        "# and commit the diff.  Shrinking it needs no ceremony.\n"
+    )
+    _FROZEN_PATHS_FILE.write_text(header + "".join(f"{p}\n" for p in sorted(found)), encoding="utf-8")
+    return len(found)
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    broad = "--sweep" in argv
+    staged = "--staged" in argv
+    freeze = "--freeze-kiln-pro-paths" in argv
+    files: list[str] = []
+    if "--files" in argv:
+        files = [a for a in argv[argv.index("--files") + 1:] if not a.startswith("--")]
+
+    check_manifest = True
+    if staged:
+        content, names = _staged()
+        check_manifest = any(n in ("kiln/MANIFEST.in", "kiln/pyproject.toml") for n in names)
+    elif files:
+        content = [(f, (_ROOT / f).read_bytes()) for f in files if (_ROOT / f).is_file()]
+        check_manifest = False
+    else:
+        content = [(rel, (_ROOT / rel).read_bytes()) for rel in _tree_paths()]
+
+    if freeze:
+        n = _freeze_paths(content)
+        print(f"Froze {n} kiln_pro path(s) into {_FROZEN_PATHS_FILE.relative_to(_ROOT)}")
         return 0
 
-    root = _SRC.parent.parent.parent
+    leaks, stats = run(content, broad=broad, check_manifest=check_manifest)
+
+    inventory = (
+        f"kiln_pro dotted paths in public tests: {stats['kiln_pro_paths_found']} distinct "
+        f"(frozen {stats['kiln_pro_paths_frozen']}, new {stats['kiln_pro_paths_new']}, "
+        f"frozen-but-unused {stats['kiln_pro_paths_unused']})"
+    )
+
+    if not leaks:
+        mode = " (--sweep)" if broad else " (--staged)" if staged else ""
+        print(f"Moat-comment audit: clean.{mode}")
+        print(f"  {inventory}")
+        return 0
+
     print(
         "MOAT-COMMENT SWEEP (advisory) — review each by hand:"
         if broad
-        else "MOAT-COMMENT LEAK — public Kiln narrates the kiln-pro overlay's strategy:"
+        else "MOAT-COMMENT LEAK — public Kiln narrates, inlines, or names the private tier:"
     )
-    for path, line, text in leaks:
-        print(f"\n  {path.relative_to(root)}:{line}")
+    by_rule: dict[str, int] = {}
+    for rel, line, rule, text in leaks:
+        by_rule[rule] = by_rule.get(rule, 0) + 1
+        print(f"\n  [{rule}] {rel}:{line}")
         for ln in text.splitlines()[:6]:
             print(f"    {ln.strip()}")
 
+    print(f"\n  {inventory}")
+    summary = ", ".join(f"{k}: {v}" for k, v in sorted(by_rule.items()))
     if broad:
         print(
-            f"\n{len(leaks)} block(s) flagged by the broad heuristic — most are "
+            f"\n{len(leaks)} finding(s) — {summary}.  Most broad-heuristic hits are "
             "legitimate contract / seam / marketed-feature notes.  Trim only the "
             "ones that narrate HOW the overlay reasons, then add the new vocabulary "
             "to _STRATEGY_TOKENS so the hard gate catches it next time."
@@ -295,9 +747,11 @@ def main() -> int:
         return 0  # advisory — never fails the build
 
     print(
-        f"\n{len(leaks)} block(s).  Trim the moat reasoning (keep the math + the "
-        "'exposed for the kiln-pro overlay' contract), or — if genuinely a contract "
-        "note — add a (filename, marker) entry to _ALLOWLIST."
+        f"\n{len(leaks)} finding(s) — {summary}.  Trim the private reasoning / "
+        "values / path (keep the math + the 'exposed for the kiln-pro overlay' "
+        "contract).  A NEW kiln_pro dotted path is added to "
+        "scripts/public_tests_kiln_pro_paths.txt on purpose; a genuinely "
+        "contract-only block gets a (filename, marker) entry in _ALLOWLIST."
     )
     return 2
 
