@@ -1027,8 +1027,8 @@ def auto_arrange_parts(
     the same XY position (they overlap intentionally, like body + QR pads).
     Different groups are spaced apart.
 
-    For smart 2D bin-packing that maximises plate density, upgrade to
-    kiln-pro (``from kiln_pro.plate_optimizer import smart_arrange``).
+    For smart 2D bin-packing that maximises plate density, use Kiln Pro's
+    ``auto_arrange_parts_on_plate``.
 
     Args:
         part_specs: List of dicts, each with:

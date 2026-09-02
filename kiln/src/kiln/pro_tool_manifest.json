@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-01T23:28:28.871577+00:00",
+  "generated": "2026-09-02T08:01:40.151958+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -4320,7 +4320,7 @@
     },
     {
       "name": "cherry_pick_modification",
-      "description": "Apply one isolated semantic modification from a source branch onto a target branch (KILN-021 Priority 13). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply one isolated semantic modification from a source branch onto a target branch. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -4367,7 +4367,7 @@
     },
     {
       "name": "compare_branches",
-      "description": "Render a side-by-side comparison of two branches as a Mermaid ``sequenceDiagram`` (KILN-028 merge-preview).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Render a side-by-side comparison of two branches as a Mermaid ``sequenceDiagram``.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -6252,7 +6252,7 @@
     },
     {
       "name": "merge_feature_branches",
-      "description": "Record a merge \u2014 ``a = source.head``, ``b = target.head`` (bug-X2 correct). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Record a merge \u2014 ``a = source.head``, ``b = target.head``. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -6512,7 +6512,7 @@
     },
     {
       "name": "push_reflog_to_cloud",
-      "description": "Mirror local reflog entries up to the tenant's cloud reflog (``kiln_cloud_reflog``).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Mirror local reflog entries up to the tenant's cloud reflog.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -7622,7 +7622,7 @@
     },
     {
       "name": "show_design_lineage",
-      "description": "Show the full lineage of a design as a Mermaid ``flowchart TD`` with outcomes emphasized (KILN-021 native).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Show the full lineage of a design as a Mermaid ``flowchart TD`` with outcomes emphasized.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -7990,7 +7990,7 @@
     },
     {
       "name": "source_merge_three_way",
-      "description": "Three-way OpenSCAD source merge (KILN-021 Priority 9 fallback).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Three-way OpenSCAD source merge.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -9284,7 +9284,7 @@
     },
     {
       "name": "get_provenance_history",
-      "description": "Return provenance-log entries for explainability (Claim 35).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Return provenance-log entries for explainability.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",

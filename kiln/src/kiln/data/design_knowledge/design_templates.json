@@ -2,20 +2,17 @@
   "_meta": {
     "version": "2.0.0",
     "domain": "fdm",
-    "description": "Discovery catalog of functional design templates for FDM printing. Each entry is identifiable by display_name, use_cases, and material compatibility — enough for an agent to surface the right template to the user. Engineering-grade depth (design_rules, agent_guidance, failure modes, structured variants, sources) lives in the Kiln Pro overlay.",
+    "description": "Discovery catalog of functional design templates for FDM printing. Each entry is identifiable by display_name, use_cases, and material compatibility — enough for an agent to surface the right template to the user. Engineering-grade depth for each template is available in Kiln Pro.",
     "_data_quality": {
       "last_audit_date": "2026-05-05",
       "primary_sources": [
-        "Bayer 'Snap-Fit Joint Design' Engineering Polymers Design Guide (1995)",
-        "Shigley & Mischke 'Mechanical Engineering Design' 10th ed.",
-        "ISO 261 / ISO 286 / ISO 60529 / ISO 60715 / ISO 62133 — relevant standards",
-        "AGMA 933 — Basic Gear Geometry",
+        "Published mechanical-design references and international standards",
         "Manufacturer technical datasheets and published catalogs",
         "Empirical FDM community consensus"
-      ],
+       ],
       "methodology": "Conservative safety-floor values appropriate for AI-controlled FDM printing without expert supervision. Deeper curated engineering values ship in Kiln Pro."
     },
-    "_split_note": "Discovery + safety-floor profiles for AI-controlled FDM printing. Curated engineering depth (recommended dimensions, structured failure modes, decision trees, holding torques, cycle estimates, helical-gear formulas, IP-rating decision trees, captured-ball variants, anti-walkout lock options, per-material insert tables, DIN-rail variants, and source-cited reasoning) is available in Kiln Pro. See https://kiln3d.com/pricing."
+    "_split_note": "Discovery + safety-floor profiles for AI-controlled FDM printing. Curated engineering depth for every template is available in Kiln Pro. See https://kiln3d.com/pricing."
   },
   "snap_fit_cantilever": {
     "display_name": "Cantilever Snap Fit",

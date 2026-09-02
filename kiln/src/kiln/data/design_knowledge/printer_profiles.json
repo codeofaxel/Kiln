@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "domain": "fdm",
     "description": "Desktop printer capability profiles for material feasibility and design-for-manufacturing decisions.",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (agent_notes positioning prose) is available in Kiln Pro; see https://kiln3d.com/pricing.",
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Per-printer positioning guidance is available in Kiln Pro; see https://kiln3d.com/pricing.",
     "_default_profile_note": "The 'default' entry is the deliberately conservative stand-in for a printer Kiln has no profile for. Its numbers are the floor a commodity FDM machine can be assumed to meet, NOT a measurement of any product, so a feasibility answer given against it is the answer for the least capable plausible machine. Register the real printer to get a real answer."
   },
   "default": {
