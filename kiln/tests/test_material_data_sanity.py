@@ -3,14 +3,10 @@
 Permanent guardrail — catches bad data on every future edit.
 Validates value ranges, schema completeness, and cross-references.
 
-NOTE (2026-05-03): the engineering moat (mechanical properties,
-design_limits beyond process floor, use_case_ratings, agent_guidance,
-brand-tunings) was moved to kiln-pro's overlay per the trust-theater
-discipline.  Most assertions in this file target moat fields, so the
-module is gated on overlay-present.  When kiln-pro is installed, the
-overlay restores the full record and these assertions run normally.
-A parallel test file in kiln-pro (``tests/test_materials_pro_overlay_sanity.py``)
-asserts the moat data integrity directly against the overlay file.
+Most assertions in this file target fields the kiln-pro overlay
+supplies, so the module is gated on overlay-present.  When kiln-pro is
+installed, the overlay restores the full record and these assertions
+run normally.
 """
 from __future__ import annotations
 
@@ -74,17 +70,13 @@ def patterns_data() -> dict:
 
 @pytest.fixture(scope="module")
 def patterns(patterns_data: dict) -> dict:
-    """Return all pattern entries with the kiln-pro engineering overlay
-    merged in (when installed).  The public file is discovery-only after
-    the 2026-05-05 split — design_rules / agent_guidance / failure_modes
-    / sources / related_patterns / formulas live in the kiln-pro pro
-    overlay and are merged in at runtime via
-    ``kiln.design_intelligence._merge_pro_overlay_if_available``.
+    """Return all pattern entries with the kiln-pro overlay merged in
+    (when installed).
 
     This module is gated on ``requires_engineering_overlay`` so we only
-    run when overlay is loaded; reading the merged in-memory data
+    run when the overlay is loaded; reading the merged in-memory data
     instead of the public file directly is what lets the schema /
-    guidance / count assertions reflect the post-split reality.
+    guidance / count assertions see the full record.
     """
     from kiln.design_intelligence import _get_kb
     return _get_kb().templates
@@ -624,7 +616,7 @@ class TestCompatibilityMatrix:
 
 @pytest.fixture(scope="module")
 def troubleshoot_data() -> dict:
-    """Raw public file — used only by tests that don't read moat fields."""
+    """Raw public file — used only by tests that don't need the overlay."""
     with open(TROUBLESHOOT_FILE) as f:
         return json.load(f)
 
@@ -813,7 +805,7 @@ class TestMultiMaterialPairing:
 
 @pytest.fixture(scope="module")
 def post_proc_data() -> dict:
-    """Raw public file — used only by tests that don't read moat fields."""
+    """Raw public file — used only by tests that don't need the overlay."""
     with open(POST_PROC_FILE) as f:
         return json.load(f)
 

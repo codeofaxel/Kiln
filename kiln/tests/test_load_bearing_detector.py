@@ -8,8 +8,8 @@ Validates the trip rules from RESEARCH_normie_vocabulary.md §3:
 - Decoy patterns (phone stand, drink coaster, decorative) don't trip
 
 The detector is open-source (lives in public Kiln) — these tests are
-public.  The MOAT (real engineering math the upgrade nudge points to)
-ships in kiln-pro and is tested separately there.
+public.  The engineering math the upgrade nudge points to ships in
+kiln-pro and is tested separately there.
 """
 
 from __future__ import annotations

@@ -2,8 +2,8 @@
 
 Public Kiln must not ship a curated cross-vendor capability / SME table —
 a registry keyed by printer brand carrying limitations, recovery_methods,
-capability matrices, failure_modes.  That is moat; it belongs in the
-private tier (or a pro overlay), never in public source.  A green run here
+capability matrices, failure_modes.  That belongs in the private
+tier (or a pro overlay), never in public source.  A green run here
 is the proof we didn't ship one.  See ``scripts/audit_public_sme_leak.py``.
 
 The 2026-06-23 incident: a 459-line ``resume_capabilities.py`` cross-vendor
