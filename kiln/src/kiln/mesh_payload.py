@@ -509,6 +509,166 @@ def _painted_3mf_mesh(
     return mesh
 
 
+def _3mf_transform(attr: str | None) -> Any:
+    """A 3MF ``transform`` attribute as a 4x4 matrix — identity when absent.
+
+    Twelve numbers, row-major over a 3x4 ``[R | t]`` written column by
+    column: ``m00 m01 m02 m10 m11 m12 m20 m21 m22 tx ty tz``.  Same
+    unpacking trimesh's loader does, so a file lands in the same place
+    whichever reader opened it.
+    """
+    import numpy as np
+
+    matrix = np.eye(4)
+    if attr:
+        values = np.array(attr.split(), dtype=np.float64)
+        if values.shape == (12,):
+            matrix[:3, :4] = values.reshape((4, 3)).T
+    return matrix
+
+
+def _load_3mf_stdlib(path: Path) -> Any:
+    """A 3MF read into a trimesh ``Scene`` with the standard library alone.
+
+    trimesh's own 3MF loader is a soft dependency hiding inside a core one:
+    it needs ``lxml`` and ``networkx``, and ``pip install kiln3d`` brings in
+    neither (they ride the ``dev`` extra, for the test fixtures that EXPORT
+    3MF).  On every such install the loader raises ``ModuleNotFoundError``
+    at call time, so every colored 3MF Kiln makes — a paint, a per-part
+    multicolor compose, a texture — could be written but never put on the
+    stage: the panel's lazy fetch failed and the user saw "preview
+    unavailable" over a perfectly good file, while the same file opened
+    fine on any machine with the dev extra installed.  (Measured live
+    2026-09-01 on ``paint_mesh_regions``; the STL sibling tools were fine,
+    because trimesh reads STL with no extras at all.)
+
+    Kiln already parses 3MF XML with ``xml.etree`` for colors
+    (:mod:`kiln.threemf_parser`); this is the geometry half, built to the
+    same shape trimesh's loader returns so everything downstream — the
+    per-part color bake, the painted-soup rebuild, sidecar name matching —
+    stays one code path:
+
+    * one geometry per ``<object>`` carrying a ``<mesh>``, keyed by the
+      object's ``name`` else its id, made unique the way trimesh does;
+    * one scene node per build path — a ``<build><item>`` transform
+      composed with each ``<components><component>`` transform beneath
+      it — so an assembly lands where the file places it and an object
+      instanced twice appears twice;
+    * geometry constructed with trimesh's defaults, as the loader's is.
+
+    Not mirrored: a component that references another model file inside
+    the archive (``p:path``), which no Kiln composer and no slicer export
+    writes.  This runs only when trimesh's loader is unavailable, so an
+    install that has it keeps exactly the behaviour it had.
+
+    Raises ``ValueError`` for an archive with no model XML or unparsable
+    XML — the same refusals the loader makes.
+    """
+    import re
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    import numpy as np
+    import trimesh
+    from trimesh.util import unique_name
+
+    from kiln.threemf_parser import _CORE_NS, _find_model_xml, _parse_vertices
+
+    try:
+        with zipfile.ZipFile(str(path)) as zf:
+            raw = zf.read(_find_model_xml(zf))
+    except (zipfile.BadZipFile, KeyError, OSError) as exc:
+        raise ValueError(f"not a readable 3MF archive: {path.name}") from exc
+    # Same hardening the color parser applies to the slicer sidecar: the
+    # stdlib parser refuses external entities, and entity expansion needs a
+    # declaration no legitimate model file carries.
+    if re.search(rb"<!ENTITY", raw, re.IGNORECASE):
+        raise ValueError(f"refusing 3MF model XML with entity declarations: {path.name}")
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        raise ValueError(f"unparsable 3MF model XML in {path.name}: {exc}") from exc
+
+    ns = f"{{{_CORE_NS}}}"
+    geometry: dict[str, Any] = {}
+    id_name: dict[str, str] = {}
+    components: dict[str, list[tuple[str, Any]]] = {}
+    consumed: set[str] = set()
+    counts: dict[str, int] = {}
+    resources = root.find(f"{ns}resources")
+    for obj in [] if resources is None else resources.findall(f"{ns}object"):
+        oid = obj.get("id")
+        if oid is None:
+            continue
+        name = unique_name(obj.get("name") or oid, consumed, counts)
+        consumed.add(name)
+        id_name[oid] = name
+        mesh_el = obj.find(f"{ns}mesh")
+        if mesh_el is not None:
+            vertices = _parse_vertices(mesh_el)
+            faces: list[tuple[int, int, int]] = []
+            tris_el = mesh_el.find(f"{ns}triangles")
+            for tri in [] if tris_el is None else tris_el.findall(f"{ns}triangle"):
+                try:
+                    idx = (int(tri.get("v1", "-1")), int(tri.get("v2", "-1")), int(tri.get("v3", "-1")))
+                except (TypeError, ValueError):
+                    continue
+                if all(0 <= i < len(vertices) for i in idx):
+                    faces.append(idx)
+            if faces:
+                geometry[name] = trimesh.Trimesh(
+                    vertices=np.asarray(vertices, dtype=np.float64),
+                    faces=np.asarray(faces, dtype=np.int64),
+                )
+        comps_el = obj.find(f"{ns}components")
+        if comps_el is not None:
+            components[oid] = [
+                (comp.get("objectid"), _3mf_transform(comp.get("transform")))
+                for comp in comps_el.findall(f"{ns}component")
+                if comp.get("objectid")
+            ]
+
+    scene = trimesh.Scene()
+    for name, mesh in geometry.items():
+        scene.geometry[name] = mesh
+    base = scene.graph.base_frame
+    used: set[str] = set()
+    used_counts: dict[str, int] = {}
+
+    def _place(oid: str, matrix: Any, partnumber: str | None, seen: frozenset[str]) -> None:
+        if oid in seen:
+            return  # a component cycle — the file is malformed, not infinite
+        name = id_name.get(oid)
+        if name is not None and name in geometry:
+            node = unique_name(partnumber or name, used, used_counts)
+            used.add(node)
+            scene.graph.update(
+                frame_from=base, frame_to=node, matrix=matrix, geometry=name
+            )
+        for child, child_matrix in components.get(oid, ()):
+            _place(child, matrix @ child_matrix, None, seen | {oid})
+
+    build = root.find(f"{ns}build")
+    if build is None:
+        # No build section: nothing is placed by the spec, so place every
+        # mesh object at identity — the convention Kiln's color parser
+        # already uses for the same file, so colors and geometry agree.
+        for oid, name in id_name.items():
+            if name in geometry:
+                _place(oid, np.eye(4), None, frozenset())
+    else:
+        for item in build.findall(f"{ns}item"):
+            oid = item.get("objectid")
+            if oid:
+                _place(
+                    oid,
+                    _3mf_transform(item.get("transform")),
+                    item.get("partnumber"),
+                    frozenset(),
+                )
+    return scene
+
+
 def mesh_to_viewer_payload(
     mesh_path: str | Path,
     *,
@@ -529,7 +689,11 @@ def mesh_to_viewer_payload(
       * ``ImportError`` — trimesh missing.  It is a core dependency, so this
         means a damaged or vendored install, not a normal one; the message
         says how to fix it rather than leaving the caller to report "could
-        not read that mesh" about a mesh that is perfectly fine.
+        not read that mesh" about a mesh that is perfectly fine.  A 3MF
+        never raises this for trimesh's OWN optional reader dependencies
+        (lxml, networkx): the file is read by :func:`_load_3mf_stdlib`
+        instead, so the stage works on the install ``pip install kiln3d``
+        actually produces.
     """
     import numpy as np
 
@@ -545,7 +709,14 @@ def mesh_to_viewer_payload(
     if not path.exists():
         raise FileNotFoundError(f"mesh not found: {path}")
 
-    loaded = trimesh.load(str(path))
+    try:
+        loaded = trimesh.load(str(path))
+    except ImportError:
+        # trimesh's 3MF loader wants lxml + networkx, which a plain install
+        # does not have.  The geometry is plain XML in a ZIP; read it here.
+        if path.suffix.lower() != ".3mf":
+            raise
+        loaded = _load_3mf_stdlib(path)
     if isinstance(loaded, trimesh.Scene):
         # The Scene path bakes per-part colors (a multicolor 3MF's whole
         # point) into vertex colors while flattening — force="mesh" loses

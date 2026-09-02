@@ -634,3 +634,176 @@ class TestCadFactsBlock:
         out = attach_cad_facts(payload, None)
         assert "cad" not in out
         assert out["source"]["format"] == "stl"
+
+
+class TestThreeMfWithoutTrimeshLoader:
+    """A 3MF still reaches the stage when trimesh's own 3MF loader cannot run.
+
+    That loader needs lxml and networkx, and ``pip install kiln3d`` brings
+    in neither — so on every plain install, every colored 3MF Kiln makes
+    (a paint, a per-part compose, a texture) was written fine and then
+    refused by the stage's fetch: "preview unavailable" over a good file.
+    Measured live 2026-09-01 on ``paint_mesh_regions``.  The dev extra
+    installs both, which is why no test ever saw it; this class takes the
+    loader away on purpose, the way ``test_mesh_payload_without_trimesh``
+    takes trimesh away.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_3mf_loader(self, monkeypatch, tmp_path):
+        from trimesh.exceptions import ExceptionWrapper
+        from trimesh.exchange import load as _load
+
+        missing = ModuleNotFoundError("No module named 'lxml'", name="lxml")
+        monkeypatch.setitem(_load.mesh_loaders, "3mf", ExceptionWrapper(missing))
+        # The pin must bite: prove trimesh itself now refuses a 3MF, so a
+        # pass below is the fallback working and not the loader sneaking
+        # back in through some other registry.
+        probe = tmp_path / "probe.3mf"
+        _write_3mf(probe, _one_object_model())
+        with pytest.raises(ModuleNotFoundError):
+            trimesh.load(str(probe))
+
+    def _painted_cube(self, tmp_path):
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        mesh = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+        mesh.apply_translation((100.0, 100.0, 5.0))
+        tris = [tuple(map(tuple, mesh.vertices[f])) for f in mesh.faces]
+        colors = [
+            "#F72323" if all(v[2] > 9.9 for v in t) else "#2366F7" for t in tris
+        ]
+        out = tmp_path / "painted.3mf"
+        compose_painted_3mf(tris, colors, output_path=str(out))
+        return out
+
+    def test_a_painted_file_keeps_its_colors(self, tmp_path):
+        payload = mesh_to_viewer_payload(self._painted_cube(tmp_path))
+        assert payload["downgraded"] is False
+        assert payload["counts"]["triangles"] == 12
+        rgba = np.frombuffer(
+            base64.b64decode(payload["vertex_colors"]), dtype=np.uint8
+        ).reshape(-1, 4)
+        assert {tuple(c) for c in rgba.tolist()} == {
+            (247, 35, 35, 255), (35, 102, 247, 255),
+        }
+
+    def test_a_per_part_multicolor_file_keeps_each_parts_color(self, tmp_path):
+        from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
+
+        a = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+        a.apply_translation((100.0, 100.0, 5.0))
+        b = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+        b.apply_translation((130.0, 100.0, 5.0))
+        a_p, b_p = tmp_path / "a.stl", tmp_path / "b.stl"
+        a.export(str(a_p))
+        b.export(str(b_p))
+        out = tmp_path / "parts.3mf"
+        compose_multicolor_3mf(
+            [
+                ColorPart(stl_path=str(a_p), extruder=1, name="left", color="#FF0000"),
+                ColorPart(stl_path=str(b_p), extruder=2, name="right", color="#0000FF"),
+            ],
+            output_path=str(out),
+        )
+        payload = mesh_to_viewer_payload(out)
+        assert payload["downgraded"] is False
+        assert payload["counts"]["triangles"] == 24
+        rgba = np.frombuffer(
+            base64.b64decode(payload["vertex_colors"]), dtype=np.uint8
+        ).reshape(-1, 4)
+        pos = _f32(payload["positions"]).reshape(-1, 3)
+        left = pos[:, 0] < 115.0
+        assert {tuple(c) for c in rgba[left].tolist()} == {(255, 0, 0, 255)}
+        assert {tuple(c) for c in rgba[~left].tolist()} == {(0, 0, 255, 255)}
+
+    def test_build_and_component_transforms_place_every_instance(self, tmp_path):
+        """One object, referenced twice through an assembly — each instance
+        lands where its composed transform puts it, exactly as trimesh's
+        loader would place it."""
+        out = tmp_path / "assembly.3mf"
+        _write_3mf(out, _assembly_model())
+        payload = mesh_to_viewer_payload(out)
+        assert payload["counts"]["triangles"] == 24
+        pos = _f32(payload["positions"]).reshape(-1, 3)
+        # viewer x == mesh x: one cube at 0..10 shifted +100 by the build
+        # item, the other at +100 +30 via the component transform.
+        xs = sorted({round(float(x)) for x in pos[:, 0]})
+        assert xs == [100, 110, 130, 140]
+
+    def test_a_non_3mf_still_reports_the_real_import_error(self, tmp_path, monkeypatch):
+        """The fallback is for 3MF only: an STL that trimesh cannot read
+        for a missing module keeps raising, never gets misparsed as XML."""
+        from trimesh.exceptions import ExceptionWrapper
+        from trimesh.exchange import load as _load
+
+        monkeypatch.setitem(
+            _load.mesh_loaders, "stl",
+            ExceptionWrapper(ModuleNotFoundError("No module named 'x'", name="x")),
+        )
+        stl = tmp_path / "cube.stl"
+        trimesh.creation.box(extents=(10.0, 10.0, 10.0)).export(str(stl))
+        with pytest.raises(ModuleNotFoundError):
+            mesh_to_viewer_payload(stl)
+
+
+def _write_3mf(path, model_xml: str) -> None:
+    import zipfile as z
+
+    with z.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>'
+            "</Types>",
+        )
+        zf.writestr(
+            "_rels/.rels",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Target="/3D/3dmodel.model" Id="rel0" '
+            'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
+            "</Relationships>",
+        )
+        zf.writestr("3D/3dmodel.model", model_xml)
+
+
+def _cube_mesh_xml() -> str:
+    box = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+    box.apply_translation((5.0, 5.0, 5.0))  # 0..10 on every axis
+    verts = "".join(
+        f'<vertex x="{x:.3f}" y="{y:.3f}" z="{z:.3f}"/>' for x, y, z in box.vertices
+    )
+    tris = "".join(
+        f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in box.faces
+    )
+    return f"<mesh><vertices>{verts}</vertices><triangles>{tris}</triangles></mesh>"
+
+
+def _one_object_model() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+        f'<resources><object id="1" type="model" name="cube">{_cube_mesh_xml()}</object></resources>'
+        '<build><item objectid="1"/></build></model>'
+    )
+
+
+def _assembly_model() -> str:
+    """Object 1 is a cube; object 2 is an assembly holding the cube twice,
+    the second copy shifted +30 in x; the build places the assembly at
+    +100 in x."""
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+        "<resources>"
+        f'<object id="1" type="model" name="cube">{_cube_mesh_xml()}</object>'
+        '<object id="2" type="model" name="pair"><components>'
+        '<component objectid="1"/>'
+        '<component objectid="1" transform="1 0 0 0 1 0 0 0 1 30 0 0"/>'
+        "</components></object>"
+        "</resources>"
+        '<build><item objectid="2" transform="1 0 0 0 1 0 0 0 1 100 0 0"/></build></model>'
+    )
