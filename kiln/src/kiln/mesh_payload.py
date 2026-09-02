@@ -125,6 +125,12 @@ nearest face centroid for a painted soup, whose coincident boundary
 copies would otherwise speckle — or are dropped when scipy is missing,
 never guessed.
 
+READING 3MF WITHOUT TRIMESH'S LOADER
+------------------------------------
+trimesh's 3MF loader needs lxml and networkx, which a plain install does
+not have.  A 3MF is then read by :func:`_load_3mf_stdlib` into the same
+Scene shape, so the color handling above is one code path either way.
+
 Stateless: path in, dict out.  No disk writes, no caches, no network.
 """
 
