@@ -241,6 +241,10 @@ def _filaments_from_painted_3mf(path: str) -> list[Filament]:
         mesh = parse_colored_3mf(path)
     except Exception:  # noqa: BLE001 - not a mesh we can read is "unknown"
         return []
+    if not getattr(mesh, "colors_found", False):
+        # No colour data anywhere in the file: the parser's fallback grey
+        # is a display default, not a filament the file asked for.
+        return []
     seen: list[str] = []
     for tri in getattr(mesh, "triangles", []) or []:
         rgb = getattr(tri, "color", None)

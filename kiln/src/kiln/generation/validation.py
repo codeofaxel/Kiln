@@ -1066,8 +1066,28 @@ def _parse_3mf(
     Returns:
         (triangles, unique_vertices) in the same shape as :func:`_parse_stl`.
     """
+    triangles: list[tuple[tuple[float, ...], ...]] = []
+    vertex_set: set[tuple[float, ...]] = set()
+    for _placed, _verts, tris in _placed_3mf_meshes(path, errors):
+        for triangle in tris:
+            triangles.append(triangle)
+            vertex_set.update(triangle)
+    return triangles, list(vertex_set)
+
+
+def _placed_3mf_meshes(
+    path: Path,
+    errors: list[str],
+) -> list[tuple[Any, list[tuple[float, float, float]], list[tuple[tuple[float, ...], ...]]]]:
+    """Every mesh the build places, in millimetres, as
+    ``(placed_object, vertices, triangles)`` — the plate as a slicer sees it.
+
+    The 3MF readers in this module (:func:`_parse_3mf`,
+    :func:`extract_model_from_3mf`) share this so they cannot disagree
+    about what the file contains.  Trouble is reported through *errors*
+    and reads as an empty list.
+    """
     from kiln.threemf_parser import (
-        _3MF_UNIT_TO_MM,
         _CORE_NS,
         _IDENTITY_3MF,
         _apply_3mf_transform,
@@ -1076,34 +1096,21 @@ def _parse_3mf(
     )
 
     ns = f"{{{_CORE_NS}}}"
-    triangles: list[tuple[tuple[float, ...], ...]] = []
-    vertex_set: set[tuple[float, ...]] = set()
-
+    out: list[tuple[Any, list[tuple[float, float, float]], list[tuple[tuple[float, ...], ...]]]] = []
     try:
         with zipfile.ZipFile(path, "r") as zf:
             archive = _ModelArchive(zf, errors)
-            root = archive.root
-            if root is None:
-                return [], []
-
-            unit = (root.model_el.get("unit") or "millimeter").strip().lower()
-            scale = _3MF_UNIT_TO_MM.get(unit)
-            if scale is None:
-                errors.append(f"Unknown 3MF model unit {unit!r}.")
-                return [], []
-            to_mm = (
-                _IDENTITY_3MF
-                if scale == 1.0
-                else (scale, 0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0)
-            )
-
+            to_mm = archive.root_transform_mm()
+            if to_mm is None:
+                return []
             for placed in archive.placements(root_transform=to_mm):
                 mesh_el = placed.element.find(f"{ns}mesh")
                 if mesh_el is None:
                     continue
-                verts: list[tuple[float, ...]] = _parse_vertices(mesh_el)
+                verts = _parse_vertices(mesh_el)
                 if placed.transform is not _IDENTITY_3MF:
                     verts = [_apply_3mf_transform(placed.transform, v) for v in verts]
+                tris: list[tuple[tuple[float, ...], ...]] = []
                 tris_el = mesh_el.find(f"{ns}triangles")
                 n_verts = len(verts)
                 for tri in (tris_el.findall(f"{ns}triangle") if tris_el is not None else ()):
@@ -1115,17 +1122,15 @@ def _parse_3mf(
                         continue
                     if not (0 <= i0 < n_verts and 0 <= i1 < n_verts and 0 <= i2 < n_verts):
                         continue
-                    triangle = (verts[i0], verts[i1], verts[i2])
-                    triangles.append(triangle)
-                    vertex_set.update(triangle)
+                    tris.append((verts[i0], verts[i1], verts[i2]))
+                out.append((placed, verts, tris))
     except zipfile.BadZipFile:
         errors.append("Not a valid 3MF: the file is not a ZIP archive.")
-        return [], []
+        return []
     except (ValueError, KeyError, OSError) as exc:
         errors.append(f"Not a valid 3MF: {exc}")
-        return [], []
-
-    return triangles, list(vertex_set)
+        return []
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -4513,18 +4518,16 @@ def extract_model_from_3mf(
     """Extract embedded 3D model geometry from a .3mf file to STL.
 
     3MF files (including .gcode.3mf from Bambu Studio) are ZIP archives
-    containing an XML model file at ``3D/3dmodel.model``.  This function
-    parses the XML, extracts all mesh objects (vertices + triangles), and
-    writes a binary STL.
+    holding one or more XML model parts.  This function walks the build —
+    every item and component, following the production extension's
+    ``p:path`` into the ``3D/Objects/object_N.model`` parts a BambuStudio /
+    OrcaSlicer project keeps its meshes in — and writes the placed
+    geometry as one binary STL, in millimetres.
 
-    Handles both standard 3MF and Bambu-style .gcode.3mf files.  When
-    multiple objects exist they are merged into a single STL.
-
-    .. note::
-        3MF item/component transforms are not applied — geometry is
-        extracted as stored.  This is correct for single-model files
-        and Bambu .gcode.3mf files where geometry is already in world
-        coordinates.
+    Build-item and component transforms and the model ``unit`` ARE
+    applied: the STL is the plate as the slicer would place it, so a
+    project whose item scales or rotates its mesh extracts at print size.
+    An object placed twice is written twice.
 
     Args:
         file_path: Path to the .3mf or .gcode.3mf file.
@@ -4538,8 +4541,6 @@ def extract_model_from_3mf(
         ValueError: If the file is not a valid 3MF or contains no geometry.
         FileNotFoundError: If the input file does not exist.
     """
-    import xml.etree.ElementTree as ET
-
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
@@ -4547,89 +4548,27 @@ def extract_model_from_3mf(
     if not zipfile.is_zipfile(file_path):
         raise ValueError(f"Not a valid ZIP/3MF file: {file_path}")
 
-    # Locate the model XML inside the archive.
-    model_xml: str | None = None
+    from kiln.threemf_parser import _find_model_xml
+
     with zipfile.ZipFile(file_path, "r") as zf:
-        names = zf.namelist()
+        try:
+            _find_model_xml(zf)
+        except ValueError as exc:
+            raise ValueError(f"No 3D model found in {file_path}. {exc}") from exc
 
-        # Prefer the standard path; fall back to any .model file.
-        candidates = [
-            "3D/3dmodel.model",
-            "3d/3dmodel.model",  # case-insensitive fallback
-        ]
-        for candidate in candidates:
-            if candidate in names:
-                model_xml = zf.read(candidate).decode("utf-8")
-                break
+    errors: list[str] = []
+    placed_meshes = _placed_3mf_meshes(path, errors)
 
-        if model_xml is None:
-            # Broader search for any .model file in the archive.
-            for name in names:
-                if name.lower().endswith(".model"):
-                    model_xml = zf.read(name).decode("utf-8")
-                    break
-
-    if model_xml is None:
-        raise ValueError(
-            f"No 3D model found in {file_path}. "
-            f"Archive contains: {', '.join(names[:20])}"
-        )
-
-    # Parse the XML model.
-    root = ET.fromstring(model_xml)
-
-    # Handle XML namespace — 3MF uses a default namespace.
-    ns = ""
-    if root.tag.startswith("{"):
-        ns = root.tag.split("}")[0] + "}"
-
-    # Collect all mesh objects (a 3MF can have multiple objects).
     all_triangles: list[tuple[tuple[float, ...], ...]] = []
     total_vertices = 0
-
-    for obj in root.iter(f"{ns}object"):
-        mesh_el = obj.find(f"{ns}mesh")
-        if mesh_el is None:
-            continue
-
-        verts_el = mesh_el.find(f"{ns}vertices")
-        tris_el = mesh_el.find(f"{ns}triangles")
-        if verts_el is None or tris_el is None:
-            continue
-
-        # Parse vertices.
-        vertices: list[tuple[float, ...]] = []
-        for v_el in verts_el.findall(f"{ns}vertex"):
-            x = float(v_el.get("x", "0"))
-            y = float(v_el.get("y", "0"))
-            z = float(v_el.get("z", "0"))
-            vertices.append((x, y, z))
-
-        total_vertices += len(vertices)
-
-        # Parse triangles (index references into vertices).
-        for t_el in tris_el.findall(f"{ns}triangle"):
-            v1_idx = int(t_el.get("v1", "0"))
-            v2_idx = int(t_el.get("v2", "0"))
-            v3_idx = int(t_el.get("v3", "0"))
-
-            if (
-                v1_idx < 0
-                or v2_idx < 0
-                or v3_idx < 0
-                or v1_idx >= len(vertices)
-                or v2_idx >= len(vertices)
-                or v3_idx >= len(vertices)
-            ):
-                continue  # Skip invalid index references.
-
-            all_triangles.append(
-                (vertices[v1_idx], vertices[v2_idx], vertices[v3_idx])
-            )
+    for _placed, verts, tris in placed_meshes:
+        total_vertices += len(verts)
+        all_triangles.extend(tris)
 
     if not all_triangles:
+        detail = f" ({'; '.join(errors)})" if errors else ""
         raise ValueError(
-            f"3MF file contains no mesh geometry: {file_path}"
+            f"3MF file contains no mesh geometry: {file_path}{detail}"
         )
 
     # Determine output path.

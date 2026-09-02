@@ -213,6 +213,50 @@ class TestGeometryBbox:
         junk.write_bytes(b"not a zip")
         assert compute_3mf_geometry_bbox(str(junk)) is None
 
+    def test_mesh_behind_a_production_path_is_placed(self, tmp_path):
+        """A BambuStudio project keeps its mesh in ``3D/Objects/*.model``
+        behind ``p:path``; the bed gate must see it where the item puts it."""
+        core = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+        prod = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
+        part = "3D/Objects/object_1.model"
+        root = f"""<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xmlns="{core}" xmlns:p="{prod}">
+  <resources>
+    <object id="2" type="model">
+      <components><component p:path="/{part}" objectid="1" /></components>
+    </object>
+  </resources>
+  <build><item objectid="2" transform="1 0 0 0 1 0 0 0 1 100 200 0" /></build>
+</model>"""
+        mesh = f"""<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xmlns="{core}">
+  <resources>
+    <object id="1" type="model"><mesh>
+      <vertices>
+        <vertex x="-5" y="-5" z="0" /><vertex x="5" y="-5" z="0" />
+        <vertex x="0" y="5" z="0" /><vertex x="0" y="0" z="8" />
+      </vertices>
+      <triangles>
+        <triangle v1="0" v2="1" v3="2" /><triangle v1="0" v2="1" v3="3" />
+        <triangle v1="1" v2="2" v3="3" /><triangle v1="2" v2="0" v3="3" />
+      </triangles>
+    </mesh></object>
+  </resources>
+  <build />
+</model>"""
+        path = tmp_path / "bambu.3mf"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", root)
+            zf.writestr(part, mesh)
+
+        bbox = compute_3mf_geometry_bbox(str(path))
+
+        assert bbox is not None
+        assert bbox["x_min"] == pytest.approx(95.0)
+        assert bbox["x_max"] == pytest.approx(105.0)
+        assert bbox["y_min"] == pytest.approx(195.0)
+        assert bbox["z_max"] == pytest.approx(8.0)
+
 
 # ---------------------------------------------------------------------------
 # slice_file: the pre-slice bed gate and the stderr surfacing

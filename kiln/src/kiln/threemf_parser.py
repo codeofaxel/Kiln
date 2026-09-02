@@ -6,6 +6,13 @@ the per-triangle ``paint_color`` (BambuStudio / OrcaSlicer) /
 ``slic3rpe:mmu_segmentation`` (PrusaSlicer) attributes every
 MakerWorld-style painted model carries.  Returns per-face color data
 suitable for mesh visualization.
+
+Also home to the one walk of a 3MF's object graph (:class:`_ModelArchive`):
+every build item and component, following the production extension's
+``p:path`` into the ``3D/Objects/object_N.model`` parts a BambuStudio /
+OrcaSlicer project keeps its meshes in.  The geometry readers in
+:mod:`kiln.generation.validation` and :mod:`kiln.printers.bed_fit` walk
+through it too, so a layout one reader understands the others cannot miss.
 """
 
 from __future__ import annotations
@@ -234,7 +241,9 @@ class ObjectSegment:
     def key(self) -> str:
         """The name trimesh gives this object's Scene geometry — the
         object's ``name``, else its id as a string; the same convention
-        :func:`object_display_colors` keys by."""
+        :func:`object_display_colors` keys by.  For an object reached
+        through a ``p:path`` component, ``name`` is already the placing
+        object's (see :class:`_PlacedObject`)."""
         return self.name or str(self.object_id)
 
     def to_dict(self) -> dict[str, Any]:
@@ -489,7 +498,8 @@ def _find_model_xml(zf: zipfile.ZipFile) -> str:
     """Locate the 3D model XML inside the ZIP archive.
 
     Checks ``3D/3dmodel.model`` first, then falls back to scanning
-    ``_rels/.rels`` for the primary model path.
+    ``_rels/.rels`` for the primary model path, then to the first
+    ``.model`` member in the archive.
     """
     standard_path = "3D/3dmodel.model"
     names = zf.namelist()
@@ -514,6 +524,12 @@ def _find_model_xml(zf: zipfile.ZipFile) -> str:
                         return target.lstrip("/")
             except ET.ParseError:
                 break
+
+    # Last resort: an archive that names no root part but carries exactly
+    # the model files — every reader used to keep this fallback on its own.
+    for name in sorted(names):
+        if name.lower().endswith(".model"):
+            return name
 
     raise ValueError(
         f"No 3D model XML found in 3MF archive. "
@@ -691,6 +707,25 @@ class _ModelArchive:
     def root(self) -> _ModelPart | None:
         return self.part(self.root_part)
 
+    def root_transform_mm(self) -> _Transform3mf | None:
+        """The scale that takes the root model's ``unit`` to millimetres,
+        as a transform to start :meth:`placements` from.
+
+        ``None`` — reported through *errors* — for a unit the spec does
+        not name, or when the root part failed to load.
+        """
+        root = self.root
+        if root is None:
+            return None
+        unit = (root.model_el.get("unit") or "millimeter").strip().lower()
+        scale = _3MF_UNIT_TO_MM.get(unit)
+        if scale is None:
+            self.errors.append(f"Unknown 3MF model unit {unit!r}.")
+            return None
+        if scale == 1.0:
+            return _IDENTITY_3MF
+        return (scale, 0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0)
+
     def resolve_part(self, el: ET.Element, current: str) -> str:
         """The model part *el* points at through ``p:path``, else *current*."""
         ref = el.get(_PATH_ATTR)
@@ -789,13 +824,14 @@ class _ModelArchive:
 
 def _model_part_members(zf: zipfile.ZipFile) -> list[str]:
     """Every ``.model`` member of the archive, the root part first."""
-    names = zf.namelist()
-    root = next((n for n in names if n.lower() == "3d/3dmodel.model"), None)
+    try:
+        root = _find_model_xml(zf)
+    except ValueError:
+        return []
     rest = sorted(
-        n for n in names
-        if n.lower().endswith(".model") and n.lower().startswith("3d/") and n != root
+        n for n in zf.namelist() if n.lower().endswith(".model") and n != root
     )
-    return ([root] if root else []) + rest
+    return [root] + rest
 
 
 def _scan_color_constructs(zf: zipfile.ZipFile) -> tuple[bool, bool]:
@@ -932,11 +968,21 @@ def parse_colored_3mf(
     any consumer that can re-map them.  Sub-triangle painting reduces to
     the dominant state, counted in ``ColoredMesh.split_faces``.
 
+    Every object the build reaches is read, including those in other
+    model parts of the archive (the production extension's ``p:path``,
+    which is where a BambuStudio / OrcaSlicer project keeps each mesh).
+    Object ids and palettes resolve inside the part that made the
+    reference.  Triangles stay in file coordinates — build-item and
+    component transforms are not applied — and an object placed twice
+    contributes one segment.
+
     :param file_path: Path to a ``.3mf`` ZIP file.
     :param default_color: RGB tuple used when a triangle has no color.
     :returns: A :class:`ColoredMesh` with all triangles, color metadata,
         and per-object :class:`ObjectSegment` boundaries.
-    :raises ValueError: If the archive has no model XML or the XML is corrupt.
+    :raises ValueError: If the archive has no model XML or the root model
+        XML is corrupt.  A missing or corrupt ``p:path`` part costs its
+        objects, not the file.
     :raises zipfile.BadZipFile: If *file_path* is not a valid ZIP.
     :raises FileNotFoundError: If *file_path* does not exist.
     """
@@ -1095,6 +1141,9 @@ def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
       Kiln did not write: every composer here runs its names through
       :func:`unique_object_names` first, so a duplicate arriving at this
       point means the file came from elsewhere.
+
+    Objects in other model parts (``p:path``) are read like any other, keyed
+    the way trimesh keys them — after the object holding the component.
 
     Never raises: color is enrichment (the caller keeps its mesh either way),
     so any archive trouble reads as ``{}``.

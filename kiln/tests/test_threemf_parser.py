@@ -1312,3 +1312,29 @@ class TestModelPartsViaProductionPath:
         )
 
         assert colors == {"1": _PAINT_STATE_PALETTE[0]}
+
+
+class TestFindModelXmlFallback:
+    """An archive with no ``3D/3dmodel.model`` and no rels still opens
+    through its only ``.model`` member — every door used to carry this
+    last resort on its own."""
+
+    def test_lone_model_member_is_the_root(self, tmp_path: Path) -> None:
+        xml = f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <object id="1" type="model">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles><triangle v1="0" v2="1" v3="2" /></triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /></build>
+</model>"""
+        path = tmp_path / "odd.3mf"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("Models/scene.model", xml)
+
+        assert len(parse_colored_3mf(str(path)).triangles) == 1

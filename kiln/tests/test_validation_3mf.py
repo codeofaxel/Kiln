@@ -311,6 +311,29 @@ class TestProductionExtension3mf:
 
         assert result.triangle_count == _PYRAMID_TRIANGLES
 
+    def test_extract_model_from_3mf_follows_parts_and_places_them(
+        self, tmp_path: Path
+    ) -> None:
+        """The STL a user extracts is the plate as the slicer places it: the
+        mesh behind ``p:path``, under the build item's transform."""
+        from kiln.generation.validation import extract_model_from_3mf
+
+        resources = (
+            '<object id="2" type="model"><components>'
+            f'    <component p:path="/{self._PART}" objectid="1" />'
+            "</components></object>"
+        )
+        build = '<item objectid="2" transform="2 0 0 0 2 0 0 0 2 0 0 0" />'
+        path = _write_3mf(
+            tmp_path, _model_xml(resources, build), parts={self._PART: self._part_xml()}
+        )
+
+        result = extract_model_from_3mf(path, output_path=str(tmp_path / "out.stl"))
+
+        assert result["triangle_count"] == _PYRAMID_TRIANGLES
+        assert result["vertex_count"] == 5
+        assert result["dimensions"] == {"x_mm": 20.0, "y_mm": 20.0, "z_mm": 20.0}
+
     def test_missing_part_is_reported_not_swallowed(self, tmp_path: Path) -> None:
         build = '<item objectid="1" p:path="/3D/Objects/nope.model" />'
         result = analyze_mesh(_write_3mf(tmp_path, _model_xml("", build)))

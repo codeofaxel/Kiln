@@ -159,6 +159,38 @@ class TestReadFileFilaments:
         assert {f.hex6 for f in got.filaments} == {"FFFFFF", "C81E1E", "161616"}
         assert all(f.material is None for f in got.filaments)
 
+    def test_uncoloured_model_3mf_declares_no_filaments(self, tmp_path):
+        """A MakerWorld project with no colour data is not a one-filament
+        grey print — the reader must say "none", not invent a colour."""
+        core = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+        prod = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
+        part = "3D/Objects/object_1.model"
+        root = f"""<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xmlns="{core}" xmlns:p="{prod}">
+  <resources><object id="2" type="model">
+    <components><component p:path="/{part}" objectid="1" /></components>
+  </object></resources>
+  <build><item objectid="2" /></build>
+</model>"""
+        mesh = f"""<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xmlns="{core}">
+  <resources><object id="1" type="model"><mesh>
+    <vertices><vertex x="0" y="0" z="0" /><vertex x="10" y="0" z="0" />
+      <vertex x="0" y="10" z="0" /></vertices>
+    <triangles><triangle v1="0" v2="1" v3="2" /></triangles>
+  </mesh></object></resources>
+  <build />
+</model>"""
+        path = tmp_path / "plain.3mf"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", root)
+            zf.writestr(part, mesh)
+
+        got = read_file_filaments(str(path))
+
+        assert got.source == "none"
+        assert got.filaments == []
+
     def test_single_colour_gcode_is_not_multicolour(self, tmp_path):
         p = tmp_path / "one.gcode"
         p.write_text("G28\n; filament_colour = #29B2B2\n; filament_type = PETG\n")
