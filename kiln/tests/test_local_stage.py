@@ -871,3 +871,52 @@ class TestPaintedThreeMfServesWithoutTrimeshLoader:
         assert {tuple(c) for c in rgba.tolist()} == {
             (247, 35, 35, 255), (35, 102, 247, 255),
         }
+
+
+class TestTokensResolveAcrossProcesses:
+    """A panel's fetch is answered by whichever Kiln server the host routes
+    it to — not necessarily the one that minted the token.  Measured live
+    2026-09-01: one server per open session, paint on server A, fetch on
+    server B, every fetch refused as "unknown token".  Tokens therefore
+    live in a shared machine-wide ledger any server can read; the
+    in-memory dict is just the minting process's fast path.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _own_kiln_home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "kilnhome"))
+        local_stage._reset_for_tests()
+        yield
+        local_stage._reset_for_tests()
+
+    def test_another_process_resolves_a_minted_token(self, tmp_path):
+        mesh = tmp_path / "part.stl"
+        mesh.write_bytes(b"solid x\nendsolid x\n")
+        token = local_stage._mint(str(mesh))
+        # Another server process has its own empty in-memory dict; clearing
+        # ours simulates being that process.
+        local_stage._tokens.clear()
+        assert local_stage.resolve(token) == str(mesh)
+
+    def test_unknown_tokens_stay_unknown(self):
+        assert local_stage.resolve("nope") is None
+
+    def test_ledger_is_bounded(self, tmp_path):
+        import json as _json
+
+        for i in range(local_stage._TOKENS_MAX + 40):
+            local_stage._mint(f"/tmp/mesh_{i}.stl")
+        entries = _json.loads(local_stage._token_ledger_path().read_text())
+        assert len(entries) <= local_stage._TOKENS_MAX
+
+    def test_a_corrupt_ledger_never_breaks_minting_or_resolving(self):
+        path = local_stage._token_ledger_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json")
+        token = local_stage._mint("/tmp/x.stl")
+        assert local_stage.resolve(token) == "/tmp/x.stl"
+
+    def test_ledger_file_is_private(self):
+        local_stage._mint("/tmp/y.stl")
+        mode = local_stage._token_ledger_path().stat().st_mode & 0o777
+        assert mode == 0o600

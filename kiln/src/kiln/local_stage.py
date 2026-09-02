@@ -71,6 +71,7 @@ The still image is the floor under all of it, always.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
 import os
@@ -254,14 +255,14 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-#: token -> mesh path.  Bounded; oldest dropped first.  In-memory only —
-#: and since the result went lean, that is a REACHABILITY decision, not a
-#: bookkeeping one: the token is the panel's whole route to the mesh, so a
-#: restart is what ends a scrolled-back panel's ability to redraw.  (It
-#: used to be free: the geometry had already ridden the result, so a dead
-#: token cost nothing.)  Still not persisted, because the paths it holds
-#: are this machine's temp files and outliving them would only trade a
-#: "preview unavailable" card for a broken one.  See WHAT LEAN COSTS.
+#: token -> mesh path.  Bounded; oldest dropped first.  The fast path for
+#: the process that minted; the shared ledger under ``~/.kiln`` is the
+#: truth every OTHER Kiln server on this machine answers from, because a
+#: desktop host routes a panel's fetch over whichever session's connection
+#: it holds, not necessarily the minting one (see _ledger_write).  The
+#: ledger also survives restarts, so a scrolled-back panel redraws as long
+#: as its temp file still exists; a deleted mesh gets the honest "could
+#: not read" card, which the verb already says.  See WHAT LEAN COSTS.
 _tokens: dict[str, str] = {}
 #: How many makes back a panel can still fetch its mesh.  Raised from 64
 #: when the result went lean: an evicted token used to cost nothing (the
@@ -333,18 +334,82 @@ def diagnostics_enabled() -> bool:
     }
 
 
+def _token_ledger_path() -> Path:
+    """The machine-wide token ledger, next to the other ``~/.kiln`` stores."""
+    home = Path(os.environ.get("KILN_HOME", "").strip() or (Path.home() / ".kiln"))
+    return home / "stage_tokens.json"
+
+
+def _ledger_write(token: str, mesh_path: str) -> None:
+    """Record a token in the shared ledger, best-effort and atomic.
+
+    WHY A FILE.  The in-memory dict assumes the panel's fetch comes back to
+    the PROCESS that minted the token.  It does not: a desktop host runs one
+    Kiln server per open session and routes a rendered panel's ``tools/call``
+    over whichever of those connections it holds — measured live 2026-09-01,
+    twelve fetches in one evening, every one answered "unknown token" by a
+    server that never minted it while the minting server sat idle.  The
+    ledger makes the token machine-wide: any Kiln server on this machine can
+    resolve it to the local mesh path, which is the same trust domain the
+    mesh itself lives in.  Bounded like the dict, oldest first; 0600 because
+    a token is a capability, even a local one.
+
+    Never raises — a mesh nobody can fetch later must not fail the make now.
+    """
+    try:
+        import tempfile
+
+        path = _token_ledger_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            entries = json.loads(path.read_text())
+            if not isinstance(entries, dict):
+                entries = {}
+        except (OSError, ValueError):
+            entries = {}
+        entries[token] = mesh_path
+        while len(entries) > _TOKENS_MAX:
+            entries.pop(next(iter(entries)), None)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".stage_tokens_")
+        try:
+            with os.fdopen(fd, "w") as fh:
+                json.dump(entries, fh)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
+    except Exception:  # noqa: BLE001
+        logger.debug("stage token ledger write skipped", exc_info=True)
+
+
+def _ledger_read(token: str) -> str | None:
+    """The ledger's answer for a token minted by any process, or ``None``."""
+    try:
+        entries = json.loads(_token_ledger_path().read_text())
+        value = entries.get(token) if isinstance(entries, dict) else None
+        return value if isinstance(value, str) and value else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _mint(mesh_path: str) -> str:
     token = secrets.token_urlsafe(18)
     with _lock:
         if len(_tokens) >= _TOKENS_MAX:
             _tokens.pop(next(iter(_tokens)), None)
         _tokens[token] = mesh_path
+    _ledger_write(token, mesh_path)
     return token
 
 
 def resolve(token: str) -> str | None:
     with _lock:
-        return _tokens.get(token)
+        hit = _tokens.get(token)
+    # The minting process answers from memory; every OTHER Kiln server on
+    # this machine answers from the shared ledger.  See _ledger_write.
+    return hit or _ledger_read(token)
 
 
 # ---------------------------------------------------------------------------
