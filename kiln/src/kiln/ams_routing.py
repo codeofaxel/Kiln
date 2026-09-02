@@ -37,6 +37,7 @@ import io
 import os
 import re
 import zipfile
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -45,7 +46,9 @@ __all__ = [
     "FileFilaments",
     "Filament",
     "MATCH_DELTA_E",
+    "SpoolAdvisory",
     "Tray",
+    "advise_colours",
     "loaded_trays",
     "normalize_hex",
     "plan_ams_mapping",
@@ -508,3 +511,122 @@ def plan_ams_mapping(
     if not plan.unmatched:
         plan.mapping = mapping
     return plan
+
+
+# ---------------------------------------------------------------------------
+# What a colouring tool says at the moment of intent
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SpoolAdvisory:
+    """Whether colours a tool just applied are loaded on a printer.
+
+    Advice, never a decision.  The print gate decides at print time on
+    whatever printer is in front of the job; this says, at the moment a
+    colour is chosen, whether that printer could print it as chosen — so
+    "make it red" comes back as "made it red; no red is loaded" instead
+    of a grey print and a warning nobody read.
+
+    ``verdict``:
+
+    * ``"true"``     — every distinct colour has a loaded spool close
+      enough; the design prints as previewed.
+    * ``"mismatch"`` — at least one colour has no close spool.  ``missing``
+      names each one with the nearest loaded spool and how far off it is.
+    * ``"empty"``    — the printer reports no loaded filament.
+    * ``"unknown"``  — filament is loaded but its colours were not read.
+    """
+
+    verdict: str
+    message: str
+    printer: str | None = None
+    missing: list[dict[str, Any]] = field(default_factory=list)
+    matched: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "verdict": self.verdict,
+            "message": self.message,
+            "printer": self.printer,
+            "missing": list(self.missing),
+            "matched": list(self.matched),
+        }
+
+
+def advise_colours(
+    colours: Sequence[str | None],
+    trays: Sequence[Tray],
+    *,
+    printer: str | None = None,
+    tolerance: float = MATCH_DELTA_E,
+) -> SpoolAdvisory | None:
+    """Judge *colours* against loaded *trays*; ``None`` when there is nothing to judge.
+
+    Matching goes through :func:`plan_ams_mapping`, the same matcher the
+    print gate uses, so the advice a tool gives when a colour is chosen and
+    the decision the gate makes when the print starts can never disagree —
+    two design colours that would compete for one spool are a mismatch
+    here because they will be one there.
+    """
+    wanted: list[str] = []
+    for raw in colours:
+        hex6 = normalize_hex(raw)
+        if hex6 and hex6 not in wanted:
+            wanted.append(hex6)
+    if not wanted:
+        return None
+
+    where = f" on {printer}" if printer else ""
+    if not trays:
+        return SpoolAdvisory(
+            "empty",
+            f"No loaded filament is reported{where}, so these colours could not be checked.",
+            printer,
+        )
+    if not any(t.hex6 for t in trays):
+        return SpoolAdvisory(
+            "unknown",
+            f"Filament is loaded{where} but the printer did not report its "
+            "colours, so these colours could not be checked.",
+            printer,
+        )
+
+    plan = plan_ams_mapping(
+        [Filament(hex6=h) for h in wanted], list(trays), tolerance=tolerance,
+    )
+    matched: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for hex6, match in zip(wanted, plan.matches, strict=True):
+        entry = {
+            "color": f"#{hex6}",
+            "name": _colour_name(hex6),
+            "nearest": match["tray"],
+            "slot": match["slot"],
+            "delta_e": match["delta_e"],
+        }
+        if match["slot"] is None:
+            cands = [(t, _delta_e(hex6, t.hex6)) for t in trays if t.hex6]
+            nearest = min(cands, key=lambda c: c[1]) if cands else None
+            entry["nearest"] = nearest[0].label if nearest else None
+            entry["delta_e"] = round(nearest[1], 1) if nearest else None
+            missing.append(entry)
+        else:
+            matched.append(entry)
+
+    if not missing:
+        names = ", ".join(m["name"] for m in matched)
+        return SpoolAdvisory(
+            "true", f"Every colour is loaded{where}: {names}.", printer, missing, matched,
+        )
+    parts = []
+    for m in missing:
+        nearest = (
+            f" — nearest is {m['nearest']} (ΔE {m['delta_e']:.0f})"
+            if m["nearest"] else ""
+        )
+        parts.append(f"no {m['name']} ({m['color']}) loaded{where}{nearest}")
+    message = "; ".join(parts)
+    return SpoolAdvisory(
+        "mismatch", message[0].upper() + message[1:] + ".", printer, missing, matched,
+    )

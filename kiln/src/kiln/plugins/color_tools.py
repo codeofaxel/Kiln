@@ -1130,6 +1130,29 @@ def _build_summary(
     return f"{count} color zone{'s' if count != 1 else ''}: {', '.join(parts)}"
 
 
+def _attach_spool_advisory(
+    response: dict[str, Any],
+    colours: list[str | None],
+    printer_id: str | None = None,
+) -> None:
+    """Say, as the colours are chosen, whether the printer has them loaded.
+
+    Adds ``ams_advisory`` to a successful *response* when there is a
+    printer to ask — the same field every colouring tool carries, so an
+    agent reads "no red is loaded" in the answer to "make it red" rather
+    than in a warning at print time.  Advice only: the print gate decides.
+    """
+    try:
+        from kiln.server import _spool_advisory
+
+        advisory = _spool_advisory(colours, printer_name=printer_id or None)
+    except Exception as exc:  # a courtesy layer never fails a good colouring
+        _logger.debug("spool advisory skipped: %s", exc)
+        return
+    if advisory:
+        response["ams_advisory"] = advisory
+
+
 def _build_result(
     zones: list[_ColorZone],
     output_dir: str,
@@ -1617,6 +1640,7 @@ class _ColorToolsPlugin:
                 compose_3mf_error=compose_err,
                 band_warning=warn,
             )
+            _attach_spool_advisory(response, palette[:num_colors], printer_id)
             try:
                 from kiln_pro.plugins.git_render_tools import (
                     attach_inspect_bundle,
@@ -1743,6 +1767,7 @@ class _ColorToolsPlugin:
                 compose_3mf_error=compose_err,
                 band_warning=warn,
             )
+            _attach_spool_advisory(response, palette[:num_colors], printer_id)
             try:
                 from kiln_pro.plugins.git_render_tools import (
                     attach_inspect_bundle,
@@ -2023,6 +2048,9 @@ class _ColorToolsPlugin:
             for key in ("colors", "bed_translation", "native_paint_truncated"):
                 if key in composed:
                     response[key] = composed[key]
+            _attach_spool_advisory(
+                response, sorted({c for c in colors if c}), printer_id,
+            )
             if "floor_indices" in record and target == "all":
                 response["hint"] = (
                     "This record distinguishes recess floors from side-walls — "

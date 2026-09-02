@@ -5577,6 +5577,59 @@ def _resolve_use_ams(
     }
 
 
+def _spool_advisory(
+    colours: list[str | None],
+    *,
+    printer_name: str | None = None,
+    adapter: PrinterAdapter | None = None,
+) -> dict[str, Any] | None:
+    """Say whether *colours* are loaded on the printer, for a colouring tool.
+
+    The colouring tools call this the moment a colour is chosen, so "make
+    it red" answers "made it red; no red is loaded on default" instead of
+    leaving the miss for a warning at print time.  Advice only — the
+    print gate (:func:`_resolve_use_ams`) still decides, on whatever
+    printer is in front of the job when it starts.
+
+    *printer_name* may be a registered printer or a printer MODEL id, as
+    the colouring tools take one; an unregistered name falls back to the
+    default printer.  Returns ``None`` — says nothing — when there is no
+    printer, the printer cannot report its spools, or it reports no AMS.
+    Never raises: a colouring that succeeded is never failed by advice.
+    """
+    from kiln.ams_routing import advise_colours, loaded_trays
+
+    label = printer_name or None
+    try:
+        if adapter is None:
+            try:
+                adapter = _resolve_adapter(printer_name or None)
+            except Exception:
+                if not printer_name:
+                    raise
+                # A model id, not a printer name — ask the default printer.
+                adapter = _resolve_adapter(None)
+                label = None
+        if label is None:
+            label = _resolve_effective_printer_name(None)
+    except Exception as exc:
+        logger.debug("spool advisory: no printer to ask (%s)", exc)
+        return None
+
+    if not hasattr(adapter, "get_ams_status"):
+        return None
+    try:
+        ams_info = adapter.get_ams_status()
+    except Exception as exc:
+        logger.debug("spool advisory: AMS not readable on %s (%s)", label, exc)
+        return None
+    if not ams_info.get("units"):
+        return None
+
+    advisory = advise_colours(colours, loaded_trays(ams_info), printer=label)
+    return advisory.to_dict() if advisory else None
+
+
 @mcp.tool()
 def start_print(
     file_name: str,
@@ -7724,13 +7777,19 @@ def wrap_gcode_as_3mf(
                         if thumb_name.lower() not in existing:
                             zf.writestr(thumb_name, thumb_data)
         _audit("wrap_gcode_as_3mf", "executed", details={"gcode_path": gcode_path})
-        return {
+        result = {
             "success": True,
             "output_path": output_path,
             "gcode_path": gcode_path,
             "filament_type": filament_type,
             "num_filaments": num_filaments,
         }
+        if filament_colors:
+            # The colours were chosen here; say now whether they are loaded.
+            advisory = _spool_advisory(list(filament_colors), adapter=adapter)
+            if advisory:
+                result["ams_advisory"] = advisory
+        return result
     except FileNotFoundError as exc:
         return _error_dict(f"G-code file not found: {exc}")
     except ValueError as exc:

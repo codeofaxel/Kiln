@@ -26,6 +26,7 @@ import pytest
 from kiln.ams_routing import (
     Filament,
     Tray,
+    advise_colours,
     loaded_trays,
     normalize_hex,
     plan_ams_mapping,
@@ -468,3 +469,143 @@ class TestStageShowsWhatAPreviewMade:
 
 def _unused():  # keeps io imported for readers that patch it
     return io
+
+
+# ---------------------------------------------------------------------------
+# advise_colours — what a colouring tool says at the moment of intent
+# ---------------------------------------------------------------------------
+
+
+class TestAdviseColours:
+    def test_every_colour_loaded_is_true(self):
+        adv = advise_colours(
+            ["#FFFFFF", "#F72323"], _trays("FFFFFF", "161616", "F72323"), printer="default",
+        )
+        assert adv.verdict == "true"
+        assert adv.missing == []
+        assert [m["name"] for m in adv.matched] == ["white", "red"]
+        assert adv.message == "Every colour is loaded on default: white, red."
+
+    def test_missing_colour_names_the_nearest_spool(self):
+        adv = advise_colours(["#F72323"], _trays("FFFFFF", "161616"), printer="default")
+        assert adv.verdict == "mismatch"
+        assert adv.matched == []
+        (m,) = adv.missing
+        assert m["color"] == "#F72323"
+        assert m["name"] == "red"
+        assert m["nearest"] in ("white PLA in slot 1", "black PLA in slot 2")
+        assert m["delta_e"] > 28
+        assert adv.message.startswith("No red (#F72323) loaded on default — nearest is ")
+        assert adv.message.endswith(").")
+
+    def test_two_colours_competing_for_one_spool_is_a_mismatch(self):
+        # The print gate feeds one tray per extruder; the advice must say
+        # so before the print does.
+        adv = advise_colours(["#F72323", "#F03030"], _trays("F72323"))
+        assert adv.verdict == "mismatch"
+        assert len(adv.matched) == 1
+        assert len(adv.missing) == 1
+
+    def test_agrees_with_the_print_gate(self):
+        trays = _trays("FFFFFF", "161616", "898989", "F72323")
+        for colours in (["#FFFFFF", "#C81E1E"], ["#00FF00"], ["#F72323", "#F03030"]):
+            adv = advise_colours(colours, trays)
+            plan = plan_ams_mapping([Filament(hex6=normalize_hex(c)) for c in colours], trays)
+            assert (adv.verdict == "true") is plan.ok
+
+    def test_no_trays_is_empty(self):
+        adv = advise_colours(["#F72323"], [], printer="default")
+        assert adv.verdict == "empty"
+        assert "on default" in adv.message
+
+    def test_unread_colours_is_unknown(self):
+        adv = advise_colours(["#F72323"], _trays(None, None))
+        assert adv.verdict == "unknown"
+
+    def test_nothing_to_judge_is_none(self):
+        assert advise_colours([None, "", "nope"], _trays("FFFFFF")) is None
+        assert advise_colours([], _trays("FFFFFF")) is None
+
+    def test_duplicates_collapse(self):
+        adv = advise_colours(["#FFFFFF", "#ffffff", "FFFFFF"], _trays("FFFFFF"))
+        assert adv.verdict == "true"
+        assert len(adv.matched) == 1
+
+    def test_no_printer_name_leaves_the_message_unplaced(self):
+        adv = advise_colours(["#FFFFFF"], _trays("FFFFFF"))
+        assert adv.printer is None
+        assert " on " not in adv.message
+        assert adv.to_dict()["verdict"] == "true"
+
+
+class TestSpoolAdvisoryWrapper:
+    """kiln.server._spool_advisory: the printer-resolving door the tools call."""
+
+    def _adapter(self, ams=JAR_NIGHT_AMS):
+        adapter = MagicMock()
+        adapter.get_ams_status.return_value = ams
+        return adapter
+
+    def _patch(self, monkeypatch, resolve):
+        from kiln import server
+
+        monkeypatch.setattr(server, "_resolve_adapter", resolve)
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "default")
+        return server
+
+    def test_answers_for_the_default_printer(self, monkeypatch):
+        server = self._patch(monkeypatch, lambda name=None: self._adapter())
+        got = server._spool_advisory(["#F72323", "#00FF00"])
+        assert got["verdict"] == "mismatch"
+        assert got["printer"] == "default"
+        assert [m["color"] for m in got["missing"]] == ["#00FF00"]
+
+    def test_a_model_id_falls_back_to_the_default_printer(self, monkeypatch):
+        asked = []
+
+        def resolve(name=None):
+            asked.append(name)
+            if name:
+                raise KeyError(name)
+            return self._adapter()
+
+        server = self._patch(monkeypatch, resolve)
+        got = server._spool_advisory(["#F72323"], printer_name="bambu_a1")
+        assert asked == ["bambu_a1", None]
+        assert got["verdict"] == "true"
+        assert got["printer"] == "default"
+
+    def test_a_registered_name_is_used_and_named(self, monkeypatch):
+        server = self._patch(monkeypatch, lambda name=None: self._adapter())
+        got = server._spool_advisory(["#F72323"], printer_name="garage")
+        assert got["printer"] == "garage"
+
+    def test_no_printer_says_nothing(self, monkeypatch):
+        def resolve(name=None):
+            raise RuntimeError("no printer configured")
+
+        server = self._patch(monkeypatch, resolve)
+        assert server._spool_advisory(["#F72323"]) is None
+
+    def test_a_printer_that_cannot_show_spools_says_nothing(self, monkeypatch):
+        server = self._patch(monkeypatch, lambda name=None: MagicMock(spec=[]))
+        assert server._spool_advisory(["#F72323"]) is None
+
+    def test_no_ams_units_says_nothing(self, monkeypatch):
+        server = self._patch(monkeypatch, lambda name=None: self._adapter({"units": []}))
+        assert server._spool_advisory(["#F72323"]) is None
+
+    def test_an_unreadable_ams_says_nothing(self, monkeypatch):
+        adapter = self._adapter()
+        adapter.get_ams_status.side_effect = RuntimeError("mqtt down")
+        server = self._patch(monkeypatch, lambda name=None: adapter)
+        assert server._spool_advisory(["#F72323"]) is None
+
+    def test_a_given_adapter_is_asked_directly(self, monkeypatch):
+        def resolve(name=None):
+            raise AssertionError("should not resolve when an adapter is given")
+
+        server = self._patch(monkeypatch, resolve)
+        got = server._spool_advisory(["#F72323"], adapter=self._adapter())
+        assert got["verdict"] == "true"
+        assert got["printer"] == "default"
