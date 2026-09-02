@@ -235,7 +235,7 @@ class TestGLBToSTLConversion:
         assert os.path.isfile(out)
 
     def test_unsupported_format(self):
-        with pytest.raises(ValueError, match="expects .obj or .glb"):
+        with pytest.raises(ValueError, match="expects .obj, .glb, or .3mf"):
             convert_to_stl("/tmp/model.fbx")
 
     def test_obj_still_works(self, tmp_path):
