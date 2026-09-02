@@ -32,10 +32,9 @@ on a local stdio server could not call tools back.  Two facts retired it:
   act on them.  Paying the entire result to draw a panel is not a trade any
   user would choose.  (Measured 2026-08-19; hit again live 2026-08-30 on
   ``build_organic_mesh``, whose result truncated mid-payload.)
-* **The lazy fetch is not theoretical.**  ``kiln_viewer_payload`` is
-  registered on this door the moment a host reads the stage document, and
-  serving geometry through it — never in the result — is the only way the
-  hosted door has ever worked.
+* **The lazy fetch is not theoretical.**  ``kiln_viewer_payload`` is a
+  standing tool on this door from install, and serving geometry through it
+  — never in the result — is the only way the hosted door has ever worked.
 
 So the token rides the result and the geometry does not.  The View fetches
 through the host's ``tools/call`` proxy where the host offers one, and
@@ -83,7 +82,6 @@ from typing import Any
 from kiln.mcp_compat import (
     capture_request_context,
     client_capabilities,
-    current_session,
     lowlevel_server,
     wrap_call_tool_result,
 )
@@ -686,9 +684,10 @@ def _register_resource(mcp: Any) -> bool:
         # "is the verb available", which is True on every later read too,
         # and notifying there would tell the host to re-list its tools once
         # per panel for a list that did not change.
-        had_verb = _payload_verb_registered(mcp)
-        if _register_payload_verb(mcp) and not had_verb:
-            await _announce_tool_list_changed(mcp)
+        # Belt and braces: install() already registered the verb; a server
+        # whose install was partial still gets it before the View's first
+        # tools/call.  Idempotent, so this costs nothing when it holds.
+        _register_payload_verb(mcp)
         return doc
 
     # SDK 2 hands the request ctx to the handler and nowhere else, and a
@@ -734,13 +733,25 @@ def _payload_verb_registered(mcp: Any) -> bool:
 def _register_payload_verb(mcp: Any) -> bool:
     """Register ``kiln_viewer_payload`` — the View's lazy mesh fetch.
 
-    Idempotent and never raises.  Called from two places: the stage-document
-    read (door parity — a host that renders the panel gets the verb before
-    its View's first ``tools/call``; see ``_document``) and the diagnostics
-    path (which forces it at install for smoke-testing).  Serves the
-    operator's own local files at full fidelity — the hosted door's
-    charge-on-keep wall guards artifact tokens, which never exist here;
-    a local token resolves only to a mesh this machine already made.
+    Idempotent and never raises.  Registered at ``install``, so it is on
+    the tool list a host caches at initialize.
+
+    It used to be registered late, at the first stage-document read, to
+    keep a verb nobody should call by hand off the standing surface, and
+    the server sent ``notifications/tools/list_changed`` so a host that
+    validates ``tools/call`` names could learn it.  Measured 2026-09-01 on
+    the Claude desktop host (clientInfo ``mcp/0.1.0``): the panel rendered,
+    the verb registered, the notice went out, and the host never re-listed
+    — hours later its tool list still lacked the verb, so every panel's
+    fetch failed into "Preview unavailable".  With the lean result this
+    verb is the ONLY route to a mesh; it cannot hang on a notification a
+    host may ignore.  The cost is one app-visibility tool on the list,
+    hidden from the model by hosts that honour ``_meta.ui.visibility``.
+    The alternative was a 3D panel that never works.
+
+    Serves the operator's own local files at full fidelity — the hosted
+    door's charge-on-keep wall guards artifact tokens, which never exist
+    here; a local token resolves only to a mesh this machine already made.
     """
     try:
         if _payload_verb_registered(mcp):
@@ -771,49 +782,6 @@ def _register_payload_verb(mcp: Any) -> bool:
     except Exception:
         logger.warning("local stage: payload tool failed", exc_info=True)
         return False
-
-
-async def _announce_tool_list_changed(mcp: Any) -> None:
-    """Tell the connected host its tool list just grew.
-
-    ``kiln_viewer_payload`` is registered LATE on purpose — a verb only a
-    rendered panel calls does not belong on the standing tool surface — and
-    FastMCP does not send ``notifications/tools/list_changed`` when a tool
-    is added after connect (measured on SDK 1.x: neither ``add_tool`` nor
-    the tool manager notifies).  Registration alone is therefore only half
-    the promise: the SERVER can find the verb, and a host that validates a
-    ``tools/call`` name against the list it cached at initialize cannot.
-
-    That gap was survivable while geometry rode the result and this fetch
-    was a fallback.  It is load-bearing now: the lean result means EVERY
-    panel reaches its mesh through this verb, so a host that will not proxy
-    an unannounced name would show "Preview unavailable" on every make.
-
-    Awaited before the document is returned, not fired into the background:
-    the host then knows the verb exists before it can possibly render the
-    View, and there is no loop or task lifetime to get wrong.  The session
-    comes from :func:`kiln.mcp_compat.current_session` — one opinion about
-    where a session lives, not a second.
-
-    That accessor is why this works on SDK 2 at all.  Reading the 1.x
-    location directly (``lowlevel_server(mcp).request_context.session``)
-    raised ``AttributeError`` on 2.x, which the ``except`` below caught and
-    turned into "no session" — so the notification was never sent, on every
-    make, and nothing said so.  With the lean result this verb is the only
-    route to a mesh, so a host that validates a ``tools/call`` name against
-    its cached tool list would have shown "Preview unavailable" every time.
-
-    Never raises.  A panel that fails to open beats a stage document that
-    fails to arrive.
-    """
-    session = current_session(mcp)
-    if session is None:
-        logger.debug("local stage: no session to announce the verb to")
-        return
-    try:
-        await session.send_tool_list_changed()
-    except Exception:  # noqa: BLE001 — a host that hung up mid-read
-        logger.debug("local stage: tool-list notice not delivered", exc_info=True)
 
 
 def _register_diagnostics(mcp: Any, out: dict[str, Any]) -> None:
@@ -1000,6 +968,8 @@ def install(mcp: Any) -> dict[str, Any]:
         logger.warning("local stage: resource registration failed", exc_info=True)
         return out
 
+    # Standing, not lazy — see _register_payload_verb for the measurement.
+    out["payload_tool"] = _register_payload_verb(mcp)
     if diagnostics_enabled():
         _register_diagnostics(mcp, out)
 

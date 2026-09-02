@@ -19,7 +19,6 @@ import sys
 import pytest
 
 from kiln import local_stage, stage_cache
-from kiln.mcp_compat import MCP_SDK_MAJOR as _MCP_SDK_MAJOR
 
 _DOC = "<!DOCTYPE html><html><body>stage</body></html>"
 
@@ -163,14 +162,29 @@ class TestOnByDefault:
         assert local_stage.token_for_call_result(
             _Result({"success": True, "stl_path": _stl(tmp_path / "a.stl")})) is None
 
-    def test_the_support_verbs_stay_off_the_standing_tool_surface(self):
-        """Neither is useful to a person or an agent; a tool nobody should
-        call is a permanent tax on everyone reading the tool list."""
+    def test_the_payload_verb_stands_and_the_smoke_test_stays_off(self):
+        """The fetch verb is on the standing surface from install: a host
+        that caches its tool list at initialize and ignores list_changed
+        (measured: the Claude desktop host, 2026-09-01) can only call what
+        was there at the start, and this verb is the panel's only route to
+        a mesh.  The smoke test stays off — nobody's panel depends on it."""
+        _cache_the_stage()
+        mcp = _fastmcp()
+        summary = local_stage.install(mcp)
+        assert summary["payload_tool"] is True
+        assert "kiln_viewer_payload" in mcp._tool_manager._tools
+        assert "stage_smoke_test" not in mcp._tool_manager._tools
+
+    def test_the_payload_verb_is_marked_app_only(self):
+        """Standing, but not for the model: hosts that honour the MCP Apps
+        visibility hint hide it, so the cost of standing is one row on
+        the wire and nothing in anyone's prompt."""
         _cache_the_stage()
         mcp = _fastmcp()
         local_stage.install(mcp)
-        assert "kiln_viewer_payload" not in mcp._tool_manager._tools
-        assert "stage_smoke_test" not in mcp._tool_manager._tools
+        tool = mcp._tool_manager._tools["kiln_viewer_payload"]
+        meta = getattr(tool, "meta", None) or {}
+        assert meta.get("ui", {}).get("visibility") == ["app"]
 
     def test_diagnostics_flag_brings_them_back(self, monkeypatch):
         _cache_the_stage()
@@ -292,19 +306,17 @@ class TestTheStageDocumentComesFromTheCache:
     def test_a_rendering_host_gets_the_payload_verb_with_the_stage(self, tmp_path):
         """Door parity, the widget's return path: a stamped declaration
         promises the rendered View a working ``kiln_viewer_payload`` on
-        THIS door.  The verb stays off the standing tool surface until a
-        host proves it renders panels (the stage read) — and from that
-        moment, which precedes the View's first ``tools/call``, the View
-        can never call into a missing verb.  (2026-08-06: a token-only
-        lean result plus an unregistered verb starves the panel into the
-        viewer's "3D view never arrived" card.)
+        THIS door.  The verb is standing from install and the stage read
+        must not disturb that.  (2026-08-06: a token-only lean result plus
+        an unregistered verb starves the panel into the viewer's "3D view
+        never arrived" card.)
         """
         import anyio
 
         _cache_the_stage()
         mcp = _fastmcp()
         local_stage.install(mcp)
-        assert "kiln_viewer_payload" not in mcp._tool_manager._tools
+        assert "kiln_viewer_payload" in mcp._tool_manager._tools
 
         anyio.run(mcp.read_resource, local_stage.MESH_VIEWER_RESOURCE_URI)
         assert "kiln_viewer_payload" in mcp._tool_manager._tools
@@ -804,138 +816,3 @@ def _walk_strings(node, path="result"):
         yield path, node
 
 
-class TestTheHostIsToldTheVerbArrived:
-    """Registering the fetch verb late is only half the promise.
-
-    ``kiln_viewer_payload`` is registered at the stage read rather than at
-    install, so it stays off the standing tool surface of every host that
-    never renders a panel.  Measured on SDK 1.x: FastMCP sends no
-    ``notifications/tools/list_changed`` for a tool added after connect —
-    so the SERVER can find the verb and a host validating a ``tools/call``
-    name against the list it cached at initialize cannot.
-
-    That was survivable while geometry rode the result and this fetch was a
-    fallback.  With the lean result it is the ONLY route to a mesh, so a
-    host that will not proxy an unannounced name would show "Preview
-    unavailable" on every make.  Hence the explicit notification.
-    """
-
-    def _session(self, sent, fail=False):
-        class _Session:
-            async def send_tool_list_changed(_self):
-                if fail:
-                    raise RuntimeError("host hung up")
-                sent.append(True)
-
-        return _Session()
-
-    def _read_with_session(self, mcp, session):
-        """Read the stage document with *session* where the server keeps it.
-
-        The majors disagree about where that is, so this asks once which
-        dialect it is speaking (same shape as ``_run_hook`` above).
-
-        SDK 1.x parks the request context on a module contextvar the
-        lowlevel dispatcher sets before every handler.  SDK 2 removed both
-        that contextvar and ``Server.request_context``, and hands the
-        ``ServerRequestContext`` to the handler as an argument instead — so
-        the read is driven through the real ``resources/read`` handler
-        here, which is the only way a session reaches the stage on 2.x and
-        therefore the only honest way to test that it does.
-        """
-        import anyio
-
-        from kiln.mcp_compat import MCP_SDK_MAJOR, lowlevel_server
-
-        if MCP_SDK_MAJOR >= 2:
-            from mcp.server.context import ServerRequestContext
-            from mcp_types import ReadResourceRequestParams
-
-            entry = lowlevel_server(mcp).get_request_handler("resources/read")
-
-            async def _go_v2():
-                ctx = ServerRequestContext(
-                    session=session,
-                    lifespan_context=None,
-                    protocol_version="2026-07-28",
-                    method="resources/read",
-                )
-                return await entry.handler(
-                    ctx,
-                    ReadResourceRequestParams(
-                        uri=local_stage.MESH_VIEWER_RESOURCE_URI
-                    ),
-                )
-
-            return anyio.run(_go_v2)
-
-        from types import SimpleNamespace
-
-        from mcp.server.lowlevel.server import request_ctx
-
-        async def _go():
-            token = request_ctx.set(SimpleNamespace(session=session))
-            try:
-                return await mcp.read_resource(local_stage.MESH_VIEWER_RESOURCE_URI)
-            finally:
-                request_ctx.reset(token)
-
-        return anyio.run(_go)
-
-    def test_the_first_stage_read_announces_the_new_verb(self):
-        _cache_the_stage()
-        mcp = _fastmcp()
-        local_stage.install(mcp)
-        sent = []
-        self._read_with_session(mcp, self._session(sent))
-        assert "kiln_viewer_payload" in mcp._tool_manager._tools
-        assert sent == [True], (
-            "the verb was registered and the host was never told — a host "
-            "that validates tool names cannot call what it has not listed"
-        )
-
-    def test_a_second_read_announces_nothing(self):
-        """The list did not change, so saying it did would make a host
-        re-list its tools once per panel."""
-        _cache_the_stage()
-        mcp = _fastmcp()
-        local_stage.install(mcp)
-        sent = []
-        self._read_with_session(mcp, self._session(sent))
-        self._read_with_session(mcp, self._session(sent))
-        assert sent == [True]
-
-    def test_a_failed_notice_never_sinks_the_document_read(self):
-        """This runs inside the read that hands the host its stage.  A
-        panel that fails to open beats a document that fails to arrive."""
-        _cache_the_stage()
-        mcp = _fastmcp()
-        local_stage.install(mcp)
-        doc = self._read_with_session(mcp, self._session([], fail=True))
-        assert doc, "a refused notification took the stage document with it"
-        assert "kiln_viewer_payload" in mcp._tool_manager._tools
-
-    def test_the_read_registers_the_verb_on_every_sdk(self):
-        """The half that works on both majors.
-
-        Registration is what makes the fetch verb callable at all; the
-        notification only tells a host that caches its tool list.  Pinned
-        unconditionally so SDK 2 is not left with zero coverage of this
-        class while the announce gap above is open.
-        """
-        _cache_the_stage()
-        mcp = _fastmcp()
-        local_stage.install(mcp)
-        assert "kiln_viewer_payload" not in mcp._tool_manager._tools
-        self._read_with_session(mcp, self._session([]))
-        assert "kiln_viewer_payload" in mcp._tool_manager._tools
-
-    def test_no_session_is_not_a_crash(self):
-        """The diagnostics path and the tests read the document with no
-        lowlevel context at all."""
-        import anyio
-
-        _cache_the_stage()
-        mcp = _fastmcp()
-        local_stage.install(mcp)
-        assert anyio.run(mcp.read_resource, local_stage.MESH_VIEWER_RESOURCE_URI)
