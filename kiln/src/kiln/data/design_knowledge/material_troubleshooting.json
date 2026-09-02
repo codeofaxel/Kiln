@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "domain": "fdm",
     "description": "Per-material troubleshooting: common print failures, root causes, and specific fixes. Agent-consumable for real-time print diagnostics.",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Per-symptom diagnostic playbooks are available in Kiln Pro; see https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (what is going wrong and how to fix it, symptom by symptom) is available in Kiln Pro; see https://kiln3d.com/pricing."
   },
   "pla": {
     "storage_requirements": {

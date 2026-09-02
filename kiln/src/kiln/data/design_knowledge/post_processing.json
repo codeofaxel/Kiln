@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "domain": "fdm",
     "description": "Post-processing techniques per material. Surface finishing, strengthening, and aesthetic treatments with specific procedures.",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Step-by-step procedures and strengthening tradeoffs are available in Kiln Pro; see https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (step-by-step finishing procedures and the tradeoffs of each) is available in Kiln Pro; see https://kiln3d.com/pricing."
   },
   "pla": {
     "techniques": [

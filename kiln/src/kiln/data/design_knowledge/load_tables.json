@@ -4,7 +4,7 @@
     "domain": "fdm",
     "description": "Per-material safe-load lookup for cantilevered FDM parts, DERIVED (not hand-authored): safe_load_N = tensile_capacity_n_per_mm2 x (A^1.5/6) / L, where tensile_capacity = catalogue tensile x 0.9 FDM print factor / 3.0 safety factor. SQUARE cross-section basis \u2014 wide or flat sections are weaker. Regenerate with kiln/scripts/generate_load_tables.py; never hand-edit values.",
     "_orientation_convention": "layer_orientation_derating keys: 'across_layers' = the load pulls the layer interfaces apart (build/Z direction \u2014 the WEAK case for FDM; factor 0.4, the worst per-material interlayer ratio so one conservative pair covers every material). 'along_layers' = the load acts within the layer planes (the STRONG case; factor 1.0). Per-material anisotropy depth lives in Kiln Pro.",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Per-material engineering caveats are available in Kiln Pro; see https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (the per-material caveats behind these numbers) is available in Kiln Pro; see https://kiln3d.com/pricing."
   },
   "pla": {
     "tensile_capacity_n_per_mm2": 15.0,
