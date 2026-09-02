@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "domain": "fdm",
     "description": "Printer-to-material compatibility matrix. Maps which materials each printer can handle out-of-box, with upgrades, or not at all.",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Per-printer, per-material notes are available in Kiln Pro; see https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (what to expect from each printer and material together) is available in Kiln Pro; see https://kiln3d.com/pricing."
   },
   "anker_m5": {
     "pla": {
