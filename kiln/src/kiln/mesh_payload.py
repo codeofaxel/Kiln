@@ -125,11 +125,14 @@ nearest face centroid for a painted soup, whose coincident boundary
 copies would otherwise speckle — or are dropped when scipy is missing,
 never guessed.
 
-READING 3MF WITHOUT TRIMESH'S LOADER
-------------------------------------
-trimesh's 3MF loader needs lxml and networkx, which a plain install does
-not have.  A 3MF is then read by :func:`_load_3mf_stdlib` into the same
-Scene shape, so the color handling above is one code path either way.
+READING 3MF
+-----------
+A 3MF is read by :func:`_load_3mf_stdlib`, Kiln's own standard-library
+reader, on every install.  trimesh's 3MF loader needs lxml and networkx,
+which a plain install does not have; it is never used here, so the path
+the tests exercise is the path a user runs.  The reader returns the same
+Scene shape the loader would, so the color handling above is one code
+path.
 
 Stateless: path in, dict out.  No disk writes, no caches, no network.
 """
@@ -564,8 +567,11 @@ def _load_3mf_stdlib(path: Path) -> Any:
 
     Not mirrored: a component that references another model file inside
     the archive (``p:path``), which no Kiln composer and no slicer export
-    writes.  This runs only when trimesh's loader is unavailable, so an
-    install that has it keeps exactly the behaviour it had.
+    writes.  This is THE 3MF path, on every install — not a fallback for
+    the ones missing trimesh's extras.  It was a fallback for a day; the
+    trouble with a fallback is that the machine running the tests has the
+    extras and the user's machine does not, so the path users run was the
+    one the suite never exercised.  One reader everywhere ends that.
 
     Raises ``ValueError`` for an archive with no model XML or unparsable
     XML — the same refusals the loader makes.
@@ -696,10 +702,8 @@ def mesh_to_viewer_payload(
         means a damaged or vendored install, not a normal one; the message
         says how to fix it rather than leaving the caller to report "could
         not read that mesh" about a mesh that is perfectly fine.  A 3MF
-        never raises this for trimesh's OWN optional reader dependencies
-        (lxml, networkx): the file is read by :func:`_load_3mf_stdlib`
-        instead, so the stage works on the install ``pip install kiln3d``
-        actually produces.
+        never raises for trimesh's OWN optional reader dependencies (lxml,
+        networkx): :func:`_load_3mf_stdlib` reads it on every install.
     """
     import numpy as np
 
@@ -715,14 +719,13 @@ def mesh_to_viewer_payload(
     if not path.exists():
         raise FileNotFoundError(f"mesh not found: {path}")
 
-    try:
-        loaded = trimesh.load(str(path))
-    except ImportError:
-        # trimesh's 3MF loader wants lxml + networkx, which a plain install
-        # does not have.  The geometry is plain XML in a ZIP; read it here.
-        if path.suffix.lower() != ".3mf":
-            raise
+    if path.suffix.lower() == ".3mf":
+        # Kiln's own reader, on every install — never trimesh's loader,
+        # which wants lxml + networkx that a plain install does not have.
+        # One path everywhere, so what the tests read is what a user reads.
         loaded = _load_3mf_stdlib(path)
+    else:
+        loaded = trimesh.load(str(path))
     if isinstance(loaded, trimesh.Scene):
         # The Scene path bakes per-part colors (a multicolor 3MF's whole
         # point) into vertex colors while flattening — force="mesh" loses

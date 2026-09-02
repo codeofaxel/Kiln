@@ -637,16 +637,18 @@ class TestCadFactsBlock:
 
 
 class TestThreeMfWithoutTrimeshLoader:
-    """A 3MF still reaches the stage when trimesh's own 3MF loader cannot run.
+    """A 3MF reaches the stage with trimesh's own 3MF loader unavailable.
 
     That loader needs lxml and networkx, and ``pip install kiln3d`` brings
     in neither — so on every plain install, every colored 3MF Kiln makes
     (a paint, a per-part compose, a texture) was written fine and then
     refused by the stage's fetch: "preview unavailable" over a good file.
     Measured live 2026-09-01 on ``paint_mesh_regions``.  The dev extra
-    installs both, which is why no test ever saw it; this class takes the
-    loader away on purpose, the way ``test_mesh_payload_without_trimesh``
-    takes trimesh away.
+    installs both, which is why no test ever saw it.  The encoder now
+    reads 3MF itself on every install; this class takes trimesh's loader
+    away on purpose — the way ``test_mesh_payload_without_trimesh`` takes
+    trimesh away — so the suite can never again pass on a path users do
+    not run.
     """
 
     @pytest.fixture(autouse=True)
@@ -730,6 +732,21 @@ class TestThreeMfWithoutTrimeshLoader:
         # item, the other at +100 +30 via the component transform.
         xs = sorted({round(float(x)) for x in pos[:, 0]})
         assert xs == [100, 110, 130, 140]
+
+    def test_trimesh_loader_is_never_consulted_for_a_3mf(self, tmp_path, monkeypatch):
+        """Not a fallback: even a loader that is present and would work is
+        not called.  A fallback would leave the tests running one reader
+        and users another; a loader that blows up with a non-import error
+        proves this path never reaches it."""
+        from trimesh.exchange import load as _load
+
+        def _forbidden(*args, **kwargs):
+            raise RuntimeError("trimesh's 3MF loader must not be used")
+
+        monkeypatch.setitem(_load.mesh_loaders, "3mf", _forbidden)
+        payload = mesh_to_viewer_payload(self._painted_cube(tmp_path))
+        assert payload["counts"]["triangles"] == 12
+        assert "vertex_colors" in payload
 
     def test_a_non_3mf_still_reports_the_real_import_error(self, tmp_path, monkeypatch):
         """The fallback is for 3MF only: an STL that trimesh cannot read

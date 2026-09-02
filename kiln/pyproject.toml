@@ -133,12 +133,13 @@ dev = [
     "Pillow>=9.0",
     # networkx + lxml are what trimesh's 3MF loader AND exporter need.  Only
     # test fixtures export 3MF (tests/test_community_autofire.py builds 3MF
-    # files with mesh.export).  Production reads 3MF without them: the stage
-    # encoder (mesh_payload.py) uses trimesh's loader when they are present
-    # and its own standard-library reader when they are not, and
-    # file_metadata.py reads 3MF as a ZIP.  So they stay out of the core
-    # dependencies — and any 3MF read path must be tested with the loader
-    # blocked, because a dev install has these and a user install does not.
+    # files with mesh.export).  Production never reads 3MF through trimesh:
+    # the stage encoder (mesh_payload.py) has its own standard-library 3MF
+    # reader, and file_metadata.py reads 3MF as a ZIP.  So they stay out of
+    # the core dependencies — and no production path may start depending on
+    # trimesh's loader, because a dev install has these and a user install
+    # does not, which is how the stage broke for users while every test
+    # passed (2026-09-01).
     "networkx>=3.4",
     "lxml>=5.0",
     # manifold3d is trimesh's boolean backend.  Only test fixtures cut one
