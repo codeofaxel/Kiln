@@ -904,7 +904,8 @@ class _DesignKnowledgeBase:
         self._skin_contact: dict[str, dict[str, Any]] = {}
         # Each table's ``_meta`` block, keyed by table attribute.  The tables
         # themselves drop every underscore key (that rule keeps metadata and
-        # paid-tier fields out of the merged material dicts), so curated table-level policy —
+        # paid-tier fields out of the merged material dicts), so curated
+        # table-level policy —
         # which is legitimately public — would otherwise be unreachable.
         self._table_meta: dict[str, dict[str, Any]] = {}
         #: Overlay kind -> ``(the overlay payload that was merged, the merged

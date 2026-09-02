@@ -574,8 +574,8 @@ class _RecoveryToolsPlugin:
             printability and structural issues, without modifying the
             creative intent.
 
-            The improved prompt is run through a three-check sanity gate (no contradictions, fits
-            the provider budget, ≥70% original-token overlap so intent
+            The improved prompt is run through a three-check sanity gate
+            (no contradictions, fits the provider budget, ≥70% original-token overlap so intent
             is preserved).  When ``enforce_sanity=True`` (default) and
             the gate fails, this tool refuses with
             ``code="SANITY_GATE_FAILED"`` and returns the failure list

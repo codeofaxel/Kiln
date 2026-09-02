@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Minimum fraction of original-prompt tokens that must survive into the
-# improved prompt, so the improved prompt still carries the original intent.
+# improved prompt, so the result still carries the original intent.
 _MIN_TOKEN_OVERLAP_PCT = 0.70
 
 # Detects "minimum X 2.5mm" / "max X 30 degrees" style numeric clauses.

@@ -2,7 +2,7 @@
   "_meta": {
     "version": "2.0.0",
     "domain": "fdm",
-    "description": "Discovery catalog of functional design templates for FDM printing. Each entry is identifiable by display_name, use_cases, and material compatibility — enough for an agent to surface the right template to the user. Engineering-grade depth (design_rules, agent_guidance, failure modes, structured variants, sources) lives in the Kiln Pro overlay.",
+    "description": "Discovery catalog of functional design templates for FDM printing. Each entry is identifiable by display_name, use_cases, and material compatibility — enough for an agent to surface the right template to the user. Engineering-grade depth for each template is available in Kiln Pro.",
     "_data_quality": {
       "last_audit_date": "2026-05-05",
       "primary_sources": [
