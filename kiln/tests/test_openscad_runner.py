@@ -499,3 +499,64 @@ class TestLocaleHypothesisNotShipped:
             "and not demonstrated to help — see the module docstring."
         )
         assert os.environ["LC_ALL"] == "en_US.UTF-8"
+
+
+# ---------------------------------------------------------------------------
+# Windows: the crash sets must build on a signal module without SIGBUS
+# ---------------------------------------------------------------------------
+
+#: The Unix-only signals the crash sets name.  CPython's ``signal`` module
+#: on Windows defines neither, so any module that reads them at import
+#: time cannot be imported there at all.
+_UNIX_ONLY_SIGNALS = ("SIGBUS", "SIGTRAP")
+
+_WINDOWS_SHAPED_IMPORT = f"""
+import json, signal
+for name in {_UNIX_ONLY_SIGNALS!r}:
+    delattr(signal, name)
+import kiln.cli.main
+import kiln.openscad_runner as runner
+import kiln.slicer as slicer
+print(json.dumps({{
+    "openscad": sorted(runner.OPENSCAD_CRASH_RETURNCODES),
+    "slic3r": sorted(slicer._SLIC3R_STARTUP_CRASH_RETURNCODES),
+    "orca": sorted(slicer._ORCA_STARTUP_CRASH_RETURNCODES),
+}}))
+"""
+
+
+class TestImportsOnWindowsShapedSignalModule:
+    """Issue #146: ``kiln`` could not start on Windows.
+
+    ``signal.SIGBUS`` is Unix-only and was read at module import time, so
+    every entrypoint — ``kiln serve``, ``kiln doctor``, ``kiln --help`` —
+    died with ``AttributeError`` before running a command.  ``kiln.slicer``
+    carried the same fault twice over (``SIGTRAP`` and ``SIGBUS``), one
+    lazy import further down the same road.
+
+    The Windows signal module is simulated in a child interpreter by
+    deleting the two attributes before the package is imported: that is
+    exactly the shape of the failure, and nothing in this process has to
+    be reloaded.  The sets are expected to degrade to what remains,
+    ``SIGSEGV``, not to vanish.
+    """
+
+    def test_every_entrypoint_imports_and_the_sets_degrade(self):
+        proc = subprocess.run(
+            [sys.executable, "-c", _WINDOWS_SHAPED_IMPORT],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=os.environ,
+        )
+        assert proc.returncode == 0, (
+            "import failed on a signal module without SIGBUS/SIGTRAP:\n"
+            + proc.stderr[-2000:]
+        )
+        import json
+
+        sets = json.loads(proc.stdout.strip().splitlines()[-1])
+        segv = int(signal.SIGSEGV)
+        assert sets["openscad"] == sorted({-segv, 128 + segv})
+        assert sets["slic3r"] == [-segv]
+        assert sets["orca"] == []

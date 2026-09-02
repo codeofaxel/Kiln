@@ -97,7 +97,23 @@ from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["OPENSCAD_CRASH_RETURNCODES", "run_openscad"]
+__all__ = ["OPENSCAD_CRASH_RETURNCODES", "present_signals", "run_openscad"]
+
+
+def present_signals(*names: str) -> frozenset[int]:
+    """The numbers of the named signals this platform defines.
+
+    CPython's :mod:`signal` module on Windows has no ``SIGBUS`` and no
+    ``SIGTRAP``; reading either as an attribute raises at import time and
+    takes every ``kiln`` entrypoint down with it (issue #146).  A crash
+    set is built from whatever the platform offers and degrades, on
+    Windows, to ``SIGSEGV`` alone — which is right: the startup race the
+    sets exist for is a macOS libc bug, and a platform that cannot spell
+    the signal cannot produce the crash.
+    """
+    return frozenset(
+        int(sig) for sig in (getattr(signal, name, None) for name in names) if sig is not None
+    )
 
 
 #: Signals treated as "the process crashed on its way up, try again".
@@ -113,7 +129,7 @@ __all__ = ["OPENSCAD_CRASH_RETURNCODES", "run_openscad"]
 #:   that just told us it is out of room.
 #: - ``SIGTERM``/``SIGINT`` are somebody asking for this to stop.
 #:   Restarting it is the opposite of what was asked.
-_CRASH_SIGNALS = frozenset({signal.SIGSEGV, signal.SIGBUS})
+_CRASH_SIGNALS = present_signals("SIGSEGV", "SIGBUS")
 
 #: Return codes that mean one of :data:`_CRASH_SIGNALS` killed the child.
 #:
@@ -123,7 +139,7 @@ _CRASH_SIGNALS = frozenset({signal.SIGSEGV, signal.SIGBUS})
 #: :mod:`kiln.slicer` carries them: cheap, and correct if a caller ever
 #: hands a result from elsewhere to :func:`crashed_on_startup`.
 OPENSCAD_CRASH_RETURNCODES = frozenset(
-    {-int(sig) for sig in _CRASH_SIGNALS} | {128 + int(sig) for sig in _CRASH_SIGNALS}
+    {-sig for sig in _CRASH_SIGNALS} | {128 + sig for sig in _CRASH_SIGNALS}
 )
 
 #: How long a run may take and still be blamed on the startup race.
