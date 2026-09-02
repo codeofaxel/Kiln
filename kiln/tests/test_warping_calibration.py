@@ -3,10 +3,9 @@
 Pins the printability warping verdict across a ~105-case sweep that
 spans the supported material catalog plus the most common geometric
 failure modes (compact warp-prone, flat-area boundary, score-1
-baseline-driven cases).  Free tier uses :data:`_WARPING_PUBLIC_DEFAULTS`
-and must catch the largest / most-extreme prints via geometry alone.
-The overlay-tuned verdicts for the same sweep are pinned in kiln-pro's
-suite.
+baseline-driven cases).  The public defaults in
+:data:`_WARPING_PUBLIC_DEFAULTS` must catch the largest / most-extreme
+prints via geometry alone.
 
 Reality targets are grounded in vendor datasheets (Stratasys / Solvay /
 Bambu wiki / NatureWorks Ingeo / BASF Ultramid) and the
