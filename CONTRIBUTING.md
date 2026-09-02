@@ -16,9 +16,14 @@ python3 -m venv .venv && source .venv/bin/activate
 pip3 install -e "./kiln[dev,bambu]"
 pip3 install -e "./octoprint-cli[dev]"
 
-# Install pre-commit hooks
-pip3 install pre-commit
-pre-commit install
+# Install the commit-time gate as a commit-msg hook (stdlib only, no extra
+# tooling).  It refuses private editorial language and private-tier leaks
+# in the staged files and the commit message — the same checks CI runs.
+cat > .git/hooks/commit-msg <<'EOF'
+#!/bin/sh
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check_public_language.py" --staged --message-file "$1"
+EOF
+chmod +x .git/hooks/commit-msg
 ```
 
 ## Running Tests
@@ -33,7 +38,7 @@ cd octoprint-cli && python3 -m pytest tests/ -q
 
 ## Linting & Formatting
 
-Ruff handles both linting and formatting. Pre-commit hooks run automatically on `git commit`, but you can run them manually:
+Ruff handles both linting and formatting; run it before you commit:
 
 ```bash
 # Check linting
@@ -42,8 +47,9 @@ ruff check kiln/ octoprint-cli/
 # Auto-format
 ruff format kiln/ octoprint-cli/
 
-# Run all pre-commit hooks
-pre-commit run --all-files
+# Run the repository gates CI will run (both stdlib only)
+python3 scripts/check_public_language.py
+python3 scripts/audit_moat_comment_leak.py
 ```
 
 ## Code Style

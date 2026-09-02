@@ -476,7 +476,7 @@ def host_renders_apps(mcp: Any, ctx: Any = None) -> bool:
 def _log_signal_once(mcp: Any, renders: bool, ctx: Any = None) -> None:
     """State, once, what this host declared and what the panel gets.
 
-    ``renders`` is the panel verdict, not the geometry verdict: the result
+    ``renders`` is what the panel declared, not the geometry verdict: the result
     is lean by default whatever the host declared, so this line reports the
     mesh route — the View's own fetch, or the opted-in inline payload —
     rather than claiming an attach that no longer happens.

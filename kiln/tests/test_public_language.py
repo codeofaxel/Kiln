@@ -47,6 +47,35 @@ def test_catches_internal_review_attribution() -> None:
     assert [finding.rule for finding in findings] == ["internal review process"]
 
 
+def test_catches_review_persona_phrases() -> None:
+    # The forms that slipped past the older panel-only pattern.  Each fixture
+    # is split so no single source line here matches the rule itself.
+    for text in (
+        "Judges" + "' verdict on placement: wire into the 4 canonical entry points",
+        "the " + "judges asked for a smaller diff",
+        "war-" + "room notes from the outage",
+        "ship-" + "gate passed",
+        "panel " + "verdict: ship it",
+        "Judges" + ": keep the seam",
+    ):
+        findings = _GATE.find_violations(text, source="module.py")
+        assert [finding.rule for finding in findings] == ["internal review process"], text
+
+
+def test_allows_verb_judges_and_bare_panel() -> None:
+    # "judges" as a verb and "panel" as the MCP Apps panel are ordinary
+    # implementation language, not review attribution.
+    for text in (
+        "a new print judges its heaters afresh",
+        "the composer re-centres a group it judges off ITS plate",
+        "the MCP Apps panel renders the mesh inline",
+        "``renders`` is what the panel declared, not the geometry verdict",
+        "a judge of character",
+        "shipping the gate",
+    ):
+        assert _GATE.find_violations(text, source="module.py") == [], text
+
+
 def test_catches_commit_metadata() -> None:
     message = (
         "fix: neutral subject\n\nCo-"

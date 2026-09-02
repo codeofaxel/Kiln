@@ -1,9 +1,9 @@
 """Tests for the safety-gap warning helper.
 
-Judges' verdict on placement: wire into the 4 canonical entry points
-(kiln_health, printer_status, preflight_check, get_started).  Skip
-downstream tools (upload_file, slice_*, send_gcode) — they'd be
-redundant once the agent has seen the warning once.
+Placement: the warning is wired into the 4 canonical entry points
+(kiln_health, printer_status, preflight_check, get_started) and not
+into downstream tools (upload_file, slice_*, send_gcode) — those would
+be redundant once the agent has seen the warning once.
 """
 from __future__ import annotations
 

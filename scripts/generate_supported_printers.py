@@ -112,7 +112,7 @@ def build_surface() -> tuple[dict, list[tuple[str, list[str]]]]:
         brand = derive_manufacturer(pid, name)
         # PUBLIC SURFACE — name + id only. NEVER add per-model engineering specs
         # (build volume, temps, materials, ...) here: this JSON ships to the
-        # crawlable /printers page, and the curated catalog detail is moat.
+        # crawlable /printers page, and the curated catalog detail is private-tier data.
         # Pinned by test_public_surface_exposes_only_name_not_specs.
         by_brand.setdefault(brand, []).append(
             {"id": pid, "name": name}

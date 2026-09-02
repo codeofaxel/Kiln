@@ -5,7 +5,9 @@ In ``--staged`` mode (the commit-time hook) this also runs
 ``scripts/audit_moat_comment_leak.py --staged`` over the same index, so a
 paid-tier table, a private ``kiln_pro`` path, a self-label, or an internal
 persona name in a staged test / doc / script is refused at the commit, not
-at the PR.  Full-tree runs of that gate stay with its own CI step and the
+at the PR.  (The gate skips itself during a merge or rebase, where the index
+carries files the committer did not author; the full-tree CI step covers
+those.)  Full-tree runs of that gate stay with its own CI step and the
 pre-push hook; this file only closes the commit-time door.
 """
 
@@ -22,14 +24,6 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 _SELF = Path(__file__).relative_to(_ROOT).as_posix()
 _LEAK_GATE = _ROOT / "scripts" / "audit_moat_comment_leak.py"
-# Files that must spell out the phrases they catch: this checker, the
-# private-tier leak gate, and that gate's fixture test.  Everything else in
-# the tree is fair game.
-_PATTERN_OWNERS = frozenset({
-    _SELF,
-    "scripts/audit_moat_comment_leak.py",
-    "kiln/tests/test_moat_comment_leak.py",
-})
 _SKIP_PREFIXES = (
     "kiln/src/kiln/data/scad_libraries/",
 )
@@ -93,10 +87,17 @@ _PUBLIC_RULES = (
             re.IGNORECASE,
         ),
     ),
+    # Phrases, never bare words: "panel" alone is an MCP Apps panel and
+    # "judges" alone is a verb ("the composer judges the layout"); only the
+    # review-persona forms — possessive, "the judges", the panel / room /
+    # gate phrases — are private editorial context.
     Rule(
         "internal review process",
         re.compile(
-            r"\b(?:judges?[- ]panel|war[- ]room|panel-approved|judge-voted|"
+            r"\bjudges['’]|\bjudges\s*:|"
+            r"\b(?:the|our|three|four|from the|per the) judges\b|"
+            r"\b(?:judges?[- ]panel|war[- ]room|ship[- ]gate|panel(?:['’]s)? verdicts?|"
+            r"panel-approved|judge-voted|"
             r"gap analysis|sme flagged|internal thinking|session shorthand)\b",
             re.IGNORECASE,
         ),
@@ -189,7 +190,7 @@ def _git(*args: str) -> bytes:
 
 
 def _eligible(relative_path: str) -> bool:
-    if relative_path in _PATTERN_OWNERS:
+    if relative_path == _SELF:
         return False
     if relative_path.startswith(_SKIP_PREFIXES):
         return False
