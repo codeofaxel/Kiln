@@ -1939,3 +1939,100 @@ class TestPaintedFormForSurfaceMethods:
             assert self._model_xml(result["multicolor_3mf"]).count("<object ") == 2
         finally:
             os.unlink(stl)
+
+
+# ---------------------------------------------------------------------------
+# Every colouring door says whether its colours are loaded
+# ---------------------------------------------------------------------------
+
+
+class TestSpoolAdvisoryOnColouringDoors:
+    """The tools that choose colours carry ``ams_advisory`` in their result."""
+
+    def _tools(self) -> dict[str, Any]:
+        from kiln.plugins.color_tools import _ColorToolsPlugin
+
+        tools: dict[str, Any] = {}
+
+        class _FakeMcp:
+            def tool(self):
+                def decorator(fn):
+                    tools[fn.__name__] = fn
+                    return fn
+                return decorator
+
+        _ColorToolsPlugin().register(_FakeMcp())
+        return tools
+
+    def _stl(self) -> str:
+        return _make_stl_file([
+            _make_triangle(0, 0, 0),
+            _make_triangle(5, 5, 5),
+            _make_triangle(10, 10, 10),
+        ])
+
+    def _fake_advisory(self, monkeypatch, reply):
+        from kiln import server
+
+        seen: dict[str, Any] = {}
+
+        def fake(colours, *, printer_name=None, adapter=None):
+            seen["colours"] = list(colours)
+            seen["printer_name"] = printer_name
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        monkeypatch.setattr(server, "_spool_advisory", fake)
+        return seen
+
+    def test_colour_by_height_asks_about_its_palette(self, monkeypatch):
+        seen = self._fake_advisory(
+            monkeypatch, {"verdict": "mismatch", "message": "No red loaded on default."},
+        )
+        stl = self._stl()
+        try:
+            result = self._tools()["auto_color_by_height"](
+                input_path=stl, num_colors=2,
+                color_palette=["#FFFFFF", "#F72323", "#161616"], printer_id="bambu_a1",
+            )
+        finally:
+            os.unlink(stl)
+        assert result["success"] is True
+        assert result["ams_advisory"]["verdict"] == "mismatch"
+        assert seen["colours"] == ["#FFFFFF", "#F72323"]
+        assert seen["printer_name"] == "bambu_a1"
+
+    def test_colour_by_region_asks_about_its_palette(self, monkeypatch):
+        seen = self._fake_advisory(monkeypatch, {"verdict": "true", "message": "ok"})
+        stl = self._stl()
+        try:
+            result = self._tools()["auto_color_by_region"](
+                input_path=stl, num_colors=3, color_palette=["#FF0000", "#00FF00", "#0000FF"],
+            )
+        finally:
+            os.unlink(stl)
+        assert result["success"] is True
+        assert result["ams_advisory"]["verdict"] == "true"
+        assert seen["colours"] == ["#FF0000", "#00FF00", "#0000FF"]
+        assert seen["printer_name"] is None
+
+    def test_silence_when_there_is_nothing_to_say(self, monkeypatch):
+        self._fake_advisory(monkeypatch, None)
+        stl = self._stl()
+        try:
+            result = self._tools()["auto_color_by_height"](input_path=stl, num_colors=2)
+        finally:
+            os.unlink(stl)
+        assert result["success"] is True
+        assert "ams_advisory" not in result
+
+    def test_advice_never_fails_a_good_colouring(self, monkeypatch):
+        self._fake_advisory(monkeypatch, RuntimeError("printer exploded"))
+        stl = self._stl()
+        try:
+            result = self._tools()["auto_color_by_height"](input_path=stl, num_colors=2)
+        finally:
+            os.unlink(stl)
+        assert result["success"] is True
+        assert "ams_advisory" not in result

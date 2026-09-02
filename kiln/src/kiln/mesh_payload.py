@@ -412,30 +412,14 @@ def _painted_3mf_mesh(
     import numpy as np
     import trimesh
 
-    from kiln.threemf_parser import (
-        _SLICER_SETTINGS_PATH,
-        _bytes_have_paint,
-        _find_model_xml,
-        parse_colored_3mf,
-    )
+    from kiln.threemf_parser import _scan_color_constructs, parse_colored_3mf
 
     try:
         with zipfile.ZipFile(str(path)) as zf:
-            raw = zf.read(_find_model_xml(zf))
-            sidecar = b""
-            for member in zf.namelist():
-                if member.lower() == _SLICER_SETTINGS_PATH.lower():
-                    sidecar = zf.read(member)
-                    break
+            has_palette, has_paint = _scan_color_constructs(zf)
     except (ValueError, OSError, KeyError, zipfile.BadZipFile):
         return None
-    has_paint = _bytes_have_paint(raw)
-    if (
-        b"colorgroup" not in raw
-        and b"basematerials" not in raw
-        and b'key="color"' not in sidecar
-        and not has_paint
-    ):
+    if not has_palette and not has_paint:
         return None
     if baked_colors and not has_paint:
         # The per-part bake already carried every color this file states.

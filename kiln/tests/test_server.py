@@ -4363,3 +4363,42 @@ class TestResolveUseAms:
         }
         result = _resolve_use_ams("auto", None, adapter)
         assert result["selection"] == {"slot": 0, "type": "PLA", "color": ""}
+
+
+class TestWrapGcodeSaysWhetherColoursAreLoaded:
+    """wrap_gcode_as_3mf is a colouring door when filament colours are given."""
+
+    _AMS = {
+        "units": [{"unit_id": "0", "trays": [
+            {"slot": "0", "tray_type": "PLA", "tray_color": "FFFFFFFF"},
+            {"slot": "1", "tray_type": "PLA", "tray_color": "161616FF"},
+        ]}],
+    }
+
+    @patch("kiln.server._resolve_effective_printer_name", return_value="default")
+    @patch("kiln.server._get_adapter")
+    def test_colours_given_are_checked_against_the_spools(self, mock_get_adapter, _name):
+        adapter = MagicMock(spec=BambuAdapter)
+        adapter.wrap_gcode_as_3mf.return_value = "/tmp/output.3mf"
+        adapter.get_ams_status.return_value = self._AMS
+        mock_get_adapter.return_value = adapter
+
+        result = wrap_gcode_as_3mf(
+            gcode_path="/tmp/test.gcode", num_filaments=2,
+            filament_colors=["#FFFFFF", "#F72323"],
+        )
+        assert result["success"] is True
+        assert result["ams_advisory"]["verdict"] == "mismatch"
+        assert result["ams_advisory"]["printer"] == "default"
+        assert [m["color"] for m in result["ams_advisory"]["missing"]] == ["#F72323"]
+
+    @patch("kiln.server._get_adapter")
+    def test_no_colours_given_means_nothing_to_say(self, mock_get_adapter):
+        adapter = MagicMock(spec=BambuAdapter)
+        adapter.wrap_gcode_as_3mf.return_value = "/tmp/output.3mf"
+        mock_get_adapter.return_value = adapter
+
+        result = wrap_gcode_as_3mf(gcode_path="/tmp/test.gcode")
+        assert result["success"] is True
+        assert "ams_advisory" not in result
+        adapter.get_ams_status.assert_not_called()

@@ -25,7 +25,9 @@ _logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-_PRINTABLE_EXTENSIONS = {".stl", ".obj", ".3mf"}
+# The formats the printability engine reads — asked of the engine, not
+# restated here, so a format it gains is analysed here the same day.
+from kiln.generation.validation import _SUPPORTED_MESH_FORMATS as _PRINTABLE_EXTENSIONS  # noqa: E402
 
 
 def _format_time(seconds: int | None) -> str:
