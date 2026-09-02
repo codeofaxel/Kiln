@@ -26,7 +26,13 @@ applies is deliberately un-product-like:
 * header and footer strips that say what the colors mean, burned into
   the image at both ends so a crop of either half still carries it,
 * numbered callouts on the object plus a numbered legend, so the image
-  identifies its own regions when it is all that is left.
+  identifies its own regions when it is all that is left,
+* callouts that never sit on top of each other: crowded discs are pushed
+  apart and tied back to their region with a leader line, so a cluster
+  of small regions (a thread, a rim) still reads as N distinct numbers,
+* Kiln's brand rail across the top — the same chrome the inline stage
+  and the /view page wear — so the diagram is recognisably a Kiln
+  document and not a screenshot out of a slicer.
 
 Callers pass a triangle soup and a face-to-region mapping and get a PNG
 back.  They must NOT re-derive the palette: :func:`region_palette` is the
@@ -38,6 +44,7 @@ from __future__ import annotations
 
 import colorsys
 import contextlib
+import math
 import os
 import tempfile
 from dataclasses import dataclass, field
@@ -77,9 +84,20 @@ _DEFAULT_TITLE = "REGION MAP"
 
 _PAPER = (240, 240, 236)
 _INK = (26, 29, 34)
-_HEADER_BG = (26, 29, 34)
-_HEADER_FG = (246, 246, 243)
-_HEADER_SUB = (183, 191, 203)
+
+#: The brand rail.  These are the inline stage's own values (its ``#brand``
+#: rule: rgba(22,27,34) on a #30363D hairline, #E6EDF3 text, #6E7681 for
+#: the quiet line) so a region map and the 3D panel it was cut from share
+#: one header.  Copied by value because a PNG cannot import a stylesheet;
+#: if the stage rail changes, this changes with it.
+_HEADER_BG = (22, 27, 34)
+_HEADER_FG = (230, 237, 243)
+_HEADER_SUB = (139, 148, 158)
+_HEADER_RULE = (48, 54, 61)
+#: Brand orange — the ember line in the mark and the I in the wordmark.
+#: The signature, not the chrome: nothing else on the sheet is this color.
+_EMBER = (255, 107, 43)
+_BRAND_URL = "kiln3d.com"
 _FOOTER_BG = (222, 223, 218)
 _FOOTER_FG = (74, 80, 88)
 _RULE = (196, 199, 192)
@@ -101,6 +119,12 @@ _MIN_CALLOUT_PX = 130
 #: Legend rows.  Past this the map says how many it left out rather than
 #: growing a column nobody can read.
 _MAX_LEGEND_ROWS = 12
+
+#: Clear space kept between two callout discs once they have been pushed
+#: apart, and how far a disc may drift from its region before it gets a
+#: leader line back to the point it labels.
+_CALLOUT_GAP_PX = 4
+_LEADER_AFTER_PX = 6
 
 _FONT_CANDIDATES_REGULAR = (
     "/System/Library/Fonts/Helvetica.ttc",
@@ -206,14 +230,15 @@ def render_region_map(
     face_region: Sequence[int],
     *,
     output_path: str | None = None,
-    width: int = 900,
-    height: int = 700,
+    width: int = 1200,
+    height: int = 900,
     elevation: float = 35.0,
     azimuth: float = 45.0,
     supersample: int = 2,
     region_count: int | None = None,
     region_area_fractions: Sequence[float] | None = None,
     title: str = _DEFAULT_TITLE,
+    subject: str = "",
     note: str = "",
 ) -> RegionMapResult:
     """Render a mesh's segmentation as a labelled diagram.
@@ -237,6 +262,8 @@ def render_region_map(
         region id, for the legend.  Omitted rather than guessed when the
         caller does not have it — the segmenter owns that number.
     :param title: Heading text.
+    :param subject: What was mapped — usually the mesh's file name.  Drawn
+        beside the title so the sheet names its own object.
     :param note: Extra footer sentence appended after the disclaimer.
         The disclaimer itself is not overridable; it is the point.
     :returns: :class:`RegionMapResult`.
@@ -315,10 +342,17 @@ def render_region_map(
             rid,
         ),
     )
-    legend_ids = ordered[:_MAX_LEGEND_ROWS]
+    # Chosen by area so the rows that matter survive the cap, but SHOWN
+    # in id order: the ids are what a caller types into a paint request,
+    # and a column someone can scan is one that counts upward.
+    legend_ids = sorted(ordered[:_MAX_LEGEND_ROWS])
+    # Every region the eye can find gets a number, legend row or not: a
+    # colored patch with no callout is a region the reader cannot name,
+    # and its id is its name.  The legend cap bounds the column, not the
+    # picture.
     labeled_ids = [
         rid
-        for rid in legend_ids
+        for rid in ordered
         if rid in anchors and pixels.get(rid, 0) >= _MIN_CALLOUT_PX
     ]
 
@@ -342,7 +376,9 @@ def render_region_map(
         offset_y=_HEADER_H,
         field=(0, _HEADER_H, map_w, _HEADER_H + map_h),
     )
-    _draw_header(draw, width, title=title, region_count=total_regions)
+    _draw_header(
+        draw, width, title=title, subject=subject, region_count=total_regions
+    )
     _draw_legend(
         draw,
         canvas_w=width,
@@ -371,20 +407,62 @@ def render_region_map(
 # ---------------------------------------------------------------------------
 
 
-def _draw_header(
-    draw: Any, width: int, *, title: str, region_count: int
-) -> None:
-    """Dark title bar: what this is, and what its colors are not."""
-    draw.rectangle([0, 0, width, _HEADER_H - 1], fill=_HEADER_BG)
-    draw.text((18, 12), title.upper(), fill=_HEADER_FG, font=_font(21, bold=True))
-    draw.text(
-        (18, 40), REGION_MAP_DISCLAIMER, fill=_HEADER_SUB, font=_font(13)
-    )
+def _draw_brand(draw: Any, x: int, y: int) -> int:
+    """Kiln's mark and wordmark, as the inline stage draws them.
 
-    count_font = _font(13)
-    count_text = f"{region_count} regions"
-    tw = draw.textlength(count_text, font=count_font)
-    draw.text((width - 18 - tw, 40), count_text, fill=_HEADER_SUB, font=count_font)
+    The mark is the stage's own SVG (``KilnLogo.tsx``: the kiln shell as
+    one mitered path, the ember line in brand orange) traced here in
+    pixels; the wordmark is K·I·LN with the I in ember and the stage's
+    0.15 em tracking.  ``(x, y)`` is the top-left of a 24 px glyph box.
+    Returns the x just past the wordmark.
+    """
+    scale = 24 / 32
+    px = lambda u: x + u * scale  # noqa: E731
+    py = lambda v: y + v * scale  # noqa: E731
+    draw.polygon(
+        [(px(3.72), py(17.94)), (px(3.26), py(19.46)),
+         (px(28.74), py(19.46)), (px(28.28), py(17.94))],
+        fill=_EMBER,
+    )
+    shell = [(12.76, 7), (7, 7), (1.6, 25), (30.4, 25), (25, 7), (19.24, 7)]
+    draw.line([(px(u), py(v)) for u, v in shell], fill=_HEADER_FG, width=2)
+
+    font = _font(16, bold=True)
+    tracking = 16 * 0.15
+    cx = x + 34.0
+    for ch, color in (("K", _HEADER_FG), ("I", _EMBER), ("L", _HEADER_FG),
+                      ("N", _HEADER_FG)):
+        draw.text((cx, y + 4), ch, fill=color, font=font)
+        cx += draw.textlength(ch, font=font) + tracking
+    return int(cx - tracking)
+
+
+def _draw_header(
+    draw: Any, width: int, *, title: str, subject: str, region_count: int
+) -> None:
+    """The brand rail: who made this, what it is, and what its colors are not."""
+    draw.rectangle([0, 0, width, _HEADER_H - 1], fill=_HEADER_BG)
+    draw.line([(0, _HEADER_H - 1), (width, _HEADER_H - 1)], fill=_HEADER_RULE, width=1)
+
+    end = _draw_brand(draw, 18, 21)
+    divider = end + 18
+    draw.line([(divider, 16), (divider, _HEADER_H - 16)], fill=_HEADER_RULE, width=1)
+
+    tx = divider + 18
+    title_font = _font(19, bold=True)
+    draw.text((tx, 12), title.upper(), fill=_HEADER_FG, font=title_font)
+    if subject:
+        sx = tx + draw.textlength(title.upper(), font=title_font) + 12
+        draw.text((sx, 16), subject, fill=_HEADER_SUB, font=_font(13))
+    draw.text((tx, 40), REGION_MAP_DISCLAIMER, fill=_HEADER_SUB, font=_font(13))
+
+    right_font = _font(13)
+    count_text = f"{region_count} region{'s' if region_count != 1 else ''}"
+    tw = draw.textlength(count_text, font=right_font)
+    draw.text((width - 18 - tw, 14), count_text, fill=_HEADER_FG, font=right_font)
+    url_font = _font(12)
+    uw = draw.textlength(_BRAND_URL, font=url_font)
+    draw.text((width - 18 - uw, 40), _BRAND_URL, fill=_HEADER_SUB, font=url_font)
 
 
 def _draw_footer(draw: Any, width: int, height: int, *, note: str) -> None:
@@ -395,7 +473,66 @@ def _draw_footer(draw: Any, width: int, height: int, *, note: str) -> None:
     text = _FOOTER_DISCLAIMER
     if note:
         text = f"{text}  {note}"
-    draw.text((18, top + 12), text, fill=_FOOTER_FG, font=_font(12))
+    font = _font(12)
+    draw.text((18, top + 12), text, fill=_FOOTER_FG, font=font)
+    made = f"Made with Kiln \u00b7 {_BRAND_URL}"
+    mw = draw.textlength(made, font=font)
+    # Never over the disclaimer: on a narrow sheet the brand line yields.
+    if 18 + draw.textlength(text, font=font) + 24 + mw < width:
+        draw.text((width - 18 - mw, top + 12), made, fill=_FOOTER_FG, font=font)
+
+
+def _spread_callouts(
+    anchors: dict[int, tuple[float, float]],
+    radii: dict[int, int],
+    field: tuple[int, int, int, int],
+) -> dict[int, tuple[int, int]]:
+    """Push overlapping discs apart until every number is legible.
+
+    A thread ring or a rim segments into several thin regions whose
+    visible centres land within a few pixels of each other; drawn where
+    they fall, the discs stack and the top one hides the rest — a map that
+    labels three regions with one readable number.  Pairwise repulsion,
+    clamped to the field, separates them; the caller ties each moved disc
+    back to its anchor with a leader so the number still points somewhere.
+    """
+    ids = list(anchors)
+    pos = {rid: [float(anchors[rid][0]), float(anchors[rid][1])] for rid in ids}
+    fx0, fy0, fx1, fy1 = field
+
+    def _clamp(rid: int) -> None:
+        r = radii[rid]
+        pos[rid][0] = max(fx0 + r + 1, min(fx1 - r - 1, pos[rid][0]))
+        pos[rid][1] = max(fy0 + r + 1, min(fy1 - r - 1, pos[rid][1]))
+
+    for rid in ids:
+        _clamp(rid)
+    for _ in range(80):
+        moved = False
+        for i, a in enumerate(ids):
+            for b in ids[i + 1 :]:
+                dx = pos[b][0] - pos[a][0]
+                dy = pos[b][1] - pos[a][1]
+                dist = math.hypot(dx, dy)
+                need = radii[a] + radii[b] + _CALLOUT_GAP_PX
+                if dist >= need:
+                    continue
+                if dist < 1e-6:
+                    # Coincident centres: separate along a fixed axis so
+                    # the outcome is the same picture every run.
+                    dx, dy, dist = 1.0, 0.0, 1.0
+                push = (need - dist) / 2.0
+                ux, uy = dx / dist, dy / dist
+                pos[a][0] -= ux * push
+                pos[a][1] -= uy * push
+                pos[b][0] += ux * push
+                pos[b][1] += uy * push
+                _clamp(a)
+                _clamp(b)
+                moved = True
+        if not moved:
+            break
+    return {rid: (int(round(p[0])), int(round(p[1]))) for rid, p in pos.items()}
 
 
 def _draw_callouts(
@@ -408,22 +545,39 @@ def _draw_callouts(
 ) -> None:
     """Numbered discs on the object — the identification that survives a crop."""
     font = _font(13, bold=True)
-    fx0, fy0, fx1, fy1 = field
+    radii: dict[int, int] = {}
+    widths: dict[int, float] = {}
+    origin: dict[int, tuple[float, float]] = {}
     for rid in labeled_ids:
-        x, y = anchors[rid]
-        y += offset_y
         text = str(rid)
-        tw = draw.textlength(text, font=font)
-        r = max(11, int(tw / 2) + 8)
-        # A region whose visible centre sits against an edge would
-        # otherwise get half a disc.  Nudged in rather than dropped: a
-        # clipped number is still the only thing identifying that region.
-        x = max(fx0 + r + 1, min(fx1 - r - 1, x))
-        y = max(fy0 + r + 1, min(fy1 - r - 1, y))
+        widths[rid] = draw.textlength(text, font=font)
+        radii[rid] = max(11, int(widths[rid] / 2) + 8)
+        x, y = anchors[rid]
+        origin[rid] = (float(x), float(y + offset_y))
+
+    placed = _spread_callouts(origin, radii, field)
+
+    # Leaders first so every disc sits on top of every line.
+    for rid in labeled_ids:
+        ox, oy = origin[rid]
+        x, y = placed[rid]
+        drift = math.hypot(x - ox, y - oy)
+        if drift <= _LEADER_AFTER_PX:
+            continue
+        # From the anchor to the disc's rim, not its centre: a line that
+        # runs under the number is a line that crosses it out.
+        r = radii[rid]
+        ux, uy = (ox - x) / drift, (oy - y) / drift
+        draw.line([(ox, oy), (x + ux * r, y + uy * r)], fill=_INK, width=1)
+        draw.ellipse([ox - 2.5, oy - 2.5, ox + 2.5, oy + 2.5], fill=_INK)
+
+    for rid in labeled_ids:
+        x, y = placed[rid]
+        r = radii[rid]
         draw.ellipse(
             [x - r, y - r, x + r, y + r], fill=_CALLOUT_FILL, outline=_INK, width=2
         )
-        draw.text((x - tw / 2, y - 8), text, fill=_INK, font=font)
+        draw.text((x - widths[rid] / 2, y - 8), str(rid), fill=_INK, font=font)
 
 
 def _draw_legend(

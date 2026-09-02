@@ -14,6 +14,9 @@ Coverage areas:
     - numbered callouts land on the regions they name
     - the legend is drawn from the same palette the pixels use
     - regions past the legend cap are counted, not silently dropped
+    - the brand rail: Kiln's mark in the header, the file name beside the title
+    - callouts never overlap, and every visible region gets one
+    - the legend reads in id order
     - refusals for an empty mesh and a mismatched face map
 """
 
@@ -28,11 +31,15 @@ import pytest
 from kiln.colored_renderer import render_colored_mesh
 from kiln.region_map import (
     _CALLOUT_FILL,
+    _CALLOUT_GAP_PX,
+    _EMBER,
     _FOOTER_DISCLAIMER,
     _HEADER_BG,
     _HEADER_H,
     _LEGEND_W,
+    _MAX_LEGEND_ROWS,
     REGION_MAP_DISCLAIMER,
+    _spread_callouts,
     region_palette,
     render_region_map,
 )
@@ -390,3 +397,143 @@ class TestRefusals:
         tris, regions = banded
         with pytest.raises(ValueError, match="face_region has"):
             render_region_map(tris, regions[:-1])
+
+
+# ---------------------------------------------------------------------------
+# Brand rail, callout spacing, legend order
+# ---------------------------------------------------------------------------
+
+
+def _drawn_texts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Every string handed to PIL's text(), in draw order."""
+    from PIL import ImageDraw
+
+    drawn: list[str] = []
+    original = ImageDraw.ImageDraw.text
+
+    def _record(self, xy, text, *args, **kwargs):  # noqa: ANN001, ANN202
+        drawn.append(str(text))
+        return original(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", _record)
+    return drawn
+
+
+def _cylinder_with_edges(edges: list[float], *, sections: int = 48, radius: float = 20.0):
+    """Like ``_cylinder_with_bands`` but with caller-chosen band edges, so
+    the bands can have deliberately unequal areas."""
+    tris: list[tuple] = []
+    face_region: list[int] = []
+    bands = len(edges) - 1
+    for k in range(sections):
+        a0 = 2 * math.pi * k / sections
+        a1 = 2 * math.pi * (k + 1) / sections
+        x0, y0 = radius * math.cos(a0), radius * math.sin(a0)
+        x1, y1 = radius * math.cos(a1), radius * math.sin(a1)
+        for b in range(bands):
+            zb, zt = edges[b], edges[b + 1]
+            tris.append(((x0, y0, zb), (x1, y1, zb), (x1, y1, zt)))
+            tris.append(((x0, y0, zb), (x1, y1, zt), (x0, y0, zt)))
+            face_region.extend([b, b])
+        tris.append(((0.0, 0.0, edges[0]), (x1, y1, edges[0]), (x0, y0, edges[0])))
+        face_region.append(bands)
+        tris.append(((0.0, 0.0, edges[-1]), (x0, y0, edges[-1]), (x1, y1, edges[-1])))
+        face_region.append(bands + 1)
+    return tris, face_region
+
+
+class TestBrandRail:
+    """The sheet is a Kiln document, and says which object it maps."""
+
+    def test_the_ember_mark_is_in_the_rail_and_nowhere_else(
+        self, banded: tuple[list[tuple], list[int]], tmp_path: Path
+    ) -> None:
+        from PIL import Image
+
+        tris, regions = banded
+        out = str(tmp_path / "map.png")
+        render_region_map(tris, regions, output_path=out, width=700, height=560)
+        with Image.open(out).convert("RGB") as img:
+            rail = img.crop((0, 0, img.width, _HEADER_H))
+            sheet = img.crop((0, _HEADER_H, img.width, img.height))
+            assert _count_of(rail, _EMBER) > 20, "no Kiln mark in the header"
+            assert _count_of(sheet, _EMBER) == 0, (
+                "brand orange below the rail would read as a filament color"
+            )
+
+    def test_wordmark_and_subject_are_drawn(
+        self, banded: tuple[list[tuple], list[int]], tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        drawn = _drawn_texts(monkeypatch)
+        tris, regions = banded
+        render_region_map(
+            tris, regions, output_path=str(tmp_path / "map.png"),
+            width=700, height=560, subject="bracket_v3.stl",
+        )
+        # K·I·L·N is drawn letter by letter so the I can wear the ember.
+        runs = [tuple(drawn[i : i + 4]) for i in range(len(drawn) - 3)]
+        assert ("K", "I", "L", "N") in runs, drawn[:12]
+        assert "bracket_v3.stl" in drawn
+        assert "kiln3d.com" in drawn
+
+
+class TestCallouts:
+    """Every visible region gets a number, and no number hides another."""
+
+    def test_coincident_anchors_are_pushed_apart(self) -> None:
+        field = (0, 0, 400, 300)
+        anchors = {0: (200.0, 150.0), 1: (200.0, 150.0), 2: (203.0, 149.0)}
+        radii = {0: 12, 1: 12, 2: 14}
+        placed = _spread_callouts(anchors, radii, field)
+        ids = list(placed)
+        for i, a in enumerate(ids):
+            for b in ids[i + 1 :]:
+                d = math.hypot(placed[a][0] - placed[b][0], placed[a][1] - placed[b][1])
+                assert d >= radii[a] + radii[b] + _CALLOUT_GAP_PX - 1, (a, b, d)
+        for rid, (x, y) in placed.items():
+            r = radii[rid]
+            assert r <= x <= 400 - r and r <= y <= 300 - r
+
+    def test_spreading_is_deterministic(self) -> None:
+        field = (0, 0, 400, 300)
+        anchors = {0: (100.0, 100.0), 1: (100.0, 100.0)}
+        radii = {0: 11, 1: 11}
+        assert _spread_callouts(anchors, radii, field) == _spread_callouts(
+            anchors, radii, field
+        )
+
+    def test_a_visible_region_past_the_legend_cap_still_gets_a_number(
+        self, tmp_path: Path
+    ) -> None:
+        # More side bands than the legend has rows, every one of them in
+        # view: the legend truncates, the picture must not.
+        bands = _MAX_LEGEND_ROWS + 4
+        edges = [60.0 * i / bands for i in range(bands + 1)]
+        tris, regions = _cylinder_with_edges(edges)
+        result = render_region_map(
+            tris, regions, output_path=str(tmp_path / "map.png"),
+            width=900, height=900, elevation=10.0,
+        )
+        assert len(result.labeled_ids) > _MAX_LEGEND_ROWS, (
+            "a colored patch with no callout is a region the reader cannot name"
+        )
+
+
+class TestLegendOrder:
+    def test_rows_read_in_id_order_even_when_area_says_otherwise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Band 0 is the thinnest, band 3 the tallest: by area the legend
+        # would open with Region 3.  The ids are what a caller types into
+        # a paint request, so the column counts upward instead.
+        tris, regions = _cylinder_with_edges([0.0, 3.0, 8.0, 18.0, 60.0])
+        drawn = _drawn_texts(monkeypatch)
+        render_region_map(
+            tris, regions, output_path=str(tmp_path / "map.png"),
+            width=700, height=560,
+        )
+        rows = [t for t in drawn if t.startswith("Region ")]
+        ids = [int(t.split()[1]) for t in rows]
+        assert ids == sorted(ids), rows
+        assert ids[0] == 0
