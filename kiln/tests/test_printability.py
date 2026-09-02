@@ -2617,3 +2617,149 @@ class TestPlacementIsStructuredNotOnlyProse:
             block = analyze_printability(path).to_dict()["placement"]
 
             assert [f["name"] for f in block["faults"]] == ["off_bed"]
+
+
+# ---------------------------------------------------------------------------
+# Sub-tolerance geometry: cracks and slivers are not walls or cavities
+# ---------------------------------------------------------------------------
+
+
+def _box_with_rib_in_crack_triangles(*, crack_mm: float) -> list[tuple]:
+    """20 mm solid box with a 3 mm rib on its +X face whose root sits in
+    a wedge-shaped crack: the rib's lower base edge (z=5) touches the
+    face, its upper base edge (z=14) stands ``crack_mm`` off it.
+
+    This is the seam a swept feature leaves when its flat root chords
+    are unioned with a faceted wall — the thread of the ``threaded_jar``
+    template against its 60-facet cylinder — reduced to one rib.  The
+    box's +X face is triangulated through the rib's touching edge so
+    the two share vertices and form one connected component, exactly
+    as the union does; a detached rib would be scoped out of the
+    cavity measurement by component labelling and prove nothing.
+    """
+    a, b, c, d = (20.0, 0.0, 0.0), (20.0, 20.0, 0.0), (20.0, 20.0, 20.0), (20.0, 0.0, 20.0)
+    p, q = (20.0, 5.0, 5.0), (20.0, 15.0, 5.0)
+    x1 = 20.0 + crack_mm
+    p1, q1 = (x1, 5.0, 14.0), (x1, 15.0, 14.0)
+    p2, q2 = (23.0, 5.0, 5.0), (23.0, 15.0, 5.0)
+    p3, q3 = (23.0, 5.0, 14.0), (23.0, 15.0, 14.0)
+    o = [
+        (0.0, 0.0, 0.0), (20.0, 0.0, 0.0), (20.0, 20.0, 0.0), (0.0, 20.0, 0.0),
+        (0.0, 0.0, 20.0), (20.0, 0.0, 20.0), (20.0, 20.0, 20.0), (0.0, 20.0, 20.0),
+    ]
+    tris: list[tuple] = []
+    tris += [(o[0], o[2], o[1]), (o[0], o[3], o[2])]  # bottom -Z
+    tris += [(o[4], o[5], o[6]), (o[4], o[6], o[7])]  # top +Z
+    tris += [(o[0], o[1], o[5]), (o[0], o[5], o[4])]  # -Y
+    tris += [(o[2], o[3], o[7]), (o[2], o[7], o[6])]  # +Y
+    tris += [(o[3], o[0], o[4]), (o[3], o[4], o[7])]  # -X
+    # +X face, triangulated through the rib's touching edge p-q.
+    tris += [(a, b, q), (a, q, p), (a, p, d), (d, p, q), (d, q, c), (c, q, b)]
+    # Rib.  Root face leans toward the box (normal ≈ -X).
+    tris += [(p, p1, q1), (p, q1, q)]
+    tris += [(p2, q2, q3), (p2, q3, p3)]  # outer +X
+    tris += [(p, q, q2), (p, q2, p2)]  # bottom -Z
+    tris += [(p1, q3, q1), (p1, p3, q3)]  # top +Z
+    tris += [(p, p2, p3), (p, p3, p1)]  # -Y
+    tris += [(q, q3, q2), (q, q1, q3)]  # +Y
+    return tris
+
+
+def _plate_with_fin_triangles(
+    fin_mm: float, *, fin_height_mm: float = 5.0, plate_z: float = 3.0,
+) -> list[tuple]:
+    """40 mm plate with a ``fin_mm``-thick, 20 mm-long fin standing on
+    top — the solid twin of ``_plate_with_groove_triangles``, sharing
+    the plate top's vertices so the mesh is one component."""
+    s = 20.0
+    gw = fin_mm / 2
+    gl = 10.0
+    z_top = plate_z
+    z_fin = plate_z + fin_height_mm
+    o = [
+        (-s, -s, 0.0), (s, -s, 0.0), (s, s, 0.0), (-s, s, 0.0),
+        (-s, -s, z_top), (s, -s, z_top), (s, s, z_top), (-s, s, z_top),
+    ]
+    tris: list[tuple] = []
+    tris += [(o[0], o[2], o[1]), (o[0], o[3], o[2])]
+    tris += [(o[0], o[1], o[5]), (o[0], o[5], o[4])]
+    tris += [(o[1], o[2], o[6]), (o[1], o[6], o[5])]
+    tris += [(o[2], o[3], o[7]), (o[2], o[7], o[6])]
+    tris += [(o[3], o[0], o[4]), (o[3], o[4], o[7])]
+    gt = [(-gl, -gw, z_top), (gl, -gw, z_top), (gl, gw, z_top), (-gl, gw, z_top)]
+    tris += [(o[4], o[5], gt[1]), (o[4], gt[1], gt[0])]
+    tris += [(o[5], o[6], gt[2]), (o[5], gt[2], gt[1])]
+    tris += [(o[6], o[7], gt[3]), (o[6], gt[3], gt[2])]
+    tris += [(o[7], o[4], gt[0]), (o[7], gt[0], gt[3])]
+    gu = [(-gl, -gw, z_fin), (gl, -gw, z_fin), (gl, gw, z_fin), (-gl, gw, z_fin)]
+    tris += [(gt[0], gt[1], gu[1]), (gt[0], gu[1], gu[0])]  # -Y wall, normal -Y
+    tris += [(gt[1], gt[2], gu[2]), (gt[1], gu[2], gu[1])]  # +X wall, normal +X
+    tris += [(gt[2], gt[3], gu[3]), (gt[2], gu[3], gu[2])]  # +Y wall, normal +Y
+    tris += [(gt[3], gt[0], gu[0]), (gt[3], gu[0], gu[3])]  # -X wall, normal -X
+    tris += [(gu[0], gu[1], gu[2]), (gu[0], gu[2], gu[3])]  # fin top +Z
+    return tris
+
+
+class TestSubToleranceGeometryIsNotMeasured:
+    """A crack between two surfaces that were meant to coincide, or a
+    sliver of solid below any nozzle, must not reach the wall or cavity
+    numbers the material rules fire on.  The real case: a swept thread's
+    flat root chords sit 0–0.15 mm off the faceted cylinder they were
+    unioned with, and the smallest of those hairlines was reported as a
+    0.005 mm cavity — which the material overlay escalated to a
+    severity-error "wall thickness 0.01mm" verdict on a part the slicer
+    prints cleanly.
+    """
+
+    def test_wedge_crack_under_attached_rib_is_not_a_cavity(self):
+        tris = _box_with_rib_in_crack_triangles(crack_mm=0.4)
+        result = _analyze_cavity_widths(tris, [], nozzle_diameter=0.4)
+        assert result.cavity_sample_count == 0, result
+        assert result.min_cavity_width_mm == 0.0, result
+        assert result.problematic_regions == []
+
+    def test_wedge_crack_leaves_the_wall_measurement_alone(self):
+        tris = _box_with_rib_in_crack_triangles(crack_mm=0.4)
+        result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
+        assert result.thin_wall_count == 0, result
+        assert result.min_wall_thickness_mm > 2.0, result
+
+    def test_wedge_crack_is_not_a_cavity_through_the_file_door(self):
+        tris = _box_with_rib_in_crack_triangles(crack_mm=0.4)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = analyze_printability(_write_stl(tmpdir, tris))
+        assert report.cavities.cavity_sample_count == 0, report.cavities
+        assert report.cavities.min_cavity_width_mm == 0.0, report.cavities
+
+    def test_sub_floor_sliver_fin_is_not_a_thin_wall(self):
+        # A 30 µm fin: below the 50 µm sliver floor, below any nozzle,
+        # deleted by every slicer.  It must not count as a thin wall or
+        # surface as a problematic region.
+        tris = _plate_with_fin_triangles(0.03)
+        result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
+        assert result.thin_wall_count == 0, result
+        assert result.problematic_regions == [], result
+        assert abs(result.min_wall_thickness_mm - 3.0) < 0.05, result
+
+    def test_genuine_thin_wall_is_still_measured(self):
+        # The check must not be neutered: a real 0.4 mm wall is still the
+        # number the material rules see, with the thin count to match.
+        tris = _open_top_hollow_box_triangles(outer_mm=20.0, wall_mm=0.4)
+        result = _analyze_thin_walls(tris, [], nozzle_diameter=0.6)
+        assert abs(result.min_wall_thickness_mm - 0.4) < 0.05, result
+        assert result.thin_wall_count > 0, result
+        assert result.problematic_regions, result
+
+    def test_genuine_thin_fin_is_still_measured(self):
+        tris = _plate_with_fin_triangles(0.4)
+        result = _analyze_thin_walls(tris, [], nozzle_diameter=0.6)
+        assert abs(result.min_wall_thickness_mm - 0.4) < 0.05, result
+        assert result.thin_wall_count > 0, result
+
+    def test_genuine_narrow_groove_is_still_measured(self):
+        # Sibling of ``test_subperimeter_groove_detected``: a real 0.2 mm
+        # groove, just above the crack floor, still reads as a cavity.
+        tris = _plate_with_groove_triangles(groove_width_mm=0.2)
+        result = _analyze_cavity_widths(tris, [], nozzle_diameter=0.4)
+        assert result.cavity_sample_count > 0, result
+        assert abs(result.min_cavity_width_mm - 0.2) < 0.05, result

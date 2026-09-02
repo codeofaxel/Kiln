@@ -16,6 +16,7 @@ import contextlib
 import json
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -89,7 +90,9 @@ class CavityAnalysis:
     sentinel when no cavities are detected on the mesh).  Sub-perimeter
     cavities flag as 'unprintable' in the kiln-pro overlay (the slicer
     cannot reproduce a sub-extrusion gap; the feature closes up during
-    printing).
+    printing).  A void narrower than the slicer's crack-closing width,
+    or one that tapers to nothing within the face it is measured from,
+    is a tessellation crack rather than a cavity and does not register.
     """
 
     min_cavity_width_mm: float
@@ -1357,6 +1360,28 @@ _THIN_WALL_MIN_PERPENDICULAR_DOT: float = 0.85
 # the anomaly rather than a silenced no-signal.
 _SLIVER_CHORD_FLOOR_MM: float = 0.05
 
+# Crack floor for cavity measurements.  A void narrower than this is
+# closed by the slicer before any perimeter is planned: PrusaSlicer and
+# OrcaSlicer ship ``slice_closing_radius = 0.049`` mm in their bundled
+# profiles and fill every crack narrower than twice that radius while
+# slicing the mesh.  Such voids come from tessellation, not design — a
+# swept feature whose flat chord faces sit a few hundredths off the
+# faceted cylinder it was unioned with leaves a 0–0.15 mm sliver of air
+# between the two — and no engraved groove or slot is drawn that narrow
+# on purpose.
+_CAVITY_CRACK_FLOOR_MM: float = 0.1
+
+# A chord measured from one point on a face says nothing about the rest
+# of the face.  Before a chord counts, it is re-cast from three more
+# points on the same face, this fraction of the way from the centroid
+# to each corner, and every one of the four must clear the floor.  A
+# crack that tapers to nothing within the face fails near the corner it
+# tapers toward; a wall or groove of real width holds everywhere.  Set
+# close to the corners so the wide end of a wedge cannot pass on its
+# centroid alone, but strictly inside the face so a probe never sits on
+# an edge shared with a differently-oriented neighbour.
+_CHORD_SUPPORT_FRACTION: float = 0.9
+
 
 
 def _compute_mesh_genus(
@@ -1482,6 +1507,138 @@ def _label_mesh_components(
     return comp_ids.astype(np.int64)
 
 
+def _cast_within_components(
+    origins: np.ndarray,
+    directions: np.ndarray,
+    origin_comps: np.ndarray,
+    target_v0: np.ndarray,
+    target_e1: np.ndarray,
+    target_e2: np.ndarray,
+    target_areas: np.ndarray,
+    target_comps: np.ndarray,
+) -> np.ndarray:
+    """Ray-cast each origin against the triangles of its own component.
+
+    Shared by the wall and cavity measurements and by the support probes
+    both run on their candidate chords.  Iterates the small set of
+    components touched by the rays: a single-body mesh is one iteration
+    (a plain global cast); a lattice of N struts casts each strut's rays
+    only against that strut's triangles, so a joint overlap with a
+    neighbour never reads as a wall or a cavity.
+
+    Returns one distance per ray, ``inf`` for a miss.
+    """
+    dist = np.full(origins.shape[0], np.inf, dtype=np.float64)
+    for cid in np.unique(origin_comps):
+        ray_mask = origin_comps == cid
+        target_mask = target_comps == cid
+
+        # A component with fewer than 4 triangles can't enclose space —
+        # rays from it would miss everything anyway.  Skip the cast.
+        if target_mask.sum() < 4:
+            continue
+
+        # Component-local target subsampling: apply the global cap to
+        # each component so a single huge body still benefits from the
+        # memory budget, but small components keep all their triangles.
+        # Seeded per call so a support probe casts against exactly the
+        # triangles its candidate chord was measured against.
+        tv0 = target_v0[target_mask]
+        te1 = target_e1[target_mask]
+        te2 = target_e2[target_mask]
+        tareas = target_areas[target_mask]
+        if tv0.shape[0] > _THIN_WALL_INTERSECTION_TRI_CAP:
+            rng_target = np.random.default_rng(1)
+            t_probs = tareas / tareas.sum()
+            t_idx = rng_target.choice(
+                tv0.shape[0],
+                size=_THIN_WALL_INTERSECTION_TRI_CAP,
+                replace=False,
+                p=t_probs,
+            )
+            tv0 = tv0[t_idx]
+            te1 = te1[t_idx]
+            te2 = te2[t_idx]
+
+        dist[ray_mask] = _raycast_min_distances(
+            origins[ray_mask],
+            directions[ray_mask],
+            tv0,
+            te1,
+            te2,
+            min_abs_perpendicular_dot=_THIN_WALL_MIN_PERPENDICULAR_DOT,
+        )
+    return dist
+
+
+def _supported_chord_mask(
+    chord: np.ndarray,
+    faces: np.ndarray,
+    directions: np.ndarray,
+    origin_comps: np.ndarray,
+    cast: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray],
+    *,
+    floor: float,
+    ceiling: float,
+    verify_below: float,
+) -> np.ndarray:
+    """Mask of chords that hold across the face they were measured from.
+
+    ``chord`` is one distance per ray (``inf`` for a miss; anything at
+    or above ``ceiling`` also counts as a miss), ``faces`` the
+    ``(N, 3, 3)`` triangles the rays left from, ``directions`` their
+    directions.  ``cast`` re-runs the same component-scoped cast for
+    new origins.
+
+    A chord is *supported* when it and three more chords, cast from
+    points ``_CHORD_SUPPORT_FRACTION`` of the way from the face's
+    centroid to each corner, all land between ``floor`` and
+    ``ceiling``.  Sub-tolerance geometry fails this: a sliver of air
+    between two surfaces that were meant to coincide, or a sliver of
+    solid where a curved surface grazes a plane, tapers to nothing
+    within the face, so at least one probe reads below the floor or
+    misses.  A wall or groove of real width holds at every probe.
+
+    Every chord below ``verify_below`` is verified.  Above it, chords
+    are verified in ascending order until one holds, so the smallest
+    surviving chord is always a verified one and the larger chords are
+    taken at face value.  This keeps the extra casts proportional to
+    the number of chords that could be mistaken for a defect rather
+    than to the sample count.
+    """
+    n = chord.shape[0]
+    measured = np.isfinite(chord) & (chord < ceiling)
+    keep = measured.copy()
+    verified = np.zeros(n, dtype=bool)
+
+    def verify(idx: np.ndarray) -> None:
+        ok = chord[idx] >= floor
+        centroids = faces[idx].mean(axis=1)
+        for corner in range(3):
+            probes = (
+                centroids
+                + _CHORD_SUPPORT_FRACTION * (faces[idx, corner, :] - centroids)
+                + _THIN_WALL_RAY_ORIGIN_OFFSET * directions[idx]
+            )
+            d = cast(probes, directions[idx], origin_comps[idx])
+            ok &= np.isfinite(d) & (d < ceiling) & (d >= floor)
+        keep[idx] = ok
+        verified[idx] = True
+
+    thin = np.where(measured & (chord < verify_below))[0]
+    if thin.size:
+        verify(thin)
+    if not keep[verified].any():
+        rest = np.where(measured & ~verified)[0]
+        rest = rest[np.argsort(chord[rest])]
+        for start in range(0, rest.size, _THIN_WALL_INTERSECTION_CHUNK):
+            batch = rest[start:start + _THIN_WALL_INTERSECTION_CHUNK]
+            verify(batch)
+            if keep[batch].any():
+                break
+    return keep
+
+
 def _analyze_thin_walls(
     triangles: list[tuple[tuple[float, ...], ...]],
     vertices: list[tuple[float, ...]],
@@ -1515,7 +1672,10 @@ def _analyze_thin_walls(
     on a structurally-thick part.  Cylindrical hole-bore tessellation
     artifacts on round holes are similarly out-of-scope.  Engraved-
     groove widths are measured separately by
-    :func:`_analyze_cavity_widths`.
+    :func:`_analyze_cavity_widths`.  Every chord that counts has been
+    verified to hold across the face it was measured from — see
+    :func:`_supported_chord_mask` — so a sliver that tapers to nothing
+    within one face is dropped rather than reported at its centroid.
     """
     total = len(triangles)
     if total < 4:
@@ -1576,53 +1736,17 @@ def _analyze_thin_walls(
     origin_comps = comp_ids[valid_indices[sample_idx]]  # one per ray
     valid_face_comps = comp_ids[valid_indices]          # one per valid target
 
-    exit_dist = np.full(n_sample, np.inf, dtype=np.float64)
+    target_v0 = v0[valid_face]
+    target_e1 = edge1[valid_face]
+    target_e2 = edge2[valid_face]
 
-    # Iterate the small set of components touched by sampled rays.  For
-    # a 1-component mesh this is a single iteration — same work as the
-    # prior global cast.  For a lattice of N struts the budget splits
-    # across struts; each strut casts only against its own triangles.
-    for cid in np.unique(origin_comps):
-        ray_mask = origin_comps == cid
-        target_mask = valid_face_comps == cid
-
-        # A component with fewer than 4 triangles can't enclose space —
-        # rays from it would miss everything anyway.  Skip the cast.
-        if target_mask.sum() < 4:
-            continue
-
-        # Component-local target subsampling: apply the global cap to
-        # each component so a single huge body still benefits from the
-        # memory budget, but small components keep all their triangles.
-        comp_target_v0 = v0[valid_face][target_mask]
-        comp_target_e1 = edge1[valid_face][target_mask]
-        comp_target_e2 = edge2[valid_face][target_mask]
-        comp_target_areas = valid_areas[target_mask]
-        if comp_target_v0.shape[0] > _THIN_WALL_INTERSECTION_TRI_CAP:
-            rng_target = np.random.default_rng(1)
-            t_probs = comp_target_areas / comp_target_areas.sum()
-            t_idx = rng_target.choice(
-                comp_target_v0.shape[0],
-                size=_THIN_WALL_INTERSECTION_TRI_CAP,
-                replace=False,
-                p=t_probs,
-            )
-            comp_target_v0 = comp_target_v0[t_idx]
-            comp_target_e1 = comp_target_e1[t_idx]
-            comp_target_e2 = comp_target_e2[t_idx]
-
-        comp_origins = origins[ray_mask]
-        comp_directions = directions[ray_mask]
-
-        comp_dist = _raycast_min_distances(
-            comp_origins,
-            comp_directions,
-            comp_target_v0,
-            comp_target_e1,
-            comp_target_e2,
-            min_abs_perpendicular_dot=_THIN_WALL_MIN_PERPENDICULAR_DOT,
+    def cast(o: np.ndarray, d: np.ndarray, c: np.ndarray) -> np.ndarray:
+        return _cast_within_components(
+            o, d, c,
+            target_v0, target_e1, target_e2, valid_areas, valid_face_comps,
         )
-        exit_dist[ray_mask] = comp_dist
+
+    exit_dist = cast(origins, directions, origin_comps)
 
     finite_mask = np.isfinite(exit_dist)
     if not finite_mask.any():
@@ -1633,22 +1757,29 @@ def _analyze_thin_walls(
             problematic_regions=[],
         )
 
-    finite_dists = exit_dist[finite_mask]
-    # Sliver-chord filter — drop measurements below the physical floor
-    # (50 µm; well under any nozzle).  Sub-floor chords typically come
-    # from boundary slivers where curved surfaces graze the bounding
-    # box at a thin angle (round-4 topology audit, gyroid clipping).
-    # Fall through to the raw min when every chord is sub-floor
-    # (degenerate mesh) so the consumer sees the anomaly rather than
-    # a silenced no-signal.
-    non_sliver = finite_dists[finite_dists >= _SLIVER_CHORD_FLOOR_MM]
-    if non_sliver.size > 0:
-        measured_min = float(non_sliver.min())
-    else:
-        measured_min = float(finite_dists.min())
+    # A chord counts only when it holds across the face it was measured
+    # from and clears the sliver floor (50 µm; well under any nozzle).
+    # Sub-floor chords come from boundary slivers where curved surfaces
+    # graze the bounding box at a thin angle (round-4 topology audit,
+    # gyroid clipping); the support probes drop the wider end of the
+    # same slivers.  Fall through to every finite chord when nothing
+    # holds (degenerate mesh) so the consumer sees the anomaly rather
+    # than a silenced no-signal.
+    supported = _supported_chord_mask(
+        exit_dist,
+        tris[valid_indices[sample_idx]],
+        directions,
+        origin_comps,
+        cast,
+        floor=_SLIVER_CHORD_FLOOR_MM,
+        ceiling=np.inf,
+        verify_below=nozzle_diameter,
+    )
+    counted = supported if supported.any() else finite_mask
+    measured_min = float(exit_dist[counted].min())
 
-    thin_mask = exit_dist < nozzle_diameter
-    thin_count = int((thin_mask & finite_mask).sum())
+    thin_mask = counted & (exit_dist < nozzle_diameter)
+    thin_count = int(thin_mask.sum())
     thin_pct = thin_count / n_sample * 100.0
 
     # ``min_wall_thickness_mm`` carries the absolute smallest measured
@@ -1660,8 +1791,8 @@ def _analyze_thin_walls(
     # measurement failure on degenerate meshes.
     problematic: list[dict[str, float]] = []
     if thin_count > 0:
-        thin_dists = exit_dist[thin_mask & finite_mask]
-        thin_origins = origins[thin_mask & finite_mask]
+        thin_dists = exit_dist[thin_mask]
+        thin_origins = origins[thin_mask]
         order = np.argsort(thin_dists)[:5]
         for i in order:
             problematic.append(
@@ -1764,43 +1895,17 @@ def _analyze_cavity_widths(
     origin_comps = comp_ids[valid_indices[sample_idx]]
     valid_face_comps = comp_ids[valid_indices]
 
-    hit_dist = np.full(n_sample, np.inf, dtype=np.float64)
+    target_v0 = v0[valid_face]
+    target_e1 = edge1[valid_face]
+    target_e2 = edge2[valid_face]
 
-    for cid in np.unique(origin_comps):
-        ray_mask = origin_comps == cid
-        target_mask = valid_face_comps == cid
-        if target_mask.sum() < 4:
-            continue
-
-        comp_target_v0 = v0[valid_face][target_mask]
-        comp_target_e1 = edge1[valid_face][target_mask]
-        comp_target_e2 = edge2[valid_face][target_mask]
-        comp_target_areas = valid_areas[target_mask]
-        if comp_target_v0.shape[0] > _THIN_WALL_INTERSECTION_TRI_CAP:
-            rng_target = np.random.default_rng(1)
-            t_probs = comp_target_areas / comp_target_areas.sum()
-            t_idx = rng_target.choice(
-                comp_target_v0.shape[0],
-                size=_THIN_WALL_INTERSECTION_TRI_CAP,
-                replace=False,
-                p=t_probs,
-            )
-            comp_target_v0 = comp_target_v0[t_idx]
-            comp_target_e1 = comp_target_e1[t_idx]
-            comp_target_e2 = comp_target_e2[t_idx]
-
-        comp_origins = origins[ray_mask]
-        comp_directions = directions[ray_mask]
-
-        comp_dist = _raycast_min_distances(
-            comp_origins,
-            comp_directions,
-            comp_target_v0,
-            comp_target_e1,
-            comp_target_e2,
-            min_abs_perpendicular_dot=_THIN_WALL_MIN_PERPENDICULAR_DOT,
+    def cast(o: np.ndarray, d: np.ndarray, c: np.ndarray) -> np.ndarray:
+        return _cast_within_components(
+            o, d, c,
+            target_v0, target_e1, target_e2, valid_areas, valid_face_comps,
         )
-        hit_dist[ray_mask] = comp_dist
+
+    hit_dist = cast(origins, directions, origin_comps)
 
     # Cap at the cavity-distance threshold — anything longer is "ray
     # exited the part into open space," not a cavity measurement.
@@ -1814,7 +1919,25 @@ def _analyze_cavity_widths(
     bbox_max = tris[valid_face].reshape(-1, 3).max(axis=0)
     bbox_extent = float((bbox_max - bbox_min).min())
     cavity_max_dist = max(_CAVITY_RAY_MIN_MAX_DIST_MM, bbox_extent / 2.0)
-    cavity_mask = (hit_dist < cavity_max_dist) & np.isfinite(hit_dist)
+
+    # A void counts as a cavity only when it holds across the face it
+    # was measured from and is at least the slicer's crack-closing
+    # width.  A sliver of air between two surfaces that were meant to
+    # coincide — a swept thread's flat root chords against the faceted
+    # cylinder they were unioned with — tapers to nothing within the
+    # face and is closed by the slicer before it plans a perimeter; it
+    # is tessellation, not an engraved feature.  No fall-through here:
+    # a mesh with nothing but cracks has no cavities.
+    cavity_mask = _supported_chord_mask(
+        hit_dist,
+        tris[valid_indices[sample_idx]],
+        directions,
+        origin_comps,
+        cast,
+        floor=_CAVITY_CRACK_FLOOR_MM,
+        ceiling=cavity_max_dist,
+        verify_below=nozzle_diameter,
+    )
     cavity_count = int(cavity_mask.sum())
     if cavity_count == 0:
         return CavityAnalysis(
