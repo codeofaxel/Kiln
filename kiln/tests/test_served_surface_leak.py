@@ -53,6 +53,7 @@ def _j(*parts: str) -> str:
 
 _LABEL = _j("mo", "at")
 _PRIV = _j("kiln", "_pro")
+_OVERLAY_FILE = _j("_pro", "_overlay.json")
 
 #: The exact wording shapes the 2026-09-02 sweep found on served surfaces.
 #: Each must stay caught; a rule that stops matching its row is a rule that
@@ -71,6 +72,57 @@ _LEAK_SHAPES: tuple[tuple[str, str], ...] = (
     ("infrastructure internals", "On the hosted server (Supabase backend + a JWT tenant)"),
     ("infrastructure internals", "the permission check the cloud RLS will run"),
 )
+
+#: Every ALTERNATIVE each rule is built from, with a probe that only that
+#: alternative catches.  A fixture per rule is not enough: a rule spelling out
+#: nine field names is satisfied by one of them, so deleting any of the other
+#: eight silently stops the gate seeing that field while the suite stays green.
+#: Deleting an alternative must fail its row here.
+_ALTERNATIVES: dict[str, tuple[str, ...]] = {
+    "private-tier self-label": (
+        f"these curated values are the engineering {_LABEL}",
+    ),
+    "private module or file path": (
+        f"see ``{_PRIV}/_rest/org_admin_authz.py``",
+        f"reads printability{_OVERLAY_FILE} at startup",
+    ),
+    "internal docket or claim shorthand": (
+        "tracked as KILN-021 in the ledger",
+        "the patent covers this technique",
+        "per claim 51 the overlap must hold",
+        "runs the Priority 8 conflict detection",
+        "returns has_conflicts (bug-X2 correct)",
+        "the crown-jewel surface",
+    ),
+    "paid field inventory": (
+        "the paid tier restores agent_notes for each material",
+        "the paid tier restores agent_guidance for each material",
+        "the paid tier restores failure_modes for each printer",
+        "the paid tier restores general_rules for co-printing",
+        "the paid tier restores common_issues for each symptom",
+        "the paid tier restores use_case_ratings for each material",
+        "the paid tier restores break_in_tips for each printer",
+        "the paid tier restores cycle_life_estimates for each block",
+        "the paid tier restores co_print notes for each pair",
+    ),
+    "research bibliography": (
+        "measured by CNC Kitchen on a worn nozzle",
+        "cross-checked against MatWeb",
+        "cross-checked against CES EduPack",
+        "per the Springer wear methodology",
+        "per Shigley for the shear fraction",
+        "datasheet-grounded values for each grade",
+        "datasheet-derived values for each grade",
+        "compiled from vendor datasheets",
+        "tds-derived numbers for each grade",
+        "filament data sheets (2024-2025)",
+    ),
+    "infrastructure internals": (
+        "hosted on Supabase behind a JWT",
+        "the permission check the cloud RLS will run",
+        "needs the service-role key to write",
+    ),
+}
 
 #: Wording that sells the upgrade or names the interface.  None of it may trip
 #: a rule: a gate that flags the funnel gets switched off by the next person
@@ -98,6 +150,33 @@ def test_each_leak_shape_is_still_caught(rule: str, text: str) -> None:
     assert rule in _rules_hit(text), (
         f"the {rule!r} rule no longer matches {text!r} — if its pattern was "
         "reworded, the gate now runs green without looking"
+    )
+
+
+@pytest.mark.parametrize(
+    "rule, probe",
+    [(rule, probe) for rule, probes in _ALTERNATIVES.items() for probe in probes],
+)
+def test_each_alternative_within_a_rule_is_still_caught(rule: str, probe: str) -> None:
+    """Fails when any single alternative is dropped from a rule.
+
+    The level below the per-rule fixtures: a rule is an alternation, and
+    deleting one branch of it blinds the gate to that shape alone, which no
+    per-rule fixture notices.
+    """
+    assert rule in _rules_hit(probe), (
+        f"the {rule!r} rule no longer matches {probe!r} — an alternative was "
+        "dropped from its pattern and the gate is now blind to that shape"
+    )
+
+
+def test_every_rule_declares_its_alternatives() -> None:
+    """A rule added later cannot arrive with only a coarse fixture."""
+    declared = {rule for rule, _ in _GATE.RULES}
+    pinned = set(_ALTERNATIVES)
+    assert declared == pinned, (
+        f"rules missing per-alternative probes: {sorted(declared - pinned)}; "
+        f"probes for rules that no longer exist: {sorted(pinned - declared)}"
     )
 
 
