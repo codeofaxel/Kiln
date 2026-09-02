@@ -1023,3 +1023,54 @@ class TestToContourGroups:
         assert [c["hole"] for c in groups[0]] == [False, True, False]
         # And the mesh rendering is untouched alongside it.
         assert "polygon(points=" in info["openscad_polygons"]
+
+
+# A dark-theme logo export: the ground is painted as a canvas-filling rect
+# (not white), the mark is light strokes plus an accent bar.  Synthetic —
+# same structure as a real brand mark, no brand data.
+DARK_GROUND_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<rect fill="#1A1A1A" width="512" height="512"/>
+<rect x="186" y="248" width="140" height="3" fill="#FF6B2B"/>
+<path d="M 238 185 L 206 185 L 176 285 L 336 285 L 306 185 L 274 185" fill="none" stroke="#CCCCCC" stroke-width="2.5"/>
+</svg>
+"""
+
+
+class TestBackgroundRect:
+    def test_canvas_filling_rect_is_ground_not_ink(self):
+        """Carving the ground turned a line-art mark into a 512-unit square
+        pocket (measured 2026-09-01 on a dark-theme logo)."""
+        m = parse_svg_to_mark(DARK_GROUND_SVG)
+        assert m is not None and not m.is_empty
+        assert m.width < 200, f"background rect carved: mark is {m.width} wide"
+        assert m.height < 200
+        # The accent bar (a small filled rect) is still ink.
+        assert len(m.groups) >= 2
+
+    def test_attribute_order_does_not_matter(self):
+        svg = DARK_GROUND_SVG.replace(
+            '<rect fill="#1A1A1A" width="512" height="512"/>',
+            '<rect height="512" style="fill:#222" width="512" x="0" y="0"/>',
+        )
+        m = parse_svg_to_mark(svg)
+        assert m is not None and m.width < 200
+
+    def test_transformed_ground_is_still_ground(self):
+        svg = DARK_GROUND_SVG.replace(
+            '<rect fill="#1A1A1A" width="512" height="512"/>',
+            '<g transform="scale(2)"><rect fill="#1A1A1A" width="256" height="256"/></g>',
+        )
+        m = parse_svg_to_mark(svg)
+        assert m is not None and m.width < 200
+
+    def test_ground_rect_alone_yields_no_mark(self):
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#000"/></svg>'
+        m = parse_svg_to_mark(svg)
+        assert m is None or m.is_empty
+
+    def test_a_large_but_partial_rect_is_ink(self):
+        """Half the canvas is a shape, not a ground."""
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="40" fill="#000"/></svg>'
+        m = parse_svg_to_mark(svg)
+        assert m is not None and not m.is_empty
+        assert m.width == pytest.approx(100.0)

@@ -32,10 +32,9 @@ on a local stdio server could not call tools back.  Two facts retired it:
   act on them.  Paying the entire result to draw a panel is not a trade any
   user would choose.  (Measured 2026-08-19; hit again live 2026-08-30 on
   ``build_organic_mesh``, whose result truncated mid-payload.)
-* **The lazy fetch is not theoretical.**  ``kiln_viewer_payload`` is
-  registered on this door the moment a host reads the stage document, and
-  serving geometry through it — never in the result — is the only way the
-  hosted door has ever worked.
+* **The lazy fetch is not theoretical.**  ``kiln_viewer_payload`` is a
+  standing tool on this door from install, and serving geometry through it
+  — never in the result — is the only way the hosted door has ever worked.
 
 So the token rides the result and the geometry does not.  The View fetches
 through the host's ``tools/call`` proxy where the host offers one, and
@@ -72,6 +71,7 @@ The still image is the floor under all of it, always.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
 import os
@@ -83,7 +83,6 @@ from typing import Any
 from kiln.mcp_compat import (
     capture_request_context,
     client_capabilities,
-    current_session,
     lowlevel_server,
     wrap_call_tool_result,
 )
@@ -256,14 +255,14 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-#: token -> mesh path.  Bounded; oldest dropped first.  In-memory only —
-#: and since the result went lean, that is a REACHABILITY decision, not a
-#: bookkeeping one: the token is the panel's whole route to the mesh, so a
-#: restart is what ends a scrolled-back panel's ability to redraw.  (It
-#: used to be free: the geometry had already ridden the result, so a dead
-#: token cost nothing.)  Still not persisted, because the paths it holds
-#: are this machine's temp files and outliving them would only trade a
-#: "preview unavailable" card for a broken one.  See WHAT LEAN COSTS.
+#: token -> mesh path.  Bounded; oldest dropped first.  The fast path for
+#: the process that minted; the shared ledger under ``~/.kiln`` is the
+#: truth every OTHER Kiln server on this machine answers from, because a
+#: desktop host routes a panel's fetch over whichever session's connection
+#: it holds, not necessarily the minting one (see _ledger_write).  The
+#: ledger also survives restarts, so a scrolled-back panel redraws as long
+#: as its temp file still exists; a deleted mesh gets the honest "could
+#: not read" card, which the verb already says.  See WHAT LEAN COSTS.
 _tokens: dict[str, str] = {}
 #: How many makes back a panel can still fetch its mesh.  Raised from 64
 #: when the result went lean: an evicted token used to cost nothing (the
@@ -335,18 +334,82 @@ def diagnostics_enabled() -> bool:
     }
 
 
+def _token_ledger_path() -> Path:
+    """The machine-wide token ledger, next to the other ``~/.kiln`` stores."""
+    home = Path(os.environ.get("KILN_HOME", "").strip() or (Path.home() / ".kiln"))
+    return home / "stage_tokens.json"
+
+
+def _ledger_write(token: str, mesh_path: str) -> None:
+    """Record a token in the shared ledger, best-effort and atomic.
+
+    WHY A FILE.  The in-memory dict assumes the panel's fetch comes back to
+    the PROCESS that minted the token.  It does not: a desktop host runs one
+    Kiln server per open session and routes a rendered panel's ``tools/call``
+    over whichever of those connections it holds — measured live 2026-09-01,
+    twelve fetches in one evening, every one answered "unknown token" by a
+    server that never minted it while the minting server sat idle.  The
+    ledger makes the token machine-wide: any Kiln server on this machine can
+    resolve it to the local mesh path, which is the same trust domain the
+    mesh itself lives in.  Bounded like the dict, oldest first; 0600 because
+    a token is a capability, even a local one.
+
+    Never raises — a mesh nobody can fetch later must not fail the make now.
+    """
+    try:
+        import tempfile
+
+        path = _token_ledger_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            entries = json.loads(path.read_text())
+            if not isinstance(entries, dict):
+                entries = {}
+        except (OSError, ValueError):
+            entries = {}
+        entries[token] = mesh_path
+        while len(entries) > _TOKENS_MAX:
+            entries.pop(next(iter(entries)), None)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".stage_tokens_")
+        try:
+            with os.fdopen(fd, "w") as fh:
+                json.dump(entries, fh)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
+    except Exception:  # noqa: BLE001
+        logger.debug("stage token ledger write skipped", exc_info=True)
+
+
+def _ledger_read(token: str) -> str | None:
+    """The ledger's answer for a token minted by any process, or ``None``."""
+    try:
+        entries = json.loads(_token_ledger_path().read_text())
+        value = entries.get(token) if isinstance(entries, dict) else None
+        return value if isinstance(value, str) and value else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _mint(mesh_path: str) -> str:
     token = secrets.token_urlsafe(18)
     with _lock:
         if len(_tokens) >= _TOKENS_MAX:
             _tokens.pop(next(iter(_tokens)), None)
         _tokens[token] = mesh_path
+    _ledger_write(token, mesh_path)
     return token
 
 
 def resolve(token: str) -> str | None:
     with _lock:
-        return _tokens.get(token)
+        hit = _tokens.get(token)
+    # The minting process answers from memory; every OTHER Kiln server on
+    # this machine answers from the shared ledger.  See _ledger_write.
+    return hit or _ledger_read(token)
 
 
 # ---------------------------------------------------------------------------
@@ -686,9 +749,10 @@ def _register_resource(mcp: Any) -> bool:
         # "is the verb available", which is True on every later read too,
         # and notifying there would tell the host to re-list its tools once
         # per panel for a list that did not change.
-        had_verb = _payload_verb_registered(mcp)
-        if _register_payload_verb(mcp) and not had_verb:
-            await _announce_tool_list_changed(mcp)
+        # Belt and braces: install() already registered the verb; a server
+        # whose install was partial still gets it before the View's first
+        # tools/call.  Idempotent, so this costs nothing when it holds.
+        _register_payload_verb(mcp)
         return doc
 
     # SDK 2 hands the request ctx to the handler and nowhere else, and a
@@ -734,13 +798,25 @@ def _payload_verb_registered(mcp: Any) -> bool:
 def _register_payload_verb(mcp: Any) -> bool:
     """Register ``kiln_viewer_payload`` — the View's lazy mesh fetch.
 
-    Idempotent and never raises.  Called from two places: the stage-document
-    read (door parity — a host that renders the panel gets the verb before
-    its View's first ``tools/call``; see ``_document``) and the diagnostics
-    path (which forces it at install for smoke-testing).  Serves the
-    operator's own local files at full fidelity — the hosted door's
-    charge-on-keep wall guards artifact tokens, which never exist here;
-    a local token resolves only to a mesh this machine already made.
+    Idempotent and never raises.  Registered at ``install``, so it is on
+    the tool list a host caches at initialize.
+
+    It used to be registered late, at the first stage-document read, to
+    keep a verb nobody should call by hand off the standing surface, and
+    the server sent ``notifications/tools/list_changed`` so a host that
+    validates ``tools/call`` names could learn it.  Measured 2026-09-01 on
+    the Claude desktop host (clientInfo ``mcp/0.1.0``): the panel rendered,
+    the verb registered, the notice went out, and the host never re-listed
+    — hours later its tool list still lacked the verb, so every panel's
+    fetch failed into "Preview unavailable".  With the lean result this
+    verb is the ONLY route to a mesh; it cannot hang on a notification a
+    host may ignore.  The cost is one app-visibility tool on the list,
+    hidden from the model by hosts that honour ``_meta.ui.visibility``.
+    The alternative was a 3D panel that never works.
+
+    Serves the operator's own local files at full fidelity — the hosted
+    door's charge-on-keep wall guards artifact tokens, which never exist
+    here; a local token resolves only to a mesh this machine already made.
     """
     try:
         if _payload_verb_registered(mcp):
@@ -771,49 +847,6 @@ def _register_payload_verb(mcp: Any) -> bool:
     except Exception:
         logger.warning("local stage: payload tool failed", exc_info=True)
         return False
-
-
-async def _announce_tool_list_changed(mcp: Any) -> None:
-    """Tell the connected host its tool list just grew.
-
-    ``kiln_viewer_payload`` is registered LATE on purpose — a verb only a
-    rendered panel calls does not belong on the standing tool surface — and
-    FastMCP does not send ``notifications/tools/list_changed`` when a tool
-    is added after connect (measured on SDK 1.x: neither ``add_tool`` nor
-    the tool manager notifies).  Registration alone is therefore only half
-    the promise: the SERVER can find the verb, and a host that validates a
-    ``tools/call`` name against the list it cached at initialize cannot.
-
-    That gap was survivable while geometry rode the result and this fetch
-    was a fallback.  It is load-bearing now: the lean result means EVERY
-    panel reaches its mesh through this verb, so a host that will not proxy
-    an unannounced name would show "Preview unavailable" on every make.
-
-    Awaited before the document is returned, not fired into the background:
-    the host then knows the verb exists before it can possibly render the
-    View, and there is no loop or task lifetime to get wrong.  The session
-    comes from :func:`kiln.mcp_compat.current_session` — one opinion about
-    where a session lives, not a second.
-
-    That accessor is why this works on SDK 2 at all.  Reading the 1.x
-    location directly (``lowlevel_server(mcp).request_context.session``)
-    raised ``AttributeError`` on 2.x, which the ``except`` below caught and
-    turned into "no session" — so the notification was never sent, on every
-    make, and nothing said so.  With the lean result this verb is the only
-    route to a mesh, so a host that validates a ``tools/call`` name against
-    its cached tool list would have shown "Preview unavailable" every time.
-
-    Never raises.  A panel that fails to open beats a stage document that
-    fails to arrive.
-    """
-    session = current_session(mcp)
-    if session is None:
-        logger.debug("local stage: no session to announce the verb to")
-        return
-    try:
-        await session.send_tool_list_changed()
-    except Exception:  # noqa: BLE001 — a host that hung up mid-read
-        logger.debug("local stage: tool-list notice not delivered", exc_info=True)
 
 
 def _register_diagnostics(mcp: Any, out: dict[str, Any]) -> None:
@@ -1000,6 +1033,8 @@ def install(mcp: Any) -> dict[str, Any]:
         logger.warning("local stage: resource registration failed", exc_info=True)
         return out
 
+    # Standing, not lazy — see _register_payload_verb for the measurement.
+    out["payload_tool"] = _register_payload_verb(mcp)
     if diagnostics_enabled():
         _register_diagnostics(mcp, out)
 

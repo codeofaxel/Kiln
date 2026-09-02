@@ -22,6 +22,8 @@ from kiln._vec import normalize as _normalize
 from kiln._vec import sub as _sub
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from kiln.threemf_parser import ColoredTriangle
 
 # ---------------------------------------------------------------------------
@@ -82,6 +84,23 @@ class RenderResult:
     triangle_count: int
     face_colors_used: int
     quality_score: float = 0.0
+
+    #: Where each ``face_labels`` group actually landed on screen, in
+    #: OUTPUT pixel coordinates: label -> (x, y).  Measured from the
+    #: depth buffer's per-pixel owner, so it is the centroid of the
+    #: pixels the label really won — occlusion included — rather than a
+    #: projection of its geometry, which would put a callout on a face
+    #: something else is standing in front of.  ``None`` unless the
+    #: caller passed ``face_labels``.  Deliberately absent from
+    #: :meth:`to_dict`: this is render-time scaffolding for a caller
+    #: drawing on top of the image, not part of the JSON a tool returns.
+    label_anchors: dict[int, tuple[int, int]] | None = None
+
+    #: Visible pixel count per label, same scale as ``label_anchors``.
+    #: A caller uses it to skip labelling a region that is a sliver from
+    #: this angle rather than printing a number nobody can associate
+    #: with anything.
+    label_pixels: dict[int, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +171,41 @@ _DIFFUSE = 0.55
 # compete with).
 _RIM_BASE = 0.08
 _RIM_DARK_BOOST = 0.30  # extra rim for very dark faces
+
+#: Shading modes.  ``"studio"`` is the product look: smooth normals,
+#: ambient + diffuse, and the rim term above — an image that says "this
+#: is what the object will look like".  ``"matte"`` is the diagram look:
+#: the same geometry with the gloss taken out, so an image that means
+#: something else cannot borrow the product language and be mistaken for
+#: a product render.
+SHADING_MODES = ("studio", "matte")
+
+#: Matte shading range.  Plain lambert with NO rim term — the rim is the
+#: highlight, and a highlight is the single strongest "this is a
+#: photograph of a real object" cue the studio path has.  The band is
+#: also narrow (0.74-1.0 against the studio path's effective 0.30-1.0):
+#: enough falloff to read the form, not enough for the fill to drift far
+#: from its declared color, so a legend swatch and the pixels it names
+#: stay recognizably the same color.
+_MATTE_FLOOR = 0.74
+_MATTE_RANGE = 1.0 - _MATTE_FLOOR
+
+
+def _matte_shade(normal_cam: _Vec3, light_cam: _Vec3) -> float:
+    """Rim-free, narrow-range lambert for the diagram look."""
+    ndl = max(0.0, _dot(normal_cam, light_cam))
+    return _MATTE_FLOOR + _MATTE_RANGE * ndl
+
+
+def _apply_shade(
+    color: tuple[int, int, int], shade: float
+) -> tuple[int, int, int]:
+    """Scale a color by a matte shade factor, no saturation trickery."""
+    return (
+        max(0, min(255, int(color[0] * shade))),
+        max(0, min(255, int(color[1] * shade))),
+        max(0, min(255, int(color[2] * shade))),
+    )
 
 
 def _compute_brightness(
@@ -335,6 +389,9 @@ def render_colored_mesh(
     azimuth: float = 45.0,
     background: tuple[int, int, int] = (30, 30, 30),
     supersample: int = 2,
+    shading: str = "studio",
+    background_gradient: bool = True,
+    face_labels: Sequence[int] | None = None,
 ) -> RenderResult:
     """Render colored triangles to a PNG image.
 
@@ -350,10 +407,36 @@ def render_colored_mesh(
     :param azimuth: Camera azimuth in degrees (rotation around Z axis).
     :param background: RGB background color.
     :param supersample: Supersampling factor (2 = render at 2x then downscale).
+    :param shading: ``"studio"`` (default) for the product look — smooth
+        normals, wide diffuse falloff and a rim highlight.  ``"matte"``
+        for the diagram look — narrow-range diffuse, no rim, no
+        highlight, so an image whose colors mean something other than
+        "this is the color it will print in" does not arrive dressed as
+        a product render.
+    :param background_gradient: Vertical background ramp simulating
+        ambient environment light and a ground plane.  Pass ``False`` for
+        a flat field: an image that is a diagram should not be standing
+        on an implied floor.
+    :param face_labels: Optional per-face group id, one entry per input
+        triangle.  When given, the result carries ``label_anchors`` and
+        ``label_pixels`` — where each group landed on screen and how much
+        of it is visible — so a caller can draw numbered callouts without
+        re-deriving this function's camera.
     :returns: RenderResult with output path and metadata.
+    :raises ValueError: on an empty mesh, an unknown ``shading`` mode, or
+        a ``face_labels`` sequence that does not match ``triangles``.
     """
     if not triangles:
         raise ValueError("No triangles to render")
+    if shading not in SHADING_MODES:
+        raise ValueError(
+            f"unknown shading {shading!r}; choose from {list(SHADING_MODES)}"
+        )
+    if face_labels is not None and len(face_labels) != len(triangles):
+        raise ValueError(
+            f"face_labels has {len(face_labels)} entries for "
+            f"{len(triangles)} triangles"
+        )
 
     # Resolve output path
     if output_path is None:
@@ -501,9 +584,14 @@ def render_colored_mesh(
 
         # Lighting uses SMOOTH normal for gradual shading on curves
         smooth_normal = _smooth_normals[i]
-        face_lum = _luminance(tri.color)
-        brightness = _compute_brightness(smooth_normal, light_cam, face_luminance=face_lum)
-        lit_color = _apply_brightness(tri.color, brightness)
+        if shading == "matte":
+            lit_color = _apply_shade(tri.color, _matte_shade(smooth_normal, light_cam))
+        else:
+            face_lum = _luminance(tri.color)
+            brightness = _compute_brightness(
+                smooth_normal, light_cam, face_luminance=face_lum
+            )
+            lit_color = _apply_brightness(tri.color, brightness)
 
         unique_colors.add(tri.color)
         face_data.append((pts, lit_color))
@@ -550,9 +638,9 @@ def render_colored_mesh(
     # key cannot order faces whose screen overlap spans crossing depth
     # ranges.  On a single watertight mesh that cost ~25 stray pixels; on
     # composed multi-part plates — where long thin parts from different
-    # objects interleave — it measured 3.9-10.8% wrong-colour pixels, a
-    # solid wedge of one part's colour across another, in a feature whose
-    # whole claim is which colour goes where.
+    # objects interleave — it measured 3.9-10.8% wrong-color pixels, a
+    # solid wedge of one part's color across another, in a feature whose
+    # whole claim is which color goes where.
     import numpy as np
     from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
@@ -562,16 +650,18 @@ def render_colored_mesh(
     # --- Gradient background: vertical gradient for spatial context.
     # Top is slightly darker, bottom lighter — simulates ambient
     # environment light and a ground plane so objects don't float
-    # in a featureless void.
+    # in a featureless void.  Which is exactly why a diagram turns it
+    # off: an implied ground plane is an implied photograph.
     bg_r, bg_g, bg_b = background
-    for row in range(rh):
-        t = row / max(1, rh - 1)  # 0=top, 1=bottom
-        # Full gradient: top darkened by -8, bottom lifted by +30
-        shift = int(-8 + 38 * t)
-        lr = max(0, min(255, bg_r + shift))
-        lg = max(0, min(255, bg_g + shift))
-        lb = max(0, min(255, bg_b + shift))
-        draw.line([(0, row), (rw, row)], fill=(lr, lg, lb))
+    if background_gradient:
+        for row in range(rh):
+            t = row / max(1, rh - 1)  # 0=top, 1=bottom
+            # Full gradient: top darkened by -8, bottom lifted by +30
+            shift = int(-8 + 38 * t)
+            lr = max(0, min(255, bg_r + shift))
+            lg = max(0, min(255, bg_g + shift))
+            lb = max(0, min(255, bg_b + shift))
+            draw.line([(0, row), (rw, row)], fill=(lr, lg, lb))
 
     # The camera looks along +Y, so smaller camera-space Y is nearer;
     # the winner at each pixel is the face with the minimum interpolated
@@ -610,6 +700,45 @@ def render_colored_mesh(
         win = inside & (depth < tile_z)
         tile_z[win] = depth[win].astype(np.float32)
         tile_owner[win] = di
+
+    # --- Label anchors: where each face group actually ended up ---
+    #
+    # Read straight off the depth buffer's owner map, so a group that is
+    # hidden behind something else contributes no pixels and gets no
+    # anchor.  Deriving this from the geometry instead would need a
+    # second copy of this function's camera, and a second copy is a
+    # value that can disagree with the first one.
+    label_anchors: dict[int, tuple[int, int]] | None = None
+    label_pixels: dict[int, int] | None = None
+    if face_labels is not None:
+        # owner indexes face_data (draw order); map that back to labels.
+        draw_label = np.full(len(face_data), -1, dtype=np.int64)
+        for orig_i, draw_i in _vis_to_draw.items():
+            draw_label[draw_i] = face_labels[orig_i]
+        label_anchors = {}
+        label_pixels = {}
+        drawn_mask = owner >= 0
+        if drawn_mask.any():
+            per_pixel = draw_label[owner[drawn_mask]]
+            ys_px, xs_px = np.nonzero(drawn_mask)
+            for label in np.unique(per_pixel):
+                sel = per_pixel == label
+                count = int(sel.sum())
+                if count == 0:
+                    continue
+                # Mean pixel, then snapped to a pixel the label actually
+                # owns: the mean of a ring or a C-shape lands in the hole,
+                # and a callout in the hole points at the wrong thing.
+                mx = float(xs_px[sel].mean())
+                my = float(ys_px[sel].mean())
+                lx = xs_px[sel]
+                ly = ys_px[sel]
+                nearest = int(np.argmin((lx - mx) ** 2 + (ly - my) ** 2))
+                label_anchors[int(label)] = (
+                    int(lx[nearest] / ss),
+                    int(ly[nearest] / ss),
+                )
+                label_pixels[int(label)] = int(count / (ss * ss))
 
     arr = np.asarray(img, dtype=np.uint8).copy()
     if face_data:
@@ -653,7 +782,7 @@ def render_colored_mesh(
     # unbroken surface, so the contour was drawn as hairlines across the
     # body of the model (measured on a mug with a handle: a full-height
     # line down the wall plus two arcs at the handle junction).  It hid in
-    # single-colour previews only because bright fills skip the contour,
+    # single-color previews only because bright fills skip the contour,
     # so a grey control render looked clean while every painted one did
     # not.  Silhouette-by-background-adjacency cannot draw inside the
     # object at all: the ring is derived from the drawn mask's own border.
@@ -723,6 +852,8 @@ def render_colored_mesh(
         triangle_count=len(triangles),
         face_colors_used=len(unique_colors),
         quality_score=quality,
+        label_anchors=label_anchors,
+        label_pixels=label_pixels,
     )
 
 

@@ -46,17 +46,40 @@ _VALID_IMAGE_STYLES = frozenset(
     }
 )
 
-# Best-effort map from a preset's surface_selection to decorate_surface's
-# single-face `face`.  decorate_surface places one-off content on one face;
-# the richer multi-face selection (vertical_walls / selected_face_ids) is a
-# texture-path concern, so anything but the horizontal cap falls back to
-# "auto" (largest flat face).
+# Map from a preset's surface_selection to decorate_surface's single-face
+# `face`.  decorate_surface places one-off content on one face, so the
+# richer multi-face selections fall back to "auto" (largest flat face).
+#
+# "vertical_walls" means the walls, and it used to resolve to "auto" —
+# which on a round body picks the largest FLAT face, i.e. the cap.  A jar
+# preset saved as vertical_walls therefore carved the lid-side top, the
+# one surface the selection excludes (measured 2026-09-01).  It now asks
+# for the curved wall, degrading to the flat route when that wall cannot
+# take the carve (see _WALL_FALLBACK_CODES).
 _FACE_BY_SELECTION = {
     "horizontal_caps": "top",
     "all_faces": "auto",
     "outer_faces": "auto",
-    "vertical_walls": "auto",
+    "vertical_walls": "wall",
 }
+
+# Wall refusals that mean "this body or this artwork cannot take a wrapped
+# carve", as opposed to "the request was malformed".  A preset that merely
+# SELECTED the walls degrades to the flat-face route on these and says so
+# in warnings; an explicit caller ``face="wall"`` still gets the honest
+# error, because that caller asked for the wall specifically and a quiet
+# landing somewhere else is the silently-wrong-result class.
+_WALL_FALLBACK_CODES = frozenset(
+    {
+        "NO_ROUND_WALL",       # box, tray — no upright round wall at all
+        "INVALID_CONTENT",     # photo relief, or art the wrap cannot trace
+        "INVALID_MODE",        # an *_emboss family; the wall only carves
+        "UNSUPPORTED_FORMAT",  # OBJ host, which the flat path does accept
+        "ENGINE_UNAVAILABLE",  # public-only install, no wrap engine
+        "MARK_DOES_NOT_FIT",   # wall too small for a printable mark
+        "TEXT_DOES_NOT_FIT",
+    }
+)
 
 # Keys decorate_surface may use for the produced mesh, most-specific first.
 _PATH_KEYS = (
@@ -209,28 +232,60 @@ def apply_decoration_spec(
     if offset_y_mm:
         placement["offset_y_mm"] = float(offset_y_mm)
 
-    result = decorate_surface(
-        model_path=host_mesh_path,
-        content=resolved_content,
-        face=(face or _FACE_BY_SELECTION.get(surface_selection, "auto")),
-        depth_mm=float(depth_mm or 0.0),
-        mode=_mode_for_family(family),
-        material=material or "PLA",
-        image_style=image_style,
-        content_type="auto",
-        **placement,
-    )
-
     # decorate_surface invoked in-process may return the FastMCP tool
     # shape ``[Image, payload_dict]`` (inline preview + data).  This
     # function's contract is "decorate_surface's result DICT" — unwrap
     # to the payload so callers never juggle transport shapes.
     from kiln.tool_results import unwrap_tool_result
 
-    result = unwrap_tool_result(result)
+    def _carve(on_face: str) -> Any:
+        return unwrap_tool_result(
+            decorate_surface(
+                model_path=host_mesh_path,
+                content=resolved_content,
+                face=on_face,
+                depth_mm=float(depth_mm or 0.0),
+                mode=_mode_for_family(family),
+                material=material or "PLA",
+                image_style=image_style,
+                content_type="auto",
+                **placement,
+            )
+        )
+
+    resolved_face = face or _FACE_BY_SELECTION.get(surface_selection, "auto")
+    result = _carve(resolved_face)
+
+    # The wall is a real surface with real limits, so a SELECTED wall that
+    # cannot be carved lands on the flat face rather than failing the
+    # apply outright — the behaviour every vertical_walls preset had
+    # before, minus the silence.  decorate_surface refunds the decoration
+    # quota on each failure exit, so the retry costs the caller one carve,
+    # not two.
+    fallback_note: str | None = None
+    if (
+        not face
+        and resolved_face == "wall"
+        and isinstance(result, dict)
+        and result.get("success") is False
+        and (result.get("error") or {}).get("code") in _WALL_FALLBACK_CODES
+    ):
+        why = (result.get("error") or {}).get("message", "")
+        result = _carve("auto")
+        fallback_note = (
+            "surface_selection 'vertical_walls' asked for the curved wall, "
+            "which this model or artwork could not take, so the decoration "
+            f"landed on the auto-selected flat face instead. Reason: {why}"
+        )
+
     if isinstance(result, dict):
         result = _resolved_via_preset(result)
         path = _decorated_path(result)
         if path and "decorated_model_path" not in result:
             result = {**result, "decorated_model_path": path}
+        if fallback_note:
+            result = {
+                **result,
+                "warnings": [*(result.get("warnings") or []), fallback_note],
+            }
     return result

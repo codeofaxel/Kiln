@@ -895,6 +895,43 @@ def _stroke_segments_to_rings(
     return rings
 
 
+def _canvas_size(root: ET.Element) -> tuple[float, float] | None:
+    """The SVG canvas in user units — the ``viewBox`` size, else the root
+    ``width``/``height`` — or ``None`` when the root declares neither."""
+    vb = root.get("viewBox") or root.get("viewbox")
+    if vb:
+        nums = [float(m.group(0)) for m in _FLOAT_RE.finditer(vb)]
+        if len(nums) >= 4 and nums[2] > 0 and nums[3] > 0:
+            return nums[2], nums[3]
+    w, h = _num(root.get("width")), _num(root.get("height"))
+    if w > 0 and h > 0:
+        return w, h
+    return None
+
+
+#: A filled rect at least this share of the canvas in BOTH axes is the
+#: artwork's ground, not the artwork.  Same rule the legacy regex extractor
+#: applied to viewBox-filling rects.
+_BACKGROUND_RECT_COVER = 0.9
+
+
+def _covers_canvas(
+    ring: Ring, matrix: tuple, canvas: tuple[float, float] | None
+) -> bool:
+    """Whether *ring* (a rect in local units) spans the canvas once the
+    element's accumulated transform is applied."""
+    if canvas is None:
+        return False
+    pts = [_mat_apply(matrix, x, y) for x, y in ring]
+    xs = [x for x, _ in pts]
+    ys = [y for _, y in pts]
+    cw, ch = canvas
+    return (
+        (max(xs) - min(xs)) >= _BACKGROUND_RECT_COVER * cw
+        and (max(ys) - min(ys)) >= _BACKGROUND_RECT_COVER * ch
+    )
+
+
 def parse_svg_to_mark(
     svg_text: str, *, min_stroke_units: float = 0.0
 ) -> MarkGeometry | None:
@@ -905,9 +942,12 @@ def parse_svg_to_mark(
     back to OpenSCAD's own ``import()`` in that case.
 
     White fills are treated as background and skipped (standard logo
-    semantics: dark ink on light ground).  Subpaths of one element keep
-    even-odd containment, so letter counters and outlined bands carve as
-    true holes.
+    semantics: dark ink on light ground), and so is a filled ``<rect>``
+    that covers the whole canvas whatever its colour — a dark-theme
+    export paints its ground as a rect, and carving it turned a line-art
+    mark into a square pocket.  Subpaths of one element keep even-odd
+    containment, so letter counters and outlined bands carve as true
+    holes.
     """
     # XML hardening for user-supplied SVGs: stdlib ElementTree already
     # refuses external-entity expansion, and billion-laughs requires
@@ -925,6 +965,7 @@ def parse_svg_to_mark(
         return None
 
     groups: list[list[Ring]] = []
+    canvas = _canvas_size(root)
     skip_tags = {
         "defs", "clippath", "mask", "symbol", "marker", "pattern",
         "metadata", "title", "desc", "style", "text", "tspan", "script",
@@ -997,7 +1038,12 @@ def parse_svg_to_mark(
             w, h = _num(elem.get("width")), _num(elem.get("height"))
             if w > 0 and h > 0:
                 ring = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
-                if has_fill:
+                if has_fill and _covers_canvas(ring, matrix, canvas):
+                    # The ground of the artwork, not the artwork: a filled
+                    # rect spanning the canvas is a background plate (the
+                    # dark-theme logo export), never ink to carve.
+                    pass
+                elif has_fill:
                     local_rings.append(ring)
                 elif has_stroke:
                     stroke_pts.append((ring, True))
