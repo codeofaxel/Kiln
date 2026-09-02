@@ -129,6 +129,7 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-mock>=3.6",
+    "pytest-xdist>=3.5",
     "responses>=0.20",
     "Pillow>=9.0",
     # networkx + lxml are what trimesh's 3MF loader AND exporter need.  Only

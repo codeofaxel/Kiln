@@ -213,13 +213,29 @@ jobs:
         # enumeration slipped a detection gap on 2026-06-27.  Exit 2 = leak.
         run: python3 scripts/audit_moat_comment_leak.py
 
+      # Parallel, and quiet.  The suite is ~14.4k tests; run serially with
+      # per-test output it took 24 minutes a job.  `-n auto` spreads it over
+      # the runner's cores, and coverage is measured on ONE version because
+      # four identical percentages cost three extra traced runs.
       - name: Run kiln tests
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
-        run: cd kiln && python -m pytest tests/ -v --cov=kiln --cov-report=term-missing
+        run: |
+          cd kiln
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pytest tests/ -q -n auto --cov=kiln --cov-report=term-missing
+          else
+            python -m pytest tests/ -q -n auto
+          fi
 
       - name: Run octoprint-cli tests
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
-        run: cd octoprint-cli && python -m pytest tests/ -v --cov=octoprint_cli --cov-report=term-missing
+        run: |
+          cd octoprint-cli
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pytest tests/ -q --cov=octoprint_cli --cov-report=term-missing
+          else
+            python -m pytest tests/ -q
+          fi
 
       - name: Served-surface leak gate
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
