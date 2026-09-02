@@ -131,10 +131,15 @@ dev = [
     "pytest-mock>=3.6",
     "responses>=0.20",
     "Pillow>=9.0",
-    # networkx + lxml exist for trimesh's optional 3MF *exporter*, which only
-    # test fixtures use (tests/test_community_autofire.py builds 3MF files
-    # with mesh.export).  Production never exports 3MF — file_metadata.py
-    # reads 3MF as a ZIP — so these stay out of the core dependencies.
+    # networkx + lxml are what trimesh's 3MF loader AND exporter need.  Only
+    # test fixtures export 3MF (tests/test_community_autofire.py builds 3MF
+    # files with mesh.export).  Production never reads 3MF through trimesh:
+    # the stage encoder (mesh_payload.py) has its own standard-library 3MF
+    # reader, and file_metadata.py reads 3MF as a ZIP.  So they stay out of
+    # the core dependencies — and no production path may start depending on
+    # trimesh's loader, because a dev install has these and a user install
+    # does not, which is how the stage broke for users while every test
+    # passed (2026-09-01).
     "networkx>=3.4",
     "lxml>=5.0",
     # manifold3d is trimesh's boolean backend.  Only test fixtures cut one

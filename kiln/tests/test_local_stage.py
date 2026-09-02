@@ -816,3 +816,58 @@ def _walk_strings(node, path="result"):
         yield path, node
 
 
+
+
+class TestPaintedThreeMfServesWithoutTrimeshLoader:
+    """The panel's fetch verb serves a painted 3MF on the install
+    ``pip install kiln3d`` produces — one without lxml or networkx, which
+    trimesh's 3MF loader needs and a plain install never gets.
+
+    Measured live 2026-09-01: ``paint_mesh_regions`` wrote a good painted
+    3MF, the panel fetched it through ``kiln_viewer_payload``, the encoder
+    died on ``No module named 'lxml'``, and the user saw "preview
+    unavailable" over a file the PNG preview had already shown correctly.
+    Every tool that returns a colored 3MF reaches the stage through this
+    one verb, so this is the door test for all of them.
+    """
+
+    def test_the_verb_serves_a_painted_3mf(self, tmp_path, monkeypatch):
+        import base64
+
+        import anyio
+
+        np = pytest.importorskip("numpy")
+        trimesh = pytest.importorskip("trimesh")
+        from trimesh.exceptions import ExceptionWrapper
+        from trimesh.exchange import load as _load
+
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        mesh = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+        mesh.apply_translation((100.0, 100.0, 5.0))
+        tris = [tuple(map(tuple, mesh.vertices[f])) for f in mesh.faces]
+        colors = ["#F72323" if all(v[2] > 9.9 for v in t) else "#2366F7" for t in tris]
+        painted = tmp_path / "painted.3mf"
+        compose_painted_3mf(tris, colors, output_path=str(painted))
+
+        missing = ModuleNotFoundError("No module named 'lxml'", name="lxml")
+        monkeypatch.setitem(_load.mesh_loaders, "3mf", ExceptionWrapper(missing))
+        with pytest.raises(ModuleNotFoundError):
+            trimesh.load(str(painted))  # the pin bites
+
+        _cache_the_stage()
+        mcp = _fastmcp()
+        local_stage.install(mcp)
+        anyio.run(mcp.read_resource, local_stage.MESH_VIEWER_RESOURCE_URI)
+        fn = mcp._tool_manager._tools["kiln_viewer_payload"].fn
+        served = fn(artifact_token=local_stage._mint(str(painted)))
+        assert served.get("success") is not False, served
+        payload = served[local_stage.VIEWER_STRUCTURED_CONTENT_KEY]
+        assert payload["kind"] == "kiln.mesh.v1"
+        assert payload["counts"]["triangles"] == 12
+        rgba = np.frombuffer(
+            base64.b64decode(payload["vertex_colors"]), dtype=np.uint8
+        ).reshape(-1, 4)
+        assert {tuple(c) for c in rgba.tolist()} == {
+            (247, 35, 35, 255), (35, 102, 247, 255),
+        }
