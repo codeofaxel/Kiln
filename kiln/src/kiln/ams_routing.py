@@ -597,11 +597,13 @@ def advise_colours(
     )
     matched: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
+    by_slot = {t.slot: t for t in trays}
     for hex6, match in zip(wanted, plan.matches, strict=True):
         entry = {
             "color": f"#{hex6}",
             "name": _colour_name(hex6),
             "nearest": match["tray"],
+            "nearest_color": None,
             "slot": match["slot"],
             "delta_e": match["delta_e"],
         }
@@ -609,9 +611,12 @@ def advise_colours(
             cands = [(t, _delta_e(hex6, t.hex6)) for t in trays if t.hex6]
             nearest = min(cands, key=lambda c: c[1]) if cands else None
             entry["nearest"] = nearest[0].label if nearest else None
+            entry["nearest_color"] = f"#{nearest[0].hex6}" if nearest else None
             entry["delta_e"] = round(nearest[1], 1) if nearest else None
             missing.append(entry)
         else:
+            tray_hex = by_slot[match["slot"]].hex6
+            entry["nearest_color"] = f"#{tray_hex}" if tray_hex else None
             matched.append(entry)
 
     if not missing:

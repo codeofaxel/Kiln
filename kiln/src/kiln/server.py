@@ -13008,13 +13008,25 @@ def compose_multicolor_3mf(
             )
         )
 
-    return _compose(
+    result = _compose(
         color_parts,
         output_path=output_path or None,
         plate_width=plate_width,
         plate_depth=plate_depth,
         printer_id=printer_id or None,
     )
+    if result.get("success"):
+        # The part colours were chosen here; say now whether they are loaded.
+        try:
+            advisory = _spool_advisory(
+                [p.get("color") for p in parts], printer_name=printer_id or None,
+            )
+        except Exception as exc:  # advice never fails a good composition
+            logger.debug("compose: spool advisory skipped (%s)", exc)
+            advisory = None
+        if advisory:
+            result["ams_advisory"] = advisory
+    return result
 
 
 # auto_arrange_parts_on_plate — moved to plugins/design_reasoning_tools.py

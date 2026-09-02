@@ -282,3 +282,47 @@ class TestArrangeThenComposeDoors:
             os.unlink(stl)
         assert recorder.kwargs is not None, "the door never reached the composer"
         assert recorder.kwargs.get("printer_id") == "bambu_a1_mini"
+
+
+class TestComposeSaysWhetherColoursAreLoaded:
+    """compose_multicolor_3mf chooses part colours, so it carries the advisory."""
+
+    def _compose(self, monkeypatch, reply):
+        from kiln import server
+        from kiln.server import compose_multicolor_3mf
+
+        seen: dict[str, Any] = {}
+
+        def fake(colours, *, printer_name=None, adapter=None):
+            seen["colours"] = list(colours)
+            seen["printer_name"] = printer_name
+            return reply
+
+        monkeypatch.setattr(server, "_spool_advisory", fake)
+        body = _write_stl(_off_plate_box(20.0))
+        mark = _write_stl(_off_plate_box(8.0))
+        try:
+            with patch("kiln.server._check_auth", side_effect=_no_auth):
+                result = compose_multicolor_3mf(
+                    parts=[
+                        {"stl_path": body, "extruder": 1, "color": "#FFFFFF"},
+                        {"stl_path": mark, "extruder": 2, "color": "#F72323"},
+                    ],
+                    printer_id="bambu_a1",
+                )
+        finally:
+            os.unlink(body)
+            os.unlink(mark)
+        return result, seen
+
+    def test_part_colours_are_checked(self, monkeypatch):
+        result, seen = self._compose(monkeypatch, {"verdict": "mismatch", "message": "No red loaded."})
+        assert result["success"] is True, result.get("error")
+        assert result["ams_advisory"]["verdict"] == "mismatch"
+        assert seen["colours"] == ["#FFFFFF", "#F72323"]
+        assert seen["printer_name"] == "bambu_a1"
+
+    def test_silence_when_there_is_nothing_to_say(self, monkeypatch):
+        result, _ = self._compose(monkeypatch, None)
+        assert result["success"] is True
+        assert "ams_advisory" not in result
