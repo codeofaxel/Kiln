@@ -5,8 +5,7 @@ spans uniform-prism (low-stress regression), gradual transitions,
 material variants of the same geometry (for tier-diff coverage), and
 extreme cross-section discontinuities.  Built per the simulation-
 engineering review report at /tmp/thermal_stress_model_research.md
-plus 12 additional cases that exercise the per-material stress_factor
-seam between free and Pro.
+plus 12 material variants of the same geometries.
 
 Key fixtures:
 
@@ -16,15 +15,12 @@ Key fixtures:
   `max_ratio = 1.0` → "low" verdict on any uniform-cross-section
   prism, regardless of material.
 - `wide_base_tower_*` and `flange_to_pin_*` — genuine cross-section
-  discontinuities the model SHOULD catch.  Per-material stress_factor
-  determines whether the verdict lands "moderate" (PLA-forgiving) or
-  "critical" (ABS / Nylon / PP / PEEK / PC amplify).
+  discontinuities the model SHOULD catch.  A per-material stress
+  factor scales the verdict; the free tier uses one factor for every
+  material.
 
-Tier seam: 18 cases land at different risk_level buckets between
-free (uniform stress_factor=1.0) and Pro (curated per-material
-values from kiln-pro's printability_pro_overlay).  Free over-flags
-PLA / PETG-relative cases (no stress reduction), Pro escalates
-warp-prone materials (PP / Nylon / PEEK / PC stress_factor > 1.0).
+The overlay-tuned verdicts for the same sweep are pinned in kiln-pro's
+suite.
 """
 
 from __future__ import annotations
@@ -34,23 +30,6 @@ import struct
 import pytest
 
 from kiln.printability import analyze_printability
-
-
-def _overlay_available() -> bool:
-    try:
-        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
-    except ImportError:
-        return False
-    try:
-        return bool(pro_features.is_available("printability_overlay"))
-    except Exception:  # noqa: BLE001
-        return False
-
-
-_pro_overlay_required = pytest.mark.skipif(
-    not _overlay_available(),
-    reason="requires kiln-pro printability_overlay for tier-specific verdicts",
-)
 
 
 @pytest.fixture
@@ -250,44 +229,6 @@ _GEOM: list = [
 ]
 
 
-# Pro tier outputs (curated material-physics-aware stress_factor).
-# Generated against the corrected wall-vs-face thermal-stress model.
-_PRO_EXPECTED: dict[str, str] = {
-    "cube_pla_20": "low", "cube_petg_50": "low",
-    "tall_tower_pla": "low", "plate_pla": "low",
-    "cylinder_solid_pla": "low", "thin_wall_box_pla": "low",
-    "coaster_pla": "low", "phone_stand_petg": "low",
-    "pla_cube_30": "low", "pla_box_60": "low",
-    "petg_box_40": "low", "pla_disc": "low",
-    "abs_cube_30": "low", "nylon_cube_30": "low",
-    "pp_cube_30": "moderate",
-    "cone_step_pla": "low", "bracket_unfilleted": "low",
-    "coupler_abs": "moderate", "bottle_neck_pla": "low",
-    # Slenderness-gated (2026-08-25): forgiving materials (stress
-    # factor <= 0.8) with a chunky neck (hydraulic thickness >= 4.5 mm
-    # in the 6 mm band above the peak zone) downgrade — a 20 mm solid
-    # PLA/PETG tower or a 60x10 PETG crossbar doesn't crack the way
-    # the same ratio does over a thin fin.  High-shrink materials and
-    # the free tier keep the undowngraded verdicts below/above.
-    "T_junction_petg": "low",
-    "step_pyramid_pla": "low",
-    "bushing_petg": "low",
-    "step_pyramid_abs": "moderate", "step_pyramid_nylon": "high",
-    "cone_step_abs": "moderate", "cone_step_nylon": "moderate",
-    "cone_step_pp": "high", "cone_step_peek": "moderate",
-    "wide_base_tower_pla": "low", "wide_base_tower_petg": "low",
-    "wide_base_tower_abs": "critical", "wide_base_tower_nylon": "critical",
-    "pcb_mount_abs": "critical", "funnel_step_pc": "critical",
-    "bracket_pa6_gf": "moderate", "gear_blank_cf_nylon": "high",
-    "dumbbell_peek": "critical", "flange_to_pin_abs": "critical",
-    "multi_step_tower_pc": "high",
-    "t_joint_unfilleted_pp": "critical",
-    # 6 mm solid PLA neck: slenderness gate steps high down to
-    # moderate — sturdy enough to absorb the contraction.
-    "dumbbell_pla": "moderate", "flange_to_pin_nylon": "critical",
-}
-
-
 # Free tier outputs (uniform stress_factor=1.0 — over-flags PLA /
 # PETG-relative cases, under-flags warp-prone-material cases).
 _FREE_EXPECTED: dict[str, str] = {
@@ -346,30 +287,6 @@ def test_thermal_stress_calibration_free_tier(
     expected = _FREE_EXPECTED[name]
     assert report.thermal_stress.risk_level == expected, (
         f"{name} (free, {material}): expected {expected}, got "
-        f"{report.thermal_stress.risk_level} "
-        f"(max_ratio={report.thermal_stress.max_area_change_ratio})"
-    )
-
-
-@_pro_overlay_required
-@pytest.mark.parametrize("name,material,kind,geom", _GEOM)
-def test_thermal_stress_calibration_pro_tier(
-    tmp_path, name, material, kind, geom,
-):
-    """PRO-tier regression — pins overlay-tuned thermal-stress verdict.
-
-    Pro overlay supplies per-material stress_factor (PLA 0.6, PETG 0.7,
-    ABS 1.5, Nylon 1.6, PP 2.0, PEEK 1.5, PC 1.8) — multiplies the
-    corrected max_ratio to produce material-aware verdicts.  PLA-
-    relative cases stay low even at moderate ratios; warp-prone
-    materials escalate.
-    """
-    path = _build(tmp_path, name, material, kind, geom)
-    report = analyze_printability(path, material=material)
-    assert report.thermal_stress is not None, f"{name}: no thermal_stress report"
-    expected = _PRO_EXPECTED[name]
-    assert report.thermal_stress.risk_level == expected, (
-        f"{name} (pro, {material}): expected {expected}, got "
         f"{report.thermal_stress.risk_level} "
         f"(max_ratio={report.thermal_stress.max_area_change_ratio})"
     )
