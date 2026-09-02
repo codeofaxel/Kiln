@@ -1782,6 +1782,44 @@ _CONSENT_FILE_ARG: dict[str, str] = {
 }
 
 
+def _consent_filament_line(
+    tool_name: str, file_value: str, printer_name: str | None
+) -> str | None:
+    """The colour routing the person is approving, in one line — or None.
+
+    Read from the same planner the print will use, against the AMS as it
+    is right now, so what the dialog says is what the printer does.  A
+    file whose filaments cannot be read gets no line rather than a guess;
+    a colour nothing loaded can supply is said in capitals, because the
+    yes being asked for would otherwise put the wrong colour on the part.
+    Never raises: a dialog that fails to open beats one that lies.
+    """
+    try:
+        from kiln.ams_routing import loaded_trays, plan_ams_mapping, read_file_filaments
+
+        local = (
+            file_value
+            if tool_name in ("slice_and_print", "retry_print_with_fix")
+            else _local_copy_of(file_value)
+        )
+        wanted = read_file_filaments(local).filaments
+        if not wanted or not any(f.hex6 for f in wanted):
+            return None
+        adapter = _resolve_adapter(printer_name)
+        if not hasattr(adapter, "get_ams_status"):
+            return None
+        trays = loaded_trays(adapter.get_ams_status())
+        if not trays:
+            return None
+        plan = plan_ams_mapping(wanted, trays)
+        if plan.ok:
+            return plan.summary + (" (" + "; ".join(plan.warnings) + ")" if plan.warnings else "")
+        return "MISSING COLOUR — " + plan.summary
+    except Exception as exc:  # noqa: BLE001 — the dialog must still open
+        logger.debug("consent: filament routing line skipped: %s", exc)
+        return None
+
+
 async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: Any):
     """Ask the person before this print starts.  Returns a reset token or None.
 
@@ -1823,6 +1861,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         extra={
             "material": arguments.get("material"),
             "printer model": arguments.get("printer_id"),
+            "filament slots": _consent_filament_line(tool_name, file_value, printer_name),
         },
     )
     action, detail = await ask_user_to_confirm(ctx, message)
@@ -2322,6 +2361,33 @@ _tool_limiter = _ToolRateLimiter()
 # the resolved name rides along so the confirmed upload can prove it is going
 # to the machine the user was actually shown.
 _pending_uploads: dict[str, tuple[str, str | None, str]] = {}
+
+#: Printer-side file name -> the local file it was uploaded from.  A later
+#: ``start_print`` names only the printer-side file; this is how it still
+#: learns what that file WANTS (its filament colours) without a round-trip
+#: to the printer.  Bounded, newest wins; a miss just means "not checked".
+_UPLOADED_FROM: dict[str, str] = {}
+_UPLOADED_FROM_MAX = 64
+
+
+def _remember_upload(remote_name: str | None, local_path: str | None) -> None:
+    if not remote_name or not local_path:
+        return
+    key = os.path.basename(str(remote_name))
+    _UPLOADED_FROM.pop(key, None)
+    _UPLOADED_FROM[key] = str(local_path)
+    while len(_UPLOADED_FROM) > _UPLOADED_FROM_MAX:
+        _UPLOADED_FROM.pop(next(iter(_UPLOADED_FROM)), None)
+
+
+def _local_copy_of(file_name: str | None) -> str | None:
+    """A readable local copy of a printer-side file name, or ``None``."""
+    if not file_name:
+        return None
+    if os.path.isfile(file_name):
+        return file_name
+    local = _UPLOADED_FROM.get(os.path.basename(file_name))
+    return local if local and os.path.isfile(local) else None
 
 # Rate limits: {tool_name: (min_interval_ms, max_per_minute)}.
 # Read-only tools have no limits.  Physically-dangerous tools get cooldowns.
@@ -5018,6 +5084,7 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
 
         result = adapter.upload_file(file_path)
         resp = result.to_dict()
+        _remember_upload(getattr(result, "file_name", None) or resp.get("file_name"), file_path)
         # Which machine now holds the file — start_print has to be aimed at
         # the same one, and on a multi-printer bench that is not a given.
         resp["printer_name"] = target_name
@@ -5104,6 +5171,7 @@ def upload_file_confirm(token: str) -> dict:
             )
         result = adapter.upload_file(file_path)
         resp = result.to_dict()
+        _remember_upload(getattr(result, "file_name", None) or resp.get("file_name"), file_path)
         resp["printer_name"] = target_name
         return resp
     except FileNotFoundError as exc:
@@ -5244,6 +5312,9 @@ def _resolve_use_ams(
     ams_mapping: list[int] | None,
     adapter: PrinterAdapter,
     material: str | None = None,
+    *,
+    file_path: str | None = None,
+    wanted: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve tri-state use_ams into a concrete routing decision.
 
@@ -5254,8 +5325,20 @@ def _resolve_use_ams(
         auto-routing prefers a tray whose ``tray_type`` matches (case-
         insensitive), falling back to the first loaded tray and
         attaching a warning when no match is found.
+    :param file_path: A local copy of the file about to print.  When it
+        declares its filaments (a sliced G-code, a Bambu ``.gcode.3mf``, a
+        painted ``.3mf``), each one is matched to the loaded tray of the
+        closest colour and material and the mapping is built from that —
+        see :mod:`kiln.ams_routing`.  A multi-colour file with a colour no
+        loaded spool can stand in for comes back ``blocked``: the file's
+        second filament used to feed from slot 2 whatever was in it.
+    :param wanted: The filaments themselves, when the caller already has
+        them; overrides ``file_path``.
     :returns: Dict with ``use_ams`` (bool), optional ``ams_mapping`` (list),
-        and optional ``warnings`` (list of human-readable strings).
+        optional ``warnings`` (list of human-readable strings), and — when
+        the file's filaments were known — ``plan`` (see
+        :class:`kiln.ams_routing.AmsPlan`) and ``blocked`` when routing
+        would put the wrong colour on the part.
     """
     # Normalize string/bool input
     if isinstance(use_ams, bool):
@@ -5400,6 +5483,57 @@ def _resolve_use_ams(
         }
 
     warnings_out: list[str] = []
+
+    # Colour-aware routing: when the file says which filaments it wants,
+    # match each to the loaded tray that is actually that colour.  The
+    # legacy single-tray pick below is the N=1 case with no colour to go on.
+    from kiln.ams_routing import loaded_trays as _loaded_trays
+    from kiln.ams_routing import plan_ams_mapping, read_file_filaments
+
+    if wanted is None and file_path:
+        wanted = read_file_filaments(file_path).filaments
+    if wanted and any(getattr(f, "hex6", None) for f in wanted):
+        trays = _loaded_trays(ams_info)
+        plan = plan_ams_mapping(list(wanted), trays)
+        if plan.ok:
+            resolved = list(plan.mapping)
+            if ams_mapping is not None and list(ams_mapping) != resolved:
+                warnings_out.append(
+                    "Explicit ams_mapping "
+                    f"{list(ams_mapping)} differs from what the loaded spools "
+                    f"suggest ({plan.summary}); using the explicit mapping."
+                )
+            warnings_out.extend(plan.warnings)
+            first = resolved[0]
+            first_type = next((t.material for t in trays if t.slot == first), "")
+            logger.info("AMS colour routing: %s", plan.summary)
+            return {
+                "use_ams": True,
+                "ams_mapping": None if ams_mapping is not None else resolved,
+                "warnings": warnings_out,
+                "selection": _ams_selection_record(first, first_type, ams_info),
+                "plan": plan.to_dict(),
+            }
+        if len(wanted) >= 2:
+            # A partial mapping is a wrong print.  Say which colour is
+            # missing and stop; the caller decides what to do about it.
+            logger.warning("AMS colour routing blocked: %s", plan.summary)
+            return {
+                "use_ams": True,
+                "ams_mapping": None,
+                "warnings": [
+                    "This file needs "
+                    f"{len(wanted)} filaments and the loaded spools cannot "
+                    f"supply them all: {plan.summary}. Load the missing "
+                    "colour, or pass an explicit ams_mapping to print it "
+                    "with a substitute."
+                ]
+                + plan.warnings,
+                "selection": None,
+                "plan": plan.to_dict(),
+                "blocked": True,
+            }
+        warnings_out.extend(plan.warnings)
 
     # Material-aware tray selection when caller hints at the material.
     chosen = None
@@ -5710,8 +5844,23 @@ def start_print(
         # Build kwargs for Bambu-specific print parameters.
         print_kwargs: dict[str, Any] = {}
 
-        # Resolve tri-state use_ams: "auto" | "true"/"false" | bool
-        _ams_decision = _resolve_use_ams(use_ams, ams_mapping, adapter)
+        # Resolve tri-state use_ams: "auto" | "true"/"false" | bool.  The
+        # local copy (when this session uploaded the file) says which
+        # colours it wants, so the mapping is by colour, not by slot number.
+        _ams_decision = _resolve_use_ams(
+            use_ams, ams_mapping, adapter, file_path=_local_copy_of(file_name)
+        )
+        if _ams_decision.get("blocked"):
+            _audit(
+                "start_print", "ams_routing_blocked",
+                details={"file": file_name, "plan": _ams_decision.get("plan")},
+            )
+            return _error_dict(
+                " ".join(_ams_decision.get("warnings") or ["AMS routing blocked."]),
+                code="AMS_COLOR_MISMATCH",
+                retryable=False,
+                extra={"ams_plan": _ams_decision.get("plan")},
+            )
         if _ams_decision["use_ams"]:
             print_kwargs["use_ams"] = True
         if _ams_decision.get("ams_mapping") is not None:
@@ -5929,6 +6078,15 @@ def start_print(
         # Say which machine took the job.  With more than one printer on the
         # bench, "started" on its own does not tell the caller where to look.
         out["printer_name"] = target_name
+        # Say how the filaments were routed, in words, every time: a
+        # print that silently fed the wrong slot is the failure this exists
+        # to end, so the routing is part of the answer rather than a log.
+        if _ams_decision.get("plan"):
+            out["ams_plan"] = _ams_decision["plan"]
+        if _ams_decision.get("selection"):
+            out["ams_selection"] = _ams_decision["selection"]
+        if _ams_decision.get("warnings"):
+            out["ams_warnings"] = list(_ams_decision["warnings"])
         if is_resume_3mf:
             out["resume_3mf_detected"] = True
         if reasserted is not None:

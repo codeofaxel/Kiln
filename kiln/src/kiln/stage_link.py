@@ -274,6 +274,10 @@ _INPUT_MARKERS = (
 _OUTPUT_MARKERS = (
     "output", "result", "produced", "final", "new", "repaired", "decorated",
     "textured", "merged", "split", "generated", "exported", "written",
+    # A preview is something the tool MADE, and the stage exists to show
+    # what was made.  Without this a preview-only paint named only its
+    # input, and the panel showed a grey jar beside a painted PNG.
+    "preview",
 )
 
 

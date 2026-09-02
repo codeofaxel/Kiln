@@ -752,8 +752,19 @@ def quick_print(
                 ams_mapping,
                 adapter,
                 material=material,
+                # The G-code just sliced says which colours it wants, so
+                # each extruder is routed to the tray of that colour.
+                file_path=ctx.get("gcode_path"),
             )
             ams_warnings = list(ams_decision.get("warnings") or [])
+            if ams_decision.get("blocked"):
+                return PipelineStep(
+                    name="start_print",
+                    success=False,
+                    message="Not started: " + " ".join(ams_warnings),
+                    duration_seconds=time.time() - step_start,
+                    data={"ams_plan": ams_decision.get("plan"), "ams_warnings": ams_warnings},
+                )
             ams_selection = None
             if ams_decision.get("use_ams"):
                 start_kwargs["use_ams"] = True
@@ -787,8 +798,13 @@ def quick_print(
                 step_data["ams_selection"] = ams_selection
             if ams_warnings:
                 step_data["ams_warnings"] = ams_warnings
+            ams_plan = ams_decision.get("plan") if "ams_decision" in locals() else None
+            if ams_plan:
+                step_data["ams_plan"] = ams_plan
             msg = _start_print_step_message(verdict, remote_name)
-            if ams_selection is not None:
+            if ams_plan and len(ams_plan.get("matches") or []) > 1:
+                msg += f" (AMS: {ams_plan.get('summary')})"
+            elif ams_selection is not None:
                 msg += (
                     f" (AMS slot {ams_selection['slot']} — "
                     f"{ams_selection['type']})"
@@ -1219,22 +1235,31 @@ def reslice_and_print(
                     start_kwargs["use_ams"] = use_ams
                 if ams_mapping is not None:
                     start_kwargs["ams_mapping"] = ams_mapping
-            elif defer_multi_material_3mf:
-                # Multi-material (or unreadable) 3MF — defer to the adapter's
-                # multi-material auto-detect + single-filament auto-route,
-                # which peek the loaded-tray list and so handle the 255 quirk.
-                pass
             else:
-                # Raw gcode OR confidently single-material 3MF — route through
-                # the shared resolver for the 255 fix + material-aware tray
-                # match + selection record (parity with quick_print).  Lazy
-                # import avoids the server<->pipelines cycle (R1).
+                # Every 3MF and raw G-code goes through the shared resolver.
+                # A multi-material 3MF used to be deferred to the adapter,
+                # which fed extruder N from slot N whatever was loaded there;
+                # the resolver now reads the colours the file wants and
+                # matches them to the trays.  When it cannot read them, the
+                # old deferral stands.  Lazy import avoids the
+                # server<->pipelines cycle (R1).
                 from kiln.server import _resolve_use_ams
 
                 ams_decision = _resolve_use_ams(
-                    "auto", None, adapter, material=material
+                    "auto", None, adapter, material=material,
+                    file_path=local_3mf or ctx.get("gcode_path"),
                 )
                 ams_warnings = list(ams_decision.get("warnings") or [])
+                if ams_decision.get("blocked"):
+                    return PipelineStep(
+                        name="start_print",
+                        success=False,
+                        message="Not started: " + " ".join(ams_warnings),
+                        duration_seconds=time.time() - step_start,
+                        data={"ams_plan": ams_decision.get("plan"), "ams_warnings": ams_warnings},
+                    )
+                if defer_multi_material_3mf and not ams_decision.get("plan"):
+                    ams_decision = {"use_ams": False, "warnings": ams_warnings}
                 if ams_decision.get("use_ams"):
                     start_kwargs["use_ams"] = True
                     if ams_decision.get("ams_mapping") is not None:
@@ -1255,8 +1280,13 @@ def reslice_and_print(
                 step_data["ams_selection"] = ams_selection
             if ams_warnings:
                 step_data["ams_warnings"] = ams_warnings
+            ams_plan = ams_decision.get("plan") if "ams_decision" in locals() else None
+            if ams_plan:
+                step_data["ams_plan"] = ams_plan
             msg = _start_print_step_message(verdict, remote_name)
-            if ams_selection is not None:
+            if ams_plan and len(ams_plan.get("matches") or []) > 1:
+                msg += f" (AMS: {ams_plan.get('summary')})"
+            elif ams_selection is not None:
                 msg += (
                     f" (AMS slot {ams_selection['slot']} — "
                     f"{ams_selection['type']})"
