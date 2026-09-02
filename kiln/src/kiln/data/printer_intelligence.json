@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "description": "Printer intelligence database: firmware quirks, material compatibility, calibration guidance, and known failure modes. Keyed by the same printer_id as safety_profiles.json.",
     "updated": "2025-02-11",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Per-printer quirks, calibration recipes, and failure-mode playbooks are available in Kiln Pro; see https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (each printer's quirks, its calibration recipes, and the failures it is known for) is available in Kiln Pro; see https://kiln3d.com/pricing."
   },
   "default": {
     "display_name": "Generic FDM Printer",

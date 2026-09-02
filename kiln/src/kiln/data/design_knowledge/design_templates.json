@@ -2,7 +2,7 @@
   "_meta": {
     "version": "2.0.0",
     "domain": "fdm",
-    "description": "Discovery catalog of functional design templates for FDM printing. Each entry is identifiable by display_name, use_cases, and material compatibility — enough for an agent to surface the right template to the user. Engineering-grade depth for each template is available in Kiln Pro.",
+    "description": "Discovery catalog of functional design templates for FDM printing. Each entry is identifiable by display_name, use_cases, and material compatibility — enough for an agent to surface the right template to the user. Engineering depth for each template is available in Kiln Pro.",
     "_data_quality": {
       "last_audit_date": "2026-05-05",
       "primary_sources": [
@@ -12,7 +12,7 @@
        ],
       "methodology": "Conservative safety-floor values appropriate for AI-controlled FDM printing without expert supervision. Deeper curated engineering values ship in Kiln Pro."
     },
-    "_split_note": "Discovery + safety-floor profiles for AI-controlled FDM printing. Curated engineering depth for every template is available in Kiln Pro. See https://kiln3d.com/pricing."
+    "_split_note": "Discovery + safety-floor profiles for AI-controlled FDM printing. Engineering depth for every template (how to size it, what goes wrong, and why) is available in Kiln Pro. See https://kiln3d.com/pricing."
   },
   "snap_fit_cantilever": {
     "display_name": "Cantilever Snap Fit",
