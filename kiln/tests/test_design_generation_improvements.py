@@ -1605,20 +1605,18 @@ class TestMeshSimplification:
         assert "_simplified" in result["path"]
 
 
-# The scorecard_weights overlay a licensed caller resolves.  Kept here
-# so the tier tests below compare against the real shipped values.
-_PRO_SCORECARD_OVERLAY = {
+# A stand-in scorecard overlay with the same shape as the real one and
+# made-up values.  The tests below only need SOME overlay to be present;
+# the shipped weighting and ladder are judged in kiln-pro's suite.
+_STAND_IN_SCORECARD_OVERLAY = {
     "overall_weights": {
-        "printability": 0.35,
-        "structural": 0.25,
+        "printability": 0.40,
+        "structural": 0.30,
         "efficiency": 0.20,
-        "quality": 0.20,
+        "quality": 0.10,
     },
-    "grade_thresholds": {"A": 90, "B": 80, "C": 65, "D": 50},
+    "grade_thresholds": {"A": 95, "B": 85, "C": 70, "D": 55},
 }
-
-# Best to worst, so a higher index is a harsher verdict.
-_GRADE_ORDER = ["A", "B", "C", "D", "F"]
 
 
 class TestDesignScorecard:
@@ -1659,10 +1657,9 @@ class TestDesignScorecard:
             design_scorecard(str(bad))
 
     # ----------------------------------------------------------------
-    # Tier seam — the SCALE is shared.  Every tier blends the four
-    # factors 35/25/20/20 and reads the same A>=90 ladder, so a letter
-    # means one thing.  The overlay's lever is DEPTH: curated
-    # per-factor deduction rules, which change what gets flagged.
+    # Tier seam — with no overlay the free path blends with the
+    # published weights and reads the published ladder; an overlay may
+    # supply its own, and the engine applies exactly what it is given.
     # ----------------------------------------------------------------
 
     def test_no_licence_uses_the_published_weighting(self, tmp_path, monkeypatch):
@@ -1713,135 +1710,43 @@ class TestDesignScorecard:
             expected = "F"
         assert result["grade"] == expected
 
-    def test_narrow_base_tower_grades_the_same_with_and_without_a_licence(
-        self, tmp_path, monkeypatch,
-    ):
-        """The measured regression: a 10x10x110 mm tower (11:1 aspect
-        ratio, narrow base) scored 85/"A" with no overlay and 84/"B"
-        with one, off identical per-factor scores and identical notes.
-        The headline was the only thing that moved, and it moved the
-        one direction that hurts."""
+    def test_overlay_weights_are_applied(self, tmp_path, monkeypatch):
+        """An overlay's ``overall_weights`` drive the blend."""
         from kiln.generation import validation
-
-        f = str(tmp_path / "tower.stl")
-        _write_box_stl(f, 10.0, 10.0, 110.0)
-
-        monkeypatch.setattr(
-            "kiln.design_intelligence.load_pro_overlay_or_empty", lambda kind: {},
-        )
-        no_licence = validation.design_scorecard(f)
 
         monkeypatch.setattr(
             "kiln.design_intelligence.load_pro_overlay_or_empty",
-            lambda kind: _PRO_SCORECARD_OVERLAY,
-        )
-        licensed = validation.design_scorecard(f)
-
-        # The part really is the flagged shape this test is about.
-        notes = no_licence["structural"]["notes"]
-        assert any("aspect ratio" in n.lower() for n in notes), notes
-        assert any("narrow base" in n.lower() for n in notes), notes
-
-        assert no_licence["grade"] == licensed["grade"]
-        assert no_licence["overall_score"] == licensed["overall_score"]
-
-    def test_no_licence_verdict_never_reads_more_generous(
-        self, tmp_path, monkeypatch,
-    ):
-        """The engine-level invariant behind the case above: across
-        shapes, the unlicensed headline never comes out above the
-        licensed one.  Depth may differ; the scale may not."""
-        from kiln.generation import validation
-
-        shapes = {
-            "cube.stl": (20.0, 20.0, 20.0),
-            "tower.stl": (10.0, 10.0, 110.0),
-            "mild_tower.stl": (10.0, 10.0, 60.0),
-            "thin_plate.stl": (40.0, 4.0, 44.0),
-        }
-        for name, (sx, sy, sz) in shapes.items():
-            f = str(tmp_path / name)
-            _write_box_stl(f, sx, sy, sz)
-
-            monkeypatch.setattr(
-                "kiln.design_intelligence.load_pro_overlay_or_empty",
-                lambda kind: {},
-            )
-            no_licence = validation.design_scorecard(f)
-
-            monkeypatch.setattr(
-                "kiln.design_intelligence.load_pro_overlay_or_empty",
-                lambda kind: _PRO_SCORECARD_OVERLAY,
-            )
-            licensed = validation.design_scorecard(f)
-
-            assert no_licence["overall_score"] <= licensed["overall_score"], (
-                f"{name}: unlicensed score {no_licence['overall_score']} reads "
-                f"above licensed {licensed['overall_score']}"
-            )
-            assert _GRADE_ORDER.index(no_licence["grade"]) >= _GRADE_ORDER.index(
-                licensed["grade"]
-            ), (
-                f"{name}: unlicensed grade {no_licence['grade']} is kinder than "
-                f"licensed {licensed['grade']}"
-            )
-
-    def test_pro_tier_uses_curated_weighting(self, tmp_path, monkeypatch):
-        """Pro tier (overlay populated): 35/25/20/20 weighting applies.
-        Overall = round(p*0.35 + s*0.25 + e*0.20 + q*0.20)."""
-        from kiln.generation import validation
-
-        pro_overlay = {
-            "overall_weights": {
-                "printability": 0.35,
-                "structural": 0.25,
-                "efficiency": 0.20,
-                "quality": 0.20,
-            },
-            "grade_thresholds": {"A": 90, "B": 80, "C": 65, "D": 50},
-        }
-        monkeypatch.setattr(
-            "kiln.design_intelligence.load_pro_overlay_or_empty", lambda kind: pro_overlay,
+            lambda kind: _STAND_IN_SCORECARD_OVERLAY,
         )
         f = str(tmp_path / "cube.stl")
         _write_cube_stl(f, 20.0)
         result = validation.design_scorecard(f)
 
-        p = result["printability"]["score"]
-        s = result["structural"]["score"]
-        e = result["efficiency"]["score"]
-        q = result["quality"]["score"]
-        expected = round(p * 0.35 + s * 0.25 + e * 0.20 + q * 0.20)
+        w = _STAND_IN_SCORECARD_OVERLAY["overall_weights"]
+        expected = round(
+            result["printability"]["score"] * w["printability"]
+            + result["structural"]["score"] * w["structural"]
+            + result["efficiency"]["score"] * w["efficiency"]
+            + result["quality"]["score"] * w["quality"]
+        )
         assert result["overall_score"] == expected
 
-    def test_pro_tier_grade_ladder_still_applies(self, tmp_path, monkeypatch):
-        """An overlay-supplied ladder is still read and applied.  It
-        now matches the public one — the upgrade is depth, not a
-        different meaning for the same letter."""
+    def test_overlay_grade_ladder_is_applied(self, tmp_path, monkeypatch):
+        """An overlay-supplied ladder is read and applied verbatim — a
+        ladder nothing can reach turns a good cube into an F."""
         from kiln.generation import validation
 
-        pro_overlay = {
-            "grade_thresholds": {"A": 90, "B": 80, "C": 65, "D": 50},
-        }
+        unreachable = {"A": 101, "B": 101, "C": 101, "D": 101}
         monkeypatch.setattr(
-            "kiln.design_intelligence.load_pro_overlay_or_empty", lambda kind: pro_overlay,
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: {"grade_thresholds": unreachable},
         )
         f = str(tmp_path / "cube.stl")
         _write_cube_stl(f, 20.0)
         result = validation.design_scorecard(f)
 
-        overall = result["overall_score"]
-        if overall >= 90:
-            expected = "A"
-        elif overall >= 80:
-            expected = "B"
-        elif overall >= 65:
-            expected = "C"
-        elif overall >= 50:
-            expected = "D"
-        else:
-            expected = "F"
-        assert result["grade"] == expected
+        assert result["overall_score"] >= 50, "fixture should be a decent cube"
+        assert result["grade"] == "F"
 
     def test_shape_identical_across_tiers(self, tmp_path, monkeypatch):
         """The dict shape must not drift between free and Pro paths —
@@ -1858,13 +1763,7 @@ class TestDesignScorecard:
 
         monkeypatch.setattr(
             "kiln.design_intelligence.load_pro_overlay_or_empty",
-            lambda kind: {
-                "overall_weights": {
-                    "printability": 0.35, "structural": 0.25,
-                    "efficiency": 0.20, "quality": 0.20,
-                },
-                "grade_thresholds": {"A": 90, "B": 80, "C": 65, "D": 50},
-            },
+            lambda kind: _STAND_IN_SCORECARD_OVERLAY,
         )
         pro = validation.design_scorecard(f)
 

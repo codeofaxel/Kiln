@@ -13,9 +13,8 @@ replaces the lookup with a deterministic verdict; when kiln-pro is
 NOT installed the import fails and the function falls back to the
 historic path — both are exercised here.
 
-Skip semantics: these tests do NOT need the engineering overlay
-(materials.json moat fields).  They only need
-``kiln_pro.engineering.calibration_coach`` to be importable, and
+Skip semantics: these tests do NOT need the kiln-pro overlay.  They
+only need ``kiln_pro.engineering.calibration_coach`` to be importable, and
 several tests stub it explicitly.  The ``requires_engineering_overlay``
 marker is therefore intentionally NOT applied here.
 """

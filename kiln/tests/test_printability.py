@@ -1424,24 +1424,20 @@ class TestAnalyzePrintability:
             assert "thin_walls" in d
 
     def test_connected_components_single_body(self):
-        # A single closed cube must report ``connected_components = 1``
-        # — the kiln-pro overlay branches on this field to apply
-        # lattice / scaffold rules vs continuous-wall rules.
+        # A single closed cube must report ``connected_components = 1``.
+        # Callers branch on this field, so the count has to be right.
         with tempfile.TemporaryDirectory() as tmpdir:
             path = _write_stl(tmpdir, _outward_cube_triangles(10.0))
             report = analyze_printability(path)
             assert report.connected_components == 1, (
                 f"single cube reports {report.connected_components} "
-                "components — kiln-pro overlay's lattice detection would "
-                "misclassify"
+                "components — callers branching on this would misclassify it"
             )
 
     def test_connected_components_lattice(self):
         # A cubic lattice must report multiple components (one per
         # axis-line family).  The exact count is fixture-dependent;
-        # what matters for the kiln-pro overlay is "> threshold" so it
-        # routes through strut-specific load-bearing thresholds rather
-        # than continuous-wall floors.
+        # what callers need is that it reads clearly above one.
         with tempfile.TemporaryDirectory() as tmpdir:
             tris = _cubic_lattice_triangles(cell_mm=4.0, strut_mm=1.5, grid_n=3)
             path = _write_stl(tmpdir, tris)
@@ -1494,12 +1490,10 @@ class TestAnalyzePrintability:
             assert report.component_size_uniformity == 1.0
 
     def test_genus_solid_cube_is_zero(self):
-        # A closed solid (zero through-holes) must report genus 0.  The
-        # kiln-pro overlay's planned second-signal strut classifier
-        # depends on this baseline being right: every clean continuous-
-        # wall body reads genus 0, so a positive genus reliably means
-        # "topologically complex" (handles, through-holes, lattice
-        # scaffolds — see ``test_genus_curved_lattice_signal_for_pro``).
+        # A closed solid (zero through-holes) must report genus 0.
+        # That baseline is what makes a positive genus meaningful:
+        # every clean continuous-wall body reads 0, so anything above
+        # it is topologically complex (handles, through-holes).
         with tempfile.TemporaryDirectory() as tmpdir:
             path = _write_stl(tmpdir, _outward_cube_triangles(10.0))
             report = analyze_printability(path)
@@ -1616,11 +1610,11 @@ class TestAnalyzePrintability:
 
     def test_genus_cubic_lattice_caught_by_n_components_not_genus(self):
         # Cubic lattice composed of disjoint bars: each bar is a closed
-        # box (genus 0), the total is the sum (0).  The strut classifier
-        # routes this through ``connected_components`` (existing
-        # signal), NOT through genus.  This test pins the
-        # "complementary signals" property — n_components catches
-        # multi-body lattices, genus catches single-component scaffolds.
+        # box (genus 0), the total is the sum (0).  A caller sees this
+        # shape through ``connected_components``, NOT through genus.
+        # This test pins the complementary-signals property —
+        # n_components catches multi-body lattices, genus catches
+        # single-component ones.
         with tempfile.TemporaryDirectory() as tmpdir:
             tris = _cubic_lattice_triangles(cell_mm=4.0, strut_mm=1.5, grid_n=3)
             path = _write_stl(tmpdir, tris)

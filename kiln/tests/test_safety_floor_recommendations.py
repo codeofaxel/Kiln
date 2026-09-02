@@ -22,8 +22,8 @@ prompts and verify:
 
 These tests live in PUBLIC Kiln (not kiln-pro).  The trigger words
 and inference rules are public-domain knowledge — material datasheets
-and DIY common sense — not curated expertise.  No moat data leaks
-through this fallback.
+and DIY common sense — not curated expertise.  Nothing from the
+kiln-pro overlay reaches this fallback.
 """
 
 from __future__ import annotations

@@ -853,34 +853,37 @@ class TestDuplicateStlOnPlate:
 
 
 # ---------------------------------------------------------------------------
-# TestOrientationScoringTierSeam — public/Pro seam in _score_orientation
+# TestOrientationScoringTierSeam — free/overlay seam in _score_orientation
 # ---------------------------------------------------------------------------
 
 
-_PRO_ORIENTATION_OVERLAY = {
+# A stand-in overlay with the same shape as the real one and made-up
+# values.  The tests below only need SOME overlay to be present; the
+# shipped weighting is judged in kiln-pro's suite.
+_STAND_IN_OVERLAY = {
     "combination_weights": {
-        "bed_contact": 0.3,
-        "support_volume": 0.3,
+        "bed_contact": 0.4,
+        "support_volume": 0.2,
         "print_height": 0.2,
         "overhang": 0.2,
     },
     "normalization": {
-        "bed_contact": {"multiplier": 2.0, "cap": 100.0},
+        "bed_contact": {"multiplier": 1.5, "cap": 100.0},
         "support_volume": {"invert_from": 100.0},
-        "print_height": {"reference_mm": 100.0, "cap": 100.0},
+        "print_height": {"reference_mm": 200.0, "cap": 100.0},
         "overhang": {"invert_from": 100.0},
     },
 }
 
 
 class TestOrientationScoringTierSeam:
-    """Pin the tier seam in ``_score_orientation``:
+    """Pin the seam in ``_score_orientation``:
 
     - Free tier (overlay returns ``{}``): single-factor "largest bed
       contact" — score = bed_contact_pct directly.  Safe textbook
       default; never picks a wildly wrong orientation.
-    - Pro+ tier (overlay populated): weighted multi-factor combination
-      using the curated ``orientation_scoring`` overlay.
+    - Overlay populated: weighted multi-factor combination read from
+      the overlay's own weights and normalisation.
 
     The four returned fact fields (volume, contact area, height,
     overhang %) are identical across tiers — only the ``score`` differs.
@@ -899,8 +902,8 @@ class TestOrientationScoringTierSeam:
 
     def test_free_path_ignores_other_factors(self):
         """Free path is single-factor: support/height/overhang must
-        not influence the score (they only matter once Pro unlocks
-        the weighted combination)."""
+        not influence the score (they only matter once an overlay
+        supplies the weighted combination)."""
         base = _apply_orientation_scoring(
             overlay={},
             bed_contact_pct=30.0,
@@ -917,37 +920,37 @@ class TestOrientationScoringTierSeam:
         )
         assert base == worse_facts == 30.0
 
-    def test_pro_path_uses_curated_weighting(self):
-        """Pro overlay → curated 0.3/0.3/0.2/0.2 weighting after
-        normalization.  Math: bed_contact_pct=42 → 84 capped at 100;
-        sup=10 → 90; height=50/100 → 50; overhang=5 → 95.
-        Score = 84*0.3 + 90*0.3 + 50*0.2 + 95*0.2 = 81.2.
+    def test_populated_overlay_applies_its_own_weighting(self):
+        """A populated overlay → weighted blend after normalisation, on
+        the overlay's own numbers.  Stand-in math: bed 42 → 63; sup 10
+        → 90; height 50/200 → 75; overhang 5 → 95.
+        Score = 63*0.4 + 90*0.2 + 75*0.2 + 95*0.2 = 77.2.
         """
         score = _apply_orientation_scoring(
-            overlay=_PRO_ORIENTATION_OVERLAY,
+            overlay=_STAND_IN_OVERLAY,
             bed_contact_pct=42.0,
             support_pct=10.0,
             print_height_mm=50.0,
             overhang_pct=5.0,
         )
-        assert abs(score - 81.2) < 0.01
+        assert abs(score - 77.2) < 0.01
 
-    def test_pro_path_bed_contact_caps_at_100(self):
-        """The bed-contact multiplier (2x) doesn't push past the cap."""
+    def test_populated_overlay_bed_contact_caps(self):
+        """The bed-contact multiplier doesn't push past the cap."""
         score = _apply_orientation_scoring(
-            overlay=_PRO_ORIENTATION_OVERLAY,
-            bed_contact_pct=80.0,  # would be 160 uncapped
+            overlay=_STAND_IN_OVERLAY,
+            bed_contact_pct=80.0,  # would be 120 uncapped
             support_pct=100.0,
             print_height_mm=999.0,
             overhang_pct=100.0,
         )
-        # bed=100 (capped), sup=0, height=0, over=0 → 30.0
-        assert abs(score - 30.0) < 0.01
+        # bed=100 (capped), sup=0, height=0, over=0 → 40.0
+        assert abs(score - 40.0) < 0.01
 
     def test_partial_overlay_falls_back_to_free(self):
         """Partial overlay (weights without normalization) is treated
-        as ``{}`` — defensive: never half-apply the curated formula."""
-        partial = {"combination_weights": _PRO_ORIENTATION_OVERLAY["combination_weights"]}
+        as ``{}`` — defensive: never half-apply the weighted formula."""
+        partial = {"combination_weights": _STAND_IN_OVERLAY["combination_weights"]}
         score = _apply_orientation_scoring(
             overlay=partial,
             bed_contact_pct=42.0,
@@ -971,7 +974,7 @@ class TestOrientationScoringTierSeam:
 
         monkeypatch.setattr(
             "kiln.design_intelligence.load_pro_overlay_or_empty",
-            lambda kind: _PRO_ORIENTATION_OVERLAY,
+            lambda kind: _STAND_IN_OVERLAY,
         )
         pro = find_optimal_orientation(stl_path)
 
@@ -1002,7 +1005,7 @@ class TestOrientationScoringTierSeam:
 
         monkeypatch.setattr(
             "kiln.design_intelligence.load_pro_overlay_or_empty",
-            lambda kind: _PRO_ORIENTATION_OVERLAY,
+            lambda kind: _STAND_IN_OVERLAY,
         )
         pro = find_optimal_orientation(stl_path)
 

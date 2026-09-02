@@ -13,32 +13,6 @@ from kiln.printability import (
 )
 
 
-def _overlay_available() -> bool:
-    """True when kiln-pro's per-material printability overlay is loaded.
-
-    A subset of the assertions below describe Pro-tier behavior — they
-    expect curated per-material values (e.g. PP adhesion_strength=0.03,
-    shrinkage=0.018) that ``_material_physics_from_overlay`` only
-    returns when the kiln-pro package is installed and its overlay
-    module is reachable.  In a clean public-Kiln environment the
-    defaults are uniform (adhesion_strength=0.10, shrinkage=0.005) and
-    those assertions are inapplicable, so the affected tests skip.
-    """
-    try:
-        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
-    except ImportError:
-        return False
-    try:
-        return bool(pro_features.is_available("printability_overlay"))
-    except Exception:  # noqa: BLE001
-        return False
-
-
-_pro_overlay_required = pytest.mark.skipif(
-    not _overlay_available(),
-    reason="requires kiln-pro printability_overlay for per-material physics",
-)
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -88,31 +62,11 @@ class TestAdhesionForce:
         assert report.adhesion_force.force_ratio > 1.0
         assert report.adhesion_force.will_detach is False
 
-    @_pro_overlay_required
-    def test_tall_narrow_poor_adhesion(self, tmp_path):
-        """A 2x2x250mm PP tower should have poor adhesion.
-
-        The adhesion force model uses peel_force = shrinkage * longest_xy * z * 0.01.
-        To trigger marginal/likely_detach, we need force_ratio < 3.0.  PP has
-        the weakest adhesion_strength (0.03) and highest shrinkage (0.018), so
-        a tiny base with extreme height is required.
-        - adhesion = 4 * 0.03 = 0.12 N
-        - peel = 0.018 * 2 * 250 * 0.01 = 0.09 N
-        - ratio = 0.12 / 0.09 = 1.33 -> marginal
-        """
-        stl_path = str(tmp_path / "tower.stl")
-        _write_box_stl(stl_path, 2, 2, 250)
-
-        report = analyze_printability(stl_path, material="pp")
-        assert report.adhesion_force is not None
-        # Tiny contact area + extreme height + PP shrinkage -> poor adhesion.
-        assert report.adhesion_force.risk_level in ("marginal", "likely_detach")
-
     def test_pp_terrible_adhesion(self, tmp_path):
         """A 30x30x10mm PP part is still 'secure' but gets adhesion recommendations.
 
-        PP has terrible adhesion on standard build surfaces (adhesion_strength=0.03),
-        but the force-balance model's peel force is small for compact geometries.
+        PP has terrible adhesion on standard build surfaces, but the
+        force-balance model's peel force is small for compact geometries.
         The implementation instead flags PP via material-specific recommendations
         regardless of the force ratio.
         """
@@ -124,20 +78,6 @@ class TestAdhesionForce:
         # PP gets a recommendation about specialized build sheets even when secure.
         recs = " ".join(report.adhesion_force.recommendations).lower()
         assert "pp" in recs or "adhesion" in recs or "build" in recs
-
-    @_pro_overlay_required
-    def test_pla_vs_abs_adhesion(self, tmp_path):
-        """PLA should have better adhesion than ABS for the same geometry."""
-        stl_path = str(tmp_path / "box.stl")
-        _write_box_stl(stl_path, 30, 30, 30)
-
-        report_pla = analyze_printability(stl_path, material="pla")
-        report_abs = analyze_printability(stl_path, material="abs")
-
-        assert report_pla.adhesion_force is not None
-        assert report_abs.adhesion_force is not None
-        # PLA should have a higher force_ratio (better adhesion).
-        assert report_pla.adhesion_force.force_ratio > report_abs.adhesion_force.force_ratio
 
     def test_large_flat_part_good_adhesion(self, tmp_path):
         """A 100x100x5mm flat plate with PLA should have excellent adhesion."""
@@ -168,40 +108,6 @@ class TestAdhesionForce:
         assert hasattr(report.adhesion_force, "risk_level")
         assert hasattr(report.adhesion_force, "score_deduction")
         assert hasattr(report.adhesion_force, "recommendations")
-
-    @_pro_overlay_required
-    def test_will_detach_flag(self, tmp_path):
-        """A geometry that triggers will_detach=True should recommend brim/raft.
-
-        PP with a 1x1x500mm tower:
-        - adhesion = 1 * 0.03 = 0.03 N
-        - peel = 0.018 * 1 * 500 * 0.01 = 0.09 N
-        - ratio = 0.03 / 0.09 = 0.33 -> likely_detach, will_detach=True
-        """
-        stl_path = str(tmp_path / "tower.stl")
-        _write_box_stl(stl_path, 1, 1, 500)
-
-        report = analyze_printability(stl_path, material="pp")
-        assert report.adhesion_force is not None
-        assert report.adhesion_force.will_detach is True
-        recs = " ".join(report.adhesion_force.recommendations).lower()
-        assert any(
-            kw in recs for kw in ("brim", "raft", "detach", "adhesion")
-        ), f"Expected adhesion recommendations, got: {report.adhesion_force.recommendations}"
-
-    @_pro_overlay_required
-    def test_adhesion_score_deduction(self, tmp_path):
-        """A part with likely_detach should get score_deduction of -10.
-
-        PP with a 1x1x500mm tower triggers will_detach=True.
-        """
-        stl_path = str(tmp_path / "tower.stl")
-        _write_box_stl(stl_path, 1, 1, 500)
-
-        report = analyze_printability(stl_path, material="pp")
-        assert report.adhesion_force is not None
-        assert report.adhesion_force.risk_level == "likely_detach"
-        assert report.adhesion_force.score_deduction == -10
 
     def test_force_ratio_calculation(self, tmp_path):
         """Verify force_ratio ≈ adhesion_force_n / peel_force_n.
@@ -319,36 +225,22 @@ class TestAdhesionForce:
 
 
 # ---------------------------------------------------------------------------
-# Calibration matrix — 24-case sweep that pins the current model's
-# behavior across realistic prints.  The ``current_actual`` column
-# records what the model says today (with the v1.1.2 geometry guard +
-# datasheet-grounded Pro overlay); the ``reality`` column is the
-# educated-guess ground truth from domain knowledge (NOT measured).
+# Calibration matrix — a sweep that pins the current model's behavior
+# across realistic prints.  The ``reality`` column is the educated-guess
+# ground truth from domain knowledge (NOT measured); the expected-verdict
+# table records what the model says today.
 #
-# This test is INTENTIONALLY loose — it asserts that the model's
-# verdict is in the EXPECTED current-actual column, NOT that it
-# matches reality.  That makes it a regression matrix, not a quality
-# matrix.  When the adhesion-model rework lands (see kiln-pro
-# tasks.md → "Layer 2"), update the ``current_actual`` values to
-# match the new model and verify catch rate improves toward the
-# ``reality`` column.
-#
-# Catch rate today (after geometry guard + aspect-ratio peel
-# multiplier exp=1.5 + thermal-stress contribution z_scale=100):
-# 8/8 on truly-risky prints; 0 false positives on the 23 safe-
-# print sample (PLA candleholder at ratio 3.05, just above the
-# 3.0 secure threshold — the closest boundary in the sweep).
-# Target maintained as Layer 2 lands the remaining pieces
-# (perimeter-aware adhesion, threshold recalibration, etc.) and
-# Layer 3 wires outcome_tracker for empirical recalibration.
+# This test is INTENTIONALLY loose — it asserts that the model's verdict
+# matches the expected table, NOT that it matches reality.  That makes
+# it a regression matrix, not a quality matrix.  When the adhesion model
+# is reworked, update the table and verify the catch rate moves toward
+# the ``reality`` column.
 # ---------------------------------------------------------------------------
 
 
-# Geometries shared across both tiers.  Each row is a print with
-# a reality target ("what should the model say").  The free-tier
-# and pro-tier expected-verdict maps below differ because the
-# overlay supplies per-material physics that the public defaults
-# lack — this is the tier seam, expressed as test data.
+# Each row is a print with a reality target ("what should the model
+# say").  The public defaults use one stress factor for every material,
+# so some rows are known misses or false positives on this tier.
 _GEOM = [
     # (name, material, W, D, Z, reality)
     # ── SHOULD-BE-SECURE PRINTS (target: no false positives in either tier) ──
@@ -387,12 +279,9 @@ _GEOM = [
 
 # FREE-TIER expected verdicts.  Public defaults: stress_factor=1.0
 # for every material, adhesion_strength=0.10, shrinkage_strain=0.005.
-# Over-flags PLA (stress=1.0 vs Pro's curated 0.6), under-flags
-# warp-prone materials (stress=1.0 vs Pro's curated 1.5-2.0).
-# Catch rate: 5/8 on risky prints, with one false positive on PLA
-# candleholder.  Pro tier closes both gaps via per-material
-# stress_factor in the overlay — see _PRO_TIER_EXPECTED below for
-# the contract that Pro delivers.
+# One stress factor for everything over-flags PLA and under-flags
+# warp-prone materials: one false positive (PLA candleholder) and
+# three misses (PP / Nylon / ABS columns) are pinned as known.
 _FREE_TIER_EXPECTED: dict[str, str] = {
     "3DBenchy": "secure", "Phone stand": "secure", "Cal cube": "secure",
     "Mini figurine": "secure", "Cookie cutter": "secure", "Lithophane": "secure",
@@ -402,38 +291,15 @@ _FREE_TIER_EXPECTED: dict[str, str] = {
     "Nylon snap-fit": "secure", "Nylon gear": "secure", "TPU phone bumper": "secure",
     "PP gasket (flat)": "secure", "PP cup": "secure", "PP small clip": "secure",
     "Tall PLA vase": "secure", "PLA pen holder": "secure",
-    "PLA candleholder": "likely_detach",  # FALSE POSITIVE — Pro fixes via PLA stress=0.6
+    "PLA candleholder": "likely_detach",  # known false positive on public defaults
     "PETG tall tower": "secure",
     "Hairlike PLA tower": "likely_detach", "PP test tall tower": "likely_detach",
     "PP needle pillar": "likely_detach", "PETG ultra-tall thin": "likely_detach",
-    "PP narrow column": "secure",  # MISSED — Pro catches via PP stress=2.0
-    "Skyscraper PLA": "likely_detach",  # over-flagged (Pro: marginal)
-    "Nylon thin tower": "secure",  # MISSED — Pro catches via Nylon stress=1.6
-    "ABS tall thin": "secure",     # MISSED — Pro catches via ABS stress=1.5
+    "PP narrow column": "secure",  # known miss on public defaults
+    "Skyscraper PLA": "likely_detach",  # over-flagged on public defaults
+    "Nylon thin tower": "secure",  # known miss on public defaults
+    "ABS tall thin": "secure",     # known miss on public defaults
 }
-
-# PRO-TIER expected verdicts.  Overlay supplies per-material
-# stress_factor / adhesion_strength / shrinkage_strain curated
-# against datasheets.  Catches all 8 truly-risky cases (100%),
-# zero false positives.  PLA candleholder lands at force_ratio
-# 3.05 — just above the 3.0 secure threshold (closest boundary
-# in the sweep).
-_PRO_TIER_EXPECTED: dict[str, str] = {
-    "3DBenchy": "secure", "Phone stand": "secure", "Cal cube": "secure",
-    "Mini figurine": "secure", "Cookie cutter": "secure", "Lithophane": "secure",
-    "Desk organizer": "secure", "LEGO brick": "secure",
-    "Tool handle (compact)": "secure", "Helmet visor (large)": "secure",
-    "Phone case": "secure", "Water bottle holder": "secure",
-    "Nylon snap-fit": "secure", "Nylon gear": "secure", "TPU phone bumper": "secure",
-    "PP gasket (flat)": "secure", "PP cup": "secure", "PP small clip": "secure",
-    "Tall PLA vase": "secure", "PLA pen holder": "secure",
-    "PLA candleholder": "secure", "PETG tall tower": "secure",
-    "Hairlike PLA tower": "likely_detach", "PP test tall tower": "likely_detach",
-    "PP needle pillar": "likely_detach", "PETG ultra-tall thin": "likely_detach",
-    "PP narrow column": "likely_detach",
-    "Skyscraper PLA": "marginal", "Nylon thin tower": "marginal", "ABS tall thin": "marginal",
-}
-
 
 @pytest.fixture
 def _force_free_tier(monkeypatch):
@@ -457,11 +323,9 @@ def test_adhesion_calibration_matrix_free_tier(
 ):
     """FREE-tier regression — pins public-default model behavior.
 
-    Free tier uses ``_DEFAULT_STRESS_FACTOR=1.0`` for every
-    material, so PLA prints look as thermally-stressed as ABS
-    prints.  Catch rate 6/8 on risky prints; PLA candleholder is
-    a false positive that Pro fixes via its lower PLA stress
-    factor (0.6).
+    Free tier uses ``_DEFAULT_STRESS_FACTOR=1.0`` for every material,
+    so PLA prints look as thermally-stressed as ABS prints; the PLA
+    candleholder is a known false positive on this tier.
     """
     stl_path = str(tmp_path / f"free_{name.replace(' ', '_').replace('/', '_')}.stl")
     _write_box_stl(stl_path, w, d, z)
@@ -470,30 +334,6 @@ def test_adhesion_calibration_matrix_free_tier(
     expected = _FREE_TIER_EXPECTED[name]
     assert report.adhesion_force.risk_level == expected, (
         f"{name} (free, {material}, {w}x{d}x{z}): "
-        f"expected {expected}, got {report.adhesion_force.risk_level} "
-        f"(ratio={report.adhesion_force.force_ratio}, reality={reality})"
-    )
-
-
-@_pro_overlay_required
-@pytest.mark.parametrize("name,material,w,d,z,reality", _GEOM)
-def test_adhesion_calibration_matrix_pro_tier(
-    tmp_path, name, material, w, d, z, reality
-):
-    """PRO-tier regression — pins kiln-pro overlay-tuned behavior.
-
-    Pro tier uses per-material stress_factor / adhesion_strength /
-    shrinkage_strain from ``kiln_pro/data/printability_pro_overlay.json``.
-    Catches all 8 truly-risky cases (100%), zero false positives.
-    Skipped when the kiln-pro overlay isn't loaded.
-    """
-    stl_path = str(tmp_path / f"pro_{name.replace(' ', '_').replace('/', '_')}.stl")
-    _write_box_stl(stl_path, w, d, z)
-    report = analyze_printability(stl_path, material=material)
-    assert report.adhesion_force is not None, f"{name}: no adhesion_force"
-    expected = _PRO_TIER_EXPECTED[name]
-    assert report.adhesion_force.risk_level == expected, (
-        f"{name} (pro, {material}, {w}x{d}x{z}): "
         f"expected {expected}, got {report.adhesion_force.risk_level} "
         f"(ratio={report.adhesion_force.force_ratio}, reality={reality})"
     )

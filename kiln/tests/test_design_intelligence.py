@@ -729,9 +729,8 @@ class TestDesignTemplates:
 
     @requires_engineering_overlay
     def test_every_pattern_has_guidance(self):
-        # ``agent_guidance`` is moat-tier data — populated only when the
-        # kiln-pro engineering overlay is loaded.  Public-only CI runs
-        # see empty agent_guidance per the design-knowledge moat split.
+        # ``agent_guidance`` is populated only when the kiln-pro overlay
+        # is loaded.
         for p in list_design_templates():
             assert len(p.agent_guidance) > 0, f"{p.template_id} missing guidance"
 
@@ -815,8 +814,8 @@ class TestRequirementMatching:
 class TestDesignBrief:
     @requires_engineering_overlay
     def test_basic_brief(self):
-        # ``combined_guidance`` rolls up template + material agent_guidance
-        # which is moat-tier data; empty in public-only CI runs.
+        # ``combined_guidance`` rolls up guidance the overlay supplies;
+        # empty without it.
         brief = get_design_constraints("phone stand for my desk")
         assert isinstance(brief, DesignBrief)
         assert brief.recommended_material is not None
@@ -867,10 +866,9 @@ class TestDesignBrief:
     @requires_printer_profiles_overlay
     def test_printer_model_influences_brief(self):
         # ``get_design_constraints`` with a ``printer_model`` arg goes
-        # through ``get_printer_design_profile``, which hard-keys the
-        # ``agent_notes`` moat field; and ``combined_guidance`` rolls
-        # up that same moat content (the ``"consumer platform"``
-        # substring lives there).
+        # through ``get_printer_design_profile``, which needs the
+        # overlay-supplied ``agent_notes``; the ``"consumer platform"``
+        # substring lives there.
         brief = get_design_constraints(
             "outdoor garden sign that lives in the sun",
             printer_model="bambu_a1",
@@ -1079,7 +1077,7 @@ class TestEnvironmentCompatibility:
 class TestPrinterProfiles:
     # NOTE: every test that calls ``get_printer_design_profile`` or
     # ``list_printer_profiles`` exercises a constructor that
-    # hard-keys the moat-tier ``agent_notes`` field; without the
+    # hard-keys the overlay-supplied ``agent_notes`` field; without the
     # kiln-pro printer_profiles overlay those calls raise KeyError.
     # The unknown-printer path is the one exception — it returns
     # None before touching the constructor.
@@ -1245,7 +1243,7 @@ class TestGenerationFeedbackEnhancement:
     @requires_printer_profiles_overlay
     def test_enhance_can_include_printer_build_volume(self):
         # The enhance pipeline calls ``get_printer_design_profile``,
-        # which raises KeyError without the moat-tier ``agent_notes``
+        # which raises KeyError without the overlay-supplied ``agent_notes``
         # field; the enhance helper swallows that exception and
         # returns the unmodified prompt, so the build-volume string
         # never makes it into the result.
@@ -1286,10 +1284,9 @@ class TestKnowledgeBaseIsolation:
 
 class TestTroubleshooting:
     # NOTE: ``common_issues`` (matched_issues) and ``break_in_tips``
-    # are moat fields — public material_troubleshooting.json carries
-    # only ``storage_requirements``.  Tests that exercise those moat
-    # fields are gated; the storage-requirements test stays free
-    # because that data ships in public.
+    # come from the overlay.  Tests that exercise them are gated; the
+    # storage-requirements test stays free because that data ships
+    # in public.
 
     @requires_troubleshooting_overlay
     def test_all_issues_for_material(self):
@@ -1469,9 +1466,7 @@ class TestPostProcessing:
 
     @requires_post_processing_overlay
     def test_techniques_have_fields(self):
-        # The ``procedure`` walkthrough is moat-tier — public-only
-        # post_processing.json carries just ``name``, ``difficulty``,
-        # and ``tools_needed``.
+        # The ``procedure`` walkthrough comes from the overlay.
         guide = get_post_processing("pla")
         assert guide is not None
         tech = guide.techniques[0]
@@ -1563,10 +1558,9 @@ class TestMultiMaterialCompatibility:
 
     @requires_multi_material_overlay
     def test_general_rules_included(self):
-        # ``general_rules`` is a moat-tier list of co-print guidance
-        # bullets; public multi_material_pairing.json carries an
-        # empty list at that key so the safety-floor consumer at
-        # least sees the field.
+        # ``general_rules`` comes from the overlay; the public file
+        # carries an empty list at that key so the field is always
+        # present.
         report = check_multi_material_compatibility("pla", "petg")
         assert len(report.general_rules) > 0
 
@@ -1602,9 +1596,9 @@ class TestMultiMaterialCompatibility:
 
 class TestPrintDiagnostic:
     # ``matched_issues`` for the diagnostic comes from the
-    # troubleshooting catalog's ``common_issues`` — a moat field.
-    # Without the overlay the diagnostic still returns a result, but
-    # the issues list is empty.
+    # troubleshooting catalog's ``common_issues``, which the overlay
+    # supplies.  Without it the diagnostic still returns a result,
+    # but the issues list is empty.
 
     @requires_troubleshooting_overlay
     def test_basic_diagnostic(self):

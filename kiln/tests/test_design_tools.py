@@ -1259,7 +1259,7 @@ class TestFastenerAdviceOnTemplateBuilds:
     def test_the_free_block_carries_no_size_no_fit_and_no_mechanics(
         self, _auth, tmp_path,
     ):
-        """The moat rule, as a test.
+        """The sizing rule, as a test.
 
         Sizing IS the paid capability.  A free result that names a
         recommended number, a clearance, a tolerance, a fit class, or the
@@ -1666,7 +1666,7 @@ class TestOneLinePerSessionKeyedOnContent:
 
 
 class TestNoFastenerFactsInAnyFreeCopy:
-    """The moat rule, over EVERY seam's copy at once.
+    """The sizing rule, over EVERY seam's copy at once.
 
     Sizing is the paid capability.  Free copy that names a recommended
     number, a clearance, a tolerance, a fit class, or the checklist the paid

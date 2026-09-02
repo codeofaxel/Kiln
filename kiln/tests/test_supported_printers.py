@@ -131,8 +131,8 @@ _PUBLIC_MODEL_FIELDS = {"id", "name"}
 def test_public_surface_exposes_only_name_not_specs():
     """The /printers surface (and its committed JSON) must list WHICH printers we
     support — never per-model engineering specs (build volume, temps, materials,
-    nozzle, ...). The curated catalog detail is moat; only the brand→model list
-    ships to a page anyone can scrape. Allowlist, fail-closed: a new per-model
+    nozzle, ...). The curated catalog detail stays private; only the brand→model
+    list ships to a page anyone can scrape. Allowlist, fail-closed: a new per-model
     field fails here until it is consciously classified as public-safe."""
     payload, _ = gen.build_surface()
     for brand in payload["brands"]:
@@ -140,7 +140,7 @@ def test_public_surface_exposes_only_name_not_specs():
             leaked = set(model) - _PUBLIC_MODEL_FIELDS
             assert not leaked, (
                 f"{model.get('id')}: public /printers surface would leak {leaked} — "
-                "per-model specs are moat; only id+name may ship. Remove it from "
+                "per-model specs stay private; only id+name may ship. Remove it from "
                 "the model dict in scripts/generate_supported_printers.py."
             )
 
