@@ -893,6 +893,54 @@ def load_sidecar(raw: bytes | str | None) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
+def attach_block_to_payload(
+    payload: dict[str, Any] | None, block: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Stamp an already-built MESH-frame *block* (a sidecar) onto a
+    ``kiln.mesh.v1`` *payload*, in the payload's frame.
+
+    The hosted door's route: the slice never reaches the server, only the
+    block the owner's install built from it, aligned to the mesh FILE's
+    bbox.  The payload has since been centred on the plate, so the block
+    is slid by the same distance — the payload's bbox centre against the
+    block's own ``model_footprint`` centre, which by construction IS the
+    file bbox's centre — then rotated into the viewer frame.  An
+    unavailable block rides as it is; ``None`` attaches nothing.  Never
+    raises.
+    """
+    try:
+        if not isinstance(payload, dict) or not isinstance(block, dict):
+            return payload
+        if block.get("kind") != FEATURE_KIND or payload.get("downgraded"):
+            return payload
+        if not block.get("available"):
+            payload[PAYLOAD_KEY] = dict(block)
+            return payload
+        import copy
+
+        block = copy.deepcopy(block)
+        if block.get("frame") == "viewer":
+            payload[PAYLOAD_KEY] = block
+            return payload
+        bbox = payload.get("bbox") if isinstance(payload.get("bbox"), dict) else None
+        fp = block.get("model_footprint") if isinstance(block.get("model_footprint"), dict) else None
+        if bbox and fp:
+            lo, hi = bbox.get("min"), bbox.get("max")
+            fmin, fmax = fp.get("min"), fp.get("max")
+            if (
+                isinstance(lo, list) and isinstance(hi, list)
+                and isinstance(fmin, list) and isinstance(fmax, list)
+                and len(lo) >= 2 and len(hi) >= 2 and len(fmin) >= 2 and len(fmax) >= 2
+            ):
+                dx = (float(lo[0]) + float(hi[0])) / 2.0 - (float(fmin[0]) + float(fmax[0])) / 2.0
+                dy = (float(lo[1]) + float(hi[1])) / 2.0 - (float(fmin[1]) + float(fmax[1])) / 2.0
+                shift_block(block, dx, dy)
+        payload[PAYLOAD_KEY] = to_viewer_frame(block)
+    except Exception:  # noqa: BLE001 — extras never break the stage
+        logger.debug("slicer block not attached", exc_info=True)
+    return payload
+
+
 def attach_to_payload(
     payload: dict[str, Any] | None,
     gcode_path: str | os.PathLike[str] | None,

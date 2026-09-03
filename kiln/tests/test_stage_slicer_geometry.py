@@ -405,3 +405,47 @@ def test_attach_never_raises_on_a_broken_payload(tmp_path):
     junk = {"kind": "kiln.mesh.v1", "bbox": {"min": "nope"}}
     assert sg.attach_to_payload(copy.deepcopy(junk), gcode) == junk
     assert stage_plate.attach_slicer_geometry(copy.deepcopy(junk), gcode_path=gcode) == junk
+
+
+# ===========================================================================
+# 6. The hosted door — a sidecar block lands where the slice would have
+# ===========================================================================
+
+
+class TestSidecarOnTheHostedDoor:
+    """The hosted server never sees the slice, only the MESH-frame block
+    the owner's install built from it.  Stamped onto a payload that has
+    since been centred, it must land exactly where the G-code route
+    would have put it."""
+
+    def test_a_mesh_frame_sidecar_lands_where_the_gcode_would(self, tmp_path, no_printer):
+        from kiln.mesh_payload import mesh_to_viewer_payload
+
+        mesh = _box(tmp_path / "part.stl")
+        gcode = _gcode_for_box(tmp_path / "part.gcode")
+        # The G-code route: the truth to match.
+        direct = stage_plate.attach_stage_plate(mesh_to_viewer_payload(mesh), gcode_path=gcode)
+        # The hosted route: a sidecar built against the FILE bbox, attached
+        # to a payload the plate door already centred.
+        block = sg.load_sidecar(sg.sidecar_for_mesh(mesh, gcode))
+        hosted = stage_plate.attach_stage_plate(mesh_to_viewer_payload(mesh))
+        sg.attach_block_to_payload(hosted, block)
+        assert hosted["slicer"]["frame"] == "viewer"
+        for a, b in zip(direct["slicer"]["features"], hosted["slicer"]["features"], strict=True):
+            assert a["class"] == b["class"]
+            assert np.allclose(_segments(a), _segments(b), atol=1e-3)
+            assert a["bounds"] == pytest.approx(b["bounds"], abs=1e-3)
+        # The sidecar itself is untouched — the caller may reuse it.
+        assert block["frame"] == "mesh"
+
+    def test_an_unavailable_sidecar_rides_as_is(self):
+        payload = {"kind": "kiln.mesh.v1", "bbox": {"min": [0, 0, 0], "max": [1, 1, 1]}}
+        sg.attach_block_to_payload(payload, sg.unavailable_block("no slice"))
+        assert payload["slicer"]["available"] is False
+        assert payload["slicer"]["reason"] == "no slice"
+
+    def test_junk_attaches_nothing(self):
+        payload = {"kind": "kiln.mesh.v1", "bbox": {"min": [0, 0, 0], "max": [1, 1, 1]}}
+        sg.attach_block_to_payload(payload, {"kind": "something.else"})
+        sg.attach_block_to_payload(payload, None)
+        assert "slicer" not in payload
