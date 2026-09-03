@@ -25,6 +25,12 @@ from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
 from kiln.printers.base import (
+    DEFAULT_LOAD_LENGTH_MM,
+    DEFAULT_PURGE_LENGTH_MM,
+    DEFAULT_UNLOAD_LENGTH_MM,
+    FilamentHandlingUnsupported,
+    FilamentOpPlan,
+    FilamentOpResult,
     FirmwareComponent,
     FirmwareStatus,
     FirmwareUpdateResult,
@@ -660,6 +666,7 @@ class MoonrakerAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
+            can_handle_filament=True,
             can_stream=True,
             can_probe_bed=True,
             can_update_firmware=True,
@@ -1427,6 +1434,164 @@ class MoonrakerAdapter(PrinterAdapter):
         "bed_leveling": "BED_MESH_CALIBRATE",
         "vibration": "SHAPER_CALIBRATE",
     }
+
+
+    # ------------------------------------------------------------------
+    # Filament handling — Klipper macros when the config has them, the
+    # shared G-code sequence otherwise, ``extruder.can_extrude`` as the
+    # one genuine pre-move signal Klipper offers.
+    # ------------------------------------------------------------------
+
+    #: Macro names a Klipper config commonly defines for filament work.
+    #: Checked against ``/printer/gcode/help`` (the same discovery
+    #: ``get_cfs_status`` uses) — never assumed.
+    _FILAMENT_MACROS: dict[str, tuple[str, ...]] = {
+        "load": ("LOAD_FILAMENT", "M701"),
+        "unload": ("UNLOAD_FILAMENT", "M702"),
+    }
+
+    #: Klipper objects that mean a multi-material unit OWNS the filament
+    #: path: Happy-Hare registers ``mmu``, AFC registers ``AFC``.  Each
+    #: brings its own load / unload commands; an extruder-driven feed sent
+    #: behind its back fights the unit.  Detection is the same
+    #: ``/printer/objects/list`` read ``get_cfs_status`` uses.
+    _MMU_OBJECTS: dict[str, tuple[str, str]] = {
+        "mmu": ("Happy-Hare", "MMU_LOAD / MMU_UNLOAD (MMU_EJECT to eject fully) / MMU_SELECT_TOOL / MMU_CHANGE_TOOL"),
+        "AFC": ("AFC", "its own AFC load / unload commands"),
+    }
+
+    def _mmu_in_charge(self) -> tuple[str, str] | None:
+        """``(unit name, its commands)`` when an MMU object is registered."""
+        try:
+            data = self._get_json("/printer/objects/list")
+        except PrinterError:
+            return None
+        objects = _safe_get(data, "result", "objects", default=[]) or []
+        names = {str(o) for o in objects} if isinstance(objects, list) else set()
+        for obj, info in self._MMU_OBJECTS.items():
+            if obj in names:
+                return info
+        return None
+
+    def _refuse_if_mmu(self, action: str) -> None:
+        mmu = self._mmu_in_charge()
+        if mmu is not None:
+            unit, commands = mmu
+            raise FilamentHandlingUnsupported(
+                f"{unit} owns the filament path on this printer, so an "
+                f"extruder-driven {action} from Kiln would fight it. Use the "
+                f"unit's own commands ({commands}) from the printer's console "
+                "for now; Kiln's MMU-aware routing is a separate change."
+            )
+
+    def _klipper_commands(self) -> set[str]:
+        """Every command / macro name Klipper reports it knows."""
+        try:
+            data = self._get_json("/printer/gcode/help")
+        except PrinterError:
+            return set()
+        result = data.get("result", data)
+        return {str(k).upper() for k in result} if isinstance(result, dict) else set()
+
+    def _klipper_can_extrude(self) -> tuple[str, str] | None:
+        """Klipper's own ``extruder.can_extrude`` — a real signal, read
+        after heating.  Returns a refusal ``(reason, source)`` or ``None``."""
+        try:
+            data = self._get_json("/printer/objects/query", params={"extruder": ""})
+        except PrinterError as exc:
+            return None if "404" in str(exc) else (f"could not read the extruder object ({exc})", "moonraker_query_failed")
+        ext = _safe_get(data, "result", "status", "extruder", default={}) or {}
+        if ext.get("can_extrude") is False:
+            temp = ext.get("temperature")
+            return (
+                "Klipper reports extruder.can_extrude=false"
+                + (f" at {temp:g}°C" if isinstance(temp, (int, float)) else "")
+                + " — below its min_extrude_temp, so it would drop the move.",
+                "klipper_can_extrude",
+            )
+        return None
+
+    def _macro_filament_op(self, plan: FilamentOpPlan, macro: str) -> FilamentOpResult:
+        """Heat, wait for the thermistor, run the config's own macro."""
+        try:
+            self.set_tool_temp(plan.temperature)
+        except PrinterError as exc:
+            return FilamentOpResult(
+                success=False, action=plan.action,
+                message=f"Could not set the hotend to {plan.temperature:g}°C: {exc}",
+                extrusion_verified=False, verification_source="heater_command_rejected",
+                error_hint=str(exc), slot=plan.slot, material=plan.material,
+                temperature=plan.temperature,
+            )
+        reached, reading = self._wait_for_hotend(plan.temperature)
+        if not reached:
+            return FilamentOpResult(
+                success=False, action=plan.action,
+                message=(
+                    f"The hotend did not reach {plan.temperature:g}°C before the "
+                    f"{macro} macro would have run (last reading {reading!r}). "
+                    "Nothing was moved."
+                ),
+                extrusion_verified=False, verification_source="thermistor",
+                slot=plan.slot, material=plan.material, temperature=plan.temperature,
+                details={"last_hotend_reading": reading},
+            )
+        try:
+            self._send_gcode(macro)
+        except PrinterError as exc:
+            return FilamentOpResult(
+                success=False, action=plan.action,
+                message=f"Klipper rejected {macro}: {exc}",
+                extrusion_verified=False, verification_source="firmware_rejected_move",
+                error_hint=str(exc), slot=plan.slot, material=plan.material,
+                temperature=plan.temperature, details={"macro": macro},
+            )
+        return FilamentOpResult(
+            success=True, action=plan.action,
+            message=(
+                f"Hotend at {reading:g}°C; Klipper accepted the {macro} macro from "
+                "this printer's own config. Klipper reports no flow sensor, so "
+                "whether filament actually moved is not something Kiln can "
+                "confirm — check the extruder."
+            ),
+            extrusion_verified=None, verification_source="command_accepted_only",
+            slot=plan.slot, material=plan.material, temperature=plan.temperature,
+            details={"macro": macro, "hotend_reading": reading, "mechanism": "klipper_macro"},
+        )
+
+    def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        self._refuse_if_mmu("load")
+        known = self._klipper_commands()
+        for macro in self._FILAMENT_MACROS["load"]:
+            if macro in known:
+                return self._macro_filament_op(plan, macro)
+        return self._gcode_filament_move(
+            plan,
+            signed_length_mm=float(plan.length_mm or DEFAULT_LOAD_LENGTH_MM),
+            mechanism="moonraker_gcode_script",
+            pre_move_check=self._klipper_can_extrude,
+        )
+
+    def _unload_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        self._refuse_if_mmu("unload")
+        known = self._klipper_commands()
+        for macro in self._FILAMENT_MACROS["unload"]:
+            if macro in known:
+                return self._macro_filament_op(plan, macro)
+        return self._gcode_filament_move(
+            plan,
+            signed_length_mm=-float(plan.length_mm or DEFAULT_UNLOAD_LENGTH_MM),
+            mechanism="moonraker_gcode_script",
+            pre_move_check=self._klipper_can_extrude,
+        )
+
+    def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        return self._gcode_filament_move(
+            plan,
+            signed_length_mm=float(plan.length_mm or DEFAULT_PURGE_LENGTH_MM),
+            mechanism="moonraker_gcode_script",
+            pre_move_check=self._klipper_can_extrude,
+        )
 
     def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
         """Run calibration routines via Klipper G-code macros.

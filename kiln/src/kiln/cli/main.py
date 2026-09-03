@@ -3307,6 +3307,110 @@ def light(node: str, mode: str, json_mode: bool) -> None:
         sys.exit(1)
 
 
+@cli.group()
+def filament() -> None:
+    """Load, unload, or purge filament (purge doubles as the clog test).
+
+    Each subcommand runs the same tool the MCP server exposes, so the
+    safety gate — not mid-print, the printer's temperature ceiling, the
+    spool's own window, the 170 °C cold-extrusion floor — is identical on
+    both doors, as is the answer: what the printer could honestly report,
+    not that a command was sent.
+    """
+
+
+def _emit_filament_result(result: dict, json_mode: bool) -> None:
+    if not result.get("success", False):
+        err = result.get("error") or {}
+        msg = err.get("message") if isinstance(err, dict) else str(err)
+        detail = result.get("filament") or {}
+        if not json_mode and detail.get("error_hint"):
+            msg = f"{msg}\n  printer fault: {detail.get('error_code')} — {detail['error_hint']}"
+        click.echo(format_error(msg or "Filament operation failed.", json_mode=json_mode))
+        sys.exit(1)
+    click.echo(format_response("success", data=result, json_mode=json_mode))
+
+
+@filament.command("load")
+@click.option("--slot", type=int, default=None, help="AMS tray id (Bambu). Omit for the external / single spool.")
+@click.option("--material", default=None, help="Material name, e.g. PLA — picks a temperature when none is given.")
+@click.option("--temp", "temperature", type=float, default=None, help="Hotend target (°C).")
+@click.option("--length", "length_mm", type=float, default=None, help="Feed distance for generic G-code backends (mm).")
+@click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for the AMS to confirm.")
+@click.option("--printer", "printer_name", default=None, help="Target printer name.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def filament_load(slot, material, temperature, length_mm, wait_seconds, printer_name, json_mode) -> None:
+    """Feed filament to the nozzle."""
+    try:
+        from kiln.plugins.filament_handling_tools import load_filament as _load
+
+        _emit_filament_result(
+            _load(slot=slot, material=material, temperature=temperature, length_mm=length_mm,
+                  wait_seconds=wait_seconds, printer_name=printer_name),
+            json_mode,
+        )
+    except click.ClickException:
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to load filament: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@filament.command("unload")
+@click.option("--material", default=None, help="Material name, e.g. PLA.")
+@click.option("--temp", "temperature", type=float, default=None, help="Hotend target (°C).")
+@click.option("--length", "length_mm", type=float, default=None, help="Retract distance for generic G-code backends (mm).")
+@click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for the AMS to confirm.")
+@click.option("--printer", "printer_name", default=None, help="Target printer name.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def filament_unload(material, temperature, length_mm, wait_seconds, printer_name, json_mode) -> None:
+    """Pull filament out of the hotend."""
+    try:
+        from kiln.plugins.filament_handling_tools import unload_filament as _unload
+
+        _emit_filament_result(
+            _unload(material=material, temperature=temperature, length_mm=length_mm,
+                    wait_seconds=wait_seconds, printer_name=printer_name),
+            json_mode,
+        )
+    except click.ClickException:
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to unload filament: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@filament.command("purge")
+@click.option("--length", "length_mm", type=float, default=30.0, help="Extrusion length, 1-150 mm.")
+@click.option("--material", default=None, help="Material name, e.g. PLA.")
+@click.option("--temp", "temperature", type=float, default=None, help="Hotend target (°C).")
+@click.option("--slot", type=int, default=None, help="AMS tray whose temperature window applies (Bambu).")
+@click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for a fault code after the purge.")
+@click.option("--printer", "printer_name", default=None, help="Target printer name.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def filament_purge(length_mm, material, temperature, slot, wait_seconds, printer_name, json_mode) -> None:
+    """Heat and extrude a short length — the clog test."""
+    try:
+        from kiln.plugins.filament_handling_tools import purge_filament as _purge
+
+        _emit_filament_result(
+            _purge(length_mm=length_mm, material=material, temperature=temperature, slot=slot,
+                   wait_seconds=wait_seconds, printer_name=printer_name),
+            json_mode,
+        )
+    except click.ClickException:
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to purge filament: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
 @cli.command("emergency-trip")
 @click.argument("printer_name")
 @click.option("--input", "input_name", default="external_button", help="Which input tripped.")
@@ -9826,6 +9930,36 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                         )
             except Exception as exc:
                 logger.debug("Printer identity check failed: %s", exc)
+
+        # 6c. Filament handling — can Kiln load / unload / purge on this
+        #     backend?  Reported either way so the capability is
+        #     DISCOVERABLE: a user with a clogged hotend learns here that
+        #     purge_filament exists (and reports the printer's own fault
+        #     code) instead of working the touchscreen while Kiln watches.
+        if verify_adapter is not None:
+            try:
+                if verify_adapter.capabilities.can_handle_filament:
+                    checks.append({
+                        "name": "filament_handling",
+                        "ok": True,
+                        "detail": (
+                            "load / unload / purge available "
+                            "(kiln filament …, or the load_filament / "
+                            "unload_filament / purge_filament tools)"
+                        ),
+                    })
+                else:
+                    checks.append({
+                        "name": "filament_handling",
+                        "ok": True,
+                        "warn": True,
+                        "detail": (
+                            f"not available on the {verify_adapter.name} backend — "
+                            "load, unload, and purge from the printer's own screen"
+                        ),
+                    })
+            except Exception as exc:
+                logger.debug("Filament handling check failed: %s", exc)
                 checks.append(
                     {
                         "name": "printer_model",

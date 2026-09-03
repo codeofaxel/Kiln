@@ -58,6 +58,15 @@ def _shipped_adapters() -> list[type]:
 
 
 class FakeAdapter(PrinterAdapter):
+    # Filament handling is part of the adapter contract; these stubs
+    # never move filament, so the hooks refuse.
+    def _load_filament_impl(self, plan):
+        raise NotImplementedError
+    def _unload_filament_impl(self, plan):
+        raise NotImplementedError
+    def _purge_filament_impl(self, plan):
+        raise NotImplementedError
+
     """A non-Bambu adapter with no auto-record hook — the case that
     reported zero prints no matter how much its owner printed."""
 

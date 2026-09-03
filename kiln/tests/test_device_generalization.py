@@ -32,6 +32,15 @@ class TestDeviceAdapterAlias:
     def test_subclass_via_device_adapter(self):
         """A concrete class inheriting DeviceAdapter satisfies isinstance checks."""
         class FakeCNC(DeviceAdapter):
+            # Filament handling is part of the adapter contract; these stubs
+            # never move filament, so the hooks refuse.
+            def _load_filament_impl(self, plan):
+                raise NotImplementedError
+            def _unload_filament_impl(self, plan):
+                raise NotImplementedError
+            def _purge_filament_impl(self, plan):
+                raise NotImplementedError
+
             @property
             def name(self): return "fake_cnc"
             @property
@@ -117,6 +126,15 @@ class TestOptionalDeviceMethods:
     def _make_adapter(self):
         """Create a minimal concrete adapter for testing optional methods."""
         class Stub(PrinterAdapter):
+            # Filament handling is part of the adapter contract; these stubs
+            # never move filament, so the hooks refuse.
+            def _load_filament_impl(self, plan):
+                raise NotImplementedError
+            def _unload_filament_impl(self, plan):
+                raise NotImplementedError
+            def _purge_filament_impl(self, plan):
+                raise NotImplementedError
+
             @property
             def name(self): return "stub"
             @property

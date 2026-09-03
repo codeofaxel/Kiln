@@ -83,6 +83,9 @@ GATED_ACTIONS = frozenset(
         "set_tool_temp",
         "set_bed_temp",
         "send_gcode",
+        "load_filament",
+        "unload_filament",
+        "purge_filament",
     }
 )
 

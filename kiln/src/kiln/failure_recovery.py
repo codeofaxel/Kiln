@@ -277,7 +277,9 @@ def _build_recovery(failure_type: FailureType, *, printer_capabilities: dict[str
                 "Heat the nozzle to printing temperature",
                 "Perform a cold pull (heat to 250C, cool to 90C, pull filament)",
                 "If clog persists, remove and clean or replace the nozzle",
-                "Reload filament and test extrusion",
+                "Reload filament (load_filament) and test extrusion with "
+                "purge_filament — it reports whether the printer raised an "
+                "extrusion fault, not just that the command was sent",
                 "Restart the print",
             ],
             automated=False,

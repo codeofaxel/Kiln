@@ -40,7 +40,10 @@ from typing import Any, ClassVar
 import paho.mqtt.client as mqtt
 
 from kiln.printers.base import (
+    DEFAULT_PURGE_LENGTH_MM,
     STALE_STATE_WARN_AGE,
+    FilamentOpPlan,
+    FilamentOpResult,
     JobProgress,
     JobResult,
     PrinterAdapter,
@@ -337,6 +340,83 @@ def _classify_flow_anomaly(error_code: int) -> tuple[str, str] | None:
             severity = _FLOW_ANOMALY_SEVERITY.get(prefix, "medium")
             return event_type, severity
     return None
+
+# Bambu's public HMS page for a code, the same form server.py links.
+_BAMBU_HMS_WIKI_URL = "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/{code}"
+
+# Plain-language readings of the fault codes a filament load / purge can
+# raise, keyed by the 8-hex module/attr prefix.  Sources, per row:
+#   wiki   — the title of Bambu's own HMS wiki page for the code
+#   printara — printara3d.com/tools/bambu-error-codes (secondary; the wiki
+#              could not be fetched for these on 2026-09-03)
+#   local  — prefixes this adapter already classifies for the wear
+#            cross-check (_FLOW_ANOMALY_ERROR_PREFIXES)
+# Anything not here gets a family reading plus the wiki link, never a guess.
+_BAMBU_FILAMENT_FAULTS: dict[str, str] = {
+    # wiki: HMS_1200-2000-0002-0006
+    "12002000": (
+        "Failed to extrude the AMS slot's filament — the extruder may be "
+        "clogged, or the filament too thin so the extruder gear slipped."
+    ),
+    # wiki: HMS_0700-7000-0002-0006
+    "07007000": (
+        "Timed out purging the old filament — the filament may be stuck, or "
+        "the extruder / nozzle clogged."
+    ),
+    # printara
+    "12008003": "The AMS could not pull the filament back out of the extruder.",
+    # printara
+    "12008014": "The AMS could not find where the filament is in the path.",
+    # printara
+    "12008016": "The extruder is not extruding normally.",
+    # Observed 2026-09-03 on an A1: raised by the touchscreen Load wizard at
+    # its purge step, right after a layer-1 failure with a clogged hotend.
+    # Bambu's wiki entry for it could not be retrieved, so this row names
+    # only what was observed, not a title Kiln has not verified.
+    "12008007": (
+        "Raised by the printer's own load routine at its purge step (seen on "
+        "an A1 with a clogged hotend). The wiki page linked here is the "
+        "authoritative text; treat it as 'filament did not come through the "
+        "nozzle' until it says otherwise."
+    ),
+    # local
+    "03008003": "Filament feeding abnormal — the extruder cannot pull filament.",
+    "03008005": "Filament broken at the extruder.",
+    "05000B00": "The AMS reports the filament stuck or jammed.",
+    "03000900": "Extruder motor overload — a clog or stuck filament.",
+}
+
+_BAMBU_FAULT_FAMILIES: dict[str, str] = {
+    "1200": "an AMS filament load / unload path fault",
+    "0700": "an AMS / filament path fault",
+    "0300": "a toolhead / extruder fault",
+    "0500": "an AMS filament sensor fault",
+}
+
+
+def _hms_group(hex_digits: str) -> str:
+    """``"12008007"`` → ``"1200_8007"`` (4-hex groups, the screen's form)."""
+    h = hex_digits.upper()
+    return "_".join(h[i : i + 4] for i in range(0, len(h), 4))
+
+
+def describe_bambu_filament_fault(code: str) -> str:
+    """Plain-language reading of a Bambu fault raised around filament work.
+
+    *code* is any-separator HMS / ``print_error`` code.  Known prefixes get
+    their reading; unknown ones get the family plus the wiki link, so the
+    caller is never handed a bare number and never a made-up title.
+    """
+    hex_only = "".join(c for c in str(code).upper() if c in "0123456789ABCDEF")
+    prefix = hex_only[:8]
+    grouped = _hms_group(hex_only) if len(hex_only) >= 8 else str(code)
+    url = _BAMBU_HMS_WIKI_URL.format(code=grouped)
+    reading = _BAMBU_FILAMENT_FAULTS.get(prefix)
+    if reading:
+        return f"{reading} ({url})"
+    family = _BAMBU_FAULT_FAMILIES.get(prefix[:4], "a fault Kiln has no reading for")
+    return f"The printer reported {grouped}, {family}. See {url}"
+
 
 # Bambu LED node names.
 _VALID_LED_NODES: frozenset[str] = frozenset({"chamber_light", "work_light"})
@@ -916,6 +996,7 @@ class BambuAdapter(PrinterAdapter):
             can_clear_error=True,
             can_report_multi_material=True,
             cancel_during_calibration_faults=True,
+            can_handle_filament=True,
             # Port 6000 TLS+JPEG works on A1 / A1 Mini / P1P / P1S
             # without ffmpeg.  get_snapshot() tries port 6000 first
             # and falls back to RTSPS (X1 series, port 322) only if
@@ -4200,6 +4281,299 @@ class BambuAdapter(PrinterAdapter):
         from kiln.multi_material import from_bambu_ams
 
         return from_bambu_ams(self.get_ams_status(), printer_model=self._printer_model)
+
+    # ------------------------------------------------------------------
+    # Filament handling: AMS-aware load / unload, purge as the clog test
+    # ------------------------------------------------------------------
+    #
+    # Wire shapes, from the community-documented LAN protocol
+    # (github.com/Doridian/OpenBambuAPI, mqtt.md) and BambuStudio's own
+    # ``MachineObject::command_ams_change_filament`` /
+    # ``command_ams_switch``:
+    #
+    #   {"print": {"command": "ams_change_filament",
+    #              "target": <tray id>, "curr_temp": N, "tar_temp": N}}
+    #
+    # ``target`` is the GLOBAL tray id the status reports in ``tray_now``
+    # (unit*4 + slot on AMS units), 254 for the external spool, 255 to
+    # unload.  The firmware's routine does the whole job — retract the old
+    # filament, feed the new one, purge — which is why "load" here needs
+    # no G-code of its own, and why the printer's own purge fault (the
+    # touchscreen wizard's HMS 1200-8007 on 2026-09-03) is what a load
+    # reports back.
+
+    _BAMBU_EXTERNAL_SPOOL_TRAY: int = 254
+    _BAMBU_NO_TRAY: int = 255
+    _FILAMENT_LOAD_WAIT_S: float = 120.0
+    _FILAMENT_UNLOAD_WAIT_S: float = 90.0
+    _FILAMENT_PURGE_WATCH_S: float = 10.0
+
+    def _ams_tray(self, slot: int) -> dict[str, Any] | None:
+        """The tray dict ``get_ams_status`` reports for global tray *slot*."""
+        try:
+            status = self.get_ams_status()
+        except PrinterError:
+            return None
+        unit_id, tray_id = divmod(int(slot), 4)
+        for unit in status.get("units", []):
+            if int(unit.get("unit_id", 0)) != unit_id:
+                continue
+            for tray in unit.get("trays", []):
+                if int(tray.get("slot", -1)) == tray_id:
+                    return tray
+        return None
+
+    def _filament_material_window(
+        self, material: str | None, slot: int | None
+    ) -> tuple[float, float, str] | None:
+        """The AMS tray's own ``nozzle_temp_min`` / ``max`` when it has one.
+
+        The spool's RFID / user setting beats a table: it is what the
+        printer itself would heat to.  Falls back to the base table by
+        material name when no tray is in play or the tray reports no range.
+        """
+        tray_slot = slot
+        if tray_slot is None:
+            with self._state_lock:
+                raw_now = self._last_status.get("tray_now")
+            with contextlib.suppress(TypeError, ValueError):
+                now = int(raw_now)
+                if now not in (self._BAMBU_EXTERNAL_SPOOL_TRAY, self._BAMBU_NO_TRAY):
+                    tray_slot = now
+        if tray_slot is not None:
+            tray = self._ams_tray(tray_slot)
+            if tray is not None:
+                lo, hi = tray.get("nozzle_temp_min"), tray.get("nozzle_temp_max")
+                if lo is not None and hi is not None and float(hi) >= float(lo) > 0:
+                    return (
+                        float(lo),
+                        float(hi),
+                        f"the AMS tray {tray_slot} report ({tray.get('tray_type') or 'unknown type'})",
+                    )
+                if not material and tray.get("tray_type"):
+                    material = str(tray["tray_type"])
+        return super()._filament_material_window(material, slot)
+
+    def _bambu_fault_codes(self, status: dict[str, Any]) -> set[str]:
+        """Every fault the cached status carries, as ``XXXX_XXXX[_…]`` codes.
+
+        ``print_error`` is the 32-bit code the firmware latches; the ``hms``
+        list carries ``{attr, code}`` pairs that make the full 16-hex HMS
+        code the screen shows.  Both are read so a fault reported either
+        way is seen.
+        """
+        codes: set[str] = set()
+        raw = status.get("print_error")
+        with contextlib.suppress(TypeError, ValueError):
+            val = int(raw or 0)
+            if val:
+                codes.add(_hms_group(f"{val:08X}"))
+        hms = status.get("hms")
+        if isinstance(hms, list):
+            for entry in hms:
+                if not isinstance(entry, dict):
+                    continue
+                with contextlib.suppress(TypeError, ValueError):
+                    attr = int(entry.get("attr") or 0)
+                    code = int(entry.get("code") or 0)
+                    if attr or code:
+                        codes.add(_hms_group(f"{attr:08X}{code:08X}"))
+        return codes
+
+    def _snapshot_faults(self) -> set[str]:
+        with self._state_lock:
+            return self._bambu_fault_codes(dict(self._last_status))
+
+    def _fault_result(
+        self, plan: FilamentOpPlan, codes: set[str], *, stage: str
+    ) -> FilamentOpResult:
+        code = sorted(codes)[0]
+        hint = describe_bambu_filament_fault(code)
+        return FilamentOpResult(
+            success=False,
+            action=plan.action,
+            message=f"The printer raised {code} during the {stage}: {hint}",
+            extrusion_verified=False,
+            verification_source="bambu_fault_code",
+            error_code=code,
+            error_hint=hint,
+            slot=plan.slot,
+            material=plan.material,
+            temperature=plan.temperature,
+            details={
+                "all_new_faults": sorted(codes),
+                "hms_wiki_url": _BAMBU_HMS_WIKI_URL.format(code=code),
+            },
+        )
+
+    def _watch_tray_change(
+        self,
+        plan: FilamentOpPlan,
+        *,
+        expect_tray: int,
+        faults_before: set[str],
+        wait_seconds: float,
+        stage: str,
+    ) -> FilamentOpResult:
+        """Watch the push cache until the AMS reports the change or a fault.
+
+        ``tray_now`` moving to the requested tray is the printer's own
+        statement that the filament reached the nozzle, so it is the only
+        thing that earns ``extrusion_verified=True``.  A new fault code
+        earns ``False`` with its reading.  Neither within the window is
+        reported as exactly that — not as success.
+        """
+        deadline = time.monotonic() + wait_seconds
+        last_now: Any = None
+        while True:
+            with self._state_lock:
+                status = dict(self._last_status)
+            new_faults = self._bambu_fault_codes(status) - faults_before
+            if new_faults:
+                return self._fault_result(plan, new_faults, stage=stage)
+            raw_now = status.get("tray_now")
+            with contextlib.suppress(TypeError, ValueError):
+                last_now = int(raw_now)
+                if last_now == expect_tray:
+                    what = (
+                        "no tray is feeding the nozzle"
+                        if expect_tray == self._BAMBU_NO_TRAY
+                        else f"tray {expect_tray} is feeding the nozzle"
+                    )
+                    return FilamentOpResult(
+                        success=True,
+                        action=plan.action,
+                        message=(
+                            f"{plan.action.capitalize()} complete: the AMS reports "
+                            f"{what} and no fault was raised."
+                        ),
+                        extrusion_verified=True,
+                        verification_source="ams_tray_now",
+                        slot=plan.slot,
+                        material=plan.material,
+                        temperature=plan.temperature,
+                        details={"tray_now": last_now},
+                    )
+            if time.monotonic() >= deadline:
+                return FilamentOpResult(
+                    success=False,
+                    action=plan.action,
+                    message=(
+                        f"The {plan.action} command was sent, but within "
+                        f"{wait_seconds:g}s the AMS never reported "
+                        f"tray_now={expect_tray} (last seen {last_now!r}) and "
+                        "raised no fault. The printer may still be working, or "
+                        "the routine may be waiting on the screen — check it "
+                        "before assuming either."
+                    ),
+                    extrusion_verified=None,
+                    verification_source="timeout_no_signal",
+                    slot=plan.slot,
+                    material=plan.material,
+                    temperature=plan.temperature,
+                    details={"tray_now": last_now, "waited_seconds": wait_seconds},
+                )
+            time.sleep(1.0)
+
+    def _ams_change_filament(self, target: int, plan: FilamentOpPlan) -> None:
+        with self._state_lock:
+            raw_cur = self._last_status.get("nozzle_target_temper")
+        curr_temp = int(plan.temperature)
+        with contextlib.suppress(TypeError, ValueError):
+            if raw_cur is not None and int(float(raw_cur)) > 0:
+                curr_temp = int(float(raw_cur))
+        self._publish_command(
+            {
+                "print": {
+                    "sequence_id": self._next_seq(),
+                    "command": "ams_change_filament",
+                    "target": int(target),
+                    "curr_temp": curr_temp,
+                    "tar_temp": int(plan.temperature),
+                }
+            }
+        )
+
+    def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Feed an AMS tray (or the external spool) to the nozzle.
+
+        The firmware's own routine does the retract / feed / purge, so
+        success is read from ``tray_now`` and failure from the fault code
+        the routine raises — the same signals the touchscreen wizard shows.
+        """
+        if plan.slot is None:
+            target = self._BAMBU_EXTERNAL_SPOOL_TRAY
+        else:
+            target = plan.slot
+            tray = self._ams_tray(target)
+            if tray is None:
+                raise PrinterError(
+                    f"AMS tray {target} is not present in the AMS report. "
+                    "Use ams_status to see which trays exist."
+                )
+            if not tray.get("tray_type"):
+                raise PrinterError(
+                    f"AMS tray {target} reports no filament. Put a spool in it "
+                    "(or pick a tray that has one) and try again."
+                )
+        faults_before = self._snapshot_faults()
+        self._ams_change_filament(target, plan)
+        wait = float(plan.options.get("wait_seconds") or self._FILAMENT_LOAD_WAIT_S)
+        return self._watch_tray_change(
+            plan,
+            expect_tray=target,
+            faults_before=faults_before,
+            wait_seconds=wait,
+            stage="load (the firmware's own feed-and-purge routine)",
+        )
+
+    def _unload_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        faults_before = self._snapshot_faults()
+        self._ams_change_filament(self._BAMBU_NO_TRAY, plan)
+        wait = float(plan.options.get("wait_seconds") or self._FILAMENT_UNLOAD_WAIT_S)
+        return self._watch_tray_change(
+            plan,
+            expect_tray=self._BAMBU_NO_TRAY,
+            faults_before=faults_before,
+            wait_seconds=wait,
+            stage="unload",
+        )
+
+    def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Heat and extrude through ``gcode_line``, then watch for a fault.
+
+        Bambu reports no extruder-flow telemetry, so a clean purge stays
+        ``extrusion_verified=None``; a fault code raised inside the watch
+        window (the same codes its own load wizard raises) turns it
+        ``False`` with the reading.
+        """
+        faults_before = self._snapshot_faults()
+        result = self._gcode_filament_move(
+            plan,
+            signed_length_mm=float(plan.length_mm or DEFAULT_PURGE_LENGTH_MM),
+            mechanism="bambu_mqtt_gcode_line",
+        )
+        if not result.success:
+            return result
+        watch = float(plan.options.get("wait_seconds") or self._FILAMENT_PURGE_WATCH_S)
+        deadline = time.monotonic() + watch
+        while True:
+            new_faults = self._snapshot_faults() - faults_before
+            if new_faults:
+                return self._fault_result(plan, new_faults, stage="purge")
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(1.0)
+        result.verification_source = "no_fault_within_window"
+        result.message = (
+            f"Hotend at {result.details.get('hotend_reading')}°C; the printer "
+            f"accepted a {plan.length_mm:g} mm purge and raised no extrusion "
+            f"fault in the {watch:g}s after it. Bambu reports no flow sensor, "
+            "so 'no fault' is the strongest thing the printer can say — look "
+            "at the nozzle to confirm a clean stream."
+        )
+        result.details["fault_watch_seconds"] = watch
+        return result
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code

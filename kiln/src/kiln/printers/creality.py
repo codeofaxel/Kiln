@@ -9,6 +9,8 @@ from urllib.parse import urlparse, urlunparse
 import requests
 
 from kiln.printers.base import (
+    FilamentOpPlan,
+    FilamentOpResult,
     FirmwareStatus,
     FirmwareUpdateResult,
     JobProgress,
@@ -859,6 +861,18 @@ class CrealityAdapter(PrinterAdapter):
 
     def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
         return self._backend.run_calibration(options=options)
+
+    # Filament handling rides the Moonraker backend: the gate has already
+    # run on THIS adapter's template, so the backend's _impl is what is
+    # called — going through its public method would gate twice.
+    def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        return self._backend._load_filament_impl(plan)
+
+    def _unload_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        return self._backend._unload_filament_impl(plan)
+
+    def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        return self._backend._purge_filament_impl(plan)
 
     def set_tool_temp(self, target: float) -> bool:
         return self._backend.set_tool_temp(target)

@@ -351,6 +351,15 @@ class TestPrinterAdapterABC:
         """A complete subclass can be instantiated."""
 
         class Complete(PrinterAdapter):
+            # Filament handling is part of the adapter contract; these stubs
+            # never move filament, so the hooks refuse.
+            def _load_filament_impl(self, plan):
+                raise NotImplementedError
+            def _unload_filament_impl(self, plan):
+                raise NotImplementedError
+            def _purge_filament_impl(self, plan):
+                raise NotImplementedError
+
             @property
             def name(self) -> str:
                 return "test"

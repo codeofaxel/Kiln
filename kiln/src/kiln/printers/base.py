@@ -96,6 +96,18 @@ class PrinterEngagementError(PrinterError):
         self.verdict = verdict
 
 
+class FilamentHandlingUnsupported(PrinterError):
+    """This backend has no honest way to load, unload, or purge filament.
+
+    Raised by an adapter's ``_load_filament_impl`` / ``_unload_filament_impl``
+    / ``_purge_filament_impl`` INSTEAD of pretending: a backend with no
+    G-code door (Prusa Link) or an unverified one (Elegoo SDCP) says so, by
+    name, with what the user can do instead.  A subclass of
+    :class:`PrinterError` so every existing caller renders it as a message;
+    a distinct class so a test can tell "refused honestly" from "broke".
+    """
+
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -1049,6 +1061,108 @@ class PrintResult:
         return asdict(self)
 
 
+# ---------------------------------------------------------------------------
+# Filament handling (load / unload / purge)
+# ---------------------------------------------------------------------------
+
+#: Cold-extrusion floor.  Marlin ships ``EXTRUDE_MINTEMP 170`` and Klipper's
+#: ``min_extrude_temp`` defaults to 170; Bambu firmware refuses an extrude
+#: below its own floor too.  Kiln refuses earlier, with a reason, rather than
+#: sending a move the firmware will drop (or, on a firmware with the guard
+#: disabled, grind cold plastic through the gears).
+MIN_EXTRUDE_TEMP_C: float = 170.0
+
+#: Longest single purge Kiln will command.  A clog test needs a few tens of
+#: millimetres; anything longer is a runaway extrusion, not a purge.
+MAX_PURGE_LENGTH_MM: float = 150.0
+
+#: Default purge for the clog test: enough to see a clean stream, short
+#: enough to be harmless when the nozzle is blocked.
+DEFAULT_PURGE_LENGTH_MM: float = 30.0
+
+#: Generic G-code feed for a load — the distance Marlin's own ``M701``
+#: default covers on a direct-drive head — and the retract for an unload.
+#: Bowden machines pass their own ``length_mm``.
+DEFAULT_LOAD_LENGTH_MM: float = 60.0
+DEFAULT_UNLOAD_LENGTH_MM: float = 80.0
+
+#: Slow feed for every extrude Kiln commands (3 mm/s).  Fast enough to be
+#: over quickly, slow enough that a partial clog shows as an under-stream
+#: rather than a skipped stepper.
+FILAMENT_FEED_RATE_MM_MIN: int = 180
+
+#: How long the shared sequence waits for the hotend to reach target.
+HOTEND_HEAT_TIMEOUT_S: float = 240.0
+
+#: Fallback hotend ceiling for the filament template when no adapter or
+#: safety profile tightens it.  Mirrors the literal every G-code adapter
+#: passes to ``_validate_temp`` from ``set_tool_temp``.
+_DEFAULT_MAX_HOTEND_C: float = 300.0
+
+
+@dataclass
+class FilamentOpPlan:
+    """A validated filament operation, handed to an adapter's ``_impl``.
+
+    Built by :meth:`PrinterAdapter._prepare_filament_op` and never by an
+    adapter, so the temperature an ``_impl`` receives has already cleared
+    the safety profile, the material window, and the cold-extrusion floor.
+    """
+
+    action: str  # "load" | "unload" | "purge"
+    temperature: float
+    temperature_source: str
+    slot: int | None = None
+    material: str | None = None
+    length_mm: float | None = None
+    #: ``(nozzle_temp_min, nozzle_temp_max, source)`` when a window was
+    #: known — from an AMS tray report or Kiln's material table.
+    material_window: tuple[float, float, str] | None = None
+    #: Adapter-specific extras forwarded verbatim (e.g. ``wait_seconds``).
+    options: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        if self.material_window is not None:
+            data["material_window"] = list(self.material_window)
+        return data
+
+
+@dataclass
+class FilamentOpResult:
+    """Outcome of a load, unload, or purge.
+
+    ``extrusion_verified`` is three-valued on purpose.  ``True`` and
+    ``False`` are only ever set from a signal the printer genuinely
+    produced (an AMS reporting the tray now feeding the nozzle, a firmware
+    rejecting the move, a fault code raised during the purge).  ``None``
+    means the command was accepted and nothing the printer reports can
+    say whether plastic left the nozzle — which is the honest answer on
+    every backend without a flow sensor.  ``verification_source`` names
+    the signal so a caller can weigh it.
+    """
+
+    success: bool
+    action: str
+    message: str
+    extrusion_verified: bool | None = None
+    verification_source: str | None = None
+    #: The printer's own fault code, when it raised one (Bambu HMS /
+    #: ``print_error`` in ``XXXX_XXXX`` form, a Klipper error line, …).
+    error_code: str | None = None
+    #: Plain-language reading of ``error_code`` — what it means and what to
+    #: do — or the firmware's own text when Kiln has no translation.
+    error_hint: str | None = None
+    slot: int | None = None
+    material: str | None = None
+    temperature: float | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable dictionary."""
+        return asdict(self)
+
+
 @dataclass
 class PrinterCapabilities:
     """Declares what a specific adapter is able to do.
@@ -1071,6 +1185,12 @@ class PrinterCapabilities:
     #: taught its firmware's acknowledgement advertises the truth — a caller
     #: offering the user a button that cannot work is worse than no button.
     can_clear_error: bool = False
+    #: Whether :meth:`PrinterAdapter.load_filament` / ``unload_filament`` /
+    #: ``purge_filament`` do something real on this backend.  False means
+    #: the adapter's ``_impl`` hooks raise
+    #: :class:`FilamentHandlingUnsupported` — declared here so ``kiln
+    #: doctor`` and the MCP tools can say so before a heater moves.
+    can_handle_filament: bool = False
     #: Whether cancelling DURING a calibration routine (bed levelling, Z
     #: homing) trips a firmware fault on this backend.  Measured on an A1
     #: (2026-08-13): a cancel mid-levelling aborts the homing move and the
@@ -2246,6 +2366,426 @@ class PrinterAdapter(ABC):
             raise PrinterError(f"{heater} temperature {target}°C is negative -- must be >= 0.")
         if target > max_temp:
             raise PrinterError(f"{heater} temperature {target}°C exceeds safety limit ({max_temp}°C).")
+
+    # -- filament handling (load / unload / purge) -----------------------
+    #
+    # TEMPLATE METHODS — adapters must NOT override the three public
+    # methods.  Each runs the one shared safety gate (``_prepare_filament_op``:
+    # not mid-print, temperature inside the safety profile AND the
+    # material's own window AND above the cold-extrusion floor, purge
+    # length capped) and only then hands a validated ``FilamentOpPlan`` to
+    # the adapter's ``_impl``.  Same shape as start_print/_start_print_impl,
+    # for the same reason: no entry point — MCP tool, CLI, recovery flow —
+    # can reach a heater or a stepper around the gate, and no adapter can
+    # forget it.  Measured need (2026-09-03): a print failed at layer 1 with
+    # a clogged hotend and Kiln could only watch the touchscreen wizard fail
+    # at its purge step, because nothing composed set_tool_temp and
+    # send_gcode into "load this slot" or "is the melt zone clear".
+
+    #: Fallback hotend ceiling for the filament gate; a bound safety
+    #: profile tightens it (``_validate_temp`` takes the min).  Bambu
+    #: overrides to its hottest hotend; every other backend's
+    #: ``set_tool_temp`` already passes this same literal.
+    _MAX_HOTEND_C: float = _DEFAULT_MAX_HOTEND_C
+
+    def load_filament(
+        self,
+        *,
+        slot: int | None = None,
+        material: str | None = None,
+        temperature: float | None = None,
+        length_mm: float | None = None,
+        **options: Any,
+    ) -> FilamentOpResult:
+        """Feed filament to the nozzle.
+
+        Args:
+            slot: Which spool to feed on a multi-material unit (Bambu AMS
+                tray id, 0-based across units).  ``None`` means the external
+                / single spool the user has already pushed into the extruder.
+            material: Material name, used to choose a temperature when
+                *temperature* is omitted and no spool report supplies one.
+            temperature: Hotend target in °C.  Checked against the
+                printer's safety profile, the material's own window, and
+                the cold-extrusion floor; refused outside any of them.
+            length_mm: How far a generic G-code backend feeds.  Ignored by
+                a backend whose own filament-change routine decides.
+            **options: Adapter-specific extras (e.g. ``wait_seconds``).
+
+        Raises:
+            PrinterError: If the gate refuses, or the backend cannot do it.
+        """
+        plan = self._prepare_filament_op(
+            "load",
+            slot=slot,
+            material=material,
+            temperature=temperature,
+            length_mm=DEFAULT_LOAD_LENGTH_MM if length_mm is None else length_mm,
+            options=options,
+        )
+        return self._load_filament_impl(plan)
+
+    def unload_filament(
+        self,
+        *,
+        material: str | None = None,
+        temperature: float | None = None,
+        length_mm: float | None = None,
+        **options: Any,
+    ) -> FilamentOpResult:
+        """Retract filament out of the hotend (and back to the spool unit
+        where the backend has one).
+
+        Args mirror :meth:`load_filament`.  The hotend must be hot for the
+        retract to free the melt zone, so the same temperature gate runs.
+        """
+        plan = self._prepare_filament_op(
+            "unload",
+            slot=None,
+            material=material,
+            temperature=temperature,
+            length_mm=DEFAULT_UNLOAD_LENGTH_MM if length_mm is None else length_mm,
+            options=options,
+        )
+        return self._unload_filament_impl(plan)
+
+    def purge_filament(
+        self,
+        *,
+        length_mm: float = DEFAULT_PURGE_LENGTH_MM,
+        material: str | None = None,
+        temperature: float | None = None,
+        slot: int | None = None,
+        **options: Any,
+    ) -> FilamentOpResult:
+        """Extrude a short length at temperature — the clog test.
+
+        The result's ``extrusion_verified`` says what the printer could
+        honestly tell: ``False`` with a plain-language ``error_hint`` when
+        the firmware refused the move or raised an extrusion fault,
+        ``True`` only when a real signal confirmed flow, ``None`` when the
+        move was accepted and the machine reports nothing either way.
+
+        Args:
+            length_mm: Extrusion length, 1–``MAX_PURGE_LENGTH_MM`` mm.
+            material / temperature / slot: as :meth:`load_filament`.
+        """
+        plan = self._prepare_filament_op(
+            "purge",
+            slot=slot,
+            material=material,
+            temperature=temperature,
+            length_mm=length_mm,
+            options=options,
+        )
+        return self._purge_filament_impl(plan)
+
+    def _prepare_filament_op(
+        self,
+        action: str,
+        *,
+        slot: int | None,
+        material: str | None,
+        temperature: float | None,
+        length_mm: float | None,
+        options: dict[str, Any] | None = None,
+    ) -> FilamentOpPlan:
+        """The single gate every filament door passes through.
+
+        Refuses (``PrinterError``) rather than adjusting: a caller who asked
+        for 300 °C on a PLA tray is told why, not quietly given 220.
+        """
+        if not self.capabilities.can_handle_filament:
+            raise FilamentHandlingUnsupported(
+                f"{self.name} cannot {action} filament through Kiln — this "
+                "backend declares no filament handling. Use the printer's "
+                "own screen or web UI for that step."
+            )
+
+        if slot is not None:
+            try:
+                slot = int(slot)
+            except (TypeError, ValueError) as exc:
+                raise PrinterError(f"slot must be an integer tray id, got {slot!r}.") from exc
+            if slot < 0:
+                raise PrinterError(f"slot must be >= 0, got {slot}.")
+
+        if length_mm is not None:
+            try:
+                length_mm = float(length_mm)
+            except (TypeError, ValueError) as exc:
+                raise PrinterError(f"length_mm must be a number, got {length_mm!r}.") from exc
+            if action == "purge" and not 1.0 <= length_mm <= MAX_PURGE_LENGTH_MM:
+                raise PrinterError(
+                    f"Purge length {length_mm:g} mm is outside 1–{MAX_PURGE_LENGTH_MM:g} mm. "
+                    "A clog test needs tens of millimetres; a longer extrude is a "
+                    "runaway, not a purge."
+                )
+            if action != "purge" and not 1.0 <= length_mm <= 1000.0:
+                raise PrinterError(
+                    f"{action} length {length_mm:g} mm is outside 1–1000 mm."
+                )
+
+        # Not while printing.  A pause is allowed: purging through a clog
+        # and resuming is exactly the mid-print recovery this exists for.
+        try:
+            state = self.get_state()
+        except PrinterError as exc:
+            raise PrinterError(
+                f"Cannot {action} filament: the printer did not answer a status "
+                f"request ({exc})."
+            ) from exc
+        if state.state == PrinterStatus.PRINTING:
+            raise PrinterError(
+                f"Refusing to {action} filament while a print is running. "
+                "Pause the print first, or wait for it to finish."
+            )
+
+        window = self._filament_material_window(material, slot)
+        if temperature is None:
+            if window is not None:
+                lo, hi, _src = window
+                temperature = round((lo + hi) / 2.0)
+                temperature_source = f"midpoint of {window[2]}"
+            else:
+                raise PrinterError(
+                    f"Cannot {action} filament: no temperature. Pass "
+                    "temperature=, or name the material (or the spool slot on "
+                    "a multi-material unit) so Kiln can look one up."
+                )
+        else:
+            try:
+                temperature = float(temperature)
+            except (TypeError, ValueError) as exc:
+                raise PrinterError(f"temperature must be a number, got {temperature!r}.") from exc
+            temperature_source = "caller"
+
+        # Per-printer ceiling (safety profile tightens the adapter fallback).
+        self._validate_temp(temperature, self._MAX_HOTEND_C, "Hotend")
+        # Cold-extrusion floor.
+        if temperature < MIN_EXTRUDE_TEMP_C:
+            raise PrinterError(
+                f"Hotend temperature {temperature:g}°C is below the "
+                f"{MIN_EXTRUDE_TEMP_C:g}°C cold-extrusion floor. Feeding "
+                "plastic through a cold nozzle strips the gears; the firmware "
+                "would refuse the move anyway."
+            )
+        # The material's own window, when the spool or table gave one.
+        if window is not None:
+            lo, hi, src = window
+            if not lo <= temperature <= hi:
+                raise PrinterError(
+                    f"Hotend temperature {temperature:g}°C is outside the "
+                    f"{lo:g}–{hi:g}°C window {src} reports for "
+                    f"{material or 'the loaded material'}. Pass a temperature "
+                    "inside the window, or a different material."
+                )
+
+        return FilamentOpPlan(
+            action=action,
+            temperature=temperature,
+            temperature_source=temperature_source,
+            slot=slot,
+            material=material,
+            length_mm=length_mm,
+            material_window=window,
+            options=dict(options or {}),
+        )
+
+    def _filament_material_window(
+        self, material: str | None, slot: int | None
+    ) -> tuple[float, float, str] | None:
+        """``(nozzle_min, nozzle_max, source)`` for the filament in play.
+
+        Default: Kiln's material table by name.  A backend that can READ
+        the spool — Bambu's AMS reports ``nozzle_temp_min`` / ``max`` per
+        tray — overrides this so the spool's own numbers win.  ``None``
+        means no window is known and the caller must pass a temperature.
+        """
+        if not material:
+            return None
+        try:
+            from kiln.gcode import _MATERIAL_TEMPS
+        except ImportError:  # pragma: no cover
+            return None
+        key = material.strip().upper()
+        for name, (lo, hi, _b_lo, _b_hi) in _MATERIAL_TEMPS.items():
+            if name.upper() == key:
+                return float(lo), float(hi), "Kiln's material table"
+        return None
+
+    @abstractmethod
+    def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Backend load, called AFTER the filament gate passed.
+
+        Never call directly — callers use :meth:`load_filament`.  A backend
+        with no honest way to do this raises
+        :class:`FilamentHandlingUnsupported` naming what the user can do
+        instead; it must not return a ``success=True`` it cannot stand
+        behind.
+        """
+
+    @abstractmethod
+    def _unload_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Backend unload, called AFTER the filament gate passed.  See
+        :meth:`_load_filament_impl` for the honesty rule."""
+
+    @abstractmethod
+    def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Backend purge, called AFTER the filament gate passed.
+
+        Set ``extrusion_verified`` only from a signal the printer produced;
+        leave it ``None`` when it produced none.
+        """
+
+    # -- shared G-code sequence -------------------------------------------
+
+    def _wait_for_hotend(
+        self,
+        target: float,
+        *,
+        timeout: float = HOTEND_HEAT_TIMEOUT_S,
+        tolerance: float = 5.0,
+        poll: float = 2.0,
+    ) -> tuple[bool, float | None]:
+        """Poll ``get_state`` until the hotend is within *tolerance* of
+        *target*.  Returns ``(reached, last_reading)``.
+
+        A thermistor reading is a genuine signal, and the one every backend
+        has, so the shared sequence uses it before any extrude.
+        """
+        deadline = time.monotonic() + timeout
+        last: float | None = None
+        while True:
+            try:
+                last = self.get_state().tool_temp_actual
+            except PrinterError:
+                last = None
+            if last is not None and last >= target - tolerance:
+                return True, last
+            if time.monotonic() >= deadline:
+                return False, last
+            time.sleep(poll)
+
+    def _gcode_filament_move(
+        self,
+        plan: FilamentOpPlan,
+        *,
+        signed_length_mm: float,
+        mechanism: str,
+        heat_timeout: float = HOTEND_HEAT_TIMEOUT_S,
+        pre_move_check: Any | None = None,
+    ) -> FilamentOpResult:
+        """Heat, wait for the thermistor, then one relative E move.
+
+        *pre_move_check* is an optional callable run after the hotend is at
+        temperature and before the move; it returns ``(refusal_reason,
+        source)`` to stop the sequence on a genuine printer signal (Klipper's
+        ``extruder.can_extrude``) or ``None`` to proceed.
+
+        The generic feed/retract/purge every G-code backend shares: the
+        ``M104`` / ``M83`` / ``G1 E`` / ``M82`` sequence is the same on
+        Marlin, Klipper, RepRapFirmware and Bambu.  What differs per
+        backend is what it can report back, so a firmware refusal (raised
+        by the adapter's own transport as ``PrinterError``) becomes
+        ``success=False`` with the firmware's words in ``error_hint``, and
+        an accepted move is reported as exactly that — accepted, flow
+        unverified — unless the adapter layers a real signal on top.
+        """
+        target = plan.temperature
+        try:
+            self.set_tool_temp(target)
+        except PrinterError as exc:
+            return FilamentOpResult(
+                success=False,
+                action=plan.action,
+                message=f"Could not set the hotend to {target:g}°C: {exc}",
+                extrusion_verified=False,
+                verification_source="heater_command_rejected",
+                error_hint=str(exc),
+                slot=plan.slot,
+                material=plan.material,
+                temperature=target,
+            )
+        reached, reading = self._wait_for_hotend(target, timeout=heat_timeout)
+        if not reached:
+            return FilamentOpResult(
+                success=False,
+                action=plan.action,
+                message=(
+                    f"The hotend did not reach {target:g}°C within "
+                    f"{heat_timeout:g}s (last reading "
+                    f"{'unknown' if reading is None else f'{reading:g}°C'}). "
+                    "Nothing was extruded."
+                ),
+                extrusion_verified=False,
+                verification_source="thermistor",
+                slot=plan.slot,
+                material=plan.material,
+                temperature=target,
+                details={"last_hotend_reading": reading},
+            )
+        if pre_move_check is not None:
+            refusal = pre_move_check()
+            if refusal:
+                reason, source = refusal
+                return FilamentOpResult(
+                    success=False,
+                    action=plan.action,
+                    message=f"Not extruding: {reason}",
+                    extrusion_verified=False,
+                    verification_source=source,
+                    error_hint=reason,
+                    slot=plan.slot,
+                    material=plan.material,
+                    temperature=target,
+                    details={"hotend_reading": reading, "mechanism": mechanism},
+                )
+        commands = [
+            "M83",
+            f"G1 E{signed_length_mm:g} F{FILAMENT_FEED_RATE_MM_MIN}",
+            "M82",
+        ]
+        try:
+            self.send_gcode(commands)
+        except PrinterError as exc:
+            return FilamentOpResult(
+                success=False,
+                action=plan.action,
+                message=f"The printer rejected the {plan.action} move: {exc}",
+                extrusion_verified=False,
+                verification_source="firmware_rejected_move",
+                error_hint=str(exc),
+                slot=plan.slot,
+                material=plan.material,
+                temperature=target,
+                details={"gcode": commands, "mechanism": mechanism},
+            )
+        verb = {"load": "fed", "unload": "retracted", "purge": "extruded"}.get(
+            plan.action, "moved"
+        )
+        return FilamentOpResult(
+            success=True,
+            action=plan.action,
+            message=(
+                f"Hotend at {reading:g}°C; the printer accepted a "
+                f"{abs(signed_length_mm):g} mm {plan.action} ({verb} at "
+                f"{FILAMENT_FEED_RATE_MM_MIN / 60:g} mm/s). This backend "
+                "reports no extruder-flow signal, so whether plastic actually "
+                "left the nozzle is not something Kiln can confirm — look at "
+                "the nozzle."
+            ),
+            extrusion_verified=None,
+            verification_source="command_accepted_only",
+            slot=plan.slot,
+            material=plan.material,
+            temperature=target,
+            details={
+                "gcode": commands,
+                "mechanism": mechanism,
+                "hotend_reading": reading,
+            },
+        )
 
     # -- fan control ------------------------------------------------------
 

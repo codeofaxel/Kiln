@@ -338,6 +338,9 @@ class TestTheAdapterChokepoint:
                 "set_tool_temp",
                 "set_bed_temp",
                 "send_gcode",
+                "load_filament",
+                "unload_filament",
+                "purge_filament",
             }
         )
 
@@ -362,6 +365,15 @@ def _real_adapter_class():
     )
 
     class _Real(PrinterAdapter):
+        # Filament handling is part of the adapter contract; these stubs
+        # never move filament, so the hooks refuse.
+        def _load_filament_impl(self, plan):
+            raise NotImplementedError
+        def _unload_filament_impl(self, plan):
+            raise NotImplementedError
+        def _purge_filament_impl(self, plan):
+            raise NotImplementedError
+
         def __init__(self, serial, state=PrinterStatus.PRINTING, job="bracket.gcode"):
             self.serial = serial
             self.host = ""

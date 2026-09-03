@@ -23,6 +23,11 @@ from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
 from kiln.printers.base import (
+    DEFAULT_LOAD_LENGTH_MM,
+    DEFAULT_PURGE_LENGTH_MM,
+    DEFAULT_UNLOAD_LENGTH_MM,
+    FilamentOpPlan,
+    FilamentOpResult,
     FirmwareComponent,
     FirmwareStatus,
     FirmwareUpdateResult,
@@ -573,6 +578,7 @@ class OctoPrintAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
+            can_handle_filament=True,
             can_stream=True,
             can_probe_bed=True,
             can_update_firmware=True,
@@ -1370,6 +1376,39 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
     # PrinterAdapter -- calibration
     # ------------------------------------------------------------------
+
+
+    # ------------------------------------------------------------------
+    # Filament handling — the shared G-code sequence
+    # ------------------------------------------------------------------
+
+    def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Heat, then feed ``length_mm`` — the manual-load the firmware's
+        own Extrude button performs.  The user has already pushed filament
+        into the extruder; the printer pulls it the rest of the way."""
+        return self._gcode_filament_move(
+            plan,
+            signed_length_mm=float(plan.length_mm or DEFAULT_LOAD_LENGTH_MM),
+            mechanism="octoprint_api_printer_command",
+        )
+
+    def _unload_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Heat, then retract ``length_mm`` to free the melt zone."""
+        return self._gcode_filament_move(
+            plan,
+            signed_length_mm=-float(plan.length_mm or DEFAULT_UNLOAD_LENGTH_MM),
+            mechanism="octoprint_api_printer_command",
+        )
+
+    def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Heat, then extrude ``length_mm`` — the clog test.  A firmware
+        refusal (cold-extrusion guard, error reply) is reported with its
+        words; an accepted move stays flow-unverified."""
+        return self._gcode_filament_move(
+            plan,
+            signed_length_mm=float(plan.length_mm or DEFAULT_PURGE_LENGTH_MM),
+            mechanism="octoprint_api_printer_command",
+        )
 
     def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
         """Run calibration routines via G-code commands.

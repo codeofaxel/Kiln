@@ -44,6 +44,9 @@ import requests
 
 from kiln.printers.base import (
     STALE_STATE_WARN_AGE,
+    FilamentHandlingUnsupported,
+    FilamentOpPlan,
+    FilamentOpResult,
     JobProgress,
     PrinterAdapter,
     PrinterCapabilities,
@@ -1614,6 +1617,33 @@ class ElegooAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
     # Dunder helpers
     # ------------------------------------------------------------------
+
+
+    # ------------------------------------------------------------------
+    # Filament handling — not available on this backend, said plainly
+    # ------------------------------------------------------------------
+
+    _FILAMENT_UNSUPPORTED_REASON = (
+        "the SDCP raw G-code passthrough this adapter uses is vendor-specific "
+        "and unverified on real hardware, so Kiln will not drive the extruder "
+        "through it and report a result it cannot stand behind. Use the "
+        "printer's own screen to load, unload, or purge."
+    )
+
+    def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        raise FilamentHandlingUnsupported(
+            f"{self.name} cannot load filament through Kiln: " + self._FILAMENT_UNSUPPORTED_REASON
+        )
+
+    def _unload_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        raise FilamentHandlingUnsupported(
+            f"{self.name} cannot unload filament through Kiln: " + self._FILAMENT_UNSUPPORTED_REASON
+        )
+
+    def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        raise FilamentHandlingUnsupported(
+            f"{self.name} cannot purge filament through Kiln: " + self._FILAMENT_UNSUPPORTED_REASON
+        )
 
     def __repr__(self) -> str:
         return f"<ElegooAdapter host={self._host!r} mainboard_id={self._mainboard_id!r}>"

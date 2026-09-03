@@ -13773,6 +13773,23 @@ def get_material_recommendation(
 # text lives in this public repo).
 _HMS_WIKI_CODE_URL = "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/{code}"
 
+# Symptom words that mean "filament is not coming through" — the case
+# purge_filament exists to test.  Matched as substrings of the lowercased
+# symptom (plus the normalized HMS code) in troubleshoot_printer.
+_FILAMENT_PATH_SYMPTOMS: tuple[str, ...] = (
+    "clog",
+    "under-extrusion",
+    "under extrusion",
+    "underextrusion",
+    "no extrusion",
+    "not extruding",
+    "filament stuck",
+    "filament jam",
+    "purge",
+    "load filament",
+    "loading filament",
+)
+
 
 def _normalize_hms_code(raw: str) -> str:
     """Normalize a Bambu HMS code to uppercase 4-hex groups joined by ``_``.
@@ -13852,6 +13869,16 @@ def troubleshoot_printer(
         if code:
             result["hms_code"] = code
             result["hms_wiki_url"] = _HMS_WIKI_CODE_URL.format(code=code)
+        # A clog / extrusion complaint has a test Kiln can run itself, so the
+        # diagnosis names it rather than leaving the user at the touchscreen.
+        _probe = f"{symptom} {code}".lower()
+        if any(k in _probe for k in _FILAMENT_PATH_SYMPTOMS) or code.startswith(("1200_", "0700_7")):
+            result["filament_next_step"] = (
+                "Kiln can test the melt zone directly: purge_filament heats the "
+                "nozzle and extrudes a short length, reporting the printer's own "
+                "fault code in plain language if one is raised. load_filament / "
+                "unload_filament drive a spool change the same way."
+            )
         return result
     except KeyError:
         return _error_dict(

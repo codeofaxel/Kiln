@@ -27,6 +27,9 @@ from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
 from kiln.printers.base import (
+    FilamentHandlingUnsupported,
+    FilamentOpPlan,
+    FilamentOpResult,
     JobProgress,
     JobResult,
     PrinterAdapter,
@@ -1128,6 +1131,32 @@ class PrusaLinkAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
     # Dunder helpers
     # ------------------------------------------------------------------
+
+
+    # ------------------------------------------------------------------
+    # Filament handling — not available on this backend, said plainly
+    # ------------------------------------------------------------------
+
+    _FILAMENT_UNSUPPORTED_REASON = (
+        "Prusa Link exposes no raw G-code endpoint, so there is no way to "
+        "heat and drive the extruder (github.com/prusa3d/Prusa-Link/issues/832). "
+        "Use the printer's own screen: Filament → Load / Unload / Purge."
+    )
+
+    def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        raise FilamentHandlingUnsupported(
+            f"{self.name} cannot load filament through Kiln: " + self._FILAMENT_UNSUPPORTED_REASON
+        )
+
+    def _unload_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        raise FilamentHandlingUnsupported(
+            f"{self.name} cannot unload filament through Kiln: " + self._FILAMENT_UNSUPPORTED_REASON
+        )
+
+    def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        raise FilamentHandlingUnsupported(
+            f"{self.name} cannot purge filament through Kiln: " + self._FILAMENT_UNSUPPORTED_REASON
+        )
 
     def __repr__(self) -> str:
         return f"<PrusaLinkAdapter host={self._host!r}>"

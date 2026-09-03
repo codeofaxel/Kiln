@@ -87,6 +87,15 @@ def test_an_adapter_never_claims_more_than_it_implements():
     """
 
     class _ClaimsButCannot(PrinterAdapter):
+        # Filament handling is part of the adapter contract; these stubs
+        # never move filament, so the hooks refuse.
+        def _load_filament_impl(self, plan):
+            raise NotImplementedError
+        def _unload_filament_impl(self, plan):
+            raise NotImplementedError
+        def _purge_filament_impl(self, plan):
+            raise NotImplementedError
+
         @property
         def name(self) -> str:
             return "liar"
@@ -123,6 +132,15 @@ def test_the_default_refuses_rather_than_pretending():
     """An unteachable backend must say so, not report a hollow success."""
 
     class _Unteachable(PrinterAdapter):
+        # Filament handling is part of the adapter contract; these stubs
+        # never move filament, so the hooks refuse.
+        def _load_filament_impl(self, plan):
+            raise NotImplementedError
+        def _unload_filament_impl(self, plan):
+            raise NotImplementedError
+        def _purge_filament_impl(self, plan):
+            raise NotImplementedError
+
         @property
         def name(self) -> str:
             return "mystery-printer"

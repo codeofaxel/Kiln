@@ -409,6 +409,18 @@
     },
     "first_layer_status": {
       "level": "safe"
+    },
+    "load_filament": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "unload_filament": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "purge_filament": {
+      "level": "confirm",
+      "physical_effect": true
     }
   }
 }
