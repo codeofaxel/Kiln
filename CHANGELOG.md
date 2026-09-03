@@ -103,6 +103,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Kiln reads your description the way you wrote it.** A magnet worn
+  "against bodies" skipped the implanted-device warning that "against the
+  body" raised, and a board for "a monitor that watches patients" missed the
+  review that "a patient monitor" got.
+
 - **3MF files now work everywhere STL does.** Measurements, printability, and
   part colours come straight from the file.
 
