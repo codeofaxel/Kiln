@@ -72,7 +72,7 @@ dependencies = [
     # error said why, so the missing half was invisible to the person missing
     # it.  4.1 MB on disk, and its one requirement is the numpy above, so the
     # marginal cost of the correct behaviour is small.
-    "trimesh>=4.0",
+    "trimesh>=5.1.0",
     # Pillow paints the software stage (``kiln.stage_paint``), which is what
     # a machine with no usable browser gets — every install that is not this
     # laptop, in practice.  Promoted for the same reason as the two above and
