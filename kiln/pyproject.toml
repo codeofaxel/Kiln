@@ -98,7 +98,7 @@ dependencies = [
 
 [project.optional-dependencies]
 bambu = []  # Bambu support is now included by default
-elegoo = ["websocket-client>=1.9.1"]
+elegoo = ["websocket-client>=1.9.2"]
 postgres = ["psycopg2-binary>=2.9.12"]
 # NOTE: `kiln3d[rest]` used to pull `kiln-pro[rest]`, but kiln-pro is a
 # private package and the extra would fail on every public `pip install`.
