@@ -5307,6 +5307,150 @@ def _ams_selection_record(
     return {"slot": int(slot), "type": tray_type, "color": color}
 
 
+def _undriven_multi_material_decision(
+    mm: Any,
+    ams_mapping: list[int] | None,
+    *,
+    file_path: str | None = None,
+    wanted: list[Any] | None = None,
+) -> dict[str, Any]:
+    """The routing decision for a printer whose filament changes Kiln does not drive.
+
+    Three printers land here and each gets a different sentence:
+
+    * **no unit** (``kind="none"``) — a single-feed printer.  The shape
+      the callers have always had: ``use_ams=False``, no warnings.
+    * **could not ask** (``kind="unknown"``) — the probe failed.  Said as
+      such; never mistaken for "no unit".
+    * **a unit Kiln reads but does not drive** (Happy Hare, AFC) — the
+      gate map judges the file's colours through the SAME matcher the
+      AMS gate uses, so a file whose colours the loaded gates cannot
+      supply comes back ``blocked``, exactly as it would at an AMS.
+      ``use_ams`` stays False: Kiln emits no slot routing at an MMU; the
+      unit's own tool map decides where each ``Tn`` pulls from, and the
+      warning says so.  An explicit ``ams_mapping`` is reported ignored
+      rather than silently dropped, which is what the CLI used to do.
+    """
+    warnings_out: list[str] = []
+    out: dict[str, Any] = {"use_ams": False, "ams_mapping": None, "warnings": warnings_out}
+    if not mm.detected:
+        if mm.kind == "unknown":
+            warnings_out.append(mm.describe())
+            out["multi_material"] = mm.to_dict()
+        return out
+
+    out["multi_material"] = mm.to_dict()
+    if ams_mapping is not None:
+        warnings_out.append(
+            f"ams_mapping {list(ams_mapping)} was ignored: Kiln does not drive "
+            f"the {mm.label}'s slots — its own tool map routes each tool change."
+        )
+
+    from kiln.ams_routing import plan_ams_mapping, read_file_filaments
+
+    if wanted is None and file_path:
+        wanted = read_file_filaments(file_path).filaments
+    coloured = [f for f in (wanted or []) if getattr(f, "hex6", None)]
+    if coloured and mm.slots:
+        plan = plan_ams_mapping(list(wanted), list(mm.slots))
+        out["plan"] = plan.to_dict()
+        if plan.ok:
+            warnings_out.append(
+                f"{mm.describe()} The file's {len(wanted)} filament(s) are "
+                f"loaded: {plan.summary}. Check the unit's tool map puts them "
+                f"on the tools the file expects."
+            )
+            warnings_out.extend(plan.warnings)
+        elif len(wanted) >= 2:
+            out["blocked"] = True
+            warnings_out.append(
+                f"This file needs {len(wanted)} filaments and the {mm.label}'s "
+                f"loaded slots cannot supply them all: {plan.summary}. Load the "
+                f"missing colour, or remap the unit's tool map yourself — Kiln "
+                f"does not drive this unit and cannot substitute a slot for you."
+            )
+            warnings_out.extend(plan.warnings)
+        else:
+            warnings_out.append(mm.describe())
+            warnings_out.extend(plan.warnings)
+    elif len(wanted or []) >= 2:
+        warnings_out.append(
+            f"{mm.describe()} It reports no loaded filament, so the file's "
+            f"{len(wanted)} colours could not be checked against it."
+        )
+    else:
+        warnings_out.append(mm.describe())
+    return out
+
+
+def _refuse_undriven_multi_material(
+    tool: str,
+    printer_name: str | None,
+    composed_path: str,
+    *,
+    needs: int,
+) -> dict[str, Any] | None:
+    """Refuse a per-object filament print at a printer Kiln does not drive.
+
+    ``multi_material_print`` and ``multi_color_copies`` compose a 3MF with
+    one extruder per object and then rely on the print gate routing each
+    extruder to a slot.  Only a Bambu AMS has that path.  At any other
+    printer the objects come out in ONE filament — and the tools used to
+    say so in a warning attached to a print that had already started.
+
+    Returns ``None`` when the target is driven by Kiln (proceed), or when
+    no printer can be resolved at all (the print step fails on its own
+    terms, as before).  Otherwise an error envelope, code
+    ``MULTI_MATERIAL_NOT_DRIVEN``, carrying the composed file so the user
+    can slice it in a slicer that knows their unit, and — for a detected
+    MMU — what Kiln saw on it.
+    """
+    from kiln.multi_material import multi_material_status
+
+    try:
+        adapter = _resolve_adapter(printer_name)
+    except Exception as exc:
+        logger.debug("%s: no printer to judge multi-material against (%s)", tool, exc)
+        return None
+    mm = multi_material_status(adapter)
+    if mm.driven_by_kiln:
+        return None
+    where = printer_name or _resolve_effective_printer_name(None)
+    if mm.detected:
+        why = (
+            f"{mm.describe()} Kiln cannot route the {needs} filaments this print "
+            f"needs to its slots, so the objects would print in one filament."
+        )
+        hint = (
+            f"Slice {composed_path} in a slicer that drives the {mm.label} "
+            f"(OrcaSlicer with its Happy Hare / AFC integration), or print a "
+            f"single-filament version."
+        )
+    elif mm.kind == "unknown":
+        why = f"{mm.describe()} A per-object filament print needs a unit Kiln can see and drive."
+        hint = f"Check the printer connection, or slice {composed_path} yourself."
+    else:
+        why = (
+            f"'{where}' reports no multi-material unit, so the {needs} filaments "
+            f"this print needs would all come out of the one feed."
+        )
+        hint = (
+            f"Print it on a printer with a Bambu AMS, or slice {composed_path} "
+            f"yourself with manual filament changes (M600)."
+        )
+    _audit(tool, "multi_material_not_driven", details={"printer": where, "kind": mm.kind})
+    return _error_dict(
+        f"{why} {hint}",
+        code="MULTI_MATERIAL_NOT_DRIVEN",
+        retryable=False,
+        extra={
+            "multi_material": mm.to_dict(),
+            "multi_material_3mf": composed_path,
+            "filaments_needed": needs,
+        },
+    )
+
+
 def _resolve_use_ams(
     use_ams: str | bool,
     ams_mapping: list[int] | None,
@@ -5354,10 +5498,24 @@ def _resolve_use_ams(
     if val != "auto":
         logger.warning("Unknown use_ams value %r, treating as 'auto'", use_ams)
 
-    # Check if the adapter supports AMS queries
+    # One question, one record: what does this printer have?  A Bambu AMS
+    # continues into the routing below.  Everything else used to fall out
+    # here at a ``hasattr`` gate with ``warnings=[]`` — which is how a
+    # four-colour file at a Voron ERCF never met the colour-mismatch
+    # refusal an AMS owner gets: the refusal was vendor-gated, not
+    # hardware-gated.  A Klipper MMU is now READ (the gate map judges the
+    # file's colours) even though it is not DRIVEN (``use_ams`` stays
+    # False; the MMU's own tool map routes each ``Tn``).
     if not hasattr(adapter, "get_ams_status"):
-        logger.debug("Adapter has no get_ams_status — AMS auto-detect disabled.")
-        return {"use_ams": False, "ams_mapping": None, "warnings": []}
+        # A Bambu keeps the retry-and-ambiguity routing below, which reads
+        # the AMS itself — asking the shared helper first would read it
+        # twice.  Everything else is decided here, from the one record.
+        from kiln.multi_material import multi_material_status
+
+        return _undriven_multi_material_decision(
+            multi_material_status(adapter), ams_mapping,
+            file_path=file_path, wanted=wanted,
+        )
 
     try:
         ams_info = adapter.get_ams_status()
@@ -5597,7 +5755,7 @@ def _spool_advisory(
     printer, the printer cannot report its spools, or it reports no AMS.
     Never raises: a colouring that succeeded is never failed by advice.
     """
-    from kiln.ams_routing import advise_colours, loaded_trays
+    from kiln.ams_routing import advise_colours
 
     label = printer_name or None
     try:
@@ -5616,18 +5774,52 @@ def _spool_advisory(
         logger.debug("spool advisory: no printer to ask (%s)", exc)
         return None
 
-    if not hasattr(adapter, "get_ams_status"):
-        return None
-    try:
-        ams_info = adapter.get_ams_status()
-    except Exception as exc:
-        logger.debug("spool advisory: AMS not readable on %s (%s)", label, exc)
-        return None
-    if not ams_info.get("units"):
-        return None
+    # One record for every printer kind.  A unit Kiln reads but does not
+    # drive (a Klipper MMU) is judged by the same matcher: the advice is
+    # about what is LOADED, which is true whoever routes the tool change.
+    # A read that failed says so — the advisory used to vanish (``None``)
+    # for every non-Bambu printer, which to a caller reads as "nothing to
+    # say" when it meant "never looked".
+    from kiln.multi_material import multi_material_status
 
-    advisory = advise_colours(colours, loaded_trays(ams_info), printer=label)
-    return advisory.to_dict() if advisory else None
+    mm = multi_material_status(adapter)
+    if mm.kind == "none":
+        return None
+    if mm.kind == "unknown":
+        return {
+            "verdict": "unknown",
+            "message": (
+                f"Could not read what is loaded on {label}: "
+                f"{mm.warnings[0] if mm.warnings else 'the printer did not answer'}."
+            ),
+            "printer": label,
+            "missing": [],
+            "matched": [],
+            "multi_material": mm.to_dict(),
+        }
+    if not mm.slots:
+        return None if mm.driven_by_kiln else _advisory_without_slots(mm, label)
+
+    advisory = advise_colours(colours, list(mm.slots), printer=label)
+    if not advisory:
+        return None
+    out = advisory.to_dict()
+    if not mm.driven_by_kiln:
+        out["multi_material"] = mm.to_dict()
+        out["message"] += f" {mm.describe()}"
+    return out
+
+
+def _advisory_without_slots(mm: Any, label: str | None) -> dict[str, Any]:
+    """A detected but empty-reading unit: say what was seen, not nothing."""
+    return {
+        "verdict": "empty",
+        "message": mm.describe(),
+        "printer": label,
+        "missing": [],
+        "matched": [],
+        "multi_material": mm.to_dict(),
+    }
 
 
 @mcp.tool()
@@ -7937,6 +8129,13 @@ def preflight_check(
     - (Optional) Material loaded matches expected material
     - (Optional) Local G-code file is valid and readable
     - (Optional) Remote file exists on the printer
+    - Multi-material: what unit the printer carries (AMS, a Klipper MMU)
+      and, with ``file_path``, whether the file's filaments are loaded.
+      Advisory for a unit Kiln drives (the print gate decides at start);
+      a FAILURE when a multi-filament file needs more colours than a
+      unit Kiln does not drive has loaded — that print comes out wrong
+      and nothing downstream stops it.  Absent for a single-feed printer;
+      a read that failed is reported as such, never as "no unit".
 
     Args:
         file_path: Optional path to a local G-code file to validate before
@@ -8068,6 +8267,57 @@ def preflight_check(
                     # If sensor not enabled, skip silently
             except Exception as exc:
                 logger.debug("Filament sensor check failed: %s", exc)  # Filament sensor not available -- skip silently
+
+        # -- Multi-material check ------------------------------------------
+        # Says what unit the printer carries and whether the file's colours
+        # are loaded on it.  Absent for a single-feed printer; advisory for
+        # a unit Kiln drives (the print gate decides at start); and a REAL
+        # failure — not an advisory — when a multi-filament file needs more
+        # colours than a unit Kiln does not drive has loaded, because that
+        # print comes out wrong and nothing downstream will stop it.
+        try:
+            from kiln.ams_routing import read_file_filaments
+            from kiln.multi_material import multi_material_status
+
+            _mm = multi_material_status(adapter)
+            if _mm.kind == "unknown":
+                checks.append({
+                    "name": "multi_material",
+                    "passed": True,
+                    "message": _mm.describe(),
+                    "advisory": True,
+                })
+            elif _mm.detected:
+                _wanted = read_file_filaments(file_path).filaments if file_path else []
+                _needs = len(_wanted)
+                _loaded = len(_mm.slots)
+                _short = (
+                    not _mm.driven_by_kiln
+                    and _needs > 1
+                    and _loaded > 0
+                    and _needs > _loaded
+                )
+                _msg = _mm.describe()
+                if _short:
+                    _msg = (
+                        f"This file needs {_needs} filaments but the {_mm.label} "
+                        f"reports only {_loaded} loaded, and Kiln does not drive "
+                        f"it — the print would come out wrong. Load the missing "
+                        f"filament or check the unit's tool map."
+                    )
+                elif _needs > 1:
+                    _msg += f" The file needs {_needs} filaments; {_loaded} slot(s) report filament."
+                checks.append({
+                    "name": "multi_material",
+                    "passed": not _short,
+                    "message": _msg,
+                    "advisory": not _short,
+                    "multi_material": _mm.to_dict(),
+                })
+                if _short:
+                    errors.append(_msg)
+        except Exception as exc:
+            logger.debug("Multi-material check skipped: %s", exc)
 
         # -- Material mismatch check (optional) ----------------------------
         _strict_material = os.environ.get("KILN_STRICT_MATERIAL_CHECK", "true").lower() in ("1", "true", "yes")
@@ -16081,6 +16331,15 @@ def multi_material_print(
 ) -> dict:
     """Print multiple objects in different materials/colors on one build plate.
 
+    **Only a printer Kiln drives can make this print** — today a Bambu with
+    an AMS.  At any other printer (a Klipper MMU Kiln can read but not
+    route, or a single-feed machine) a multi-filament plate is REFUSED
+    before slicing with code ``MULTI_MATERIAL_NOT_DRIVEN``: the objects
+    would all come out in one filament.  The refusal carries what Kiln saw
+    on the printer (``multi_material``) and the composed file
+    (``multi_material_3mf``), so the user can slice it in a slicer that
+    drives their unit.  A single-filament plate is never refused.
+
     Takes a JSON array of objects, each with a model file and material
     assignment. Builds a multi-material 3MF file with per-object filament
     assignments, slices it, auto-maps materials to AMS slots, and prints.
@@ -16453,7 +16712,17 @@ def multi_material_print(
             except Exception as _ams_exc:
                 logger.debug("AMS query failed in multi_material_print: %s", _ams_exc)
 
-        # Step 5: Slice and print
+        # Step 5: refuse honestly, or slice and print.  Per-object filament
+        # assignment is only a print Kiln can make on a unit Kiln DRIVES;
+        # anywhere else the objects would come out in one filament and the
+        # warning used to arrive AFTER the print had started.
+        if len(unique_filaments) > 1 and (
+            refusal := _refuse_undriven_multi_material(
+                "multi_material_print", printer_name, output_3mf,
+                needs=len(unique_filaments),
+            )
+        ):
+            return refusal
         result = run_reslice_and_print(
             model_path=output_3mf,
             printer_name=printer_name,
@@ -16585,6 +16854,13 @@ def multi_color_copies(
     slicer_path: str | None = None,
 ) -> dict:
     """Print multiple copies of the same model, each in a different AMS color.
+
+    **Only a printer Kiln drives can make this print** — today a Bambu with
+    an AMS.  At any other printer the copies are REFUSED before slicing
+    with code ``MULTI_MATERIAL_NOT_DRIVEN`` (every copy would print in one
+    colour; the slot map below is a Bambu instruction).  The refusal
+    carries what Kiln saw on the printer (``multi_material``) and the
+    composed plate (``multi_material_3mf``) for slicing elsewhere.
 
     Takes a single model file and produces a multi-color print where each
     copy uses a different AMS filament slot.  Perfect for "print 4 lids
@@ -16809,7 +17085,14 @@ def multi_color_copies(
         except Exception:
             pass  # best-effort — slicer profile defaults are fine
 
-        # --- Slice and print with explicit AMS mapping ---
+        # --- Refuse honestly, or slice and print with explicit AMS mapping ---
+        # The slot map below is a Bambu instruction.  At a printer Kiln does
+        # not drive it was forwarded anyway and dropped by the adapter, so
+        # every copy printed in one colour with a soft "unchecked" warning.
+        if refusal := _refuse_undriven_multi_material(
+            "multi_color_copies", None, output_3mf, needs=n_copies,
+        ):
+            return refusal
         result = run_reslice_and_print(
             model_path=output_3mf,
             printer_id=printer_id,

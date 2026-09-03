@@ -522,6 +522,13 @@ def _send_heartbeat() -> None:
                 # said "every P2S install fails at start_print" without
                 # anyone having to send us screenshots.
                 "tool_failures": _top_n(stats.get("tool_failures", {}), 100),
+                # Which multi-material unit the printer carried when a
+                # filament-change door asked — {kind: count_today} over
+                # the closed vocabulary in kiln.multi_material.KINDS.
+                # The only instrument for "how many Klipper installs
+                # have an MMU"; nothing server-side can see it.  Kind
+                # names only — never a gate map, a colour, or a spool.
+                "multi_material_seen": stats.get("multi_material_seen", {}),
                 # Upgrade-nudge funnel — {stage: count_today}.  A closed
                 # five-value vocabulary, not tool names.  This is the
                 # only way the funnel is ever seen: the offer, the

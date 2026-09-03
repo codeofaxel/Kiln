@@ -487,6 +487,31 @@ def _make_adapter(cfg: dict[str, Any]):
         )
 
 
+def _ams_flags_unsupported_message(adapter: Any) -> str:
+    """Why ``--use-ams`` / ``--ams-mapping`` cannot be honoured at *adapter*.
+
+    Names what the printer DOES have — a Klipper MMU Kiln can see but not
+    drive, or nothing — so the refusal is a fact about the machine, not a
+    bare "unsupported".
+    """
+    from kiln.multi_material import multi_material_status
+
+    mm = multi_material_status(adapter)
+    base = "--use-ams and --ams-mapping are Bambu AMS instructions"
+    if mm.detected:
+        return (
+            f"{base}, and this printer's {mm.label} is not driven by Kiln. "
+            f"{mm.describe()} Drop the flags: the unit's own tool map routes "
+            f"each tool change (Happy Hare: MMU_TTG_MAP)."
+        )
+    if mm.kind == "unknown":
+        return f"{base}. {mm.describe()} Drop the flags, or check the printer connection."
+    return (
+        f"{base}, and this printer ({getattr(adapter, 'name', type(adapter).__name__)}) "
+        "reports no multi-material unit. Drop the flags to print from its single feed."
+    )
+
+
 def _get_adapter_from_ctx(ctx: click.Context):
     """Resolve printer config and return an adapter instance."""
     printer_name = ctx.obj.get("printer")
@@ -2687,6 +2712,26 @@ def print_cmd(
                 click.echo(f"  Action: {summary['action']}")
             return
 
+        from kiln.printers.bambu import BambuAdapter as _BambuAdapter
+
+        if not isinstance(adapter, _BambuAdapter) and (
+            use_ams is not None or ams_mapping is not None
+        ):
+            # These flags are Bambu AMS instructions.  They used to be
+            # dropped inside the loop below with exit 0, so `kiln print
+            # --ams-mapping 0,1` at a Klipper MMU "succeeded" and printed
+            # from whatever the MMU's own tool map said.  A flag Kiln cannot
+            # honour is an error, said before anything is uploaded, and the
+            # message names what the printer does have.
+            click.echo(
+                format_error(
+                    _ams_flags_unsupported_message(adapter),
+                    code="AMS_UNSUPPORTED_ON_PRINTER",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+
         for i, f in enumerate(expanded):
             file_name = f
             if os.path.isfile(f):
@@ -3605,6 +3650,24 @@ def slice(
 
         # --print-after: wrap for Bambu if needed, upload, and start
         adapter = _get_adapter_from_ctx(ctx)
+        from kiln.printers.bambu import BambuAdapter as _BambuAdapter
+
+        if not isinstance(adapter, _BambuAdapter) and (
+            use_ams is not None or parsed_ams_mapping is not None
+        ):
+            # The merged multi-colour gcode carries bare T0..Tn and the
+            # slot map is a Bambu instruction; at any other printer both
+            # were sent and silently dropped, and every copy printed in
+            # one colour.  Refuse before upload, keep the sliced file.
+            click.echo(
+                format_error(
+                    _ams_flags_unsupported_message(adapter)
+                    + f" The sliced file is at {result.output_path}.",
+                    code="AMS_UNSUPPORTED_ON_PRINTER",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
         if not json_mode:
             click.echo(result.message)
 

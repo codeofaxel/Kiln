@@ -419,6 +419,14 @@ class PrinterCapabilities:
     #: as "cancelled".  Default False: a backend nobody has measured is not
     #: assumed to share the hazard, because the guard costs a real command.
     cancel_during_calibration_faults: bool = False
+    #: Whether :meth:`PrinterAdapter.get_multi_material_status` can ASK the
+    #: machine what multi-material unit it carries (an AMS, a Klipper MMU).
+    #: This is "can look", not "has one": the answer is a live read, so it
+    #: lives on the method, never on this static declaration.  Default
+    #: False — a backend nobody has taught to look says so, and the shared
+    #: reader (:func:`kiln.multi_material.multi_material_status`) reports
+    #: ``none`` rather than guessing.
+    can_report_multi_material: bool = False
     device_type: str = "fdm_printer"
     supported_extensions: tuple[str, ...] = (".gcode", ".gco", ".g")
 
@@ -1793,6 +1801,21 @@ class PrinterAdapter(ABC):
         "sensor_enabled": True}``), or ``None`` if no filament sensor is
         available.  This is an optional method -- the default implementation
         returns ``None``.
+        """
+        return None
+
+    def get_multi_material_status(self) -> Any | None:
+        """What multi-material unit this printer carries, read live.
+
+        Returns a :class:`kiln.multi_material.MultiMaterialStatus` — the
+        one record every door that cares about filament changes reads —
+        or ``None`` when this backend knows no multi-material path at
+        all.  A backend that CAN look but the read fails should RAISE
+        :class:`PrinterError`: the shared reader turns that into
+        ``kind="unknown"`` carrying the reason, which is a different fact
+        from ``None`` and must not be reported as one.  Optional; the
+        default knows nothing and says so.  Backends that implement it
+        advertise :attr:`PrinterCapabilities.can_report_multi_material`.
         """
         return None
 

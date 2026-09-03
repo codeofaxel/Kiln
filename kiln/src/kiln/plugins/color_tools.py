@@ -1183,6 +1183,12 @@ def _build_result(
             "face_count": zone.face_count,
             "stl_path": stl_path,
             "ams_slot": slot_num,
+            # ``ams_slot`` is the zone's ORDINAL, not a slot anything was
+            # read from: this tool never asks the printer.  Said explicitly
+            # so a reader does not mistake it for a routed assignment; the
+            # ``ams_advisory`` beside the result is where a real reading
+            # of the printer's slots lives.
+            "slot_source": "zone_index",
             "estimated_weight_g": weight,
         }
         if zone.watertight is not None:

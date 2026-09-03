@@ -1738,62 +1738,70 @@ class _SlicerToolsPlugin:
                 print_kwargs: dict[str, Any] = {}
                 ams_routing: dict[str, Any] | None = None
                 ams_routing_warnings: list[str] = []
-                # Ask the adapter that will receive the job what it is: an
-                # aimed print at a Bambu skipped AMS routing entirely when
-                # the default connection was not a Bambu — the silent
-                # external-spool fallthrough this block exists to prevent.
-                if _srv._resolve_target_printer_type(printer_name, adapter) == "bambu":
-                    ams_decision = _srv._resolve_use_ams(
-                        "auto", None, adapter, material=material,
-                        # The sliced file says which colours it wants, so
-                        # each extruder routes to the tray of that colour.
-                        file_path=upload_path,
+                # Ask the adapter that will receive the job, whatever it is.
+                # This block used to run only for a Bambu, which made the
+                # colour-mismatch refusal below VENDOR-gated: a four-colour
+                # file at a Klipper MMU sailed through.  ``_resolve_use_ams``
+                # now reads every kind of unit (and says when it cannot), so
+                # the refusal is about the hardware, not the brand.
+                ams_decision = _srv._resolve_use_ams(
+                    "auto", None, adapter, material=material,
+                    # The sliced file says which colours it wants, so
+                    # each extruder routes to the tray of that colour.
+                    file_path=upload_path,
+                )
+                ams_routing_warnings = list(ams_decision.get("warnings") or [])
+                if ams_decision.get("blocked"):
+                    return _srv._error_dict(
+                        " ".join(ams_routing_warnings) or "AMS routing blocked.",
+                        code="AMS_COLOR_MISMATCH",
+                        retryable=False,
+                        extra={"ams_plan": ams_decision.get("plan")},
                     )
-                    ams_routing_warnings = list(ams_decision.get("warnings") or [])
-                    if ams_decision.get("blocked"):
-                        return _srv._error_dict(
-                            " ".join(ams_routing_warnings) or "AMS routing blocked.",
-                            code="AMS_COLOR_MISMATCH",
-                            retryable=False,
-                            extra={"ams_plan": ams_decision.get("plan")},
-                        )
-                    # Refuse to silent-route when AMS state is ambiguous
-                    # (hardware bits say AMS present but no tray state, or
-                    # probe errored out).  Returning an error envelope
-                    # here blocks the print BEFORE upload instead of
-                    # silently routing to the wrong filament feed path.
-                    # Memory rule: "always route to AMS when printer has
-                    # one — never silent external-spool fallthrough".
-                    if ams_decision.get("ambiguous") and not ams_decision.get("use_ams"):
-                        return _srv._error_dict(
-                            "AMS routing is ambiguous — hardware reports AMS "
-                            "present but no tray state is available.  Refusing "
-                            "to silently route to external spool (which would "
-                            "fail with Bambu error 0300-8015 if nothing is "
-                            "loaded there).  Retry in a few seconds for the "
-                            "MQTT cache to refresh, or call start_print() "
-                            "directly with use_ams='true' and an explicit "
-                            "ams_mapping=[<slot>]. "
-                            + " ".join(ams_routing_warnings),
-                            code="AMS_STATE_AMBIGUOUS",
-                        )
-                    if ams_decision.get("use_ams"):
-                        print_kwargs["use_ams"] = True
-                        mapping = ams_decision.get("ams_mapping")
-                        if mapping is not None:
-                            print_kwargs["ams_mapping"] = mapping
-                        ams_routing = {
-                            "routed": "ams",
-                            "ams_mapping": mapping,
-                            "warnings": ams_routing_warnings,
-                        }
-                        if ams_decision.get("plan"):
-                            ams_routing["plan"] = ams_decision["plan"]
-                    else:
-                        ams_routing = {
-                            "routed": "external_spool",
-                            "warnings": ams_routing_warnings,
-                        }
+                # Refuse to silent-route when AMS state is ambiguous
+                # (hardware bits say AMS present but no tray state, or
+                # probe errored out).  Returning an error envelope
+                # here blocks the print BEFORE upload instead of
+                # silently routing to the wrong filament feed path.
+                # Memory rule: "always route to AMS when printer has
+                # one — never silent external-spool fallthrough".
+                if ams_decision.get("ambiguous") and not ams_decision.get("use_ams"):
+                    return _srv._error_dict(
+                        "AMS routing is ambiguous — hardware reports AMS "
+                        "present but no tray state is available.  Refusing "
+                        "to silently route to external spool (which would "
+                        "fail with Bambu error 0300-8015 if nothing is "
+                        "loaded there).  Retry in a few seconds for the "
+                        "MQTT cache to refresh, or call start_print() "
+                        "directly with use_ams='true' and an explicit "
+                        "ams_mapping=[<slot>]. "
+                        + " ".join(ams_routing_warnings),
+                        code="AMS_STATE_AMBIGUOUS",
+                    )
+                if ams_decision.get("use_ams"):
+                    print_kwargs["use_ams"] = True
+                    mapping = ams_decision.get("ams_mapping")
+                    if mapping is not None:
+                        print_kwargs["ams_mapping"] = mapping
+                    ams_routing = {
+                        "routed": "ams",
+                        "ams_mapping": mapping,
+                        "warnings": ams_routing_warnings,
+                    }
+                    if ams_decision.get("plan"):
+                        ams_routing["plan"] = ams_decision["plan"]
+                elif ams_decision.get("multi_material"):
+                    # A unit Kiln reads but does not drive: say what it saw.
+                    ams_routing = {
+                        "routed": "printer_owned_unit",
+                        "multi_material": ams_decision["multi_material"],
+                        "warnings": ams_routing_warnings,
+                    }
+                elif _srv._resolve_target_printer_type(printer_name, adapter) == "bambu":
+                    ams_routing = {
+                        "routed": "external_spool",
+                        "warnings": ams_routing_warnings,
+                    }
 
                 # Pass local 3MF path so bambu.py can compute MD5 + detect
                 # multi-material plates (supersedes single-tray routing above

@@ -209,7 +209,15 @@ def _get_printer_tool_change(
         addon_display_name (str | None): Human-readable add-on name.
         max_colors (int | None): Maximum simultaneous colors supported.
         hardware_unverified (bool): True when Kiln has no hardware-validated
-            active slot-control path for this changer.
+            active slot-control path for this changer.  DERIVED from the
+            changer, never stored per row: Kiln drives exactly the changers
+            in :data:`kiln.multi_material.KILN_DRIVEN_CHANGERS` (Bambu AMS /
+            AMS Lite), so every other automatic changer is unverified by
+            construction.  A per-row flag had to be remembered, and the ERCF
+            and Prusa MMU rows had not been — they estimated 90-150 minutes
+            of tool changes at ``confidence="high"`` with no caution while
+            the CFS rows warned twice.  A row may still say ``true`` itself;
+            it can never say ``false`` for a changer Kiln does not drive.
         warnings (list[str]): Runtime warnings callers should surface.
     """
     profiles = _load_slicer_profiles()
@@ -235,7 +243,7 @@ def _get_printer_tool_change(
                 "addon": None,
                 "addon_display_name": None,
                 "max_colors": None,
-                "hardware_unverified": bool(tc.get("hardware_unverified", False)),
+                "hardware_unverified": _hardware_unverified(changer, tc),
                 "control_mode": tc.get("control_mode"),
                 "warnings": list(tc.get("warnings", [])),
             }
@@ -307,10 +315,26 @@ def _resolve_addon(
         "addon": addon_id,
         "addon_display_name": addon.get("display_name", addon_id),
         "max_colors": addon.get("max_colors"),
-        "hardware_unverified": bool(addon.get("hardware_unverified", False)),
+        "hardware_unverified": _hardware_unverified(addon["tool_changer"], addon),
         "control_mode": addon.get("control_mode"),
         "warnings": list(addon.get("warnings", [])),
     }
+
+
+def _hardware_unverified(changer: str | None, row: dict[str, Any]) -> bool:
+    """Whether Kiln lacks a hardware-validated slot-control path for *changer*.
+
+    Derived, not stored: ``True`` for every automatic changer outside
+    :data:`kiln.multi_material.KILN_DRIVEN_CHANGERS`, and ``False`` for
+    ``none`` (nothing to control).  A row may additionally assert ``true``
+    (the CFS rows do); it cannot clear a changer Kiln has never driven.
+    """
+    from kiln.multi_material import KILN_DRIVEN_CHANGERS
+
+    kind = str(changer or "none").strip().lower()
+    if bool(row.get("hardware_unverified", False)):
+        return True
+    return kind != "none" and kind not in KILN_DRIVEN_CHANGERS
 
 
 def _get_klipper_printer_ids(profiles: dict[str, Any]) -> set[str]:
@@ -372,7 +396,7 @@ def list_addons(*, printer_id: str | None = None) -> list[dict[str, Any]]:
             "max_colors": addon.get("max_colors"),
             "compatible": "universal" if is_universal else ("klipper" if is_klipper else compatible),
             "requires_klipper": addon.get("requires_klipper", False),
-            "hardware_unverified": bool(addon.get("hardware_unverified", False)),
+            "hardware_unverified": _hardware_unverified(addon["tool_changer"], addon),
             "control_mode": addon.get("control_mode"),
             "warnings": list(addon.get("warnings", [])),
         })
@@ -769,10 +793,21 @@ def estimate_from_dimensions(
 
         if tc_info["has_auto_tool_change"]:
             tool_change_time_s = tool_changes * tc_seconds
-            if tc_info.get("hardware_unverified"):
+            if tc_info.get("hardware_unverified") and not any(
+                "unverified" in str(w).lower() for w in tc_info.get("warnings", [])
+            ):
+                # The row's own warning, when it has one, is the wording; this
+                # generic line covers the changers whose rows carry none.  It
+                # names THEIR changer — the previous text told a Voron owner
+                # to "verify CFS slot mapping".
+                from kiln.multi_material import changer_label
+
                 warnings.append(
-                    f"{addon_display or tool_change_type} slot control is hardware-unverified in Kiln. "
-                    "Verify CFS slot mapping and run a small multicolor test before unattended production printing."
+                    f"{addon_display or changer_label(tool_change_type)} slot control "
+                    "is hardware-unverified in Kiln: the tool-change timing is from "
+                    "published figures, not from Kiln driving this changer. Verify "
+                    "the slot/tool mapping and run a small multicolor test before "
+                    "unattended production printing."
                 )
             # Check color capacity warning
             if max_colors and num_materials > max_colors:

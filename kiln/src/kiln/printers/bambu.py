@@ -900,6 +900,7 @@ class BambuAdapter(PrinterAdapter):
             can_send_gcode=True,
             can_pause=True,
             can_clear_error=True,
+            can_report_multi_material=True,
             cancel_during_calibration_faults=True,
             # Port 6000 TLS+JPEG works on A1 / A1 Mini / P1P / P1S
             # without ffmpeg.  get_snapshot() tries port 6000 first
@@ -4043,6 +4044,20 @@ class BambuAdapter(PrinterAdapter):
             result["units"].append(unit_out)
 
         return result
+
+    def get_multi_material_status(self) -> Any:
+        """The AMS as a :class:`~kiln.multi_material.MultiMaterialStatus`.
+
+        The same reading :meth:`get_ams_status` gives, in the one record
+        every filament-change door reads.  ``driven_by_kiln=True``: this is
+        the one changer family Kiln routes to (``use_ams`` + ``ams_mapping``
+        on :meth:`start_print`), exercised on real hardware.  An MQTT
+        failure raises :class:`PrinterError` so the reader reports
+        ``unknown`` rather than "no AMS".
+        """
+        from kiln.multi_material import from_bambu_ams
+
+        return from_bambu_ams(self.get_ams_status(), printer_model=self._printer_model)
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code

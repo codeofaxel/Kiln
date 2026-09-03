@@ -655,6 +655,7 @@ class MoonrakerAdapter(PrinterAdapter):
         """Capabilities supported by the Moonraker/Klipper backend."""
         return PrinterCapabilities(
             can_clear_error=True,
+            can_report_multi_material=True,
             can_upload=True,
             can_set_temp=True,
             can_send_gcode=True,
@@ -1674,6 +1675,69 @@ class MoonrakerAdapter(PrinterAdapter):
         except Exception:
             logger.debug("Filament sensor query failed", exc_info=True)
             return None
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- multi-material (read-only)
+    # ------------------------------------------------------------------
+
+    #: Klipper printer objects that mean a multi-material unit is CONFIGURED
+    #: AND LOADED.  Detection anchors on ``/printer/objects/list`` rather
+    #: than on ``printer.cfg`` sections on purpose: a ``[mmu]`` section whose
+    #: extras failed to load is not a working MMU, and only the object list
+    #: tells the two apart.  Happy Hare registers ``mmu`` + ``mmu_machine``
+    #: (verified on 4.0.0 in the virtual-klipper-printer simulator);
+    #: AFC-Klipper-Add-On registers ``AFC`` (read from its source, never a
+    #: live unit).
+    _MULTI_MATERIAL_OBJECTS: ClassVar[tuple[str, ...]] = ("mmu", "AFC")
+
+    def get_multi_material_status(self) -> Any:
+        """Read the MMU this Klipper carries, if any — a read, never a route.
+
+        One ``GET /printer/objects/list``; then, for a Happy Hare, one
+        ``GET /printer/objects/query?mmu&mmu_machine`` for the per-gate
+        map (``gate_status``/``gate_material``/``gate_color``/``ttg_map``);
+        for an AFC, ``?AFC``.  Returns a
+        :class:`~kiln.multi_material.MultiMaterialStatus` with
+        ``driven_by_kiln=False`` in every case: Kiln does not emit tool
+        changes at a Klipper MMU, and the record says so in words.
+
+        A transport failure RAISES :class:`PrinterError` so the shared
+        reader reports ``unknown`` — "could not ask" is not "nothing
+        there", and the doors that used to conflate the two are the
+        reason this method exists.
+        """
+        from kiln.multi_material import from_afc, from_happy_hare, none_status
+
+        try:
+            listing = self._get_json("/printer/objects/list")
+        except PrinterError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive
+            raise PrinterError(f"objects/list failed: {exc}") from exc
+        objects = _safe_get(listing, "result", "objects", default=[])
+        names = {o for o in objects if isinstance(o, str)} if isinstance(objects, list) else set()
+
+        if "mmu" in names:
+            payload = self._get_json(
+                "/printer/objects/query",
+                params={"mmu": "", "mmu_machine": ""},
+            )
+            status = _safe_get(payload, "result", "status", default={}) or {}
+            mmu = status.get("mmu") if isinstance(status, dict) else None
+            if not isinstance(mmu, dict):
+                raise PrinterError("Klipper lists an mmu object but returned no status for it")
+            machine = status.get("mmu_machine") if isinstance(status, dict) else None
+            return from_happy_hare(mmu, machine if isinstance(machine, dict) else None)
+
+        if "AFC" in names:
+            payload = self._get_json("/printer/objects/query", params={"AFC": ""})
+            status = _safe_get(payload, "result", "status", default={}) or {}
+            afc = status.get("AFC") if isinstance(status, dict) else None
+            if not isinstance(afc, dict):
+                raise PrinterError("Klipper lists an AFC object but returned no status for it")
+            return from_afc(afc)
+
+        return none_status("moonraker:no_mmu_object")
 
     # ------------------------------------------------------------------
     # Klipper configuration

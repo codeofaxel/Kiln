@@ -275,6 +275,15 @@ def _empty_day() -> dict[str, Any]:
         # locked door, a caller we don't know yet.  This one is Kiln not
         # working, which is a different question with a different owner.
         "tool_failures": {},       # {"start_print": 4}
+        # Which multi-material unit Kiln SAW on the printer it asked —
+        # {kind: count_today}, kind from kiln.multi_material.KINDS
+        # ("ams", "ams_lite", "happy_hare", "afc", "none").  Recorded at
+        # the one reader every filament-change door goes through, so it
+        # answers the question nobody could until now: how many Klipper
+        # installs actually carry an MMU.  "none" is counted on purpose —
+        # it is the denominator; a failed read ("unknown") is not, because
+        # it is evidence of nothing.
+        "multi_material_seen": {}, # {"happy_hare": 3, "none": 12}
         # Upgrade-nudge funnel: stage -> count today.  Stages are a
         # CLOSED vocabulary (_UPDATE_NUDGE_STAGES), not tool names: the
         # question is "did the offer get shown, taken, and did it work",
@@ -346,6 +355,7 @@ _ROLLOVER_MAPS = (
     "texture_names", "decoration_types", "slicer_profiles",
     "marketplace_sources", "template_uses",
     "surface_sessions", "surface_events",
+    "multi_material_seen",
 )
 
 
@@ -905,6 +915,22 @@ def record_template_use(template_id: str) -> None:
     _record_name_count("template_uses", template_id)
 
 
+def record_multi_material_seen(kind: str) -> None:
+    """Count one sighting of a multi-material unit of ``kind`` on a printer.
+
+    Written by :func:`kiln.multi_material.multi_material_status`, the one
+    reader every door that cares about filament changes goes through, so
+    the count covers the whole surface without each tool phoning in.
+    ``kind`` is the closed vocabulary in :data:`kiln.multi_material.KINDS`
+    minus ``unknown`` (a failed read proves nothing); ``none`` IS recorded
+    because it is the denominator — "we looked at N Klipper printers and
+    M carried an MMU" is the number that decides whether lane routing is
+    ever worth building.  A kind name, never a gate map or a colour.
+    Silent by contract.
+    """
+    _record_name_count("multi_material_seen", kind)
+
+
 def get_daily_stats() -> dict[str, Any]:
     """Return today's counters and breakdowns."""
     data = _read()
@@ -944,6 +970,8 @@ def get_daily_stats() -> dict[str, Any]:
         # a map missing any leg of that chain ships {} forever.
         "surface_sessions": data.get("surface_sessions", {}),
         "surface_events": data.get("surface_events", {}),
+        # Same contract again: recorded, rolled over, returned.
+        "multi_material_seen": data.get("multi_material_seen", {}),
         # The last COMPLETE day's counters (see _archive_completed_day).
         # The heartbeat reports these because the same-day counters it
         # can see at server startup are structurally near-empty.

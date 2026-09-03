@@ -595,11 +595,23 @@ class TestSpoolAdvisoryWrapper:
         server = self._patch(monkeypatch, lambda name=None: self._adapter({"units": []}))
         assert server._spool_advisory(["#F72323"]) is None
 
-    def test_an_unreadable_ams_says_nothing(self, monkeypatch):
+    def test_an_unreadable_ams_is_said_not_silent(self, monkeypatch):
+        """Was: ``None``.  A failed read is not "nothing to say".
+
+        Silence here reads as "checked, nothing to add" — the same silence a
+        Klipper MMU got for every read, because the door could not tell "no
+        unit" from "could not ask".  The advisory now carries an ``unknown``
+        verdict naming the reason, so an agent relays "could not read the
+        spools" instead of nothing at all.
+        """
         adapter = self._adapter()
         adapter.get_ams_status.side_effect = RuntimeError("mqtt down")
         server = self._patch(monkeypatch, lambda name=None: adapter)
-        assert server._spool_advisory(["#F72323"]) is None
+        got = server._spool_advisory(["#F72323"])
+        assert got is not None
+        assert got["verdict"] == "unknown"
+        assert "mqtt down" in got["message"]
+        assert got["printer"] == "default"
 
     def test_a_given_adapter_is_asked_directly(self, monkeypatch):
         def resolve(name=None):
