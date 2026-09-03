@@ -31,8 +31,23 @@ platform-endian, which is LE on every client Kiln targets)::
       "decimated_from": N,             # only when a decimation backend ran
       "source": {"filename": "<basename only>", "format": "stl"},
       "plate": {...},                  # optional — see THE PLATE below
-      "cad": {...}                     # optional — see THE CAD BLOCK below
+      "cad": {...},                    # optional — see THE CAD BLOCK below
+      "slicer": {...}                  # optional — see THE SLICER BLOCK below
     }
+
+THE SLICER BLOCK
+----------------
+Optional, and produced by :mod:`kiln.slicer_geometry` rather than here —
+present when a sliced G-code of THIS mesh exists on the machine building the
+payload.  It carries what the printer prints that the model never
+contained: skirt, brim, prime tower, supports, raft, each as the real
+extrusion segments from the slice, classified, in the SAME viewer-space
+frame as ``positions`` and moved by the same plate-centring offset
+(:func:`kiln.stage_plate.stand_on_plate` shifts both).  A stage draws them
+only behind a toggle that is off by default, so the model-only view is
+unchanged; a stage that predates the block ignores an unknown key.  The
+block is ``kiln.slicer_features.v1`` — shape, frames and budget are
+documented on that module.
 
 THE CAD BLOCK
 -------------

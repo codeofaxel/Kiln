@@ -134,6 +134,21 @@ def _stage_printer_id() -> str | None:
     return None
 
 
+def _slicer_sidecar(path: Path) -> bytes | None:
+    """The slicer-added-geometry sidecar for *path*, or ``None``.
+
+    Built by :func:`kiln.slicer_geometry.sidecar_for_mesh` — the one place
+    that decides which slice belongs to a mesh and what the block looks
+    like.  Wrapped here so a link never fails over its furniture."""
+    try:
+        from kiln.slicer_geometry import sidecar_for_mesh
+
+        return sidecar_for_mesh(path)
+    except Exception:  # noqa: BLE001
+        logger.debug("stage link: slicer sidecar skipped", exc_info=True)
+        return None
+
+
 def _sha256_of(path: Path) -> str | None:
     try:
         h = hashlib.sha256()
@@ -175,9 +190,17 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     # maker's real bed.  Resolved the same way the inline stage's payload
     # is (kiln.stage_plate): a machine we can actually name, or nothing.
     printer_id = _stage_printer_id()
+    # So does the slice this machine made of the mesh — skirt, brim, prime
+    # tower, supports — as a small sidecar in the mesh's own frame, so the
+    # hosted page can offer the same "show what the slicer added" toggle
+    # the inline panel does.  None for a mesh nobody sliced.
+    sidecar = _slicer_sidecar(path)
     # The printer is part of the link's identity: the token carries it, so a
     # config change between calls must not serve a link claiming the old bed.
-    cache_key = f"{sha}:{printer_id or ''}"
+    # The sidecar is too: a re-slice between calls must not serve a link
+    # still wearing the previous slice's tower.
+    sidecar_tag = hashlib.sha256(sidecar).hexdigest()[:16] if sidecar else ""
+    cache_key = f"{sha}:{printer_id or ''}:{sidecar_tag}"
     cached = _cache_get(cache_key)
     if cached:
         # Same bytes already staged — the sixteen-pose case, and the
@@ -210,10 +233,15 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
 
     try:
         with path.open("rb") as fh:
+            files: dict[str, Any] = {
+                "file": (path.name, fh, "application/octet-stream"),
+            }
+            if sidecar:
+                files["slicer"] = ("slicer.json", sidecar, "application/json")
             resp = httpx.post(
                 f"{_api_base()}/api/view/mesh",
                 headers={"Authorization": f"Bearer {token}"},
-                files={"file": (path.name, fh, "application/octet-stream")},
+                files=files,
                 # The server canonicalises the claim and bakes it into the
                 # signed link, so the /view page draws THIS machine's bed.
                 data={"printer": printer_id} if printer_id else None,

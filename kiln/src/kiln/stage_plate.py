@@ -129,9 +129,14 @@ def resolve_stage_plate(printer_id: str | None = None) -> dict[str, Any]:
 
 
 def attach_stage_plate(
-    payload: dict[str, Any] | None, printer_id: str | None = None
+    payload: dict[str, Any] | None,
+    printer_id: str | None = None,
+    *,
+    mesh_path: str | None = None,
+    gcode_path: str | None = None,
 ) -> dict[str, Any] | None:
-    """Stand a ``kiln.mesh.v1`` *payload* on the plate and stamp the plate on.
+    """Stand a ``kiln.mesh.v1`` *payload* on the plate, stamp the plate on,
+    and lay the slicer's own additions around the part.
 
     The single call every payload-producing door makes, so a door added later
     cannot ship a stage with no bed under it — or, the same mistake from the
@@ -144,12 +149,77 @@ def attach_stage_plate(
     nothing.  Centring lives here so the plate and the placement cannot
     come apart again.
 
+    The same reasoning puts the slicer-added geometry here — skirt, brim,
+    prime tower, supports, the things the printer prints that the model
+    never contained (:mod:`kiln.slicer_geometry`).  They share the plate's
+    coordinate frame and must move with the same centring the part gets,
+    so the one door that decides placement is the one that attaches them.
+    A door passes ``gcode_path`` when it holds the slice (the print twin),
+    or ``mesh_path`` so the slice can be looked up in the machine's own
+    ledger (:func:`kiln.monitor_twin.sliced_output_for`); a door that
+    passes neither, or a mesh nobody sliced, attaches nothing — the model-
+    only payload is byte-identical to one built before extras existed.
+
     A ``None`` payload (no geometry to show) passes straight through.
     """
     if not isinstance(payload, dict):
         return payload
     stand_on_plate(payload)
     payload["plate"] = resolve_stage_plate(printer_id)
+    attach_slicer_geometry(payload, mesh_path=mesh_path, gcode_path=gcode_path)
+    return payload
+
+
+def resolve_sliced_gcode(
+    mesh_path: str | None, gcode_path: str | None = None
+) -> str | None:
+    """The sliced G-code to draw around *mesh_path*, or ``None``.
+
+    An explicit *gcode_path* is honoured as given — the door that holds a
+    slice knows more than any ledger.  Otherwise the machine's own slice
+    ledger answers, EXCEPT on the hosted server: one process there serves
+    every customer out of one ``~/.kiln``, so its ledger is nobody's, and
+    a hosted caller's mesh must never be dressed in another tenant's
+    skirt.  Same rule the plate follows.  Never raises.
+    """
+    try:
+        if gcode_path:
+            return str(gcode_path)
+        if not mesh_path:
+            return None
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            return None
+        from kiln.monitor_twin import sliced_output_for
+
+        return sliced_output_for(mesh_path)
+    except Exception:  # noqa: BLE001 — no slice is the ordinary case
+        logger.debug("sliced gcode not resolved", exc_info=True)
+        return None
+
+
+def attach_slicer_geometry(
+    payload: dict[str, Any] | None,
+    *,
+    mesh_path: str | None = None,
+    gcode_path: str | None = None,
+) -> dict[str, Any] | None:
+    """Stamp the ``slicer`` block onto *payload*, in place, when a slice of
+    this mesh exists.  Aligned to the payload's bbox as it stands — call
+    AFTER :func:`stand_on_plate`, as :func:`attach_stage_plate` does.
+    Never raises."""
+    try:
+        if not isinstance(payload, dict):
+            return payload
+        gcode = resolve_sliced_gcode(mesh_path, gcode_path)
+        if not gcode:
+            return payload
+        from kiln.slicer_geometry import attach_to_payload
+
+        attach_to_payload(payload, gcode)
+    except Exception:  # noqa: BLE001 — extras never break the stage
+        logger.debug("slicer geometry skipped", exc_info=True)
     return payload
 
 
@@ -208,6 +278,12 @@ def stand_on_plate(payload: dict | None) -> dict | None:
         ).decode("ascii")
         bbox["min"] = [round(float(lo[0]) + dx, 4), round(float(lo[1]) + dy, 4), lo[2]]
         bbox["max"] = [round(float(hi[0]) + dx, 4), round(float(hi[1]) + dy, 4), hi[2]]
+        # The slicer's additions share this frame and ride the same slide:
+        # a skirt left behind by a centring is a skirt around empty plate.
+        if isinstance(payload.get("slicer"), dict):
+            from kiln.slicer_geometry import shift_block
+
+            shift_block(payload["slicer"], dx, dy)
     except Exception:  # noqa: BLE001 — the stage may be off-centre, never broken
         logger.debug("stage centring skipped", exc_info=True)
     return payload
