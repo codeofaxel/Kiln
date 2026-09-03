@@ -559,6 +559,15 @@ _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
     "03001900": "The filament is tangled at the extruder feed",
 }
 
+# Kiln's own flow-anomaly prefixes, split by the namespace check above
+# (2026-09-03, against the published HMS index): 0300-1900 IS an HMS
+# module/attr, while 0300-8003 / 0300-8005 / 0500-0900 / 0500-0B00 are
+# not and can only be print_error codes.  Recorded here so the next
+# reader does not have to re-derive it.
+_VERIFIED_HMS_PREFIXES: frozenset[str] = frozenset(
+    {"03001900", "03001A00", "03001800", "03000900"}
+)
+
 _BAMBU_PRINT_ERROR_FAMILIES: dict[str, str] = {
     "1200": "an AMS lite filament load / unload fault",
     "0700": "an AMS filament path fault",
