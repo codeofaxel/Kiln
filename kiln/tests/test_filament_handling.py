@@ -559,23 +559,46 @@ class TestBambuLoad:
             bambu.load_filament(slot=3, temperature=200)
 
     def test_the_wizards_fault_is_read_in_plain_language(self, bambu, monkeypatch):
-        """The measured case: the load's purge step raises 1200-8007."""
+        """The measured case: the load's purge step raises 1200-8007.
+
+        It is a print_error, not an HMS code — it appears nowhere in
+        Bambu's HMS index — so the reading must carry NO wiki link.
+        """
         _status_after_sleep(bambu, monkeypatch, print_error=0x12008007)
         result = bambu.load_filament(slot=0)
         assert result.success is False
         assert result.extrusion_verified is False
         assert result.verification_source == "bambu_fault_code"
         assert result.error_code == "1200_8007"
-        assert "purge step" in result.error_hint
-        assert "wiki.bambulab.com" in result.details["hms_wiki_url"]
-        assert "1200_8007" in result.details["hms_wiki_url"]
+        assert "did not come through the nozzle" in result.error_hint
+        assert result.details["code_kind"] == "print_error"
+        assert "hms_wiki_url" not in result.details
 
     def test_hms_list_entries_count_as_faults_too(self, bambu, monkeypatch):
         _status_after_sleep(bambu, monkeypatch, hms=[{"attr": 0x12002000, "code": 0x00020006}])
         result = bambu.load_filament(slot=0)
         assert result.success is False
         assert result.error_code == "1200_2000_0002_0006"
-        assert "clogged" in result.error_hint
+        assert "extruder may be clogged" in result.error_hint
+        assert result.details["code_kind"] == "hms"
+        # The A1-only page really does live under /a1-mini/, not /x1/.
+        assert result.details["hms_wiki_url"] == (
+            "https://wiki.bambulab.com/en/a1-mini/troubleshooting/"
+            "hmscode/1200_2000_0002_0006"
+        )
+
+    def test_an_hms_code_wins_over_a_print_error_when_both_land(self, bambu, monkeypatch):
+        """HMS is the namespace Bambu documents, so it is the better reading."""
+        _status_after_sleep(
+            bambu,
+            monkeypatch,
+            print_error=0x12008007,
+            hms=[{"attr": 0x07007000, "code": 0x00020006}],
+        )
+        result = bambu.load_filament(slot=0)
+        assert result.error_code == "0700_7000_0002_0006"
+        assert result.details["code_kind"] == "hms"
+        assert {"code": "1200_8007", "kind": "print_error"} in result.details["all_new_faults"]
 
     def test_a_fault_already_latched_before_the_load_is_not_blamed_on_it(self, bambu, monkeypatch):
         bambu._last_status["print_error"] = 0x12008007
@@ -622,6 +645,7 @@ class TestBambuPurge:
         assert result.extrusion_verified is False
         assert result.error_code == "0300_8003"
         assert "cannot pull filament" in result.error_hint
+        assert result.details["code_kind"] == "print_error"
 
     def test_no_tray_and_no_material_is_refused(self, bambu):
         bambu._last_status["tray_now"] = "255"
@@ -630,18 +654,86 @@ class TestBambuPurge:
 
 
 class TestBambuFaultReadings:
-    def test_known_prefix(self):
+    """The two namespaces, and the per-unit / per-slot synonyms.
+
+    Every HMS string asserted here is the title of that code's own page on
+    wiki.bambulab.com, read 2026-09-03.
+    """
+
+    def test_known_hms_code_gets_the_vendors_words_and_a_link(self):
         from kiln.printers.bambu import describe_bambu_filament_fault
 
-        text = describe_bambu_filament_fault("0700-7000-0002-0006")
-        assert "purging" in text and "0700_7000_0002_0006" in text
+        text, url = describe_bambu_filament_fault("0700-7000-0002-0006")
+        assert "Timed out purging the old filament" in text
+        assert url == ("https://wiki.bambulab.com/en/x1/troubleshooting/"
+                       "hmscode/0700_7000_0002_0006")
 
-    def test_unknown_code_gets_family_and_link_never_a_guess(self):
+    def test_a_print_error_never_gets_an_hms_link(self):
+        """/hmscode/1200_8007 is a 404 — Bambu documents no print_error pages."""
         from kiln.printers.bambu import describe_bambu_filament_fault
 
-        text = describe_bambu_filament_fault("1200_ABCD_0001_0001")
-        assert "load / unload path fault" in text
-        assert "hmscode/1200_ABCD_0001_0001" in text
+        text, url = describe_bambu_filament_fault("1200-8007", kind="print_error")
+        assert url is None
+        assert "purge_filament" in text
+
+    def test_the_same_digits_read_differently_per_namespace(self):
+        from kiln.printers.bambu import describe_bambu_filament_fault
+
+        as_hms = describe_bambu_filament_fault("1200_8000_0002_0001", kind="hms")
+        as_err = describe_bambu_filament_fault("1200_8000", kind="print_error")
+        assert as_hms[1] is not None
+        assert as_err[1] is None
+        assert as_hms[0] != as_err[0]
+
+    @pytest.mark.parametrize(
+        "code,unit,slot",
+        [
+            ("0700_7000_0002_0003", "AMS A", "slot 1"),
+            ("0701_7200_0002_0003", "AMS B", "slot 3"),
+            ("0703_7300_0002_0003", "AMS D", "slot 4"),
+            ("1202_2100_0002_0006", "AMS C", "slot 2"),
+        ],
+    )
+    def test_unit_and_slot_variants_share_one_reading(self, code, unit, slot):
+        """Bambu files these as synonyms of one entry; so does Kiln."""
+        from kiln.printers.bambu import describe_bambu_filament_fault
+
+        text, url = describe_bambu_filament_fault(code, kind="hms")
+        assert unit in text and slot in text
+        # The link points at the canonical unit-A / slot-1 page that exists.
+        assert url.endswith(("/0700_7000_0002_0003", "/1200_2000_0002_0006"))
+        assert "/en/" in url
+
+    def test_unknown_hms_code_gets_family_and_the_index_never_a_guessed_page(self):
+        """A page Kiln has not harvested may live under any model segment,
+        so the searchable index is offered rather than a link that 404s."""
+        from kiln.printers.bambu import describe_bambu_filament_fault
+
+        text, url = describe_bambu_filament_fault("0700_7000_0009_0009")
+        assert "load / unload path" in text
+        assert url == "https://wiki.bambulab.com/en/hms/home"
+
+    def test_every_tabulated_page_path_is_one_of_the_real_model_segments(self):
+        """Guards the harvest: a model segment typo is a 404 nobody sees."""
+        from kiln.printers.bambu import _BAMBU_HMS_FILAMENT_FAULTS
+
+        known = {"x1", "x1e", "x2d", "a1", "a1-mini", "a2l", "p2s", "h2", "h2s", "h2c", "h2d", "h2d-pro"}
+        for code, (reading, model) in _BAMBU_HMS_FILAMENT_FAULTS.items():
+            assert model in known, f"{code} -> {model!r}"
+            assert reading and reading[0].isupper() and reading.endswith(".")
+
+    def test_a_completely_unknown_code_admits_it(self):
+        from kiln.printers.bambu import describe_bambu_filament_fault
+
+        text, _ = describe_bambu_filament_fault("9999_9999", kind="print_error")
+        assert "no reading for" in text
+
+    def test_garbage_is_not_mistaken_for_a_code(self):
+        from kiln.printers.bambu import describe_bambu_filament_fault
+
+        text, url = describe_bambu_filament_fault("oops")
+        assert url is None
+        assert "not a readable HMS code" in text
 
 
 # ---------------------------------------------------------------------------
@@ -933,6 +1025,32 @@ class TestOtherDoors:
 
         out = srv.troubleshoot_printer("bambu_a1", symptom="nozzle clog, no extrusion")
         assert "purge_filament" in out.get("filament_next_step", "")
+
+    def test_troubleshoot_printer_links_the_page_that_actually_exists(self):
+        """The A1's own AMS-lite code lives under /a1-mini/, not /x1/."""
+        import kiln.server as srv
+
+        out = srv.troubleshoot_printer("bambu_a1", hms_code="1200-2000-0002-0006")
+        assert out["hms_code_kind"] == "hms"
+        assert out["hms_wiki_url"] == (
+            "https://wiki.bambulab.com/en/a1-mini/troubleshooting/"
+            "hmscode/1200_2000_0002_0006"
+        )
+
+    def test_troubleshoot_printer_offers_no_page_for_a_print_error(self):
+        """1200-8007 is a print_error; Bambu publishes no page for it."""
+        import kiln.server as srv
+
+        out = srv.troubleshoot_printer("bambu_a1", hms_code="1200-8007")
+        assert out["hms_code"] == "1200_8007"
+        assert out["hms_code_kind"] == "print_error"
+        assert "hms_wiki_url" not in out
+
+    def test_troubleshoot_printer_falls_back_to_the_index_not_a_guess(self):
+        import kiln.server as srv
+
+        out = srv.troubleshoot_printer("bambu_a1", hms_code="0300-0100-0001-0003")
+        assert out["hms_wiki_url"] == "https://wiki.bambulab.com/en/hms/home"
 
     def test_tool_safety_json_classifies_all_three_as_confirm(self):
         from pathlib import Path

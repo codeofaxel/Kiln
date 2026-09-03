@@ -341,81 +341,290 @@ def _classify_flow_anomaly(error_code: int) -> tuple[str, str] | None:
             return event_type, severity
     return None
 
-# Bambu's public HMS page for a code, the same form server.py links.
-_BAMBU_HMS_WIKI_URL = "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/{code}"
+# A specific HMS code's page.  The model segment is per-code (see the
+# table below), so this template takes both halves.
+_BAMBU_HMS_WIKI_URL = (
+    "https://wiki.bambulab.com/en/{model}/troubleshooting/hmscode/{code}"
+)
+#: The searchable index of every published HMS code.  Where a code's own
+#: page location is not known, this is offered instead of a guess.
+_BAMBU_HMS_INDEX_URL = "https://wiki.bambulab.com/en/hms/home"
 
-# Plain-language readings of the fault codes a filament load / purge can
-# raise, keyed by the 8-hex module/attr prefix.  Sources, per row:
-#   wiki   — the title of Bambu's own HMS wiki page for the code
-#   printara — printara3d.com/tools/bambu-error-codes (secondary; the wiki
-#              could not be fetched for these on 2026-09-03)
-#   local  — prefixes this adapter already classifies for the wear
-#            cross-check (_FLOW_ANOMALY_ERROR_PREFIXES)
-# Anything not here gets a family reading plus the wiki link, never a guess.
-_BAMBU_FILAMENT_FAULTS: dict[str, str] = {
-    # wiki: HMS_1200-2000-0002-0006
-    "12002000": (
-        "Failed to extrude the AMS slot's filament — the extruder may be "
-        "clogged, or the filament too thin so the extruder gear slipped."
+# Bambu reports faults in TWO separate namespaces, and they must not be
+# conflated -- the first version of this decoder did, and produced a wiki
+# link that 404s for half the codes it was handed:
+#
+#   HMS          the ``hms`` array's {attr, code} pairs, 16 hex digits,
+#                shown on screen as XXXX-XXXX-XXXX-XXXX.  Every one has a
+#                published wiki page.  Verified 2026-09-03 against
+#                wiki.bambulab.com/en/hms/home (402 entries).
+#   print_error  the ``print_error`` field, 32 bits, shown on screen as
+#                XXXX-XXXX followed by a decimal serial (e.g.
+#                "1200-8007 031520").  Bambu publishes NO wiki page for
+#                these: 1200-8007 appears nowhere in the HMS index, and
+#                /hmscode/1200_8007 is a 404.  Both checked 2026-09-03.
+#
+# So a print_error never gets an HMS link, and its reading says where the
+# reading came from rather than borrowing the HMS namespace's authority.
+
+# HMS codes come in per-AMS-unit and per-slot variants that Bambu's own
+# pages list as synonyms of one entry: the FIRST group's low digit is the
+# AMS unit (0700 A, 0701 B, ...; 1200 A, 1201 B, ... on AMS lite) and the
+# SECOND group's second digit is the slot (7000/7100/7200/7300 =
+# slots 1-4; 2000/2100/2200/2300 on AMS lite).  Normalising to unit A /
+# slot 1 lets one table row cover all sixteen, exactly as the wiki does,
+# and recovers which unit and slot the printer is complaining about.
+_AMS_UNIT_FAMILIES: tuple[str, ...] = ("0700", "1200", "1800")
+_AMS_SLOT_FAMILIES: dict[str, str] = {"7": "7000", "2": "2000"}
+
+
+def _hms_group(hex_digits: str) -> str:
+    """``"12008007"`` -> ``"1200_8007"`` (4-hex groups, the screen's form)."""
+    h = hex_digits.upper()
+    return "_".join(h[i : i + 4] for i in range(0, len(h), 4))
+
+
+def normalize_bambu_hms(code: str) -> tuple[str, int | None, int | None]:
+    """``(canonical 16-hex code, ams_unit_index, slot_index)``.
+
+    The canonical form is the unit-A / slot-1 variant the wiki files the
+    entry under.  Indices are 0-based and ``None`` when the code does not
+    belong to a per-unit / per-slot family.  Returns ``("", None, None)``
+    for anything that is not at least 8 hex digits.
+    """
+    hex_only = "".join(c for c in str(code).upper() if c in "0123456789ABCDEF")
+    if len(hex_only) < 8:
+        return "", None, None
+    hex_only = hex_only[:16].ljust(16, "0")
+    g = [hex_only[i : i + 4] for i in range(0, 16, 4)]
+    unit: int | None = None
+    slot: int | None = None
+    base = g[0][:3] + "0"
+    if base in _AMS_UNIT_FAMILIES and g[0][3] in "0123":
+        unit = int(g[0][3])
+        g[0] = base
+    slot_base = _AMS_SLOT_FAMILIES.get(g[1][0])
+    if slot_base and g[1][1] in "0123" and g[1][2:] == "00":
+        slot = int(g[1][1])
+        g[1] = slot_base
+    return "_".join(g), unit, slot
+
+
+# HMS readings, keyed by the canonical 16-hex code.  Each row is
+# ``(reading, wiki path)``: the reading is the title of that code's own
+# page on wiki.bambulab.com and the path is the page's REAL location,
+# both harvested from the HMS index on 2026-09-03.  The path is stored
+# rather than templated because the model segment is part of a code's
+# identity -- ``/x1/.../0300_1A00_0002_0002`` is a 404 while
+# ``/a1-mini/.../0300_1A00_0002_0002`` is the page, so a templated
+# "/x1/" link would have been wrong for every A1-only code, which is
+# most of the AMS lite ones on Adam's own machine.
+_BAMBU_HMS_FILAMENT_FAULTS: dict[str, tuple[str, str]] = {
+    "0700_7000_0002_0001": (
+        "Failed to pull the filament out of the extruder. The extruder may be clogged, or the filament broken inside it.",
+        "x1",
     ),
-    # wiki: HMS_0700-7000-0002-0006
-    "07007000": (
-        "Timed out purging the old filament — the filament may be stuck, or "
-        "the extruder / nozzle clogged."
+    "0700_7000_0002_0002": (
+        "Failed to feed the filament into the toolhead. The filament or the spool may be stuck.",
+        "x1",
     ),
-    # printara
-    "12008003": "The AMS could not pull the filament back out of the extruder.",
-    # printara
-    "12008014": "The AMS could not find where the filament is in the path.",
-    # printara
-    "12008016": "The extruder is not extruding normally.",
-    # Observed 2026-09-03 on an A1: raised by the touchscreen Load wizard at
-    # its purge step, right after a layer-1 failure with a clogged hotend.
-    # Bambu's wiki entry for it could not be retrieved, so this row names
-    # only what was observed, not a title Kiln has not verified.
-    "12008007": (
-        "Raised by the printer's own load routine at its purge step (seen on "
-        "an A1 with a clogged hotend). The wiki page linked here is the "
-        "authoritative text; treat it as 'filament did not come through the "
-        "nozzle' until it says otherwise."
+    "0700_7000_0002_0003": (
+        "Failed to extrude the filament. The extruder or nozzle may be clogged.",
+        "x1",
     ),
-    # local
-    "03008003": "Filament feeding abnormal — the extruder cannot pull filament.",
-    "03008005": "Filament broken at the extruder.",
-    "05000B00": "The AMS reports the filament stuck or jammed.",
-    "03000900": "Extruder motor overload — a clog or stuck filament.",
+    "0700_7000_0002_0004": (
+        "Failed to pull the filament back from the toolhead to the AMS. The filament or the spool may be stuck.",
+        "x1",
+    ),
+    "0700_7000_0002_0005": (
+        "Failed to feed the filament outside the AMS. Clip the end of the filament flat and check whether the spool is stuck.",
+        "x1",
+    ),
+    "0700_7000_0002_0006": (
+        "Timed out purging the old filament. The filament may be stuck, or the extruder / nozzle clogged.",
+        "x1",
+    ),
+    "0700_7000_0002_0007": (
+        "The AMS filament ran out. Load new filament into the same slot and resume.",
+        "x1",
+    ),
+    "0700_2000_0002_0003": (
+        "The filament may be broken inside the AMS.",
+        "x1",
+    ),
+    "0700_2000_0002_0004": (
+        "The filament may be broken in the toolhead.",
+        "x1",
+    ),
+    "0700_2000_0002_0005": (
+        "The filament ran out and purging the old filament went abnormally. Check whether filament is stuck in the toolhead.",
+        "x1",
+    ),
+    "0700_2000_0002_0009": (
+        "Failed to extrude the filament. The extruder may be clogged, or the filament too thin, letting the extruder slip.",
+        "p2s",
+    ),
+    "1200_2000_0002_0003": (
+        "The AMS lite filament may be broken in the PTFE tube.",
+        "a1-mini",
+    ),
+    "1200_2000_0002_0004": (
+        "The AMS lite filament may be broken in the toolhead.",
+        "a1",
+    ),
+    "1200_2000_0002_0005": (
+        "The AMS lite filament ran out and purging the old filament went abnormally. Check whether filament is stuck in the toolhead.",
+        "a2l",
+    ),
+    "1200_2000_0002_0006": (
+        "Failed to extrude the AMS lite filament. The extruder may be clogged, or the filament too thin, letting the extruder slip.",
+        "a1-mini",
+    ),
+    "1200_2000_0002_0009": (
+        "Failed to extrude the AMS lite filament. The extruder may be clogged, or the filament too thin, letting the extruder slip.",
+        "a2l",
+    ),
+    "1200_8000_0002_0001": (
+        "The AMS lite filament may be tangled or stuck.",
+        "a1-mini",
+    ),
+    "0300_0900_0002_0001": (
+        "The extrusion motor is overloaded. The extruder may be clogged, or filament stuck in the toolhead.",
+        "p2s",
+    ),
+    "0300_0900_0002_0002": (
+        "The extrusion resistance is abnormal. The extruder may be clogged, or filament stuck in the toolhead.",
+        "p2s",
+    ),
+    "0300_0900_0002_0003": (
+        "The extruder is extruding abnormally. It may be clogged, or the filament too thin, letting the extruder slip.",
+        "p2s",
+    ),
+    "0300_1A00_0002_0001": (
+        "The nozzle is covered with filament, or the build plate is crooked.",
+        "a1-mini",
+    ),
+    "0300_1A00_0002_0002": (
+        "The extrusion force sensor detects that the nozzle is clogged.",
+        "a1-mini",
+    ),
 }
 
-_BAMBU_FAULT_FAMILIES: dict[str, str] = {
-    "1200": "an AMS filament load / unload path fault",
-    "0700": "an AMS / filament path fault",
+# Family fallbacks for an HMS code whose exact sub-code is not tabulated.
+# No path: the code's own page may exist under a model segment Kiln has
+# not harvested, so the caller is sent to the searchable index instead of
+# a link that might 404.
+_BAMBU_HMS_FAMILIES: dict[str, str] = {
+    "0700_7000": "a fault on the AMS filament load / unload path",
+    "0700_2000": "an AMS slot / filament fault",
+    "1200_2000": "an AMS lite slot / filament fault",
+    "1200_8000": "an AMS lite filament feed fault",
+    "0300_0900": "an extruder motor fault",
+    "0300_1A00": "a nozzle clumping / clog detection fault",
+}
+
+# print_error readings.  A DIFFERENT namespace from the HMS table above,
+# with no vendor page to cite, so each row says where its reading is from.
+_BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
+    # Observed on Adam's A1 (2026-09-03): raised by the printer's own Load
+    # wizard at its purge step, straight after a layer-1 failure with a
+    # clogged hotend.  Corroborated on the Bambu forum by an A1 owner who
+    # hit "1200-8007 031520" at print start on both AMS and external spool,
+    # and for whom the fix was heating the nozzle and extruding by hand --
+    # which is exactly what purge_filament does.
+    # (forum.bambulab.com/t/1200-8010-23175-error/125692)
+    "12008007": (
+        "The filament did not come through the nozzle during the load's purge "
+        "step. Bambu publishes no page for this code; on the A1 it goes with a "
+        "clogged hotend, and owners clear it by heating the nozzle and "
+        "extruding by hand -- which is what purge_filament does"
+    ),
+    "12008010": (
+        "The printer reports the filament may be tangled or the spool stuck. "
+        "Seen alongside 1200-8007 on the A1 when the real cause was a clog "
+        "(forum.bambulab.com/t/1200-8010-23175-error/125692)"
+    ),
+    # Third-party lookup (printara3d.com/tools/bambu-error-codes), the only
+    # list that carries these; Bambu documents none of them.
+    "12008003": "The AMS could not pull the filament back out of the extruder",
+    "12008014": "The AMS could not find where the filament is in the path",
+    "12008016": "The extruder is not extruding normally",
+    # Prefixes this adapter already classifies for the nozzle-wear
+    # cross-check (see _FLOW_ANOMALY_ERROR_PREFIXES).
+    "03008003": "Filament feeding is abnormal -- the extruder cannot pull filament",
+    "03008005": "The filament broke at the extruder",
+    "05000B00": "The AMS reports the filament stuck or jammed",
+    "03000900": "The extruder motor is overloaded -- a clog or stuck filament",
+    "05000900": "The printer reports an extrusion failure",
+    "03001900": "The filament is tangled at the extruder feed",
+}
+
+_BAMBU_PRINT_ERROR_FAMILIES: dict[str, str] = {
+    "1200": "an AMS lite filament load / unload fault",
+    "0700": "an AMS filament path fault",
     "0300": "a toolhead / extruder fault",
     "0500": "an AMS filament sensor fault",
 }
 
 
-def _hms_group(hex_digits: str) -> str:
-    """``"12008007"`` → ``"1200_8007"`` (4-hex groups, the screen's form)."""
-    h = hex_digits.upper()
-    return "_".join(h[i : i + 4] for i in range(0, len(h), 4))
+def describe_bambu_filament_fault(
+    code: str, *, kind: str = "hms"
+) -> tuple[str, str | None]:
+    """``(plain-language reading, wiki URL or None)`` for a Bambu fault.
 
+    *kind* selects the namespace: ``"hms"`` for a code from the ``hms``
+    array, ``"print_error"`` for the ``print_error`` field.  Getting this
+    wrong is not cosmetic -- an HMS link built for a print_error code
+    points at a page that does not exist.
 
-def describe_bambu_filament_fault(code: str) -> str:
-    """Plain-language reading of a Bambu fault raised around filament work.
-
-    *code* is any-separator HMS / ``print_error`` code.  Known prefixes get
-    their reading; unknown ones get the family plus the wiki link, so the
-    caller is never handed a bare number and never a made-up title.
+    An unknown code returns its family rather than a guess, and a
+    print_error never returns a URL, because Bambu publishes none.
     """
-    hex_only = "".join(c for c in str(code).upper() if c in "0123456789ABCDEF")
-    prefix = hex_only[:8]
-    grouped = _hms_group(hex_only) if len(hex_only) >= 8 else str(code)
-    url = _BAMBU_HMS_WIKI_URL.format(code=grouped)
-    reading = _BAMBU_FILAMENT_FAULTS.get(prefix)
-    if reading:
-        return f"{reading} ({url})"
-    family = _BAMBU_FAULT_FAMILIES.get(prefix[:4], "a fault Kiln has no reading for")
-    return f"The printer reported {grouped}, {family}. See {url}"
+    if kind == "print_error":
+        hex_only = "".join(c for c in str(code).upper() if c in "0123456789ABCDEF")
+        prefix = hex_only[:8]
+        grouped = _hms_group(prefix) if len(prefix) == 8 else str(code)
+        reading = _BAMBU_PRINT_ERROR_FAULTS.get(prefix)
+        if reading:
+            return f"{reading}.", None
+        family = _BAMBU_PRINT_ERROR_FAMILIES.get(prefix[:4])
+        if family:
+            return (
+                f"The printer reported {grouped}, {family}. Bambu publishes no "
+                "page for this code.",
+                None,
+            )
+        return (
+            f"The printer reported {grouped}, a code Kiln has no reading for. "
+            "Bambu publishes no page for print_error codes.",
+            None,
+        )
+
+    canonical, unit, slot = normalize_bambu_hms(code)
+    if not canonical:
+        return f"The printer reported {code}, which is not a readable HMS code.", None
+    where = ""
+    if unit is not None and slot is not None:
+        where = f" (AMS {chr(ord('A') + unit)}, slot {slot + 1})"
+    elif unit is not None:
+        where = f" (AMS {chr(ord('A') + unit)})"
+    entry = _BAMBU_HMS_FILAMENT_FAULTS.get(canonical)
+    if entry is not None:
+        reading, model = entry
+        return f"{reading}{where}", _BAMBU_HMS_WIKI_URL.format(
+            model=model, code=canonical
+        )
+    shown = _hms_group(canonical.replace("_", ""))
+    family = _BAMBU_HMS_FAMILIES.get(canonical[:9])
+    if family:
+        return (
+            f"The printer reported {shown}{where}, {family}.",
+            _BAMBU_HMS_INDEX_URL,
+        )
+    return (
+        f"The printer reported {shown}{where}, a fault Kiln has no reading for.",
+        _BAMBU_HMS_INDEX_URL,
+    )
 
 
 # Bambu LED node names.
@@ -4354,20 +4563,21 @@ class BambuAdapter(PrinterAdapter):
                     material = str(tray["tray_type"])
         return super()._filament_material_window(material, slot)
 
-    def _bambu_fault_codes(self, status: dict[str, Any]) -> set[str]:
-        """Every fault the cached status carries, as ``XXXX_XXXX[_…]`` codes.
+    def _bambu_fault_codes(self, status: dict[str, Any]) -> set[tuple[str, str]]:
+        """Every fault the cached status carries, as ``(code, kind)`` pairs.
 
-        ``print_error`` is the 32-bit code the firmware latches; the ``hms``
-        list carries ``{attr, code}`` pairs that make the full 16-hex HMS
-        code the screen shows.  Both are read so a fault reported either
-        way is seen.
+        The two namespaces stay apart (see the tables above): ``kind`` is
+        ``"print_error"`` for the latched 32-bit field and ``"hms"`` for the
+        ``hms`` array's ``{attr, code}`` pairs.  Folding them together is
+        how a print_error ends up wearing an HMS wiki link to a page that
+        does not exist.
         """
-        codes: set[str] = set()
+        codes: set[tuple[str, str]] = set()
         raw = status.get("print_error")
         with contextlib.suppress(TypeError, ValueError):
             val = int(raw or 0)
             if val:
-                codes.add(_hms_group(f"{val:08X}"))
+                codes.add((_hms_group(f"{val:08X}"), "print_error"))
         hms = status.get("hms")
         if isinstance(hms, list):
             for entry in hms:
@@ -4377,18 +4587,33 @@ class BambuAdapter(PrinterAdapter):
                     attr = int(entry.get("attr") or 0)
                     code = int(entry.get("code") or 0)
                     if attr or code:
-                        codes.add(_hms_group(f"{attr:08X}{code:08X}"))
+                        codes.add((_hms_group(f"{attr:08X}{code:08X}"), "hms"))
         return codes
 
-    def _snapshot_faults(self) -> set[str]:
+    def _snapshot_faults(self) -> set[tuple[str, str]]:
         with self._state_lock:
             return self._bambu_fault_codes(dict(self._last_status))
 
     def _fault_result(
-        self, plan: FilamentOpPlan, codes: set[str], *, stage: str
+        self, plan: FilamentOpPlan, codes: set[tuple[str, str]], *, stage: str
     ) -> FilamentOpResult:
-        code = sorted(codes)[0]
-        hint = describe_bambu_filament_fault(code)
+        """Report the fault the printer raised, in its own words.
+
+        An HMS code is preferred over a ``print_error`` when both landed:
+        HMS is the namespace Bambu documents, so it carries a citable
+        reading and a link, where a print_error carries neither.
+        """
+        ordered = sorted(codes, key=lambda pair: (pair[1] != "hms", pair[0]))
+        code, kind = ordered[0]
+        hint, url = describe_bambu_filament_fault(code, kind=kind)
+        details: dict[str, Any] = {
+            "all_new_faults": [
+                {"code": c, "kind": k} for c, k in ordered
+            ],
+            "code_kind": kind,
+        }
+        if url:
+            details["hms_wiki_url"] = url
         return FilamentOpResult(
             success=False,
             action=plan.action,
@@ -4400,10 +4625,7 @@ class BambuAdapter(PrinterAdapter):
             slot=plan.slot,
             material=plan.material,
             temperature=plan.temperature,
-            details={
-                "all_new_faults": sorted(codes),
-                "hms_wiki_url": _BAMBU_HMS_WIKI_URL.format(code=code),
-            },
+            details=details,
         )
 
     def _watch_tray_change(

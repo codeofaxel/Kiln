@@ -13806,6 +13806,41 @@ def _normalize_hms_code(raw: str) -> str:
     return "_".join(hex_only[i : i + 4] for i in range(0, len(hex_only), 4))
 
 
+def _hms_reference(code: str) -> tuple[str | None, str]:
+    """``(best wiki link or None, namespace)`` for a normalized Bambu code.
+
+    Bambu keeps two code namespaces and publishes pages for only one of
+    them, so a single template produced links that 404 (measured
+    2026-09-03):
+
+    * A full 16-hex code is an HMS code and has a page — but the page's
+      model segment is part of its address, so ``/x1/`` is wrong for every
+      A1-only code. The exact paths Kiln has harvested live in
+      ``kiln.printers.bambu``; anything else gets the searchable index.
+    * An 8-hex code is a ``print_error``, a different namespace with no
+      published page at all. ``1200-8007`` appears nowhere in the 402-entry
+      HMS index and ``/hmscode/1200_8007`` is a 404.
+
+    Returns ``None`` for the link rather than offering a page that does not
+    exist.
+    """
+    from kiln.printers.bambu import (
+        _BAMBU_HMS_FILAMENT_FAULTS,
+        _BAMBU_HMS_INDEX_URL,
+        _BAMBU_HMS_WIKI_URL,
+        normalize_bambu_hms,
+    )
+
+    hex_digits = code.replace("_", "")
+    if len(hex_digits) < 16:
+        return None, "print_error"
+    canonical, _unit, _slot = normalize_bambu_hms(code)
+    entry = _BAMBU_HMS_FILAMENT_FAULTS.get(canonical)
+    if entry is not None:
+        return _BAMBU_HMS_WIKI_URL.format(model=entry[1], code=canonical), "hms"
+    return _BAMBU_HMS_INDEX_URL, "hms"
+
+
 @mcp.tool()
 def troubleshoot_printer(
     printer_id: str,
@@ -13868,7 +13903,10 @@ def troubleshoot_printer(
         code = _normalize_hms_code(hms_code)
         if code:
             result["hms_code"] = code
-            result["hms_wiki_url"] = _HMS_WIKI_CODE_URL.format(code=code)
+            link, kind = _hms_reference(code)
+            result["hms_code_kind"] = kind
+            if link:
+                result["hms_wiki_url"] = link
         # A clog / extrusion complaint has a test Kiln can run itself, so the
         # diagnosis names it rather than leaving the user at the touchscreen.
         _probe = f"{symptom} {code}".lower()
