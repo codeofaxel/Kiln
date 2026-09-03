@@ -1038,7 +1038,12 @@ class TestTelemetryVintage:
         ):
             state = adapter_with_ws.get_state()
 
-        assert state.state is PrinterStatus.PRINTING
+        # The age is the headline; the run state moves underneath it, where
+        # `effective_state` and `is_occupied` keep reading it — so a stale
+        # print still blocks a second one.
+        assert state.state is PrinterStatus.STALE
+        assert state.effective_state is PrinterStatus.PRINTING
+        assert state.is_occupied is True
         assert state.is_stale() is True
         assert state.staleness_note() is not None
 

@@ -108,11 +108,28 @@ def test_no_printer_configured_stays_a_typed_error():
 
 
 def test_every_lite_key_still_exists_on_printer_state():
-    """The roster names real fields.  A key that drifts from the dataclass
-    silently blanks a readout at poll cadence — exactly the failure a
-    contract test exists to catch at commit time instead."""
+    """The roster names keys a PrinterState can actually emit.
+
+    A key that drifts from the dataclass silently blanks a readout at poll
+    cadence — exactly the failure a contract test exists to catch at commit
+    time instead.  Checked against what ``to_dict`` can produce rather than
+    against the fields alone, because some readouts are DERIVED: the HMS
+    code is formatted from the raw one rather than stored twice."""
     import dataclasses
 
-    field_names = {f.name for f in dataclasses.fields(PrinterState)}
+    emitted = set(
+        PrinterState(
+            connected=True,
+            state=PrinterStatus.STALE,
+            last_known_state=PrinterStatus.PRINTING,
+            print_error=302022663,
+            state_age_seconds=1396.0,
+            state_stale_after_seconds=60.0,
+            last_job_result=JobResult.CANCELLED,
+            cause="reachable_but_silent",
+            remedy="power-cycle the printer",
+        ).to_dict()
+    )
+    known = {f.name for f in dataclasses.fields(PrinterState)} | emitted
     for key in server._LITE_PRINTER_KEYS:
-        assert key in field_names, f"lite key {key!r} is not a PrinterState field"
+        assert key in known, f"lite key {key!r} is not a PrinterState readout"

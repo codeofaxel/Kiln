@@ -33,7 +33,15 @@ _ASSUMED_SECONDS_PER_QUEUED_JOB = 1800.0
 
 #: Printer states that mean work is in progress, so the machine is not
 #: free right now even when its queue is empty.
-_BUSY_STATES = frozenset({"printing", "busy", "paused", "cancelling"})
+#:
+#: "stale" is one of them.  An expired reading cannot show a machine is
+#: free, and routing a job to one whose last known state was PRINTING is
+#: how two prints end up on one bed.  Kept in step with
+#: :func:`kiln.printers.base.status_is_occupied` by the test that pins the
+#: two together.
+_BUSY_STATES = frozenset(
+    {"printing", "busy", "paused", "cancelling", "stale"}
+)
 
 #: Extensions that are plain machine code — every printer backend takes
 #: them, so an adapter that advertises nothing still gets a chance.

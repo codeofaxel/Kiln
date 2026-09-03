@@ -400,7 +400,11 @@ class JobScheduler:
                     state = adapter.get_state()
                     job_progress = adapter.get_job()
 
-                if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+                # `is_occupied` so a reading that goes STALE mid-print still
+                # counts as "we saw this printing" — losing that would make a
+                # later idle read look like a print that never started, and
+                # the outcome would be banked as "unknown" instead of watched.
+                if getattr(state, "is_occupied", False) is True:
                     self._seen_printing.add(job_id)
 
                 # Printer returned to idle -- the job has ENDED.  How it
@@ -413,6 +417,12 @@ class JobScheduler:
                 #     success poisons the learning data that proven-settings
                 #     and printer rankings are built from.  It ends as
                 #     "unknown" (inferred) and the user gets asked.
+                # Strict `state` on the two branches that END a job: a
+                # reading that has gone STALE is not evidence the print
+                # finished or failed, and acting on one would close a job
+                # that is still running.  Those cases fall through to the
+                # next poll, which is what a printer going quiet for a
+                # moment should cost.
                 if state.state == PrinterStatus.IDLE:
                     pre_idle_job = self._queue.get_job(job_id)
                     queue_cancelled = bool(
@@ -506,7 +516,12 @@ class JobScheduler:
                         machine_reported=machine_reported,
                     )
 
-                elif state.state == PrinterStatus.PRINTING:
+                # ...and `effective_state` on the branch that only WATCHES
+                # one.  The last thing the printer said is still the best
+                # answer to "is this printing", so a stale reading keeps the
+                # STARTING promotion and the stuck-job clock running instead
+                # of silently skipping both.
+                elif state.effective_state == PrinterStatus.PRINTING:
                     # Promote STARTING -> PRINTING when the printer confirms
                     try:
                         job = self._queue.get_job(job_id)

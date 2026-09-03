@@ -3708,8 +3708,11 @@ class TestMonitorPrint:
         with patch("kiln.server._get_adapter", return_value=adapter):
             result = monitor_print(include_snapshot=False)
 
-        assert "Errors: Code 84033543" in result
-        assert "Error detected" in result
+        # The form the printer's own screen shows (0x05024007 → 0502-4007),
+        # with the raw decimal kept beside it: one is searchable, the other
+        # is what the firmware actually said.
+        assert "Errors: Code 0502-4007 (raw 84033543)" in result
+        assert "Error detected (code 0502-4007, raw 84033543)" in result
 
     def test_printer_not_found(self):
         from kiln.registry import PrinterNotFoundError

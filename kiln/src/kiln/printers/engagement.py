@@ -441,12 +441,13 @@ def _ask_peer_bounded(peer: Any, engagement: Engagement) -> bool:
     answer: list[bool] = []
 
     def _ask() -> None:
-        from kiln.printers.base import PrinterStatus
-
         try:
             with internal_read():
                 state = peer.get_state()
-                if state.state not in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+                # `is_occupied`, so a peer whose reading has gone stale is
+                # judged on what it was last seen doing rather than reading
+                # as free.
+                if getattr(state, "is_occupied", False) is not True:
                     return
                 if engagement.job is None:
                     answer.append(True)
@@ -588,12 +589,10 @@ def observe(adapter: Any, action: str, result: Any) -> None:
         if engagement is None:
             if action != "get_state":
                 return
-            from kiln.printers.base import PrinterStatus
-
-            if getattr(result, "state", None) not in (
-                PrinterStatus.PRINTING,
-                PrinterStatus.PAUSED,
-            ):
+            # A stale reading of a running print still engages: dropping
+            # the engagement because the last push was late would let a
+            # second session command a machine that is mid-job.
+            if getattr(result, "is_occupied", False) is not True:
                 return
             engage(adapter, None, reason="commanded")
             return

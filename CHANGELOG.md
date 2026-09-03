@@ -108,6 +108,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   body" raised, and a board for "a monitor that watches patients" missed the
   review that "a patient monitor" got.
 
+- **A printer that has gone quiet says so, instead of showing its last reading
+  as current.** Kiln also stops presenting a finished or cancelled job as if it
+  were still running, and says which kind of "offline" you're looking at —
+  switched off, a wrong access code, or connection slots already taken.
+
 - **3MF files now work everywhere STL does.** Measurements, printability, and
   part colours come straight from the file.
 

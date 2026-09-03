@@ -43,8 +43,11 @@ MONITOR_PAYLOAD_KIND = "kiln.monitor.v1"
 #: twin of the panel resolver's isPrintingish().  The camera gate reads this
 #: SERVER-SIDE: a printer camera is a room camera, and the active-print rule
 #: must not be enforceable only by panel JS.
+#: "stale" is included: the camera gate must fail CLOSED.  A reading that
+#: has expired cannot show the bed is empty, and a room camera opened on
+#: that assumption is the one mistake this gate exists to prevent.
 ACTIVE_PRINT_STATES = frozenset(
-    {"printing", "paused", "busy", "cancelling", "stopping", "pausing"}
+    {"printing", "paused", "busy", "cancelling", "stopping", "pausing", "stale"}
 )
 
 

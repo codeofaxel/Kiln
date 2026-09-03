@@ -97,6 +97,12 @@ WATCHED: dict[str, str] = {
         "stale' warning — absent, that warning can never fire"
     ),
     "PrinterState.last_job_result": "how the last print ended",
+    "PrinterState.state_stale_after_seconds": (
+        "the freshness budget the age above is judged against — absent, the "
+        "adapter silently falls back to the fixed floor, so a printer that "
+        "reports every few minutes reads as permanently stale and one that "
+        "goes quiet mid-print may not read as stale at all"
+    ),
     "JobProgress.file_name": "what is printing",
     "JobProgress.completion": "the progress readout",
     "JobProgress.print_time_seconds": (

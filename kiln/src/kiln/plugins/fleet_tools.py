@@ -145,6 +145,8 @@ class _FleetToolsPlugin:
             Requires Enterprise license.
             """
             try:
+                from kiln.printers.base import status_is_occupied
+
                 grouped = _srv._get_registry().get_fleet_status_by_site()
                 result = {}
                 for site, statuses in grouped.items():
@@ -152,10 +154,14 @@ class _FleetToolsPlugin:
                         "printers": statuses,
                         "count": len(statuses),
                         "idle": [p["name"] for p in statuses if str(p.get("state", "")).lower() == "idle"],
+                        # Through the shared classifier, so this listing
+                        # cannot drift from the rest of the product about
+                        # which states mean "not free to take work" — a
+                        # "stale" machine is busy here, not idle.
                         "busy": [
                             p["name"]
                             for p in statuses
-                            if str(p.get("state", "")).lower() in {"printing", "busy", "paused"}
+                            if status_is_occupied(p.get("state"))
                         ],
                     }
                 return {"success": True, "sites": result, "site_count": len(result)}

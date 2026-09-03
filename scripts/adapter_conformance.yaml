@@ -38,6 +38,7 @@ adapters:
       PrinterState.print_error: provided
       PrinterState.state_age_seconds: provided
       PrinterState.last_job_result: provided
+      PrinterState.state_stale_after_seconds: provided
       JobProgress.file_name: provided
       JobProgress.completion: provided
       JobProgress.print_time_seconds: provided
@@ -92,6 +93,10 @@ adapters:
         why: >-
           Not yet verified whether /rr_model carries a last-job outcome.
         by: "2026-11-30"
+      PrinterState.state_stale_after_seconds:
+        status: not_in_protocol
+        why: >-
+          There is no cached reading to age, for the same reason PrinterState.state_age_seconds is absent: get_state asks the printer on every call, so a freshness budget would have nothing to judge.
       JobProgress.file_name: provided
       JobProgress.completion: provided
       JobProgress.print_time_seconds: provided
@@ -124,6 +129,7 @@ adapters:
         why: >-
           Not yet verified whether SDCP reports a last-job outcome.
         by: "2026-11-30"
+      PrinterState.state_stale_after_seconds: provided
       JobProgress.file_name: provided
       JobProgress.completion: provided
       JobProgress.print_time_seconds: provided
@@ -157,6 +163,14 @@ adapters:
           numeric error code.
         by: "2026-11-30"
       PrinterState.last_job_result: provided
+      PrinterState.state_stale_after_seconds:
+        status: deferred
+        why: >-
+          This backend has a push path with a real state age, so the
+          budget would apply — but it measures no cadence, so the fixed
+          floor stands in. Harmless where the printer reports often;
+          on a slow reporter it calls a healthy reading stale.
+        by: "2026-12-31"
       JobProgress.file_name: provided
       JobProgress.completion: provided
       JobProgress.print_time_seconds: provided
@@ -194,6 +208,14 @@ adapters:
         why: >-
           Not yet verified whether /api/job carries a last-job outcome.
         by: "2026-11-30"
+      PrinterState.state_stale_after_seconds:
+        status: deferred
+        why: >-
+          This backend has a push path with a real state age, so the
+          budget would apply — but it measures no cadence, so the fixed
+          floor stands in. Harmless where the printer reports often;
+          on a slow reporter it calls a healthy reading stale.
+        by: "2026-12-31"
       JobProgress.file_name: provided
       JobProgress.completion: provided
       JobProgress.print_time_seconds: provided
@@ -227,6 +249,10 @@ adapters:
           Not yet verified whether PrusaLink exposes a numeric error code.
         by: "2026-11-30"
       PrinterState.last_job_result: provided
+      PrinterState.state_stale_after_seconds:
+        status: not_in_protocol
+        why: >-
+          There is no cached reading to age, for the same reason PrinterState.state_age_seconds is absent: get_state asks the printer on every call, so a freshness budget would have nothing to judge.
       JobProgress.file_name: provided
       JobProgress.completion: provided
       JobProgress.print_time_seconds: provided
@@ -260,6 +286,10 @@ adapters:
           Marlin-style firmware reports errors as free text on the serial
           line, not as a numeric code this field could carry.
       PrinterState.last_job_result: provided
+      PrinterState.state_stale_after_seconds:
+        status: not_in_protocol
+        why: >-
+          There is no cached reading to age, for the same reason PrinterState.state_age_seconds is absent: get_state asks the printer on every call, so a freshness budget would have nothing to judge.
       JobProgress.file_name: provided
       JobProgress.completion: provided
       JobProgress.print_time_seconds:

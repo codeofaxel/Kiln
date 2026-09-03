@@ -311,6 +311,7 @@ from kiln.printer_intelligence import (
     intel_to_dict,
 )
 from kiln.printers import (
+    STALE_STATE_WARN_AGE,
     BambuAdapter,
     CrealityAdapter,
     DuetAdapter,
@@ -323,7 +324,13 @@ from kiln.printers import (
     PrusaLinkAdapter,
     SerialPrinterAdapter,
     describe_stale_state,
+    diagnose_read_failure,
+    diagnosed_state,
     progress_stall_note,
+    read_status,
+    status_is_occupied,
+    status_is_unreachable,
+    stuck_job_note,
 )
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
@@ -3935,6 +3942,41 @@ def _reads_as_auth_failure(message: str) -> bool:
     )
 
 
+def _unreachable_evidence(printer_name: str | None = None) -> dict[str, Any]:
+    """The two facts only this machine can supply about a silent printer.
+
+    ``diagnose_read_failure`` decides WHICH of the four causes a failed read
+    is; it needs the printer's address (to tell "not answering at all" from
+    "answering but refusing") and how many of this machine's own Kiln
+    servers are holding one of the printer's scarce connection slots.  Both
+    are best-effort: a missing answer costs a less specific diagnosis, never
+    an exception in a status read.
+    """
+    evidence: dict[str, Any] = {}
+    try:
+        adapter = (
+            _get_registry().get(printer_name) if printer_name else _get_adapter()
+        )
+        host = getattr(adapter, "_host", "") or ""
+        if host:
+            evidence["host"] = host
+            evidence["port"] = int(getattr(adapter, "_port", 0) or 8883)
+    except Exception:  # noqa: BLE001
+        logger.debug("no address for unreachable diagnosis", exc_info=True)
+
+    host = evidence.get("host")
+    if host:
+        try:
+            from kiln.serve_siblings import printer_connection_holders
+
+            held = printer_connection_holders(host)
+            if held.get("supported"):
+                evidence["kiln_slot_holders"] = int(held.get("kiln_count") or 0)
+        except Exception:  # noqa: BLE001
+            logger.debug("connection-holder scan unavailable", exc_info=True)
+    return evidence
+
+
 def _reported_printer_name(printer_name: str | None = None) -> str | None:
     """The name of the printer a status result is describing.
 
@@ -3986,7 +4028,19 @@ _LITE_PRINTER_KEYS = (
     "speed_profile",
     "speed_magnitude",
     "print_error",
+    # The looked-up form of the code above.  A poller that only ever sees
+    # lite readings would otherwise get a decimal nobody can search for.
+    "print_error_code",
     "state_age_seconds",
+    # The three fields that make a stale reading readable: what the printer
+    # was last seen doing, the budget its age was judged against, and the
+    # plain sentence saying what to do.  All three ride the lite path too —
+    # it is the one being polled every few seconds, so it is the one where a
+    # frozen cache does its damage.
+    "last_known_state",
+    "state_stale_after_seconds",
+    "cause",
+    "remedy",
     # How the LAST job ended — success / failed / cancelled — on its own
     # axis, so `idle` keeps meaning ready without also meaning finished.
     # The web's completion card and any poller watching for an ending need
@@ -4039,8 +4093,10 @@ def printer_status(
                 code="VALIDATION_ERROR",
             )
         adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
-        state = adapter.get_state()
-        job = adapter.get_job()
+        # ONE door for both halves: `get_status` reconciles them so the job
+        # block cannot contradict the state printed beside it — no cancelled
+        # job served with a time remaining, no "idle" over a live one.
+        state, job = read_status(adapter)
 
         printer_block = state.to_dict()
         if detail == "lite":
@@ -4068,12 +4124,30 @@ def printer_status(
         # being evidence, so the answer cannot be read as current by accident.
         # Read from the serialised form, so an adapter returning a duck-typed
         # state object cannot turn a status read into an AttributeError.
+        # The adapter has already made staleness the HEADLINE — `state` reads
+        # "stale" and the run state has moved to `last_known_state` — so this
+        # is the sentence beside it, not the only place it appears.  Read
+        # from the serialised form, so an adapter returning a duck-typed
+        # state object cannot turn a status read into an AttributeError.
         stale_note = describe_stale_state(
             response["printer"].get("state_age_seconds"),
-            response["printer"].get("state", "unknown"),
+            response["printer"].get(
+                "last_known_state", response["printer"].get("state", "unknown")
+            ),
+            response["printer"].get("state_stale_after_seconds")
+            or STALE_STATE_WARN_AGE,
         )
         if stale_note:
             response["telemetry_warning"] = stale_note
+        # A printer holding a job it already finished, which is also what
+        # greys out Load and Unload on its own screen.  Named with its
+        # remedy, because no amount of retrying from here clears it.
+        try:
+            held = stuck_job_note(state, job)
+        except Exception:  # noqa: BLE001 — never break a status read
+            held = None
+        if held:
+            response["stuck_job_warning"] = held
         # The complementary question: the reading is current, but is the
         # MACHINE moving?  A frozen push cache and a lying state word are
         # different failures, and each is invisible to the other's check.
@@ -4114,11 +4188,18 @@ def printer_status(
         # the first sends someone to check a power switch for a
         # credentials problem.
         if isinstance(exc, PrinterError) and not _reads_as_auth_failure(str(exc)):
+            # Which KIND of unreachable, from the same classifier the adapter
+            # layer uses, so the tool and the adapter cannot name different
+            # causes — or different fixes — for one silent printer.
+            diagnosis = diagnose_read_failure(
+                str(exc), **_unreachable_evidence(printer_name)
+            )
             offline: dict[str, Any] = {
                 "success": True,
-                "printer": {"connected": False, "state": "offline"},
+                "printer": diagnosed_state(diagnosis).to_dict(),
                 "job": {},
                 "offline_reason": str(exc),
+                "remedy": diagnosis.remedy,
             }
             _offline_name = _reported_printer_name(printer_name)
             if _offline_name:
@@ -4245,6 +4326,7 @@ def _format_duration(seconds: int | float | None) -> str:
 def _generate_print_comment(
     state_str: str,
     *,
+    last_known: str | None = None,
     completion: float | None,
     tool_actual: float | None,
     tool_target: float | None,
@@ -4254,10 +4336,22 @@ def _generate_print_comment(
 ) -> str:
     """Generate an auto-observation comment about print health."""
     if print_error and print_error > 0:
-        return f"Error detected (code {print_error}). Check printer."
+        # The form the printer's own screen and Bambu's HMS pages use, so
+        # the number in the report is one a user can actually look up; the
+        # raw decimal stays beside it.
+        from kiln.printers.base import format_error_code
+
+        pretty = format_error_code(print_error)
+        shown = f"{pretty}, raw {print_error}" if pretty else str(print_error)
+        return f"Error detected (code {shown}). Check printer."
     if state_str == "paused":
         return "Print is paused."
     if state_str not in ("printing", "preparing"):
+        # "Printer state: stale." on its own answers nothing.  The staleness
+        # sentence is prepended by the caller; this adds what the printer was
+        # last seen doing, which is the part that decides what to do next.
+        if state_str == "stale" and last_known:
+            return f"Printer state: stale — last seen {last_known}."
         return f"Printer state: {state_str}."
 
     comments: list[str] = []
@@ -4415,8 +4509,9 @@ def monitor_print(
         else:
             adapter = _get_adapter()
 
-        state = adapter.get_state()
-        job = adapter.get_job()
+        # The same reconciled door the tool surface uses, so the Monitor and
+        # printer_status cannot describe one printer two ways.
+        state, job = read_status(adapter)
         sd = state.to_dict()
         jd = job.to_dict()
 
@@ -4458,7 +4553,14 @@ def monitor_print(
             speed_str = f"{speed_profile} ({speed_magnitude}%)"
         else:
             speed_str = "N/A"
-        error_str = f"Code {print_error}" if print_error and print_error > 0 else "None"
+        from kiln.printers.base import format_error_code as _fmt_err
+
+        _pretty_err = _fmt_err(print_error)
+        error_str = (
+            f"Code {_pretty_err} (raw {print_error})"
+            if _pretty_err
+            else ("None" if not print_error else f"Code {print_error}")
+        )
 
         # --- Snapshot ---
         snapshot_line = "No camera available"
@@ -4511,8 +4613,20 @@ def monitor_print(
         import time as _time_mod
         _now = _time_mod.time()
         _stale_warning = describe_stale_state(
-            sd.get("state_age_seconds"), state_str
+            sd.get("state_age_seconds"),
+            sd.get("last_known_state", state_str),
+            sd.get("state_stale_after_seconds") or STALE_STATE_WARN_AGE,
         ) or ""
+        # A held job — finished, still being served, still greying out Load
+        # and Unload on the printer's screen — with the one fix that clears
+        # it.  Sits with the staleness sentence because that is the reading
+        # it is a consequence of.
+        try:
+            _held_note = stuck_job_note(state, job)
+        except Exception:  # noqa: BLE001 — never break a monitor read
+            _held_note = None
+        if _held_note:
+            _stale_warning = f"{_stale_warning} {_held_note}".strip()
         _motion_note = progress_stall_note(adapter, state, job)
         if _motion_note:
             _stale_warning = f"{_stale_warning} {_motion_note}".strip()
@@ -4693,6 +4807,7 @@ def monitor_print(
         # --- Comments ---
         comment = _generate_print_comment(
             state_str,
+            last_known=sd.get("last_known_state"),
             completion=completion,
             tool_actual=tool_actual,
             tool_target=tool_target,
@@ -9187,13 +9302,24 @@ def fleet_status() -> dict:
             state = str(p.get("state", "unknown"))
             state_counts[state] = state_counts.get(state, 0) + 1
 
+        # Asked through the shared classifiers rather than against a set of
+        # words kept here.  A hand-written membership list is how a new state
+        # reaches half the product: "unauthorized" and "connection_limit"
+        # would have read as neither offline nor busy, and "stale" would have
+        # read as free to take work.
         offline_printers = [
             p.get("name", "")
             for p in status
-            if (not p.get("connected")) or str(p.get("state", "")).lower() == "offline"
+            if (not p.get("connected")) or status_is_unreachable(p.get("state"))
         ]
-        busy_states = {"printing", "busy", "starting", "cancelling", "paused"}
-        busy_printers = [p.get("name", "") for p in status if str(p.get("state", "")).lower() in busy_states]
+        # ...with one word this listing owns: "starting" is a queue state,
+        # not a PrinterStatus, and only this surface sees it.
+        busy_printers = [
+            p.get("name", "")
+            for p in status
+            if status_is_occupied(p.get("state"))
+            or str(p.get("state", "")).lower() == "starting"
+        ]
         return {
             "success": True,
             "printers": status,

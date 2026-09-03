@@ -471,12 +471,13 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
         # Which OTHER machines are busy right now?  Queried in parallel with
         # the registry's own bounded-timeout helper; unreachable peers read
         # as "not busy" so an offline printer can't wedge a valid print.
-        from kiln.printers.base import PrinterStatus
-
         this_machine = _machine_id(adapter)
         busy: list[str] = []
         for name, state in _peer_states(registry, this_machine).items():
-            if state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+            # `is_occupied` rather than a list of states, so a peer whose
+            # reading has gone STALE is counted from what it was last seen
+            # doing instead of dropping out of the count entirely.
+            if getattr(state, "is_occupied", False) is True:
                 busy.append(name)
 
         if len(busy) < cap:
@@ -538,7 +539,12 @@ def _machine_id(adapter: Any) -> str:
 
 
 def _peer_states(registry: Any, this_machine: str) -> dict[str, Any]:
-    """State of every registered machine EXCEPT this one, aliases collapsed."""
+    """State of every registered machine EXCEPT this one, aliases collapsed.
+
+    Returns the whole :class:`~kiln.printers.base.PrinterState`, not just its
+    status word: a stale reading needs ``last_known_state`` to be judged, and
+    a caller handed only ``STALE`` would have to guess.
+    """
     from kiln.printers.engagement import internal_read
     from kiln.registry import machine_fingerprint
 
@@ -552,7 +558,7 @@ def _peer_states(registry: Any, this_machine: str) -> dict[str, Any]:
             # without this the engagement gate would refuse the very reads
             # this gate is made of, then read the refusal as an answer.
             with internal_read():
-                out[name] = peer.get_state().state
+                out[name] = peer.get_state()
         except Exception:
             continue  # unreachable peer reads as not-busy, never blocks
     return out

@@ -64,6 +64,10 @@ FULL_ROWS = {
     "PrinterState.bed_temp_target": "provided",
     "PrinterState.print_error": {"status": "not_in_protocol", "why": "no code"},
     "PrinterState.state_age_seconds": {"status": "not_in_protocol", "why": "fresh"},
+    "PrinterState.state_stale_after_seconds": {
+        "status": "not_in_protocol",
+        "why": "no cache to age, so no budget to judge it against",
+    },
     "PrinterState.last_job_result": {"status": "not_in_protocol", "why": "none"},
     "JobProgress.file_name": "provided",
     "JobProgress.completion": "provided",

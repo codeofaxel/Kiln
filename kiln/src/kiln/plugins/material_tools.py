@@ -295,7 +295,7 @@ class _MaterialToolsPlugin:
                     Used for printer-intelligence lookups.
             """
             import kiln.server as _srv
-            from kiln.printers.base import PrinterError, PrinterStatus
+            from kiln.printers.base import PrinterError
             from kiln.registry import PrinterNotFoundError
 
             checks: dict[str, dict[str, str]] = {}
@@ -325,12 +325,17 @@ class _MaterialToolsPlugin:
                 state = adapter.get_state()
                 state_dict = state.to_dict()
 
-                if not state.connected or state.state == PrinterStatus.OFFLINE:
+                from kiln.printers.base import UNREACHABLE_STATES
+
+                if not state.connected or state.state in UNREACHABLE_STATES:
+                    # The remedy the adapter worked out, rather than one
+                    # word for four different problems.
+                    detail = state.remedy or "Printer is offline or not connected."
                     checks["printer_connected"] = {
                         "status": "critical",
-                        "detail": "Printer is offline or not connected.",
+                        "detail": detail,
                     }
-                    anomalies.append("Printer is offline.")
+                    anomalies.append(detail)
                 else:
                     checks["printer_connected"] = {
                         "status": "ok",

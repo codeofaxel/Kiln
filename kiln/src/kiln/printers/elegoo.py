@@ -53,6 +53,7 @@ from kiln.printers.base import (
     PrinterState,
     PrinterStatus,
     PrintResult,
+    TelemetryCadence,
     UploadResult,
     canonical_model_key,
 )
@@ -381,6 +382,11 @@ class ElegooAdapter(PrinterAdapter):
         # The cache is a merge, so _last_state_time answers "when did anything
         # arrive", not "how old is the state we report".  0.0 means never.
         self._print_state_time: float = 0.0
+        # How often THIS printer actually reports, measured from the gaps
+        # between the pushes above.  Same measurement as the Bambu adapter's,
+        # from the same class, so the age at which a cached state stops being
+        # evidence follows each machine's own pace instead of a shared guess.
+        self._cadence = TelemetryCadence()
         self._connected = False
 
         # WebSocket state.
@@ -838,6 +844,7 @@ class ElegooAdapter(PrinterAdapter):
         """
         if any(key in payload for key in _STATE_KEYS):
             self._print_state_time = self._last_state_time
+            self._cadence.record(self._last_state_time)
 
     def _print_state_age_locked(self) -> float | None:
         """Seconds since a push last carried the print state, or ``None``.
@@ -863,10 +870,13 @@ class ElegooAdapter(PrinterAdapter):
         if self._backoff.in_cooldown():
             with self._state_lock:
                 age = time.monotonic() - self._last_state_time
-                if self._last_status and age < _STALE_STATE_MAX_AGE:
+                # Follows the measured budget, for the reason given on
+                # BambuAdapter.get_state's matching branch.
+                if self._last_status and age < self._cadence.stale_after_seconds():
                     return self._build_state_from_cache(
                         dict(self._last_status),
                         age=self._print_state_age_locked(),
+                        stale_after=self._cadence.stale_after_seconds(),
                     )
             return PrinterState(connected=False, state=PrinterStatus.OFFLINE)
 
@@ -885,6 +895,7 @@ class ElegooAdapter(PrinterAdapter):
             return self._build_state_from_cache(
                 dict(self._last_status),
                 age=self._print_state_age_locked(),
+                stale_after=self._cadence.stale_after_seconds(),
             )
 
     def _build_state_from_cache(
@@ -892,12 +903,16 @@ class ElegooAdapter(PrinterAdapter):
         status: dict[str, Any],
         *,
         age: float | None = None,
+        stale_after: float | None = None,
     ) -> PrinterState:
         """Convert cached SDCP status to :class:`PrinterState`.
 
         *age* is the vintage of the print state this status carries, from
-        :meth:`_print_state_age_locked`.  It is passed in because the callers
-        already hold :attr:`_state_lock`, which is not reentrant.
+        :meth:`_print_state_age_locked`, and *stale_after* the budget it is
+        judged against, from this printer's measured cadence.  Both are
+        passed in because the callers already hold :attr:`_state_lock`,
+        which is not reentrant.  PrinterState itself decides from the pair
+        whether the reading still counts as the present tense.
         """
         print_status = status.get("CurrentStatus", status.get("Status", 0))
         # SDCP V3 (e.g. Centauri Carbon) returns CurrentStatus as a list.
@@ -927,6 +942,10 @@ class ElegooAdapter(PrinterAdapter):
             bed_temp_target=bed_target,
             chamber_temp_actual=chamber_actual,
             state_age_seconds=round(age, 1) if age is not None else None,
+            state_stale_after_seconds=round(
+                stale_after if stale_after is not None else STALE_STATE_WARN_AGE,
+                1,
+            ),
         )
 
     def get_job(self) -> JobProgress:
@@ -956,11 +975,21 @@ class ElegooAdapter(PrinterAdapter):
         if total_ticks is not None and current_ticks is not None:
             print_time_left_seconds = max(0, total_ticks - current_ticks)
 
+        # Is this the job the machine is running NOW?  The cache keeps a
+        # finished print's filename, so "there is a filename" is not "there
+        # is a print" — read from the same status code that decides the
+        # printer's state, so the two halves cannot disagree.
+        raw_code = _safe_int(status.get("CurrentStatus", status.get("Status")))
+        running: bool | None = None
+        if raw_code is not None:
+            running = _PRINT_STATUS_MAP.get(raw_code) in _ACTIVE_PRINT_STATUSES
+
         return JobProgress(
             file_name=file_name if file_name else None,
             completion=completion,
             print_time_seconds=print_time_seconds,
             print_time_left_seconds=print_time_left_seconds,
+            active=running,
         )
 
     def list_files(self) -> list[PrinterFile]:

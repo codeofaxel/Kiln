@@ -133,17 +133,36 @@ def test_preflight_contract_a_finished_printer_is_still_ready():
     assert finished.state.value == "idle"
 
 
-def test_printer_status_enum_is_unchanged():
-    """No new member: the blast radius argument, pinned.
+def test_printer_status_carries_no_ending():
+    """The blast-radius argument, pinned as the RULE rather than a list.
 
-    ``kiln/tests/test_base.py`` already asserts this set; restating it
-    here ties it to the reason, so a later attempt to "just add FINISHED"
-    trips a test that explains itself.
+    The set is allowed to grow — ``stale`` and the two split-out
+    unreachable causes were added deliberately, and every gate that reads
+    this enum was updated with them.  What may never happen is a member
+    meaning "a job ended": ``IDLE`` is load-bearing as "ready to print" in
+    the pre-print gate, the CLI preflight, ``registry.get_idle_printers``
+    and the fleet routers, two of which compare the raw string.  A printer
+    that just finished IS ready, so the ending lives on :class:`JobResult`
+    and nowhere else.
+
+    Pinning the rule instead of the membership is what makes this test
+    survive a legitimate addition while still catching "just add FINISHED".
     """
-    assert {m.value for m in PrinterStatus} == {
-        "idle", "printing", "paused", "error",
-        "offline", "busy", "cancelling", "unknown",
-    }
+    ending_words = {m.value for m in JobResult} | {"finished", "complete", "done"}
+    assert not ending_words & {m.value for m in PrinterStatus}
+
+    # And every member is classified, so no gate can silently fall through
+    # a new one.
+    from kiln.printers.base import (
+        BUSY_STATES,
+        INDETERMINATE_STATES,
+        READY_STATES,
+        UNREACHABLE_STATES,
+    )
+
+    covered = BUSY_STATES | READY_STATES | UNREACHABLE_STATES | INDETERMINATE_STATES
+    assert covered == set(PrinterStatus)
+    assert {PrinterStatus.IDLE} == READY_STATES
 
 
 # ---------------------------------------------------------------------------

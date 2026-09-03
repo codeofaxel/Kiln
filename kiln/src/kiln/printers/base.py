@@ -17,7 +17,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
@@ -119,6 +119,110 @@ class PrinterStatus(enum.Enum):
     BUSY = "busy"
     CANCELLING = "cancelling"
     UNKNOWN = "unknown"
+    # The reading itself has expired.  A push-cache adapter answers from the
+    # last thing the printer said, and once that is older than the printer's
+    # own measured reporting interval it has stopped being evidence about
+    # now -- so the AGE becomes the headline rather than a footnote under a
+    # confident ``idle``.  What the machine was last seen doing is not lost:
+    # it moves to :attr:`PrinterState.last_known_state`.
+    STALE = "stale"
+    # The three ways "offline" used to be one word.  Each has a different
+    # remedy, and collapsing them sent people to check a power switch for a
+    # credentials problem or a connection-slot problem.
+    #
+    # UNAUTHORIZED: the printer answered and refused our credentials.
+    # CONNECTION_LIMIT: the printer rations LAN connections and they are all
+    #   taken -- most often by leftover ``kiln serve`` processes, which
+    #   ``trim_serve_processes`` closes.
+    # OFFLINE keeps its original, now narrower meaning: nothing answered at
+    #   all, which is what a powered-off or off-network printer looks like.
+    UNAUTHORIZED = "unauthorized"
+    CONNECTION_LIMIT = "connection_limit"
+
+
+# Every :class:`PrinterStatus` sorted into exactly one bucket, so that the
+# gates which read this enum ask a named question instead of listing members
+# inline.  The buckets are disjoint and their union is the whole enum --
+# ``test_printer_state_vocabulary`` pins both, which is what makes adding a
+# member a loud failure rather than a silent fallthrough at a dozen call
+# sites.
+#
+# BUSY: the machine has work in flight.
+# READY: free to accept work.  Only IDLE qualifies -- nothing else may.
+# UNREACHABLE: Kiln cannot talk to it, and each member names its own cause.
+# INDETERMINATE: reachable, or last seen reachable, but not something that
+#   can be called free.  A gate that must not start a second print treats
+#   these as occupied.
+BUSY_STATES: frozenset[PrinterStatus] = frozenset(
+    {
+        PrinterStatus.PRINTING,
+        PrinterStatus.PAUSED,
+        PrinterStatus.BUSY,
+        PrinterStatus.CANCELLING,
+    }
+)
+READY_STATES: frozenset[PrinterStatus] = frozenset({PrinterStatus.IDLE})
+UNREACHABLE_STATES: frozenset[PrinterStatus] = frozenset(
+    {
+        PrinterStatus.OFFLINE,
+        PrinterStatus.UNAUTHORIZED,
+        PrinterStatus.CONNECTION_LIMIT,
+    }
+)
+INDETERMINATE_STATES: frozenset[PrinterStatus] = frozenset(
+    {
+        PrinterStatus.ERROR,
+        PrinterStatus.UNKNOWN,
+        PrinterStatus.STALE,
+    }
+)
+
+
+def as_status(value: Any) -> PrinterStatus | None:
+    """A :class:`PrinterStatus` from a member or its serialised word.
+
+    Fleet listings and relayed payloads carry the state as a string, and
+    each such surface used to keep its own hand-written set of which words
+    mean "busy".  Those sets are how a new member silently fails to reach
+    half the product; this is the one conversion they all go through.
+    ``None`` for anything that is not a state Kiln knows.
+    """
+    if isinstance(value, PrinterStatus):
+        return value
+    try:
+        return PrinterStatus(str(value).strip().lower())
+    except (ValueError, AttributeError):
+        return None
+
+
+def status_is_occupied(status: Any) -> bool:
+    """Might a machine in *status* have work in flight?
+
+    The conservative reading, for a caller holding only the status -- as a
+    member or as its word.  ``STALE`` counts as occupied because a reading
+    that has expired cannot prove the bed is clear, and the cost of being
+    wrong runs one way: a refused print is a retry, a second print onto an
+    occupied bed is a crash.  Callers holding the whole
+    :class:`PrinterState` should prefer :attr:`PrinterState.is_occupied`,
+    which can consult what the printer was last seen doing.
+    """
+    resolved = as_status(status)
+    if resolved is None:
+        return False
+    return resolved in BUSY_STATES or resolved is PrinterStatus.STALE
+
+
+def status_is_unreachable(status: Any) -> bool:
+    """Is a machine in *status* one Kiln currently cannot see?
+
+    True for every member of :data:`UNREACHABLE_STATES` -- powered off,
+    refusing our credentials, or out of connection slots.  Deliberately
+    False for ``STALE``: a printer whose reading has expired is still
+    connected, and calling it unreachable would send the user to the wrong
+    fix.
+    """
+    resolved = as_status(status)
+    return resolved is not None and resolved in UNREACHABLE_STATES
 
 
 class JobResult(enum.Enum):
@@ -166,17 +270,150 @@ class DeviceType(enum.Enum):
 # ---------------------------------------------------------------------------
 
 
-# A reading older than this is no longer evidence about now.  Adapters that
-# query the printer on every call are current by construction; adapters that
-# answer from a push cache (Bambu, over MQTT) are only as current as the last
-# push they were sent, and a push cache that stops advancing keeps answering
-# confidently.  One minute is the point past which a cached print state is
-# reported as stale rather than presented as the present tense.
+# The FLOOR of the freshness budget, and the whole budget until there is a
+# cadence to measure.  Adapters that query the printer on every call are
+# current by construction; adapters that answer from a push cache (Bambu over
+# MQTT, Elegoo over websocket) are only as current as the last push they were
+# sent, and a push cache that stops advancing keeps answering confidently.
 #
-# Bambu's own cooldown ceiling reads this constant rather than restating the
-# number, so the two cannot drift into disagreeing about when a cache stops
-# being trustworthy.
+# One minute is where that stops being credible at the fastest cadence a
+# printer reports at, so nothing is ever called stale sooner than this -- the
+# rule Kiln shipped in 1.4.0, kept as the noise floor.
+#
+# Both push adapters read this constant rather than restating the number, for
+# their cold-start budget AND for the cooldown ceiling that decides whether a
+# cache is still worth serving, so the two cannot drift into disagreeing
+# about when a cache stops being trustworthy.
 STALE_STATE_WARN_AGE: float = 60.0
+
+# ...but a fixed minute is a guess about a cadence that is not fixed.  A
+# Bambu pushes roughly once a second while a print runs and far more slowly
+# when it is sitting idle, so one constant is either noisy at one end or deaf
+# at the other.  The budget in force is therefore MEASURED per printer, from
+# that printer's own reporting interval (:class:`TelemetryCadence`), and
+# these two numbers are only the guard-rails around the measurement:
+#
+#   floor  -- STALE_STATE_WARN_AGE.  Never warn sooner than the rule Kiln
+#             already shipped, so a fast cadence cannot make this noisy.
+#   ceiling -- past this, no measured cadence excuses a reading.  Fixed at
+#             five minutes by a measurement: on 2026-09-03 a set_temperature
+#             was accepted and the nozzle was visibly heating while the
+#             freshest reading Kiln held was 435 s old and still reported
+#             target 0 with the fans cooling.  A reading that cannot tell
+#             whether a heater Kiln just commanded is on is not evidence,
+#             whatever the printer's usual pace.
+STALE_STATE_MAX_AGE: float = 300.0
+# How many consecutive missed reports it takes before a reading is stale.
+# Three is the ordinary "we have missed a beat, and another, and another"
+# threshold; one missed push is a dropped packet, not a silent printer.
+STALE_CADENCE_MULTIPLIER: float = 3.0
+# How many recent intervals the cadence is measured over.  Long enough that
+# one hiccup cannot move the median, short enough to follow a printer moving
+# between idle and printing.
+_CADENCE_WINDOW: int = 12
+
+
+class TelemetryCadence:
+    """How often a given printer ACTUALLY reports, measured from its pushes.
+
+    A push-transport adapter (Bambu over MQTT, Elegoo over websocket) calls
+    :meth:`record` each time a message carrying the run state arrives.  The
+    gaps between those calls are this printer's real reporting interval, and
+    :meth:`stale_after_seconds` turns them into the age past which the
+    adapter stops presenting its cache as the present tense.
+
+    Nothing is assumed before there is something to measure: with no samples
+    the budget is :data:`STALE_STATE_WARN_AGE`, exactly the fixed rule this
+    replaces.  Instances are guarded by their owner's state lock; the class
+    holds no lock of its own.
+    """
+
+    def __init__(self, window: int = _CADENCE_WINDOW) -> None:
+        self._window = max(2, int(window))
+        self._last: float | None = None
+        self._gaps: list[float] = []
+
+    def record(self, at: float) -> None:
+        """Note that a state-bearing report arrived at monotonic time *at*."""
+        previous, self._last = self._last, at
+        if previous is None:
+            return
+        gap = at - previous
+        # A gap longer than the ceiling IS the outage this measurement exists
+        # to catch.  Feeding it back in would widen the budget by exactly the
+        # failure, so the next outage has to be longer still to be noticed.
+        if gap <= 0 or gap > STALE_STATE_MAX_AGE:
+            return
+        self._gaps.append(gap)
+        if len(self._gaps) > self._window:
+            del self._gaps[: len(self._gaps) - self._window]
+
+    @property
+    def observed_interval_seconds(self) -> float | None:
+        """This printer's typical gap between reports, or ``None`` if unmeasured.
+
+        The median rather than the mean or the maximum: one slow push should
+        not move the answer, and the question being asked is what this
+        printer's ordinary pace is.
+        """
+        if not self._gaps:
+            return None
+        ordered = sorted(self._gaps)
+        mid = len(ordered) // 2
+        if len(ordered) % 2:
+            return ordered[mid]
+        return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+    def stale_after_seconds(self) -> float:
+        """The age past which this printer's cache stops being evidence."""
+        interval = self.observed_interval_seconds
+        if interval is None:
+            return STALE_STATE_WARN_AGE
+        return min(
+            STALE_STATE_MAX_AGE,
+            max(STALE_STATE_WARN_AGE, STALE_CADENCE_MULTIPLIER * interval),
+        )
+
+
+def format_error_code(raw: Any) -> str | None:
+    """A firmware error code in the form the printer's own screen shows.
+
+    Bambu reports ``print_error`` as a 32-bit decimal; the machine's screen
+    and Bambu's HMS documentation both render the same value as two
+    four-hex-digit groups -- ``302022663`` is ``1200-8007``, which is what a
+    user can actually search for.  Handing back the decimal gave them a
+    number nobody can look up.
+
+    ``None`` for a missing, unparseable or zero code: zero is the firmware's
+    way of saying "no error", and formatting it would invent one.
+    """
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return f"{(value >> 16) & 0xFFFF:04X}-{value & 0xFFFF:04X}"
+
+
+def describe_stale_remedy(
+    state_age_seconds: float, stale_after_seconds: float
+) -> str:
+    """What to DO about an expired reading, in one sentence.
+
+    Deliberately says nothing :func:`describe_stale_state` already says.
+    That one names the age and whose tense it is; this one names the
+    evidence -- how long this printer usually goes between reports -- and
+    the single next step.  Two sentences that restate each other in one
+    payload read as a system arguing with itself.
+    """
+    return (
+        f"Nothing has arrived for {state_age_seconds:.0f}s, against the "
+        f"{stale_after_seconds:.0f}s this printer's own reporting pace "
+        f"allows for. Look at the machine before acting on anything below."
+    )
 
 
 def describe_stale_state(
@@ -242,53 +479,166 @@ class PrinterState:
     # is not reporting an ended job (it is mid-print, or its protocol has
     # no completion signal); it never means "ended fine".
     last_job_result: JobResult | None = None
+    # What the printer was last seen doing, when :attr:`state` is ``STALE``.
+    # The age takes the headline because it decides whether anything else in
+    # the reading can be acted on -- but the run state underneath is not
+    # discarded, because it is what keeps the concurrency gates conservative.
+    # ``None`` on every state that is not ``STALE``.
+    last_known_state: PrinterStatus | None = None
+    # The freshness budget in force for this reading, measured from this
+    # printer's own reporting cadence (:class:`TelemetryCadence`).  Reported
+    # rather than kept private so a reader sees the rule and not only its
+    # verdict -- and so no surface has to guess which number was applied.
+    state_stale_after_seconds: float | None = None
+    # Why Kiln has no current reading for this printer, and what to do
+    # about it.  Set on the unreachable states and on ``STALE`` -- which is
+    # why it is not called `unreachable_cause`: a stale printer is
+    # connected, and a field naming it unreachable would contradict
+    # :func:`status_is_unreachable` in the same payload.  Two fields because
+    # the cause is for a machine to branch on and the remedy is for a person
+    # to read; ``offline`` on its own was neither.
+    cause: str | None = None
+    remedy: str | None = None
+
+    def __post_init__(self) -> None:
+        """Promote an expired reading to ``STALE``, whoever built it.
+
+        Here rather than in each adapter so it is ONE rule.  Two push-cache
+        adapters (Bambu over MQTT, Elegoo over websocket) had the same shape
+        of failure and would otherwise each grow their own copy of the fix,
+        which is how the tool surface and the web Monitor came to disagree
+        about one printer in the first place.
+
+        It fires only when the adapter has supplied BOTH an age and a budget
+        measured for that printer.  An adapter that queries the printer on
+        every call sets neither and is untouched: it is current by
+        construction, and warning about it would make the signal noise.
+        """
+        if (
+            self.state is PrinterStatus.STALE
+            or self.state in UNREACHABLE_STATES
+            or self.state_age_seconds is None
+            or self.state_stale_after_seconds is None
+            or self.state_age_seconds <= self.state_stale_after_seconds
+        ):
+            return
+        self.last_known_state = self.state
+        self.state = PrinterStatus.STALE
+        if self.cause is None:
+            self.cause = CAUSE_SILENT
+        if self.remedy is None:
+            self.remedy = describe_stale_remedy(
+                self.state_age_seconds, self.state_stale_after_seconds
+            )
+
+    @property
+    def print_error_code(self) -> str | None:
+        """:attr:`print_error` as the printer's own screen renders it."""
+        return format_error_code(self.print_error)
+
+    @property
+    def effective_state(self) -> PrinterStatus:
+        """What the machine was doing, looking through a stale reading.
+
+        ``STALE`` answers "can this reading be trusted", not "what is the
+        printer doing" -- so anything asking the second question reads this
+        and gets the run state, aged but not erased.
+        """
+        if self.state is PrinterStatus.STALE and self.last_known_state is not None:
+            return self.last_known_state
+        return self.state
+
+    @property
+    def is_occupied(self) -> bool:
+        """Might this machine have work in flight?
+
+        The question every gate that must not start a second print is really
+        asking.  A stale reading answers from what the printer was last seen
+        doing, and from "yes" when even that is unknown: the costs are not
+        symmetric -- a refused print is a retry, a second print onto an
+        occupied bed is a crash.
+        """
+        if self.state is PrinterStatus.STALE:
+            if self.last_known_state is None:
+                return True
+            return self.last_known_state in BUSY_STATES
+        return self.state in BUSY_STATES
+
+    def freshness_budget(self, max_age: float | None = None) -> float:
+        """The age past which this reading stops counting as evidence.
+
+        An explicit *max_age* wins; otherwise the budget the adapter measured
+        for this printer; otherwise :data:`STALE_STATE_WARN_AGE`, the fixed
+        rule that applies until there is a cadence to measure.
+        """
+        if max_age is not None:
+            return max_age
+        if self.state_stale_after_seconds is not None:
+            return self.state_stale_after_seconds
+        return STALE_STATE_WARN_AGE
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
 
-        The :attr:`state` and :attr:`last_job_result` enums are converted
-        to their string values so the result can be passed directly to
-        ``json.dumps``.  Extended monitoring fields that are ``None`` are
-        omitted for compactness.
+        The :attr:`state`, :attr:`last_job_result` and
+        :attr:`last_known_state` enums are converted to their string values so
+        the result can be passed directly to ``json.dumps``.  Extended
+        monitoring fields that are ``None`` are omitted for compactness.
         """
         data = asdict(self)
         data["state"] = self.state.value
         if self.last_job_result is not None:
             data["last_job_result"] = self.last_job_result.value
+        if self.last_known_state is not None:
+            data["last_known_state"] = self.last_known_state.value
+        # The looked-up form of the error code travels WITH the raw one,
+        # never instead of it: the formatted string is what a person can
+        # search for, the decimal is what the firmware said.
+        code = self.print_error_code
+        if code is not None:
+            data["print_error_code"] = code
         # Omit None extended fields.
         _EXTENDED = (
             "cooling_fan_speed", "aux_fan_speed", "chamber_fan_speed",
             "heatbreak_fan_speed", "wifi_signal", "nozzle_diameter",
             "nozzle_type", "speed_profile", "speed_magnitude", "print_error",
-            "state_age_seconds", "last_job_result",
+            "state_age_seconds", "last_job_result", "last_known_state",
+            "state_stale_after_seconds", "cause", "remedy",
         )
         for key in _EXTENDED:
             if data.get(key) is None:
                 data.pop(key, None)
         return data
 
-    def is_stale(self, max_age: float = STALE_STATE_WARN_AGE) -> bool:
-        """Whether :attr:`state` is older than *max_age* seconds.
+    def is_stale(self, max_age: float | None = None) -> bool:
+        """Whether :attr:`state` is older than its freshness budget.
 
-        ``False`` when the adapter reports no age: a missing measurement
-        is not evidence of staleness, and treating it as stale would put a
+        ``False`` when the adapter reports no age: a missing measurement is
+        not evidence of staleness, and treating it as stale would put a
         warning on every polling adapter's output.
         """
-        return self.state_age_seconds is not None and self.state_age_seconds > max_age
+        if self.state_age_seconds is None:
+            return False
+        return self.state_age_seconds > self.freshness_budget(max_age)
 
-    def staleness_note(self, max_age: float = STALE_STATE_WARN_AGE) -> str | None:
+    def staleness_note(self, max_age: float | None = None) -> str | None:
         """One sentence naming this reading's age, or ``None`` when fresh.
 
         Every surface that reports printer state in prose leads with this when
         it is not ``None``.  It exists because the failure it names is silent
         otherwise: a frozen push cache answers "printing" in exactly the tone
         it would use for a live reading, and a confidently wrong answer costs
-        more than an error.  The state itself is never rewritten -- callers
-        downstream read the enum to decide whether a printer is busy, and
-        demoting a stale PRINTING to UNKNOWN would let a second concurrent
-        print start.
+        more than an error.
+
+        The sentence names what the printer was last seen DOING, not the
+        ``STALE`` headline -- "PRINTING describes then, not now" is the fact;
+        "STALE describes then" would be a tautology.
         """
-        return describe_stale_state(self.state_age_seconds, self.state.value, max_age)
+        return describe_stale_state(
+            self.state_age_seconds,
+            self.effective_state.value,
+            self.freshness_budget(max_age),
+        )
 
 
 @dataclass
@@ -309,17 +659,328 @@ class JobProgress:
     # subtask_id are the literal "0" on every LAN print.  Consumers must not
     # invent one here: ``kiln.printers.job_identity`` owns the fallback.
     job_id: str | None = None
+    # How THIS job ended, when it has.  ``None`` means the job is running,
+    # or that the backend reports no ending -- never that it ended well.
+    #
+    # It exists because a job block with no ending on it reads as current,
+    # and a push cache goes on serving the last job long after it stopped.
+    # Measured on an A1 (2026-09-03): layer 1 of 225 with 3h 57m remaining,
+    # for a print cancelled hours earlier.  Every number in that block was
+    # the firmware's, and the block as a whole was a lie -- not because any
+    # field was wrong, but because nothing on it said the job was over.
+    ended_as: JobResult | None = None
+    # Whether this job is the one the machine is running NOW.  Distinct from
+    # :attr:`ended_as` because the two facts have different sources and a
+    # printer can supply one without the other: a Bambu sitting idle still
+    # carries the last print's file name in its cache, so the block needs to
+    # be markable as not-current even when the firmware never said how that
+    # print ended.  ``None`` means the backend does not report it, and
+    # :attr:`is_active` then falls back to the ending.
+    active: bool | None = None
+
+    @property
+    def is_active(self) -> bool:
+        """Is this a job the machine is running now?"""
+        if self.active is not None:
+            return self.active
+        return self.ended_as is None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
 
         Extended fields that are ``None`` are omitted for compactness.
+
+        A job that has ENDED is serialised as such, and loses the fields
+        that only mean something about a running one: a "time remaining"
+        for a cancelled print is a forecast of a future that is not coming.
+        The fields that describe what happened -- the file, how far it got,
+        which layer it stopped on -- are kept, because those are true.
         """
         data = asdict(self)
+        data.pop("ended_as", None)
+        data.pop("active", None)
+        if self.file_name and not self.is_active:
+            data["active"] = False
+            # A "time remaining" for a job that is not running is a forecast
+            # of a future that is not coming.
+            data.pop("print_time_left_seconds", None)
+            if self.ended_as is not None:
+                data["ended_as"] = self.ended_as.value
         for key in ("current_layer", "total_layers", "job_id"):
             if data.get(key) is None:
                 data.pop(key, None)
         return data
+
+
+def read_status(adapter: Any) -> tuple[PrinterState, JobProgress]:
+    """Read both halves of a printer's status and make them agree.
+
+    A module-level function rather than only a method, so it works on
+    anything that answers ``get_state`` and ``get_job`` — a duck-typed
+    adapter, a kiln-pro subclass, a test double — and not only on subclasses
+    of :class:`PrinterAdapter`.  :meth:`PrinterAdapter.get_status` is the
+    method form of this.
+    """
+    state = adapter.get_state()
+    return state, reconcile_job_with_state(state, adapter.get_job())
+
+
+def reconcile_job_with_state(
+    state: PrinterState, job: JobProgress
+) -> JobProgress:
+    """A job block that cannot contradict the state standing beside it.
+
+    The single place the two halves of a status read are made to agree, so
+    every door that reports both -- the tool surface, the web Monitor, the
+    CLI -- gets the same answer instead of each deciding for itself.
+
+    Two rules, and only two:
+
+    * A machine that is running a job has not ended one.  Any ending on the
+      block is dropped, because the firmware's ``last_job_result`` describes
+      the job BEFORE this one.
+    * A machine that is not running a job, and whose firmware reports how the
+      last one ended, has that ending stamped onto the block -- which is what
+      stops "layer 1 of 225, 3h 57m remaining" from being served for a print
+      that was cancelled hours ago.
+
+    Returns the job unchanged when neither applies; never mutates the input.
+
+    Anything that is not a real :class:`PrinterState` / :class:`JobProgress`
+    pair is passed straight through.  A duck-typed adapter -- or a test
+    double -- can answer these calls with objects this function has no way
+    to rebuild, and a status read must not fail because the reconciliation
+    could not run.
+    """
+    if not isinstance(state, PrinterState) or not isinstance(job, JobProgress):
+        return job
+    if state.effective_state in BUSY_STATES:
+        if job.ended_as is None and job.active is not False:
+            return job
+        return replace(job, ended_as=None, active=True)
+    if not job.file_name:
+        return job
+    ending = job.ended_as if job.ended_as is not None else state.last_job_result
+    if job.active is False and job.ended_as is ending:
+        return job
+    return replace(job, ended_as=ending, active=False)
+
+
+def stuck_job_note(state: PrinterState, job: JobProgress) -> str | None:
+    """Name the held-job condition, and the one thing that clears it.
+
+    Measured on an A1 (2026-09-03): a print cancelled hours earlier stayed in
+    the printer's telemetry as though it were current, and the pushes stopped
+    arriving.  The visible cost was not in Kiln at all -- the held job greyed
+    out Load and Unload on the printer's own screen, so a filament jam could
+    not be cleared by hand.  A power cycle fixed it: the reading's age fell to
+    69 s, the job block emptied, and Load became pressable again.
+
+    Fires only when all three hold, because any two of them are ordinary:
+    the reading has expired, the block still names a job, and that job has
+    already ended.
+    """
+    if not isinstance(state, PrinterState) or not isinstance(job, JobProgress):
+        return None
+    if state.state is not PrinterStatus.STALE:
+        return None
+    if not job.file_name or job.is_active:
+        return None
+    age = state.state_age_seconds
+    aged = f"{age:.0f}s" if isinstance(age, (int, float)) else "some time"
+    ended = f" ({job.ended_as.value})" if job.ended_as is not None else ""
+    return (
+        f"The printer is still holding a job it already finished"
+        f"{ended} and has sent no update for {aged}. On the "
+        f"machine itself this is what greys out Load and Unload, so filament "
+        f"cannot be changed by hand. Power-cycle the printer — switch it off, "
+        f"wait about ten seconds, switch it on — and the held job clears. "
+        f"Clearing the error code from here does not release it."
+    )
+
+
+@dataclass
+class ReadDiagnosis:
+    """Why a status read produced no current answer, and what to do about it.
+
+    "Offline" used to be one word for four different situations with four
+    different fixes, so the advice attached to it was wrong three times out
+    of four -- most expensively when a printer that was powered on, on the
+    network and perfectly healthy was reported offline because its LAN
+    connection slots were held by leftover ``kiln serve`` processes, and the
+    user power-cycled hardware that was never at fault.
+    """
+
+    state: PrinterStatus
+    cause: str
+    remedy: str
+
+
+# The four causes, as stable strings for anything branching on them.
+CAUSE_POWERED_OFF = "powered_off_or_off_network"
+CAUSE_WRONG_ACCESS_CODE = "wrong_access_code"
+CAUSE_CONNECTION_LIMIT = "connection_limit"
+CAUSE_SILENT = "reachable_but_silent"
+
+
+def probe_tcp(host: str, port: int, timeout: float = 2.0) -> bool | None:
+    """Can this machine open a TCP socket to *host*:*port*?
+
+    The one fact that separates "powered off" from "answering but refusing":
+    a printer that is on and on the network completes the TCP handshake even
+    when it will not let us any further in.
+
+    Deliberately a bare connect-and-close.  No protocol bytes are sent, so
+    this does not open an MQTT session and cannot itself consume one of the
+    scarce connection slots it is helping to diagnose.  ``None`` when there
+    is nothing to probe.
+    """
+    if not host:
+        return None
+    import socket
+
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+    except Exception:  # noqa: BLE001 — a probe never raises into a status read
+        return None
+
+
+_AUTH_NEEDLES: tuple[str, ...] = (
+    "not authorized",
+    "unauthorized",
+    "unauthorised",
+    "access code",
+    "api key",
+    "api-key",
+    "forbidden",
+    "authentication",
+    "invalid credentials",
+)
+
+_SLOT_NEEDLES: tuple[str, ...] = (
+    "already connected",
+    "connections at once",
+    "single client",
+    "single-client",
+    "connection slot",
+    "too many connections",
+)
+
+
+def diagnose_read_failure(
+    message: str,
+    *,
+    host: str = "",
+    port: int | None = None,
+    kiln_slot_holders: int | None = None,
+    reachable: bool | None = None,
+) -> ReadDiagnosis:
+    """Sort a failed printer read into ONE of the four causes, with its fix.
+
+    Named for the CALL SITE -- a read that failed -- rather than for one of
+    its verdicts, because one of the four is that the printer is reachable
+    and simply silent.  Calling that "unreachable" is the conflation this
+    function exists to undo.
+
+    *message* is the adapter's own exception text, *kiln_slot_holders* the
+    number of this machine's own Kiln servers currently holding a connection
+    to the printer (from :func:`kiln.serve_siblings.printer_slot_report`),
+    and *reachable* the result of :func:`probe_tcp` when it has already been
+    taken -- otherwise it is taken here, given a host and port.
+
+    Order matters.  Credentials first, because a printer that refuses our
+    access code says so and nothing else needs checking.  Then the
+    connection ceiling, on evidence rather than on the adapter's guess: the
+    timeout message names a busy slot as the likely cause, which is exactly
+    the assumption that sent people to power-cycle a healthy printer.  Only
+    then, with the machine not answering at all, is "it is off" the answer.
+    """
+    text = (message or "").lower()
+
+    if any(needle in text for needle in _AUTH_NEEDLES):
+        return ReadDiagnosis(
+            state=PrinterStatus.UNAUTHORIZED,
+            cause=CAUSE_WRONG_ACCESS_CODE,
+            remedy=(
+                "The printer answered and refused Kiln's access code. On the "
+                "printer's screen go to Settings → Network, turn LAN Only "
+                "Mode off and on, then Developer Mode off and on, and copy "
+                "the NEW code — a restarted printer issues a fresh one even "
+                "though it looks the same. Then run "
+                "`kiln config set access_code <new code>`."
+            ),
+        )
+
+    if reachable is None and host and port:
+        reachable = probe_tcp(host, int(port))
+
+    holders = kiln_slot_holders if isinstance(kiln_slot_holders, int) else 0
+    if holders > 1 or (reachable and any(n in text for n in _SLOT_NEEDLES)):
+        held = (
+            f"{holders} copies of Kiln's own server are each holding one. "
+            if holders > 1
+            else ""
+        )
+        return ReadDiagnosis(
+            state=PrinterStatus.CONNECTION_LIMIT,
+            cause=CAUSE_CONNECTION_LIMIT,
+            remedy=(
+                "The printer is powered on and answering, but it allows only "
+                f"a few connections at once and they are taken. {held}"
+                "Closing the leftover servers frees them — run "
+                "trim_serve_processes (terminal: `kiln trim`). Power-cycling "
+                "the printer will not help, and closing Bambu Studio or the "
+                "Handy app frees a slot too."
+            ),
+        )
+
+    if reachable:
+        return ReadDiagnosis(
+            state=PrinterStatus.STALE,
+            cause=CAUSE_SILENT,
+            remedy=(
+                "The printer is on the network and accepting connections but "
+                "is not reporting anything, so Kiln has nothing current to "
+                "show. Check its screen: a printer sitting on a finished or "
+                "cancelled job stops publishing until it is power-cycled — "
+                "switch it off, wait about ten seconds, switch it on."
+            ),
+        )
+
+    return ReadDiagnosis(
+        state=PrinterStatus.OFFLINE,
+        cause=CAUSE_POWERED_OFF,
+        remedy=(
+            "Nothing answered at the printer's address, which is what a "
+            "printer that is switched off or off this network looks like. "
+            "Check it is powered on and connected to the same network, and "
+            "that the address in your Kiln config still matches the one on "
+            "its screen."
+        ),
+    )
+
+
+def diagnosed_state(diagnosis: ReadDiagnosis) -> PrinterState:
+    """The :class:`PrinterState` a *diagnosis* stands for.
+
+    One constructor so every adapter's failure path reports the cause and
+    the remedy in the same shape, instead of each building its own bare
+    ``connected=False, state=OFFLINE``.
+
+    ``connected`` follows the verdict rather than the call site: three of
+    the four causes mean no connection, but a printer that is reachable and
+    merely silent IS connected, and saying otherwise would send the reader
+    to the power switch.
+    """
+    return PrinterState(
+        connected=diagnosis.state is PrinterStatus.STALE,
+        state=diagnosis.state,
+        cause=diagnosis.cause,
+        remedy=diagnosis.remedy,
+    )
 
 
 @dataclass
@@ -1004,6 +1665,22 @@ class PrinterAdapter(ABC):
         Raises:
             PrinterError: If communication with the printer fails.
         """
+
+    def get_status(self) -> tuple[PrinterState, JobProgress]:
+        """State and job together, reconciled so they cannot contradict.
+
+        The door every surface that reports BOTH halves should come through.
+        :meth:`get_state` and :meth:`get_job` each answer honestly about
+        their own half; it is only when the two are printed side by side
+        that "idle" next to "layer 1 of 225, 3h 57m remaining" becomes a
+        claim neither of them made.  Concrete rather than abstract, so every
+        adapter gets it without writing anything: the reconciliation is in
+        :func:`reconcile_job_with_state`, once.
+
+        Raises:
+            PrinterError: If communication with the printer fails.
+        """
+        return read_status(self)
 
     @abstractmethod
     def list_files(self) -> list[PrinterFile]:
@@ -2044,6 +2721,7 @@ def _ending_was_watched(
     *,
     observation_gap_seconds: float | None,
     state_age_seconds: float | None,
+    stale_after_seconds: float | None = None,
 ) -> bool:
     """Did Kiln really SEE this ending, or merely find out afterwards?
 
@@ -2069,9 +2747,13 @@ def _ending_was_watched(
     # is minutes old dates the transition we just "saw", by exactly the same
     # amount and for the same reason.  Absent age means the caller learned
     # this from the printer on this call, which is current by construction.
+    budget = (
+        stale_after_seconds
+        if isinstance(stale_after_seconds, (int, float))
+        else STALE_STATE_WARN_AGE
+    )
     return not (
-        isinstance(state_age_seconds, (int, float))
-        and state_age_seconds > STALE_STATE_WARN_AGE
+        isinstance(state_age_seconds, (int, float)) and state_age_seconds > budget
     )
 
 
@@ -2100,6 +2782,7 @@ def _record_print_duration(
     state_age_seconds: float | None,
     observation_gap_seconds: float | None,
     duration_semantics: str,
+    stale_after_seconds: float | None = None,
 ) -> None:
     """Bank this print's duration — if this reading can be TRUSTED.
 
@@ -2174,6 +2857,11 @@ def _record_print_duration(
     watched = _ending_was_watched(
         observation_gap_seconds=observation_gap_seconds,
         state_age_seconds=state_age_seconds,
+        # The budget this printer's own cadence earns, so "was the reading
+        # current" is asked here with the same number every other surface
+        # asks it with.  Absent, the floor applies — which is what it did
+        # before any budget was measured.
+        stale_after_seconds=stale_after_seconds,
     )
     # A late reading is only worth banking when the printer's own clock
     # froze with the print.  Comparing against "frozen" — never against
@@ -2315,6 +3003,9 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
                 job_label=label,
                 elapsed_seconds=getattr(job, "print_time_seconds", None),
                 state_age_seconds=getattr(state, "state_age_seconds", None),
+                stale_after_seconds=getattr(
+                    state, "state_stale_after_seconds", None
+                ),
                 observation_gap_seconds=read_gap_seconds,
                 duration_semantics=adapter._DURATION_SEMANTICS,
             )

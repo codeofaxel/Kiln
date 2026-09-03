@@ -3945,7 +3945,12 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
                 click.echo(format_response("success", data=data, json_mode=json_mode))
                 return
 
-            if state.state in (PrinterStatus.ERROR, PrinterStatus.OFFLINE):
+            if state.state in (
+                PrinterStatus.ERROR,
+                PrinterStatus.OFFLINE,
+                PrinterStatus.UNAUTHORIZED,
+                PrinterStatus.CONNECTION_LIMIT,
+            ):
                 data = {
                     "final_state": state.state.value,
                     "file_name": job.file_name,

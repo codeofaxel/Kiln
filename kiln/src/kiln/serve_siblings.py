@@ -472,7 +472,15 @@ def _etime_seconds(etime: str) -> float | None:
 
 
 # Printer states that mean "a job is in flight, monitoring matters".
-_ACTIVE_PRINT_STATES = frozenset({"printing", "paused", "cancelling", "busy"})
+#
+# "stale" belongs here, and its absence was the dangerous case: a printer
+# whose reading has expired is not a printer known to be idle, and reading
+# it as idle would let a trim kill the very server that was watching a live
+# print.  Asked through the shared classifier so this set cannot drift from
+# the rest of the product.
+_ACTIVE_PRINT_STATES = frozenset(
+    {"printing", "paused", "cancelling", "busy", "stale"}
+)
 
 
 def printing_now() -> dict:

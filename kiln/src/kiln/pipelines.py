@@ -39,7 +39,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kiln.print_start_verdict import resolve_print_start
-from kiln.printers.base import PrinterStatus
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +46,26 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
+
+
+def _not_ready(state: Any) -> str:
+    """Why the printer is not ready, and what to do about it.
+
+    ``Printer not ready: stale`` is true and useless.  The adapter has
+    already worked out the remedy for every state it reports that way, so
+    this passes it through rather than making the reader go and ask a
+    different tool.
+    """
+    from kiln.printers.base import PrinterState, PrinterStatus
+
+    if not isinstance(state, PrinterState):
+        return "Printer not ready."
+    if state.state is PrinterStatus.STALE:
+        label = f"stale (last seen {state.effective_state.value})"
+    else:
+        label = state.state.value
+    remedy = f" {state.remedy}" if state.remedy else ""
+    return f"Printer not ready: {label}.{remedy}"
 
 
 @dataclass
@@ -713,7 +732,7 @@ def quick_print(
             return PipelineStep(
                 name="preflight",
                 success=checks_passed,
-                message="Printer ready" if checks_passed else f"Printer not ready: {state.state.value}",
+                message="Printer ready" if checks_passed else _not_ready(state),
                 data={"connected": state.connected, "status": state.state.value},
                 duration_seconds=time.time() - step_start,
             )
@@ -1178,7 +1197,7 @@ def reslice_and_print(
             return PipelineStep(
                 name="preflight",
                 success=checks_passed,
-                message="Printer ready" if checks_passed else f"Printer not ready: {state.state.value}",
+                message="Printer ready" if checks_passed else _not_ready(state),
                 data={"connected": state.connected, "status": state.state.value},
                 duration_seconds=time.time() - step_start,
             )
@@ -1375,13 +1394,14 @@ def calibrate(
         # clear plate.  While a job is printing or paused the plate
         # carries a part, and the G28's Z descent (and the probe pass
         # after it) would drive the nozzle into it.
-        if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+        # `is_occupied`: a STALE reading is not proof the plate is clear.
+        if getattr(state, "is_occupied", False) is True:
             steps.append(
                 PipelineStep(
                     name="connect",
                     success=False,
                     message=(
-                        f"Printer is {state.state.value} — calibration "
+                        f"Printer is {state.effective_state.value} — calibration "
                         "homes Z and probes the bed, which needs a clear "
                         "plate. Finish or cancel the job first."
                     ),
@@ -1392,8 +1412,8 @@ def calibrate(
                 pipeline="calibrate",
                 success=False,
                 message=(
-                    f"Refused: printer is {state.state.value} and the bed "
-                    "carries a print. Calibrate only on a clear plate."
+                    f"Refused: printer is {state.effective_state.value} and "
+                    "the bed carries a print. Calibrate only on a clear plate."
                 ),
                 steps=steps,
                 total_duration_seconds=time.time() - start,

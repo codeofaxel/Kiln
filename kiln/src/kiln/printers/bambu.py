@@ -51,8 +51,11 @@ from kiln.printers.base import (
     PrinterState,
     PrinterStatus,
     PrintResult,
+    TelemetryCadence,
     UploadResult,
     _record_print_duration,
+    diagnose_read_failure,
+    diagnosed_state,
     outcome_printer_name,
 )
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
@@ -727,6 +730,17 @@ class BambuAdapter(PrinterAdapter):
         # age is not the age of the state a caller is told about.  0.0 means no
         # push has ever carried it.
         self._gcode_state_time: float = 0.0
+        # How often THIS printer actually reports, measured from the gaps
+        # between the pushes above.  A Bambu publishes roughly once a second
+        # while a print runs and far more slowly when it sits idle, so the
+        # age at which its cache stops being evidence is a property of the
+        # machine and not a constant anyone can pick in advance.  Guarded by
+        # _state_lock, like everything else it is measured from.
+        self._cadence = TelemetryCadence()
+        # When we last ASKED for a full dump because the cache had expired.
+        # Rate-limits that request to one per budget window; a wedged printer
+        # is asked once, not on every poll.
+        self._last_forced_refresh: float = 0.0
         self._connected = False
         self._sequence_id = 0
         # One-shot per process: on the first full status after connecting,
@@ -1447,6 +1461,9 @@ class BambuAdapter(PrinterAdapter):
                     # nothing.  Reported as PrinterState.state_age_seconds.
                     if "gcode_state" in print_data:
                         self._gcode_state_time = self._last_state_time
+                        # Same push, same clock: the gaps between these
+                        # stamps ARE this printer's reporting interval.
+                        self._cadence.record(self._last_state_time)
 
                     # Fire the auto-record hook outside the state lock
                     # to avoid a deadlock if record_print_outcome ever
@@ -1727,20 +1744,42 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def _get_cached_status(self) -> dict[str, Any]:
-        """Get the latest status from the cache, requesting a refresh if stale.
+        """Get the latest status from the cache, asking again when it is stale.
 
         Returns a copy of the cached status dict.
+
+        Two reasons to ask the printer for a full dump: the cache is empty,
+        or what is in it has outlived this printer's own reporting pace.  The
+        second is new, and it is what makes a STALE verdict EVIDENCE rather
+        than an assumption -- "we asked again and it still said nothing" is a
+        different claim from "nothing has arrived on its own".  It is also
+        the cheapest possible fix for the common case, a dropped push that
+        nobody retransmitted: one publish and the reading is current again.
+
+        Rate-limited to one forced dump per budget window, so a printer that
+        is genuinely wedged is asked once and then left alone rather than
+        being republished at every poll.
         """
         self._ensure_mqtt()
 
-        # If cache is empty, request a full dump and wait briefly.
         with self._state_lock:
             if not self._last_status:
                 need_refresh = True
             else:
-                need_refresh = False
+                age = self._gcode_state_age_locked()
+                budget = self._cadence.stale_after_seconds()
+                since_asked = time.monotonic() - self._last_forced_refresh
+                need_refresh = (
+                    age is not None
+                    and age > budget
+                    and since_asked > budget
+                )
+            if need_refresh:
+                self._last_forced_refresh = time.monotonic()
 
         if need_refresh:
+            with self._state_lock:
+                asked_at = self._gcode_state_time
             self._publish_command(
                 {
                     "pushing": {
@@ -1749,8 +1788,17 @@ class BambuAdapter(PrinterAdapter):
                     }
                 }
             )
-            # Give the printer a moment to respond.
-            time.sleep(min(2.0, self._timeout / 2))
+            # Wait for the ANSWER, not for a fixed interval.  A printer that
+            # is listening replies in tens of milliseconds and the caller
+            # pays that; one that is wedged costs the cap, once per budget
+            # window.  The old blind sleep charged every caller the full
+            # wait even when the reply had already landed.
+            deadline = time.monotonic() + min(2.0, self._timeout / 2)
+            while time.monotonic() < deadline:
+                with self._state_lock:
+                    if self._gcode_state_time != asked_at:
+                        break
+                time.sleep(0.05)
 
         with self._state_lock:
             return dict(self._last_status)
@@ -1879,13 +1927,16 @@ class BambuAdapter(PrinterAdapter):
         status: dict[str, Any],
         *,
         age: float | None = None,
+        stale_after: float | None = None,
     ) -> PrinterState:
         """Convert a cached status dict into a :class:`PrinterState`.
 
         *age* is the vintage of the ``gcode_state`` this status carries, from
-        :meth:`_gcode_state_age_locked`.  It is passed in rather than read here
-        because both callers already hold — or deliberately do not hold —
-        :attr:`_state_lock`, which is not reentrant.
+        :meth:`_gcode_state_age_locked`, and *stale_after* the budget that
+        vintage is judged against, from this printer's measured cadence.
+        Both are passed in rather than read here because both callers already
+        hold — or deliberately do not hold — :attr:`_state_lock`, which is
+        not reentrant.
         """
         gcode_state = status.get("gcode_state", "unknown")
         if not isinstance(gcode_state, str):
@@ -1944,9 +1995,16 @@ class BambuAdapter(PrinterAdapter):
             with contextlib.suppress(TypeError, ValueError):
                 print_error_int = int(print_error)
 
+        # The age and the budget it is judged against travel together, and
+        # PrinterState decides from them whether this reading still counts as
+        # the present tense.  The promotion to STALE lives there, once, so
+        # this adapter and Elegoo's cannot drift into two versions of it.
+        budget = stale_after if stale_after is not None else STALE_STATE_WARN_AGE
+
         return PrinterState(
             connected=True,
             state=mapped,
+            state_stale_after_seconds=round(budget, 1),
             last_job_result=job_result,
             tool_temp_actual=status.get("nozzle_temper"),
             tool_temp_target=status.get("nozzle_target_temper"),
@@ -1988,7 +2046,12 @@ class BambuAdapter(PrinterAdapter):
         if self._backoff.in_cooldown():
             with self._state_lock:
                 age = time.monotonic() - self._last_state_time
-                if self._last_status and age < _STALE_STATE_MAX_AGE:
+                # The ceiling follows the measured budget, not a constant:
+                # "is this cache still worth serving" and "is this reading
+                # still evidence" are the same question asked on two clocks,
+                # and answering them with two different numbers is the drift
+                # the single budget exists to prevent.
+                if self._last_status and age < self._cadence.stale_after_seconds():
                     logger.debug(
                         "In backoff cooldown; returning cached state (%.1fs old)",
                         age,
@@ -2001,24 +2064,54 @@ class BambuAdapter(PrinterAdapter):
                     return self._build_state_from_cache(
                         dict(self._last_status),
                         age=self._gcode_state_age_locked(),
+                        stale_after=self._cadence.stale_after_seconds(),
                     )
-            logger.debug("In backoff cooldown with no recent cached state; returning OFFLINE")
-            return PrinterState(
-                connected=False,
-                state=PrinterStatus.OFFLINE,
+            logger.debug(
+                "In backoff cooldown with no recent cached state; diagnosing"
             )
+            return self._unreachable("MQTT reconnection is in backoff cooldown")
 
         try:
             status = self._get_cached_status()
-        except PrinterError:
-            return PrinterState(
-                connected=False,
-                state=PrinterStatus.OFFLINE,
-            )
+        except PrinterError as exc:
+            return self._unreachable(str(exc))
 
         with self._state_lock:
             state_age = self._gcode_state_age_locked()
-        return self._build_state_from_cache(status, age=state_age)
+            stale_after = self._cadence.stale_after_seconds()
+        return self._build_state_from_cache(
+            status, age=state_age, stale_after=stale_after
+        )
+
+    def _unreachable(self, message: str) -> PrinterState:
+        """Why this printer cannot be seen, in place of a bare OFFLINE.
+
+        Four situations used to share one word, and three of the four fixes
+        were therefore wrong.  A printer that is powered on, on the network
+        and healthy still read as "offline" when its LAN connection slots
+        were held by leftover ``kiln serve`` processes — so the advice that
+        came with the word sent people to power-cycle hardware that was
+        never at fault.  The classification itself lives in
+        :func:`kiln.printers.base.diagnose_read_failure`; this supplies the
+        two pieces of evidence only the adapter has.
+        """
+        holders: int | None = None
+        try:
+            from kiln.serve_siblings import printer_connection_holders
+
+            held = printer_connection_holders(self._host)
+            if held.get("supported"):
+                holders = int(held.get("kiln_count") or 0)
+        except Exception:  # noqa: BLE001 — a diagnosis never breaks a read
+            logger.debug("connection-holder scan unavailable", exc_info=True)
+        return diagnosed_state(
+            diagnose_read_failure(
+                message,
+                host=self._host,
+                port=_MQTT_PORT,
+                kiln_slot_holders=holders,
+            )
+        )
 
     def get_job(self) -> JobProgress:
         """Retrieve progress info for the active (or last) print job.
@@ -2084,6 +2177,22 @@ class BambuAdapter(PrinterAdapter):
             status.get("task_id"), status.get("subtask_id"),
         )
 
+        # Has this job already ENDED?  Read from the same gcode_state that
+        # decides the printer's state, so the two halves of a status read
+        # cannot disagree about the same cache.  Without it the block was
+        # self-contradictory: measured on an A1 (2026-09-03), layer 1 of
+        # 225 with 3h 57m remaining, for a print cancelled hours earlier,
+        # served beside a last_job_result of "cancelled".
+        ended_as = self._job_ending(status)
+        # And is it the job the machine is running now?  A Bambu keeps the
+        # last print's file name in its cache long after that print stopped,
+        # so "there is a file name" is not "there is a print".
+        raw_state = status.get("gcode_state")
+        running: bool | None = None
+        if isinstance(raw_state, str):
+            lowered = raw_state.lower()
+            running = lowered in _PRINT_ACTIVE_STATES or lowered == "pause"
+
         return JobProgress(
             file_name=file_name if file_name else None,
             completion=completion,
@@ -2092,7 +2201,40 @@ class BambuAdapter(PrinterAdapter):
             current_layer=current_layer,
             total_layers=total_layers,
             job_id=native_job_id,
+            ended_as=ended_as,
+            active=running,
         )
+
+    @staticmethod
+    def _job_ending(status: dict[str, Any]) -> JobResult | None:
+        """How the job in *status* ended, or ``None`` while it is running.
+
+        Shares :data:`_JOB_RESULT_MAP` and the ``failed``-means-cancelled
+        reading with :meth:`_build_state_from_cache`, so a job block and the
+        state beside it are always answering off the same word.
+        """
+        gcode_state = status.get("gcode_state")
+        if not isinstance(gcode_state, str):
+            return None
+        gcode_state = gcode_state.lower()
+        if gcode_state in _PRINT_ACTIVE_STATES or gcode_state == "pause":
+            return None
+        ended = _JOB_RESULT_MAP.get(gcode_state)
+        if ended is not None:
+            return ended
+        if _STATE_MAP.get(gcode_state) is not PrinterStatus.ERROR:
+            return None
+        # ``failed`` with no error code beside it is what a cancel looks
+        # like on this firmware; with one, it is a real failure.
+        raw_error = status.get("print_error")
+        if raw_error is None:
+            return JobResult.FAILED
+        try:
+            return (
+                JobResult.CANCELLED if int(raw_error) == 0 else JobResult.FAILED
+            )
+        except (TypeError, ValueError):
+            return JobResult.FAILED
 
     def list_files(self) -> list[PrinterFile]:
         """Return a list of files stored on the printer's storage.

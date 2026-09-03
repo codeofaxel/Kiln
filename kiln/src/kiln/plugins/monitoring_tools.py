@@ -458,7 +458,14 @@ class _PrintWatcher:
                     self._finish(result)
                     return
 
-                if state.state in (PrinterStatus.ERROR, PrinterStatus.OFFLINE):
+                # Every way the printer stops being watchable, including the
+                # two causes that used to hide inside "offline".
+                if state.state in (
+                    PrinterStatus.ERROR,
+                    PrinterStatus.OFFLINE,
+                    PrinterStatus.UNAUTHORIZED,
+                    PrinterStatus.CONNECTION_LIMIT,
+                ):
                     if self._event_bus is not None:
                         try:
                             self._event_bus.publish(
@@ -817,7 +824,22 @@ class _MonitoringToolsPlugin:
                 )
                 state = adapter.get_state()
                 job = adapter.get_job()
-                is_printing = state.state == PrinterStatus.PRINTING
+                # Through a stale reading: the last thing the printer said
+                # is still the best answer to "is it printing", and it
+                # arrives with its age attached in ``printer_state``.
+                #
+                # Explicitly typed rather than a getattr fallback: a
+                # duck-typed adapter's `effective_state` is an attribute
+                # that exists and answers nothing, which would quietly turn
+                # every such printer into "not printing".
+                from kiln.printers.base import PrinterState
+
+                doing = (
+                    state.effective_state
+                    if isinstance(state, PrinterState)
+                    else getattr(state, "state", None)
+                )
+                is_printing = doing == PrinterStatus.PRINTING
                 phase = _detect_phase(job.completion)
                 hints = _PHASE_HINTS.get(phase, _PHASE_HINTS["unknown"])
 

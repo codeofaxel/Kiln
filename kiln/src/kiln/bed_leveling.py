@@ -262,19 +262,31 @@ class BedLevelManager:
         # proven hazard, it doesn't add a new way to be offline.
         from kiln.printers.base import PrinterStatus
 
-        live_state = None
+        live = None
         with contextlib.suppress(Exception):
-            live_state = adapter.get_state().state
-        if live_state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+            live = adapter.get_state()
+        # A STALE reading cannot prove the plate is clear, and
+        # `is_occupied` says so — this gate stops a probe crash, so the
+        # unknown case has to refuse rather than fail open.
+        # `is True` and not merely truthy: this gate documents that an
+        # unknown state fails OPEN, and a duck-typed adapter's attribute
+        # must not read as "occupied" just by existing.
+        if getattr(live, "is_occupied", False) is True:
+            doing = live.effective_state.value
+            aged = (
+                " (from a reading that has gone stale — check the machine)"
+                if live.state is PrinterStatus.STALE
+                else ""
+            )
             return {
                 "success": False,
                 "message": (
                     f"Refused to level the bed: printer '{printer_name}' is "
-                    f"{live_state.value} and the plate carries a print — "
+                    f"{doing}{aged} and the plate carries a print — "
                     f"probing would drive the nozzle into it.  Level after "
                     f"the job finishes and the plate is clear."
                 ),
-                "state": live_state.value,
+                "state": live.state.value,
             }
 
         policy = self.get_policy(printer_name)

@@ -66,11 +66,24 @@ class TestPrinterStatus:
     """Tests for the PrinterStatus enum."""
 
     def test_all_members_present(self):
-        expected = {"IDLE", "PRINTING", "PAUSED", "ERROR", "OFFLINE", "BUSY", "CANCELLING", "UNKNOWN"}
+        expected = {
+            "IDLE", "PRINTING", "PAUSED", "ERROR", "OFFLINE", "BUSY",
+            "CANCELLING", "UNKNOWN",
+            # The reading has expired — the age, not the state word, is the
+            # headline.  What the machine was doing moves to
+            # PrinterState.last_known_state.
+            "STALE",
+            # The two causes that used to hide inside OFFLINE, each with a
+            # different fix.
+            "UNAUTHORIZED", "CONNECTION_LIMIT",
+        }
         actual = {member.name for member in PrinterStatus}
         assert actual == expected
 
     def test_values(self):
+        assert PrinterStatus.STALE.value == "stale"
+        assert PrinterStatus.UNAUTHORIZED.value == "unauthorized"
+        assert PrinterStatus.CONNECTION_LIMIT.value == "connection_limit"
         assert PrinterStatus.IDLE.value == "idle"
         assert PrinterStatus.PRINTING.value == "printing"
         assert PrinterStatus.PAUSED.value == "paused"

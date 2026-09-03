@@ -3921,9 +3921,14 @@ class TestTelemetryVintage:
 
     The incident: a P2S sat PAUSED at layer 0 with an error and a cooling
     nozzle while Kiln reported the print as running — read out of an MQTT
-    cache that had stopped advancing.  Nothing rewrites a state on account of
-    its age (the concurrency gate and the pre-flight checks read the enum),
-    so the fix is that the answer stops sounding current when it is not.
+    cache that had stopped advancing.
+
+    The age used to ride along as a footnote under a state word that still
+    sounded current.  It no longer does: past the freshness budget the state
+    reads STALE and the run state moves to ``last_known_state``.  The
+    safety property that motivated the old shape is unchanged and asserted
+    below — ``is_occupied`` and ``effective_state`` read the run state
+    through the staleness, so a stale PRINTING still blocks a second print.
     """
 
     def test_fresh_push_reports_a_small_age(
@@ -3943,9 +3948,8 @@ class TestTelemetryVintage:
     ) -> None:
         """The incident, as a unit test.
 
-        The state still reads PRINTING — demoting it would let a second
-        concurrent print start — but it now arrives with its true age and a
-        sentence saying so, which is what the session was missing.
+        The headline is the age; the run state is kept underneath, because
+        demoting it outright would let a second concurrent print start.
         """
         _push(adapter_with_mqtt, gcode_state="RUNNING", nozzle_temper=210)
         # Five minutes with nothing arriving: a dropped socket, a QoS-0 push
@@ -3955,13 +3959,20 @@ class TestTelemetryVintage:
 
         state = adapter_with_mqtt.get_state()
 
-        assert state.state is PrinterStatus.PRINTING
+        assert state.state is PrinterStatus.STALE
+        assert state.last_known_state is PrinterStatus.PRINTING
+        assert state.effective_state is PrinterStatus.PRINTING
+        # The property every concurrency gate now reads, unchanged.
+        assert state.is_occupied is True
         assert state.state_age_seconds is not None
         assert 295.0 < state.state_age_seconds < 320.0
         assert state.is_stale() is True
         note = state.staleness_note()
         assert note is not None
-        assert "300s old" in note
+        # Tied to the age actually reported, not to a literal: the read
+        # itself takes measurable time now that an expired cache is
+        # re-asked before being called stale.
+        assert f"{state.state_age_seconds:.0f}s old" in note
         assert "PRINTING" in note
         # And it rides the serialised form every reporting surface reads.
         assert state.to_dict()["state_age_seconds"] == state.state_age_seconds
@@ -3982,7 +3993,9 @@ class TestTelemetryVintage:
         _push(adapter_with_mqtt, nozzle_temper=35, bed_temper=22)
 
         state = adapter_with_mqtt.get_state()
-        assert state.state is PrinterStatus.PRINTING  # unchanged by the merge
+        # Unchanged by the merge — and reported as the expired reading it is.
+        assert state.effective_state is PrinterStatus.PRINTING
+        assert state.state is PrinterStatus.STALE
         assert state.tool_temp_actual == 35  # the new temperature did land
         assert state.state_age_seconds is not None
         assert state.state_age_seconds > 295.0
@@ -4018,7 +4031,8 @@ class TestTelemetryVintage:
         assert adapter_with_mqtt._backoff.in_cooldown()
         state = adapter_with_mqtt.get_state()
 
-        assert state.state is PrinterStatus.PRINTING
+        assert state.effective_state is PrinterStatus.PRINTING
+        assert state.state is PrinterStatus.STALE
         assert state.state_age_seconds is not None
         assert state.state_age_seconds > 295.0
 
@@ -4045,7 +4059,8 @@ class TestTelemetryVintage:
         adapter_with_mqtt._connected = True
 
         state = adapter_with_mqtt.get_state()
-        assert state.state is PrinterStatus.PRINTING
+        assert state.effective_state is PrinterStatus.PRINTING
+        assert state.state is PrinterStatus.STALE
         assert state.is_stale() is True
 
     def test_timestamp_guard_freeze_becomes_visible_as_age(
@@ -4069,7 +4084,8 @@ class TestTelemetryVintage:
         assert adapter_with_mqtt._last_status.get("gcode_state") == "RUNNING"
         assert adapter_with_mqtt._gcode_state_time == frozen_at
         state = adapter_with_mqtt.get_state()
-        assert state.state is PrinterStatus.PRINTING
+        assert state.effective_state is PrinterStatus.PRINTING
+        assert state.state is PrinterStatus.STALE
         assert state.is_stale() is True
 
     def test_a_landed_pause_is_reported_fresh_and_with_its_error(

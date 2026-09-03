@@ -14,6 +14,26 @@ from datetime import datetime
 from io import StringIO
 from typing import Any
 
+# How each printer state is coloured in the terminal.  ONE table for both
+# readouts below — they carried separate copies of it, which is how a new
+# state ends up coloured in one place and not the other.  Everything that
+# means "Kiln cannot give you a current answer" is red; "stale" is amber,
+# because the printer is answering, just not recently.
+_STATE_COLORS: dict[str, str] = {
+    "idle": "green",
+    "printing": "yellow",
+    "paused": "yellow",
+    "busy": "yellow",
+    "cancelling": "yellow",
+    "stale": "yellow",
+    # Not a verdict, so not a colour that implies one.
+    "unknown": "white",
+    "error": "red",
+    "offline": "red",
+    "unauthorized": "red",
+    "connection_limit": "red",
+}
+
 try:
     from rich.console import Console
     from rich.panel import Panel
@@ -191,7 +211,7 @@ def format_status(
         table.add_column("Key", style="bold cyan", no_wrap=True)
         table.add_column("Value")
 
-        color = {"idle": "green", "printing": "yellow", "paused": "yellow", "error": "red", "offline": "red"}.get(
+        color = _STATE_COLORS.get(
             state_text, "white"
         )
         table.add_row("State", f"[{color}]{state_text}[/{color}]")
@@ -830,7 +850,7 @@ def format_fleet_status(
 
         for p in printers:
             state = p.get("state", "unknown")
-            color = {"idle": "green", "printing": "yellow", "paused": "yellow", "error": "red", "offline": "red"}.get(
+            color = _STATE_COLORS.get(
                 state, "white"
             )
 

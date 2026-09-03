@@ -135,11 +135,24 @@ class MonitorResult:
 # ---------------------------------------------------------------------------
 
 # Terminal printer states that mean the print is no longer running.
+#
+# The two newer unreachable states belong here for the same reason OFFLINE
+# does: the monitor cannot see the print any more, whether that is because
+# the printer is off, because it refused our credentials, or because its
+# connection slots are taken.
+#
+# STALE is deliberately ABSENT.  An expired reading is not evidence that a
+# print ended — treating it as terminal would close the watch on a print
+# that is still running, which is the opposite of the honesty this state
+# exists for.  A stale reading keeps the loop alive, and the age travels
+# with the report.
 _TERMINAL_STATES = frozenset(
     {
         PrinterStatus.IDLE,
         PrinterStatus.ERROR,
         PrinterStatus.OFFLINE,
+        PrinterStatus.UNAUTHORIZED,
+        PrinterStatus.CONNECTION_LIMIT,
         PrinterStatus.CANCELLING,
     }
 )
