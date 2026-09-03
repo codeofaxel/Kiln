@@ -141,7 +141,14 @@ def device_id() -> str:
 _FLUSH_INTERVAL_S = 300.0  # at most one network flush per 5 minutes
 _MAX_FLUSH_ENTRIES = 1000
 
-_last_flush = 0.0
+# "no flush has happened yet".  Deliberately NOT 0.0: the throttle below
+# measures with monotonic(), which counts seconds since the machine booted.
+# A 0.0 sentinel therefore reads as "flushed at boot", so on a box that came
+# up less than _FLUSH_INTERVAL_S ago the first flush is skipped until it has
+# been running five minutes.  -inf is "long ago" at any uptime.
+_NEVER_FLUSHED = float("-inf")
+
+_last_flush = _NEVER_FLUSHED
 _flush_lock = threading.Lock()
 
 

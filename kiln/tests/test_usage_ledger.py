@@ -11,6 +11,7 @@ pair.  Pins both layers:
   failure re-sends); signed-out / offline is a no-op; the hot-path
   trigger throttles.
 """
+import importlib.util
 import sqlite3
 
 import pytest
@@ -196,7 +197,48 @@ def test_maybe_flush_throttles(flushable, monkeypatch):
             pass
 
     monkeypatch.setattr(lr.threading, "Thread", _FakeThread)
-    lr._last_flush = 0.0
+    lr._last_flush = lr._NEVER_FLUSHED
     lr.maybe_flush()  # due → spawns
     lr.maybe_flush()  # within interval → throttled
+    assert spawns["n"] == 1
+
+
+def _pristine_last_flush() -> float:
+    """The module's own initial ``_last_flush``, as a fresh import sees it.
+
+    Loaded as a private copy so the value is the module's, not whatever an
+    earlier test left behind -- and so this test never hand-copies the
+    sentinel it is meant to be checking.
+    """
+    spec = importlib.util.spec_from_file_location("_usage_ledger_probe", lr.__file__)
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    return probe._last_flush
+
+
+def test_first_flush_is_due_on_a_freshly_booted_machine(flushable, monkeypatch):
+    """A machine minutes past boot must still flush.
+
+    ``maybe_flush`` throttles on ``time.monotonic()``, which counts seconds
+    since boot -- so a 0.0 "never flushed" sentinel reads as a flush that
+    just happened, and the first flush is skipped for the box's first five
+    minutes.  CI runners are always that young, which is how this reached
+    main red: the throttle test above passes on a long-running dev machine
+    and fails on a fresh runner.
+    """
+    spawns = {"n": 0}
+
+    class _FakeThread:
+        def __init__(self, *a, **k):
+            spawns["n"] += 1
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(lr.threading, "Thread", _FakeThread)
+    monkeypatch.setattr(lr.time, "monotonic", lambda: 120.0)  # up 2 minutes
+    monkeypatch.setattr(lr, "_last_flush", _pristine_last_flush())
+
+    lr.maybe_flush()
+
     assert spawns["n"] == 1
