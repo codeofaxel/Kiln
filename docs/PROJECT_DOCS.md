@@ -8,7 +8,7 @@
 
 ### Overview
 
-Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 911 MCP capabilities and a <!-- KILN_CLI_COUNT --> 239-command CLI.
+Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 914 MCP capabilities and a <!-- KILN_CLI_COUNT --> 248-command CLI.
 
 **Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
@@ -209,7 +209,7 @@ You can still go from idea to object: design through the agent or the [web app](
 | `--json` | Output structured JSON (for agents/scripts) |
 | `--help` | Show command help |
 
-The CLI has <!-- KILN_CLI_COUNT --> 239 commands in total; this section documents the everyday core. Run `kiln --help` for the full command tree.
+The CLI has <!-- KILN_CLI_COUNT --> 248 commands in total; this section documents the everyday core. Run `kiln --help` for the full command tree.
 
 ### Commands
 
@@ -254,6 +254,21 @@ Pause or resume the active print.
 #### `kiln temp [--tool N] [--bed N] [--printer NAME]`
 Get current temperatures, or set targets. Without flags, returns current
 temps. Targets are held to the named machine's own limits.
+
+#### `kiln filament load|unload|purge [--slot N] [--material MAT] [--temp N] [--length MM]`
+Move filament. `load` feeds a spool to the nozzle — on a Bambu it drives the
+AMS through the printer's own change-filament routine and reads the result
+back from the AMS; elsewhere it heats and feeds. `unload` pulls filament out
+of the hotend. `purge` extrudes a short length and reports whether the printer
+raised an extrusion fault, which makes it the clog test.
+
+Temperature is held to the machine's own safety profile, to the loaded spool's
+temperature window where the printer reports one, and to a 170 °C
+cold-extrusion floor. Refused while a print is running; allowed while paused,
+which is the mid-print recovery case. On a Klipper machine whose filament path
+belongs to a Happy Hare or AFC unit, load and unload refuse and name the unit's
+own commands. Backends that cannot drive the extruder honestly — Prusa Link,
+Elegoo — say so instead of pretending.
 
 #### `kiln gcode <commands>...`
 Send raw G-code commands to the printer. Commands are validated for safety before sending.
@@ -343,7 +358,7 @@ The MCP server starts via `kiln serve` or `python -m kiln serve`. The fastest se
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **<!-- KILN_MCP_TOOL_COUNT --> 904 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT --> 911 total MCP capabilities**. The everyday core is documented below by category; agents see the full, current catalog at connect time (`get_started` and `get_skill_manifest` return the complete map).
+Kiln exposes **<!-- KILN_MCP_TOOL_COUNT --> 907 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT --> 914 total MCP capabilities**. The everyday core is documented below by category; agents see the full, current catalog at connect time (`get_started` and `get_skill_manifest` return the complete map).
 
 Paid-tier tools are discoverable too: agents without a license receive a structured response naming the required tier, so they can tell you what's possible and where it lives ([pricing](https://kiln3d.com/pricing)).
 
@@ -357,6 +372,9 @@ Paid-tier tools are discoverable too: agents without a license receive a structu
 | `pause_print` | — | Confirmation or error |
 | `resume_print` | — | Confirmation or error |
 | `set_temperature` | `tool_temp`, `bed_temp` | Confirmation |
+| `load_filament` | `slot`, `material`, `temperature` | Feeds filament to the nozzle; on Bambu drives the AMS |
+| `unload_filament` | `material`, `temperature` | Retracts filament out of the hotend |
+| `purge_filament` | `length_mm`, `material`, `temperature` | Extrudes a short length — the clog test |
 | `send_gcode` | `commands` | Response lines |
 | `validate_gcode` | `commands` | Validation result |
 | `preflight_check` | `filename`, `material` | Pass/fail with details |
