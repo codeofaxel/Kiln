@@ -2822,8 +2822,8 @@
       "retract_length": "0.8",
       "retract_speed": "30",
       "retract_lift": "0.2",
-      "bed_shape": "0x0,340x0,340x320,0x320",
-      "max_print_height": "340",
+      "bed_shape": "0x0,300x0,300x320,0x320",
+      "max_print_height": "320",
       "gcode_flavor": "marlin"
     },
     "tool_change": {
@@ -2865,8 +2865,8 @@
       "retract_length": "0.8",
       "retract_speed": "30",
       "retract_lift": "0.2",
-      "bed_shape": "0x0,340x0,340x320,0x320",
-      "max_print_height": "340",
+      "bed_shape": "0x0,300x0,300x320,0x320",
+      "max_print_height": "320",
       "gcode_flavor": "marlin"
     },
     "tool_change": {
@@ -2908,8 +2908,8 @@
       "retract_length": "0.8",
       "retract_speed": "30",
       "retract_lift": "0.2",
-      "bed_shape": "0x0,340x0,340x320,0x320",
-      "max_print_height": "340",
+      "bed_shape": "0x0,300x0,300x320,0x320",
+      "max_print_height": "320",
       "gcode_flavor": "marlin"
     },
     "tool_change": {
@@ -2951,8 +2951,8 @@
       "retract_length": "0.8",
       "retract_speed": "30",
       "retract_lift": "0.2",
-      "bed_shape": "0x0,340x0,340x320,0x320",
-      "max_print_height": "340",
+      "bed_shape": "0x0,235x0,235x256,0x256",
+      "max_print_height": "256",
       "gcode_flavor": "marlin"
     },
     "tool_change": {
