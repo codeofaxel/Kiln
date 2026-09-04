@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-04T00:19:14.544457+00:00",
+  "generated": "2026-09-04T02:18:48.327212+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -9819,9 +9819,9 @@
     },
     {
       "name": "assess_conformal_coating_application",
-      "description": "Assess a populated board's conformal-coating and process path.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
+      "description": "Assess a populated board's conformal-coating and process path.\n\nFree door, tiered answer \u2014 Free: Safety basics \u2014 always free \u00b7 Pro: Safety basics \u00b7 Business: Which coating family, how it fails, what you still must prove \u00b7 Enterprise: + Named products tied to your controlled documents \u00b7 governed review for safety-critical boards.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -10121,6 +10121,13 @@
         ],
         "title": "assess_conformal_coating_applicationArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "conformal_coating",
+        "free": "Safety basics \u2014 always free",
+        "pro": "Safety basics",
+        "business": "Which coating family, how it fails, what you still must prove",
+        "enterprise": "+ Named products tied to your controlled documents \u00b7 governed review for safety-critical boards"
       }
     },
     {
@@ -10340,9 +10347,9 @@
     },
     {
       "name": "drying_advisor",
-      "description": "Is this spool ready to print -- and if not, exactly how to dry it?",
-      "tier": "free",
-      "access": "free",
+      "description": "Is this spool ready to print -- and if not, exactly how to dry it?\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -11666,9 +11673,9 @@
     },
     {
       "name": "recommend_static_dissipative_material",
-      "description": "Which static-dissipative material for this job -- or whether the one you named fits.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
+      "description": "Which static-dissipative material for this job -- or whether the one you named fits.\n\nFree door, tiered answer \u2014 Free: Safety basics \u2014 always free \u00b7 Pro: Safety basics \u00b7 Business: Grade selection & sourcing for your printer \u00b7 Enterprise: + Audit-ready ESD program support.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -11702,6 +11709,13 @@
         },
         "title": "recommend_static_dissipative_materialArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "esd",
+        "free": "Safety basics \u2014 always free",
+        "pro": "Safety basics",
+        "business": "Grade selection & sourcing for your printer",
+        "enterprise": "+ Audit-ready ESD program support"
       }
     },
     {
