@@ -709,3 +709,33 @@ class TestSkirtBrimSplit:
         g.write_text(_orca_job(layers=2) .replace(";TYPE:Skirt", ";TYPE:Brim", 1))
         parsed = sg.parse_slicer_features(g)
         assert "brim" in parsed.buckets and "skirt" not in parsed.buckets
+
+
+class TestUnloadStrokes:
+    def test_the_unload_rammed_over_the_tower_is_dropped_before_any_stage(self, tmp_path):
+        """Orca rams the filament out over the tower spot at the print's
+        final height and writes it as an extrusion under the tower's label.
+        A person asked what the floating line was.  It is not the tower and
+        no stage draws it; a tower's own sparse layers (a gap INSIDE it) stay."""
+        g = tmp_path / "job.gcode"
+        text = _orca_job(layers=6)
+        # a lone stroke 15 mm above the tower's top, under the tower's label
+        text += ";LAYER_CHANGE\n;Z:16.2\n;TYPE:Prime tower\nG1 X160 Y105 Z16.2\nG1 X170 Y105 E0.5\n"
+        g.write_text(text)
+        parsed = sg.parse_slicer_features(g)
+        tower = parsed.buckets["prime_tower"]
+        assert tower.z_max == pytest.approx(1.2)
+        assert len(set(tower.layers)) == 6
+        block = sg.slicer_features_block(g, (100, 100, 0), (140, 130, 1.2))
+        entry = [f for f in block["features"] if f["class"] == "prime_tower"][0]
+        assert entry["z_max"] == pytest.approx(1.2)
+
+    def test_a_gap_inside_a_tower_is_kept(self, tmp_path):
+        g = tmp_path / "job.gcode"
+        out = [_orca_job(layers=3).rstrip("\n")]
+        # three more tower-only layers well above a 4 mm gap, then the part again
+        for z in (5.0, 5.2, 5.4):
+            out.append(f";LAYER_CHANGE\n;Z:{z}\n;TYPE:Prime tower\n" + _square_loop(160, 100, 170, 110, z))
+        g.write_text("\n".join(out) + "\n")
+        parsed = sg.parse_slicer_features(g)
+        assert len(set(parsed.buckets["prime_tower"].layers)) == 6

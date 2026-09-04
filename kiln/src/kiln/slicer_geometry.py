@@ -456,6 +456,57 @@ def _split_brim(buckets: dict[str, _ClassBucket], footprint: tuple[float, float,
     skirt.label = CLASS_LABELS["skirt"]        # the joint label is resolved, not kept
 
 
+def _drop_unload_strokes(buckets: dict[str, _ClassBucket]) -> None:
+    """A solid's layers standing on air ABOVE its top are not the solid:
+    they are the end-of-print filament unload — Orca rams the filament
+    out over the tower spot at the print's final height, and writes the
+    ram as an extrusion under the tower's label.  The slicer's own
+    preview draws that stroke floating over the tower; a person asks what
+    it is.  It is dropped here, before any stage sees it: a run of fewer
+    than three layers past a gap of several layers, above the last run
+    that is a solid.  Gaps INSIDE a tower (sparse layers) are kept."""
+    for cls in ("prime_tower", "raft"):
+        bucket = buckets.get(cls)
+        if bucket is None or not bucket.segments:
+            continue
+        tops: dict[int, float] = {}
+        seg = bucket.segments
+        for idx, lyr in enumerate(bucket.layers):
+            base = idx * 6
+            tops[lyr] = max(tops.get(lyr, -math.inf), seg[base + 2], seg[base + 5])
+        layers = sorted(tops)
+        if len(layers) < 2:
+            continue
+        first_h = max(0.05, tops[layers[1]] - tops[layers[0]])
+        gap = max(3 * first_h, 1.0)
+        runs: list[list[int]] = [[layers[0]]]
+        for lyr in layers[1:]:
+            if tops[lyr] - tops[runs[-1][-1]] <= gap:
+                runs[-1].append(lyr)
+            else:
+                runs.append([lyr])
+        solid = [r for r in runs if len(r) >= 3]
+        if not solid:
+            continue
+        ceiling = tops[solid[-1][-1]]
+        above = {lyr for lyr in layers if tops[lyr] > ceiling + 1e-6}
+        if not above:
+            continue
+        keep_seg: list[float] = []
+        keep_lay: list[int] = []
+        keep_tool: list[int] = []
+        for idx, lyr in enumerate(bucket.layers):
+            if lyr in above:
+                continue
+            base = idx * 6
+            keep_seg.extend(seg[base:base + 6])
+            keep_lay.append(lyr)
+            keep_tool.append(bucket.tools[idx])
+        bucket.segments, bucket.layers, bucket.tools = keep_seg, keep_lay, keep_tool
+        bucket.z_min = min(keep_seg[2::3])
+        bucket.z_max = max(keep_seg[2::3])
+
+
 def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
     """One streaming pass over *gcode_path*: extra-class segments, the
     model footprint, and the labels the file used.
@@ -658,6 +709,7 @@ def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
 
     if not math.isinf(model_zmin):
         _split_raft(buckets, model_zmin)
+    _drop_unload_strokes(buckets)
     footprint = None
     if fp_xmax > fp_xmin and fp_ymax > fp_ymin:
         footprint = (fp_xmin, fp_ymin, fp_xmax, fp_ymax)
