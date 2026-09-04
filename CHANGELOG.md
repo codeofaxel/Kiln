@@ -41,6 +41,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   printer running Happy Hare or AFC, and a Creality with a CFS, now report what
   is loaded in each slot — and Kiln says plainly when the unit's own tool map,
   not Kiln, decides which slot feeds each tool change.
+- **Your AMS can answer questions now.** Why filament won't unload after a power
+  cut, how hot a unit can safely dry, and what a critical code means — including
+  the one that says switch the power off. *Free covers the safety answers; Kiln
+  Pro adds the full capacity, LED and code reference.* See
+  https://kiln3d.com/pricing.
+
+- **Find out which failures your printer catches on its own.** Whether your exact
+  model has spaghetti, clumping or air-printing detection — and, where Bambu
+  documents it, the firmware it needs and the print modes that silently switch
+  it off.
 
 - **Your cloud library shows up on your machine.** Designs saved to your Kiln
   account appear next to your local ones, each entry saying which one it came
