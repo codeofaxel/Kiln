@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Your AI assistant can better say what each tier gets.**
+
 - **History answers say what they cover.** Your print, job, failure and model
   histories now say they're this machine's records, and how many entries
   exist in total — so a page of twenty is never mistaken for everything
@@ -107,6 +109,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **Coating and anti-static guidance now answer at every tier.**
+
+- **Hosted answers arrived missing the part you paid for.** Magnet and
+  coating advice came back as safety notes only.
 
 - **A colour print stops before it starts on a printer that cannot do it.**
   Multi-object and multi-copy colour prints used to slice, start, and come out
