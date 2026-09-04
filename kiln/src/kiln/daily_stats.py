@@ -276,14 +276,15 @@ def _empty_day() -> dict[str, Any]:
         # working, which is a different question with a different owner.
         "tool_failures": {},       # {"start_print": 4}
         # Which multi-material unit Kiln SAW on the printer it asked —
-        # {kind: count_today}, kind from kiln.multi_material.KINDS
-        # ("ams", "ams_lite", "happy_hare", "afc", "none").  Recorded at
+        # {kind: count_today}, over the closed vocabulary
+        # kiln.multi_material.KINDS defines — never re-listed here, so a
+        # new unit kind cannot leave a stale roster in a comment.  Recorded at
         # the one reader every filament-change door goes through, so it
         # answers the question nobody could until now: how many Klipper
         # installs actually carry an MMU.  "none" is counted on purpose —
         # it is the denominator; a failed read ("unknown") is not, because
         # it is evidence of nothing.
-        "multi_material_seen": {}, # {"happy_hare": 3, "none": 12}
+        "multi_material_seen": {}, # e.g. {"happy_hare": 3, "none": 12}
         # Upgrade-nudge funnel: stage -> count today.  Stages are a
         # CLOSED vocabulary (_UPDATE_NUDGE_STAGES), not tool names: the
         # question is "did the offer get shown, taken, and did it work",

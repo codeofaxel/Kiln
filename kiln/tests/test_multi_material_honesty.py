@@ -788,3 +788,213 @@ class TestLiveSimulator:
         assert gate3.material == "TPU" and gate3.hex6 == "FFFF00"
         with urllib.request.urlopen("http://localhost:7125/printer/info", timeout=5) as r:
             assert json.load(r)["result"]["state"] == "ready"
+
+
+# ===========================================================================
+# Second pass (2026-09-03): defects the first pass shipped, each verified
+# before it was fixed.  Kept as regressions because every one of them is the
+# SAME failure the module exists to end, reappearing one layer in.
+# ===========================================================================
+
+
+class TestSpoolNameIsNotAMaterial:
+    """A gate's filament NAME is a label, never a material spec.
+
+    Pre-fix, a gate with no ``gate_material`` but a ``gate_filament_name``
+    of "Polymaker Galaxy Black" produced ``material='POLYMAKER GALAXY
+    BLACK'``.  That reached the colour matcher, which then warned "colour
+    agrees, material differs" against a real PLA — a mismatch Kiln invented
+    out of a brand string, in the one module built to stop Kiln inventing
+    filament facts.
+    """
+
+    _NAMED = {
+        "enabled": True, "num_gates": 2, "gate_status": [1, 1],
+        "gate_material": ["", ""], "gate_color": ["ff0000", "00ff00"],
+        "gate_filament_name": ["Polymaker Galaxy Black", "RedPLA"],
+    }
+
+    def test_an_uncurated_gate_is_unknown_not_the_spool_name(self):
+        st = mm.from_happy_hare(self._NAMED, {"num_gates": 2})
+        from kiln.ams_routing import UNREAD_MATERIAL
+
+        assert [t.material for t in st.slots] == [UNREAD_MATERIAL] * 2
+        assert "POLYMAKER" not in st.slots[0].label.upper()
+
+    def test_no_invented_material_mismatch_reaches_the_matcher(self):
+        from kiln.ams_routing import Filament, plan_ams_mapping
+
+        st = mm.from_happy_hare(self._NAMED, {"num_gates": 2})
+        plan = plan_ams_mapping([Filament(hex6="FF0000", material="PLA")], list(st.slots))
+        assert plan.ok
+        assert not any("material differs" in w for w in plan.warnings), (
+            "Kiln invented a material from a spool name and then warned "
+            "about the mismatch it invented"
+        )
+
+    def test_a_real_material_still_wins(self):
+        st = mm.from_happy_hare(dict(self._NAMED, gate_material=["PLA", "PETG"]),
+                                {"num_gates": 2})
+        assert [t.material for t in st.slots] == ["PLA", "PETG"]
+
+
+class TestCrealityCfsIsSeen:
+    """A CFS is a real unit and Kiln has always been able to read it.
+
+    Pre-fix the shared reader knew only Bambu and Klipper, so a K2 with a
+    CFS answered ``kind="none"`` — "no multi-material unit" — to an owner
+    looking straight at one.  Exactly the lie the module exists to end,
+    left standing in the module itself.
+    """
+
+    _CFS = {
+        "detected": True, "hardware_unverified": True,
+        "slots": [
+            {"slot": 0, "material": "PLA", "color": "#FF0000"},
+            {"slot": 1, "material": "PETG", "color": "#00FF00"},
+            {"slot": 2},
+        ],
+        "warnings": ["Creality CFS active slot control is hardware-unverified in Kiln."],
+    }
+
+    def test_a_loaded_cfs_reads_as_a_unit(self):
+        st = mm.from_creality_cfs(self._CFS)
+        assert st.kind == "cfs" and st.detected
+        assert st.driven_by_kiln is False
+        assert [(t.slot, t.material, t.hex6) for t in st.slots] == [
+            (0, "PLA", "FF0000"), (1, "PETG", "00FF00"),
+        ]
+        assert st.num_slots == 3
+        assert any("hardware-unverified" in w for w in st.warnings)
+
+    def test_no_cfs_discovered_is_none(self):
+        assert mm.from_creality_cfs({"detected": False, "slots": []}).kind == "none"
+
+    def test_the_adapter_answers_the_shared_reader(self):
+        from kiln.printers.creality import CrealityAdapter
+
+        assert hasattr(CrealityAdapter, "get_multi_material_status")
+        adapter = CrealityAdapter.__new__(CrealityAdapter)
+        with patch.object(CrealityAdapter, "get_cfs_status", return_value=self._CFS):
+            assert mm.multi_material_status(adapter).kind == "cfs"
+
+    def test_cfs_colours_are_judged_like_any_other_unit(self):
+        from kiln.ams_routing import advise_colours
+
+        st = mm.from_creality_cfs(self._CFS)
+        advice = advise_colours(["#ff0000", "#0000ff"], list(st.slots), printer="k2")
+        assert advice.verdict == "mismatch"
+
+
+class TestAmsStatusStopsDenyingAVisibleUnit:
+    """The door a user knocks on to ask "what is loaded?".
+
+    Pre-fix it told a Voron owner with a populated gate map: "AMS status is
+    only available on Bambu Lab printers with AMS." Kiln could read that
+    exact map by then. The dump stays Bambu-shaped — that part is honest —
+    but the refusal now says what IS there rather than naming a brand the
+    user did not buy.
+    """
+
+    def _ams_status(self, adapter):
+        from kiln import server
+
+        with patch.object(server, "_check_auth", return_value=None), \
+                patch.object(server, "_check_rate_limit", return_value=None), \
+                patch.object(server, "_get_adapter", return_value=adapter):
+            return server.ams_status()
+
+    def test_a_visible_mmu_is_named_in_the_refusal(self):
+        out = self._ams_status(_MmuPrinter(_happy_hare()))
+        assert out["success"] is False
+        assert out["error"]["code"] == "UNSUPPORTED"
+        assert "Happy Hare" in out["error"]["message"]
+        assert out["multi_material"]["num_slots"] == 4
+        assert len(out["multi_material"]["loaded_slots"]) == 2
+
+    def test_a_failed_read_does_not_claim_the_printer_has_nothing(self):
+        out = self._ams_status(_MmuPrinter(raise_with=PrinterError("offline")))
+        assert "not saying it has none" in out["error"]["message"]
+        assert out["multi_material"]["kind"] == "unknown"
+
+    def test_a_single_feed_printer_still_says_so_plainly(self):
+        out = self._ams_status(_PlainPrinter())
+        assert "no multi-material unit of any kind" in out["error"]["message"]
+        assert out["multi_material"]["kind"] == "none"
+
+
+def test_the_afc_slot_has_no_dead_assignment():
+    """Every line earns its place — the loop overwrote `slot` on both paths."""
+    import inspect
+
+    src = inspect.getsource(mm.from_afc)
+    assert "slot = index\n" not in src
+
+
+def test_the_legacy_fallback_reads_no_private_attribute():
+    """A shared module has no business reading BambuAdapter's privates."""
+    import inspect
+
+    src = inspect.getsource(mm._legacy_ams_status)
+    assert 'getattr(adapter, "_printer_model"' not in src
+    assert "printer_model=None" in src
+
+
+class TestUnreadMaterialIsNotADisagreement:
+    """An absence is not a mismatch — on the tray side as on the file side.
+
+    The file's side has always worked this way (``f.material is None`` means
+    "cannot judge").  The tray's side did not, so the first fix for the
+    spool-name defect only moved it: the invented brand became ``UNKNOWN``
+    and the matcher went on reporting "colour agrees, material differs" —
+    a disagreement built out of an absence.
+    """
+
+    def test_an_unread_tray_material_never_reports_a_mismatch(self):
+        from kiln.ams_routing import UNREAD_MATERIAL, Filament, Tray, plan_ams_mapping
+
+        trays = [Tray(slot=0, material=UNREAD_MATERIAL, hex6="FF0000")]
+        plan = plan_ams_mapping([Filament(hex6="FF0000", material="PLA")], trays)
+        assert plan.ok
+        assert not any("material differs" in w for w in plan.warnings)
+
+    def test_a_real_material_disagreement_is_still_reported(self):
+        from kiln.ams_routing import Filament, Tray, plan_ams_mapping
+
+        trays = [Tray(slot=0, material="PETG", hex6="FF0000")]
+        plan = plan_ams_mapping([Filament(hex6="FF0000", material="PLA")], trays)
+        assert any("material differs" in w for w in plan.warnings), (
+            "loosening the unread case must not blind the real one"
+        )
+
+    def test_an_unread_material_reads_as_filament_not_as_a_material_name(self):
+        from kiln.ams_routing import UNREAD_MATERIAL, Tray
+
+        assert Tray(slot=0, material=UNREAD_MATERIAL, hex6="FF0000").label == (
+            "red filament in slot 1"
+        )
+
+    def test_a_gate_with_nothing_read_matches_nothing(self):
+        """The hole the FIRST version of this fix opened, caught in review.
+
+        Treating an unread tray material as "cannot judge" is right, but it
+        must not turn a slot Kiln knows nothing about — neither colour nor
+        material — into a slot that matches everything.  The first cut did
+        exactly that, and reported it as "matched on material only": a
+        claim about a material that was never read.
+        """
+        from kiln.ams_routing import UNREAD_MATERIAL, Filament, Tray, plan_ams_mapping
+
+        trays = [Tray(slot=0, material=UNREAD_MATERIAL, hex6=None)]
+        plan = plan_ams_mapping([Filament(hex6="FF0000", material="PLA")], trays)
+        assert not plan.ok
+        assert not any("matched on material" in w for w in plan.warnings)
+
+    def test_an_unread_colour_still_matches_on_a_material_that_was_read(self):
+        """The legitimate half of that branch must survive the fix."""
+        from kiln.ams_routing import Filament, Tray, plan_ams_mapping
+
+        trays = [Tray(slot=0, material="PLA", hex6=None)]
+        plan = plan_ams_mapping([Filament(hex6="FF0000", material="PLA")], trays)
+        assert plan.ok
+        assert any("matched on material only" in w for w in plan.warnings)

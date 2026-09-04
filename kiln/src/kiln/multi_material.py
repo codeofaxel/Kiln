@@ -42,7 +42,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from kiln.ams_routing import Tray, loaded_trays, normalize_hex
+from kiln.ams_routing import UNREAD_MATERIAL, Tray, loaded_trays, normalize_hex
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +52,12 @@ KIND_AMS = "ams"
 KIND_AMS_LITE = "ams_lite"
 KIND_HAPPY_HARE = "happy_hare"
 KIND_AFC = "afc"
+KIND_CFS = "cfs"
 KIND_NONE = "none"
 KIND_UNKNOWN = "unknown"
 KINDS: frozenset[str] = frozenset({
-    KIND_AMS, KIND_AMS_LITE, KIND_HAPPY_HARE, KIND_AFC, KIND_NONE, KIND_UNKNOWN,
+    KIND_AMS, KIND_AMS_LITE, KIND_HAPPY_HARE, KIND_AFC, KIND_CFS,
+    KIND_NONE, KIND_UNKNOWN,
 })
 
 #: The changers Kiln DRIVES — reads the loaded slots AND routes each
@@ -84,6 +86,7 @@ CHANGER_LABELS: dict[str, str] = {
     "idex": "IDEX",
     KIND_HAPPY_HARE: "Happy Hare MMU",
     KIND_AFC: "AFC MMU",
+    KIND_CFS: "Creality CFS",
 }
 
 
@@ -217,10 +220,13 @@ def _legacy_ams_status(adapter: Any) -> MultiMaterialStatus:
     except Exception as exc:
         logger.debug("AMS not readable on %r: %s", adapter, exc)
         return unknown_status(f"{label}:ams_unreadable", f"AMS not readable: {exc}")
-    return from_bambu_ams(
-        info if isinstance(info, dict) else None,
-        printer_model=getattr(adapter, "_printer_model", None),
-    )
+    # Deliberately no printer_model: the only way to learn it here is
+    # BambuAdapter's private ``_printer_model``, and a shared module has no
+    # business reading another class's privates.  Every in-tree Bambu
+    # answers get_multi_material_status directly and never reaches this
+    # path, so the AMS/AMS-Lite distinction is lost only for a duck-typed
+    # third-party adapter, which is a label, not a behaviour.
+    return from_bambu_ams(info if isinstance(info, dict) else None, printer_model=None)
 
 
 def _record_seen(status: MultiMaterialStatus) -> None:
@@ -299,7 +305,6 @@ def from_happy_hare(mmu: dict[str, Any], machine: dict[str, Any] | None = None) 
     statuses = _as_list(mmu.get("gate_status"))
     materials = _as_list(mmu.get("gate_material"))
     colours = _as_list(mmu.get("gate_color"))
-    names = _as_list(mmu.get("gate_filament_name"))
     try:
         num_gates = int(mmu.get("num_gates") or machine.get("num_gates") or len(statuses)) or None
     except (TypeError, ValueError):
@@ -314,9 +319,16 @@ def from_happy_hare(mmu: dict[str, Any], machine: dict[str, Any] | None = None) 
         if status < 1:
             continue
         material = str((materials[gate] if gate < len(materials) else None) or "").strip().upper()
-        name = str((names[gate] if gate < len(names) else None) or "").strip()
         hex6 = normalize_hex(colours[gate] if gate < len(colours) else None)
-        slots.append(Tray(slot=gate, material=material or name.upper() or "UNKNOWN", hex6=hex6))
+        # ``gate_filament_name`` is the SPOOL's name — "Polymaker Galaxy
+        # Black", "RedPLA" — and is deliberately NOT used as a fallback
+        # material.  It reads like one ("REDPLA"), which is how a brand
+        # string reached the colour matcher and produced "colour agrees,
+        # material differs" against a real PLA: a mismatch Kiln invented
+        # out of a label.  An uncurated gate is UNKNOWN, which the matcher
+        # already treats as "cannot judge the material" rather than as a
+        # material that disagrees.
+        slots.append(Tray(slot=gate, material=material or UNREAD_MATERIAL, hex6=hex6))
 
     warnings: list[str] = []
     if statuses and all(_int_or(s, -1) < 0 for s in statuses):
@@ -365,7 +377,6 @@ def from_afc(afc: dict[str, Any]) -> MultiMaterialStatus:
 
     slots: list[Tray] = []
     for index, lane in enumerate(lanes):
-        slot = index
         tool = str(lane.get("map") or "").strip().upper()
         if tool.startswith("T") and tool[1:].isdigit():
             slot = int(tool[1:])
@@ -375,7 +386,7 @@ def from_afc(afc: dict[str, Any]) -> MultiMaterialStatus:
             continue
         material = str(lane.get("material") or "").strip().upper()
         hex6 = normalize_hex(lane.get("color"))
-        slots.append(Tray(slot=slot, material=material or "UNKNOWN", hex6=hex6))
+        slots.append(Tray(slot=slot, material=material or UNREAD_MATERIAL, hex6=hex6))
     slots.sort(key=lambda t: t.slot)
     return MultiMaterialStatus(
         kind=KIND_AFC,
@@ -387,6 +398,52 @@ def from_afc(afc: dict[str, Any]) -> MultiMaterialStatus:
             "AFC lane reading is parsed from the add-on's source and has not "
             "been verified against a live AFC unit."
         ],
+    )
+
+
+def from_creality_cfs(cfs: dict[str, Any]) -> MultiMaterialStatus:
+    """A :class:`MultiMaterialStatus` from Creality's ``get_cfs_status`` reading.
+
+    The CFS is a real multi-material unit and Kiln has always been able to
+    SEE it — the adapter's discovery walks Moonraker for CFS objects and
+    normalises whatever slot-shaped data is visible.  It was left out of
+    the first cut of this module, so a K2 with a CFS answered ``none``:
+    "no multi-material unit", to an owner looking straight at one.  That is
+    the same lie this module exists to end, so it is wired here rather than
+    left to the door that happens to ask.
+
+    ``driven_by_kiln`` is False and stays False: the adapter's own
+    docstring records that Creality publishes no stable slot-control API,
+    and the reading itself carries ``hardware_unverified``.  Kiln reads the
+    slots and says so; it does not claim to route them.
+    """
+    detected = bool(cfs.get("detected"))
+    raw_slots = cfs.get("slots")
+    slots: list[Tray] = []
+    if isinstance(raw_slots, list):
+        for index, slot in enumerate(raw_slots):
+            if not isinstance(slot, dict):
+                continue
+            material = str(slot.get("material") or "").strip().upper()
+            hex6 = normalize_hex(slot.get("color"))
+            if not material and hex6 is None:
+                continue  # an empty bay is not a loaded slot
+            slots.append(Tray(
+                slot=_int_or(slot.get("slot"), index),
+                material=material or UNREAD_MATERIAL,
+                hex6=hex6,
+            ))
+    slots.sort(key=lambda t: t.slot)
+    if not detected and not slots:
+        return none_status("creality:no_cfs_discovered")
+    warnings = [str(w) for w in (cfs.get("warnings") or []) if w]
+    return MultiMaterialStatus(
+        kind=KIND_CFS,
+        driven_by_kiln=False,
+        source="creality:get_cfs_status",
+        slots=tuple(slots),
+        num_slots=len(raw_slots) if isinstance(raw_slots, list) and raw_slots else None,
+        warnings=warnings,
     )
 
 

@@ -983,5 +983,24 @@ class CrealityAdapter(PrinterAdapter):
     def delete_file(self, file_path: str) -> bool:
         return self._backend.delete_file(file_path)
 
+    def get_multi_material_status(self) -> Any:
+        """The CFS as a :class:`~kiln.multi_material.MultiMaterialStatus`.
+
+        Same reading :meth:`get_cfs_status` gives, in the one record every
+        filament-change door reads.  Without this a K2 with a CFS answered
+        "no multi-material unit" to an owner looking straight at one,
+        because the shared reader only knew how to ask a Bambu and a
+        Klipper MMU.
+
+        ``driven_by_kiln`` stays False: Creality publishes no stable
+        slot-control API (see :meth:`get_cfs_status`), so Kiln reads the
+        slots and says so rather than claiming to route them.  A transport
+        failure RAISES, so the reader reports ``unknown`` — "could not
+        ask" is not "nothing there".
+        """
+        from kiln.multi_material import from_creality_cfs
+
+        return from_creality_cfs(self.get_cfs_status())
+
     def __repr__(self) -> str:
         return f"<CrealityAdapter host={self._input_host!r} moonraker_url={self._moonraker_url!r}>"

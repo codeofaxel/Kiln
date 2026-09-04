@@ -297,6 +297,14 @@ def read_file_filaments(path: str | None) -> FileFilaments:
 # ---------------------------------------------------------------------------
 
 
+#: A loaded slot whose MATERIAL the printer did not report.  A Bambu tray
+#: always names its type, so this only arises on a unit that reports a gate
+#: as loaded without saying what is in it (a Klipper MMU gate, a CFS bay).
+#: It is a sentinel, not a material: everything that compares materials
+#: must read it as "cannot judge", never as a material that disagrees.
+UNREAD_MATERIAL = "UNKNOWN"
+
+
 @dataclass(frozen=True)
 class Tray:
     """One loaded AMS tray.  ``hex6`` is ``None`` when the colour was not read."""
@@ -308,7 +316,10 @@ class Tray:
 
     @property
     def label(self) -> str:
-        return f"{_colour_name(self.hex6)} {self.material} in slot {self.slot + 1}"
+        # "red UNKNOWN in slot 1" reads like a material called UNKNOWN.  A
+        # slot whose material was never reported is just filament.
+        material = "filament" if self.material == UNREAD_MATERIAL else self.material
+        return f"{_colour_name(self.hex6)} {material} in slot {self.slot + 1}"
 
 
 def loaded_trays(ams_info: dict[str, Any] | None) -> list[Tray]:
@@ -434,11 +445,28 @@ def plan_ams_mapping(
     # always beats a material mismatch (rank in (tolerance, 2*tolerance]),
     # which always beats an unread-colour tray (rank > 2*tolerance).
     def _score(f: Filament, t: Tray) -> tuple[float, float | None, str | None] | None:
-        same_mat = f.material is None or f.material.upper() == t.material.upper()
+        # An unread material on EITHER side is unjudgeable, not a
+        # disagreement.  The file's side has always worked this way; the
+        # tray's side did not, so a gate that reported "loaded" without
+        # naming its filament produced "colour agrees, material differs"
+        # against a perfectly good spool — a mismatch built out of an
+        # absence, which is the shape this module exists to avoid.
+        same_mat = (
+            f.material is None
+            or t.material.upper() == UNREAD_MATERIAL
+            or f.material.upper() == t.material.upper()
+        )
         if f.hex6 is None:
             return (tolerance, None, None) if same_mat else None
         if t.hex6 is None:
             if not same_mat:
+                return None
+            if t.material.upper() == UNREAD_MATERIAL:
+                # Neither the colour nor the material was read, so there is
+                # nothing to match ON.  Treating the unread material as
+                # "cannot judge" (above) must not turn a slot Kiln knows
+                # nothing about into a slot that matches everything, under
+                # a message claiming it matched on the material.
                 return None
             return (
                 2 * tolerance + 1.0,

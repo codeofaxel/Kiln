@@ -5515,7 +5515,17 @@ def _refuse_undriven_multi_material(
 
     Returns ``None`` when the target is driven by Kiln (proceed), or when
     no printer can be resolved at all (the print step fails on its own
-    terms, as before).  Otherwise an error envelope, code
+    terms, as before).
+
+    **Known cost, stated rather than hidden:** on a printer Kiln DOES
+    drive this probes the unit once and then lets the print path probe it
+    again through ``_resolve_use_ams`` — one extra read per multi-material
+    print, which on a Bambu is a cached MQTT status (and, only when that
+    cache is cold, a ``pushall`` plus a short wait).  Threading one status
+    through ``run_reslice_and_print`` into the pipeline would remove it and
+    is a larger refactor than this refusal is worth; it has not been
+    measured against real hardware, so it is recorded here rather than
+    defended as free.  Otherwise an error envelope, code
     ``MULTI_MATERIAL_NOT_DRIVEN``, carrying the composed file so the user
     can slice it in a slicer that knows their unit, and — for a detected
     MMU — what Kiln saw on it.
@@ -7738,9 +7748,38 @@ def ams_status() -> dict:
     try:
         adapter = _get_adapter()
         if not hasattr(adapter, "get_ams_status"):
+            # An AMS dump is Bambu-shaped and stays that way — but this is
+            # the door a user knocks on to ask "what is loaded?", and it
+            # used to answer a Happy Hare owner with a full gate map in
+            # front of them that they had no multi-material hardware.  Kiln
+            # can read that map now, so the refusal says what IS there and
+            # points at the tool that shows it, instead of naming a brand
+            # they did not buy.
+            from kiln.multi_material import multi_material_status
+
+            mm = multi_material_status(adapter)
+            if mm.detected:
+                return _error_dict(
+                    f"{mm.describe()} An AMS tray dump is Bambu-specific, so "
+                    f"this tool cannot show it — the loaded slots are in "
+                    f"`multi_material` on this response, and preflight_check "
+                    f"reports them against a file's colours.",
+                    code="UNSUPPORTED",
+                    extra={"multi_material": mm.to_dict()},
+                )
+            if mm.kind == "unknown":
+                return _error_dict(
+                    f"{mm.describe()} Kiln could not determine whether this "
+                    f"printer has a multi-material unit, so it is not saying "
+                    f"it has none.",
+                    code="UNSUPPORTED",
+                    extra={"multi_material": mm.to_dict()},
+                )
             return _error_dict(
-                "AMS status is only available on Bambu Lab printers with AMS.",
+                "AMS status is only available on Bambu Lab printers with AMS, "
+                "and this printer reports no multi-material unit of any kind.",
                 code="UNSUPPORTED",
+                extra={"multi_material": mm.to_dict()},
             )
         result = adapter.get_ams_status()
         _audit("ams_status", "queried")
