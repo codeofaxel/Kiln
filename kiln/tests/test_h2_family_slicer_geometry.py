@@ -118,3 +118,60 @@ def test_bambu_transport_invariants_hold(slicer, model: str):
     assert settings["start_gcode"] == ""
     assert settings["end_gcode"] == ""
     assert float(settings["nozzle_diameter"]) == 0.4
+
+
+# --- fields that were inherited, then checked ------------------------------
+#
+# The rest of the clone audit.  Each of these kept the donor's value, so each
+# was re-derived rather than left as a copy that happens to look right.
+
+
+@pytest.fixture(scope="module")
+def profiles() -> dict:
+    return json.loads(
+        (DATA / "design_knowledge" / "printer_profiles.json").read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.parametrize("model", MODELS)
+def test_tolerance_follows_the_machine_class_not_the_donor(profiles, model: str):
+    """0.1mm is the enclosed-CoreXY figure, and these are enclosed CoreXY.
+
+    This is the one inherited field that is NOT a fleet constant: Bambu
+    profiles carry 0.1, 0.12 and 0.15.  The split is by class -- every
+    enclosed CoreXY is 0.1 and the open-frame bed-slingers are looser.  So
+    the donor's value is correct here for a reason, which is worth pinning,
+    because the next machine copied in might not be the same class.
+    """
+    assert profiles[model]["typical_tolerance_mm"] == 0.1
+    assert profiles[model]["has_enclosure"] is True
+
+
+@pytest.mark.parametrize("model", MODELS)
+def test_direct_drive_describes_the_main_extruder(profiles, model: str):
+    """True across the whole Bambu fleet, and true of every main nozzle here.
+
+    Noted because one of these machines feeds its SECOND hotend from a remote
+    extruder on the rear panel.  The flag describes the main path; the remote
+    one is recorded in the machine's curated notes, where there is room to say
+    which side it applies to.
+    """
+    assert profiles[model]["has_direct_drive"] is True
+
+
+@pytest.mark.parametrize("model", MODELS)
+def test_supported_materials_agree_with_the_temperature_table(profiles, model: str):
+    """The material list and the per-material temperatures must not disagree.
+
+    PPS is the one that separates these machines, so a list claiming it on the
+    machine whose hotend cannot reach it would be caught here.
+    """
+    catalogue = json.loads(
+        (DATA / "printer_intelligence.json").read_text(encoding="utf-8")
+    )
+    listed = set(profiles[model]["supported_materials"])
+    has_pps_temps = "PPS" in catalogue[model]["materials"]
+    assert ("pps" in listed) == has_pps_temps, (
+        f"{model} lists pps={'pps' in listed} but its temperature table "
+        f"says {has_pps_temps}"
+    )
