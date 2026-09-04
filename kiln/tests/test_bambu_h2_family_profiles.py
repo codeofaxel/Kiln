@@ -157,3 +157,76 @@ def test_x2d_keeps_the_lower_hotend_ceiling_of_its_own_class():
     assert compat["bambu_x2d"]["pps"]["status"] == "not_compatible"
     assert "high_temp_hotend" in compat["bambu_x2d"]["pps"]["upgrades_needed"]
     assert compat["bambu_h2d"]["pps"]["status"] == "needs_upgrade"
+
+
+# --- BambuStudio model_id detection ---------------------------------------
+#
+# Read from the installed BambuStudio's own machine profiles
+# (Contents/Resources/profiles/BBL/machine/*.json, field "model_id"), which is
+# the same source the map's own comment cites.
+
+
+@pytest.mark.parametrize(
+    "model_id,family",
+    [
+        ("O1D", "h2d"),
+        ("O1E", "h2d_pro"),
+        # The H2C is O1C2.  An O1C also exists in that directory and is a
+        # different machine, so this row is the reason to read the profile
+        # rather than infer the code from the model name.
+        ("O1C2", "h2c"),
+        ("N6", "x2d"),
+    ],
+)
+def test_new_machines_are_detected_by_their_bambustudio_model_id(
+    model_id: str, family: str
+):
+    from kiln.printers.bambu import _BAMBU_MODEL_FAMILIES
+
+    assert _BAMBU_MODEL_FAMILIES.get(model_id) == family
+
+
+def test_bl_p001_is_the_x1_carbon_not_the_p1s():
+    """A 3MF sliced for an X1 Carbon must not announce itself as a P1S.
+
+    BambuStudio's own profile gives the X1 Carbon ``model_id`` BL-P001 and the
+    P1S C12.  The map had BL-P001 pointing at the P1S, so the mismatch check
+    compared a real X1C against the wrong family -- the same class of error
+    the "01S" serial row above it was already fixed for.
+    """
+    from kiln.printers.bambu import _BAMBU_MODEL_FAMILIES
+
+    assert _BAMBU_MODEL_FAMILIES["BL-P001"] == "x1c"
+    assert _BAMBU_MODEL_FAMILIES["C12"] == "p1s"
+    assert _BAMBU_MODEL_FAMILIES["C11"] == "p1p"
+
+
+@pytest.mark.parametrize("model", NEW_MODELS)
+def test_every_new_machine_is_reachable_by_all_three_identifier_kinds(model: str):
+    """product_name, serial prefix and model_id must all land on the machine.
+
+    Detection self-corrects on connect via MQTT, but a 3MF carries only the
+    model_id, so a machine known by two of the three still answers wrongly for
+    the file the user is about to print.
+    """
+    from kiln.printers.bambu import _BAMBU_MODEL_FAMILIES
+
+    family = model.removeprefix("bambu_")
+    resolved = {v for v in _BAMBU_MODEL_FAMILIES.values()}
+    assert family in resolved, f"{model} unreachable by any identifier"
+
+    kinds = {
+        "product_name": any(
+            k.startswith("Bambu Lab") and v == family
+            for k, v in _BAMBU_MODEL_FAMILIES.items()
+        ),
+        "serial_prefix": any(
+            len(k) == 3 and k.isalnum() and not k.startswith("Bambu") and v == family
+            for k, v in _BAMBU_MODEL_FAMILIES.items()
+        ),
+        "model_id": any(
+            k in {"O1D", "O1E", "O1C2", "N6"} and v == family
+            for k, v in _BAMBU_MODEL_FAMILIES.items()
+        ),
+    }
+    assert all(kinds.values()), f"{model} missing identifier kinds: {kinds}"

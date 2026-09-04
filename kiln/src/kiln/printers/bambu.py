@@ -716,15 +716,34 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "BBL-A1M": "a1_mini",
     "BBL-A1": "a1",
     "BL-A001": "a1",
+    # BL-P001 is the X1 CARBON and BL-P002 the non-Carbon X1, read from
+    # BambuStudio's own machine profiles (profiles/BBL/machine/*.json,
+    # "model_id").  BL-P001 was mapped to "p1s" here, which is the same class
+    # of error as the "01S" serial row below: a 3MF sliced for an X1 Carbon
+    # announced itself as a P1S and the mismatch check answered on the wrong
+    # machine.  The P1S's real id is C12.  The plain X1 keeps the x1c family
+    # deliberately -- same chassis, and Kiln ships no separate X1 profile.
+    "BL-P001": "x1c",
     "BL-P002": "x1c",
     "BBL-X1C": "x1c",
     "BBL-X1E": "x1e",
-    "BL-P001": "p1s",
     "BBL-P1S": "p1s",
     "BBL-P1P": "p1p",
-    # model_id codes (BambuStudio resources/printers/N*.json or O*.json + MQTT report)
+    # model_id codes (BambuStudio resources/printers/N*.json or O*.json + MQTT
+    # report).  Read from the installed BambuStudio's machine profiles rather
+    # than inferred from the model name -- the H2C is O1C2, NOT the O1C that
+    # also exists in that directory.
+    "C11": "p1p",
+    "C12": "p1s",
+    "C13": "x1e",
+    "N1": "a1_mini",
+    "N2S": "a1",
+    "N6": "x2d",
     "N9": "a2l",
     "N7": "p2s",
+    "O1C2": "h2c",
+    "O1D": "h2d",
+    "O1E": "h2d_pro",
     "O1S": "h2s",
     # Human-readable names (from slicer config / XML metadata, and the
     # product_name field of MQTT get_version firmware modules)
