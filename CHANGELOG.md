@@ -31,6 +31,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Load, unload and purge filament from Kiln on most printers.** Purging
+  doubles as a clog test: Kiln says whether the filament actually came
+  through and reads the printer's own error back in plain words. Printers
+  whose firmware gives Kiln no way to drive the extruder say so rather than
+  pretending.
+
 - **Kiln now sees your multi-material unit, whatever brand it is.** A Klipper
   printer running Happy Hare or AFC, and a Creality with a CFS, now report what
   is loaded in each slot — and Kiln says plainly when the unit's own tool map,
@@ -109,6 +115,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **A Bambu error code now gets the explanation that belongs to it.** Some
+  codes were read as if they came from a different part of the printer's
+  reporting, so the plain-English cause could describe the wrong fault.
 
 - **Coating and anti-static guidance now answer at every tier.**
 
