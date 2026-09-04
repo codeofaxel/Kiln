@@ -248,6 +248,20 @@ class TestParsing:
         parsed = sg.parse_slicer_features(g)
         assert len(set(parsed.buckets["support"].layers)) == 3
 
+    def test_prusaslicers_before_and_after_markers_do_not_double_count_layers(self, tmp_path):
+        """PrusaSlicer brackets each change with ;BEFORE_LAYER_CHANGE and
+        ;AFTER_LAYER_CHANGE around the ;LAYER_CHANGE itself — one layer."""
+        g = tmp_path / "prusa.gcode"
+        g.write_text(
+            "G90\nM83\n"
+            ";LAYER_CHANGE\n;Z:0.2\n;BEFORE_LAYER_CHANGE\nG1 Z0.2\n;AFTER_LAYER_CHANGE\n;0.2\n"
+            ";TYPE:Support material\nG1 X0 Y0\nG1 X5 Y0 E0.1\n"
+            ";LAYER_CHANGE\n;Z:0.4\n;BEFORE_LAYER_CHANGE\nG1 Z0.4\n;AFTER_LAYER_CHANGE\n;0.4\n"
+            ";TYPE:Support material\nG1 X0 Y0\nG1 X5 Y0 E0.1\n"
+        )
+        parsed = sg.parse_slicer_features(g)
+        assert sorted(set(parsed.buckets["support"].layers)) == [1, 2]
+
     def test_a_missing_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             sg.parse_slicer_features(tmp_path / "nope.gcode")

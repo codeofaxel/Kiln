@@ -134,6 +134,21 @@ def _stage_printer_id() -> str | None:
     return None
 
 
+def _slice_identity(path: Path) -> str:
+    """Which slice belongs to *path*, as a cheap cache tag — the G-code's
+    path and mtime, or ``""`` for a mesh nobody sliced.  A ledger read,
+    never a parse."""
+    try:
+        from kiln.stage_plate import resolve_sliced_gcode
+
+        gcode = resolve_sliced_gcode(str(path))
+        if not gcode:
+            return ""
+        return f"{gcode}@{int(os.path.getmtime(gcode))}"
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _slicer_sidecar(path: Path) -> bytes | None:
     """The slicer-added-geometry sidecar for *path*, or ``None``.
 
@@ -193,14 +208,16 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     # So does the slice this machine made of the mesh — skirt, brim, prime
     # tower, supports — as a small sidecar in the mesh's own frame, so the
     # hosted page can offer the same "show what the slicer added" toggle
-    # the inline panel does.  None for a mesh nobody sliced.
-    sidecar = _slicer_sidecar(path)
+    # the inline panel does.  Only WHICH slice is resolved here (a ledger
+    # read); the sidecar itself — a full parse of the G-code — is built
+    # only on a cache miss, after the sign-in check, so sixteen still poses
+    # of one mesh parse it once and a signed-out install never does.
+    slice_tag = _slice_identity(path)
     # The printer is part of the link's identity: the token carries it, so a
     # config change between calls must not serve a link claiming the old bed.
-    # The sidecar is too: a re-slice between calls must not serve a link
+    # The slice is too: a re-slice between calls must not serve a link
     # still wearing the previous slice's tower.
-    sidecar_tag = hashlib.sha256(sidecar).hexdigest()[:16] if sidecar else ""
-    cache_key = f"{sha}:{printer_id or ''}:{sidecar_tag}"
+    cache_key = f"{sha}:{printer_id or ''}:{slice_tag}"
     cached = _cache_get(cache_key)
     if cached:
         # Same bytes already staged — the sixteen-pose case, and the
@@ -230,6 +247,11 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
         import httpx
     except ImportError:
         return None
+
+    # A real upload, so the sidecar is worth building now: one parse of the
+    # slice, keyed above so the next call for the same mesh and slice never
+    # pays it again.
+    sidecar = _slicer_sidecar(path) if slice_tag else None
 
     try:
         with path.open("rb") as fh:

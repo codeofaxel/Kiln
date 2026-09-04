@@ -155,10 +155,10 @@ CLASS_LABELS: dict[str, str] = {
     "shield": "Shield",
 }
 
-#: Keyword → class, first match wins, checked in this order.  Specific
-#: before general: "support" would otherwise catch nothing wrong, but
-#: "tower" must beat "wipe" so a future "wipe" feature does not become a
-#: tower, and "skirt/brim" is one PrusaSlicer label for both.
+#: Keyword → class, first match wins, checked in this order.  "skirt"
+#: sits first so PrusaSlicer's joint "Skirt/Brim" lands as a skirt (the
+#: label itself is kept, so the brim is still named); the tower spellings
+#: precede the bare "tower" so the specific one is what matched.
 _CLASS_KEYWORDS: tuple[tuple[str, str], ...] = (
     ("skirt", "skirt"),          # Skirt, Skirt/Brim, SKIRT
     ("brim", "brim"),            # Brim, BRIM
@@ -181,8 +181,12 @@ _IGNORED_KEYWORDS: tuple[str, ...] = ("custom",)
 
 _TYPE_RE = re.compile(r"^\s*;\s*(?:TYPE|FEATURE)\s*:\s*(.+?)\s*$", re.IGNORECASE)
 _S3D_FEATURE_RE = re.compile(r"^\s*;\s*feature\s+(.+?)\s*$", re.IGNORECASE)
+#: One boundary per layer: ``;LAYER_CHANGE`` (PrusaSlicer, SuperSlicer,
+#: OrcaSlicer), ``; CHANGE_LAYER`` (Bambu Studio), ``;LAYER:n`` (Cura),
+#: ``; layer n,`` (Simplify3D).  PrusaSlicer's ``;BEFORE_LAYER_CHANGE`` /
+#: ``;AFTER_LAYER_CHANGE`` bracket the same change and must NOT count again.
 _LAYER_RE = re.compile(
-    r"^\s*;\s*(?:LAYER_CHANGE|CHANGE_LAYER|LAYER\s*:|AFTER_LAYER_CHANGE|layer\s+\d)",
+    r"^\s*;\s*(?:LAYER_CHANGE|CHANGE_LAYER|LAYER\s*:|layer\s+\d)",
     re.IGNORECASE,
 )
 _WORD_RE = re.compile(r"([A-Za-z])\s*(-?\d*\.?\d+(?:[eE][-+]?\d+)?)")
@@ -622,18 +626,28 @@ def _decode_f32(b64: str) -> Any:
 
 
 def _sample_stride(parsed: ParsedFeatures, max_segments: int) -> int:
+    """The smallest layer stride that brings the block under *max_segments*.
+
+    Counted per LAYER, not per segment: a million-segment support forest
+    is tallied once into a few hundred layer counts, and each candidate
+    stride then costs a pass over those counts, not over the segments.
+    """
     total = sum(b.count for b in parsed.buckets.values())
     if total <= max_segments:
         return 1
-    layers = sorted({lyr for b in parsed.buckets.values() for lyr in b.layers})
+    per_layer: dict[int, int] = {}
+    for b in parsed.buckets.values():
+        for lyr in b.layers:
+            per_layer[lyr] = per_layer.get(lyr, 0) + 1
+    layers = sorted(per_layer)
     if len(layers) <= 1:
         return 1  # one layer cannot be sampled; the ceiling still bounds it
+    first = layers[0]
     stride = 2
     while stride < len(layers):
         kept = sum(
-            1 for b in parsed.buckets.values()
-            for lyr in b.layers
-            if lyr == layers[0] or (lyr - layers[0]) % stride == 0
+            n for lyr, n in per_layer.items()
+            if lyr == first or (lyr - first) % stride == 0
         )
         if kept <= max_segments:
             break
