@@ -35,6 +35,7 @@ from unittest import mock
 
 import pytest
 import responses
+from requests.exceptions import ConnectionError as ReqConnectionError
 
 from kiln.printers.base import (
     DEFAULT_PURGE_LENGTH_MM,
@@ -807,6 +808,8 @@ class TestMoonraker:
         adapter = self._adapter()
 
         def _request(method, url, **kw):
+            if url.endswith("/printer/objects/list"):
+                return _moon_response(json_data={"result": {"objects": ["extruder"]}})
             if url.endswith("/printer/gcode/help"):
                 return _moon_response(json_data={"result": {"LOAD_FILAMENT": "Load", "G28": "Home"}})
             return _moon_response(json_data={"result": "ok"})
@@ -823,6 +826,8 @@ class TestMoonraker:
         adapter = self._adapter()
 
         def _request(method, url, **kw):
+            if url.endswith("/printer/objects/list"):
+                return _moon_response(json_data={"result": {"objects": ["extruder"]}})
             if url.endswith("/printer/gcode/help"):
                 return _moon_response(json_data={"result": {"G28": "Home"}})
             if url.endswith("/printer/objects/query"):
@@ -855,6 +860,51 @@ class TestMoonraker:
             with pytest.raises(FilamentHandlingUnsupported, match="owns the filament path"):
                 adapter.unload_filament(temperature=210)
         assert not any((c.kwargs.get("params") or {}).get("script") for c in req.call_args_list)
+
+    @pytest.mark.parametrize("failure", ["raises", "garbage"])
+    def test_a_failed_probe_refuses_rather_than_assuming_no_mmu(self, fast_clock, failure):
+        """A probe that FAILED is not a printer without an MMU.
+
+        Collapsing the two is how an extruder-driven feed ends up fighting
+        a Happy-Hare unit whose Moonraker happened not to answer. A wrong
+        refusal costs a retry; a wrong proceed drives filament into a unit
+        that may be mid-move.
+        """
+        adapter = self._adapter()
+
+        def _request(method, url, **kw):
+            if url.endswith("/printer/objects/list"):
+                if failure == "raises":
+                    raise ReqConnectionError("moonraker unreachable")
+                return _moon_response(json_data={"result": {"not_objects": 1}})
+            return _moon_response(json_data={"result": "ok"})
+
+        with mock.patch.object(adapter._session, "request", side_effect=_request) as req:
+            with pytest.raises(FilamentHandlingUnsupported, match="could not read"):
+                adapter.load_filament(temperature=210)
+            with pytest.raises(FilamentHandlingUnsupported, match="could not read"):
+                adapter.unload_filament(temperature=210)
+        assert not any(
+            "G1 E" in ((c.kwargs.get("params") or {}).get("script") or "")
+            for c in req.call_args_list
+        )
+
+    def test_a_clean_probe_showing_no_unit_proceeds(self, fast_clock):
+        """The other side of the three-way answer: 'none' is not 'unknown'."""
+        adapter = self._adapter()
+
+        def _request(method, url, **kw):
+            if url.endswith("/printer/objects/list"):
+                return _moon_response(json_data={"result": {"objects": ["extruder", "toolhead"]}})
+            if url.endswith("/printer/gcode/help"):
+                return _moon_response(json_data={"result": {"G28": "Home"}})
+            if url.endswith("/printer/objects/query"):
+                return _moon_response(json_data={"result": {"status": {"extruder": {"can_extrude": True}}}})
+            return _moon_response(json_data={"result": "ok"})
+
+        with mock.patch.object(adapter._session, "request", side_effect=_request):
+            result = adapter.load_filament(temperature=210)
+        assert result.success is True
 
     def test_purge_still_runs_with_an_mmu_the_extruder_owns_the_melt_zone(self, fast_clock):
         adapter = self._adapter()
