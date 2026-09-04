@@ -556,11 +556,20 @@ def test_a_paid_tool_states_its_paywall_exactly_once(registered_stub_description
 
 
 def test_the_agent_guidance_names_the_real_access_classes():
-    """The guidance tells agents the three classes and the exact field values.
+    """The guidance tells agents the four classes and the exact field values.
 
     Prose teaching a vocabulary the data does not use is worse than no prose:
     the agent applies a rule that never matches, silently. So the class names
     it promises are checked against the values the manifest actually carries.
+
+    2026-09-03: the prose taught THREE classes and defined 'free' as "FREE,
+    UNLIMITED … silence is never ambiguous", while five kiln-pro tools sat
+    under access='free' with a free DOOR and a tier-banded ANSWER (the safety
+    floor free, the depth paid).  An agent read the prose and told a user
+    magnet intelligence was free.  The fourth class — free door, tiered
+    answer, access='free_banded' — carries a `band` block naming what each
+    tier gets, and 'free' goes back to meaning flat.  Both halves are pinned
+    here at the artifact an agent reads.
     """
     import json
     from pathlib import Path
@@ -576,18 +585,83 @@ def test_the_agent_guidance_names_the_real_access_classes():
         if "access classes" in value:
             guidance = value
             break
-    assert guidance, "the three-class guidance is gone from the skill manifest"
+    assert guidance, "the access-class guidance is gone from the skill manifest"
+    assert "four access classes" in guidance, (
+        "the guidance still teaches three classes; 'free door, tiered answer' "
+        "(access='free_banded') is the fourth, and without it an agent reads a "
+        "banded free door as FREE, UNLIMITED"
+    )
+    assert "'free_banded'" in guidance
 
     bundled = Path(__file__).resolve().parents[1] / "src" / "kiln" / "pro_tool_manifest.json"
     if not bundled.exists():
         pytest.skip("no bundled pro manifest in this checkout")
-    real = {t.get("access") for t in json.loads(bundled.read_text())["tools"]}
+    tools = json.loads(bundled.read_text())["tools"]
+    real = {t.get("access") for t in tools}
     assert real, "the bundled manifest carries no access field at all"
     for value in sorted(real):
         assert f"'{value}'" in guidance, (
             f"the manifest uses access={value!r} but the agent guidance never "
             f"names it — an agent cannot classify what it was not told about"
         )
+
+    # The fourth class, at the artifact: the label is DERIVED from the band
+    # block (present <=> free_banded), the block names every tier, and the
+    # description says it in prose for an agent that never parses JSON.
+    # 'free' keeps meaning flat — no block, no line.
+    tiers = ("free", "pro", "business", "enterprise")
+    for t in tools:
+        banded = t.get("access") == "free_banded"
+        assert banded == bool(t.get("band")), (
+            f"{t['name']}: access={t.get('access')!r} disagrees with its band block"
+        )
+        if banded:
+            band = t["band"]
+            assert band.get("domain"), f"{t['name']}: band block names no domain"
+            for tier in tiers:
+                assert str(band.get(tier, "")).strip(), f"{t['name']}: band has no {tier} line"
+            assert "Free door, tiered answer" in t.get("description", ""), (
+                f"{t['name']}: banded, but the description an agent reads is bare"
+            )
+        elif t.get("access") == "free":
+            assert "Free door, tiered answer" not in t.get("description", ""), (
+                f"{t['name']}: labelled flat free while its description says banded"
+            )
+
+    _assert_flat_free_tools_have_no_band_resolver(tools)
+
+
+def _assert_flat_free_tools_have_no_band_resolver(tools):
+    """Every tool still labelled plain 'free' must really be flat.
+
+    Otherwise the four-class prose above is decoration again: the label
+    would be right for the tools somebody remembered to classify and wrong
+    for the next one.  This needs kiln-pro SOURCE (the scan reads tool
+    bodies), which public CI guarantees is absent — so the half runs on an
+    install that has it, and kiln-pro's own suite pins it unconditionally
+    (kiln-pro tests/test_band_claims.py).  It is not a silent skip: the
+    consumer-level checks above run everywhere.
+    """
+    try:
+        from kiln_pro import band_scan
+    except ImportError:
+        return
+    located = band_scan.locate_tools()
+    banded_but_flat = []
+    for t in tools:
+        name = t["name"]
+        if t.get("access") != "free" or band_scan.exemption(name):
+            continue
+        path = located.get(name)
+        if path is None:
+            continue
+        scan = band_scan.scan_tool(name, path)
+        if scan is not None and scan.banded:
+            banded_but_flat.append((name, sorted(scan.signals | scan.policies)))
+    assert not banded_but_flat, (
+        "tools labelled access='free' whose bodies band the answer by tier — "
+        f"the prose says free means flat, and for these it is a lie: {banded_but_flat}"
+    )
 
 
 def _walk_strings(obj):
