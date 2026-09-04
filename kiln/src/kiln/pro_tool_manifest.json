@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-02T08:01:40.151958+00:00",
+  "generated": "2026-09-04T00:19:14.544457+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -9750,9 +9750,9 @@
     },
     {
       "name": "assess_bom_sourcing_risk",
-      "description": "Flag the off-the-shelf parts a design can't reliably buy in a year.",
+      "description": "Flag the off-the-shelf parts a design can't reliably buy in a year.\n\nFree door, tiered answer \u2014 Free: \u2014 \u00b7 Pro: \u2014 \u00b7 Business: \u2014 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
-      "access": "free",
+      "access": "free_banded",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -9808,6 +9808,13 @@
         },
         "title": "assess_bom_sourcing_riskArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "sourcing",
+        "free": "\u2014",
+        "pro": "\u2014",
+        "business": "\u2014",
+        "enterprise": "\u2713"
       }
     },
     {
@@ -10145,9 +10152,9 @@
     },
     {
       "name": "check_chemical_resistance",
-      "description": "Will a printed <material> part survive <reagent>? -- cited, plain-English, tier-gated.",
+      "description": "Will a printed <material> part survive <reagent>? -- cited, plain-English, tier-gated.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Warnings \u00b7 Business: Verdicts \u2014 solvents, fuels, oils, bleach, UV, weather \u00b7 Enterprise: + Safety-critical grade \u2014 concentrated acids, caustics, food contact.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
-      "access": "free",
+      "access": "free_banded",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -10171,6 +10178,13 @@
         ],
         "title": "check_chemical_resistanceArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "chemical",
+        "free": "Warnings \u2014 always free",
+        "pro": "Warnings",
+        "business": "Verdicts \u2014 solvents, fuels, oils, bleach, UV, weather",
+        "enterprise": "+ Safety-critical grade \u2014 concentrated acids, caustics, food contact"
       }
     },
     {
@@ -11247,9 +11261,9 @@
     },
     {
       "name": "propose_sourcing_remediation",
-      "description": "Close the loop on a flagged part: propose what to do about it.",
+      "description": "Close the loop on a flagged part: propose what to do about it.\n\nFree door, tiered answer \u2014 Free: \u2014 \u00b7 Pro: \u2014 \u00b7 Business: \u2014 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
-      "access": "free",
+      "access": "free_banded",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -11277,6 +11291,13 @@
         ],
         "title": "propose_sourcing_remediationArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "sourcing",
+        "free": "\u2014",
+        "pro": "\u2014",
+        "business": "\u2014",
+        "enterprise": "\u2713"
       }
     },
     {
@@ -11541,9 +11562,9 @@
     },
     {
       "name": "recommend_magnet_for_product",
-      "description": "Recommend a magnet strategy for a printed product, with tier-gated depth.",
+      "description": "Recommend a magnet strategy for a printed product, with tier-gated depth.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Design guidance \u00b7 Business: + Validation tests & QC plans \u00b7 Enterprise: + Child-safety & supplier vetting.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
-      "access": "free",
+      "access": "free_banded",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -11634,6 +11655,13 @@
         ],
         "title": "recommend_magnet_for_productArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "magnets",
+        "free": "Warnings \u2014 always free",
+        "pro": "Design guidance",
+        "business": "+ Validation tests & QC plans",
+        "enterprise": "+ Child-safety & supplier vetting"
       }
     },
     {
@@ -12469,9 +12497,9 @@
     },
     {
       "name": "check_skin_contact_suitability",
-      "description": "Is a printed <material> part OK for <exposure> skin contact? -- honest, cited, tier-gated.",
+      "description": "Is a printed <material> part OK for <exposure> skin contact? -- honest, cited, tier-gated.\n\nFree door, tiered answer \u2014 Free: Flags \u2014 always free \u00b7 Pro: Flags \u00b7 Business: Sell-ready remediation steps \u00b7 Enterprise: + Market compliance checks (EU \u00b7 UK \u00b7 US \u00b7 Canada).\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
-      "access": "free",
+      "access": "free_banded",
       "category": "material_safety",
       "parameters": {
         "properties": {
@@ -12495,6 +12523,13 @@
         ],
         "title": "check_skin_contact_suitabilityArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "skin_contact",
+        "free": "Flags \u2014 always free",
+        "pro": "Flags",
+        "business": "Sell-ready remediation steps",
+        "enterprise": "+ Market compliance checks (EU \u00b7 UK \u00b7 US \u00b7 Canada)"
       }
     },
     {
