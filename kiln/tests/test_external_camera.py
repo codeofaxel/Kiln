@@ -418,3 +418,32 @@ def test_a_real_adapter_is_wrapped_and_falls_back_when_no_camera(still_server, m
     with pytest.raises(PrinterError, match="No webcams configured"):
         adapter.get_snapshot()
     assert calls == ["/server/webcams/list"]
+
+
+def test_every_shipping_adapter_is_camera_first() -> None:
+    """Every concrete adapter Kiln ships — and any added later — honours a
+    user camera: a class that overrides get_snapshot / get_stream_url carries
+    the wrap, and one that inherits the base default already asks the camera
+    first.  Enumerated from the package's public roster, so a new backend is
+    judged the day it is exported."""
+    import inspect
+
+    import kiln.printers as printers
+
+    concrete = [
+        obj
+        for name in getattr(printers, "__all__", dir(printers))
+        if (obj := getattr(printers, name, None)) is not None
+        and inspect.isclass(obj)
+        and issubclass(obj, PrinterAdapter)
+        and obj is not PrinterAdapter
+        and not inspect.isabstract(obj)
+    ]
+    assert len(concrete) >= 8, [c.__name__ for c in concrete]
+    for cls in concrete:
+        for method in ("get_snapshot", "get_stream_url"):
+            own = method in cls.__dict__
+            fn = getattr(cls, method)
+            assert getattr(fn, "_kiln_camera_wrapped", False) or (
+                not own and fn is getattr(PrinterAdapter, method)
+            ), f"{cls.__name__}.{method} is not camera-first"
