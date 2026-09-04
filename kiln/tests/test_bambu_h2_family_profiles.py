@@ -230,3 +230,63 @@ def test_every_new_machine_is_reachable_by_all_three_identifier_kinds(model: str
         ),
     }
     assert all(kinds.values()), f"{model} missing identifier kinds: {kinds}"
+
+
+# --- per-material temperatures -------------------------------------------
+#
+# Derived from BambuStudio's own machine-specific filament profiles
+# (profiles/BBL/filament/"<filament> @BBL <TAG>[ 0.4 nozzle]".json, following
+# each profile's `inherits` chain).  The method was validated by rebuilding
+# the H2S map Kiln already ships: hotend matched 10/11 and bed 10/11.  Fan is
+# NOT taken from the vendor profile -- it is a per-material constant in Kiln,
+# identical across every Bambu machine in the catalogue, so it is read from
+# that existing convention rather than re-derived.
+
+
+@pytest.mark.parametrize("model", NEW_MODELS)
+def test_new_machines_carry_per_material_temperatures(model: str):
+    """A catalogued machine that answers no material question is half-added."""
+    intel = json.loads(ROSTER_FILES["printer_intelligence"].read_text(encoding="utf-8"))
+    mats = intel[model]["materials"]
+    assert len(mats) >= 10, f"{model} has only {len(mats)} materials"
+    for name, entry in mats.items():
+        assert set(entry) == {"hotend", "bed", "fan"}, f"{model}.{name} shape"
+        assert 150 <= entry["hotend"] <= intel[model]["max_hotend_temp"], (
+            f"{model}.{name} hotend {entry['hotend']} outside the machine's own ceiling"
+        )
+        assert 0 <= entry["bed"] <= intel[model]["max_bed_temp"]
+        assert 0 <= entry["fan"] <= 100
+
+
+def test_x2d_has_no_pps_because_it_cannot_reach_the_temperature():
+    """The X2D's 300C ceiling and its missing PPS profile must agree.
+
+    Bambu publishes no PPS filament profile for the X2D at all, which is the
+    vendor independently confirming the compatibility verdict derived from its
+    hotend ceiling.  If a future edit adds PPS here, one of the two is wrong.
+    """
+    intel = json.loads(ROSTER_FILES["printer_intelligence"].read_text(encoding="utf-8"))
+    assert "PPS" not in intel["bambu_x2d"]["materials"]
+    for hot_family in ("bambu_h2d", "bambu_h2d_pro", "bambu_h2c"):
+        assert "PPS" in intel[hot_family]["materials"]
+
+    profiles = json.loads(ROSTER_FILES["printer_profiles"].read_text(encoding="utf-8"))
+    assert "pps" not in profiles["bambu_x2d"]["supported_materials"]
+
+
+def test_fan_stays_a_per_material_constant_across_bambu_machines():
+    """Fan is a material property in this catalogue, not a machine one.
+
+    The new machines were populated on that basis, so if a future edit makes
+    fan machine-specific this assumption needs revisiting rather than silently
+    breaking.
+    """
+    intel = json.loads(ROSTER_FILES["printer_intelligence"].read_text(encoding="utf-8"))
+    seen: dict[str, set[int]] = {}
+    for pid, prof in intel.items():
+        if not pid.startswith("bambu_"):
+            continue
+        for mat, entry in (prof.get("materials") or {}).items():
+            seen.setdefault(mat, set()).add(entry["fan"])
+    disagreeing = {m: v for m, v in seen.items() if len(v) > 1}
+    assert not disagreeing, f"fan is no longer material-constant: {disagreeing}"
