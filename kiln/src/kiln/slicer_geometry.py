@@ -365,6 +365,97 @@ def _split_raft(buckets: dict[str, _ClassBucket], model_zmin: float) -> None:
             del buckets[cls]
 
 
+def _loops(bucket: _ClassBucket) -> list[list[int]]:
+    """Segment indices grouped into the loops the slicer laid them as: a
+    loop runs while each segment starts where the last one ended, on the
+    same layer.  Travels between loops are never segments, so a break in
+    the chain is a new loop."""
+    seg = bucket.segments
+    loops: list[list[int]] = []
+    for idx, lyr in enumerate(bucket.layers):
+        base = idx * 6
+        if loops and bucket.layers[loops[-1][-1]] == lyr:
+            prev = loops[-1][-1] * 6
+            if abs(seg[prev + 3] - seg[base]) < 1e-3 and abs(seg[prev + 4] - seg[base + 1]) < 1e-3:
+                loops[-1].append(idx)
+                continue
+        loops.append([idx])
+    return loops
+
+
+def _rect_distance(x: float, y: float, rect: tuple[float, float, float, float]) -> float:
+    """Distance from a point to a rectangle's edge, zero inside it."""
+    dx = max(rect[0] - x, 0.0, x - rect[2])
+    dy = max(rect[1] - y, 0.0, y - rect[3])
+    return math.hypot(dx, dy)
+
+
+def _split_brim(buckets: dict[str, _ClassBucket], footprint: tuple[float, float, float, float]) -> None:
+    """PrusaSlicer and SuperSlicer write one label for both loops
+    ("Skirt/Brim"); Cura writes SKIRT for a brim too.  A slicer that
+    names its brim needs nothing.  Otherwise the loops say what the label
+    cannot: a brim hugs the part — its first loop stands one line out
+    from the outline, and each loop one line out from the last — while a
+    skirt stands off, past a gap no brim loop ever has.  Loops are walked
+    outward from the part; the first gap wider than a few lines ends the
+    brim, and everything past it is the skirt.  A skirt with no loop
+    against the part moves nothing, whatever its distance."""
+    skirt = buckets.get("skirt")
+    if skirt is None or "brim" in buckets or not skirt.segments:
+        return
+    width = max(skirt.widths, key=skirt.widths.get) if skirt.widths else DEFAULT_LINE_WIDTH_MM
+    seg = skirt.segments
+    loops = _loops(skirt)
+    distances: list[float] = []
+    for loop in loops:
+        d = math.inf
+        for idx in loop:
+            base = idx * 6
+            d = min(d, _rect_distance(seg[base], seg[base + 1], footprint),
+                    _rect_distance(seg[base + 3], seg[base + 4], footprint))
+        distances.append(d)
+    order = sorted(range(len(loops)), key=lambda i: distances[i])
+    if not order or distances[order[0]] > 1.5 * width:
+        return                                   # nothing against the part: all skirt
+    gap = max(1.0, 3.0 * width)
+    brim_loops: set[int] = set()
+    last = distances[order[0]]
+    for i in order:
+        if distances[i] - last > gap:
+            break
+        brim_loops.add(i)
+        last = distances[i]
+    if len(brim_loops) == len(loops):
+        skirt.cls = "brim"
+        skirt.label = CLASS_LABELS["brim"]
+        buckets["brim"] = buckets.pop("skirt")
+        return
+    brim = buckets["brim"] = _ClassBucket(cls="brim", label=CLASS_LABELS["brim"])
+    keep_seg: list[float] = []
+    keep_lay: list[int] = []
+    keep_tool: list[int] = []
+    for li, loop in enumerate(loops):
+        target = brim if li in brim_loops else None
+        for idx in loop:
+            base = idx * 6
+            piece = seg[base:base + 6]
+            if target is not None:
+                target.segments.extend(piece)
+                target.layers.append(skirt.layers[idx])
+                target.tools.append(skirt.tools[idx])
+            else:
+                keep_seg.extend(piece)
+                keep_lay.append(skirt.layers[idx])
+                keep_tool.append(skirt.tools[idx])
+    brim.widths = dict(skirt.widths)
+    brim.z_min = min(brim.segments[2::3])
+    brim.z_max = max(brim.segments[2::3])
+    skirt.segments, skirt.layers, skirt.tools = keep_seg, keep_lay, keep_tool
+    skirt.z_min = min(keep_seg[2::3])
+    skirt.z_max = max(keep_seg[2::3])
+    skirt.label = CLASS_LABELS["skirt"]        # the joint label is resolved, not kept
+
+
 def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
     """One streaming pass over *gcode_path*: extra-class segments, the
     model footprint, and the labels the file used.
@@ -411,7 +502,9 @@ def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
         bucket = buckets.get(cls)
         if bucket is None:
             # PrusaSlicer's one label for both loops ("Skirt/Brim") is kept
-            # as the file wrote it — calling it "Skirt" would hide the brim.
+            # as the file wrote it until the loops are told apart by
+            # geometry (``_split_brim``); a file whose loops never hug the
+            # part keeps the label, so the brim it named is not hidden.
             shown = label if "/" in label else CLASS_LABELS.get(cls, label)
             bucket = buckets[cls] = _ClassBucket(cls=cls, label=shown)
         if cur_width is not None:
@@ -568,6 +661,7 @@ def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
     footprint = None
     if fp_xmax > fp_xmin and fp_ymax > fp_ymin:
         footprint = (fp_xmin, fp_ymin, fp_xmax, fp_ymax)
+        _split_brim(buckets, footprint)
     return ParsedFeatures(
         buckets=buckets,
         labels=labels,
