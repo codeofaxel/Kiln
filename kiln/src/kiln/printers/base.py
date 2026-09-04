@@ -14,6 +14,7 @@ import enum
 import logging
 import os
 import re
+import subprocess
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -1428,6 +1429,309 @@ def _install_engagement_gate(cls: type, *, own_methods_only: bool) -> None:
             continue
         setattr(cls, action, _make_engagement_gated(action, original))
 
+# ---------------------------------------------------------------------------
+# A camera the user supplies — frame plumbing only
+# ---------------------------------------------------------------------------
+#
+# Plenty of printers have no camera, or a poor one, and the obvious fix is a
+# camera the user points at the bed themselves.  What lives here is the
+# plumbing for that: a place to record the source, one fetch that every door
+# calls, and the redaction that keeps a stream password out of every reply
+# and log.  Nothing here reasons about what the frames show.
+#
+# HONESTY, stated once so every door can point at it: a camera the user
+# supplies gives Kiln frames to look at.  It does not switch on a printer's
+# own detection — spaghetti, clumping and the like run on the printer's own
+# hardware against its own cameras, and a frame Kiln fetches from elsewhere
+# never reaches them.
+EXTERNAL_CAMERA_NOTE = (
+    "Frames from a camera you supply are what Kiln looks at for snapshots and "
+    "monitoring. They do not switch on the printer's own failure detection "
+    "(spaghetti, clumping, air printing): that runs on the printer against its "
+    "own cameras and never sees a frame Kiln fetched elsewhere."
+)
+
+#: URL schemes a user camera may use.  ``http(s)`` returns a still (or an
+#: MJPEG stream a still can be cut from); ``rtsp(s)`` needs ffmpeg for a frame.
+EXTERNAL_CAMERA_SCHEMES: tuple[str, ...] = ("http", "https", "rtsp", "rtsps")
+
+_RTSP_SCHEMES = ("rtsp", "rtsps")
+_JPEG_SOI = b"\xff\xd8\xff"
+_JPEG_EOI = b"\xff\xd9"
+
+
+def redact_url_credentials(url: str | None) -> str | None:
+    """``rtsp://user:secret@host/x`` -> ``rtsp://user:****@host/x``.
+
+    A camera URL is the one printer setting that routinely embeds a password,
+    so every place a URL is shown or logged goes through here.  Anything that
+    is not a parseable URL comes back unchanged.
+    """
+    if not url:
+        return url
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    if parts.password is None:
+        return url
+    host = parts.hostname or ""
+    if parts.port is not None:
+        host = f"{host}:{parts.port}"
+    netloc = f"{parts.username or ''}:****@{host}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def validate_external_camera_url(url: str, *, what: str) -> str:
+    """Return *url* stripped, or raise ``ValueError`` naming what is wrong.
+
+    Only the scheme is judged.  Whether the camera answers is learned the
+    first time a frame is asked for, and reported then.
+    """
+    from urllib.parse import urlsplit
+
+    cleaned = (url or "").strip()
+    scheme = urlsplit(cleaned).scheme.lower() if cleaned else ""
+    if scheme not in EXTERNAL_CAMERA_SCHEMES or not urlsplit(cleaned).netloc:
+        raise ValueError(
+            f"{what} must be an http(s) or rtsp(s) URL with a host, "
+            f"got {redact_url_credentials(cleaned) or '(empty)'!r}."
+        )
+    return cleaned
+
+
+@dataclass(frozen=True)
+class ExternalCamera:
+    """Where a user-supplied camera can be reached.
+
+    ``snapshot_url`` answers with one image per request (a webcam's
+    ``?action=snapshot`` endpoint, an IP camera's still URL).  ``stream_url``
+    is a live feed — MJPEG over http(s), or rtsp(s).  Either alone is enough:
+    a still is cut from the stream when no snapshot URL is given, and the
+    stream is what a viewer opens.
+    """
+
+    snapshot_url: str | None = None
+    stream_url: str | None = None
+
+    def describe(self) -> dict[str, Any]:
+        """The camera as a reply may carry it: credentials redacted, always."""
+        return {
+            "source": "user_supplied",
+            "snapshot_url": redact_url_credentials(self.snapshot_url),
+            "stream_url": redact_url_credentials(self.stream_url),
+            "note": EXTERNAL_CAMERA_NOTE,
+        }
+
+
+def find_ffmpeg() -> str | None:
+    """Find an ffmpeg binary on PATH or in the usual install locations."""
+    import shutil
+
+    path = shutil.which("ffmpeg")
+    if path:
+        return path
+    for candidate in (
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        "/opt/homebrew/bin/ffmpeg",
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def capture_rtsp_frame(
+    stream_url: str,
+    *,
+    ffmpeg: str,
+    label: str = "Camera RTSP",
+    timeout: float = 5.0,
+) -> bytes:
+    """One JPEG frame from an rtsp(s) stream, via ffmpeg.
+
+    *stream_url* may carry credentials; nothing here echoes it.  Raises
+    :class:`PrinterError` with a message a user can act on when ffmpeg
+    fails or the stream does not answer.
+    """
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg, "-y",
+                "-rtsp_transport", "tcp",
+                "-i", stream_url,
+                "-frames:v", "1",
+                "-f", "image2",
+                "-vcodec", "mjpeg",
+                "pipe:1",
+            ],
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise PrinterError(
+            f"{label} stream timed out after {timeout:g}s. Check camera and network."
+        ) from exc
+    except Exception as exc:
+        raise PrinterError(
+            f"Camera snapshot failed: {exc}\n"
+            "Camera may be disabled or in use. Check printer camera settings. "
+            "Retry with `get_snapshot()`.",
+        ) from exc
+    if result.returncode == 0 and result.stdout and len(result.stdout) > 100:
+        return result.stdout
+    raise PrinterError(
+        f"{label} snapshot failed (ffmpeg exit {result.returncode}). "
+        "Check that the camera is enabled."
+    )
+
+
+def _first_jpeg(chunks) -> bytes | None:
+    """The first complete JPEG in a byte stream, or ``None`` when it ends first."""
+    buf = b""
+    for chunk in chunks:
+        if not chunk:
+            break
+        buf += chunk
+        start = buf.find(_JPEG_SOI)
+        if start == -1:
+            # Keep only a tail that could still hold a split marker.
+            buf = buf[-2:]
+            continue
+        end = buf.find(_JPEG_EOI, start + 3)
+        if end != -1:
+            return buf[start : end + 2]
+    return None
+
+
+def fetch_external_snapshot(camera: ExternalCamera, *, timeout: float = 10.0) -> bytes:
+    """One frame from a user-supplied camera; raises :class:`PrinterError`.
+
+    The snapshot URL is used when given.  Otherwise a still is cut from the
+    stream: the first whole JPEG of an MJPEG feed, or one ffmpeg frame of an
+    rtsp(s) feed.  Every message names the camera by its redacted URL.
+    """
+    from urllib.parse import urlsplit
+
+    url = camera.snapshot_url or camera.stream_url
+    if not url:
+        raise PrinterError("No camera URL is registered for this printer.")
+    shown = redact_url_credentials(url)
+    scheme = urlsplit(url).scheme.lower()
+
+    if scheme in _RTSP_SCHEMES:
+        ffmpeg = find_ffmpeg()
+        if not ffmpeg:
+            raise PrinterError(
+                f"Your camera at {shown} is an RTSP stream, and cutting a frame "
+                "from it needs ffmpeg. Install ffmpeg, or register an http "
+                "snapshot URL for the camera instead."
+            )
+        return capture_rtsp_frame(url, ffmpeg=ffmpeg, label="Your camera's RTSP")
+
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 — user-registered camera URL
+            content_type = str(resp.headers.get("Content-Type") or "").lower()
+            if camera.snapshot_url or "multipart" not in content_type:
+                data = resp.read()
+                if content_type.startswith("multipart"):
+                    data = _first_jpeg([data]) or b""
+                if not data:
+                    raise PrinterError(f"Your camera at {shown} answered with no image.")
+                return data
+            frame = _first_jpeg(iter(lambda: resp.read(8192), b""))
+    except PrinterError:
+        raise
+    except Exception as exc:
+        raise PrinterError(
+            f"Your camera at {shown} did not answer ({exc.__class__.__name__}: {exc}). "
+            "Check that the camera is on and reachable from this machine."
+        ) from exc
+    if not frame:
+        raise PrinterError(f"Your camera at {shown} sent a stream with no JPEG frame in it.")
+    return frame
+
+
+def _external_stream_url(camera: ExternalCamera | None, printer_stream_url: str | None) -> str | None:
+    """The stream to open: the user's camera first, else the printer's own.
+
+    A still-only user camera has nothing to stream, and the answer is then
+    ``None`` rather than the printer's own feed under the user's camera's
+    name — a stream from the wrong camera is worse than no stream.
+    """
+    if camera is None:
+        return printer_stream_url
+    return camera.stream_url
+
+
+def adapter_has_camera(adapter: Any) -> bool:
+    """Whether *adapter* can produce a frame: its own camera, or the user's.
+
+    The capability flag describes only the printer's own camera, so every
+    reader that used to test ``capabilities.can_snapshot`` asks this instead.
+    Tolerates a duck-typed or mocked adapter: only a real ``bool`` from
+    :attr:`PrinterAdapter.has_camera` is trusted, everything else falls back
+    to the capability flag exactly as before.
+    """
+    flag = getattr(adapter, "has_camera", None)
+    if isinstance(flag, bool):
+        return flag
+    return bool(getattr(getattr(adapter, "capabilities", None), "can_snapshot", False))
+
+
+def _wrap_camera_first(cls: type) -> None:
+    """Make a subclass's own ``get_snapshot`` / ``get_stream_url`` camera-aware.
+
+    Called from ``PrinterAdapter.__init_subclass__``: an adapter overriding
+    either method keeps its printer-camera code as the fallback, and the
+    user's camera is consulted first — the engine, not each adapter.
+    """
+    import functools
+
+    snapshot = cls.__dict__.get("get_snapshot")
+    if snapshot is not None and not getattr(snapshot, "_kiln_camera_wrapped", False):
+
+        @functools.wraps(snapshot)
+        def _camera_first_snapshot(self, *args, **kwargs):
+            if self._external_camera is not None:
+                return fetch_external_snapshot(self._external_camera)
+            return snapshot(self, *args, **kwargs)
+
+        _camera_first_snapshot._kiln_camera_wrapped = True  # type: ignore[attr-defined]
+        cls.get_snapshot = _camera_first_snapshot
+
+    stream = cls.__dict__.get("get_stream_url")
+    if stream is not None and not getattr(stream, "_kiln_camera_wrapped", False):
+
+        @functools.wraps(stream)
+        def _camera_first_stream(self, *args, **kwargs):
+            if self._external_camera is not None:
+                return _external_stream_url(self._external_camera, None)
+            return stream(self, *args, **kwargs)
+
+        _camera_first_stream._kiln_camera_wrapped = True  # type: ignore[attr-defined]
+        cls.get_stream_url = _camera_first_stream
+
+
+def apply_external_camera(adapter: PrinterAdapter, entry: Any) -> None:
+    """Read ``camera_snapshot_url`` / ``camera_stream_url`` off a config entry.
+
+    Every place that turns a saved printer record into a live adapter calls
+    this, so a camera survives whichever door built the adapter.  A record
+    with neither key leaves the adapter untouched.
+    """
+    if not isinstance(entry, dict):
+        return
+    snapshot = str(entry.get("camera_snapshot_url") or "").strip() or None
+    stream = str(entry.get("camera_stream_url") or "").strip() or None
+    if snapshot or stream:
+        adapter.set_external_camera(snapshot_url=snapshot, stream_url=stream)
+
+
 class PrinterAdapter(ABC):
     """Abstract base for all printer backend adapters.
 
@@ -1531,6 +1835,14 @@ class PrinterAdapter(ABC):
         # the subclass's own dict is exactly how a door gets missed.
         # ------------------------------------------------------------------
         _install_engagement_gate(cls, own_methods_only=True)
+
+        # ------------------------------------------------------------------
+        # A camera the user supplied: the same engine-not-instance shape.
+        # Every adapter's own get_snapshot / get_stream_url is wrapped so
+        # the user's camera is asked first, and the eleven doors that read
+        # a frame keep calling the method they always called.
+        # ------------------------------------------------------------------
+        _wrap_camera_first(cls)
 
 
     def set_safety_profile(self, profile_id: str) -> None:
@@ -2908,7 +3220,15 @@ class PrinterAdapter(ABC):
         Returns raw JPEG/PNG image bytes, or ``None`` if webcam is not
         available or not supported by this adapter.  This is an optional
         method -- the default implementation returns ``None``.
+
+        A camera the user registered (:meth:`set_external_camera`) is asked
+        FIRST, on every adapter: an override of this method is wrapped at
+        class creation (see ``__init_subclass__``), so the user's camera is
+        honoured by every door that reads a frame without any door knowing
+        the camera exists.
         """
+        if self._external_camera is not None:
+            return fetch_external_snapshot(self._external_camera)
         return None
 
     # -- webcam streaming (optional) -----------------------------------
@@ -2918,8 +3238,68 @@ class PrinterAdapter(ABC):
 
         Returns the full URL to the live video stream, or ``None`` if
         streaming is not available.  This is an optional method -- the
-        default implementation returns ``None``.
+        default implementation returns ``None``.  A user-registered camera's
+        stream wins, the same way as for :meth:`get_snapshot`; the URL may
+        carry credentials and is for opening a stream, never for a reply or
+        a log (see :func:`redact_url_credentials`).
         """
+        return _external_stream_url(self._external_camera, None)
+
+    # -- a camera the user supplied ------------------------------------
+    #
+    # Class-level default so no adapter's __init__ has to know about it.
+
+    _external_camera: ExternalCamera | None = None
+
+    @property
+    def external_camera(self) -> ExternalCamera | None:
+        """The user-supplied camera registered for this printer, if any."""
+        return self._external_camera
+
+    def set_external_camera(
+        self,
+        *,
+        snapshot_url: str | None = None,
+        stream_url: str | None = None,
+    ) -> None:
+        """Register (or with no URLs, clear) a camera the user supplies.
+
+        Raises ``ValueError`` when a URL is not http(s) or rtsp(s).
+        """
+        snapshot = (
+            validate_external_camera_url(snapshot_url, what="camera_snapshot_url")
+            if snapshot_url
+            else None
+        )
+        stream = (
+            validate_external_camera_url(stream_url, what="camera_stream_url")
+            if stream_url
+            else None
+        )
+        self._external_camera = (
+            ExternalCamera(snapshot_url=snapshot, stream_url=stream)
+            if snapshot or stream
+            else None
+        )
+
+    @property
+    def has_camera(self) -> bool:
+        """Whether :meth:`capture_snapshot` has any camera to ask.
+
+        The capability flag describes the printer's own camera; a camera
+        the user supplied makes a camera-less printer watchable.
+        """
+        return self._external_camera is not None or bool(
+            getattr(self.capabilities, "can_snapshot", False)
+        )
+
+    @property
+    def snapshot_source(self) -> str | None:
+        """``"user_supplied"``, ``"printer"``, or ``None`` when there is no camera."""
+        if self._external_camera is not None:
+            return "user_supplied"
+        if getattr(self.capabilities, "can_snapshot", False):
+            return "printer"
         return None
 
     # -- printer identity self-report (optional) ------------------------

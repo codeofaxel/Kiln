@@ -412,7 +412,21 @@ class _PrinterTypeChoice(click.Choice):
 
 
 def _make_adapter(cfg: dict[str, Any]):
-    """Create a PrinterAdapter from a config dict."""
+    """Create a PrinterAdapter from a config dict, camera included.
+
+    Every CLI command builds its adapter here, so a camera the user saved
+    with ``kiln auth --camera-snapshot-url`` reaches ``kiln snapshot`` and
+    ``kiln monitor`` the same way it reaches the MCP tools.
+    """
+    from kiln.printers.base import apply_external_camera
+
+    adapter = _make_bare_adapter(cfg)
+    apply_external_camera(adapter, cfg)
+    return adapter
+
+
+def _make_bare_adapter(cfg: dict[str, Any]):
+    """The backend half of :func:`_make_adapter`: the adapter, no camera."""
     from kiln.printers import (
         BambuAdapter,
         CrealityAdapter,
@@ -1602,6 +1616,16 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
     "many Marlin boards are flashed for 250000).",
 )
 @click.option("--printer-model", default=None, help="Printer model profile (e.g. k1_max, sparkx_i7, ender3_v4).")
+@click.option(
+    "--camera-snapshot-url",
+    default=None,
+    help="A camera you point at the bed: http(s) URL answering with one image.",
+)
+@click.option(
+    "--camera-stream-url",
+    default=None,
+    help="The same camera as a live feed: MJPEG over http(s), or rtsp(s).",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def auth(
     name: str,
@@ -1612,6 +1636,8 @@ def auth(
     serial: str | None,
     baudrate: int | None,
     printer_model: str | None,
+    camera_snapshot_url: str | None,
+    camera_stream_url: str | None,
     json_mode: bool,
 ) -> None:
     """Save printer credentials to the config file."""
@@ -1622,6 +1648,17 @@ def auth(
             "--baudrate applies to --type usb only; "
             f"{printer_type} printers are reached over the network."
         )
+    from kiln.printers.base import validate_external_camera_url
+
+    for _label, _url in (
+        ("--camera-snapshot-url", camera_snapshot_url),
+        ("--camera-stream-url", camera_stream_url),
+    ):
+        if _url:
+            try:
+                validate_external_camera_url(_url, what=_label)
+            except ValueError as exc:
+                raise click.UsageError(str(exc)) from exc
     try:
         path = save_printer(
             name,
@@ -1632,6 +1669,8 @@ def auth(
             serial=serial,
             baudrate=baudrate,
             printer_model=printer_model,
+            camera_snapshot_url=camera_snapshot_url,
+            camera_stream_url=camera_stream_url,
         )
         prusa_diagnostics: dict[str, Any] | None = None
         creality_diagnostics: dict[str, Any] | None = None

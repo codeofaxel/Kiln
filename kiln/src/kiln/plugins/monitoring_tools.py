@@ -326,9 +326,12 @@ class _PrintWatcher:
     def _run(self) -> None:
         """Main monitoring loop — runs in a background thread."""
         from kiln.printers import PrinterStatus
+        from kiln.printers.base import adapter_has_camera
 
         adapter = self._adapter
-        can_snap = getattr(adapter.capabilities, "can_snapshot", False)
+        # A camera the user supplied counts: the capability flag only
+        # describes the printer's own camera.
+        can_snap = adapter_has_camera(adapter)
         last_snapshot_time = 0.0
 
         # Stall detection state
@@ -860,8 +863,11 @@ class _MonitoringToolsPlugin:
                     },
                 }
 
-                # Snapshot capture — respect can_snapshot capability
-                if include_snapshot and not getattr(adapter.capabilities, "can_snapshot", False):
+                # Snapshot capture — respect can_snapshot capability, and a
+                # camera the user supplied, which the flag knows nothing of.
+                from kiln.printers.base import adapter_has_camera
+
+                if include_snapshot and not adapter_has_camera(adapter):
                     result["snapshot"] = {"available": False, "reason": "no_capability"}
                 elif include_snapshot:
                     try:

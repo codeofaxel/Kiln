@@ -1429,7 +1429,7 @@ class TestBambuAdapterSnapshot:
         assert url == f"rtsps://bblp:****@{HOST}:322/streaming/live/1"
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
-    @mock.patch("kiln.printers.bambu.subprocess.run")
+    @mock.patch("kiln.printers.base.subprocess.run")
     @mock.patch.object(BambuAdapter, "_capture_jpeg_frame", return_value=None)
     def test_get_snapshot_rtsps_fallback(self, mock_jpeg, mock_run, mock_ffmpeg) -> None:
         adapter = _adapter()
@@ -1454,7 +1454,7 @@ class TestBambuAdapterSnapshot:
             adapter.get_snapshot()
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
-    @mock.patch("kiln.printers.bambu.subprocess.run")
+    @mock.patch("kiln.printers.base.subprocess.run")
     @mock.patch.object(BambuAdapter, "_capture_jpeg_frame", return_value=None)
     def test_get_snapshot_ffmpeg_timeout(self, mock_jpeg, mock_run, mock_ffmpeg) -> None:
         adapter = _adapter()
@@ -1888,7 +1888,7 @@ class TestBambuAdapterRTSPAuth:
         assert url.endswith("/streaming/live/1")
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
-    @mock.patch("kiln.printers.bambu.subprocess.run")
+    @mock.patch("kiln.printers.base.subprocess.run")
     def test_snapshot_uses_authenticated_url(self, mock_run, mock_ffmpeg) -> None:
         adapter = _adapter()
         fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200

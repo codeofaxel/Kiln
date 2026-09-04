@@ -382,6 +382,8 @@ def save_printer(
     serial: str | None = None,
     printer_model: str | None = None,
     baudrate: int | None = None,
+    camera_snapshot_url: str | None = None,
+    camera_stream_url: str | None = None,
     set_active: bool = True,
     config_path: Path | None = None,
 ) -> Path:
@@ -389,6 +391,13 @@ def save_printer(
 
     *baudrate* applies to serial printers only; omit it to let the adapter
     fall back to :data:`DEFAULT_SERIAL_BAUDRATE`.
+
+    *camera_snapshot_url* / *camera_stream_url* record a camera the user
+    supplies (an http(s) still or MJPEG URL, or an rtsp(s) stream) for any
+    printer type.  They are stored as given — a stream URL may embed a
+    password, and this file already holds the printer's own secret in the
+    same trust — and are read back through
+    :func:`kiln.printers.base.apply_external_camera`.
 
     Returns the path to the config file.
     """
@@ -434,6 +443,11 @@ def save_printer(
     # config that pinned it.
     if printer_type == "usb" and baudrate and baudrate != DEFAULT_SERIAL_BAUDRATE:
         entry["baudrate"] = int(baudrate)
+
+    if camera_snapshot_url:
+        entry["camera_snapshot_url"] = camera_snapshot_url.strip()
+    if camera_stream_url:
+        entry["camera_stream_url"] = camera_stream_url.strip()
 
     printers[name] = entry
 

@@ -213,7 +213,11 @@ class FirstLayerMonitor:
         if effective_mode not in ("vision", "telemetry", "auto"):
             effective_mode = "auto"
 
-        can_snap = getattr(self._adapter.capabilities, "can_snapshot", False)
+        # A camera the user supplied makes a camera-less printer watchable;
+        # the capability flag only describes the printer's own camera.
+        from kiln.printers.base import adapter_has_camera
+
+        can_snap = adapter_has_camera(self._adapter)
 
         # require_camera check — must happen BEFORE auto-mode degrades to telemetry
         if self._policy.require_camera and not can_snap:

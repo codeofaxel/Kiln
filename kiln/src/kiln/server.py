@@ -407,6 +407,11 @@ _PRINTER_API_KEY: str = os.environ.get("KILN_PRINTER_API_KEY", "")
 _PRINTER_TYPE: str = _normalize_printer_type(os.environ.get("KILN_PRINTER_TYPE", "octoprint"))
 _PRINTER_SERIAL: str = os.environ.get("KILN_PRINTER_SERIAL", "")
 _PRINTER_MODEL: str = os.environ.get("KILN_PRINTER_MODEL", "")
+# A camera the user supplies for the default printer; config.yaml's
+# ``camera_snapshot_url`` / ``camera_stream_url`` win over these the same
+# way every other printer field does.
+_PRINTER_CAMERA_SNAPSHOT_URL: str = os.environ.get("KILN_PRINTER_CAMERA_SNAPSHOT_URL", "")
+_PRINTER_CAMERA_STREAM_URL: str = os.environ.get("KILN_PRINTER_CAMERA_STREAM_URL", "")
 
 # Provenance string for the active printer config — set by
 # ``_reload_env_config``. Logged prominently at startup so users can
@@ -545,6 +550,7 @@ def _reload_env_config() -> None:
     """
     global _PRINTER_HOST, _PRINTER_API_KEY, _PRINTER_TYPE  # noqa: PLW0603
     global _PRINTER_SERIAL, _PRINTER_MODEL  # noqa: PLW0603
+    global _PRINTER_CAMERA_SNAPSHOT_URL, _PRINTER_CAMERA_STREAM_URL  # noqa: PLW0603
     global _PRINTER_CONFIG_SOURCE  # noqa: PLW0603
     global _CONFIRM_UPLOAD, _CONFIRM_MODE  # noqa: PLW0603
     global _THINGIVERSE_TOKEN, _MMF_API_KEY  # noqa: PLW0603
@@ -559,6 +565,8 @@ def _reload_env_config() -> None:
     _PRINTER_TYPE = _normalize_printer_type(os.environ.get("KILN_PRINTER_TYPE", "octoprint"))
     _PRINTER_SERIAL = os.environ.get("KILN_PRINTER_SERIAL", "")
     _PRINTER_MODEL = os.environ.get("KILN_PRINTER_MODEL", "")
+    _PRINTER_CAMERA_SNAPSHOT_URL = os.environ.get("KILN_PRINTER_CAMERA_SNAPSHOT_URL", "")
+    _PRINTER_CAMERA_STREAM_URL = os.environ.get("KILN_PRINTER_CAMERA_STREAM_URL", "")
 
     # Printer credential resolution — ONE SOURCE OF TRUTH:
     #   ``~/.kiln/config.yaml`` WINS when it has a printer with a host.
@@ -615,6 +623,8 @@ def _reload_env_config() -> None:
         _PRINTER_SERIAL = str(_yaml_cfg.get("serial", ""))
         if not _PRINTER_MODEL:
             _PRINTER_MODEL = str(_yaml_cfg.get("printer_model", ""))
+        _PRINTER_CAMERA_SNAPSHOT_URL = str(_yaml_cfg.get("camera_snapshot_url") or "")
+        _PRINTER_CAMERA_STREAM_URL = str(_yaml_cfg.get("camera_stream_url") or "")
         masked_key = _key_fingerprint(_PRINTER_API_KEY)
         _PRINTER_CONFIG_SOURCE = (
             f"~/.kiln/config.yaml (host={_PRINTER_HOST}, "
@@ -1391,6 +1401,18 @@ def _get_adapter() -> PrinterAdapter:
     if _PRINTER_MODEL:
         _adapter.set_safety_profile(_PRINTER_MODEL)
 
+    # The default printer's user-supplied camera, through the same helper
+    # every other adapter builder uses.
+    from kiln.printers.base import apply_external_camera
+
+    apply_external_camera(
+        _adapter,
+        {
+            "camera_snapshot_url": _PRINTER_CAMERA_SNAPSHOT_URL,
+            "camera_stream_url": _PRINTER_CAMERA_STREAM_URL,
+        },
+    )
+
     logger.info(
         "Initialised %s adapter for %s",
         _adapter.name,
@@ -1646,6 +1668,9 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
 
     if printer_model:
         adapter.set_safety_profile(printer_model)
+    from kiln.printers.base import apply_external_camera
+
+    apply_external_camera(adapter, entry)
 
     return adapter
 
@@ -9390,6 +9415,8 @@ def register_printer(
     persist: bool = True,
     verify_connection: bool = True,
     baudrate: int | None = None,
+    camera_snapshot_url: str | None = None,
+    camera_stream_url: str | None = None,
 ) -> dict:
     """Register a new printer in the fleet.
 
@@ -9426,6 +9453,19 @@ def register_printer(
         baudrate: Baud rate for USB printers.  Defaults to
             ``DEFAULT_SERIAL_BAUDRATE``; many Marlin boards are flashed
             for 250000 and will not talk at the default.
+        camera_snapshot_url: A camera YOU point at the bed — an http(s)
+            URL that answers with one image (a webcam's snapshot endpoint,
+            an IP camera's still URL).  Any printer type; used instead of
+            the printer's own camera by ``printer_snapshot``,
+            ``monitor_print`` and every other frame reader.
+        camera_stream_url: The same camera as a live feed — MJPEG over
+            http(s), or an rtsp(s) stream (a frame is cut with ffmpeg).
+            Either URL alone is enough.  A stream URL may embed a
+            password; it is stored with the printer's other credentials
+            and never repeated in a reply or a log.  Frames from your
+            camera are what Kiln looks at; they do not switch on the
+            printer's own failure detection, which runs on the printer
+            against its own cameras.
 
     Once registered the printer can be targeted by name — ``printer_status``,
     ``monitor_print``, ``cancel_print``, ``pause_print`` and ``resume_print``
@@ -9558,6 +9598,17 @@ def register_printer(
         if printer_model:
             adapter.set_safety_profile(printer_model)
 
+        # A camera the user supplies.  Judged before anything is written,
+        # so a bad URL refuses the registration rather than saving half.
+        if camera_snapshot_url or camera_stream_url:
+            try:
+                adapter.set_external_camera(
+                    snapshot_url=camera_snapshot_url,
+                    stream_url=camera_stream_url,
+                )
+            except ValueError as exc:
+                return _error_dict(str(exc), code="INVALID_ARGS")
+
         warnings_out: list[str] = list(url_warnings)
         persisted_path: str | None = None
         if persist:
@@ -9571,6 +9622,8 @@ def register_printer(
                     serial=serial,
                     printer_model=printer_model,
                     baudrate=baudrate,
+                    camera_snapshot_url=camera_snapshot_url,
+                    camera_stream_url=camera_stream_url,
                     set_active=True,
                 )
                 persisted_path = str(persisted)
@@ -9603,6 +9656,11 @@ def register_printer(
             "message": f"Registered printer {name!r} ({printer_type} @ {host}).",
             "name": name,
         }
+        _camera = getattr(adapter, "external_camera", None)
+        if _camera is not None:
+            # Redacted by construction; the note is the honesty every door
+            # points at, said here where the camera is first accepted.
+            result["camera"] = _camera.describe()
         if fleet_note:
             result["fleet_note"] = fleet_note
             result["upgrade_url"] = "https://kiln3d.com/pricing"
@@ -10863,7 +10921,10 @@ def printer_snapshot(
     """Capture a webcam snapshot from the printer.
 
     Handles TLS+JPEG camera protocol (Bambu A1/P1), MJPEG stream capture
-    (OctoPrint/Moonraker), and RTSPS (Bambu X1) automatically.
+    (OctoPrint/Moonraker), and RTSPS (Bambu X1) automatically.  A camera the
+    user registered for the printer (``register_printer`` with
+    ``camera_snapshot_url`` / ``camera_stream_url``) is used instead of the
+    printer's own; ``camera_source`` in the reply says which one answered.
 
     :param printer_name: Target printer name.  Omit for the default printer.
     :param save_path: Optional path to save the image file.  If omitted, the
@@ -10878,13 +10939,16 @@ def printer_snapshot(
         image_data = adapter.get_snapshot()
         if image_data is None:
             return _error_dict(
-                "Webcam not available or not supported by this printer backend.",
+                "Webcam not available or not supported by this printer backend. "
+                "A camera you point at the bed yourself can be registered with "
+                "register_printer (camera_snapshot_url or camera_stream_url).",
                 code="NO_WEBCAM",
             )
 
         result: dict[str, Any] = {
             "success": True,
             "size_bytes": len(image_data),
+            "camera_source": getattr(adapter, "snapshot_source", "printer"),
         }
 
         if save_path:
@@ -11235,6 +11299,19 @@ def webcam_stream(
                 return _error_dict(
                     "Webcam streaming not available for this printer.",
                     code="NO_STREAM",
+                )
+            if stream_url.lower().startswith(("rtsp://", "rtsps://")) and (
+                getattr(adapter, "external_camera", None) is not None
+            ):
+                # The local proxy relays MJPEG over HTTP; it cannot re-mux
+                # RTSP.  Say so instead of starting a proxy that serves
+                # nothing — the user already has the URL they registered.
+                return _error_dict(
+                    "Your camera's stream is RTSP, which Kiln's local MJPEG "
+                    "proxy cannot relay. Open the RTSP URL you registered in "
+                    "a video player directly; snapshots and monitoring still "
+                    "read frames from it.",
+                    code="RTSP_NOT_PROXIED",
                 )
 
             info = _get_stream_proxy().start(

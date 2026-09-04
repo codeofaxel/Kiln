@@ -26,10 +26,8 @@ import json
 import logging
 import os
 import posixpath
-import shutil
 import socket
 import ssl
-import subprocess
 import sys
 import threading
 import time
@@ -57,8 +55,10 @@ from kiln.printers.base import (
     TelemetryCadence,
     UploadResult,
     _record_print_duration,
+    capture_rtsp_frame,
     diagnose_read_failure,
     diagnosed_state,
+    find_ffmpeg,
     outcome_printer_name,
 )
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
@@ -783,18 +783,12 @@ def _normalize_fingerprint(value: str) -> str:
 
 
 def _find_ffmpeg() -> str | None:
-    """Find ffmpeg binary on PATH or common install locations."""
-    path = shutil.which("ffmpeg")
-    if path:
-        return path
-    for candidate in (
-        "/usr/bin/ffmpeg",
-        "/usr/local/bin/ffmpeg",
-        "/opt/homebrew/bin/ffmpeg",
-    ):
-        if os.path.isfile(candidate):
-            return candidate
-    return None
+    """Find ffmpeg binary on PATH or common install locations.
+
+    The lookup lives in :mod:`kiln.printers.base` (a user-supplied RTSP
+    camera needs it too); this name stays so tests can patch it here.
+    """
+    return find_ffmpeg()
 
 
 # ---------------------------------------------------------------------------
@@ -5019,40 +5013,11 @@ class BambuAdapter(PrinterAdapter):
                 "Neither is available. Install ffmpeg if using an X1 printer."
             )
 
-        stream_url = self._raw_stream_url()
-
-        try:
-            result = subprocess.run(
-                [
-                    ffmpeg, "-y",
-                    "-rtsp_transport", "tcp",
-                    "-i", stream_url,
-                    "-frames:v", "1",
-                    "-f", "image2",
-                    "-vcodec", "mjpeg",
-                    "pipe:1",
-                ],
-                capture_output=True,
-                timeout=5,
-            )
-            if result.returncode == 0 and result.stdout and len(result.stdout) > 100:
-                return result.stdout
-            raise PrinterError(
-                f"Camera RTSPS snapshot failed (ffmpeg exit {result.returncode}). "
-                f"Check that the printer camera is enabled."
-            )
-        except PrinterError:
-            raise
-        except subprocess.TimeoutExpired as exc:
-            raise PrinterError(
-                "Camera RTSPS stream timed out after 5s. Check camera and network."
-            ) from exc
-        except Exception as exc:
-            raise PrinterError(
-                f"Camera snapshot failed: {exc}\n"
-                "Camera may be disabled or in use. Check printer camera settings. "
-                "Retry with `get_snapshot()`.",
-            ) from exc
+        # One ffmpeg invocation shared with a user-supplied RTSP camera;
+        # the URL carries the access code and is never echoed.
+        return capture_rtsp_frame(
+            self._raw_stream_url(), ffmpeg=ffmpeg, label="Camera RTSPS"
+        )
 
     def _raw_stream_url(self) -> str:
         """Return the real RTSPS URL with embedded credentials (internal use only)."""
