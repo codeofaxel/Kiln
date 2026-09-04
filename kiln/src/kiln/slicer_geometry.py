@@ -383,6 +383,45 @@ def _loops(bucket: _ClassBucket) -> list[list[int]]:
     return loops
 
 
+def _convex_hull(pts: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Andrew's monotone chain — the outline a skirt is offset from."""
+    uniq = sorted(set(pts))
+    if len(uniq) < 3:
+        return uniq
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: list[tuple[float, float]] = []
+    for q in uniq:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], q) <= 0:
+            lower.pop()
+        lower.append(q)
+    upper: list[tuple[float, float]] = []
+    for q in reversed(uniq):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], q) <= 0:
+            upper.pop()
+        upper.append(q)
+    return lower[:-1] + upper[:-1]
+
+
+def _poly_distance(x: float, y: float, hull: list[tuple[float, float]]) -> float:
+    """Distance from a point to a convex polygon's edge, zero inside it."""
+    inside = True
+    best = math.inf
+    n = len(hull)
+    for i in range(n):
+        ax, ay = hull[i]
+        bx, by = hull[(i + 1) % n]
+        if (bx - ax) * (y - ay) - (by - ay) * (x - ax) < 0:
+            inside = False
+        vx, vy = bx - ax, by - ay
+        length2 = vx * vx + vy * vy
+        s = 0.0 if length2 == 0 else max(0.0, min(1.0, ((x - ax) * vx + (y - ay) * vy) / length2))
+        best = min(best, math.hypot(x - (ax + s * vx), y - (ay + s * vy)))
+    return 0.0 if inside else best
+
+
 def _rect_distance(x: float, y: float, rect: tuple[float, float, float, float]) -> float:
     """Distance from a point to a rectangle's edge, zero inside it."""
     dx = max(rect[0] - x, 0.0, x - rect[2])
@@ -390,7 +429,11 @@ def _rect_distance(x: float, y: float, rect: tuple[float, float, float, float]) 
     return math.hypot(dx, dy)
 
 
-def _split_brim(buckets: dict[str, _ClassBucket], footprint: tuple[float, float, float, float]) -> None:
+def _split_brim(
+    buckets: dict[str, _ClassBucket],
+    footprint: tuple[float, float, float, float],
+    first_layer_pts: list[tuple[float, float]] | None = None,
+) -> None:
     """PrusaSlicer and SuperSlicer write one label for both loops
     ("Skirt/Brim"); Cura writes SKIRT for a brim too.  A slicer that
     names its brim needs nothing.  Otherwise the loops say what the label
@@ -399,10 +442,22 @@ def _split_brim(buckets: dict[str, _ClassBucket], footprint: tuple[float, float,
     skirt stands off, past a gap no brim loop ever has.  Loops are walked
     outward from the part; the first gap wider than a few lines ends the
     brim, and everything past it is the skirt.  A skirt with no loop
-    against the part moves nothing, whatever its distance."""
+    against the part moves nothing, whatever its distance.
+
+    Distances are to the part's FIRST-LAYER OUTLINE (its convex hull — the
+    shape a slicer offsets a skirt from), not to its bounding box: a skirt
+    hugging two round parts cuts across the box's empty corners and would
+    read as touching."""
     skirt = buckets.get("skirt")
     if skirt is None or "brim" in buckets or not skirt.segments:
         return
+    hull = _convex_hull(first_layer_pts) if first_layer_pts else []
+    if len(hull) >= 3:
+        def dist(x: float, y: float) -> float:
+            return _poly_distance(x, y, hull)
+    else:
+        def dist(x: float, y: float) -> float:
+            return _rect_distance(x, y, footprint)
     width = max(skirt.widths, key=skirt.widths.get) if skirt.widths else DEFAULT_LINE_WIDTH_MM
     seg = skirt.segments
     loops = _loops(skirt)
@@ -411,8 +466,7 @@ def _split_brim(buckets: dict[str, _ClassBucket], footprint: tuple[float, float,
         d = math.inf
         for idx in loop:
             base = idx * 6
-            d = min(d, _rect_distance(seg[base], seg[base + 1], footprint),
-                    _rect_distance(seg[base + 3], seg[base + 4], footprint))
+            d = min(d, dist(seg[base], seg[base + 1]), dist(seg[base + 3], seg[base + 4]))
         distances.append(d)
     order = sorted(range(len(loops)), key=lambda i: distances[i])
     if not order or distances[order[0]] > 1.5 * width:
@@ -545,6 +599,8 @@ def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
     fp_xmin = fp_ymin = math.inf
     fp_xmax = fp_ymax = -math.inf
     model_zmin = math.inf
+    model_first_layer: int | None = None
+    first_pts: list[tuple[float, float]] = []   # the part's first-layer outline, for the brim split
     segments_total = 0
     truncated = False
 
@@ -572,7 +628,11 @@ def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
             segments_total += 1
 
     def note_model(pts: list[tuple[float, float, float]]) -> None:
-        nonlocal fp_xmin, fp_ymin, fp_xmax, fp_ymax, model_zmin
+        nonlocal fp_xmin, fp_ymin, fp_xmax, fp_ymax, model_zmin, model_first_layer
+        if model_first_layer is None:
+            model_first_layer = layer
+        if layer == model_first_layer and len(first_pts) < 60000:
+            first_pts.extend((px, py) for px, py, _pz in pts)
         for px, py, pz in pts:
             if px < fp_xmin:
                 fp_xmin = px
@@ -713,7 +773,7 @@ def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
     footprint = None
     if fp_xmax > fp_xmin and fp_ymax > fp_ymin:
         footprint = (fp_xmin, fp_ymin, fp_xmax, fp_ymax)
-        _split_brim(buckets, footprint)
+        _split_brim(buckets, footprint, first_pts)
     return ParsedFeatures(
         buckets=buckets,
         labels=labels,

@@ -680,6 +680,22 @@ class TestSkirtBrimSplit:
         assert [(f["class"], f["label"]) for f in block["features"]] == [("skirt", "Skirt"), ("brim", "Brim")]
         assert block["features"][1]["line_width_mm"] == 0.5
 
+    def test_a_skirt_round_a_round_part_is_measured_from_its_outline_not_its_box(self, tmp_path):
+        """A skirt offset 2 mm from an octagonal part cuts across the corners
+        of the part's bounding box; measured from the box it would read as
+        touching.  It is measured from the first layer's convex hull."""
+        def octagon(r, z):
+            pts = [(120 + r * math.cos(math.tau * k / 8), 115 + r * math.sin(math.tau * k / 8)) for k in range(8)]
+            out = [f"G1 X{pts[0][0]:.3f} Y{pts[0][1]:.3f} Z{z}"]
+            out += [f"G1 X{x:.3f} Y{y:.3f} E0.1" for x, y in pts[1:] + pts[:1]]
+            return "\n".join(out)
+        g = tmp_path / "round.gcode"
+        g.write_text("G90\nM83\n;LAYER_CHANGE\n;Z:0.2\n;TYPE:Skirt\n;WIDTH:0.42\n" + octagon(22, 0.2)
+                     + "\n;TYPE:Outer wall\n;WIDTH:0.42\n" + octagon(20, 0.2) + "\n")
+        parsed = sg.parse_slicer_features(g)
+        assert set(parsed.buckets) == {"skirt"}
+        assert parsed.buckets["skirt"].label == "Skirt"
+
     def test_a_wide_brim_is_walked_outward_loop_by_loop(self, tmp_path):
         g = tmp_path / "prusa.gcode"
         g.write_text(self._joint_job(brim_loops=12, skirt_off=3.0))
