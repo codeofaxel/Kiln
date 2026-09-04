@@ -382,3 +382,39 @@ def test_has_camera_is_trusted_only_as_a_real_bool() -> None:
     fake.capabilities.can_snapshot = True
     assert adapter_has_camera(fake) is True
     assert adapter_has_camera(object()) is False
+
+
+def test_a_real_adapter_is_wrapped_and_falls_back_when_no_camera(still_server, monkeypatch) -> None:
+    """The class-creation hook, pinned on a shipping adapter.
+
+    Every earlier test builds its own subclass, which the hook also wraps —
+    so if ``__init_subclass__`` stopped wrapping, those tests would still be
+    exercising a class the hook never saw the way production does.  This one
+    constructs a real backend the normal way (none of the eight adapters
+    calls ``super().__init__()``), registers a camera, and asserts the
+    backend's own snapshot code is not reached; then clears the camera and
+    asserts the backend's own path runs.  Remove ``_wrap_camera_first`` from
+    ``__init_subclass__`` and the first half fails.
+    """
+    from kiln.printers.moonraker import MoonrakerAdapter
+
+    base, hits = still_server
+    calls: list[str] = []
+
+    def _no_webcams(self, path, **kwargs):  # noqa: ANN001, ANN202
+        calls.append(path)
+        return {"result": {"webcams": []}}
+
+    monkeypatch.setattr(MoonrakerAdapter, "_get_json", _no_webcams)
+    adapter = MoonrakerAdapter(host="http://127.0.0.1:9")
+    assert getattr(MoonrakerAdapter.get_snapshot, "_kiln_camera_wrapped", False) is True
+
+    adapter.set_external_camera(snapshot_url=f"{base}/snap.jpg", stream_url=f"{base}/mjpeg")
+    assert adapter.get_snapshot() == JPEG
+    assert adapter.get_stream_url() == f"{base}/mjpeg"
+    assert calls == []  # Moonraker's own webcam list was never consulted
+
+    adapter.set_external_camera()
+    with pytest.raises(PrinterError, match="No webcams configured"):
+        adapter.get_snapshot()
+    assert calls == ["/server/webcams/list"]
