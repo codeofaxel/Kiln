@@ -206,7 +206,9 @@
       "moisture_absorption": "moderate",
       "food_safe": "no",
       "biodegradable": false,
-      "outgassing": "moderate"
+      "outgassing": "moderate",
+      "ventilation_required": true,
+      "handling_warning": "Styrene-family material printed hot, usually in a closed chamber. Ventilate the working area: an enclosure and a carbon filter concentrate the fume rather than removing it, and a heated chamber releases what it has collected the moment the door opens."
     },
     "design_limits": {
       "min_wall_thickness_mm": 1.0,
@@ -363,7 +365,9 @@
       "moisture_absorption": "low",
       "food_safe": "no",
       "biodegradable": false,
-      "outgassing": "moderate"
+      "outgassing": "moderate",
+      "ventilation_required": true,
+      "handling_warning": "Styrenic, and printed hotter than ABS for longer. Ventilate the working area. The same caution about enclosures applies: a closed chamber holds fume in until it is opened."
     },
     "design_limits": {
       "min_wall_thickness_mm": 1.0,
@@ -448,7 +452,9 @@
       "moisture_absorption": "high",
       "food_safe": "conditional",
       "biodegradable": false,
-      "outgassing": "low"
+      "outgassing": "low",
+      "ventilation_required": true,
+      "handling_warning": "Releases caprolactam vapour, an irritant, throughout the print. Ventilate the working area. Nylon is also strongly hygroscopic, so it is usually printed straight from a dryer, which keeps the source of the vapour running."
     },
     "design_limits": {
       "min_wall_thickness_mm": 1.0,
@@ -552,7 +558,9 @@
       "moisture_absorption": "moderate",
       "food_safe": "conditional",
       "biodegradable": false,
-      "outgassing": "moderate"
+      "outgassing": "moderate",
+      "ventilation_required": true,
+      "handling_warning": "Processed near 280C, well above commodity filaments. Ventilate the working area, and expect parts to leave a heated chamber hot enough to burn."
     },
     "design_limits": {
       "min_wall_thickness_mm": 1.2,
@@ -759,7 +767,9 @@
       "moisture_absorption": "moderate",
       "food_safe": "no",
       "biodegradable": false,
-      "outgassing": "moderate"
+      "outgassing": "moderate",
+      "ventilation_required": true,
+      "handling_warning": "Releases caprolactam vapour while printing - ventilate the working area - and the carbon fill makes sanding, drilling or machining a finished part a respirable-dust hazard. Wear respiratory protection for that work, not just for the print."
     },
     "design_limits": {
       "min_wall_thickness_mm": 1.2,
@@ -1107,7 +1117,9 @@
       "moisture_absorption": "low",
       "food_safe": "no",
       "biodegradable": false,
-      "outgassing": "moderate"
+      "outgassing": "moderate",
+      "ventilation_required": true,
+      "handling_warning": "Emits both the polycarbonate and the styrene fractions, printed hot in a closed chamber. Ventilate the working area."
     },
     "design_limits": {
       "min_wall_thickness_mm": 1.2,
@@ -1314,7 +1326,9 @@
       "moisture_absorption": "moderate",
       "food_safe": "no",
       "biodegradable": false,
-      "outgassing": "moderate"
+      "outgassing": "moderate",
+      "ventilation_required": true,
+      "handling_warning": "Releases caprolactam vapour while printing - ventilate the working area - and the glass fill makes sanding, drilling or machining a finished part a respirable-dust hazard. Wear respiratory protection for that work."
     },
     "design_limits": {
       "min_wall_thickness_mm": 1.2,
@@ -2373,7 +2387,9 @@
       "esd_qualification_note": "The number on a spool describes the filament, not your part. Printed resistance moves with nozzle temperature, layer height, wall count and build orientation, and it is measurably worse across the layers than along them. Qualify a coupon printed with your production settings on your production machine; a datasheet value narrows the candidate list, it does not qualify the part.",
       "esd_process_sensitivity_note": "This is the clearest published case of resistance being a process variable rather than a material constant. At a fixed 280C nozzle, part orientation alone moves the published figure about two decades. Across 280-320C it moves about four. A part printed hot enough to bond well can land in the CONDUCTIVE band, which for a fixture in contact with a device is its own hazard, not a bonus.",
       "service_temp_note": "No vendor publishes a continuous service temperature for this material. 125C is the heat-deflection figure at 1.8 MPa, the conservative of the two published loads, used here as a load-bearing proxy. The widely quoted 157C is the SAME test at 0.45 MPa and is not a service rating. Both sit far above the 41.8C glass transition -- this polymer is semi-crystalline so it serves above Tg, but stiffness and creep resistance fall away well before either deflection figure.",
-      "moisture_note": "Absorbs moisture readily and it costs real strength: the vendor publishes a wet set of mechanical values alongside the dry set, and in-plane tensile drops about 13 percent at 4.6 percent moisture content. Dry hard and keep it dry. The vendor wants a heated dryer feeding the printer DURING the build, not only before it. No vendor publishes how moisture affects the electrical property."
+      "moisture_note": "Absorbs moisture readily and it costs real strength: the vendor publishes a wet set of mechanical values alongside the dry set, and in-plane tensile drops about 13 percent at 4.6 percent moisture content. Dry hard and keep it dry. The vendor wants a heated dryer feeding the printer DURING the build, not only before it. No vendor publishes how moisture affects the electrical property.",
+      "ventilation_required": true,
+      "handling_warning": "Releases caprolactam-class vapour while printing. Ventilate the working area."
     },
     "design_limits": {
       "min_wall_thickness_mm": 1.5,
