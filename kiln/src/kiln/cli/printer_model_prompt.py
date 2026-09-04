@@ -39,9 +39,8 @@ logger = logging.getLogger(__name__)
 # dangerously it mapped 094→a1_mini when 094 is actually the H2D, and
 # 01S→x1e when 01S is the P1P.  All Bambu prefixes are 3 chars.
 #
-# Full official table (only the models Kiln has profiles for are mapped below;
-# the rest are recorded for when those models are added — see
-# kiln_pro device intelligence):
+# Full official table.  Every prefix now maps: the H2D, H2D Pro, H2C and X2D
+# were the four recorded-but-unmapped rows and gained profiles 2026-09-04.
 #   039 A1 · 030 A1 mini · 01P P1S · 01S P1P · 00M X1C · 03W X1E · 22E P2S · 26A A2L
 #   094 H2D · 239 H2D Pro · 093 H2S · 31B H2C · 20P X2D
 #
@@ -58,6 +57,10 @@ _BAMBU_PREFIX_SUGGESTIONS: dict[str, str] = {
     "22E": "bambu_p2s",
     "26A": "bambu_a2l",
     "093": "bambu_h2s",
+    "094": "bambu_h2d",
+    "239": "bambu_h2d_pro",
+    "31B": "bambu_h2c",
+    "20P": "bambu_x2d",
 }
 
 # Top-N common models per backend type, shown as examples in the prompt.

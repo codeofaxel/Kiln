@@ -2912,5 +2912,73 @@
     ],
     "max_hotend_temp": 500,
     "max_bed_temp": 200
+  },
+  "bambu_h2d": {
+    "display_name": "Bambu Lab H2D",
+    "firmware": "bambu",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {},
+    "build_volume_mm": [
+      300,
+      320,
+      320
+    ],
+    "max_hotend_temp": 350,
+    "max_bed_temp": 120,
+    "has_input_shaping": true
+  },
+  "bambu_h2d_pro": {
+    "display_name": "Bambu Lab H2D Pro",
+    "firmware": "bambu",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {},
+    "build_volume_mm": [
+      300,
+      320,
+      320
+    ],
+    "max_hotend_temp": 350,
+    "max_bed_temp": 120,
+    "has_input_shaping": true
+  },
+  "bambu_h2c": {
+    "display_name": "Bambu Lab H2C",
+    "firmware": "bambu",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {},
+    "build_volume_mm": [
+      300,
+      320,
+      320
+    ],
+    "max_hotend_temp": 350,
+    "max_bed_temp": 120,
+    "has_input_shaping": true
+  },
+  "bambu_x2d": {
+    "display_name": "Bambu Lab X2D",
+    "firmware": "bambu",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {},
+    "build_volume_mm": [
+      235,
+      256,
+      256
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 120,
+    "has_input_shaping": true
   }
 }

@@ -513,6 +513,39 @@ _SPEED_CAPABILITIES: dict[str, dict[str, Any]] = {
         "quality_factor": 0.78,
         "slicer_time_factor": 0.48,
     },
+    # The H2D / H2D Pro / H2C / X2D all publish the same 1000 mm/s,
+    # 20000 mm/s2 hardware ceiling as the H2S.  They inherit the H2S's
+    # conservative envelope for the same reason: this table is a slicing
+    # quality budget, not a spec sheet, and none of these machines has been
+    # hardware-proven with Kiln.  Raise only on field data, per machine.
+    "bambu_h2d": {
+        "max_speed": 300,
+        "max_accel": 12000,
+        "input_shaping": True,
+        "quality_factor": 0.78,
+        "slicer_time_factor": 0.48,
+    },
+    "bambu_h2d_pro": {
+        "max_speed": 300,
+        "max_accel": 12000,
+        "input_shaping": True,
+        "quality_factor": 0.78,
+        "slicer_time_factor": 0.48,
+    },
+    "bambu_h2c": {
+        "max_speed": 300,
+        "max_accel": 12000,
+        "input_shaping": True,
+        "quality_factor": 0.78,
+        "slicer_time_factor": 0.48,
+    },
+    "bambu_x2d": {
+        "max_speed": 300,
+        "max_accel": 12000,
+        "input_shaping": True,
+        "quality_factor": 0.78,
+        "slicer_time_factor": 0.48,
+    },
     "bambu_p1p": {
         "max_speed": 300,
         "max_accel": 10000,

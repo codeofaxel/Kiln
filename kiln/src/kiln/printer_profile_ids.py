@@ -97,8 +97,19 @@ def map_printer_hint_to_profile_id(raw: str | None) -> str | None:
         return "bambu_a1"
     if "a2l" in hint:
         return "bambu_a2l"
+    # "h2d_pro" contains "h2d", so the Pro must be tested first or every Pro
+    # resolves to the base H2D.  They are separate machines with separate
+    # spec pages, not a trim level.
+    if "h2d" in hint and ("pro" in hint or "pro" in hint_compact):
+        return "bambu_h2d_pro"
+    if "h2d" in hint:
+        return "bambu_h2d"
+    if "h2c" in hint:
+        return "bambu_h2c"
     if "h2s" in hint:
         return "bambu_h2s"
+    if "x2d" in hint:
+        return "bambu_x2d"
     if "x1e" in hint or "x1e" in hint_compact:
         return "bambu_x1e"
     if "x1c" in hint or "x1_carbon" in hint_compact or ("bambu" in hint and "x1" in hint):

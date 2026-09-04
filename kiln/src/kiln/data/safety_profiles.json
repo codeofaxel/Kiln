@@ -1107,5 +1107,65 @@
       450
     ],
     "notes": "Industrial IDEX with a 500 C hotend and 200 C bed but only a 100 C actively heated chamber. Vision Miner's sales list names PEEK, PEKK, ULTEM 9085/1010 and PPSU; their own temperature guide is more careful, capping the chamber at 100 C for every one of them and telling you to verify each material's real requirement. Kiln does that verification: the hotend and bed clear these polymers, the chamber does not, so they are refused here. Everything up to PPS, PC and PA-CF runs comfortably at the vendor's 30-200 mm/s high-temperature range. Hold the documented 15-minute heat soak before starting, and never pre-heat the nozzle during it. Ships built-in HEPA and activated-carbon filtration with an optional external fume-extraction port. Runs RepRapFirmware on a Duet 3 with Duet Web Control and accepts standard RepRap G-code, so it slices in PrusaSlicer or OrcaSlicer today, and Kiln drives it over that same HTTP interface — register it with type 'duet'. That control path has not yet been exercised against this machine in person, so treat the first job on it as a supervised one."
+  },
+  "bambu_h2d": {
+    "display_name": "Bambu Lab H2D",
+    "max_hotend_temp": 350.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 65.0,
+    "max_feedrate": 60000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      300,
+      320,
+      320
+    ],
+    "notes": "Enclosed CoreXY, direct drive, DUAL NOZZLE. All-metal hardened hotends, active heated chamber to 65C, 120C bed, 350C hotend - full engineering-material envelope. 1000 mm/s toolhead = feedrate 60000. BUILD VOLUME IS THE DUAL-NOZZLE ENVELOPE (300x320x320), deliberately not the 325x320x325 single-nozzle figure and never the 350x320x320 'total volume for two nozzles', which is a tool-travel span and not a printable box. Also a laser/blade-cutter platform that will not power on without its safety key."
+  },
+  "bambu_h2d_pro": {
+    "display_name": "Bambu Lab H2D Pro",
+    "max_hotend_temp": 350.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 65.0,
+    "max_feedrate": 60000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      300,
+      320,
+      320
+    ],
+    "notes": "Enclosed CoreXY, direct drive, DUAL NOZZLE. Shares the H2D motion platform - volumes, temperatures and speeds are published identically on a separate spec page, verified independently, not copied. Differs in toolhead: tungsten-carbide nozzle, enhanced cooling, ethernet/WPA2-Enterprise, in-box AMS 2 Pro + AMS HT, emergency stop. BUILD VOLUME IS THE DUAL-NOZZLE ENVELOPE (300x320x320); see the H2D note on the travel-span figure."
+  },
+  "bambu_h2c": {
+    "display_name": "Bambu Lab H2C",
+    "max_hotend_temp": 350.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 65.0,
+    "max_feedrate": 60000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      300,
+      320,
+      320
+    ],
+    "notes": "Enclosed CoreXY, direct drive, DUAL NOZZLE with ASYMMETRIC hotends - left is the standard H2-series quick-swap, right is a 'Vortek' induction hotend on a 6-slot motorised rack that auto-swaps mid-print. Active heated chamber to 65C, 120C bed, 350C hotend. Per-nozzle envelopes are asymmetric (left 325x320x320, right 305x320x325); the recorded volume is the DUAL envelope 300x320x320, the floor of both. Z is 320, not the 325 the FAQ table claims."
+  },
+  "bambu_x2d": {
+    "display_name": "Bambu Lab X2D",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 65.0,
+    "max_feedrate": 60000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      235,
+      256,
+      256
+    ],
+    "notes": "Enclosed CoreXY, DUAL NOZZLE, asymmetric feed: main/left is direct drive in the toolhead, right is fed by a REMOTE extruder on the rear panel. Active heated chamber to 65C, 120C bed, 300C hotend - a lower hotend ceiling than the H2 family. BUILD VOLUME IS THE AUXILIARY/DUAL ENVELOPE (235x256x256, floored from 235.5), deliberately not the 256x256x260 main-nozzle figure, so the bed-fit guard cannot pass a part that the auxiliary nozzle cannot reach."
   }
 }

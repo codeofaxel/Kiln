@@ -575,6 +575,12 @@ _START_GCODE_EXEMPT: dict[str, str] = {
     for pid in (
         "bambu_x1c", "bambu_x1e", "bambu_p1s", "bambu_p2s", "bambu_a1",
         "bambu_a2l", "bambu_h2s", "bambu_p1p", "bambu_a1_mini",
+        # bambu_3mf ships no captured template for these four yet, so they
+        # take its documented fallback (the A1 start sequence, reported back
+        # on the result as start_gcode_model).  That fallback still warms up,
+        # which is what this guard is about; carrying a routine here would
+        # fight the injection exactly as it does for the nine above.
+        "bambu_h2d", "bambu_h2d_pro", "bambu_h2c", "bambu_x2d",
     )
 }
 
