@@ -142,7 +142,7 @@ _HARD_SEGMENT_CEILING = 1_500_000
 #: The extras, in the order a stage lists them (plate-first, then what
 #: stands beside and under the part).
 EXTRA_CLASSES: tuple[str, ...] = (
-    "skirt", "brim", "raft", "prime_tower", "support", "shield",
+    "skirt", "brim", "raft", "prime_tower", "support", "support_interface", "shield",
 )
 
 #: Display names — what a legend prints for each class.
@@ -152,8 +152,18 @@ CLASS_LABELS: dict[str, str] = {
     "raft": "Raft",
     "prime_tower": "Prime tower",
     "support": "Supports",
+    "support_interface": "Support interface",
     "shield": "Shield",
 }
+
+#: The SCAFFOLDING — what the printer builds to hold or seat the part and
+#: what comes off afterwards.  A stage draws these in a fixed identity
+#: colour, never the filament: scaffolding is shape information ("where
+#: will supports stand, what will they touch"), and painted in the part's
+#: own filament a dense support reads as a block of the part.  The legend
+#: still names the filament each prints in.  Skirt, brim and the prime
+#: tower keep their filament colours — there the colour IS the information.
+SCAFFOLD_CLASSES: tuple[str, ...] = ("support", "support_interface", "raft", "shield")
 
 #: Keyword → class, first match wins, checked in this order.  "skirt"
 #: sits first so PrusaSlicer's joint "Skirt/Brim" lands as a skirt (the
@@ -170,7 +180,8 @@ _CLASS_KEYWORDS: tuple[tuple[str, str], ...] = (
     ("wipe tower", "prime_tower"),     # PrusaSlicer / SuperSlicer
     ("purge tower", "prime_tower"),
     ("tower", "prime_tower"),
-    ("support", "support"),      # Support material, Support interface, SUPPORT
+    ("interface", "support_interface"),  # Support interface (Orca/Bambu), Support material interface (Prusa), SUPPORT-INTERFACE (Cura)
+    ("support", "support"),      # Support material, Support transition, SUPPORT
     ("shield", "shield"),        # ooze shield, draft shield
 )
 
@@ -211,6 +222,19 @@ _WIDTH_RE = re.compile(r"^\s*;\s*WIDTH\s*:\s*(\d*\.?\d+)\s*$", re.IGNORECASE)
 #: What a stage draws a path at when the file never said (a common FDM
 #: line width, and Cura's default).
 DEFAULT_LINE_WIDTH_MM = 0.45
+#: The density the grams estimate assumes (PLA; PETG and ABS sit within
+#: a tenth of it) — the legend marks the figure as an estimate.
+FILAMENT_DENSITY_G_CM3 = 1.24
+#: The layer height assumed when a class spans a single layer.
+DEFAULT_LAYER_HEIGHT_MM = 0.2
+
+
+def _layer_height(tops: set[float]) -> float:
+    """The layer height a class was printed at: the median step between
+    its distinct layer tops, or a common default when it has one layer."""
+    zs = sorted(tops)
+    steps = sorted(b - a for a, b in zip(zs, zs[1:], strict=False) if 0.02 <= b - a <= 1.0)
+    return steps[len(steps) // 2] if steps else DEFAULT_LAYER_HEIGHT_MM
 
 _XY_EPS = 1e-6
 _E_EPS = 1e-6
@@ -287,6 +311,58 @@ def _slicer_from_header(lines: list[str]) -> str | None:
         if m:
             return m.group(1).strip()[:64]
     return None
+
+
+def _split_raft(buckets: dict[str, _ClassBucket], model_zmin: float) -> None:
+    """Support laid entirely BELOW the part's first layer is the raft the
+    part stands on.  Orca, Bambu Studio and PrusaSlicer label raft layers
+    as support (Cura numbers them as negative layers), so the label alone
+    never says which is which; the height does.  Moved segment by segment
+    with its layer and tool, so a raft is drawn as the slab it is and the
+    supports above it as the lattice they are.  Nothing moves for a job
+    with no raft: the first support layer stands at the part's own first
+    layer, never under it."""
+    floor = model_zmin - 1e-3
+    for cls in ("support", "support_interface"):
+        bucket = buckets.get(cls)
+        if bucket is None:
+            continue
+        seg = bucket.segments
+        keep_seg: list[float] = []
+        keep_lay: list[int] = []
+        keep_tool: list[int] = []
+        raft_seg: list[float] = []
+        raft_lay: list[int] = []
+        raft_tool: list[int] = []
+        for idx, lyr in enumerate(bucket.layers):
+            base = idx * 6
+            piece = seg[base:base + 6]
+            if max(piece[2], piece[5]) <= floor:
+                raft_seg.extend(piece)
+                raft_lay.append(lyr)
+                raft_tool.append(bucket.tools[idx])
+            else:
+                keep_seg.extend(piece)
+                keep_lay.append(lyr)
+                keep_tool.append(bucket.tools[idx])
+        if not raft_seg:
+            continue
+        raft = buckets.get("raft")
+        if raft is None:
+            raft = buckets["raft"] = _ClassBucket(cls="raft", label=CLASS_LABELS["raft"])
+        raft.segments.extend(raft_seg)
+        raft.layers.extend(raft_lay)
+        raft.tools.extend(raft_tool)
+        for width, n in bucket.widths.items():
+            raft.widths[width] = raft.widths.get(width, 0) + n
+        raft.z_min = min(raft.z_min, *raft_seg[2::3])
+        raft.z_max = max(raft.z_max, *raft_seg[2::3])
+        if keep_seg:
+            bucket.segments, bucket.layers, bucket.tools = keep_seg, keep_lay, keep_tool
+            bucket.z_min = min(keep_seg[2::3])
+            bucket.z_max = max(keep_seg[2::3])
+        else:
+            del buckets[cls]
 
 
 def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
@@ -487,6 +563,8 @@ def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
                     note_extra(cur_cls, cur_label or cur_cls, pts)
             x, y, z, e = nx, ny, nz, ne
 
+    if not math.isinf(model_zmin):
+        _split_raft(buckets, model_zmin)
     footprint = None
     if fp_xmax > fp_xmin and fp_ymax > fp_ymin:
         footprint = (fp_xmin, fp_ymin, fp_xmax, fp_ymax)
@@ -666,6 +744,8 @@ def _feature_entry(
     seg = bucket.segments
     xmin = ymin = zmin = math.inf
     xmax = ymax = zmax = -math.inf
+    length = 0.0
+    tops: set[float] = set()
     for idx, lyr in enumerate(bucket.layers):
         if keep is not None and lyr not in keep:
             continue
@@ -677,6 +757,8 @@ def _feature_entry(
         y1 = seg[base + 4] + dy
         z1 = seg[base + 5] + dz
         out.extend((x0, y0, z0, x1, y1, z1))
+        length += math.hypot(x1 - x0, y1 - y0, z1 - z0)
+        tops.add(round(max(z0, z1), 3))
         layer_idx.append(min(lyr, 65535))
         tool_idx.append(min(bucket.tools[idx], 255))
         layers_kept.add(lyr)
@@ -688,6 +770,9 @@ def _feature_entry(
         zmax = max(zmax, z0, z1)
     if not out:
         return None
+    width = round(
+        max(bucket.widths, key=bucket.widths.get) if bucket.widths else DEFAULT_LINE_WIDTH_MM, 3
+    )
     return {
         "class": bucket.cls,
         "label": bucket.label,
@@ -698,9 +783,14 @@ def _feature_entry(
         "layers": len(layers_kept),
         # The width the stage draws these paths at: the ``;WIDTH:`` the
         # slicer wrote for most of them, else a common default.
-        "line_width_mm": round(
-            max(bucket.widths, key=bucket.widths.get) if bucket.widths else DEFAULT_LINE_WIDTH_MM, 3
-        ),
+        "line_width_mm": width,
+        # What this class costs: the path length laid, and the filament it
+        # takes at that width and this file's layer height (a PLA-density
+        # estimate — the legend says "≈").  A person deciding whether to
+        # keep supports wants the grams, the way the slicer's own legend
+        # gives them.
+        "length_mm": round(length, 1),
+        "filament_g_est": round(length * width * _layer_height(tops) * FILAMENT_DENSITY_G_CM3 / 1000, 2),
         "z_min": round(zmin, 4),
         "z_max": round(zmax, 4),
         "bounds": {
