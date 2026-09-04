@@ -13848,8 +13848,6 @@ def get_material_recommendation(
 # wiki page is the free-tier floor; kiln-pro decodes the code to a cited
 # cause / fix / severity for Pro+ callers at the REST boundary (no curated fix
 # text lives in this public repo).
-_HMS_WIKI_CODE_URL = "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/{code}"
-
 # Symptom words that mean "filament is not coming through" — the case
 # purge_filament exists to test.  Matched as substrings of the lowercased
 # symptom (plus the normalized HMS code) in troubleshoot_printer.
@@ -13900,22 +13898,16 @@ def _hms_reference(code: str) -> tuple[str | None, str]:
 
     Returns ``None`` for the link rather than offering a page that does not
     exist.
-    """
-    from kiln.printers.bambu import (
-        _BAMBU_HMS_FILAMENT_FAULTS,
-        _BAMBU_HMS_INDEX_URL,
-        _BAMBU_HMS_WIKI_URL,
-        normalize_bambu_hms,
-    )
 
-    hex_digits = code.replace("_", "")
-    if len(hex_digits) < 16:
-        return None, "print_error"
-    canonical, _unit, _slot = normalize_bambu_hms(code)
-    entry = _BAMBU_HMS_FILAMENT_FAULTS.get(canonical)
-    if entry is not None:
-        return _BAMBU_HMS_WIKI_URL.format(model=entry[1], code=canonical), "hms"
-    return _BAMBU_HMS_INDEX_URL, "hms"
+    The page address is not rebuilt here.  ``kiln.printers.bambu`` is the
+    one place that knows which model path serves which code, and a second
+    copy of that mapping is how the two drift apart.
+    """
+    from kiln.printers.bambu import describe_bambu_filament_fault
+
+    kind = "hms" if len(code.replace("_", "")) >= 16 else "print_error"
+    _reading, page = describe_bambu_filament_fault(code, kind=kind)
+    return page, kind
 
 
 @mcp.tool()

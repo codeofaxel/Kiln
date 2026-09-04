@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Your AI assistant can better say what each tier gets.**
+
 - **History answers say what they cover.** Your print, job, failure and model
   histories now say they're this machine's records, and how many entries
   exist in total — so a page of twenty is never mistaken for everything
@@ -28,6 +30,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   wrong place.
 
 ### Added
+
+- **Load, unload and purge filament from Kiln on most printers.** Purging
+  doubles as a clog test: Kiln says whether the filament actually came
+  through and reads the printer's own error back in plain words. Printers
+  whose firmware gives Kiln no way to drive the extruder say so rather than
+  pretending.
 
 - **Kiln now sees your multi-material unit, whatever brand it is.** A Klipper
   printer running Happy Hare or AFC, and a Creality with a CFS, now report what
@@ -107,6 +115,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **A Bambu error code now gets the explanation that belongs to it.** Some
+  codes were read as if they came from a different part of the printer's
+  reporting, so the plain-English cause could describe the wrong fault.
+
+- **Coating and anti-static guidance now answer at every tier.**
+
+- **Hosted answers arrived missing the part you paid for.** Magnet and
+  coating advice came back as safety notes only.
 
 - **A colour print stops before it starts on a printer that cannot do it.**
   Multi-object and multi-copy colour prints used to slice, start, and come out
