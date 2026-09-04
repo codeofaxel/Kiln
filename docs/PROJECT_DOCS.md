@@ -8,7 +8,7 @@
 
 ### Overview
 
-Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 914 MCP capabilities and a <!-- KILN_CLI_COUNT --> 248-command CLI.
+Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 914 MCP capabilities and a <!-- KILN_CLI_COUNT --> 242-command CLI.
 
 **Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
@@ -209,7 +209,7 @@ You can still go from idea to object: design through the agent or the [web app](
 | `--json` | Output structured JSON (for agents/scripts) |
 | `--help` | Show command help |
 
-The CLI has <!-- KILN_CLI_COUNT --> 248 commands in total; this section documents the everyday core. Run `kiln --help` for the full command tree.
+The CLI has <!-- KILN_CLI_COUNT --> 242 commands in total; this section documents the everyday core. Run `kiln --help` for the full command tree.
 
 ### Commands
 

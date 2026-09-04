@@ -248,7 +248,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
-- **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 914 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 248 CLI commands built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 914 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 242 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
 - **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Business)
@@ -267,7 +267,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 | **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
 | **Creality** | Stable when Moonraker is reachable | SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4/V3 KE, Ender-5 Max, CR-10 SE via local Moonraker. Older Marlin Creality printers use `serial` or `octoprint`. |
-| **Bambu** | Stable | Bambu Lab X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, H2S (via LAN MQTT) |
+| **Bambu** | Stable | Bambu Lab X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, H2S, H2D, H2D Pro, H2C, X2D (via LAN MQTT) |
 | **Prusa Link** | Stable | Prusa MK4, XL, Mini+ (local REST API — type: `prusalink`) |
 | **Elegoo** | Stable | Centauri Carbon, Saturn, Mars series (via LAN WebSocket/SDCP). Neptune 4 / OrangeStorm Giga use Moonraker. |
 | **Duet / RepRapFirmware** | Beta — not yet verified against physical hardware | Duet 2 and Duet 3 controller boards, over the same HTTP interface Duet Web Control uses. Both RepRapFirmware 2 and 3 are supported. Vision Miner 22 IDEX v4 is the first catalogued machine. Type: `duet`. |
@@ -598,7 +598,7 @@ Entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=stri
 | `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |
 | `pro_tool_manifest.json` | Public manifest for kiln-pro tool discovery and REST proxy stubs |
 | `decoration_quota.py` | Free-tier decoration quota tracking and tier resolution hooks |
-| `cli/` | Click CLI with <!-- KILN_CLI_COUNT:OLD --> 248 commands and JSON output |
+| `cli/` | Click CLI with <!-- KILN_CLI_COUNT:OLD --> 242 commands and JSON output |
 
 kiln-pro ([kiln3d.com](https://kiln3d.com/?utm_source=github&utm_medium=readme)) extends public Kiln with paid-tier REST serving, billing, licensing, SSO, RBAC, G-code encryption, uptime reporting, team administration, and project-cost workflows. Public Kiln exposes only the interface/proxy surface for those capabilities; the private implementation stays in kiln-pro.
 </details>
