@@ -729,19 +729,51 @@ class TestBambuFaultReadings:
         text, _ = describe_bambu_filament_fault("9999_9999", kind="print_error")
         assert "no reading for" in text
 
-    def test_the_namespace_split_matches_the_published_index(self):
-        """Checked against wiki.bambulab.com/en/hms/home on 2026-09-03:
-        these four are real HMS module/attrs; the flow-anomaly prefixes
-        beside them are not, so they can only be print_error codes."""
+    def test_every_reading_in_that_table_is_for_the_print_error_field(self):
+        """Both classifiers that seeded it are handed ``print_error``.
+
+        Whatever the same digits mean in the HMS namespace, these readings
+        are for the other field, so none of them may answer an HMS lookup.
+        """
+        import inspect
+
+        from kiln.printers import bambu
+
+        for fn in (bambu._is_nozzle_clump_error, bambu._classify_flow_anomaly):
+            assert "error_code" in inspect.signature(fn).parameters
+        source = inspect.getsource(bambu.BambuAdapter._bambu_fault_codes)
+        assert '"print_error"' in source and '"hms"' in source
+
+    def test_the_namespace_collisions_are_recorded_not_reclassified(self):
+        """Checked against wiki.bambulab.com/en/hms/home on 2026-09-03."""
         from kiln.printers.bambu import (
             _BAMBU_PRINT_ERROR_FAULTS,
-            _VERIFIED_HMS_PREFIXES,
+            _HMS_NAMESPACE_COLLISIONS,
         )
 
-        assert {"03001900", "03001A00", "03001800", "03000900"} == _VERIFIED_HMS_PREFIXES
+        assert set(_HMS_NAMESPACE_COLLISIONS) == {
+            "03001900", "03001A00", "03001800", "03000900",
+        }
+        # A collision is still a print_error entry — that is the point.
+        for prefix in _HMS_NAMESPACE_COLLISIONS:
+            assert prefix in _BAMBU_PRINT_ERROR_FAULTS
         for only_print_error in ("03008003", "03008005", "05000900", "05000B00"):
             assert only_print_error in _BAMBU_PRINT_ERROR_FAULTS
-            assert only_print_error not in _VERIFIED_HMS_PREFIXES
+            assert only_print_error not in _HMS_NAMESPACE_COLLISIONS
+
+    def test_the_contradictory_collision_is_flagged_as_a_hint(self):
+        """0300-1900 means something unrelated in HMS, and Kiln's own
+        print_error reading for it is unconfirmed. Neither may sound certain."""
+        from kiln.printers.bambu import (
+            _BAMBU_PRINT_ERROR_FAULTS,
+            _HMS_NAMESPACE_COLLISIONS,
+            describe_bambu_filament_fault,
+        )
+
+        assert "Y-axis" in _HMS_NAMESPACE_COLLISIONS["03001900"]
+        assert "could not confirm" in _BAMBU_PRINT_ERROR_FAULTS["03001900"]
+        text, url = describe_bambu_filament_fault("03001900", kind="print_error")
+        assert "hint" in text and url is None
 
     def test_garbage_is_not_mistaken_for_a_code(self):
         from kiln.printers.bambu import describe_bambu_filament_fault

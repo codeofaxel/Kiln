@@ -556,17 +556,52 @@ _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
     "05000B00": "The AMS reports the filament stuck or jammed",
     "03000900": "The extruder motor is overloaded -- a clog or stuck filament",
     "05000900": "The printer reports an extrusion failure",
-    "03001900": "The filament is tangled at the extruder feed",
+    # The nozzle-clumping family, which a purge is exactly what trips.  Same
+    # field as the rest of this table: _is_nozzle_clump_error is handed
+    # ``print_error`` too.  Readings from Kiln's own classifier
+    # (_NOZZLE_CLUMP_ERROR_PREFIXES), which cites Bambu's page for
+    # 0300_1A00_0002_0001.
+    "03008014": (
+        "The A1's nozzle-clumping probe tapped the nozzle and thinks it found "
+        "a blob; often a false positive on thin or flat first-layer shapes"
+    ),
+    "03001A00": "The nozzle looks wrapped or clogged with filament",
+    "03001800": (
+        "The nozzle-clumping probe could not calibrate its baseline, usually "
+        "residue on the tip or an obstructed probing spot"
+    ),
+    # Unverified: Bambu publishes no print_error list, and these digits also
+    # name an unrelated HMS module (see _HMS_NAMESPACE_COLLISIONS), so this
+    # reading could not be confirmed against a primary source on 2026-09-03.
+    "03001900": (
+        "The filament may be tangled at the extruder feed -- Kiln could not "
+        "confirm this reading against a primary source, so treat it as a hint"
+    ),
 }
 
-# Kiln's own flow-anomaly prefixes, split by the namespace check above
-# (2026-09-03, against the published HMS index): 0300-1900 IS an HMS
-# module/attr, while 0300-8003 / 0300-8005 / 0500-0900 / 0500-0B00 are
-# not and can only be print_error codes.  Recorded here so the next
-# reader does not have to re-derive it.
-_VERIFIED_HMS_PREFIXES: frozenset[str] = frozenset(
-    {"03001900", "03001A00", "03001800", "03000900"}
-)
+# Prefixes that name a module in BOTH namespaces.  Every code in the table
+# above is a print_error -- ``_is_nozzle_clump_error`` and
+# ``_classify_flow_anomaly`` are both handed the ``print_error`` field, so
+# that is the field these readings are for, whatever the same digits may
+# mean elsewhere.  These four ALSO name an HMS module (checked 2026-09-03
+# against the published index), which is a trap rather than a
+# reclassification: a reader who looks one up on the wiki lands on the
+# other namespace's page.
+#
+# Three of the four happen to agree closely enough to be harmless.
+# ``0300_1900`` does not, and is the reason this set is written down: as an
+# HMS module it is the A1 mini's Y-axis eddy current sensor, nothing to do
+# with filament.  Kiln's own print_error reading for it could not be
+# confirmed against any primary source, so it is marked as a hint above.
+_HMS_NAMESPACE_COLLISIONS: dict[str, str] = {
+    "03001A00": "HMS 0300-1A00 is nozzle-covered / nozzle-clogged detection",
+    "03001800": "HMS 0300-1800 is the extruder eddy current sensor",
+    "03000900": "HMS 0300-0900 is the extrusion motor",
+    "03001900": (
+        "HMS 0300-1900 is the A1 mini's Y-axis eddy current sensor -- "
+        "unrelated to filament, and the reading above disagrees with it"
+    ),
+}
 
 _BAMBU_PRINT_ERROR_FAMILIES: dict[str, str] = {
     "1200": "an AMS lite filament load / unload fault",
