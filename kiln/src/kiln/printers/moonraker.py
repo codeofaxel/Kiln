@@ -1450,66 +1450,39 @@ class MoonrakerAdapter(PrinterAdapter):
         "unload": ("UNLOAD_FILAMENT", "M702"),
     }
 
-    #: Klipper objects that mean a multi-material unit OWNS the filament
-    #: path: Happy-Hare registers ``mmu``, AFC registers ``AFC``.  Each
-    #: brings its own load / unload commands; an extruder-driven feed sent
-    #: behind its back fights the unit.  Detection is the same
-    #: ``/printer/objects/list`` read ``get_cfs_status`` uses.
-    #:
-    #: SEAM: ``kiln.multi_material.multi_material_status`` on main is the
-    #: shared reader for exactly this question, over the same two object
-    #: names, and it also covers Creality CFS.  This probe should be
-    #: replaced by ``multi_material_status(self).detected`` when this
-    #: branch rebases onto main — refusing on ``kind="unknown"`` too, which
-    #: is what :meth:`_refuse_if_mmu` already does.
-    _MMU_OBJECTS: dict[str, tuple[str, str]] = {
-        "mmu": ("Happy-Hare", "MMU_LOAD / MMU_UNLOAD (MMU_EJECT to eject fully) / MMU_SELECT_TOOL / MMU_CHANGE_TOOL"),
-        "AFC": ("AFC", "its own AFC load / unload commands"),
-    }
+    def _refuse_if_multi_material(self, action: str) -> None:
+        """Refuse when a unit owns the filament path, or when Kiln cannot tell.
 
-    def _mmu_in_charge(self) -> tuple[str, tuple[str, str] | None]:
-        """``(state, info)`` — ``state`` is ``detected``/``none``/``unknown``.
+        Happy-Hare and AFC bring their own load / unload commands, and an
+        extruder-driven feed sent behind one fights it.  The read goes
+        through :func:`kiln.multi_material.multi_material_status`, the one
+        place that asks this question -- so a Creality CFS is covered by the
+        same refusal without a branch here.
 
-        The three-way answer is the point.  A probe that FAILED is not a
-        printer without an MMU, and collapsing the two is how an
-        extruder-driven feed ends up fighting a Happy-Hare unit whose
-        Moonraker happened not to answer.  ``unknown`` therefore refuses,
-        the same as ``detected``: the cost of a wrong refusal is a retry,
-        and the cost of a wrong proceed is filament driven into a unit
-        that is mid-move.
+        ``unknown`` refuses too, and that is the load-bearing part: a probe
+        that FAILED is not a printer without a unit.  Treating the two alike
+        is how a feed ends up driven against a Happy-Hare whose Moonraker
+        happened not to answer.  A wrong refusal costs a retry; a wrong
+        proceed costs filament driven into a unit mid-move.
         """
-        try:
-            data = self._get_json("/printer/objects/list")
-        except PrinterError as exc:
-            logger.debug("multi-material probe failed: %s", exc)
-            return "unknown", None
-        objects = _safe_get(data, "result", "objects", default=None)
-        if not isinstance(objects, list):
-            return "unknown", None
-        names = {str(o) for o in objects}
-        for obj, info in self._MMU_OBJECTS.items():
-            if obj in names:
-                return "detected", info
-        return "none", None
+        from kiln.multi_material import KIND_UNKNOWN, multi_material_status
 
-    def _refuse_if_mmu(self, action: str) -> None:
-        """Refuse when a unit owns the filament path, or when Kiln cannot tell."""
-        state, info = self._mmu_in_charge()
-        if state == "detected" and info is not None:
-            unit, commands = info
+        status = multi_material_status(self)
+        if status.detected:
             raise FilamentHandlingUnsupported(
-                f"{unit} owns the filament path on this printer, so an "
+                f"{status.label} owns the filament path on this printer, so an "
                 f"extruder-driven {action} from Kiln would fight it. Use the "
-                f"unit's own commands ({commands}) from the printer's console "
-                "for now; Kiln's MMU-aware routing is a separate change."
+                "unit's own commands (Happy-Hare: MMU_LOAD / MMU_UNLOAD, "
+                "MMU_EJECT to eject fully, MMU_SELECT_TOOL / MMU_CHANGE_TOOL) "
+                "from the printer's console for now; Kiln's MMU-aware routing "
+                "is a separate change."
             )
-        if state == "unknown":
+        if status.kind == KIND_UNKNOWN:
             raise FilamentHandlingUnsupported(
-                f"Kiln could not read this printer's object list, so it cannot "
-                f"tell whether a multi-material unit owns the filament path. "
-                f"Refusing the {action} rather than risk driving the extruder "
-                "against a unit mid-move. Check that Moonraker is reachable "
-                "and try again."
+                "Kiln could not read whether a multi-material unit owns the "
+                f"filament path on this printer, so it is refusing the {action} "
+                "rather than risk driving the extruder against a unit mid-move. "
+                "Check that Moonraker is reachable and try again."
             )
 
     def _klipper_commands(self) -> set[str]:
@@ -1588,7 +1561,7 @@ class MoonrakerAdapter(PrinterAdapter):
         )
 
     def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        self._refuse_if_mmu("load")
+        self._refuse_if_multi_material("load")
         known = self._klipper_commands()
         for macro in self._FILAMENT_MACROS["load"]:
             if macro in known:
@@ -1601,7 +1574,7 @@ class MoonrakerAdapter(PrinterAdapter):
         )
 
     def _unload_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        self._refuse_if_mmu("unload")
+        self._refuse_if_multi_material("unload")
         known = self._klipper_commands()
         for macro in self._FILAMENT_MACROS["unload"]:
             if macro in known:
@@ -1907,8 +1880,18 @@ class MoonrakerAdapter(PrinterAdapter):
             raise
         except Exception as exc:  # pragma: no cover - defensive
             raise PrinterError(f"objects/list failed: {exc}") from exc
-        objects = _safe_get(listing, "result", "objects", default=[])
-        names = {o for o in objects if isinstance(o, str)} if isinstance(objects, list) else set()
+        objects = _safe_get(listing, "result", "objects", default=None)
+        if not isinstance(objects, list):
+            # Moonraker answered in a shape this probe does not understand.
+            # That is a FAILED read, not an empty printer: swallowing it as
+            # "no objects" would answer ``none`` for a machine that may well
+            # carry a unit, and ``none`` is what lets a caller drive the
+            # extruder.  Raise so the shared reader reports ``unknown``.
+            raise PrinterError(
+                "Klipper's object list came back in an unexpected shape, so "
+                "Kiln cannot tell what this printer has"
+            )
+        names = {o for o in objects if isinstance(o, str)}
 
         if "mmu" in names:
             payload = self._get_json(

@@ -888,7 +888,7 @@ class TestMoonraker:
         assert result.success is True
 
     @pytest.mark.parametrize("mmu_object", ["mmu", "AFC"])
-    def test_an_mmu_owns_the_filament_path_so_load_is_refused_by_name(self, fast_clock, mmu_object):
+    def test_a_unit_owns_the_filament_path_so_load_is_refused_by_name(self, fast_clock, mmu_object):
         """Happy-Hare (``mmu``) / AFC (``AFC``) register their own MMU_LOAD /
         MMU_UNLOAD commands; an extruder-driven feed behind their back
         fights the unit.  Refuse, naming the unit and its own commands."""
@@ -910,7 +910,8 @@ class TestMoonraker:
 
     @pytest.mark.parametrize("failure", ["raises", "garbage"])
     def test_a_failed_probe_refuses_rather_than_assuming_no_mmu(self, fast_clock, failure):
-        """A probe that FAILED is not a printer without an MMU.
+        """A probe that FAILED is not a printer without a unit, and an answer
+        in a shape Kiln does not understand is a failed read too.
 
         Collapsing the two is how an extruder-driven feed ends up fighting
         a Happy-Hare unit whose Moonraker happened not to answer. A wrong
