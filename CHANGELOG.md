@@ -29,6 +29,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln now sees your multi-material unit, whatever brand it is.** A Klipper
+  printer running Happy Hare or AFC, and a Creality with a CFS, now report what
+  is loaded in each slot — and Kiln says plainly when the unit's own tool map,
+  not Kiln, decides which slot feeds each tool change.
+
 - **Your cloud library shows up on your machine.** Designs saved to your Kiln
   account appear next to your local ones, each entry saying which one it came
   from, and can be pulled back down on any machine you're signed in on. Saved
@@ -102,6 +107,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **A colour print stops before it starts on a printer that cannot do it.**
+  Multi-object and multi-copy colour prints used to slice, start, and come out
+  entirely in one filament, with the warning arriving after the print began;
+  they now refuse up front.
+
+- **The wrong-colour check works on every multi-material printer.** A file
+  asking for a colour nothing loaded can supply is caught the same way
+  everywhere, instead of only on a Bambu AMS.
+
+- **Kiln stops guessing a material from a spool's name.** A slot labelled with
+  a product name but no material type was treated as if the name were the
+  material, which produced a "material differs" warning against a perfectly
+  good filament. An unknown material now reads as unknown.
+
+- **Filament-slot options no longer disappear in silence.** Asking for a
+  specific slot on a printer with no AMS used to succeed while quietly
+  ignoring the request; it now says so and stops.
+
+- **A tool-change time estimate says when Kiln has not driven that hardware.**
+  Estimates for an ERCF or Prusa multi-material unit read as fully verified,
+  and the one caution that did appear named another brand's hardware — now
+  fixed.
 
 - **Kiln reads your description the way you wrote it.** A magnet worn
   "against bodies" skipped the implanted-device warning that "against the
