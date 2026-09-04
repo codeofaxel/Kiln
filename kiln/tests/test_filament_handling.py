@@ -588,7 +588,6 @@ class TestBambuLoad:
         assert result.error_code == "1200_8007"
         assert "did not come through the nozzle" in result.error_hint
         assert result.details["code_kind"] == "print_error"
-        assert "hms_wiki_url" not in result.details
 
     def test_hms_list_entries_count_as_faults_too(self, bambu, monkeypatch):
         _status_after_sleep(bambu, monkeypatch, hms=[{"attr": 0x12002000, "code": 0x00020006}])
@@ -597,10 +596,17 @@ class TestBambuLoad:
         assert result.error_code == "1200_2000_0002_0006"
         assert "extruder may be clogged" in result.error_hint
         assert result.details["code_kind"] == "hms"
-        # The A1-only page really does live under /a1-mini/, not /x1/.
-        assert result.details["hms_wiki_url"] == (
-            "https://wiki.bambulab.com/en/a1-mini/troubleshooting/"
-            "hmscode/1200_2000_0002_0006"
+
+    def test_a_fault_result_carries_no_vendor_link(self, bambu, monkeypatch):
+        """One door links out. A fault must not answer differently depending
+        on which surface asked, and the hosted wire strips a nested link
+        while a local caller would have seen it."""
+        _status_after_sleep(bambu, monkeypatch, print_error=0x12008007)
+        result = bambu.load_filament(slot=0)
+        assert "hms_wiki_url" not in result.details
+        assert not any(
+            isinstance(v, str) and "http" in v
+            for v in (result.error_hint, result.message)
         )
 
     def test_an_hms_code_wins_over_a_print_error_when_both_land(self, bambu, monkeypatch):

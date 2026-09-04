@@ -4644,20 +4644,24 @@ class BambuAdapter(PrinterAdapter):
         """Report the fault the printer raised, in its own words.
 
         An HMS code is preferred over a ``print_error`` when both landed:
-        HMS is the namespace Bambu documents, so it carries a citable
-        reading and a link, where a print_error carries neither.
+        HMS is the namespace Bambu documents, so its reading is the citable
+        one, where a print_error's is not.
+
+        No vendor link rides along.  The reading stands on its own -- "the
+        filament may be stuck, or the extruder / nozzle clogged" needs no
+        page to act on -- and pointing at Bambu's wiki is the dedicated
+        troubleshooting tool's job.  One door links out, so a fault does
+        not answer differently depending on which surface asked.
         """
         ordered = sorted(codes, key=lambda pair: (pair[1] != "hms", pair[0]))
         code, kind = ordered[0]
-        hint, url = describe_bambu_filament_fault(code, kind=kind)
+        hint, _page = describe_bambu_filament_fault(code, kind=kind)
         details: dict[str, Any] = {
             "all_new_faults": [
                 {"code": c, "kind": k} for c, k in ordered
             ],
             "code_kind": kind,
         }
-        if url:
-            details["hms_wiki_url"] = url
         return FilamentOpResult(
             success=False,
             action=plan.action,
