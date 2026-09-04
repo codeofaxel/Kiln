@@ -1120,6 +1120,10 @@ class FilamentOpPlan:
     material_window: tuple[float, float, str] | None = None
     #: Adapter-specific extras forwarded verbatim (e.g. ``wait_seconds``).
     options: dict[str, Any] = field(default_factory=dict)
+    #: The print was paused rather than finished when this was prepared.
+    #: Allowed on purpose -- clearing a clog and resuming is the case this
+    #: exists for -- but the nozzle is parked over the part.
+    printer_paused: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -2423,7 +2427,7 @@ class PrinterAdapter(ABC):
             length_mm=DEFAULT_LOAD_LENGTH_MM if length_mm is None else length_mm,
             options=options,
         )
-        return self._load_filament_impl(plan)
+        return self._finish_filament_op(plan, self._load_filament_impl(plan))
 
     def unload_filament(
         self,
@@ -2447,7 +2451,7 @@ class PrinterAdapter(ABC):
             length_mm=DEFAULT_UNLOAD_LENGTH_MM if length_mm is None else length_mm,
             options=options,
         )
-        return self._unload_filament_impl(plan)
+        return self._finish_filament_op(plan, self._unload_filament_impl(plan))
 
     def purge_filament(
         self,
@@ -2478,7 +2482,27 @@ class PrinterAdapter(ABC):
             length_mm=length_mm,
             options=options,
         )
-        return self._purge_filament_impl(plan)
+        return self._finish_filament_op(plan, self._purge_filament_impl(plan))
+
+    def _finish_filament_op(
+        self, plan: FilamentOpPlan, result: FilamentOpResult
+    ) -> FilamentOpResult:
+        """Add what the caller has to know but the backend cannot say.
+
+        Today that is one thing: the printer was PAUSED, so the nozzle is
+        parked over the part and whatever came out landed on it.  The gate
+        allows a paused printer on purpose -- clearing a clog and resuming is
+        the case this exists for -- and saying nothing about the ooze would
+        let someone resume onto a blob.
+        """
+        if plan.printer_paused:
+            result.details["printer_paused"] = True
+            result.message = (
+                f"{result.message} The print is PAUSED, so the nozzle was "
+                "parked over the part: check for extruded filament on the "
+                "model and wipe the nozzle before resuming."
+            )
+        return result
 
     def _prepare_filament_op(
         self,
@@ -2540,6 +2564,10 @@ class PrinterAdapter(ABC):
                 f"Refusing to {action} filament while a print is running. "
                 "Pause the print first, or wait for it to finish."
             )
+        # Allowed, and the whole point of the paused case -- but the extruder
+        # is parked over the part, so whatever comes out lands on it.  The
+        # caller is told rather than left to find out.
+        paused = state.state == PrinterStatus.PAUSED
 
         window = self._filament_material_window(material, slot)
         if temperature is None:
@@ -2590,6 +2618,7 @@ class PrinterAdapter(ABC):
             length_mm=length_mm,
             material_window=window,
             options=dict(options or {}),
+            printer_paused=paused,
         )
 
     def _filament_material_window(

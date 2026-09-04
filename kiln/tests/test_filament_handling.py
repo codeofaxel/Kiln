@@ -307,6 +307,21 @@ class TestSharedGate:
         assert result.success is True
         assert stub.plans[0].action == "purge"
 
+    def test_a_paused_print_is_warned_about_the_ooze(self):
+        """The nozzle is parked over the part; resuming onto a blob is the
+        failure this sentence prevents."""
+        stub = _Stub(state=PrinterStatus.PAUSED)
+        result = stub.purge_filament(temperature=200)
+        assert result.details["printer_paused"] is True
+        assert "PAUSED" in result.message
+        assert "wipe the nozzle" in result.message
+
+    def test_an_idle_printer_gets_no_such_warning(self):
+        stub = _Stub(state=PrinterStatus.IDLE)
+        result = stub.purge_filament(temperature=200)
+        assert "printer_paused" not in result.details
+        assert "PAUSED" not in result.message
+
     def test_refuses_below_the_cold_extrusion_floor(self):
         stub = _Stub()
         with pytest.raises(PrinterError, match="cold-extrusion floor"):
