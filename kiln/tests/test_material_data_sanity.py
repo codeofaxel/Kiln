@@ -878,3 +878,78 @@ class TestPostProcessingGuide:
             assert "strengthening" in entry, (
                 f"{mat_id} missing strengthening section"
             )
+
+
+class TestMoistureAbsorptionIsAQuantity:
+    """`moisture_absorption` says HOW MUCH, and the one consumer keys on "high".
+
+    PVA carried `"excellent"` — the only value outside the quantity scale in
+    the whole catalogue (`very_low`/`low`/`moderate`/`high`), and a word that
+    reads as praise in a field that means "how much does this absorb".  The
+    one consumer, `generation_feedback`, appends "avoid designs requiring
+    long-term water contact" only when the value is exactly `"high"`, so the
+    single material that DISSOLVES in water could never match it while nylon,
+    which merely absorbs moisture, does.
+
+    HONEST BOUND on that last sentence: this was verified by reading the
+    comparison and the data, NOT by observing the constraint reach a user.
+    That block reads `brief.recommended_material` — the brief's own
+    recommendation — rather than a caller-supplied material, so an attempt to
+    exercise it end-to-end by passing `material=` did not reach it.  These
+    tests therefore pin what was actually confirmed: the value is on the
+    scale, PVA is rated so it CAN match, and the consumer still compares to
+    the literal these depend on.
+    """
+
+    _SCALE = {"very_low", "low", "moderate", "high"}
+
+    def _materials(self):
+        import json
+        from pathlib import Path
+
+        import kiln
+
+        path = (Path(kiln.__file__).parent
+                / "data" / "design_knowledge" / "materials.json")
+        blob = json.loads(path.read_text(encoding="utf-8"))
+        return {k: v for k, v in blob.items()
+                if not k.startswith("_") and isinstance(v, dict)}
+
+    def test_every_value_is_on_the_quantity_scale(self):
+        """A quality word in a quantity field cannot be compared to anything."""
+        offenders = {
+            name: (row.get("chemical") or {}).get("moisture_absorption")
+            for name, row in self._materials().items()
+            if (row.get("chemical") or {}).get("moisture_absorption")
+            and (row.get("chemical") or {}).get("moisture_absorption") not in self._SCALE
+        }
+        assert not offenders, (
+            f"moisture_absorption is a quantity (one of {sorted(self._SCALE)}); "
+            f"these carry something else: {offenders}"
+        )
+
+    def test_pva_is_rated_high_so_it_can_match_the_water_contact_caution(self):
+        """The regression itself: PVA dissolves, so it cannot rate below nylon."""
+        mats = self._materials()
+        pva = (mats["pva"].get("chemical") or {}).get("moisture_absorption")
+        assert pva == "high", (
+            "PVA is water-soluble; anything below `high` cannot match the "
+            "water-contact constraint that the less-absorbent nylon matches"
+        )
+
+    def test_the_water_contact_caution_actually_fires_for_pva(self):
+        """Pins the CONSUMER, not just the datum — the value only matters
+        because `generation_feedback` compares it to the literal "high"."""
+        import inspect
+
+        from kiln import generation_feedback
+
+        src = inspect.getsource(generation_feedback)
+        assert 'moisture == "high"' in src, (
+            "the consumer's comparison changed; re-check that PVA's rating "
+            "still reaches the water-contact constraint"
+        )
+        mats = self._materials()
+        assert (mats["pva"]["chemical"]["moisture_absorption"] == "high"), (
+            "PVA no longer matches the value the consumer keys on"
+        )

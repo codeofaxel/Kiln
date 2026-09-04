@@ -1018,7 +1018,7 @@
     },
     "chemical": {
       "uv_resistance": "poor",
-      "moisture_absorption": "excellent",
+      "moisture_absorption": "high",
       "food_safe": "no",
       "biodegradable": true,
       "outgassing": "minimal"
