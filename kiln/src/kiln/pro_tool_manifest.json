@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-09-05T19:55:43.947599+00:00",
-  "tool_count": 417,
+  "generated": "2026-09-05T21:27:56.322755+00:00",
+  "tool_count": 418,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -12344,6 +12344,39 @@
           "printers"
         ],
         "title": "fleet_skip_objectsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_thermal_posture",
+      "description": "Every registered machine's thermal-runaway protection, and what drifted (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "refresh": {
+            "default": true,
+            "title": "Refresh",
+            "type": "boolean"
+          }
+        },
+        "title": "fleet_thermal_postureArguments",
         "type": "object"
       }
     },
