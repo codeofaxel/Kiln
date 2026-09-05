@@ -214,3 +214,12 @@ def test_the_status_read_carries_the_watch_state() -> None:
     assert full["kiln_watch"]["watchdog"]["running"] is True
     assert lite["kiln_watch"]["watchdog"]["running"] is True
     assert reader.call_count == 2
+
+
+def test_printing_is_read_off_the_state_word_the_caller_already_has(monkeypatch) -> None:
+    _quiet(monkeypatch)
+    assert watch_state.kiln_watch_state("default", adapter=_Adapter(), state_word="printing")["printing"] is True
+    assert watch_state.kiln_watch_state("default", adapter=_Adapter(), state_word="idle")["printing"] is False
+    # A stale reading cannot vouch for an empty bed: it counts as a print on the machine.
+    assert watch_state.kiln_watch_state("default", adapter=_Adapter(), state_word="stale")["printing"] is True
+    assert watch_state.kiln_watch_state("default", adapter=_Adapter())["printing"] is None

@@ -213,6 +213,7 @@ def test_the_local_doors_hand_kiln_pro_the_live_watch_state() -> None:
         assert server._coverage_block_for("default") == _BLOCK
     assert seen["watch"]["kind"] == "kiln.watch.v1", seen
     assert seen["watch"]["watchdog"] == {"attached": False, "running": False}
+    assert seen["watch"]["printing"] is None  # no adapter: no reading to vouch either way
 
 
 def test_starting_a_health_session_answers_with_what_is_watching_now() -> None:

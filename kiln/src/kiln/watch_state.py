@@ -200,7 +200,9 @@ def _vision_state() -> dict[str, Any]:
     return {"armed": armed}
 
 
-def kiln_watch_state(printer_name: str | None, *, adapter: Any = None) -> dict[str, Any]:
+def kiln_watch_state(
+    printer_name: str | None, *, adapter: Any = None, state_word: str | None = None
+) -> dict[str, Any]:
     """The live facts about what Kiln is watching on *printer_name*.
 
     Reads this process's registries — never a promise.  Every part is
@@ -208,20 +210,26 @@ def kiln_watch_state(printer_name: str | None, *, adapter: Any = None) -> dict[s
     the others; the block is then reported in its "nothing" shape rather
     than dropped, because a missing block is indistinguishable from a
     watcher that is off.
+
+    *adapter* is the printer's adapter when the caller holds one (no
+    adapter means no camera can be read); *state_word* is the machine
+    state the caller has already read, so ``printing`` says whether a
+    print is on the machine without a second network read — ``None``
+    when the caller did not have one.
     """
     from kiln import server as _srv
+    from kiln.monitor_payload import is_active_print_state
 
     try:
         name = _srv._resolve_effective_printer_name(printer_name)
     except Exception:  # noqa: BLE001 — an unresolvable name still gets a state, keyed as given
         name = printer_name or ""
-    if adapter is None:
-        try:
-            adapter = _srv._get_adapter_for(name) if hasattr(_srv, "_get_adapter_for") else None
-        except Exception:  # noqa: BLE001
-            adapter = None
 
-    state: dict[str, Any] = {"kind": WATCH_STATE_KIND, "printer_name": name}
+    state: dict[str, Any] = {
+        "kind": WATCH_STATE_KIND,
+        "printer_name": name,
+        "printing": is_active_print_state(state_word) if isinstance(state_word, str) else None,
+    }
     readers = (
         ("camera", lambda: _camera_state(adapter), {"readable": False, "source": None}),
         ("watchdog", lambda: _watchdog_state(name), {"attached": False, "running": False}),
