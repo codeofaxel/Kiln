@@ -7,6 +7,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Bambu's H2D, H2D Pro, H2C and X2D are now supported.** Paid tiers add
+  per-material guidance for each one, plus additional depth.
+
 - **Your colours go to the spools that hold them.** Kiln stops rather than
   printing a colour you don't have loaded.
 
