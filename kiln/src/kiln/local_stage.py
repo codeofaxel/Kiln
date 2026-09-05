@@ -643,10 +643,15 @@ def _payload_for_mesh(mesh: str, **encode: Any) -> dict:
 
     Raises whatever the encoder raises; each door decides what to say about
     it, since they are not all answering a person.
+
+    The mesh path rides along so the plate door can find the slice this
+    machine made of it and lay the skirt, brim, prime tower and supports
+    around the part (:mod:`kiln.slicer_geometry`) — a mesh nobody sliced
+    gets exactly the payload it always did.
     """
     from kiln.stage_plate import attach_stage_plate
 
-    return attach_stage_plate(mesh_to_viewer_payload(mesh, **encode))
+    return attach_stage_plate(mesh_to_viewer_payload(mesh, **encode), mesh_path=mesh)
 
 
 def _inline_payload(token: str) -> dict | None:

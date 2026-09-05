@@ -223,6 +223,54 @@ def note_print_started(printer_name: str, file_name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def sliced_output_for(mesh_path: str | os.PathLike[str] | None) -> str | None:
+    """The G-code this machine sliced FROM ``mesh_path``, if it still exists.
+
+    The 3D stage's door to slicer-added geometry (``kiln.slicer_geometry``):
+    a skirt or a prime tower only exists in a slice, and this ledger is the
+    one place that knows which slice belongs to which mesh.  Same exact
+    join as every other read here — the path the slicer was handed, or the
+    retained twin copy ``note_print_started`` made of it — never a stem
+    match against whatever happens to sit in the output directory.
+
+    A slice OLDER than the mesh is not a slice of this mesh: a file edited
+    in place after slicing keeps its path and loses its G-code.  Newest
+    surviving entry wins.  Never raises.
+    """
+    try:
+        if not mesh_path:
+            return None
+        target = os.path.abspath(str(mesh_path))
+        if not os.path.isfile(target):
+            return None
+        mesh_mtime = os.path.getmtime(target)
+
+        def _fresh(gcode: Any) -> str | None:
+            if not gcode or not os.path.isfile(str(gcode)):
+                return None
+            if os.path.getmtime(str(gcode)) + 1.0 < mesh_mtime:
+                return None
+            return str(gcode)
+
+        active = _read_json(_ACTIVE_FILE, {})
+        if isinstance(active, dict):
+            for rec in active.values():
+                if isinstance(rec, dict) and rec.get("mesh") == target:
+                    found = _fresh(rec.get("gcode"))
+                    if found:
+                        return found
+        entries = _read_json(_SLICES_FILE, [])
+        if isinstance(entries, list):
+            for entry in reversed(entries):
+                if isinstance(entry, dict) and entry.get("input") == target:
+                    found = _fresh(entry.get("output"))
+                    if found:
+                        return found
+    except Exception:  # noqa: BLE001 — a missing twin is not a failure
+        logger.debug("monitor_twin.sliced_output_for failed", exc_info=True)
+    return None
+
+
 def active_twin(printer_name: str | None = None) -> dict[str, Any] | None:
     """The retained record for ``printer_name``, or — unnamed — the record
     of the print that started most recently.  ``None`` when nothing is
