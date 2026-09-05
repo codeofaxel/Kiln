@@ -7,6 +7,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Your colours go to the spools that hold them.** Kiln stops rather than
+  printing a colour you don't have loaded.
+
 - **Your AI assistant can better say what each tier gets.**
 
 - **History answers say what they cover.** Your print, job, failure and model
