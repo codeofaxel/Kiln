@@ -213,3 +213,32 @@ def test_the_local_doors_hand_kiln_pro_the_live_watch_state() -> None:
         assert server._coverage_block_for("default") == _BLOCK
     assert seen["watch"]["kind"] == "kiln.watch.v1", seen
     assert seen["watch"]["watchdog"] == {"attached": False, "running": False}
+
+
+def test_starting_a_health_session_answers_with_what_is_watching_now() -> None:
+    """The line is read AFTER the session starts, so it counts the session."""
+    from kiln import server
+
+    monitor = mock.MagicMock()
+    order: list[str] = []
+    monitor.start_monitoring.side_effect = lambda *a, **k: order.append("started")
+
+    def _line(name):
+        order.append("read")
+        return "What is watching this print — Kiln is watching: a heater fault."
+
+    with mock.patch("kiln.print_health_monitor.get_print_health_monitor", return_value=monitor), mock.patch.object(
+        server, "_coverage_line_for", side_effect=_line
+    ), mock.patch.object(server, "_get_adapter", return_value=mock.MagicMock()), mock.patch.object(
+        server, "_watch_capacity_error", return_value=None
+    ):
+        result = server.start_printer_health_monitoring("default", interval_seconds=30)
+    assert result.get("success"), result
+    assert result["coverage"].startswith("What is watching this print"), result
+    assert order == ["started", "read"], order
+    from pathlib import Path
+
+    src = Path(server.__file__).read_text(encoding="utf-8")
+    start = src.index("def start_printer_health_monitoring(")
+    body = src[start:src.index("def stop_printer_health_monitoring(")]
+    assert body.index("monitor.start_monitoring(") < body.index("_coverage_line_for(printer_name)")

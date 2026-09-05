@@ -17841,7 +17841,15 @@ def start_printer_health_monitoring(
 
         monitor = get_print_health_monitor()
         monitor.start_monitoring(printer_name, interval_seconds=interval_seconds)
-        return {"success": True, "printer": printer_name, "interval_seconds": interval_seconds}
+        result: dict[str, Any] = {
+            "success": True, "printer": printer_name, "interval_seconds": interval_seconds,
+        }
+        # What is watching now that the session runs — read after it starts,
+        # so the line counts the session it announces.
+        coverage = _coverage_line_for(printer_name)
+        if coverage:
+            result["coverage"] = coverage
+        return result
     except Exception as exc:
         logger.exception("Error in start_printer_health_monitoring")
         return _error_dict(f"Failed to start health monitoring: {exc}", code="MONITORING_ERROR")

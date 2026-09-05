@@ -1146,6 +1146,11 @@ class _MonitoringToolsPlugin:
                 }
                 if save_to_disk and watcher._save_dir:
                     resp["save_dir"] = watcher._save_dir
+                # What is watching now that this watch runs — read after the
+                # thread starts, so the line counts the watch it announces.
+                _coverage = _srv._coverage_line_for(printer_name)
+                if _coverage:
+                    resp["coverage"] = _coverage
                 return resp
 
             except PrinterNotFoundError:
