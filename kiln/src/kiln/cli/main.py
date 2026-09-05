@@ -4401,6 +4401,15 @@ def monitor(ctx: click.Context, interval: float,
         if not json_mode:
             click.echo(f"  Monitoring printer '{printer_name}' (poll every {interval}s, "
                        f"Ctrl+C to stop)")
+            # What is watching this print — the printer's own detectors and
+            # Kiln's, from kiln-pro when it is installed — said before the
+            # session starts, so nobody walks away on a watch that is not
+            # there.  Absent without kiln-pro, like the camera line.
+            from kiln.server import _coverage_line_for
+
+            _coverage = _coverage_line_for(printer_name)
+            if _coverage:
+                click.echo(f"  {_coverage}")
             flags = []
             if auto_pause:
                 flags.append("auto-pause")

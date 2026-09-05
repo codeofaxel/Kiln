@@ -282,6 +282,18 @@ def _camera_frame(printer_name: str | None, status: dict | None) -> tuple[str | 
         return None, "camera unavailable"
 
 
+def _coverage_block(printer_name: str | None) -> dict[str, Any] | None:
+    """kiln-pro's coverage block for this printer's model, when present.
+
+    One helper serves every door (``kiln.server._coverage_block_for``); this
+    is the local panel's call to it.  Without kiln-pro there is no block, the
+    same way there is no camera frame without a camera.
+    """
+    from kiln.server import _coverage_block_for
+
+    return _coverage_block_for(printer_name)
+
+
 def compose_local_payload(
     printer_name: str | None = None,
     include_camera: bool = False,
@@ -311,6 +323,7 @@ def compose_local_payload(
         camera_base64=camera_b64,
         camera_note=camera_note,
         account={"signed_in": _signed_in()},
+        coverage=_coverage_block(printer_name),
     )
     if printer_name:
         # The panel polls with the same argument the entry call named, so a

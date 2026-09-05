@@ -1878,6 +1878,31 @@ class TestMonitor:
         # Exit cleanly when the session ends in COMPLETED status.
         assert result.exit_code == 0, result.output
 
+    def test_monitor_command_says_what_is_watching_before_it_starts(
+        self, runner, mock_adapter, config_file
+    ):
+        """The header carries the coverage line when kiln-pro can compose
+        one, and nothing extra when it cannot."""
+        mock_instance, _captured = self._stub_monitor_class(mock_adapter)
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        line = "What is watching this print — watched: spaghetti. Kiln is watching: a heater fault."
+        with p1, p2, p3, patch(
+            "kiln.print_health_monitor.PrintHealthMonitor", return_value=mock_instance,
+        ), patch("kiln.server._coverage_line_for", return_value=line):
+            result = runner.invoke(
+                cli, ["--printer", "test-printer", "monitor", "--timeout", "1"],
+            )
+        assert line in result.output, result.output
+        assert result.output.index("Monitoring printer") < result.output.index("What is watching")
+
+        with p1, p2, p3, patch(
+            "kiln.print_health_monitor.PrintHealthMonitor", return_value=mock_instance,
+        ), patch("kiln.server._coverage_line_for", return_value=None):
+            result = runner.invoke(
+                cli, ["--printer", "test-printer", "monitor", "--timeout", "1"],
+            )
+        assert "What is watching" not in result.output, result.output
+
     def test_monitor_command_passes_interval_flag(
         self, runner, mock_adapter, config_file
     ):

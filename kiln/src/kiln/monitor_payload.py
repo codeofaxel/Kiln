@@ -64,6 +64,7 @@ def compose_monitor_payload(
     camera_base64: str | None,
     camera_note: str | None,
     account: dict[str, Any] | None = None,
+    coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The ``kiln.monitor.v1`` snapshot — pure composition, no I/O.
 
@@ -101,4 +102,14 @@ def compose_monitor_payload(
         payload["camera_note"] = camera_note
     if account is not None:
         payload["account"] = {"signed_in": bool(account.get("signed_in"))}
+    if coverage:
+        # What is actually watching this print, per failure class — composed
+        # by kiln-pro when it is present, and shown BEFORE the user walks
+        # away.  Optional context like the camera: its absence is never an
+        # error, and the panel ignores fields it does not know.
+        payload["coverage"] = {
+            "headline": coverage.get("headline"),
+            "by_status": coverage.get("by_status") or {},
+            "known": bool(coverage.get("known")),
+        }
     return payload
