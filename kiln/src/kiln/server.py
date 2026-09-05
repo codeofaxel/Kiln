@@ -1426,6 +1426,48 @@ def _get_adapter() -> PrinterAdapter:
 # ---------------------------------------------------------------------------
 
 
+def _pro_bridge():
+    """kiln-pro's feature bridge when it is installed, else ``None``."""
+    try:
+        from kiln_pro.bridge import pro_features
+    except ImportError:
+        return None
+    return pro_features
+
+
+def _coverage_block_for(printer_name: str | None) -> dict[str, Any] | None:
+    """What is watching *printer_name*'s print, as the monitor wire carries it.
+
+    Interface contract only: public Kiln knows that kiln-pro can say what a
+    printer's own detectors watch, and asks; the answer and its shape are
+    kiln-pro's (https://kiln3d.com).  Returns the
+    ``coverage`` block of ``kiln.monitor.v1`` — ``headline``, ``by_status``,
+    ``known`` — or ``None`` without kiln-pro, without a resolvable model, or
+    on any failure.  Never raises: a report must not fail because a courtesy
+    line could not be composed.
+    """
+    try:
+        pro = _pro_bridge()
+        if pro is None or not pro.is_available("device_intelligence"):
+            return None
+        model = _resolve_printer_model_live(printer_name)
+        if not model:
+            return None
+        block = pro.device_intelligence.coverage_block(model)
+        if not isinstance(block, dict) or not block.get("headline"):
+            return None
+        return block
+    except Exception as exc:  # noqa: BLE001 — a missing courtesy line is not a failure
+        logger.debug("coverage unavailable for %r: %s", printer_name, exc)
+        return None
+
+
+def _coverage_line_for(printer_name: str | None) -> str | None:
+    """The one-line coverage headline for *printer_name*'s model, or ``None``."""
+    block = _coverage_block_for(printer_name)
+    return block["headline"] if block else None
+
+
 def _resolve_printer_model_live(printer_name: str | None = None) -> str:
     """Return the current printer_id preferring the live config.yaml
     resolver over the frozen module global.  This lets safety gates
@@ -4136,6 +4178,16 @@ def printer_status(
         }
         if detail == "full":
             response["capabilities"] = adapter.capabilities.to_dict()
+        # Which catalogue machine this is (``bambu_x1c``), resolved live the
+        # way every safety gate resolves it, so a reader that is not on this
+        # box (the hosted monitor door) can ask what this model's own
+        # detectors watch.  Reported at BOTH detail levels for the same reason
+        # the name is: it is what makes a reading attributable to a machine,
+        # and it costs the config read the name already pays.  Omitted when
+        # no source has a value, so "unknown" is never a guessed id.
+        resolved_model = _resolve_printer_model_live(printer_name)
+        if resolved_model:
+            response["printer_model"] = resolved_model
         # Which machine this describes.  Omitted rather than guessed when the
         # config carries no name for it, so a reader can tell "unnamed" from
         # "named something we did not bother to pass on".  Reported at BOTH
@@ -4956,6 +5008,15 @@ def monitor_print(
         # OR the printed file's intent sidecar resolves to one (via the
         # upload manifest).  Best-effort — absent / unresolvable brief
         # silently omits the line so the report stays clean.
+        # What is actually watching this print — kiln-pro's per-class
+        # coverage statement, in one line, so the report says what the
+        # printer's own detectors cover before anyone walks away.  Absent
+        # without kiln-pro, the way the camera line is absent without a
+        # camera; the full statement is one question away
+        # (``answer_printer_question(<model>, "what is watching my print")``).
+        _coverage_line = _coverage_line_for(printer_name)
+        if _coverage_line:
+            lines.append(f"- {_coverage_line}")
         effective_brief_id = brief_id or _auto_derive_brief_id(file_name)
         goal_line = _format_goal_line_for_monitor(effective_brief_id)
         if goal_line:
