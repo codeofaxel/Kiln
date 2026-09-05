@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-04T02:18:48.327212+00:00",
+  "generated": "2026-09-05T19:55:43.947599+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -13434,7 +13434,7 @@
     },
     {
       "name": "answer_printer_question",
-      "description": "Answer one factual question about one supported printer.",
+      "description": "Answer one factual question about one printer, including whether it protects against thermal runaway.",
       "tier": "free",
       "access": "free",
       "category": "print_intelligence",
