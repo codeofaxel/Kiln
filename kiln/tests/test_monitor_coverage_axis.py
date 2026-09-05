@@ -192,3 +192,24 @@ def test_the_full_status_read_names_the_catalogue_model() -> None:
         server, "read_status", return_value=(state, job)
     ), mock.patch.object(server, "_resolve_printer_model_live", return_value=""):
         assert "printer_model" not in server.printer_status(detail="lite")
+
+
+def test_the_local_doors_hand_kiln_pro_the_live_watch_state() -> None:
+    """The card and the report say "Kiln is watching" only when it is, so
+    every local door passes the state read off THIS process, never nothing."""
+    from kiln import server
+
+    seen: dict = {}
+
+    def _block(model, **kw):
+        seen.update(kw)
+        return _BLOCK
+
+    pro = _fake_pro()
+    pro.device_intelligence = SimpleNamespace(coverage_block=_block)
+    with mock.patch.object(server, "_pro_bridge", return_value=pro), mock.patch.object(
+        server, "_resolve_printer_model_live", return_value="bambu_x1c"
+    ), mock.patch.object(server, "_resolve_adapter", side_effect=RuntimeError("no printer")):
+        assert server._coverage_block_for("default") == _BLOCK
+    assert seen["watch"]["kind"] == "kiln.watch.v1", seen
+    assert seen["watch"]["watchdog"] == {"attached": False, "running": False}

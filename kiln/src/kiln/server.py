@@ -1453,7 +1453,16 @@ def _coverage_block_for(printer_name: str | None) -> dict[str, Any] | None:
         model = _resolve_printer_model_live(printer_name)
         if not model:
             return None
-        block = pro.device_intelligence.coverage_block(model)
+        # What Kiln itself is watching on this machine, read live, so the
+        # card and the report say "Kiln is watching" only when it is.
+        from kiln.watch_state import kiln_watch_state
+
+        try:
+            adapter = _resolve_adapter(printer_name)
+        except Exception:  # noqa: BLE001 — no adapter is a state, not an error
+            adapter = None
+        watch = kiln_watch_state(printer_name, adapter=adapter)
+        block = pro.device_intelligence.coverage_block(model, watch=watch)
         if not isinstance(block, dict) or not block.get("headline"):
             return None
         return block
@@ -4178,6 +4187,19 @@ def printer_status(
         }
         if detail == "full":
             response["capabilities"] = adapter.capabilities.to_dict()
+        # What Kiln itself is watching on this machine, right now — the
+        # watchdog attached at print start, an opt-in health session, a
+        # background watch, a readable camera.  Live facts from this
+        # process's registries (``kiln.watch_state``), at BOTH detail levels
+        # for the same reason the model is: the hosted monitor door's
+        # agent-facing verb only ever polls lite, and a coverage card that
+        # says "Kiln is watching" must be true at the moment it is read.
+        try:
+            from kiln.watch_state import kiln_watch_state
+
+            response["kiln_watch"] = kiln_watch_state(printer_name, adapter=adapter)
+        except Exception as exc:  # noqa: BLE001 — context beside the reading, never the reading
+            logger.debug("watch state unavailable for %r: %s", printer_name, exc)
         # Which catalogue machine this is (``bambu_x1c``), resolved live the
         # way every safety gate resolves it, so a reader that is not on this
         # box (the hosted monitor door) can ask what this model's own
