@@ -551,10 +551,20 @@ class TestTokenMinting:
             _Result({"success": True, "input_mesh_path": before, "repaired_stl": after}))
         assert local_stage.resolve(tok) == after
 
-    def test_existing_hosted_token_is_left_alone(self, tmp_path):
+    def test_an_existing_hosted_token_is_bound_to_the_local_mesh(self, tmp_path):
+        """INVERTED 2026-09-05, deliberately — this used to assert ``is None``.
+
+        Bailing out on a hosted token was the bug, not the guard.  The viewer
+        presents whatever token the payload carries to this door, which knows
+        only tokens this machine minted, so returning None here is what left
+        the stage grey (measured 2026-09-01, a paint that minted a cloud
+        artifact).  Kept and inverted rather than deleted: a green test
+        asserting the opposite of the shipped behaviour is how this quietly
+        comes back.
+        """
         r = _Result({"success": True, "stl_path": _stl(tmp_path / "a.stl")},
                     structuredContent={"artifact": {"artifact_token": "hosted-tok"}})
-        assert local_stage.token_for_call_result(r) is None
+        assert local_stage.token_for_call_result(r) == "hosted-tok"
 
     def test_prose_content_does_not_raise(self):
         assert local_stage.token_for_call_result(_Result(None)) is None
@@ -920,3 +930,71 @@ class TestTokensResolveAcrossProcesses:
         local_stage._mint("/tmp/y.stl")
         mode = local_stage._token_ledger_path().stat().st_mode & 0o777
         assert mode == 0o600
+
+
+class TestAHostedTokenReachesTheLocalMesh:
+    """A cloud-stored result must still show the part, not a grey stage.
+
+    A kiln-pro tool that stores its output in the cloud returns a HOSTED
+    artifact token.  The viewer presents that token to this door's payload
+    verb, which knows only tokens this machine minted, so the fetch was
+    refused and the stage came up grey.  The token is now bound to the local
+    mesh, through the same ledger a minted token uses.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _own_kiln_home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "kilnhome"))
+        local_stage._reset_for_tests()
+        yield
+        local_stage._reset_for_tests()
+
+    def test_the_hosted_token_resolves_to_the_local_mesh(self, tmp_path):
+        mesh = _stl(tmp_path / "part.stl")
+        r = _Result({"success": True, "stl_path": mesh},
+                    structuredContent={"artifact": {"artifact_token": "hosted-abc"}})
+        assert local_stage.token_for_call_result(r) == "hosted-abc"
+        assert local_stage.resolve("hosted-abc") == mesh
+
+    def test_a_sibling_server_resolves_it_too(self, tmp_path):
+        """The point of the ledger: any Kiln server on the box can answer.
+
+        An in-memory-only binding passes the test above and still fails a
+        real user, whose fetch is routed to whichever server the host picks.
+        """
+        mesh = _stl(tmp_path / "part.stl")
+        r = _Result({"success": True, "stl_path": mesh},
+                    structuredContent={"artifact": {"artifact_token": "hosted-xyz"}})
+        local_stage.token_for_call_result(r)
+        local_stage._tokens.clear()  # be a different server process
+        assert local_stage.resolve("hosted-xyz") == mesh
+
+    def test_a_result_with_no_hosted_token_still_mints_its_own(self, tmp_path):
+        mesh = _stl(tmp_path / "part.stl")
+        token = local_stage.token_for_call_result(
+            _Result({"success": True, "stl_path": mesh}))
+        assert token and local_stage.resolve(token) == mesh
+
+    def test_rebinding_an_existing_token_evicts_nothing(self, tmp_path):
+        """Re-staging the SAME result must not cost an unrelated live token.
+
+        ``_record`` evicts only when the token is new.  Without that guard a
+        full table would drop somebody else's mapping every time a result was
+        re-staged — and re-staging is normal: the viewer re-fetches, and a
+        tool called twice on one mesh binds the same token twice.
+
+        (Binding a genuinely NEW token into a full table does evict, which is
+        the bound doing its job and is covered by the store-is-bounded test.)
+        """
+        mesh = _stl(tmp_path / "part.stl")
+        local_stage._adopt("hosted-stable", mesh)
+        for i in range(local_stage._TOKENS_MAX - 1):
+            local_stage._mint(f"/tmp/filler_{i}.stl")
+        assert len(local_stage._tokens) == local_stage._TOKENS_MAX
+        before = set(local_stage._tokens)
+
+        for _ in range(5):
+            local_stage._adopt("hosted-stable", mesh)
+
+        assert set(local_stage._tokens) == before, "a re-bind evicted something"
+        assert local_stage.resolve("hosted-stable") == mesh

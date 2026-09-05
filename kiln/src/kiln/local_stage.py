@@ -393,14 +393,44 @@ def _ledger_read(token: str) -> str | None:
         return None
 
 
-def _mint(mesh_path: str) -> str:
-    token = secrets.token_urlsafe(18)
+def _record(token: str, mesh_path: str) -> str:
+    """Bind *token* to *mesh_path* in memory AND in the shared ledger.
+
+    The recording half of :func:`_mint`, split out because a token minted
+    ELSEWHERE sometimes has to resolve here too (see ``_adopt``).  One path
+    rather than two: the bound of the fast-path dict and the ledger write
+    have to stay in step, and two copies of that pairing would not.
+    """
     with _lock:
-        if len(_tokens) >= _TOKENS_MAX:
+        # Only evict when this is a NEW token.  Re-binding an existing one is
+        # not growth, and treating it as growth would drop an unrelated live
+        # token every time a result was re-staged.
+        if len(_tokens) >= _TOKENS_MAX and token not in _tokens:
             _tokens.pop(next(iter(_tokens)), None)
         _tokens[token] = mesh_path
     _ledger_write(token, mesh_path)
     return token
+
+
+def _mint(mesh_path: str) -> str:
+    return _record(secrets.token_urlsafe(18), mesh_path)
+
+
+def _adopt(token: str, mesh_path: str) -> str:
+    """Let a token minted elsewhere resolve to a local mesh on this door.
+
+    A kiln-pro tool that stores its result in the cloud returns a HOSTED
+    artifact token.  The viewer presents whatever token the payload carries
+    to this door's payload verb, which knows only tokens this machine
+    minted, so the fetch was refused and the stage came up grey (measured
+    2026-09-01, on a paint that minted a cloud artifact).
+
+    The mesh is the operator's own local file either way, so the honest fix
+    is to make the hosted token resolve to it rather than to rewrite the
+    field ``keep_design`` and ``viewer_url`` read.  Recorded through the same
+    ledger as a minted token, so a sibling Kiln server answers it too.
+    """
+    return _record(token, mesh_path)
 
 
 def resolve(token: str) -> str | None:
@@ -555,11 +585,16 @@ def token_for_call_result(result: Any) -> str | None:
     try:
         if getattr(result, "isError", False):
             return None
+        hosted_token: str | None = None
         existing = getattr(result, "structuredContent", None)
         if isinstance(existing, dict):
             art = existing.get("artifact")
             if isinstance(art, dict) and art.get("artifact_token"):
-                return None  # already carries the hosted shape
+                # NOT a reason to bail out.  The hosted shape is what the
+                # viewer will present to this door, and this door only knows
+                # local tokens — so leaving now is precisely what produced the
+                # grey stage.  Carry the token down and bind it to the mesh.
+                hosted_token = str(art["artifact_token"]) or None
         for block in getattr(result, "content", None) or []:
             text = getattr(block, "text", None)
             if not isinstance(text, str):
@@ -570,6 +605,8 @@ def token_for_call_result(result: Any) -> str | None:
             path = Path(mesh)
             if path.suffix.lower() not in _MESH_SUFFIXES or not path.is_file():
                 continue
+            if hosted_token:
+                return _adopt(hosted_token, mesh)
             return _mint(mesh)
     except Exception as exc:  # noqa: BLE001 — a stage must never break a tool
         logger.debug("local stage token not minted: %s", exc)
