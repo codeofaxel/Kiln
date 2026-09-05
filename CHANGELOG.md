@@ -31,6 +31,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **See what your slicer will print around your part.** An Extras toggle on the
+  3D stage draws the skirt, brim, supports, raft and prime tower from your
+  sliced file, each labelled with its grams — from any slicer that labels its
+  paths.
+
 - **Load, unload and purge filament from Kiln on most printers.** Purging
   doubles as a clog test: Kiln says whether the filament actually came
   through and reads the printer's own error back in plain words. Printers
