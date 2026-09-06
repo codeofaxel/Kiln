@@ -42,6 +42,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   sliced file, each labelled with its grams — from any slicer that labels its
   paths.
 
+- **See what your slicer adds around your part, layer by layer.** The layer view
+  now draws the skirt, brim, supports and prime tower in the same colours the 3D
+  stage gives them, with one toggle to show or hide the lot — and paints every
+  path in the filament it actually prints in.
+
 - **Load, unload and purge filament from Kiln on most printers.** Purging
   doubles as a clog test: Kiln says whether the filament actually came
   through and reads the printer's own error back in plain words. Printers
