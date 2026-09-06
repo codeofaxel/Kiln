@@ -4444,12 +4444,14 @@ class BambuAdapter(PrinterAdapter):
         sent_at = time.monotonic()
         self.send_gcode([wire])
         # The printer reports fan level on a 0-15 scale, not the 0-255 the
-        # G-code carries; allow one step of rounding either side.
+        # G-code carries; allow one step of rounding either side, except at
+        # the ends of the scale, where off and full are exact.
         want_level = round(speed / 255 * 15)
+        slack = 0 if want_level in (0, 15) else 1
         return self._readback_verdict(
             f"{node.strip().lower()} fan {pct}%",
             _FAN_INDEX_TO_FIELD[index],
-            lambda v: abs(int(float(v)) - want_level) <= 1,
+            lambda v: abs(int(float(v)) - want_level) <= slack,
             sent_at=sent_at,
             wire=wire,
         )

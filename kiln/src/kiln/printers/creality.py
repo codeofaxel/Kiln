@@ -23,6 +23,7 @@ from kiln.printers.base import (
     UploadResult,
     delegate_outcome_lifecycle,
 )
+from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.moonraker import MoonrakerAdapter
 
 _MOONRAKER_PROBE_PATH = "/server/info"
@@ -874,16 +875,16 @@ class CrealityAdapter(PrinterAdapter):
     def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
         return self._backend._purge_filament_impl(plan)
 
-    def set_tool_temp(self, target: float) -> bool:
+    def set_tool_temp(self, target: float) -> CommandVerdict:
         return self._backend.set_tool_temp(target)
 
-    def set_bed_temp(self, target: float) -> bool:
+    def set_bed_temp(self, target: float) -> CommandVerdict:
         return self._backend.set_bed_temp(target)
 
-    def send_gcode(self, commands: list[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> CommandVerdict:
         return self._backend.send_gcode(commands)
 
-    def set_fan(self, node: str, percent: int) -> bool:
+    def set_fan(self, node: str, percent: int) -> CommandVerdict:
         """Set the part-cooling fan speed via the Moonraker/Klipper backend.
 
         Only the single default part-cooling fan is supported — see

@@ -76,6 +76,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from kiln.printers.command_verdict import CommandVerdict
 
 logger = logging.getLogger(__name__)
 
@@ -1247,7 +1248,7 @@ class DuetAdapter(PrinterAdapter):
     # PrinterAdapter -- temperature control
     # ------------------------------------------------------------------
 
-    def set_tool_temp(self, target: float) -> bool:
+    def set_tool_temp(self, target: float) -> CommandVerdict:
         """Set the hot-end (tool) target temperature in degrees Celsius.
 
         Args:
@@ -1262,9 +1263,14 @@ class DuetAdapter(PrinterAdapter):
         """
         self._validate_temp(target, _MAX_HOTEND_TEMP, "Hotend")
         self._run_gcode(f"M104 S{int(target)}")
-        return True
+        return CommandVerdict.accepted_only(
+            f"Hotend target {int(target)}°C: RepRapFirmware took the command and did not reject it. "
+            "The resulting state is not read back on this call — read "
+            "printer_status to confirm.",
+            corroboration="rr_gcode_ok",
+        )
 
-    def set_bed_temp(self, target: float) -> bool:
+    def set_bed_temp(self, target: float) -> CommandVerdict:
         """Set the heated-bed target temperature in degrees Celsius.
 
         Args:
@@ -1279,7 +1285,12 @@ class DuetAdapter(PrinterAdapter):
         """
         self._validate_temp(target, _MAX_BED_TEMP, "Bed")
         self._run_gcode(f"M140 S{int(target)}")
-        return True
+        return CommandVerdict.accepted_only(
+            f"Bed target {int(target)}°C: RepRapFirmware took the command and did not reject it. "
+            "The resulting state is not read back on this call — read "
+            "printer_status to confirm.",
+            corroboration="rr_gcode_ok",
+        )
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code
@@ -1303,7 +1314,7 @@ class DuetAdapter(PrinterAdapter):
             ),
         )
 
-    def send_gcode(self, commands: list[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> CommandVerdict:
         """Send one or more G-code commands to the printer.
 
         ``rr_gcode`` accepts several newline-separated codes in one request,
@@ -1320,9 +1331,16 @@ class DuetAdapter(PrinterAdapter):
         """
         script = "\n".join(commands)
         if not script.strip():
-            return True
+            return CommandVerdict.accepted_only(
+                "Nothing to send: every line was blank.", corroboration="none"
+            )
         self._run_gcode(script)
-        return True
+        return CommandVerdict.accepted_only(
+            f"{len(commands)} G-code line(s): RepRapFirmware took the command and did not reject it. "
+            "The resulting state is not read back on this call — read "
+            "printer_status to confirm.",
+            corroboration="rr_gcode_ok",
+        )
 
 
     # ------------------------------------------------------------------

@@ -60,6 +60,7 @@ from kiln.printers.base import (
     UploadResult,
     canonical_model_key,
 )
+from kiln.printers.command_verdict import CommandVerdict
 
 logger = logging.getLogger(__name__)
 
@@ -1344,23 +1345,21 @@ class ElegooAdapter(PrinterAdapter):
     # PrinterAdapter -- temperature control
     # ------------------------------------------------------------------
 
-    def set_tool_temp(self, target: float) -> bool:
+    def set_tool_temp(self, target: float) -> CommandVerdict:
         """Set the hotend target temperature via G-code."""
         self._validate_temp(target, 350.0, "Hotend")
-        self.send_gcode([f"M104 S{int(target)}"])
-        return True
+        return self.send_gcode([f"M104 S{int(target)}"])
 
-    def set_bed_temp(self, target: float) -> bool:
+    def set_bed_temp(self, target: float) -> CommandVerdict:
         """Set the heated-bed target temperature via G-code."""
         self._validate_temp(target, 130.0, "Bed")
-        self.send_gcode([f"M140 S{int(target)}"])
-        return True
+        return self.send_gcode([f"M140 S{int(target)}"])
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
 
-    def send_gcode(self, commands: list[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> CommandVerdict:
         """Send G-code commands to the printer.
 
         Uses a custom SDCP command if the printer supports it,
@@ -1370,7 +1369,7 @@ class ElegooAdapter(PrinterAdapter):
             commands: List of G-code command strings.
 
         Returns:
-            ``True`` if commands were sent.
+            A :class:`CommandVerdict` that is ``accepted`` (sent, not read back).
 
         Raises:
             PrinterError: If sending fails.
@@ -1385,7 +1384,12 @@ class ElegooAdapter(PrinterAdapter):
                 )
             except PrinterError:
                 raise
-        return True
+        return CommandVerdict.accepted_only(
+            f"Sent {len(commands)} raw G-code line(s) over SDCP. SDCP does not "
+            "report execution, so the effect is not confirmed — read "
+            "printer_status to check.",
+            corroboration="sdcp_sent",
+        )
 
     # ------------------------------------------------------------------
     # Fan control
@@ -1424,7 +1428,7 @@ class ElegooAdapter(PrinterAdapter):
         machine, device = self._read_identity_fields()
         return device or machine
 
-    def set_fan(self, node: str, percent: int) -> bool:
+    def set_fan(self, node: str, percent: int) -> CommandVerdict:
         """Set the part-cooling fan speed via SDCP's settings command.
 
         Only the single default part-cooling fan is supported. Refuses on
@@ -1472,7 +1476,11 @@ class ElegooAdapter(PrinterAdapter):
             _CMD_UPDATE_SETTINGS,
             {"TargetFanSpeed": {"ModelFan": pct}},
         )
-        return True
+        return CommandVerdict.accepted_only(
+            f"Part fan {int(percent)}%: the printer acknowledged the SDCP settings "
+            "command. The fan level is not read back on this call.",
+            corroboration="sdcp_ack",
+        )
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- file deletion
