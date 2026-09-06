@@ -1300,3 +1300,27 @@ class TestCalibrateRefusesMidPrint:
         # The pipeline proceeds past the state gate and sends motion.
         assert adapter.send_gcode.called
         assert result.steps[0].name == "connect"
+
+
+class TestCalibrateSendsWholeCommands:
+    """``send_gcode`` takes a list of lines.  Handed a bare string, the Bambu
+    and Moonraker adapters join its CHARACTERS with newlines, so ``"G28"``
+    reached the printer as three one-character lines.  Pin the list."""
+
+    @patch("kiln.pipelines._resolve_pipeline_adapter")
+    def test_home_and_level_are_sent_as_one_line_each(self, mock_resolve: MagicMock) -> None:
+        from kiln.pipelines import calibrate
+        from kiln.printers.base import PrinterState, PrinterStatus
+
+        adapter = MagicMock()
+        adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.IDLE)
+        adapter.send_gcode.return_value = True
+        mock_resolve.return_value = adapter
+
+        calibrate(printer_name="p1")
+
+        sent = [call.args[0] for call in adapter.send_gcode.call_args_list]
+        assert ["G28"] in sent
+        assert ["G29"] in sent
+        for arg in sent:
+            assert isinstance(arg, list), f"send_gcode was handed {arg!r}, not a list of lines"
