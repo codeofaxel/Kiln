@@ -449,11 +449,56 @@ def describe_stale_state(
     """
     if state_age_seconds is None or state_age_seconds <= max_age:
         return None
+    # The temperature clause rides in THIS sentence, not only in the
+    # dedicated note, because this is the one string the hosted surfaces
+    # (the web Monitor's stale band, the inline panel, the hosted summary)
+    # already show.  It is always true when the sentence is: the
+    # temperature fields blank on exactly this rule (see
+    # :meth:`PrinterState.__post_init__`).
     return (
         f"Telemetry is {state_age_seconds:.0f}s old — the printer has not "
         f"reported since, so {str(state_label).upper()} describes then, not "
-        f"now. Verify against the machine before acting."
+        f"now, and Kiln does not know the hotend or bed temperature. Verify "
+        f"against the machine before acting."
     )
+
+
+def describe_unknown_temperatures(state_age_seconds: float | None) -> str:
+    """Why there is no temperature in this reading, and what to do instead.
+
+    The sentence beside every blanked temperature field.  It names the
+    display as the ONLY authority rather than "the latest number" because
+    the failure it exists for is a person deciding a hotend is cool from
+    a number Kiln could not vouch for (2026-09-06: 38°C quoted, 110°C on
+    the screen, no gloves).  It deliberately carries no last-known value:
+    a dated number is still a number a reader will act on, and nothing
+    that keeps a person safe needs one -- unknown already means "assume
+    hot".
+
+    ``None`` age is the adapter naming the reading stale without measuring
+    how stale; the sentence then says only that reporting has stopped.
+    """
+    if state_age_seconds is None:
+        since = "the printer has stopped reporting"
+    else:
+        since = f"the printer has not reported for {state_age_seconds:.0f}s"
+    return (
+        f"Kiln does not know the hotend or bed temperature: {since}. The "
+        "printer's own display is the only authority — read it before "
+        "touching anything, and do not act on any earlier number."
+    )
+
+
+#: The fields a person might act on with their hands.  Blanked together, by
+#: one rule, in :meth:`PrinterState.__post_init__`.
+TEMPERATURE_FIELDS: tuple[str, ...] = (
+    "tool_temp_actual",
+    "tool_temp_target",
+    "bed_temp_actual",
+    "bed_temp_target",
+    "chamber_temp_actual",
+    "chamber_temp_target",
+)
 
 
 @dataclass
@@ -512,6 +557,11 @@ class PrinterState:
     # to read; ``offline`` on its own was neither.
     cause: str | None = None
     remedy: str | None = None
+    # Why the six temperature fields are empty, when they are empty for a
+    # trust reason rather than because the printer has no such sensor.
+    # Set beside the blanking in ``__post_init__``; ``None`` whenever the
+    # temperatures above can be acted on.
+    temperature_note: str | None = None
 
     def __post_init__(self) -> None:
         """Promote an expired reading to ``STALE``, whoever built it.
@@ -526,22 +576,55 @@ class PrinterState:
         measured for that printer.  An adapter that queries the printer on
         every call sets neither and is untouched: it is current by
         construction, and warning about it would make the signal noise.
+
+        Then, whatever the run state: a reading Kiln cannot vouch for
+        carries NO temperatures.  Not a caveat beside the number -- the
+        caveats already existed on 2026-09-06 and the number was quoted
+        anyway -- the field is empty, so no door can format it.  The run
+        state is kept through staleness because a gate needs it to fail
+        closed; a temperature has no such consumer, and the only thing a
+        stale one can do is be believed.
         """
-        if (
+        if not (
             self.state is PrinterStatus.STALE
             or self.state in UNREACHABLE_STATES
             or self.state_age_seconds is None
             or self.state_stale_after_seconds is None
             or self.state_age_seconds <= self.state_stale_after_seconds
         ):
+            self.last_known_state = self.state
+            self.state = PrinterStatus.STALE
+            if self.cause is None:
+                self.cause = CAUSE_SILENT
+            if self.remedy is None:
+                self.remedy = describe_stale_remedy(
+                    self.state_age_seconds, self.state_stale_after_seconds
+                )
+
+        # The floor.  Three ways in, one rule out:
+        #   * the reading is STALE -- promoted just now, or named so by an
+        #     adapter that diagnosed it;
+        #   * the reading is past the budget in force without having been
+        #     promoted -- an age with no measured budget, which is what the
+        #     OctoPrint and Moonraker push caches supply, and on which
+        #     ``staleness_note`` already fires past the shipped floor.  The
+        #     temperatures blank on that same rule, so no payload can say
+        #     "these readings may be stale" beside the readings;
+        #   * there is no connection at all.
+        if not (
+            self.state is PrinterStatus.STALE
+            or self.is_stale()
+            or not self.connected
+        ):
             return
-        self.last_known_state = self.state
-        self.state = PrinterStatus.STALE
-        if self.cause is None:
-            self.cause = CAUSE_SILENT
-        if self.remedy is None:
-            self.remedy = describe_stale_remedy(
-                self.state_age_seconds, self.state_stale_after_seconds
+        for name in TEMPERATURE_FIELDS:
+            setattr(self, name, None)
+        # The sentence only where there was something to be tempted by: a
+        # printer Kiln cannot reach has no numbers to mistake for current
+        # ones, and its ``cause``/``remedy`` already say what is wrong.
+        if self.connected and self.temperature_note is None:
+            self.temperature_note = describe_unknown_temperatures(
+                self.state_age_seconds
             )
 
     @property
@@ -617,6 +700,7 @@ class PrinterState:
             "nozzle_type", "speed_profile", "speed_magnitude", "print_error",
             "state_age_seconds", "last_job_result", "last_known_state",
             "state_stale_after_seconds", "cause", "remedy",
+            "temperature_note",
         )
         for key in _EXTENDED:
             if data.get(key) is None:

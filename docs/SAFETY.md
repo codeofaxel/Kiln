@@ -196,6 +196,9 @@ left on indefinitely when no print is active.
    - Heater targets are still above zero.
 4. If all conditions are met, it sends cooldown commands (set hotend and bed
    to 0 C) and emits a `TEMPERATURE_WARNING` event.
+5. If the reading has no trustworthy targets (see *Temperatures Kiln cannot
+   vouch for* below), the watch stays armed and is checked again on the next
+   tick.  An unknown target is never treated as an off heater.
 
 ### Configuration
 
@@ -203,6 +206,34 @@ Set `KILN_HEATER_TIMEOUT` to the number of minutes before auto-cooldown
 (default 30, set to 0 to disable).  The timer resets on print start/end and
 `set_temperature` calls, so the watchdog never interferes during active
 printing and gives you time to inspect a finished print.
+
+---
+
+## Temperatures Kiln Cannot Vouch For
+
+A hotend or bed temperature is the one reading a person acts on with their
+hands.  Some printers (Bambu over MQTT, Elegoo over websocket, OctoPrint and
+Moonraker when push monitoring is on) are read from a cache the printer
+fills; if the printer stops reporting, the cache keeps answering with the
+last numbers it was given.  A cached 38 C beside a hotend that is really at
+110 C is a burn, and a caveat next to the number does not prevent it -- the
+number is what gets read.
+
+So the rule is on the reading itself, not on any one screen:
+
+- A reading that is **stale** (older than the printer's own reporting budget,
+  and unanswered when Kiln asked again) or **disconnected** carries **no
+  temperatures at all**.  Every `*_temp_actual` and `*_temp_target` field is
+  empty, and a `temperature_note` says why: *Kiln does not know the hotend or
+  bed temperature ... The printer's own display is the only authority -- read
+  it before touching anything, and do not act on any earlier number.*
+- `printer_status` mirrors that sentence as `temperature_warning`;
+  `monitor_print` and `kiln status` print *unknown* where the numbers would
+  be; `set_temperature` carries the sentence instead of comparing the new
+  target with one it cannot trust.
+- Kiln never shows a "last known" temperature.  Nothing that keeps a person
+  safe needs one -- unknown already means *assume hot* -- and a dated number is
+  still a number a reader will act on.
 
 ---
 

@@ -166,6 +166,23 @@ class HeaterWatchdog:
             # Printer offline or not configured — nothing to cool down.
             return
 
+        # A reading Kiln cannot vouch for -- stale, or no connection -- has
+        # its targets BLANKED (PrinterState.__post_init__), and a blank
+        # target is not an off heater.  Standing the watch down here would
+        # be the one direction this watchdog must never err in: the heater
+        # it exists to catch may be on, unseen.  Leave the tracker armed
+        # and ask again next tick; nothing is commanded on a printer Kiln
+        # cannot hear.
+        if (
+            getattr(state, "temperature_note", None)
+            or not getattr(state, "connected", True)
+        ):
+            logger.debug(
+                "Heater watchdog: no trustworthy temperature reading; "
+                "keeping the idle-heat watch armed"
+            )
+            return
+
         tool_target = getattr(state, "tool_temp_target", None) or 0
         bed_target = getattr(state, "bed_temp_target", None) or 0
 

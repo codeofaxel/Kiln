@@ -3985,6 +3985,14 @@ class TestTelemetryVintage:
         A temperature-only push says nothing about what the printer is doing.
         Letting it reset the clock would print a small, confident freshness
         number beside a state minutes old — a new wrong answer, not a fix.
+
+        The temperature that frame carried lands in the CACHE and stays out
+        of the READING: a reading past its budget carries no temperatures at
+        all (``PrinterState.__post_init__``), because the one thing a
+        temperature beside a stale state can do is be believed.  A session
+        that delivers frames but answers no ``pushall`` is the half-open
+        case; it is resolved by the ask-and-reconnect path, not by showing
+        the number.
         """
         _push(adapter_with_mqtt, gcode_state="RUNNING", nozzle_temper=210)
         adapter_with_mqtt._gcode_state_time -= 300.0
@@ -3996,7 +4004,9 @@ class TestTelemetryVintage:
         # Unchanged by the merge — and reported as the expired reading it is.
         assert state.effective_state is PrinterStatus.PRINTING
         assert state.state is PrinterStatus.STALE
-        assert state.tool_temp_actual == 35  # the new temperature did land
+        assert adapter_with_mqtt._last_status["nozzle_temper"] == 35  # the merge landed it
+        assert state.tool_temp_actual is None  # the reading does not vouch for it
+        assert state.temperature_note is not None
         assert state.state_age_seconds is not None
         assert state.state_age_seconds > 295.0
         assert state.is_stale() is True

@@ -1061,9 +1061,14 @@ class TestTelemetryVintage:
         ):
             state = adapter_with_ws.get_state()
 
-        assert state.tool_temp_actual == 35.0  # the temperature is current
+        # The frame landed in the cache; the READING, being past its budget,
+        # carries no temperature at all — one rule for every push adapter
+        # (``PrinterState.__post_init__``), so a stale state can never be
+        # read beside a number that looks current.
+        assert state.tool_temp_actual is None
+        assert state.temperature_note is not None
         assert state.state_age_seconds is not None
-        assert state.state_age_seconds > 295.0  # the state is not
+        assert state.state_age_seconds > 295.0  # the state is not current
         assert state.is_stale() is True
 
     def test_never_pushed_state_claims_no_age(

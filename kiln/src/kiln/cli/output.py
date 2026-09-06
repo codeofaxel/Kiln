@@ -85,6 +85,12 @@ def format_temp(
     target: float | None,
 ) -> str:
     """Format temperatures like ``214.8°C / 220.0°C``."""
+    # Two unknowns are "unknown", not "N/A -> off": a reading with no actual
+    # AND no target is one Kiln could not vouch for (a stale or disconnected
+    # PrinterState blanks both), and "off" would be a claim about the heater
+    # that nobody is in a position to make.
+    if actual is None and target is None:
+        return "unknown"
     actual_str = f"{actual:.1f}\u00b0C" if actual is not None else "N/A"
     target_str = f"{target:.1f}\u00b0C" if target is not None else "off"
     return f"{actual_str} \u2192 {target_str}"
@@ -200,6 +206,8 @@ def format_status(
     tool_target = state.get("tool_temp_target")
     bed_actual = state.get("bed_temp_actual")
     bed_target = state.get("bed_temp_target")
+    # Present only when the four above are blank for a trust reason.
+    temperature_note = state.get("temperature_note")
 
     file_name = job.get("file_name")
     completion = job.get("completion")
@@ -218,6 +226,8 @@ def format_status(
         table.add_row("Connected", "yes" if connected else "[red]no[/red]")
         table.add_row("Hotend", format_temp(tool_actual, tool_target))
         table.add_row("Bed", format_temp(bed_actual, bed_target))
+        if temperature_note:
+            table.add_row("Temperatures", f"[yellow]{temperature_note}[/yellow]")
 
         if file_name:
             table.add_row("File", file_name)
@@ -239,6 +249,8 @@ def format_status(
         f"Hotend:    {format_temp(tool_actual, tool_target)}",
         f"Bed:       {format_temp(bed_actual, bed_target)}",
     ]
+    if temperature_note:
+        lines.append(f"Temps:     {temperature_note}")
     if file_name:
         lines.append(f"File:      {file_name}")
     if completion is not None:

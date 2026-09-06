@@ -4121,6 +4121,11 @@ _LITE_PRINTER_KEYS = (
     "state_stale_after_seconds",
     "cause",
     "remedy",
+    # Why the temperature fields above are empty when they are empty for a
+    # trust reason.  The lite path is the one polled through a frozen
+    # cache, so it is the one where a blank without a sentence would be
+    # read as "this printer does not report temperatures".
+    "temperature_note",
     # How the LAST job ended — success / failed / cancelled — on its own
     # axis, so `idle` keeps meaning ready without also meaning finished.
     # The web's completion card and any poller watching for an ending need
@@ -4244,6 +4249,13 @@ def printer_status(
         )
         if stale_note:
             response["telemetry_warning"] = stale_note
+        # The burn floor, mirrored to where an agent scans for warnings.  The
+        # printer block already carries it as `temperature_note` beside the
+        # blank fields it explains; the mirror is so a reader who only looks
+        # at the top-level warnings cannot miss that there is no number.
+        temperature_note = response["printer"].get("temperature_note")
+        if isinstance(temperature_note, str) and temperature_note:
+            response["temperature_warning"] = temperature_note
         # A printer holding a job it already finished, which is also what
         # greys out Load and Unload on its own screen.  Named with its
         # remedy, because no amount of retrying from here clears it.
@@ -4633,6 +4645,12 @@ def monitor_print(
         bed_actual = sd.get("bed_temp_actual")
         bed_target = sd.get("bed_temp_target")
         chamber_actual = sd.get("chamber_temp_actual")
+        # Set when the temperature fields are blank for a TRUST reason (the
+        # reading is stale), never when the printer simply has no such
+        # sensor.  The two absences must read differently: "N/A" says the
+        # printer does not report it; "unknown" says Kiln cannot vouch for
+        # it and the display is the authority.
+        temperature_note = sd.get("temperature_note")
         speed_profile = sd.get("speed_profile")
         speed_magnitude = sd.get("speed_magnitude")
         print_error = sd.get("print_error", 0)
@@ -4644,15 +4662,16 @@ def monitor_print(
         )
         elapsed_str = _format_duration(elapsed_s)
         remaining_str = _format_duration(remaining_s)
+        _no_reading = "unknown (read the printer's display)" if temperature_note else "N/A"
         nozzle_str = (
             f"{tool_actual:.0f}°C → {tool_target:.0f}°C target"
             if tool_actual is not None and tool_target is not None
-            else "N/A"
+            else _no_reading
         )
         bed_str = (
             f"{bed_actual:.0f}°C → {bed_target:.0f}°C target"
             if bed_actual is not None and bed_target is not None
-            else "N/A"
+            else _no_reading
         )
         if speed_profile is not None and speed_magnitude is not None:
             speed_str = f"{speed_profile} ({speed_magnitude}%)"
@@ -4934,6 +4953,8 @@ def monitor_print(
         ]
         if chamber_actual is not None:
             lines.append(f"- Chamber: {chamber_actual:.0f}°C")
+        if temperature_note:
+            lines.append(f"- Temperatures: {temperature_note}")
         lines.extend(
             [
                 f"- Speed: {speed_str}",
@@ -7741,17 +7762,29 @@ def set_temperature(
             return block
         results: dict[str, Any] = {"success": True, "printer_name": target_name}
 
-        # -- Relative temperature change advisory (non-blocking) ----------
+        # -- Relative target change advisory (non-blocking) ---------------
+        # Compares the requested target with the target the printer holds
+        # NOW.  On 2026-09-06 this string read "Large hotend temperature
+        # change: 38°C -> 0°C" from a cache of unknown age while the screen
+        # read 110°C, and a person about to handle the hotend was told it
+        # had cooled.  Two things changed: the number is named as the
+        # TARGET it is, never as a temperature; and on a reading Kiln cannot
+        # vouch for the targets are blank (PrinterState.__post_init__), so
+        # there is no comparison to make and the reading's own sentence is
+        # carried instead.
         _DELTA_WARN_TOOL = 10.0
         _DELTA_WARN_BED = 50.0
         rate_warnings: list[str] = []
         try:
             state = adapter.get_state()
+            unknown = getattr(state, "temperature_note", None)
+            if isinstance(unknown, str) and unknown:
+                rate_warnings.append(unknown)
             if tool_temp is not None and state.tool_temp_target is not None and state.tool_temp_target > 0:
                 delta = abs(tool_temp - state.tool_temp_target)
                 if delta > _DELTA_WARN_TOOL:
                     rate_warnings.append(
-                        f"Large hotend temperature change: "
+                        f"Large hotend target change: "
                         f"{state.tool_temp_target:.0f}°C -> {tool_temp:.0f}°C "
                         f"(delta {delta:.0f}°C)."
                     )
@@ -7759,7 +7792,7 @@ def set_temperature(
                 delta = abs(bed_temp - state.bed_temp_target)
                 if delta > _DELTA_WARN_BED:
                     rate_warnings.append(
-                        f"Large bed temperature change: "
+                        f"Large bed target change: "
                         f"{state.bed_temp_target:.0f}°C -> {bed_temp:.0f}°C "
                         f"(delta {delta:.0f}°C)."
                     )
