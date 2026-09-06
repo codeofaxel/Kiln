@@ -61,6 +61,7 @@ from kiln.printers.base import (
     find_ffmpeg,
     outcome_printer_name,
 )
+from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
 
 logger = logging.getLogger(__name__)
@@ -695,6 +696,23 @@ _FAN_NODE_TO_INDEX: dict[str, int] = {
     "chamber": 3,
 }
 
+# M106 P-index -> the status field the printer reports that fan's level in.
+# Levels are reported 0-15, not 0-255 (see _await_readback callers).
+_FAN_INDEX_TO_FIELD: dict[int, str] = {
+    1: "cooling_fan_speed",
+    2: "big_fan1_speed",
+    3: "big_fan2_speed",
+}
+
+# How long a write waits for the printer to SHOW the effect before answering
+# "accepted, not confirmed".  A Bambu publishes a status frame on change, and
+# a heater-target or speed-level change lands within about a second of the
+# command on a healthy link; three seconds covers that with room for a busy
+# broker without charging every quiet-printer command the full MQTT timeout.
+# A command that is confirmed returns as soon as the frame lands, so the
+# common healthy case pays tens of milliseconds, not the window.
+_COMMAND_CONFIRM_WINDOW_S: float = 3.0
+
 # Models whose firmware wants an ``ftp://`` job URL instead of the
 # ``file:///sdcard/model/`` form every other Bambu reads.  See
 # _build_print_url for the measurement this comes from.  Keyed on the
@@ -1069,6 +1087,14 @@ class BambuAdapter(PrinterAdapter):
         self._state_lock = threading.Lock()
         self._last_status: dict[str, Any] = {}
         self._last_state_time: float = 0.0  # monotonic time of last accepted update
+        # Monotonic time each status key was last CARRIED by an accepted push.
+        # The cache is a merge, so a value's presence says nothing about when
+        # the printer last said it; a write's read-back (see _await_readback)
+        # needs the frame that carried the field to postdate the command, or
+        # the old target reads as confirmation of the new one.
+        self._field_seen_at: dict[str, float] = {}
+        # Per-instance so a caller (or a test) can shorten the read-back wait.
+        self._confirm_window_s: float = _COMMAND_CONFIRM_WINDOW_S
         # Monotonic time of the last accepted update that actually CARRIED
         # gcode_state.  Separate from _last_state_time because the cache is a
         # merge (see _on_message): a push carrying only temperatures advances
@@ -1800,6 +1826,8 @@ class BambuAdapter(PrinterAdapter):
                     push_gap_seconds = self._gcode_state_age_locked()
                     self._last_status.update(print_data)
                     self._last_state_time = time.monotonic()
+                    for key in print_data:
+                        self._field_seen_at[key] = self._last_state_time
                     # Stamp the vintage of the one key that decides the
                     # reported state.  ``update`` is a merge, so without this
                     # a partial push would reset the age of a gcode_state it
@@ -2009,11 +2037,27 @@ class BambuAdapter(PrinterAdapter):
             client: Optional pre-connected client (used during on_connect).
 
         Raises:
-            PrinterError: If publishing fails.
+            PrinterError: If publishing fails — the socket raised, the client
+                knows it is disconnected, or paho's publish() reported a
+                non-success code.  Every one of these means the command did
+                NOT leave this process.
         """
         c = client or self._ensure_mqtt()
+        # paho does not raise on a dead connection: publish() on a client
+        # that knows it is disconnected returns an MQTTMessageInfo whose rc
+        # is MQTT_ERR_NO_CONN and drops the message.  Discarding that result
+        # is how a disconnected adapter reported every command as sent
+        # (measured 2026-09-06: four hotend commands, all "accepted", none
+        # delivered).  Ask first, and read the answer.
+        if client is None and not c.is_connected():
+            self._mark_mqtt_dropped()
+            raise PrinterError(
+                "MQTT command not sent: the client is not connected to "
+                f"{self._host}. The command was NOT delivered. "
+                "Retry with `get_state()` to re-establish the connection."
+            )
         try:
-            c.publish(
+            info = c.publish(
                 self._topic_request,
                 json.dumps(payload),
                 qos=0,
@@ -2021,6 +2065,9 @@ class BambuAdapter(PrinterAdapter):
             # QoS 0 is fire-and-forget — no PUBACK to wait for.
             # Bambu LAN MQTT broker does not support QoS 1 and
             # disconnects immediately on receiving a QoS 1 PUBLISH.
+            # So the ONLY thing this transport can say is whether the
+            # bytes left the client; whether the printer acted on them
+            # is answered above this layer, by reading state back.
         except Exception as exc:
             raise PrinterError(
                 f"Failed to publish MQTT command: {exc}\n"
@@ -2028,6 +2075,143 @@ class BambuAdapter(PrinterAdapter):
                 "Retry with `get_state()` to re-establish the connection.",
                 cause=exc,
             ) from exc
+        rc = getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS)
+        if rc != mqtt.MQTT_ERR_SUCCESS:
+            if rc == mqtt.MQTT_ERR_NO_CONN:
+                self._mark_mqtt_dropped()
+            raise PrinterError(
+                f"MQTT publish refused: {mqtt.error_string(rc)} (rc={int(rc)}). "
+                "The command was NOT delivered to the printer. "
+                "Retry with `get_state()` to re-establish the connection."
+            )
+
+    def _mark_mqtt_dropped(self) -> None:
+        """Record that the MQTT session is gone so the next call reconnects.
+
+        The on_disconnect callback normally does this, but a publish that
+        comes back MQTT_ERR_NO_CONN is proof the callback has not yet run
+        (or never will, on a half-open socket); without this the fast path
+        in _ensure_mqtt keeps handing out the dead client.
+        """
+        self._mqtt_connected.clear()
+        with self._state_lock:
+            self._connected = False
+
+    # ------------------------------------------------------------------
+    # Internal: write verification by read-back
+    # ------------------------------------------------------------------
+
+    def _await_readback(
+        self,
+        field_name: str,
+        matches: Any,
+        *,
+        sent_at: float,
+    ) -> tuple[bool, dict[str, Any]]:
+        """Wait for a status frame AFTER *sent_at* that carries *field_name*
+        with a value *matches* accepts.
+
+        Returns ``(confirmed, evidence)``.  The frame must postdate the
+        command — a reading that predates it is about the previous command,
+        and treating it as confirmation of this one is exactly the bug
+        :mod:`kiln.printers.command_verdict` exists to end.
+
+        Polls the push cache rather than subscribing, like
+        :meth:`_get_cached_status`: a printer that is listening answers in
+        tens of milliseconds and the caller pays that; one that is quiet
+        costs the window, once.
+        """
+        window = max(0.0, min(self._confirm_window_s, float(self._timeout)))
+        deadline = time.monotonic() + window
+        observed: Any = None
+        seen_at = 0.0
+        while True:
+            with self._state_lock:
+                seen_at = self._field_seen_at.get(field_name, 0.0)
+                observed = self._last_status.get(field_name)
+                last_frame = self._last_state_time
+            if seen_at > sent_at:
+                try:
+                    hit = bool(matches(observed))
+                except (TypeError, ValueError):
+                    hit = False
+                if hit:
+                    return True, {
+                        "corroboration": "read_back",
+                        "field": field_name,
+                        "observed": observed,
+                        "confirm_latency_seconds": round(seen_at - sent_at, 2),
+                    }
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+
+        evidence: dict[str, Any] = {
+            "field": field_name,
+            "window_seconds": window,
+        }
+        if seen_at > sent_at:
+            # The printer spoke about this field after the command, and the
+            # value is not what was asked for.  Still not a "failed": a
+            # frame can carry the previous target a hair after the command
+            # went out.  It is reported so the caller can see it.
+            evidence["corroboration"] = "read_back_mismatch"
+            evidence["observed"] = observed
+        elif last_frame > sent_at:
+            evidence["corroboration"] = "report_without_field"
+        else:
+            evidence["corroboration"] = "no_report_since_command"
+        with self._state_lock:
+            status = dict(self._last_status)
+        faults = sorted(code for code, _kind in self._bambu_fault_codes(status))
+        if faults:
+            evidence["printer_faults"] = faults
+        return False, evidence
+
+    def _readback_verdict(
+        self,
+        what: str,
+        field_name: str,
+        matches: Any,
+        *,
+        sent_at: float,
+        wire: str,
+    ) -> CommandVerdict:
+        """One verdict for a write whose effect the status report shows."""
+        confirmed, evidence = self._await_readback(field_name, matches, sent_at=sent_at)
+        evidence["sent"] = wire
+        if confirmed:
+            return CommandVerdict.confirmed_by(
+                f"{what}: the printer's next report shows it took effect.",
+                **evidence,
+            )
+        why = {
+            "no_report_since_command": (
+                "the printer has not reported anything since the command"
+            ),
+            "report_without_field": (
+                "the printer has reported since the command but has not "
+                f"mentioned {field_name}"
+            ),
+            "read_back_mismatch": (
+                f"the printer's report since the command shows {field_name}="
+                f"{evidence.get('observed')!r}, not the requested value"
+            ),
+        }[str(evidence["corroboration"])]
+        tail = ""
+        if evidence.get("printer_faults"):
+            tail = (
+                " The printer is reporting fault code(s) "
+                f"{', '.join(evidence['printer_faults'])}; a fault showing on "
+                "the screen is a reason a command may not have been acted "
+                "on — check the printer before retrying."
+            )
+        return CommandVerdict.accepted_only(
+            f"{what}: sent over MQTT, but NOT confirmed — {why} "
+            f"(waited {evidence['window_seconds']:g}s). Re-read printer_status "
+            f"and check {field_name} before building on this.{tail}",
+            **evidence,
+        )
 
     def _disable_nozzle_detection(self) -> None:
         """Disable nozzle clumping / blob detection via MQTT.
@@ -3961,17 +4145,44 @@ class BambuAdapter(PrinterAdapter):
     #: stricter than the printer.
     _MAX_HOTEND_C: float = 350.0
 
-    def set_tool_temp(self, target: float) -> bool:
-        """Set the hotend target temperature via G-code over MQTT."""
-        self._validate_temp(target, self._MAX_HOTEND_C, "Hotend")
-        self.send_gcode([f"M104 S{int(target)}"])
-        return True
+    def set_tool_temp(self, target: float) -> CommandVerdict:
+        """Set the hotend target temperature via G-code over MQTT.
 
-    def set_bed_temp(self, target: float) -> bool:
-        """Set the heated-bed target temperature via G-code over MQTT."""
+        Confirmed by read-back: the verdict is ``confirmed`` only once a
+        status frame that postdates the command reports
+        ``nozzle_target_temper`` at the requested value.
+        """
+        self._validate_temp(target, self._MAX_HOTEND_C, "Hotend")
+        want = int(target)
+        wire = f"M104 S{want}"
+        sent_at = time.monotonic()
+        self.send_gcode([wire])
+        return self._readback_verdict(
+            f"Hotend target {want}°C",
+            "nozzle_target_temper",
+            lambda v: int(float(v)) == want,
+            sent_at=sent_at,
+            wire=wire,
+        )
+
+    def set_bed_temp(self, target: float) -> CommandVerdict:
+        """Set the heated-bed target temperature via G-code over MQTT.
+
+        Confirmed by read-back of ``bed_target_temper``; see
+        :meth:`set_tool_temp`.
+        """
         self._validate_temp(target, 130.0, "Bed")
-        self.send_gcode([f"M140 S{int(target)}"])
-        return True
+        want = int(target)
+        wire = f"M140 S{want}"
+        sent_at = time.monotonic()
+        self.send_gcode([wire])
+        return self._readback_verdict(
+            f"Bed target {want}°C",
+            "bed_target_temper",
+            lambda v: int(float(v)) == want,
+            sent_at=sent_at,
+            wire=wire,
+        )
 
     # ------------------------------------------------------------------
     # Bambu-specific: speed profiles
@@ -4000,7 +4211,7 @@ class BambuAdapter(PrinterAdapter):
         name = _SPEED_PROFILE_NAMES.get(level, "unknown") if level else "unknown"
         return {"level": level, "name": name, "speed_magnitude": spd_mag}
 
-    def set_speed_profile(self, profile: str) -> bool:
+    def set_speed_profile(self, profile: str) -> CommandVerdict:
         """Set the printer speed profile.
 
         Args:
@@ -4008,10 +4219,13 @@ class BambuAdapter(PrinterAdapter):
                 or ``"ludicrous"`` (case-insensitive).
 
         Returns:
-            ``True`` if the command was accepted.
+            A :class:`CommandVerdict` — ``confirmed`` once a status frame
+            after the command reports ``spd_lvl`` at the requested level,
+            ``accepted`` if the printer has not shown it within the window.
 
         Raises:
-            PrinterError: If *profile* is not a valid speed profile name.
+            PrinterError: If *profile* is not a valid speed profile name, or
+                the command could not be sent.
         """
         key = profile.strip().lower()
         if key not in _SPEED_PROFILES:
@@ -4019,20 +4233,28 @@ class BambuAdapter(PrinterAdapter):
                 f"Unknown speed profile {profile!r}. "
                 f"Valid profiles: {', '.join(sorted(_SPEED_PROFILES))}"
             )
+        level = _SPEED_PROFILES[key]
+        sent_at = time.monotonic()
         self._publish_command(
             {
                 "print": {
                     "sequence_id": self._next_seq(),
                     "command": "print_speed",
-                    "param": str(_SPEED_PROFILES[key]),
+                    "param": str(level),
                 }
             }
         )
-        return True
+        return self._readback_verdict(
+            f"Speed profile {key}",
+            "spd_lvl",
+            lambda v: int(v) == level,
+            sent_at=sent_at,
+            wire=f"print_speed {level}",
+        )
 
     def publish_print_command(
         self, command: str, params: dict[str, Any] | None = None
-    ) -> bool:
+    ) -> CommandVerdict:
         """Publish a ``print``-category MQTT command to the printer.
 
         A thin escape hatch for ``print`` commands this adapter does not
@@ -4045,7 +4267,9 @@ class BambuAdapter(PrinterAdapter):
             params: Extra command fields merged into the envelope.
 
         Returns:
-            ``True`` once the command is published.
+            A :class:`CommandVerdict` that is ``accepted`` — this escape
+            hatch knows nothing about the command's effect, so it never
+            claims ``confirmed``.  A refused publish raises instead.
         """
         inner: dict[str, Any] = dict(params or {})
         # command + sequence_id are authoritative: set them last so a
@@ -4053,7 +4277,13 @@ class BambuAdapter(PrinterAdapter):
         inner["sequence_id"] = self._next_seq()
         inner["command"] = str(command)
         self._publish_command({"print": inner})
-        return True
+        return CommandVerdict.accepted_only(
+            f"Published print command {command!r} over MQTT. Its effect is "
+            "not read back here, so it is not confirmed — read printer_status "
+            "to check.",
+            corroboration="none",
+            sent=str(command),
+        )
 
     # ------------------------------------------------------------------
     # Bambu-specific: skip objects mid-print
@@ -4106,7 +4336,7 @@ class BambuAdapter(PrinterAdapter):
     # Bambu-specific: LED control
     # ------------------------------------------------------------------
 
-    def set_light(self, node: str, mode: str) -> bool:
+    def set_light(self, node: str, mode: str) -> CommandVerdict:
         """Control the printer's LED lights.
 
         Args:
@@ -4114,10 +4344,13 @@ class BambuAdapter(PrinterAdapter):
             mode: ``"on"``, ``"off"``, or ``"flashing"``.
 
         Returns:
-            ``True`` if the command was accepted.
+            A :class:`CommandVerdict` — ``confirmed`` once a status frame
+            after the command lists the node in ``lights_report`` with the
+            requested mode, else ``accepted``.
 
         Raises:
-            PrinterError: If *node* or *mode* is invalid.
+            PrinterError: If *node* or *mode* is invalid, or the command
+                could not be sent.
         """
         node_lower = node.strip().lower()
         mode_lower = mode.strip().lower()
@@ -4129,6 +4362,7 @@ class BambuAdapter(PrinterAdapter):
             raise PrinterError(
                 f"Unknown LED mode {mode!r}. Valid modes: {', '.join(sorted(_VALID_LED_MODES))}"
             )
+        sent_at = time.monotonic()
         self._publish_command(
             {
                 "system": {
@@ -4139,13 +4373,30 @@ class BambuAdapter(PrinterAdapter):
                 }
             }
         )
-        return True
+
+        def _light_matches(report: Any) -> bool:
+            if not isinstance(report, list):
+                return False
+            return any(
+                isinstance(e, dict)
+                and str(e.get("node", "")).lower() == node_lower
+                and str(e.get("mode", "")).lower() == mode_lower
+                for e in report
+            )
+
+        return self._readback_verdict(
+            f"{node_lower} {mode_lower}",
+            "lights_report",
+            _light_matches,
+            sent_at=sent_at,
+            wire=f"ledctrl {node_lower}={mode_lower}",
+        )
 
     # ------------------------------------------------------------------
     # Bambu-specific: fan control
     # ------------------------------------------------------------------
 
-    def set_fan(self, node: str, percent: int) -> bool:
+    def set_fan(self, node: str, percent: int) -> CommandVerdict:
         """Set the speed of one of the printer's fans.
 
         Drives the fan with Bambu's standard ``M106 P<n> S<0-255>`` G-code
@@ -4161,11 +4412,13 @@ class BambuAdapter(PrinterAdapter):
             percent: Fan speed 0-100 (0 turns the fan off, 100 is full speed).
 
         Returns:
-            ``True`` once the command is published.
+            A :class:`CommandVerdict` — ``confirmed`` once a status frame
+            after the command reports that fan's level (0-15 scale) at the
+            requested speed, else ``accepted``.
 
         Raises:
-            PrinterError: If *node* is not a known fan or *percent* is outside
-                0-100.
+            PrinterError: If *node* is not a known fan, *percent* is outside
+                0-100, or the command could not be sent.
 
         Note:
             The chamber fan only exists on enclosed models — per Kiln's own
@@ -4187,8 +4440,19 @@ class BambuAdapter(PrinterAdapter):
         if not 0 <= pct <= 100:
             raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
         speed = round(pct / 100 * 255)
-        self.send_gcode([f"M106 P{index} S{speed}"])
-        return True
+        wire = f"M106 P{index} S{speed}"
+        sent_at = time.monotonic()
+        self.send_gcode([wire])
+        # The printer reports fan level on a 0-15 scale, not the 0-255 the
+        # G-code carries; allow one step of rounding either side.
+        want_level = round(speed / 255 * 15)
+        return self._readback_verdict(
+            f"{node.strip().lower()} fan {pct}%",
+            _FAN_INDEX_TO_FIELD[index],
+            lambda v: abs(int(float(v)) - want_level) <= 1,
+            sent_at=sent_at,
+            wire=wire,
+        )
 
     # ------------------------------------------------------------------
     # AMS (Automatic Material System)
@@ -4862,7 +5126,7 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
 
-    def send_gcode(self, commands: list[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> CommandVerdict:
         """Send G-code commands to the Bambu printer via MQTT.
 
         Joins commands with newlines and sends as a ``gcode_line`` command.
@@ -4871,10 +5135,14 @@ class BambuAdapter(PrinterAdapter):
             commands: List of G-code command strings.
 
         Returns:
-            ``True`` if the commands were accepted.
+            A :class:`CommandVerdict` that is ``accepted``: the MQTT client
+            took the bytes.  A ``gcode_line`` has no acknowledgement and no
+            general read-back, so this never claims ``confirmed`` — the
+            typed wrappers (:meth:`set_tool_temp`, :meth:`set_fan`, ...)
+            confirm the effects they know how to observe.
 
         Raises:
-            PrinterError: If sending fails.
+            PrinterError: If the command could not be sent.
         """
         script = "\n".join(commands)
         self._publish_command(
@@ -4886,7 +5154,14 @@ class BambuAdapter(PrinterAdapter):
                 }
             }
         )
-        return True
+        return CommandVerdict.accepted_only(
+            f"Sent {len(commands)} G-code line(s) over MQTT. Bambu firmware "
+            "does not acknowledge gcode_line and there is no general "
+            "read-back, so execution is NOT confirmed — observe the printer "
+            "(printer_status, or the machine itself) before building on it.",
+            corroboration="none",
+            sent=script,
+        )
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- file deletion

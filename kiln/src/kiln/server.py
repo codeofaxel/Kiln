@@ -332,6 +332,7 @@ from kiln.printers import (
     status_is_unreachable,
     stuck_job_note,
 )
+from kiln.printers.command_verdict import CommandVerdict
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
 from kiln.safety_profiles import export_profile as _export_profile
@@ -7768,19 +7769,29 @@ def set_temperature(
                 "Failed to compute temperature rate warnings: %s", exc
             )  # Don't let warning logic block the actual operation.
 
+        # Each heater answers with one verdict — confirmed / accepted /
+        # failed, the print_start shape — so a caller can branch on
+        # ``outcome`` instead of trusting an ``accepted`` that only ever
+        # meant "sent".  ``success`` at the top stays True unless a heater
+        # was refused; an unconfirmed heater is reported, not hidden.
+        unconfirmed: list[str] = []
         if tool_temp is not None:
-            ok = adapter.set_tool_temp(tool_temp)
-            results["tool"] = {
-                "target": tool_temp,
-                "accepted": ok,
-            }
+            verdict = CommandVerdict.coerce(adapter.set_tool_temp(tool_temp), what="hotend target")
+            results["tool"] = {"target": tool_temp, **verdict.to_dict()}
+            if not verdict.confirmed:
+                unconfirmed.append(verdict.message)
+            if not verdict.ok:
+                results["success"] = False
 
         if bed_temp is not None:
-            ok = adapter.set_bed_temp(bed_temp)
-            results["bed"] = {
-                "target": bed_temp,
-                "accepted": ok,
-            }
+            verdict = CommandVerdict.coerce(adapter.set_bed_temp(bed_temp), what="bed target")
+            results["bed"] = {"target": bed_temp, **verdict.to_dict()}
+            if not verdict.confirmed:
+                unconfirmed.append(verdict.message)
+            if not verdict.ok:
+                results["success"] = False
+        if unconfirmed:
+            rate_warnings.extend(unconfirmed)
 
         # -- Heater-off safety net ----------------------------------------
         # Some OctoPrint setups don't reliably turn off heaters at 0 deg C.
@@ -7966,12 +7977,12 @@ def set_speed_profile(profile: str) -> dict:
                 "Speed profile control is only available on Bambu Lab printers.",
                 code="UNSUPPORTED",
             )
-        ok = adapter.set_speed_profile(profile)
+        verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
         _audit("set_speed_profile", "executed", details={"profile": profile})
         return {
-            "success": True,
+            "success": verdict.ok,
             "profile": profile.strip().lower(),
-            "accepted": ok,
+            **verdict.to_dict(),
         }
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to set speed profile: {exc}")
@@ -8040,13 +8051,13 @@ def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
                 "Light control is only available on Bambu Lab printers.",
                 code="UNSUPPORTED",
             )
-        ok = adapter.set_light(node, mode)
+        verdict = CommandVerdict.coerce(adapter.set_light(node, mode), what="light")
         _audit("set_printer_light", "executed", details={"node": node, "mode": mode})
         return {
-            "success": True,
+            "success": verdict.ok,
             "node": node.strip().lower(),
             "mode": mode.strip().lower(),
-            "accepted": ok,
+            **verdict.to_dict(),
         }
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to set printer light: {exc}")
@@ -8094,13 +8105,13 @@ def set_fan(node: str = "part", percent: int = 100) -> dict:
                 "Fan control isn't available on this printer type.",
                 code="UNSUPPORTED",
             )
-        ok = adapter.set_fan(node, percent)
+        verdict = CommandVerdict.coerce(adapter.set_fan(node, percent), what="fan")
         _audit("set_fan", "executed", details={"node": node, "percent": percent})
         return {
-            "success": True,
+            "success": verdict.ok,
             "node": node.strip().lower(),
             "percent": int(percent),
-            "accepted": ok,
+            **verdict.to_dict(),
         }
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to set fan: {exc}")
@@ -9252,14 +9263,14 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
                 code="UNSUPPORTED",
             )
 
-        adapter.send_gcode(cmd_list)
+        verdict = CommandVerdict.coerce(adapter.send_gcode(cmd_list), what="G-code")
         _audit("send_gcode", "executed", details={"count": len(cmd_list)})
 
         result = {
-            "success": True,
+            "success": verdict.ok,
             "commands_sent": cmd_list,
             "count": len(cmd_list),
-            "message": f"Sent {len(cmd_list)} G-code command(s).",
+            **verdict.to_dict(),
         }
         if validation.warnings:
             result["warnings"] = validation.warnings

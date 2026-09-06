@@ -21,6 +21,8 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, ClassVar
 
+from kiln.printers.command_verdict import CommandVerdict
+
 logger = logging.getLogger(__name__)
 
 # Guards the one-time, per-instance setup of the idle-release bookkeeping.
@@ -3167,38 +3169,48 @@ class PrinterAdapter(ABC):
             raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
         return round(pct / 100 * 255)
 
+    # Every write below answers with a :class:`CommandVerdict` (see
+    # kiln.printers.command_verdict): ``confirmed`` when the adapter read the
+    # effect back from the printer, ``accepted`` when the transport took the
+    # command and nothing more is known.  Adapters not yet migrated may still
+    # return a bool; callers lift it with ``CommandVerdict.coerce`` and a bare
+    # ``True`` reads as ``accepted``, never ``confirmed``.  Refusal is a
+    # ``PrinterError``, never a quiet ``False``.
+
     @abstractmethod
-    def set_tool_temp(self, target: float) -> bool:
+    def set_tool_temp(self, target: float) -> CommandVerdict | bool:
         """Set the hot-end (tool) target temperature in degrees Celsius.
 
         Args:
             target: Desired temperature.  Pass ``0`` to turn the heater off.
 
         Returns:
-            ``True`` if the command was accepted, ``False`` otherwise.
+            A :class:`CommandVerdict` — ``confirmed`` if the adapter saw the
+            target change in a report that postdates the command,
+            ``accepted`` if it was sent and not refused.
 
         Raises:
-            PrinterError: If the command fails.
+            PrinterError: If the command could not be sent.
         """
 
     @abstractmethod
-    def set_bed_temp(self, target: float) -> bool:
+    def set_bed_temp(self, target: float) -> CommandVerdict | bool:
         """Set the heated-bed target temperature in degrees Celsius.
 
         Args:
             target: Desired temperature.  Pass ``0`` to turn the heater off.
 
         Returns:
-            ``True`` if the command was accepted, ``False`` otherwise.
+            A :class:`CommandVerdict`; see :meth:`set_tool_temp`.
 
         Raises:
-            PrinterError: If the command fails.
+            PrinterError: If the command could not be sent.
         """
 
     # -- G-code ---------------------------------------------------------
 
     @abstractmethod
-    def send_gcode(self, commands: list[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> CommandVerdict | bool:
         """Send one or more G-code commands to the printer.
 
         Args:
@@ -3206,7 +3218,9 @@ class PrinterAdapter(ABC):
                 ``["G28", "G1 X10 Y10 Z5 F1200"]``.
 
         Returns:
-            ``True`` if all commands were accepted.
+            A :class:`CommandVerdict`.  Raw G-code has no general read-back,
+            so an adapter answers ``accepted`` unless its transport reports
+            execution (a synchronous request/response link may).
 
         Raises:
             PrinterError: If sending fails.

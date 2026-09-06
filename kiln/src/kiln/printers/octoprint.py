@@ -41,6 +41,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.safe_motion import build_firmware_resume_positioning
 
 # websocket-client is an optional dependency; the adapter works without it
@@ -1258,7 +1259,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # PrinterAdapter -- temperature control
     # ------------------------------------------------------------------
 
-    def set_tool_temp(self, target: float) -> bool:
+    def set_tool_temp(self, target: float) -> CommandVerdict:
         """Set the hotend (tool0) target temperature in degrees Celsius.
 
         Calls ``POST /api/printer/tool``.
@@ -1267,7 +1268,7 @@ class OctoPrintAdapter(PrinterAdapter):
             target: Target temperature.  Pass ``0`` to turn the heater off.
 
         Returns:
-            ``True`` if the command was accepted.
+            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
 
         Raises:
             PrinterError: If the command fails.
@@ -1277,9 +1278,9 @@ class OctoPrintAdapter(PrinterAdapter):
             "/api/printer/tool",
             json={"command": "target", "targets": {"tool0": int(target)}},
         )
-        return True
+        return self._http_accepted(f"Hotend target {int(target)}°C")
 
-    def set_bed_temp(self, target: float) -> bool:
+    def set_bed_temp(self, target: float) -> CommandVerdict:
         """Set the heated-bed target temperature in degrees Celsius.
 
         Calls ``POST /api/printer/bed``.
@@ -1288,7 +1289,7 @@ class OctoPrintAdapter(PrinterAdapter):
             target: Target temperature.  Pass ``0`` to turn the heater off.
 
         Returns:
-            ``True`` if the command was accepted.
+            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
 
         Raises:
             PrinterError: If the command fails.
@@ -1298,7 +1299,7 @@ class OctoPrintAdapter(PrinterAdapter):
             "/api/printer/bed",
             json={"command": "target", "target": int(target)},
         )
-        return True
+        return self._http_accepted(f"Bed target {int(target)}°C")
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code
@@ -1325,7 +1326,7 @@ class OctoPrintAdapter(PrinterAdapter):
             ),
         )
 
-    def send_gcode(self, commands: list[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> CommandVerdict:
         """Send G-code commands to OctoPrint.
 
         Calls ``POST /api/printer/command`` with a JSON body containing
@@ -1335,7 +1336,8 @@ class OctoPrintAdapter(PrinterAdapter):
             commands: List of G-code command strings.
 
         Returns:
-            ``True`` if the commands were accepted.
+            A :class:`CommandVerdict` that is ``accepted``: the server took
+            the request.  Execution is not read back on this call.
 
         Raises:
             PrinterError: If sending fails.
@@ -1344,13 +1346,30 @@ class OctoPrintAdapter(PrinterAdapter):
             "/api/printer/command",
             json={"commands": commands},
         )
-        return True
+        return self._http_accepted(f"{len(commands)} G-code line(s)")
+
+    @staticmethod
+    def _http_accepted(what: str) -> CommandVerdict:
+        """The verdict for a write OctoPrint answered 2xx to.
+
+        OctoPrint validates the request and queues the command to the
+        serial link before answering; a refusal (printer not operational,
+        bad payload) is a 4xx/5xx that ``_post`` raises as PrinterError.
+        So a 2xx means "OctoPrint took it", not "the printer did it" — the
+        firmware's own response is not in the reply.
+        """
+        return CommandVerdict.accepted_only(
+            f"{what}: OctoPrint accepted the command and queued it for the "
+            "printer. Execution is not reported back on this call — read "
+            "printer_status to confirm.",
+            corroboration="http_2xx",
+        )
 
     # ------------------------------------------------------------------
     # Fan control
     # ------------------------------------------------------------------
 
-    def set_fan(self, node: str, percent: int) -> bool:
+    def set_fan(self, node: str, percent: int) -> CommandVerdict:
         """Set the part-cooling fan speed via ``M106``/``M107`` G-code.
 
         Only the single default part-cooling fan is supported — see
@@ -1363,15 +1382,14 @@ class OctoPrintAdapter(PrinterAdapter):
             percent: Fan speed 0-100 (0 turns the fan off, 100 is full speed).
 
         Returns:
-            ``True`` once the command is sent.
+            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
 
         Raises:
             PrinterError: If *node* is not the part-cooling fan, or *percent*
                 is outside 0-100.
         """
         speed = self._validate_part_fan(node, percent)
-        self.send_gcode([f"M106 S{speed}" if speed else "M107"])
-        return True
+        return self.send_gcode([f"M106 S{speed}" if speed else "M107"])
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- calibration

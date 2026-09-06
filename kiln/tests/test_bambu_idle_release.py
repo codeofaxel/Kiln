@@ -20,6 +20,7 @@ import time
 from typing import Any
 from unittest import mock
 
+import paho.mqtt.client as mqtt
 import pytest
 
 from kiln.printers.bambu import BambuAdapter
@@ -51,6 +52,8 @@ def _connected(**status: Any) -> BambuAdapter:
     adapter._mqtt_connected.set()
     adapter._connected = True
     adapter._mqtt_client = mock.MagicMock()
+    adapter._mqtt_client.publish.return_value = mock.MagicMock(rc=mqtt.MQTT_ERR_SUCCESS)
+    adapter._confirm_window_s = 0.0
     adapter._last_status = dict(status)
     return adapter
 

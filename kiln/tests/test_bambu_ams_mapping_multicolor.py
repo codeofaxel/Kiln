@@ -20,6 +20,7 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
+import paho.mqtt.client as mqtt
 import pytest
 
 from kiln.printers.bambu import BambuAdapter
@@ -51,7 +52,9 @@ def adapter(tmp_path, monkeypatch) -> BambuAdapter:
     a._mqtt_client = mock.MagicMock()
     publish_result = mock.MagicMock()
     publish_result.wait_for_publish = mock.MagicMock()
+    publish_result.rc = mqtt.MQTT_ERR_SUCCESS
     a._mqtt_client.publish.return_value = publish_result
+    a._confirm_window_s = 0.0
     a._last_status = {"gcode_state": "running"}
     a._last_state_time = float("inf")
     return a
