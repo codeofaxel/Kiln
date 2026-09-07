@@ -57,7 +57,7 @@ class _FleetToolsPlugin:
             success rate, average print duration, and total print hours.  Also
             includes fleet-wide aggregate metrics.
 
-            Requires Kiln Pro or Business license.
+            Requires Business license.
             """
             try:
                 if _srv._get_registry().count == 0:
