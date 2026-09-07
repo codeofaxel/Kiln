@@ -514,3 +514,69 @@ def test_render_memory_stays_bounded(probe: str, tmp_path: Path) -> None:
     assert out.returncode == 0, out.stderr[-1000:]
     peak_mb = int(out.stdout.strip().splitlines()[-1]) / (1024 * 1024)
     assert peak_mb < 2000, f"render peaked at {peak_mb:.0f} MB"
+
+
+# ---------------------------------------------------------------------------
+# The caller's deadline -- the one place a partial set is the honest answer
+# ---------------------------------------------------------------------------
+
+_THREE = [("isometric", "iso"), ("front", "front"), ("top", "top")]
+_THREE_ROT = {
+    "isometric": (55.0, 0.0, 25.0), "front": (90.0, 0.0, 0.0), "top": (0.0, 0.0, 0.0),
+}
+
+
+def test_a_deadline_stops_the_loop_between_views(
+    probe: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under the caller's whole-call deadline the painter returns what fits.
+
+    Measured 2026-09-06: with the browser declined, a six-angle 1600x1200
+    paint ran ~50 s with no ceiling and pushed the tool call past the MCP
+    host's window.  A view cannot be interrupted mid-raster, so the loop
+    checks BEFORE each one whether another view of the last one's size
+    still fits, and stops there.  The caller marks the rest as skipped.
+    """
+    clock = [1000.0]
+    monkeypatch.setattr(stage_paint.time, "monotonic", lambda: clock[0])
+    real = stage_paint._paint_view
+    painted: list[int] = []
+
+    def slow_paint(*args, **kwargs):
+        painted.append(1)
+        clock[0] += 30.0
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(stage_paint, "_paint_view", slow_paint)
+    views = try_paint_stage_views(
+        probe, _THREE, _THREE_ROT, output_dir=str(tmp_path / "out"),
+        width=64, height=48, deadline=clock[0] + 40.0,
+    )
+    # 40 s left -> iso (30 s) -> 10 s left, and the next view needs ~30 s.
+    assert views is not None
+    assert [v["angle"] for v in views] == ["isometric"]
+    assert len(painted) == 1
+    assert Path(views[0]["path"]).is_file()
+
+
+def test_a_spent_deadline_paints_nothing_and_declines(
+    probe: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    painted: list[int] = []
+    real = stage_paint._paint_view
+    monkeypatch.setattr(
+        stage_paint, "_paint_view", lambda *a, **k: (painted.append(1), real(*a, **k))[1],
+    )
+    views = try_paint_stage_views(
+        probe, _THREE, _THREE_ROT, output_dir=str(tmp_path / "out"),
+        width=64, height=48, deadline=stage_paint.time.monotonic() - 1.0,
+    )
+    assert views is None
+    assert painted == []
+
+
+def test_no_deadline_keeps_the_all_or_nothing_set(probe: str, tmp_path: Path) -> None:
+    views = try_paint_stage_views(
+        probe, _THREE, _THREE_ROT, output_dir=str(tmp_path / "out"), width=64, height=48,
+    )
+    assert views is not None and [v["angle"] for v in views] == ["isometric", "front", "top"]

@@ -65,6 +65,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -710,6 +711,7 @@ def try_paint_stage_views(
     color: str | None = None,
     plate: bool = True,
     letterbox: bool = True,
+    deadline: float | None = None,
 ) -> list[dict] | None:
     """Paint every requested view in the stage look, or ``None``.
 
@@ -727,6 +729,19 @@ def try_paint_stage_views(
     as noise.  ``_paint_view`` already treats a ``None`` plate texture as
     "no plate", so the off switch is the absence of the texture, not a
     second code path.
+
+    ``deadline`` is the caller's whole-call ceiling as a ``time.monotonic()``
+    instant (:func:`kiln.model_visualizer.visualize_model` strikes one for
+    every backend).  Under it the loop checks BETWEEN views whether another
+    view the size of the last one still fits, and stops there: the views
+    that did fit come back, and the caller reports the rest as skipped.
+    That is the one case a partial list is the honest answer — measured
+    2026-09-06, six 1600x1200 angles painted for ~50 s with no ceiling and
+    pushed the tool call past the MCP host's window, so the host saw a
+    timeout and the user saw nothing.  A view cannot be interrupted
+    mid-raster, which is why the check is predictive.  Nothing painted
+    before the deadline is ``None`` (next backend), same as any decline.
+    Without a deadline the all-or-nothing contract holds unchanged.
     """
     try:
         if os.environ.get(_OPT_OUT_ENV, "").strip():
@@ -778,7 +793,18 @@ def try_paint_stage_views(
         )
 
         views: list[dict] = []
+        last_view_s = 0.0
         for label, description in selected:
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or remaining < last_view_s:
+                    logger.debug(
+                        "stage paint: %.1fs left before the call deadline, last view "
+                        "took %.1fs — stopping after %d/%d angle(s)",
+                        remaining, last_view_s, len(views), len(selected),
+                    )
+                    break
+            started = time.monotonic()
             rx, _ry, rz = rotations[label]
             az, el = _openscad_rotation_to_orbit(rx, rz)
             # One supersample step past the shared knob, internally: the
@@ -818,6 +844,9 @@ def try_paint_stage_views(
             if ss_int > 1:
                 downscale_png(out, width, height)
             views.append({"angle": label, "description": description, "path": out})
+            last_view_s = time.monotonic() - started
+        if deadline is not None and not views:
+            return None
         return views
     except Exception:  # noqa: BLE001 — a paint failure must never break a preview
         logger.debug("stage paint failed — falling through", exc_info=True)

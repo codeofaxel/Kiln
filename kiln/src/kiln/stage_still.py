@@ -468,6 +468,7 @@ def _shoot_batch(
     color: str | None,
     tmp: Path,
     profile_dir: Path,
+    call_deadline: float | None = None,
 ) -> list[dict] | None:
     """Every angle from ONE browser launch, or ``None`` to fall back.
 
@@ -516,6 +517,7 @@ def _shoot_batch(
         min(_VIEW_TIMEOUT_S, _STILL_SET_BUDGET_S)
         if _STILL_SET_BUDGET_S else _VIEW_TIMEOUT_S
     )
+    shot_timeout = _clamp_to_deadline(shot_timeout, call_deadline)
     if not _shoot(browser, harness_path, grid_png,
                   cols * shot_w, rows * shot_h, profile_dir,
                   timeout_s=shot_timeout):
@@ -555,6 +557,13 @@ def _shoot_batch(
         return None
 
 
+def _clamp_to_deadline(timeout_s: float, deadline: float | None) -> float:
+    """*timeout_s*, or whatever is left before the caller's *deadline*."""
+    if deadline is None:
+        return timeout_s
+    return max(0.0, min(timeout_s, deadline - time.monotonic()))
+
+
 def try_render_stage_views(
     file_path: str,
     selected: list[tuple[str, str]],
@@ -564,6 +573,7 @@ def try_render_stage_views(
     width: int,
     height: int,
     color: str | None = None,
+    deadline: float | None = None,
 ) -> list[dict] | None:
     """Render every requested view as a stage photograph, or ``None``.
 
@@ -578,7 +588,16 @@ def try_render_stage_views(
     handed to the stage; any other spelling declines to OpenSCAD, which
     accepts colour names this renderer does not — a render must never
     quietly come back in a colour nobody asked for.
+
+    ``deadline`` is the caller's whole-call ceiling as a
+    ``time.monotonic()`` instant (:func:`kiln.model_visualizer.visualize_model`
+    strikes one for every backend).  It is the outer envelope: the set
+    budget below still declines the set on its own, and whichever of the
+    two lands first is the one that counts.  Every shot's poll ceiling is
+    also clamped to what the caller has left, so a browser hung past the
+    caller's window fails here rather than spend the per-view ceiling.
     """
+    call_deadline = deadline
     try:
         if color and not _HEX_COLOR.match(color.strip()):
             logger.debug("stage stills: colour %r is not hex — using OpenSCAD", color)
@@ -642,9 +661,11 @@ def try_render_stage_views(
         # each shot: overrunning it declines the whole set (the
         # all-or-nothing contract above), and the painter takes every
         # angle.  A budget of 0 disables the check.
-        deadline = (
+        own_deadline = (
             time.monotonic() + _STILL_SET_BUDGET_S if _STILL_SET_BUDGET_S else None
         )
+        deadlines = [d for d in (own_deadline, call_deadline) if d is not None]
+        deadline = min(deadlines) if deadlines else None
         tmp = Path(tempfile.mkdtemp(prefix="kiln_stage_still_"))
         try:
             profile_dir = tmp / "profile"
@@ -654,12 +675,18 @@ def try_render_stage_views(
             # the cached document carrying the pose-grid driver — an older
             # document gets the per-angle loop it has always understood.
             if len(selected) > 1 and _STILL_POSES_MARKER in document:
+                if deadline is not None and time.monotonic() > deadline:
+                    logger.debug(
+                        "stage stills: deadline already spent — declining to the painter"
+                    )
+                    return None
                 batched = _shoot_batch(
                     browser, document, payload, selected, rotations,
                     output_dir=output_dir, stem=stem,
                     shot_w=shot_w, shot_h=shot_h, ss=ss,
                     width=width, height=height,
                     color=color, tmp=tmp, profile_dir=profile_dir,
+                    call_deadline=call_deadline,
                 )
                 if batched is not None:
                     return batched
@@ -690,7 +717,8 @@ def try_render_stage_views(
                 harness_path = tmp / f"still_{label}.html"
                 harness_path.write_text(harness, encoding="utf-8")
                 png_path = os.path.join(output_dir, f"{stem}_{label}.png")
-                if not _shoot(browser, harness_path, png_path, shot_w, shot_h, profile_dir):
+                if not _shoot(browser, harness_path, png_path, shot_w, shot_h, profile_dir,
+                              timeout_s=_clamp_to_deadline(_VIEW_TIMEOUT_S, call_deadline)):
                     return None
                 if not _frame_ok(png_path, shot_w, shot_h):
                     logger.debug("stage stills: blank frame for %s — falling back", label)

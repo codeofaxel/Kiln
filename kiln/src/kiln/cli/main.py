@@ -11697,6 +11697,10 @@ def preview(file_path: str, open: bool, json_mode: bool) -> None:
 
         views = result.get("views", [])
         image_paths = [v["path"] for v in views if v.get("path")]
+        # Angles the call budget left no time for (see
+        # kiln.model_visualizer._CALL_BUDGET_S): named, with the reason,
+        # or a shorter set than asked for reads as a render that lost them.
+        skipped = [v for v in views if v.get("skipped")]
 
         if json_mode:
             click.echo(
@@ -11707,6 +11711,8 @@ def preview(file_path: str, open: bool, json_mode: bool) -> None:
                         "output_dir": result.get("output_dir", ""),
                         "rendered": result.get("rendered", 0),
                         "failed": result.get("failed", 0),
+                        "skipped": [v["angle"] for v in skipped],
+                        "message": result.get("message", ""),
                     },
                     json_mode=True,
                 )
@@ -11715,6 +11721,12 @@ def preview(file_path: str, open: bool, json_mode: bool) -> None:
             click.echo(f"Rendered {result.get('rendered', 0)} preview(s):")
             for p in image_paths:
                 click.echo(f"  {p}")
+            if skipped:
+                click.echo(
+                    f"Skipped {len(skipped)} angle(s) "
+                    f"({', '.join(v['angle'] for v in skipped)}): "
+                    f"{skipped[0].get('error', 'call budget spent')}"
+                )
 
         if open and image_paths:
             import subprocess

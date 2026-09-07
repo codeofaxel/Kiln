@@ -554,11 +554,11 @@ def test_the_set_budget_declines_to_the_painter(
     real_shoot = stage_still._shoot
     base = stage_still.time.monotonic()
 
-    def slow_shoot(browser, harness, png, w, h, profile):
+    def slow_shoot(browser, harness, png, w, h, profile, **kwargs):
         calls.append(str(harness))
         # Simulate one slow angle without waiting: spend the whole budget.
         monkeypatch.setattr(stage_still.time, "monotonic", lambda: base + 10_000)
-        return real_shoot(browser, harness, png, w, h, profile)
+        return real_shoot(browser, harness, png, w, h, profile, **kwargs)
 
     monkeypatch.setattr(stage_still, "_shoot", slow_shoot)
     out = tmp_path / "out"
@@ -741,3 +741,57 @@ def test_a_wrong_size_sheet_falls_back_to_the_loop(
         "expected 1 declined batch attempt + 2 loop shots, "
         f"saw {len(harnesses)} launches"
     )
+
+
+# ---------------------------------------------------------------------------
+# The caller's whole-call deadline tightens the set budget
+# ---------------------------------------------------------------------------
+
+
+def test_a_spent_call_deadline_declines_before_the_first_shot(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The set budget is this backend's own; the call deadline is the caller's.
+
+    Whichever is nearer wins.  With the own budget disabled and the call
+    deadline already spent, the set declines before launching a browser.
+    """
+    monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 0.0)
+    shots: list = []
+    real_shoot = stage_still._shoot
+
+    def counting(*args, **kwargs):
+        shots.append(kwargs.get("timeout_s"))
+        return real_shoot(*args, **kwargs)
+
+    monkeypatch.setattr(stage_still, "_shoot", counting)
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=64, height=64,
+        deadline=stage_still.time.monotonic() - 1.0,
+    )
+    assert views is None
+    assert shots == []
+
+
+def test_the_call_deadline_clamps_the_shot_timeout(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 0.0)
+    shots: list = []
+    real_shoot = stage_still._shoot
+
+    def counting(*args, **kwargs):
+        shots.append(kwargs.get("timeout_s"))
+        return real_shoot(*args, **kwargs)
+
+    monkeypatch.setattr(stage_still, "_shoot", counting)
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=64, height=64,
+        deadline=stage_still.time.monotonic() + 5.0,
+    )
+    assert views is not None and len(views) == 2
+    assert shots and all(t is not None and t <= 5.0 for t in shots), shots
