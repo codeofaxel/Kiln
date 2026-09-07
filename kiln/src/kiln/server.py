@@ -18866,9 +18866,33 @@ def decorate_surface(
             return _finish_decoration_result(result_dict, content=content)
 
         # --- Step 2: Find the target face (needed before SVG prep for sizing) ---
-        from kiln.surface_intelligence import resolve_decoratable_face
+        from kiln.surface_intelligence import (
+            CARDINAL_FACE_NAMES,
+            resolve_decoratable_face,
+        )
 
         face_lower = face.lower().strip()
+        # This tool names faces by the direction they point.  The product
+        # face registry and the template decoration profiles name them by
+        # what they are FOR (interior_bed, exterior_bottom, exterior, a flat
+        # keychain's "front") and each of those carries the translation —
+        # an agent that hands one over untranslated needs the bridge named,
+        # not "invalid face name" with nowhere to go.
+        if face_lower != "auto" and face_lower not in CARDINAL_FACE_NAMES:
+            _refund_decoration_quota(quota_consumed)
+            return _error_dict(
+                f"face={face!r} is not a decorate_surface face. This tool "
+                "names faces by the direction they point: auto, "
+                f"{', '.join(sorted(CARDINAL_FACE_NAMES))} — plus 'wall' for "
+                "the round upright wall of a cup, jar or bowl. Product face "
+                "names (interior_bed, exterior_bottom, exterior, a flat "
+                "keychain's 'front') are the product registry's vocabulary: "
+                "pass the `decorate_surface_face` that list_decoratable_faces "
+                "/ describe_face report for that face, the `face` that "
+                "resolve_template_decoration resolves, or the "
+                "`decorate_next.face` a generator's result carries.",
+                code="VALIDATION_ERROR",
+            )
         # One shared door for auto AND named: auto prefers the visible top
         # face and only falls back to largest-flat when the mesh has no
         # top-facing geometry.  This door used bare largest-flat for years,

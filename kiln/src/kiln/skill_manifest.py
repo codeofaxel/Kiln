@@ -165,6 +165,12 @@ class SkillManifest:
                 "start_print(file) — begin printing",
                 "monitor_print() — track progress, show snapshots and cost",
             ],
+            "brand_a_product": [
+                "generate_<product>(...) — the result carries `decorate_next`: the decorate_surface face and settings for that product's canvas",
+                "decorate_surface(model_path=<output_stl>, content=<logo.svg | line-art PNG | 'text:...'>, face=<decorate_next.face>) — THE tool that carves a logo, wordmark, text or image into any mesh",
+                "visualize_model(output) — show the carve (MANDATORY)",
+                "Look-alikes: generate_decorated_product / generate_wall_plaque are PHOTO-relief pipelines (a picture as coin relief), not logo tools; apply_decoration replays a decoration you SAVED earlier and carves nothing new; resolve_template_decoration(template_id) resolves the same face/settings as decorate_next",
+            ],
             "monitor_active_print": [
                 "monitor_print() — full report with progress, temps, cost, snapshot",
                 "Read the snapshot image file and display it inline to user",
