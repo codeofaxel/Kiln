@@ -117,6 +117,26 @@ _STILL_GRID_COLS = 3
 _STILL_MAX_TRIANGLES = 600_000
 _STILL_MAX_BYTES = 64 * 1024 * 1024
 
+#: Frame-pixel ceiling for a whole photograph SET, supersample included.
+#: The browser's cost against frame size is a CLIFF, not a slope --
+#: measured 2026-09-06, one mesh at seven angles, this machine:
+#:
+#:     13.4 MP ->  8.6 s      30.2 MP -> 14.6 s      53.8 MP -> 87.5 s
+#:
+#: The first two land inside the 20 s set budget; the third is four
+#: times over it, because the software rasterizer falls off a memory
+#: cliff somewhere between them.  Past the cap the set can never come
+#: back in budget, so paying ~18 s to discover that is ~18 s taken from
+#: the painter, which would have spent it drawing angles the user keeps
+#: (measured: 2 of 7 angles delivered, against 5 when the browser is
+#: skipped instead).  The cap sits above the measured-good 30.2 MP with
+#: room, and well below the measured-hopeless 53.8 MP.  A cheap
+#: arithmetic check up front beats an expensive runtime discovery.
+#: Env-tunable; 0 disables.
+_STILL_MAX_SET_PIXELS = int(
+    float(os.environ.get("KILN_STAGE_STILL_MAX_MEGAPIXELS", "40") or 0) * 1_000_000
+)
+
 #: Virtual-time budget handed to the browser.  Virtual time fast-forwards
 #: timers and animation frames deterministically, so this is generous
 #: headroom, not wall-clock waiting.
@@ -442,7 +462,7 @@ def _shoot(browser: Path, harness_path: Path, png_path: str,
                 return True
             last_size = size
             time.sleep(0.3)
-        logger.debug("stage stills: browser timed out (%ss)", _VIEW_TIMEOUT_S)
+        logger.debug("stage stills: browser timed out (%.0fs)", timeout_s)
         return os.path.isfile(png_path) and os.path.getsize(png_path) > 0
     finally:
         if proc.poll() is None:
@@ -468,6 +488,7 @@ def _shoot_batch(
     color: str | None,
     tmp: Path,
     profile_dir: Path,
+    deadline: float | None = None,
 ) -> list[dict] | None:
     """Every angle from ONE browser launch, or ``None`` to fall back.
 
@@ -516,6 +537,7 @@ def _shoot_batch(
         min(_VIEW_TIMEOUT_S, _STILL_SET_BUDGET_S)
         if _STILL_SET_BUDGET_S else _VIEW_TIMEOUT_S
     )
+    shot_timeout = _clamp_to_deadline(shot_timeout, deadline)
     if not _shoot(browser, harness_path, grid_png,
                   cols * shot_w, rows * shot_h, profile_dir,
                   timeout_s=shot_timeout):
@@ -555,6 +577,13 @@ def _shoot_batch(
         return None
 
 
+def _clamp_to_deadline(timeout_s: float, deadline: float | None) -> float:
+    """*timeout_s*, or whatever is left before the caller's *deadline*."""
+    if deadline is None:
+        return timeout_s
+    return max(0.0, min(timeout_s, deadline - time.monotonic()))
+
+
 def try_render_stage_views(
     file_path: str,
     selected: list[tuple[str, str]],
@@ -564,6 +593,7 @@ def try_render_stage_views(
     width: int,
     height: int,
     color: str | None = None,
+    deadline: float | None = None,
 ) -> list[dict] | None:
     """Render every requested view as a stage photograph, or ``None``.
 
@@ -578,11 +608,39 @@ def try_render_stage_views(
     handed to the stage; any other spelling declines to OpenSCAD, which
     accepts colour names this renderer does not — a render must never
     quietly come back in a colour nobody asked for.
+
+    ``deadline`` is the caller's whole-call ceiling as a
+    ``time.monotonic()`` instant (:func:`kiln.model_visualizer.visualize_model`
+    hands every backend the one it was given).  It is the outer envelope:
+    the set budget below still declines the set on its own, and whichever
+    of the two lands first is the one that counts.  Every shot's poll
+    ceiling is clamped to what is left before the nearer of the two, so a
+    browser hung past it fails here rather than spend the per-view
+    ceiling — and since a set that cannot FINISH is discarded whole, no
+    shot starts unless the remaining angles are expected to fit.
     """
+    call_deadline = deadline
     try:
         if color and not _HEX_COLOR.match(color.strip()):
             logger.debug("stage stills: colour %r is not hex — using OpenSCAD", color)
             return None
+
+        # Arithmetic before ignition.  Everything below this — finding a
+        # browser, reading the cached stage, loading the mesh — is work
+        # spent on a set the frame budget already rules out.
+        from kiln.preview_render import effective_supersample
+
+        ss = effective_supersample()
+        set_pixels = width * ss * height * ss * len(selected)
+        if _STILL_MAX_SET_PIXELS and set_pixels > _STILL_MAX_SET_PIXELS:
+            logger.debug(
+                "stage stills: %d angle(s) at %dx%d is %.1f MP of frame, past the "
+                "%.1f MP cap — the painter takes the whole budget",
+                len(selected), width, height, set_pixels / 1e6,
+                _STILL_MAX_SET_PIXELS / 1e6,
+            )
+            return None
+
         browser = find_browser()
         if browser is None:
             return None
@@ -619,10 +677,10 @@ def try_render_stage_views(
         # Lanczos-downscale to the requested size (the shared knob in
         # kiln.preview_render governs BOTH renderers, so every preview
         # surface has one crispness policy).  A raw 1x browser frame under
-        # the software rasterizer reads visibly soft.
-        from kiln.preview_render import downscale_png, effective_supersample
+        # the software rasterizer reads visibly soft.  ``ss`` is already
+        # in hand from the frame-budget check above.
+        from kiln.preview_render import downscale_png
 
-        ss = effective_supersample()
         shot_w, shot_h = width * ss, height * ss
 
         stem = Path(file_path).stem
@@ -642,9 +700,11 @@ def try_render_stage_views(
         # each shot: overrunning it declines the whole set (the
         # all-or-nothing contract above), and the painter takes every
         # angle.  A budget of 0 disables the check.
-        deadline = (
+        own_deadline = (
             time.monotonic() + _STILL_SET_BUDGET_S if _STILL_SET_BUDGET_S else None
         )
+        deadlines = [d for d in (own_deadline, call_deadline) if d is not None]
+        deadline = min(deadlines) if deadlines else None
         tmp = Path(tempfile.mkdtemp(prefix="kiln_stage_still_"))
         try:
             profile_dir = tmp / "profile"
@@ -653,32 +713,58 @@ def try_render_stage_views(
             # Batch path: one browser launch for the whole set.  Gated on
             # the cached document carrying the pose-grid driver — an older
             # document gets the per-angle loop it has always understood.
+            batch_cost: float | None = None
             if len(selected) > 1 and _STILL_POSES_MARKER in document:
+                if deadline is not None and time.monotonic() > deadline:
+                    logger.debug(
+                        "stage stills: deadline already spent — declining to the painter"
+                    )
+                    return None
+                batch_started = time.monotonic()
                 batched = _shoot_batch(
                     browser, document, payload, selected, rotations,
                     output_dir=output_dir, stem=stem,
                     shot_w=shot_w, shot_h=shot_h, ss=ss,
                     width=width, height=height,
                     color=color, tmp=tmp, profile_dir=profile_dir,
+                    deadline=deadline,
                 )
                 if batched is not None:
                     return batched
-                logger.debug("stage stills: batch shot declined — per-angle loop")
-                if deadline is not None and time.monotonic() > deadline:
-                    logger.debug(
-                        "stage stills: set budget spent by the batch attempt "
-                        "— declining to the painter"
-                    )
-                    return None
+                batch_cost = time.monotonic() - batch_started
+                logger.debug(
+                    "stage stills: batch shot declined after %.1fs — per-angle loop",
+                    batch_cost,
+                )
 
+            # This set is all-or-nothing, so a shot the REST of the set
+            # cannot follow is guaranteed waste: measured 2026-09-06, the
+            # loop spent eleven seconds on a photograph that passed every
+            # check and then discarded it with the set, because seven
+            # angles could never fit the nineteen seconds left.  So the
+            # check before each shot is predictive — the time left must
+            # cover every angle still to shoot at the last measured cost
+            # of one.  The batch attempt, when it ran, is the first
+            # measurement: one browser launch + document load + three.js
+            # parse is most of a lone shot's cost too, so it over-
+            # estimates, and for a backend that must finish or decline
+            # that is the safe direction (the painter gets the remainder
+            # whole).  No measurement yet — a lone angle, an older
+            # document — shoots once to take one.
+            shot_cost = batch_cost
             for label, description in selected:
-                if deadline is not None and time.monotonic() > deadline:
-                    logger.debug(
-                        "stage stills: set budget (%.0fs) spent after %d/%d "
-                        "angle(s) — declining to the painter",
-                        _STILL_SET_BUDGET_S, len(views), len(selected),
-                    )
-                    return None
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    left = len(selected) - len(views)
+                    if remaining <= 0 or (
+                        shot_cost is not None and remaining < shot_cost * left
+                    ):
+                        logger.debug(
+                            "stage stills: %.1fs left for %d angle(s) at ~%.1fs each "
+                            "— declining to the painter after %d/%d",
+                            remaining, left, shot_cost or 0.0, len(views), len(selected),
+                        )
+                        return None
                 rx, _ry, rz = rotations[label]
                 az_deg, el_deg = _openscad_rotation_to_orbit(rx, rz)
                 harness = _build_harness(
@@ -690,8 +776,11 @@ def try_render_stage_views(
                 harness_path = tmp / f"still_{label}.html"
                 harness_path.write_text(harness, encoding="utf-8")
                 png_path = os.path.join(output_dir, f"{stem}_{label}.png")
-                if not _shoot(browser, harness_path, png_path, shot_w, shot_h, profile_dir):
+                shot_started = time.monotonic()
+                if not _shoot(browser, harness_path, png_path, shot_w, shot_h, profile_dir,
+                              timeout_s=_clamp_to_deadline(_VIEW_TIMEOUT_S, deadline)):
                     return None
+                shot_cost = time.monotonic() - shot_started
                 if not _frame_ok(png_path, shot_w, shot_h):
                     logger.debug("stage stills: blank frame for %s — falling back", label)
                     return None

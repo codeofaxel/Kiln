@@ -24,6 +24,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -508,6 +509,62 @@ def _make_scad_wrapper(
     return scad_path
 
 
+#: Wall-clock budget for a :func:`visualize_model` call made from inside
+#: an MCP tool call.  Hosts bound the tool CALL (~60 s observed
+#: 2026-08-19), and until 2026-09-06 only the first backend had a budget:
+#: the browser declined inside its 20 s set budget, the software painter
+#: then took the rest with no ceiling, and six 1600x1200 angles of a
+#: 2,195-triangle STL came back at 72.4 s.  The host reported a timeout;
+#: the server logged nothing, because nothing on the server had timed
+#: out.
+#:
+#: The engine itself assumes NO deadline — a caller with a window passes
+#: one (see :func:`host_window_deadline`), a caller without one (the CLI)
+#: passes none and waits.  The window is the host's, so the knob lives
+#: with the host's door and nowhere else: applied by default it made the
+#: CLI worse (seven angles in 72 s became one in 40) while
+#: ``compare_renders`` still took four windows for four models, because
+#: a DURATION restarts with every call and only an INSTANT can be shared.
+#: Env-tunable; 0 disables.  The default leaves room inside the ~60 s
+#: window for the one view in flight when the deadline lands, the
+#: share-link upload, and the caller's own work around the render.
+_CALL_BUDGET_S = float(os.environ.get("KILN_VISUALIZE_BUDGET_S", "40") or 0)
+
+
+def host_window_deadline() -> float | None:
+    """The ``deadline`` an MCP tool call hands :func:`visualize_model`.
+
+    A ``time.monotonic()`` instant :data:`_CALL_BUDGET_S` from now, or
+    ``None`` when the knob is 0.  Struck once per tool call and passed to
+    every render that call makes, so they share one clock.
+    """
+    return time.monotonic() + _CALL_BUDGET_S if _CALL_BUDGET_S > 0 else None
+
+
+def _budget_skipped_view(
+    label: str, description: str, *, budget_s: float, done: int, total: int,
+) -> dict:
+    """The view entry for an angle the call's deadline left no time for.
+
+    A deadline already behind us when the call started is reported as
+    what it is.  Rounding it into "the call's 0s time budget ran out"
+    reads like a broken clock and sends the reader hunting for a bug in
+    the timer instead of for the caller that handed over a spent one.
+    """
+    return {
+        "angle": label,
+        "description": description,
+        "path": None,
+        "skipped": "budget",
+        "error": (
+            "Skipped: no time left in the call's budget when this render started"
+            if budget_s < 1.0 else
+            f"Skipped: the call's {budget_s:.0f}s time budget ran out "
+            f"after {done}/{total} angle(s)"
+        ),
+    }
+
+
 def visualize_model(
     file_path: str,
     *,
@@ -519,6 +576,7 @@ def visualize_model(
     timeout: int = 120,
     allow_stage: bool = True,
     share_link: bool = True,
+    deadline: float | None = None,
 ) -> dict:
     """Primary 3D preview tool — renders high-quality PNGs via OpenSCAD.
 
@@ -549,10 +607,23 @@ def visualize_model(
             whole call local.  ``allow_stage=False`` alone does NOT stop
             this: the render goes local while the link upload still goes
             out.
+        deadline: A ``time.monotonic()`` instant by which the WHOLE call,
+            every backend included, must be back — or ``None`` (the
+            default) for no ceiling at all.  Every backend checks it
+            between views; the angles that no longer fit come back as
+            skipped entries (``path`` ``None``, ``skipped`` set, an
+            ``error`` saying why) and the message names them.  An
+            instant, not a duration, so one caller can hand the same
+            deadline to several renders.  MCP doors pass
+            :func:`host_window_deadline`; see :data:`_CALL_BUDGET_S`.
 
     Returns:
         Dict with ``success``, ``views`` list, ``output_dir``, and metadata.
     """
+    # Seconds this call was given, for the report.  A deadline already
+    # behind us is a 0 s budget: everything skips, and the message says so.
+    budget_s = max(0.0, deadline - time.monotonic()) if deadline is not None else 0.0
+
     file_path = os.path.abspath(file_path)
     if not os.path.isfile(file_path):
         return {
@@ -748,6 +819,7 @@ def visualize_model(
             width=width,
             height=height,
             color=color,
+            deadline=deadline,
         ) if allow_stage else None
         if stage_views:
             stage_renderer = "stage"
@@ -762,15 +834,40 @@ def visualize_model(
                 width=width,
                 height=height,
                 color=color,
+                deadline=deadline,
             )
             if stage_views:
                 stage_renderer = "stage_paint"
+
+        def skip_view(label: str, description: str) -> dict:
+            return _budget_skipped_view(
+                label, description, budget_s=budget_s,
+                done=sum(1 for v in views if v.get("path")), total=len(selected),
+            )
+
         if stage_views:
-            views = stage_views
+            views = list(stage_views)
             used_stage = True
+            # A backend under the deadline returns the views that fit and
+            # stops.  The angles it left are out of budget for EVERY
+            # backend, so they are reported as skipped — never handed to
+            # the OpenSCAD loop, which would mix looks inside one result
+            # and run past the window this budget exists to respect.
+            done = {v["angle"] for v in views}
+            for label, description in selected:
+                if label not in done:
+                    views.append(skip_view(label, description))
 
         # Nothing left to draw when the stage already produced every view.
         openscad_views = [] if used_stage else selected
+
+        # Out of budget before OpenSCAD is even resolved: the honest
+        # answer is "skipped", not OPENSCAD_NOT_FOUND on a machine that
+        # never needed it.
+        if openscad_views and deadline is not None and time.monotonic() >= deadline:
+            for label, description in openscad_views:
+                views.append(skip_view(label, description))
+            openscad_views = []
 
         # OpenSCAD is resolved only when a view still needs it: a mesh
         # served entirely by the stage backends never touches it, so a
@@ -790,6 +887,18 @@ def visualize_model(
                 pass
 
         for label, description in openscad_views:
+            # The budget is checked between views, and the view in flight
+            # gets only what is left of it: a render that would outrun the
+            # caller's window is cut there, and reported as the budget's
+            # doing rather than OpenSCAD's.
+            view_timeout: float = timeout
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    views.append(skip_view(label, description))
+                    continue
+                view_timeout = min(timeout, remaining)
+            budget_cut = view_timeout < timeout
             rx, ry, rz = angle_rotations[label]
             # Model is now centered at origin via translate in the wrapper,
             # so camera targets 0,0,0 with the computed distance.
@@ -813,21 +922,28 @@ def visualize_model(
 
             try:
                 result = run_openscad(
-                    cmd, timeout=timeout, output_path=png_path,
+                    cmd, timeout=view_timeout, output_path=png_path,
                 )
             except subprocess.TimeoutExpired:
                 # Logged, not just returned: the returned dict dies with
                 # the tool call, and this failure class is exactly what a
                 # later bug report needs a durable record of.
                 logger.error(
-                    "OpenSCAD render timed out after %ss (view %s, %s)",
-                    timeout, label, scad_path,
+                    "OpenSCAD render timed out after %.0fs (view %s, %s)%s",
+                    view_timeout, label, scad_path,
+                    " — visualize_model budget spent" if budget_cut else "",
                 )
                 views.append({
                     "angle": label,
                     "description": description,
                     "path": None,
-                    "error": f"Render timed out after {timeout}s",
+                    "error": (
+                        f"Render timed out after {view_timeout:.0f}s"
+                        + (
+                            f" — the call's {budget_s:.0f}s time budget ran out"
+                            if budget_cut else ""
+                        )
+                    ),
                 })
                 continue
 
@@ -872,6 +988,33 @@ def visualize_model(
 
         successful = [v for v in views if v.get("path")]
         failed = [v for v in views if not v.get("path")]
+        # Skipped angles count as failed (rendered + failed spans every
+        # angle, as it always has) but are reported apart: nothing broke,
+        # the call ran out of time, and the fix is the caller's to make.
+        skipped = [v for v in failed if v.get("skipped")]
+        broken = len(failed) - len(skipped)
+        if skipped:
+            spent = (
+                "there was no time left in the call's budget when this render "
+                "started"
+                if budget_s < 1.0 else
+                f"the call's {budget_s:.0f}s time budget ran out after "
+                f"{len(successful)} angle(s)"
+            )
+            outcome = (
+                f"{len(skipped)} angle(s) skipped "
+                f"({', '.join(v['angle'] for v in skipped)}): {spent}.  Ask for "
+                "fewer angles or a smaller size, or raise "
+                "KILN_VISUALIZE_BUDGET_S if the client's request window allows it."
+                + (f"  {broken} angle(s) failed to render." if broken else "")
+            )
+        elif failed:
+            outcome = f"{len(failed)} angle(s) failed to render."
+        else:
+            outcome = (
+                "View ALL angles to check: shape, proportions, surface features, "
+                "bottom flatness, and any artifacts before printing."
+            )
 
         # A preview is a picture of a 3D thing; the stage is the thing.  One
         # wire here gives every caller that hands this result back the
@@ -898,14 +1041,11 @@ def visualize_model(
             "renderer": stage_renderer if used_stage else "openscad",
             "rendered": len(successful),
             "failed": len(failed),
+            "skipped": len(skipped),
+            "budget_s": budget_s,
             "message": (
                 f"Rendered {len(successful)}/{len(views)} angles for {Path(file_path).name}. "
-                + (
-                    "View ALL angles to check: shape, proportions, surface features, "
-                    "bottom flatness, and any artifacts before printing."
-                    if len(successful) == len(views)
-                    else f"{len(failed)} angle(s) failed to render."
-                )
+                + outcome
             ),
         }
         if not share_link:
@@ -945,6 +1085,7 @@ def compare_renders(
     colors: list[str] | None = None,
     output_path: str | None = None,
     timeout: int = 120,
+    deadline: float | None = None,
 ) -> dict:
     """Render 2-4 models side by side in a single comparison image.
 
@@ -1014,12 +1155,16 @@ def compare_renders(
         if use_colors[idx]:
             color_kwarg["color"] = use_colors[idx]
 
+        # The SAME instant for every model: four renders under one
+        # caller's window share one clock.  A duration here would restart
+        # per model and take four windows for four models.
         result = visualize_model(
             fpath,
             angles=[angle.lower()],
             width=width,
             height=height,
             timeout=timeout,
+            deadline=deadline,
             **color_kwarg,
         )
 
@@ -1030,11 +1175,18 @@ def compare_renders(
             "error": None,
         }
 
-        if result.get("success") and result.get("views"):
-            view = result["views"][0]
+        # A view entry, even under a failed envelope, is the truer story
+        # than the envelope's error: it says whether the angle broke or
+        # was skipped for time, and the skip rides up to this caller's
+        # own report.
+        views = result.get("views") or []
+        if views:
+            view = views[0]
             model_info["render_path"] = view.get("path")
             if not view.get("path"):
                 model_info["error"] = view.get("error", "Render failed")
+                if view.get("skipped"):
+                    model_info["skipped"] = view["skipped"]
         else:
             model_info["error"] = result.get("error", "Render failed")
 
@@ -1042,10 +1194,16 @@ def compare_renders(
         render_paths.append(model_info["render_path"])
 
     successful_renders = [p for p in render_paths if p is not None]
+    skipped_models = [m for m in models if m.get("skipped")]
     if not successful_renders:
         return {
             "success": False,
-            "error": "All renders failed. Check that OpenSCAD is installed.",
+            "error": (
+                "No model rendered: the call's time budget ran out before "
+                "the first finished."
+                if len(skipped_models) == len(models)
+                else "All renders failed. Check that OpenSCAD is installed."
+            ),
             "code": "RENDER_ERROR",
             "models": models,
         }
@@ -1170,5 +1328,11 @@ def compare_renders(
         "message": (
             f"Compared {len(paths)} models side by side at '{angle}' angle. "
             f"{len(successful_renders)}/{len(paths)} rendered successfully."
+            + (
+                f" {len(skipped_models)} model(s) skipped "
+                f"({', '.join(m['label'] for m in skipped_models)}): "
+                "the call's time budget ran out."
+                if skipped_models else ""
+            )
         ),
     }

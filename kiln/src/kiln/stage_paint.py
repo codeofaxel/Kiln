@@ -65,7 +65,9 @@ from __future__ import annotations
 import logging
 import math
 import os
+import time
 from pathlib import Path
+from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -406,9 +408,56 @@ def _plate_texture(footprint):
 #: measured, not estimated (1M-pair slices peaked ~880 MB in _rasterize).
 _PAIR_SLICE = 400_000
 
+#: Candidate (pixel, triangle) pairs one view may cost.  With slicing
+#: this is a TIME bound, not a memory one.  It is a property of the VIEW
+#: — projected triangle bounding boxes at this frame size — so a set can
+#: contain views on both sides of it, and since the set is
+#: all-or-nothing, one view over the cap dooms every view under it.
+#: Hence :func:`_pair_count`, which prices a view in arithmetic alone,
+#: and the pre-pass in :func:`try_paint_stage_views` that runs it over
+#: the whole set first.  Measured 2026-09-06: painting four 1600x1200
+#: views and then meeting the cap on the fifth spent ~30 s to arrive at
+#: the same "no" the pre-pass reaches before the first pixel.
+_PAIR_CAP = 120_000_000
+
+
+class _ViewCost(NamedTuple):
+    """What one view costs, and the box arithmetic that priced it.
+
+    ``total`` is the whole answer for the pre-pass; the rasterizer also
+    keeps the per-triangle boxes, so the pixels it walks come from the
+    same arithmetic that quoted them.
+    """
+
+    x0: object
+    y0: object
+    bw: object
+    counts: object
+    total: int
+
+
+def _pair_count(tris_px, tris_py, tris_invz, w, h) -> _ViewCost:
+    """Price one view without painting it.
+
+    The rasterizer's own first step, lifted out so the set's pre-pass can
+    ask what a view costs without paying for it.  One helper, so the two
+    can never disagree about what a view is worth.
+    """
+    np = _np
+    x0 = np.clip(np.floor(tris_px.min(axis=1)), 0, w - 1).astype(np.int64)
+    x1 = np.clip(np.ceil(tris_px.max(axis=1)), 0, w - 1).astype(np.int64)
+    y0 = np.clip(np.floor(tris_py.min(axis=1)), 0, h - 1).astype(np.int64)
+    y1 = np.clip(np.ceil(tris_py.max(axis=1)), 0, h - 1).astype(np.int64)
+    bw = x1 - x0 + 1
+    bh = y1 - y0 + 1
+    counts = bw * bh
+    onscreen = (bw > 0) & (bh > 0) & (tris_invz > 0).all(axis=1)
+    counts = np.where(onscreen, counts, 0)
+    return _ViewCost(x0, y0, bw, counts, int(counts.sum()))
+
 
 def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
-               w, h, pair_cap=120_000_000):
+               w, h, pair_cap=None):
     """One z-buffered pass over a triangle soup.
 
     ``attrs`` carries, per triangle vertex, either a unit NORMAL scaled by
@@ -430,16 +479,9 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
     bound; memory no longer scales with the total).
     """
     np = _np
-    x0 = np.clip(np.floor(tris_px.min(axis=1)), 0, w - 1).astype(np.int64)
-    x1 = np.clip(np.ceil(tris_px.max(axis=1)), 0, w - 1).astype(np.int64)
-    y0 = np.clip(np.floor(tris_py.min(axis=1)), 0, h - 1).astype(np.int64)
-    y1 = np.clip(np.ceil(tris_py.max(axis=1)), 0, h - 1).astype(np.int64)
-    bw = x1 - x0 + 1
-    bh = y1 - y0 + 1
-    counts = bw * bh
-    onscreen = (bw > 0) & (bh > 0) & (tris_invz > 0).all(axis=1)
-    counts = np.where(onscreen, counts, 0)
-    total = int(counts.sum())
+    if pair_cap is None:
+        pair_cap = _PAIR_CAP
+    x0, y0, bw, counts, total = _pair_count(tris_px, tris_py, tris_invz, w, h)
     empty = np.zeros((h, w, 3), dtype=np.uint8)
     empty[:] = _BG
     if total == 0:
@@ -607,8 +649,15 @@ def _clip_polygon_near(corners, uvs, eye, fwd, near):
 
 
 def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
-                floor_y, footprint, fit_radius, fit_size, plate_tex_np):
-    """One still at full working resolution.  PIL image, or ``None``."""
+                floor_y, footprint, fit_radius, fit_size, plate_tex_np,
+                cost_only=False):
+    """One still at full working resolution.  PIL image, or ``None``.
+
+    ``cost_only`` stops after the geometry — every projection and clip
+    the real pass makes, none of the rasterizing — and returns the view's
+    pair count as an int.  That is what the set's pre-pass asks with, so
+    the price it is quoted is the price the rasterizer will charge.
+    """
     from PIL import Image
 
     np = _np
@@ -685,10 +734,14 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
                 ]]))
 
     if not all_px:
-        return Image.new("RGB", (width, height), _BG)
+        return 0 if cost_only else Image.new("RGB", (width, height), _BG)
+
+    px_all, py_all, iz_all = np.vstack(all_px), np.vstack(all_py), np.vstack(all_iz)
+    if cost_only:
+        return _pair_count(px_all, py_all, iz_all, width, height).total
 
     buf = _rasterize(
-        np.vstack(all_px), np.vstack(all_py), np.vstack(all_iz),
+        px_all, py_all, iz_all,
         np.vstack(all_at), plate_tex_np, albedo_lin, eye, width, height,
     )
     if buf is None:
@@ -710,6 +763,7 @@ def try_paint_stage_views(
     color: str | None = None,
     plate: bool = True,
     letterbox: bool = True,
+    deadline: float | None = None,
 ) -> list[dict] | None:
     """Paint every requested view in the stage look, or ``None``.
 
@@ -727,6 +781,19 @@ def try_paint_stage_views(
     as noise.  ``_paint_view`` already treats a ``None`` plate texture as
     "no plate", so the off switch is the absence of the texture, not a
     second code path.
+
+    ``deadline`` is the caller's whole-call ceiling as a ``time.monotonic()``
+    instant (:func:`kiln.model_visualizer.visualize_model` strikes one for
+    every backend).  Under it the loop checks BETWEEN views whether another
+    view the size of the last one still fits, and stops there: the views
+    that did fit come back, and the caller reports the rest as skipped.
+    That is the one case a partial list is the honest answer — measured
+    2026-09-06, six 1600x1200 angles painted for ~50 s with no ceiling and
+    pushed the tool call past the MCP host's window, so the host saw a
+    timeout and the user saw nothing.  A view cannot be interrupted
+    mid-raster, which is why the check is predictive.  Nothing painted
+    before the deadline is ``None`` (next backend), same as any decline.
+    Without a deadline the all-or-nothing contract holds unchanged.
     """
     try:
         if os.environ.get(_OPT_OUT_ENV, "").strip():
@@ -777,8 +844,49 @@ def try_paint_stage_views(
             else None
         )
 
+        # Price every view before painting any.  The cap belongs to the
+        # VIEW but the contract belongs to the SET, so one view over it
+        # makes the whole set impossible — and discovering that on view
+        # five costs the four already drawn (measured 2026-09-06: ~30 s
+        # at 1600x1200, then all of it thrown away).  Projection is
+        # arithmetic; only rasterizing is expensive.
+        for label, _description in selected:
+            rx, _ry, rz = rotations[label]
+            az, el = _openscad_rotation_to_orbit(rx, rz)
+            ss_probe = min(ss + 1, 4)
+            probe_h = height * ss_probe
+            strip_probe = round(_FOOTER_PX * ss_probe / ss) if letterbox else 0
+            canvas_probe = probe_h - strip_probe
+            if canvas_probe < 32:
+                canvas_probe = probe_h
+            cost = _paint_view(
+                v, f, az, el,
+                width=width * ss_probe, height=canvas_probe,
+                albedo_lin=albedo_lin, floor_y=floor_y,
+                footprint=footprint, fit_radius=radius, fit_size=fit_size,
+                plate_tex_np=plate_tex_np, cost_only=True,
+            )
+            if cost > _PAIR_CAP:
+                logger.debug(
+                    "stage paint: %s would cost %d raster pairs, past the %d cap "
+                    "— the whole set declines before painting anything",
+                    label, cost, _PAIR_CAP,
+                )
+                return None
+
         views: list[dict] = []
+        last_view_s = 0.0
         for label, description in selected:
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or remaining < last_view_s:
+                    logger.debug(
+                        "stage paint: %.1fs left before the call deadline, last view "
+                        "took %.1fs — stopping after %d/%d angle(s)",
+                        remaining, last_view_s, len(views), len(selected),
+                    )
+                    break
+            started = time.monotonic()
             rx, _ry, rz = rotations[label]
             az, el = _openscad_rotation_to_orbit(rx, rz)
             # One supersample step past the shared knob, internally: the
@@ -818,6 +926,9 @@ def try_paint_stage_views(
             if ss_int > 1:
                 downscale_png(out, width, height)
             views.append({"angle": label, "description": description, "path": out})
+            last_view_s = time.monotonic() - started
+        if deadline is not None and not views:
+            return None
         return views
     except Exception:  # noqa: BLE001 — a paint failure must never break a preview
         logger.debug("stage paint failed — falling through", exc_info=True)

@@ -632,3 +632,177 @@ class TestDefaultOutputDirIsUnshared:
             "a concurrent session would clobber them and poison the "
             "content-keyed render cache"
         )
+
+
+# ---------------------------------------------------------------------------
+# The whole-call budget -- one clock every backend honours
+# ---------------------------------------------------------------------------
+
+
+def _preview_run_advancing(clock: list[float], step_s: float, timeouts: list):
+    """A fake ``subprocess.run`` that writes a PNG and burns *step_s* per view."""
+
+    def mock_run(cmd, **kwargs):
+        if "--preview" in cmd:
+            clock[0] += step_s
+            timeouts.append(kwargs.get("timeout"))
+        for i, arg in enumerate(cmd):
+            if arg == "-o" and i + 1 < len(cmd):
+                Path(cmd[i + 1]).write_bytes(b"fake-png-data")
+        mock = MagicMock()
+        mock.returncode = 0
+        return mock
+
+    return mock_run
+
+
+class TestCallBudget:
+    """One budget for the whole ``visualize_model`` call, honoured by every backend.
+
+    Measured 2026-09-06 (runtime venv, 2,195-triangle STL, 1600x1200, six
+    angles): the browser declined inside its own 20 s set budget, the
+    painter then took the rest with no ceiling, and the call returned at
+    72.4 s -- past the MCP host's request window.  The host reported a
+    timeout; the server logged nothing, because nothing on the server had
+    timed out.  Only the first backend had a budget.  So: one deadline for
+    the call, handed to each backend, checked between views, and the
+    angles that no longer fit are reported as skipped -- not drawn late.
+
+    The deadline is a ``time.monotonic()`` INSTANT the caller passes in,
+    not a duration the engine assumes: an instant can be shared by every
+    render one caller makes (``compare_renders`` hands one to each of its
+    models), and a caller with no request window -- the CLI -- passes
+    none and waits.  The 40 s default belongs to the MCP door, the one
+    caller that has a window; see :func:`host_window_deadline`.
+    """
+
+    def test_openscad_loop_skips_the_angles_past_the_budget(
+        self, tmp_stl: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        from kiln import model_visualizer
+
+        clock = [1000.0]
+        monkeypatch.setattr(model_visualizer.time, "monotonic", lambda: clock[0])
+        timeouts: list = []
+
+        with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
+             patch("subprocess.run", side_effect=_preview_run_advancing(clock, 30.0, timeouts)):
+            result = visualize_model(
+                str(tmp_stl), output_dir=str(tmp_path / "out"), deadline=clock[0] + 40.0,
+            )
+
+        # 0 s -> view 1 (40 s left) -> 30 s -> view 2 (10 s left, its
+        # OpenSCAD timeout clamped to what is left) -> 60 s -> the rest skip.
+        assert len(timeouts) == 2, "views past the budget must not be rendered"
+        assert timeouts[1] <= 10.0, "an in-flight view is clamped to the remaining budget"
+        assert result["success"] is True
+        assert result["renderer"] == "openscad"
+        assert result["rendered"] == 2
+        assert result["skipped"] == 5
+        assert result["failed"] == 5  # rendered + failed still spans every angle
+        assert len(result["views"]) == 7
+        skipped = [v for v in result["views"] if v.get("skipped")]
+        assert [v["angle"] for v in skipped] == [a[0] for a in _CAMERA_ANGLES][2:]
+        for v in skipped:
+            assert v["path"] is None
+            assert "budget" in v["error"]
+        assert "skipped" in result["message"]
+        assert "40" in result["message"]
+        for v in skipped:
+            assert v["angle"] in result["message"], "the message names each skipped angle"
+
+    def test_stage_backends_get_the_deadline_and_a_partial_paint_is_honest(
+        self, tmp_stl: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        from kiln import model_visualizer
+
+        monkeypatch.delenv("KILN_NO_STAGE_STILLS", raising=False)
+        clock = [1000.0]
+        monkeypatch.setattr(model_visualizer.time, "monotonic", lambda: clock[0])
+        seen: dict = {}
+
+        def fake_still(file_path, selected, rotations, *, deadline, **kw):
+            seen["still_deadline"] = deadline
+            return None  # the browser declines, as it did in the field
+
+        def fake_paint(file_path, selected, rotations, *, deadline, output_dir, **kw):
+            seen["paint_deadline"] = deadline
+            os.makedirs(output_dir, exist_ok=True)
+            label, description = selected[0]
+            png = os.path.join(output_dir, f"first_{label}.png")
+            Path(png).write_bytes(b"fake-png-data")
+            clock[0] = deadline + 5.0  # one slow view spends the whole budget
+            return [{"angle": label, "description": description, "path": png}]
+
+        with patch("kiln.stage_still.try_render_stage_views", side_effect=fake_still), \
+             patch("kiln.stage_paint.try_paint_stage_views", side_effect=fake_paint), \
+             patch("kiln.model_visualizer._find_openscad",
+                   side_effect=AssertionError("OpenSCAD must not be resolved past the budget")), \
+             patch("subprocess.run", side_effect=_preview_run_advancing(clock, 0.0, [])):
+            result = visualize_model(
+                str(tmp_stl), output_dir=str(tmp_path / "out"),
+                deadline=1040.0, share_link=False,
+            )
+
+        assert seen["still_deadline"] == pytest.approx(1040.0)
+        assert seen["paint_deadline"] == pytest.approx(1040.0)
+        assert result["success"] is True
+        assert result["renderer"] == "stage_paint"
+        assert result["rendered"] == 1
+        assert result["skipped"] == 6
+        assert len(result["views"]) == 7
+        assert [v["angle"] for v in result["views"]] == [a[0] for a in _CAMERA_ANGLES]
+        for v in result["views"][1:]:
+            assert v["path"] is None and v.get("skipped")
+            assert "budget" in v["error"]
+        assert "6 angle(s) skipped" in result["message"]
+
+    def test_no_deadline_means_no_ceiling(
+        self, tmp_stl: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """The engine assumes nothing: a caller without a window waits."""
+        from kiln import model_visualizer
+
+        clock = [1000.0]
+        monkeypatch.setattr(model_visualizer.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(model_visualizer, "_CALL_BUDGET_S", 40.0)  # must NOT apply
+        timeouts: list = []
+
+        with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
+             patch("subprocess.run", side_effect=_preview_run_advancing(clock, 30.0, timeouts)):
+            result = visualize_model(str(tmp_stl), output_dir=str(tmp_path / "out"))
+
+        assert len(timeouts) == 7
+        assert result["rendered"] == 7
+        assert result["skipped"] == 0
+        assert "skipped" not in result["message"]
+
+    def test_host_window_deadline_reads_the_knob(self, monkeypatch: pytest.MonkeyPatch):
+        from kiln import model_visualizer
+        from kiln.model_visualizer import host_window_deadline
+
+        monkeypatch.setattr(model_visualizer.time, "monotonic", lambda: 1000.0)
+        monkeypatch.setattr(model_visualizer, "_CALL_BUDGET_S", 40.0)
+        assert host_window_deadline() == pytest.approx(1040.0)
+        monkeypatch.setattr(model_visualizer, "_CALL_BUDGET_S", 0.0)
+        assert host_window_deadline() is None
+
+    def test_an_already_spent_deadline_says_so_plainly(
+        self, tmp_stl: Path, tmp_path: Path,
+    ):
+        """A deadline already behind us is not a "0s budget that ran out".
+
+        That sentence reads like a broken clock.  The honest report is
+        that there was no time left when this render was asked for.
+        """
+        import time as _time
+
+        result = visualize_model(
+            str(tmp_stl), output_dir=str(tmp_path / "out"),
+            deadline=_time.monotonic() - 1.0, share_link=False,
+        )
+        assert result["skipped"] == 7
+        assert "0s" not in result["message"]
+        assert "no time left" in result["message"].lower()
+        assert "0s" not in result["views"][0]["error"]
+        assert "no time left" in result["views"][0]["error"].lower()

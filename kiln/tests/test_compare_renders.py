@@ -86,7 +86,7 @@ def _make_visualize_success(tmp_path: Path):
     call_count = 0
 
     def _mock(file_path, *, output_dir=None, width=800, height=600,
-              angles=None, color="", timeout=120):
+              angles=None, color="", timeout=120, deadline=None):
         nonlocal call_count
         call_count += 1
         out_dir = output_dir or str(tmp_path / f"viz_{call_count}")
@@ -210,7 +210,7 @@ class TestCompareRendersIntegration:
         captured_colors: list[str] = []
 
         def _mock(file_path, *, output_dir=None, width=800, height=600,
-                  angles=None, color="", timeout=120):
+                  angles=None, color="", timeout=120, deadline=None):
             captured_colors.append(color)
             out_dir = output_dir or str(tmp_path / f"viz_{len(captured_colors)}")
             os.makedirs(out_dir, exist_ok=True)
@@ -278,7 +278,7 @@ class TestCompareRendersIntegration:
         captured_dims: list[tuple[int, int]] = []
 
         def _mock(file_path, *, output_dir=None, width=800, height=600,
-                  angles=None, color="", timeout=120):
+                  angles=None, color="", timeout=120, deadline=None):
             captured_dims.append((width, height))
             out_dir = output_dir or str(tmp_path / f"viz_{len(captured_dims)}")
             os.makedirs(out_dir, exist_ok=True)

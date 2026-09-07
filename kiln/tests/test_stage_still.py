@@ -554,11 +554,11 @@ def test_the_set_budget_declines_to_the_painter(
     real_shoot = stage_still._shoot
     base = stage_still.time.monotonic()
 
-    def slow_shoot(browser, harness, png, w, h, profile):
+    def slow_shoot(browser, harness, png, w, h, profile, **kwargs):
         calls.append(str(harness))
         # Simulate one slow angle without waiting: spend the whole budget.
         monkeypatch.setattr(stage_still.time, "monotonic", lambda: base + 10_000)
-        return real_shoot(browser, harness, png, w, h, profile)
+        return real_shoot(browser, harness, png, w, h, profile, **kwargs)
 
     monkeypatch.setattr(stage_still, "_shoot", slow_shoot)
     out = tmp_path / "out"
@@ -741,3 +741,214 @@ def test_a_wrong_size_sheet_falls_back_to_the_loop(
         "expected 1 declined batch attempt + 2 loop shots, "
         f"saw {len(harnesses)} launches"
     )
+
+
+# ---------------------------------------------------------------------------
+# The caller's whole-call deadline tightens the set budget
+# ---------------------------------------------------------------------------
+
+
+def test_a_spent_call_deadline_declines_before_the_first_shot(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The set budget is this backend's own; the call deadline is the caller's.
+
+    Whichever is nearer wins.  With the own budget disabled and the call
+    deadline already spent, the set declines before launching a browser.
+    """
+    monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 0.0)
+    shots: list = []
+    real_shoot = stage_still._shoot
+
+    def counting(*args, **kwargs):
+        shots.append(kwargs.get("timeout_s"))
+        return real_shoot(*args, **kwargs)
+
+    monkeypatch.setattr(stage_still, "_shoot", counting)
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=64, height=64,
+        deadline=stage_still.time.monotonic() - 1.0,
+    )
+    assert views is None
+    assert shots == []
+
+
+def test_the_call_deadline_clamps_the_shot_timeout(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 0.0)
+    shots: list = []
+    real_shoot = stage_still._shoot
+
+    def counting(*args, **kwargs):
+        shots.append(kwargs.get("timeout_s"))
+        return real_shoot(*args, **kwargs)
+
+    monkeypatch.setattr(stage_still, "_shoot", counting)
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=64, height=64,
+        deadline=stage_still.time.monotonic() + 5.0,
+    )
+    assert views is not None and len(views) == 2
+    assert shots and all(t is not None and t <= 5.0 for t in shots), shots
+
+
+# ---------------------------------------------------------------------------
+# All-or-nothing means: never start a shot the SET cannot finish
+# ---------------------------------------------------------------------------
+
+
+def test_a_spent_batch_declines_before_a_lone_shot(
+    cube_stl: str, batch_stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The batch attempt is the first cost measurement, and it is enough.
+
+    Measured 2026-09-06: the batch declined at second 20 of a 40 s call,
+    the per-angle loop then spent eleven seconds on a photograph that
+    passed every check -- and discarded it, because the set could never
+    finish in the nineteen seconds left.  One browser launch + document
+    load + three.js parse is most of a lone shot's cost too, so the
+    batch's elapsed time is the estimate: with every remaining angle
+    priced at that, the set declines before the first lone shot and the
+    painter gets the whole remainder.
+    """
+    monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 0.0)
+    clock = [1000.0]
+    monkeypatch.setattr(stage_still.time, "monotonic", lambda: clock[0])
+
+    def slow_batch(*args, **kwargs):
+        clock[0] += 20.0
+        return None
+
+    lone: list = []
+    real_shoot = stage_still._shoot
+    monkeypatch.setattr(stage_still, "_shoot_batch", slow_batch)
+    monkeypatch.setattr(
+        stage_still, "_shoot",
+        lambda *a, **k: (lone.append(1), real_shoot(*a, **k))[1],
+    )
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=64, height=64,
+        deadline=clock[0] + 40.0,
+    )
+    assert views is None
+    assert lone == [], "two angles at ~20 s each cannot fit in 20 s -- no lone shot"
+
+
+def test_a_measured_shot_prices_the_rest_of_the_set(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a batch, the first shot is the measurement; the rest are priced by it."""
+    monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 0.0)
+    clock = [1000.0]
+    monkeypatch.setattr(stage_still.time, "monotonic", lambda: clock[0])
+    shots: list = []
+    real_shoot = stage_still._shoot
+
+    def ten_second_shot(*args, **kwargs):
+        shots.append(1)
+        clock[0] += 10.0
+        return real_shoot(*args, **kwargs)
+
+    monkeypatch.setattr(stage_still, "_shoot", ten_second_shot)
+    three = [*_VIEWS, ("top", "top view")]
+    rotations = {**_ROTATIONS, "top": (0, 0, 0)}
+    views = try_render_stage_views(
+        cube_stl, three, rotations,
+        output_dir=str(tmp_path / "out"), width=64, height=64,
+        deadline=clock[0] + 25.0,
+    )
+    # 25 s: shot 1 costs 10 -> 15 left, two angles still to shoot at 10
+    # each need 20.  Declining here hands the painter 15 s; shooting on
+    # would spend it all and discard three good frames.
+    assert views is None
+    assert shots == [1]
+
+
+# ---------------------------------------------------------------------------
+# The size gate — don't pay 18 s to learn the browser cannot do this set
+# ---------------------------------------------------------------------------
+
+
+def test_an_oversized_set_declines_without_launching_anything(
+    cube_stl: str, batch_stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past the pixel cap the browser is skipped before any work at all.
+
+    Measured 2026-09-06 on one mesh at seven angles: 30.2 MP of frame
+    took 14.6 s (inside the 20 s set budget), 53.8 MP took 87.5 s.  That
+    is a cliff, not a slope -- the software rasterizer falls off it -- so
+    a set past the cap can never come back in budget, and paying ~18 s to
+    discover that is ~18 s the painter should have had.
+    """
+    looked: list = []
+    monkeypatch.setattr(
+        stage_still, "find_browser",
+        lambda *a, **k: looked.append(1) or good_browser,
+    )
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=8000, height=6000,
+    )
+    assert views is None
+    assert looked == [], "the cap must be checked before the browser is even found"
+
+
+def test_a_set_inside_the_cap_is_still_attempted(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+) -> None:
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=64, height=64,
+    )
+    assert views is not None and len(views) == 2
+
+
+def test_a_zero_cap_disables_the_size_gate(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(stage_still, "_STILL_MAX_SET_PIXELS", 0)
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=8000, height=6000,
+    )
+    # The gate is off, so the attempt proceeds and fails on its own terms
+    # (the stub browser writes a fixed-size frame) rather than being
+    # refused up front.  Either way it must not raise.
+    assert views is None or isinstance(views, list)
+
+
+def test_the_timeout_log_reports_the_ceiling_actually_used(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A shot clamped to 2 s must not report the 60 s per-view constant.
+
+    The log line read ``_VIEW_TIMEOUT_S`` rather than the ceiling in
+    force, so a clamped shot said 60 s when it had waited 20 -- the one
+    number a person debugging this would trust.
+    """
+    import logging
+
+    never = tmp_path / "never.png"
+    hang = tmp_path / "hang.sh"
+    hang.write_text("#!/bin/sh\nsleep 30\n")
+    hang.chmod(0o755)
+    harness = tmp_path / "h.html"
+    harness.write_text("<html></html>")
+    with caplog.at_level(logging.DEBUG, logger="kiln.stage_still"):
+        ok = stage_still._shoot(
+            hang, harness, str(never), 64, 64, tmp_path / "prof", timeout_s=2.0,
+        )
+    assert ok is False
+    timed_out = [r.getMessage() for r in caplog.records if "timed out" in r.getMessage()]
+    assert timed_out, "the timeout must be logged"
+    assert "2" in timed_out[0] and "60" not in timed_out[0], timed_out[0]
