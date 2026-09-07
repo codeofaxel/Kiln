@@ -16,6 +16,7 @@ import struct
 import subprocess
 import zlib
 from pathlib import Path
+from typing import Any
 
 _logger = logging.getLogger(__name__)
 
@@ -42,6 +43,8 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
     pos = 8
     ihdr = None
     idat_chunks: list[bytes] = []
+    palette: bytes = b""
+    trns: bytes = b""
 
     while pos < len(data):
         chunk_len = struct.unpack(">I", data[pos : pos + 4])[0]
@@ -63,6 +66,10 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
             }
         elif chunk_type == b"IDAT":
             idat_chunks.append(chunk_data)
+        elif chunk_type == b"PLTE":
+            palette = chunk_data
+        elif chunk_type == b"tRNS":
+            trns = chunk_data
         elif chunk_type == b"IEND":
             break
 
@@ -78,7 +85,7 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
         raise ValueError(f"Only 8-bit PNGs supported, got {bit_depth}-bit")
 
     # Bytes per pixel
-    bpp_map = {0: 1, 2: 3, 4: 2, 6: 4}  # Gray, RGB, Gray+A, RGBA
+    bpp_map = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}  # Gray, RGB, Palette, Gray+A, RGBA
     if color_type not in bpp_map:
         raise ValueError(f"Unsupported PNG color type: {color_type}")
     bpp = bpp_map[color_type]
@@ -87,6 +94,25 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
     raw = zlib.decompress(b"".join(idat_chunks))
 
     stride = width * bpp + 1  # +1 for filter byte per row
+
+    # Transparency carried beside the pixels rather than in them: a palette
+    # image's tRNS is a per-index alpha table; a grayscale or RGB image's
+    # tRNS names the one colour that is fully transparent.
+    # Pillow's own L conversion, rounded — a truncating float formula sat one
+    # level below it on flat tones, so the two doors disagreed by a pixel value.
+    def _lum(r: int, g: int, b: int) -> int:
+        return (299 * r + 587 * g + 114 * b + 500) // 1000
+
+    palette_gray = [
+        _lum(palette[i], palette[i + 1], palette[i + 2])
+        for i in range(0, len(palette) - 2, 3)
+    ]
+    palette_alpha = [trns[i] if i < len(trns) else 255 for i in range(len(palette_gray))]
+    trns_gray = struct.unpack(">H", trns[:2])[0] & 0xFF if color_type == 0 and len(trns) >= 2 else None
+    trns_rgb = (
+        tuple(struct.unpack(">HHH", trns[:6])[i] & 0xFF for i in range(3))
+        if color_type == 2 and len(trns) >= 6 else None
+    )
 
     def _paeth(a: int, b: int, c: int) -> int:
         p = a + b - c
@@ -131,11 +157,26 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
         gray_row: list[int] = []
         if color_type == 0:  # Grayscale
             gray_row = list(raw_row)
+            if trns_gray is not None:
+                alpha_rows.append([0 if v == trns_gray else 255 for v in gray_row])
         elif color_type == 2:  # RGB
+            alpha_row_rgb: list[int] = []
             for x in range(width):
                 off = x * 3
                 r, g, b_val = raw_row[off], raw_row[off + 1], raw_row[off + 2]
-                gray_row.append(int(0.299 * r + 0.587 * g + 0.114 * b_val))
+                gray_row.append(_lum(r, g, b_val))
+                if trns_rgb is not None:
+                    alpha_row_rgb.append(0 if (r, g, b_val) == trns_rgb else 255)
+            if trns_rgb is not None:
+                alpha_rows.append(alpha_row_rgb)
+        elif color_type == 3:  # Palette
+            if not palette_gray:
+                raise ValueError("Palette PNG without a PLTE chunk")
+            gray_row = [palette_gray[i] if i < len(palette_gray) else 0 for i in raw_row]
+            if trns:
+                alpha_rows.append(
+                    [palette_alpha[i] if i < len(palette_alpha) else 255 for i in raw_row]
+                )
         elif color_type == 4:  # Grayscale + Alpha
             alpha_row: list[int] = []
             for x in range(width):
@@ -153,7 +194,7 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
                     raw_row[off + 2],
                     raw_row[off + 3],
                 )
-                gray_row.append(int(0.299 * r + 0.587 * g + 0.114 * b_val))
+                gray_row.append(_lum(r, g, b_val))
                 alpha_row.append(alpha)
             alpha_rows.append(alpha_row)
 
@@ -192,8 +233,20 @@ IMAGE_STYLES: tuple[str, ...] = (
 )
 
 _ALPHA_FLAT_ART_MAX_TONES = 4
-_ALPHA_FLAT_ART_TONE_BAND = 8
+_ALPHA_FLAT_ART_TONE_BAND = 4
 _ALPHA_FLAT_ART_COVERAGE = 0.9
+# When the alpha coverage is the ink, coverage this faint is not the mark:
+# a drop shadow, a glow, a soft halo an exporter left around the artwork.
+# Anti-aliased edges ramp through this floor in a pixel and are kept.
+_ALPHA_INK_FLOOR = 96
+# The tone decision reads the mark's INTERIOR: pixels this opaque.  An
+# anti-aliased edge pixel carries a blend of the mark's colour and whatever
+# the exporter put under it, and on thin line art edge pixels can outnumber
+# interior ones — read together they smear a two-tone logo into a "photo".
+# When too few pixels are fully opaque (hairline art), every opaque-ish
+# pixel counts, as before.
+_ALPHA_CORE_MIN = 250
+_ALPHA_CORE_MIN_FRACTION = 0.25
 
 
 def _alpha_is_the_ink(opaque_lum_hist: list[int]) -> bool:
@@ -246,6 +299,17 @@ def _alpha_is_the_ink(opaque_lum_hist: list[int]) -> bool:
     return False
 
 
+def _alpha_ink_level(alpha: int) -> int:
+    """Alpha coverage → ink, with faint coverage dropped to the field.
+
+    0 is full ink (black), 255 is the empty field, matching what the
+    Pillow door produces by inverting the alpha channel.
+    """
+    if alpha <= _ALPHA_INK_FLOOR:
+        return 255
+    return 255 - int((alpha - _ALPHA_INK_FLOOR) * 255 / (255 - _ALPHA_INK_FLOOR))
+
+
 def _resolve_alpha_rows(
     gray_rows: list[list[int]], alpha_rows: list[list[int]]
 ) -> list[list[int]]:
@@ -256,14 +320,19 @@ def _resolve_alpha_rows(
     composited onto white.
     """
     hist = [0] * 256
+    core_hist = [0] * 256
     for g_row, a_row in zip(gray_rows, alpha_rows, strict=True):
         for g, a in zip(g_row, a_row, strict=True):
             if a >= 128:
                 hist[g] += 1
+                if a >= _ALPHA_CORE_MIN:
+                    core_hist[g] += 1
     opaque = sum(hist)
     total = sum(len(r) for r in alpha_rows)
+    if sum(core_hist) >= opaque * _ALPHA_CORE_MIN_FRACTION:
+        hist = core_hist
     if 0 < opaque < total and _alpha_is_the_ink(hist):
-        return [[255 - a for a in a_row] for a_row in alpha_rows]
+        return [[_alpha_ink_level(a) for a in a_row] for a_row in alpha_rows]
     return [
         [
             min(255, int(g * (a / 255.0) + 255 * (1 - a / 255.0)))
@@ -271,6 +340,29 @@ def _resolve_alpha_rows(
         ]
         for g_row, a_row in zip(gray_rows, alpha_rows, strict=True)
     ]
+
+
+def _alpha_decision(rgba) -> tuple[Any, str]:
+    """The alpha rule over a Pillow RGBA image: ``(alpha_band, verdict)``.
+
+    ``verdict`` is ``"ink"`` (the coverage is the mark), ``"tones"`` (the
+    tones are the relief), or ``"opaque"`` when there is nothing to
+    decide — no transparent pixels, or no opaque ones.
+    """
+    alpha = rgba.getchannel("A")
+    a_hist = alpha.histogram()
+    opaque = sum(a_hist[128:])
+    transparent = sum(a_hist[:128])
+    if opaque == 0 or transparent == 0:
+        return alpha, "opaque"
+    core = sum(a_hist[_ALPHA_CORE_MIN:])
+    floor = _ALPHA_CORE_MIN if core >= opaque * _ALPHA_CORE_MIN_FRACTION else 128
+    mask = alpha.point(lambda a: 255 if a >= floor else 0)
+    # The pixels' OWN tones — a composite would already have pulled every
+    # anti-aliased edge toward white and blurred the very histogram this
+    # decision reads.
+    own_tones = rgba.convert("RGB").convert("L").histogram(mask)
+    return alpha, ("ink" if _alpha_is_the_ink(own_tones) else "tones")
 
 
 def _flatten_alpha_on_white(img):
@@ -300,33 +392,55 @@ def _flatten_alpha_on_white(img):
     and PA modes, plus palette/grayscale/RGB images with a transparency
     table (``info["transparency"]`` — honored by ``convert("RGBA")``).
     """
-    from PIL import Image, ImageChops
+    from PIL import Image
 
     has_alpha = img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
     if not has_alpha:
         return img
 
-    rgba = img.convert("RGBA")
-    alpha = rgba.getchannel("A")
+    try:
+        rgba = img.convert("RGBA")
+    except (ValueError, OSError):
+        # A transparency table Pillow cannot resolve for this mode (seen on
+        # some 16-bit exports).  Read the image as it is rather than fail
+        # the whole carve on the resolver.
+        _logger.warning("Transparency could not be resolved for %s-mode image; reading it opaque", img.mode)
+        return img
+
+    alpha, verdict = _alpha_decision(rgba)
+    if verdict == "ink":
+        return alpha.point(_alpha_ink_level)
+    # Tonal content, or nothing to decide (fully transparent: nothing to
+    # rescue; fully opaque: nothing to flatten) — the plain composite is
+    # the whole story.
     bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
     bg.paste(rgba, mask=alpha)
-
-    a_hist = alpha.histogram()
-    opaque = sum(a_hist[128:])
-    transparent = sum(a_hist[:128])
-    if opaque == 0 or transparent == 0:
-        # Fully transparent (nothing to rescue) or fully opaque (nothing
-        # to flatten) — the plain composite is already the whole story.
-        return bg
-
-    opaque_mask = alpha.point(lambda a: 255 if a >= 128 else 0)
-    # The opaque pixels' OWN tones — a composite would already have pulled
-    # every anti-aliased edge toward white and blurred the very histogram
-    # this decision reads.
-    own_tones = rgba.convert("RGB").convert("L").histogram(opaque_mask)
-    if _alpha_is_the_ink(own_tones):
-        return ImageChops.invert(alpha)
     return bg
+
+
+def _alpha_verdict(image_path: str) -> str | None:
+    """What the alpha rule decided for this file: ``"ink"``, ``"tones"``,
+    or ``None`` when the image carries no transparency (or Pillow is not
+    installed, in which case the heightmap probe alone decides).
+
+    Read once by :func:`prepare_image_for_emboss` so that an image whose
+    alpha coverage IS the mark is carved as a mark outright — the alpha
+    channel has already said so, and a histogram probe over a tiny or
+    sparse mark is a weaker witness than that.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        img = Image.open(image_path)
+        has_alpha = img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
+        if not has_alpha:
+            return None
+        _alpha, verdict = _alpha_decision(img.convert("RGBA"))
+        return "tones" if verdict == "opaque" else verdict
+    except Exception:  # noqa: BLE001 — the loader reports unreadable images itself
+        return None
 
 
 def _open_grayscale(image_path: str, *, exif_transpose: bool = False):
@@ -764,13 +878,31 @@ def prepare_image_for_emboss(
     # circle, and running it over a logo carved the whole disc away and
     # left the mask's edge printed on the part as a ring.  Callers pass a
     # style as a hint; the image itself is the authority.
-    _mark_mode = False
-    try:
-        _probe_rows, _pw, _ph = _load_image_as_grayscale(image_path)
-        _probe_rows, _pw, _ph = _downscale(_probe_rows, _pw, _ph, max_resolution)
-        _mark_mode = _is_mark_on_flat_field(_probe_rows, _pw, _ph)
-    except Exception:  # noqa: BLE001 — a probe failure just means "treat as photo"
-        _mark_mode = False
+    _mark_mode = _alpha_verdict(image_path) == "ink"
+    if not _mark_mode:
+        _probe = None
+        try:
+            _probe_rows, _pw, _ph = _load_image_as_grayscale(image_path)
+            _probe = _downscale(_probe_rows, _pw, _ph, max_resolution)
+        except Exception:  # noqa: BLE001 — a probe failure just means "treat as photo"
+            _probe = None
+        if _probe is not None:
+            _probe_rows, _pw, _ph = _probe
+            _lo = min(min(r) for r in _probe_rows) if _probe_rows and _probe_rows[0] else 0
+            _hi = max(max(r) for r in _probe_rows) if _probe_rows and _probe_rows[0] else 0
+            if _hi - _lo <= _ALPHA_INK_DEADBAND:
+                # One flat tone end to end: nothing to carve.  A fully
+                # transparent PNG, a blank export, a colour swatch.  Carving
+                # it anyway produced a product-shaped pool with no artwork
+                # in it.  Decided on the SOURCE, before any style can mask
+                # or posterise the blank into something that looks like
+                # content.
+                raise ValueError(
+                    f"{os.path.basename(image_path)} has no visible content to "
+                    "carve — it is one flat tone from edge to edge (a fully "
+                    "transparent PNG decodes as an empty field)."
+                )
+            _mark_mode = _is_mark_on_flat_field(_probe_rows, _pw, _ph)
 
     if _mark_mode:
         _logger.info(

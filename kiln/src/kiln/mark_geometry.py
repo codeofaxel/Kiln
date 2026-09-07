@@ -65,6 +65,10 @@ _DOT_EPS = 1e-6
 # relative so tiny-viewBox icons don't lose real detail.
 _SPECK_DIAG_FRACTION = 0.002
 
+# Tones this close to white are the empty field, not content — the same
+# tolerance the heightmap side uses to call a tone "the field".
+_FIELD_DEADBAND = 16
+
 
 # ---------------------------------------------------------------------------
 # MarkGeometry — the compiled result
@@ -1169,6 +1173,22 @@ def is_bilevel_image(image_path: str) -> bool:
         img = _load_flattened_grayscale(image_path, 256)
     except Exception:  # noqa: BLE001 — unreadable image: let the main path report it
         return False
+    # Judge the CONTENT, not the canvas.  A small photograph on a large
+    # empty field (a cut-out exported on a big transparent canvas) is
+    # mostly field, and the field's pixels are as decisive as any mark's —
+    # at 30% coverage a full-range gradient passed as bi-level and was
+    # traced into a silhouette.  Cropping to what is actually drawn lets
+    # the photograph's own mid-tones cast the vote.
+    content = img.point(lambda v: 255 if v < 255 - _FIELD_DEADBAND else 0).getbbox()
+    if content:
+        # Keep a margin of field around the content: a solid mark cropped
+        # to its own edges is one population and looks like nothing at all.
+        x0, y0, x1, y1 = content
+        margin = max(4, int(0.1 * max(x1 - x0, y1 - y0)))
+        img = img.crop((
+            max(0, x0 - margin), max(0, y0 - margin),
+            min(img.width, x1 + margin), min(img.height, y1 + margin),
+        ))
     hist = img.histogram()
     total = sum(hist)
     if not total:
@@ -1235,14 +1255,22 @@ def trace_image_to_mark(
     *,
     max_dim: int = 800,
     threshold: int | None = None,
-    simplify_px: float = 0.75,
+    simplify_px: float = 1.5,
 ) -> MarkGeometry | None:
     """Trace a bi-level raster into crisp, origin-centered polygon rings.
 
     Threshold (Otsu by default) → walk the ink/ground boundary along
     pixel edges (ink kept on the left, so outers come out CCW and holes
-    CW) → Douglas-Peucker at sub-pixel epsilon, which collapses the
-    pixel staircase into straight strokes and smooth curves.  The result
+    CW) → Douglas-Peucker, which collapses the pixel staircase into
+    straight strokes and smooth curves.  The tolerance is a pixel and a
+    half: resampling a large source to ``max_dim`` and thresholding it
+    leaves the edge of a slanted stroke wobbling by about 1.3 px in a
+    long beat, and a sub-pixel tolerance (0.75 measured 300 vertices on
+    a six-segment outline, 592 on one slanted stroke) keeps every wobble
+    as a vertex — a staircase carved into the part.  At 1.5 the outline
+    is its 14 corners, the stroke is under ten, and 50-pixel glyphs keep
+    their shapes; on a 60 mm mark the tolerance is 0.11 mm, well under a
+    nozzle width.  The result
     carves ONLY the ink: no tile frame, no background carve, no mirror —
     and a tiny mesh instead of a 100k-triangle heightmap.
 

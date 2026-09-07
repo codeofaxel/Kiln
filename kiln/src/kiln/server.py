@@ -19011,6 +19011,16 @@ def decorate_surface(
         # Metadata for the face-provenance sidecar the compile records
         # (which output triangles the carve created — what painting
         # consumes instead of re-guessing regions).
+        # What the engine DID with the style it was handed: a traced mark
+        # is "stencil" whatever was asked for, a heightmap reports the style
+        # it ran and whether the image was carved as a mark or as relief.
+        _style_applied = (
+            "stencil" if content_info.get("traced_from_raster")
+            else content_info.get("style_applied", image_style)
+        )
+        _treatment = content_info.get("treatment") or (
+            "mark" if content_info.get("type") == "svg" else None
+        )
         _face_meta = {
             "mode": mode,
             "depth_mm": effective_depth,
@@ -19190,6 +19200,8 @@ def decorate_surface(
                 "scale": scale,
                 "material": material,
                 "image_style": image_style,
+                "image_style_applied": _style_applied,
+                "treatment": _treatment,
             },
             "compile_time_seconds": compile_result.get("compile_time_seconds"),
             "scad_path": scad_result["scad_path"],
