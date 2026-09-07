@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-05T21:27:56.322755+00:00",
+  "generated": "2026-09-07T06:35:31.311779+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -16668,7 +16668,7 @@
     },
     {
       "name": "generate_license_plate_frame",
-      "description": "Generate a US-spec license plate frame. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 license plate frames/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a US license plate frame. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 license plate frames/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -16685,22 +16685,22 @@
             "type": "string"
           },
           "width_mm": {
-            "default": 318.0,
+            "default": 317.5,
             "title": "Width Mm",
             "type": "number"
           },
           "height_mm": {
-            "default": 200.0,
+            "default": 165.1,
             "title": "Height Mm",
             "type": "number"
           },
           "plate_width_mm": {
-            "default": 305.0,
+            "default": 304.8,
             "title": "Plate Width Mm",
             "type": "number"
           },
           "plate_height_mm": {
-            "default": 152.0,
+            "default": 152.4,
             "title": "Plate Height Mm",
             "type": "number"
           },
@@ -16720,12 +16720,12 @@
             "type": "number"
           },
           "mount_hole_spacing_mm": {
-            "default": 178.0,
+            "default": 177.8,
             "title": "Mount Hole Spacing Mm",
             "type": "number"
           },
           "mount_hole_inset_top_mm": {
-            "default": 9.0,
+            "default": 0.0,
             "title": "Mount Hole Inset Top Mm",
             "type": "number"
           },
@@ -17599,6 +17599,11 @@
             "title": "Material",
             "type": "string"
           },
+          "image_style": {
+            "default": "",
+            "title": "Image Style",
+            "type": "string"
+          },
           "include_step": {
             "default": false,
             "title": "Include Step",
@@ -17677,6 +17682,11 @@
           "material": {
             "default": "",
             "title": "Material",
+            "type": "string"
+          },
+          "image_style": {
+            "default": "",
+            "title": "Image Style",
             "type": "string"
           },
           "brief_id": {
