@@ -37,6 +37,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **A food-safe filament is only half the answer.** Ask Kiln for anything
+  food or a pet will eat from and it now tells you the nozzle matters too —
+  standard brass sheds trace lead — and what to print it through instead.
+
 - **Ask any product what you can decorate on it (Pro).** Every product Kiln
   generates now answers with its own surfaces — a soap dish's underside, a
   pen cup's wall — instead of only the dozen that happened to be listed.
