@@ -45,6 +45,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from kiln.printers.command_verdict import CommandVerdict
 
 # websocket-client is an optional dependency; the adapter works without it
 # but push monitoring requires it.
@@ -1284,7 +1285,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # PrinterAdapter -- temperature control
     # ------------------------------------------------------------------
 
-    def set_tool_temp(self, target: float) -> bool:
+    def set_tool_temp(self, target: float) -> CommandVerdict:
         """Set the hotend (extruder) target temperature in degrees Celsius.
 
         Moonraker does not have a dedicated temperature-set endpoint.
@@ -1295,16 +1296,16 @@ class MoonrakerAdapter(PrinterAdapter):
             target: Target temperature.  Pass ``0`` to turn the heater off.
 
         Returns:
-            ``True`` if the command was accepted.
+            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
 
         Raises:
             PrinterError: If the command fails.
         """
         self._validate_temp(target, 300.0, "Hotend")
         self._send_gcode(f"M104 S{int(target)}")
-        return True
+        return self._script_accepted(f"Hotend target {int(target)}°C")
 
-    def set_bed_temp(self, target: float) -> bool:
+    def set_bed_temp(self, target: float) -> CommandVerdict:
         """Set the heated-bed target temperature in degrees Celsius.
 
         Sends the ``M140`` G-code command via Moonraker's gcode script
@@ -1314,14 +1315,14 @@ class MoonrakerAdapter(PrinterAdapter):
             target: Target temperature.  Pass ``0`` to turn the heater off.
 
         Returns:
-            ``True`` if the command was accepted.
+            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
 
         Raises:
             PrinterError: If the command fails.
         """
         self._validate_temp(target, 130.0, "Bed")
         self._send_gcode(f"M140 S{int(target)}")
-        return True
+        return self._script_accepted(f"Bed target {int(target)}°C")
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code
@@ -1350,7 +1351,7 @@ class MoonrakerAdapter(PrinterAdapter):
             ),
         )
 
-    def send_gcode(self, commands: list[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> CommandVerdict:
         """Send G-code commands to Klipper via Moonraker.
 
         Joins all commands into a single newline-separated script and
@@ -1360,20 +1361,38 @@ class MoonrakerAdapter(PrinterAdapter):
             commands: List of G-code command strings.
 
         Returns:
-            ``True`` if the commands were accepted.
+            A :class:`CommandVerdict` that is ``accepted``: the server took
+            the request.  Execution is not read back on this call.
 
         Raises:
             PrinterError: If sending fails.
         """
-        script = "\n".join(commands)
+        script = "\n".join(self._gcode_lines(commands))
         self._send_gcode(script)
-        return True
+        return self._script_accepted(f"{len(commands)} G-code line(s)")
+
+    @staticmethod
+    def _script_accepted(what: str) -> CommandVerdict:
+        """The verdict for a script Moonraker answered ``ok`` to.
+
+        Moonraker hands the script to Klipper and answers once Klipper has
+        processed it; a Klipper error comes back as a non-2xx that
+        ``_send_gcode`` raises as PrinterError.  That is stronger than a
+        queued send but it is Moonraker's word, not a state read-back, so
+        it is reported as ``accepted`` with the corroboration named.
+        """
+        return CommandVerdict.accepted_only(
+            f"{what}: Moonraker accepted the script and Klipper did not "
+            "report an error. The resulting state is not read back on this "
+            "call — read printer_status to confirm.",
+            corroboration="moonraker_ok",
+        )
 
     # ------------------------------------------------------------------
     # Fan control
     # ------------------------------------------------------------------
 
-    def set_fan(self, node: str, percent: int) -> bool:
+    def set_fan(self, node: str, percent: int) -> CommandVerdict:
         """Set the part-cooling fan speed via ``M106``/``M107`` G-code.
 
         Only the single default part-cooling fan is supported — see
@@ -1389,7 +1408,7 @@ class MoonrakerAdapter(PrinterAdapter):
             percent: Fan speed 0-100 (0 turns the fan off, 100 is full speed).
 
         Returns:
-            ``True`` once the command is sent.
+            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
 
         Raises:
             PrinterError: If *node* is not the part-cooling fan, or *percent*
@@ -1397,9 +1416,9 @@ class MoonrakerAdapter(PrinterAdapter):
         """
         speed = self._validate_part_fan(node, percent)
         self._send_gcode(f"M106 S{speed}" if speed else "M107")
-        return True
+        return self._script_accepted(f"part fan {int(percent)}%")
 
-    def skip_objects(self, object_names: list[str]) -> bool:
+    def skip_objects(self, object_names: list[str]) -> CommandVerdict:
         """Abandon named objects on a live Klipper multi-object print.
 
         Uses Klipper's ``EXCLUDE_OBJECT NAME=<name>`` — the print keeps going

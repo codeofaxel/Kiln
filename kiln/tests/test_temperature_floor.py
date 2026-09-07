@@ -30,6 +30,7 @@ from typing import Any
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
+import paho.mqtt.client as mqtt
 import pytest
 
 from kiln.printers.base import (
@@ -296,6 +297,11 @@ def bambu(tmp_path: Any, monkeypatch: pytest.MonkeyPatch):
     a._mqtt_client = mock.MagicMock()
     publish_result = mock.MagicMock()
     publish_result.wait_for_publish = mock.MagicMock()
+    # A mocked paho client has to answer publish() the way a real one does:
+    # the adapter now reads the returned code, and a MagicMock is not
+    # MQTT_ERR_SUCCESS, so without this the forced status re-ask raises and
+    # the printer reads OFFLINE instead of STALE.
+    publish_result.rc = mqtt.MQTT_ERR_SUCCESS
     a._mqtt_client.publish.return_value = publish_result
     return a
 

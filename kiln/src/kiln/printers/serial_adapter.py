@@ -44,6 +44,7 @@ from kiln.printers.base import (
     UploadResult,
     canonical_model_key,
 )
+from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.safe_motion import build_firmware_resume_positioning
 
 logger = logging.getLogger(__name__)
@@ -942,7 +943,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # PrinterAdapter -- temperature control
     # ------------------------------------------------------------------
 
-    def set_tool_temp(self, target: float) -> bool:
+    def set_tool_temp(self, target: float) -> CommandVerdict:
         """Set the hotend target temperature in degrees Celsius.
 
         Sends ``M104 S{target}`` (set hotend temp, non-blocking).
@@ -958,9 +959,13 @@ class SerialPrinterAdapter(PrinterAdapter):
         """
         self._validate_temp(target, _MAX_HOTEND_TEMP, "Hotend")
         self._send_command(f"M104 S{int(target)}")
-        return True
+        return CommandVerdict.accepted_only(
+            f"Hotend target {int(target)}°C: the firmware answered ok. The resulting state is not "
+            "read back on this call — read printer_status to confirm.",
+            corroboration="firmware_ok",
+        )
 
-    def set_bed_temp(self, target: float) -> bool:
+    def set_bed_temp(self, target: float) -> CommandVerdict:
         """Set the heated-bed target temperature in degrees Celsius.
 
         Sends ``M140 S{target}`` (set bed temp, non-blocking).
@@ -976,7 +981,11 @@ class SerialPrinterAdapter(PrinterAdapter):
         """
         self._validate_temp(target, _MAX_BED_TEMP, "Bed")
         self._send_command(f"M140 S{int(target)}")
-        return True
+        return CommandVerdict.accepted_only(
+            f"Bed target {int(target)}°C: the firmware answered ok. The resulting state is not "
+            "read back on this call — read printer_status to confirm.",
+            corroboration="firmware_ok",
+        )
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code
@@ -1003,7 +1012,7 @@ class SerialPrinterAdapter(PrinterAdapter):
             ),
         )
 
-    def send_gcode(self, commands: list[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> CommandVerdict:
         """Send one or more G-code commands to the printer.
 
         Args:
@@ -1015,15 +1024,20 @@ class SerialPrinterAdapter(PrinterAdapter):
         Raises:
             PrinterError: If sending fails.
         """
+        commands = self._gcode_lines(commands)
         for cmd in commands:
             self._send_command(cmd)
-        return True
+        return CommandVerdict.accepted_only(
+            f"{len(commands)} G-code line(s): the firmware answered ok. The resulting state is not "
+            "read back on this call — read printer_status to confirm.",
+            corroboration="firmware_ok",
+        )
 
     # ------------------------------------------------------------------
     # Fan control
     # ------------------------------------------------------------------
 
-    def set_fan(self, node: str, percent: int) -> bool:
+    def set_fan(self, node: str, percent: int) -> CommandVerdict:
         """Set the part-cooling fan speed via ``M106``/``M107`` G-code.
 
         Only the single default part-cooling fan is supported — see
@@ -1043,10 +1057,9 @@ class SerialPrinterAdapter(PrinterAdapter):
                 is outside 0-100.
         """
         speed = self._validate_part_fan(node, percent)
-        self.send_gcode([f"M106 S{speed}" if speed else "M107"])
-        return True
+        return self.send_gcode([f"M106 S{speed}" if speed else "M107"])
 
-    def skip_objects(self, object_ids: list[int]) -> bool:
+    def skip_objects(self, object_ids: list[int]) -> CommandVerdict:
         """Abandon objects on a live multi-object print via ``M486``.
 
         Sends the RepRap cancel-object gcode ``M486 P<index>`` over the serial
@@ -1060,7 +1073,7 @@ class SerialPrinterAdapter(PrinterAdapter):
             object_ids: zero-based M486 object indices (non-empty).
 
         Returns:
-            ``True`` once the commands are sent.
+            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
 
         Raises:
             PrinterError: If *object_ids* is empty or holds a non-integer.

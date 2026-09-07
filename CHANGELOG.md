@@ -137,6 +137,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   you at the machine's own display, instead of showing the last numbers Kiln
   happened to remember.
 
+- **Your printer's commands now say whether the printer actually did it.**
+  Setting a heater, fan, light or speed reports confirmed, sent-but-unconfirmed,
+  or failed, instead of "accepted" whether or not it arrived.
+
+- **Skipping a failed object waits for the printer to say it skipped it.** The
+  skip is irreversible for the parts you name, so Kiln now tells you when the
+  printer hasn't confirmed it rather than assuming.
+
 - **A Bambu error code now gets the explanation that belongs to it.** Some
   codes were read as if they came from a different part of the printer's
   reporting, so the plain-English cause could describe the wrong fault.

@@ -662,7 +662,7 @@ class TestSetToolTemp:
             status=204,
         )
         ok = adapter.set_tool_temp(210.0)
-        assert ok is True
+        assert ok.ok and not ok.confirmed
 
         body = json.loads(responses.calls[0].request.body)
         assert body["command"] == "target"
@@ -676,7 +676,7 @@ class TestSetToolTemp:
             status=204,
         )
         ok = adapter.set_tool_temp(0)
-        assert ok is True
+        assert ok.ok and not ok.confirmed
 
         body = json.loads(responses.calls[0].request.body)
         assert body["targets"]["tool0"] == 0
@@ -693,7 +693,7 @@ class TestSetBedTemp:
             status=204,
         )
         ok = adapter.set_bed_temp(60.0)
-        assert ok is True
+        assert ok.ok and not ok.confirmed
 
         body = json.loads(responses.calls[0].request.body)
         assert body["command"] == "target"
@@ -707,7 +707,7 @@ class TestSetBedTemp:
             status=204,
         )
         ok = adapter.set_bed_temp(0)
-        assert ok is True
+        assert ok.ok and not ok.confirmed
 
         body = json.loads(responses.calls[0].request.body)
         assert body["target"] == 0
@@ -728,7 +728,7 @@ class TestSetFan:
             status=204,
         )
         ok = adapter.set_fan("part", 100)
-        assert ok is True
+        assert ok.ok and not ok.confirmed
 
         body = json.loads(responses.calls[0].request.body)
         assert body["commands"] == ["M106 S255"]
@@ -903,7 +903,7 @@ class TestOctoPrintSendGcode:
             status=200,
         )
         ok = adapter.send_gcode(["G28"])
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         body = json.loads(responses.calls[0].request.body)
         assert body == {"commands": ["G28"]}
 
@@ -916,7 +916,7 @@ class TestOctoPrintSendGcode:
             status=200,
         )
         ok = adapter.send_gcode(["G28", "M104 S200", "G1 X10 F300"])
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         body = json.loads(responses.calls[0].request.body)
         assert body == {"commands": ["G28", "M104 S200", "G1 X10 F300"]}
 

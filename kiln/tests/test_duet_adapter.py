@@ -952,7 +952,7 @@ def test_set_tool_temp_sends_m104() -> None:
     fake = _rrf3()
     adapter = fake.install(_adapter())
 
-    assert adapter.set_tool_temp(245) is True
+    assert adapter.set_tool_temp(245).ok
     assert fake.gcodes() == ["M104 S245"]
 
 
@@ -960,7 +960,7 @@ def test_set_bed_temp_sends_m140() -> None:
     fake = _rrf3()
     adapter = fake.install(_adapter())
 
-    assert adapter.set_bed_temp(60) is True
+    assert adapter.set_bed_temp(60).ok
     assert fake.gcodes() == ["M140 S60"]
 
 
@@ -969,7 +969,7 @@ def test_high_temp_machines_are_not_capped_at_desktop_limits() -> None:
     fake = _rrf3()
     adapter = fake.install(_adapter())
 
-    assert adapter.set_tool_temp(450) is True
+    assert adapter.set_tool_temp(450).ok
     assert fake.gcodes() == ["M104 S450"]
 
 
@@ -1006,7 +1006,7 @@ def test_send_gcode_batches_commands_into_one_request() -> None:
     fake = _rrf3()
     adapter = fake.install(_adapter())
 
-    assert adapter.send_gcode(["G28", "G1 Z10"]) is True
+    assert adapter.send_gcode(["G28", "G1 Z10"]).ok
     assert fake.gcodes() == ["G28\nG1 Z10"]
 
 
@@ -1023,7 +1023,7 @@ def test_empty_gcode_batch_is_a_no_op() -> None:
     fake = _rrf3()
     adapter = fake.install(_adapter())
 
-    assert adapter.send_gcode([]) is True
+    assert adapter.send_gcode([]).ok
     assert fake.gcodes() == []
 
 
@@ -1241,8 +1241,8 @@ def test_real_safety_profile_clamps_the_adapter_ceiling() -> None:
     adapter.set_safety_profile("visionminer_22idex_v4")
 
     # Within the machine's real envelope (500 C hotend / 200 C bed).
-    assert adapter.set_tool_temp(480) is True
-    assert adapter.set_bed_temp(190) is True
+    assert adapter.set_tool_temp(480).ok
+    assert adapter.set_bed_temp(190).ok
 
     # Beyond it, the profile refuses even though the class ceiling is 500.
     with pytest.raises(PrinterError, match="exceeds safety limit"):

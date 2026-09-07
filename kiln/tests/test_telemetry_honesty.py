@@ -33,6 +33,7 @@ import json
 from typing import Any
 from unittest import mock
 
+import paho.mqtt.client as mqtt
 import pytest
 
 from kiln.printers.bambu import BambuAdapter
@@ -87,7 +88,9 @@ def adapter(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> BambuAdapter:
     a._mqtt_client = mock.MagicMock()
     publish_result = mock.MagicMock()
     publish_result.wait_for_publish = mock.MagicMock()
+    publish_result.rc = mqtt.MQTT_ERR_SUCCESS
     a._mqtt_client.publish.return_value = publish_result
+    a._confirm_window_s = 0.0
     return a
 
 

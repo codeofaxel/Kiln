@@ -33,6 +33,7 @@ import json
 import time
 from unittest import mock
 
+import paho.mqtt.client as mqtt
 import pytest
 import responses
 from requests.exceptions import ConnectionError as ReqConnectionError
@@ -506,7 +507,8 @@ def bambu(monkeypatch):
     adapter._mqtt_connected.set()
     adapter._connected = True
     adapter._mqtt_client = mock.MagicMock()
-    adapter._mqtt_client.publish.return_value = mock.MagicMock()
+    adapter._mqtt_client.publish.return_value = mock.MagicMock(rc=mqtt.MQTT_ERR_SUCCESS)
+    adapter._confirm_window_s = 0.0
     adapter._fw_modules_requested = True  # skip the get_version round trip
     adapter._last_status = json.loads(json.dumps(_AMS))
     adapter._last_state_time = float("inf")

@@ -937,13 +937,13 @@ class TestSetToolTemp:
         mock_ser = _make_mock_serial(readline_responses=[b"ok\n"])
         adapter = _build_adapter(mock_ser)
         result = adapter.set_tool_temp(200.0)
-        assert result is True
+        assert result.ok and not result.confirmed
 
     def test_set_zero_temp(self):
         mock_ser = _make_mock_serial(readline_responses=[b"ok\n"])
         adapter = _build_adapter(mock_ser)
         result = adapter.set_tool_temp(0.0)
-        assert result is True
+        assert result.ok and not result.confirmed
 
     def test_negative_temp_raises(self):
         mock_ser = _make_mock_serial()
@@ -965,13 +965,13 @@ class TestSetBedTemp:
         mock_ser = _make_mock_serial(readline_responses=[b"ok\n"])
         adapter = _build_adapter(mock_ser)
         result = adapter.set_bed_temp(60.0)
-        assert result is True
+        assert result.ok and not result.confirmed
 
     def test_set_zero_temp(self):
         mock_ser = _make_mock_serial(readline_responses=[b"ok\n"])
         adapter = _build_adapter(mock_ser)
         result = adapter.set_bed_temp(0.0)
-        assert result is True
+        assert result.ok and not result.confirmed
 
     def test_negative_temp_raises(self):
         mock_ser = _make_mock_serial()
@@ -1001,13 +1001,13 @@ class TestSendGcode:
         ])
         adapter = _build_adapter(mock_ser)
         result = adapter.send_gcode(["G28", "G1 X10 Y10 Z5 F1200", "M104 S200"])
-        assert result is True
+        assert result.ok and not result.confirmed
 
     def test_send_empty_list(self):
         mock_ser = _make_mock_serial()
         adapter = _build_adapter(mock_ser)
         result = adapter.send_gcode([])
-        assert result is True
+        assert result.ok and not result.confirmed
 
     def test_send_gcode_failure_on_second_command(self):
         mock_ser = _make_mock_serial()
@@ -1038,7 +1038,7 @@ class TestSetFan:
         adapter = _build_adapter(mock_ser)
         with patch.object(adapter, "_send_command") as mock_send:
             ok = adapter.set_fan("part", 100)
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         mock_send.assert_called_once_with("M106 S255")
 
     def test_zero_sends_m107(self):
@@ -1764,19 +1764,19 @@ class TestReturnTypes:
         mock_ser = _make_mock_serial(readline_responses=[b"ok\n"])
         adapter = _build_adapter(mock_ser)
         result = adapter.set_tool_temp(200.0)
-        assert result is True
+        assert result.ok and not result.confirmed
 
     def test_set_bed_temp_returns_bool(self):
         mock_ser = _make_mock_serial(readline_responses=[b"ok\n"])
         adapter = _build_adapter(mock_ser)
         result = adapter.set_bed_temp(60.0)
-        assert result is True
+        assert result.ok and not result.confirmed
 
     def test_send_gcode_returns_bool(self):
         mock_ser = _make_mock_serial(readline_responses=[b"ok\n"])
         adapter = _build_adapter(mock_ser)
         result = adapter.send_gcode(["G28"])
-        assert result is True
+        assert result.ok and not result.confirmed
 
     def test_capabilities_returns_printer_capabilities(self):
         mock_ser = _make_mock_serial()
