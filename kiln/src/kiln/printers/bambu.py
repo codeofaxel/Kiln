@@ -713,6 +713,32 @@ _FAN_INDEX_TO_FIELD: dict[int, str] = {
 # common healthy case pays tens of milliseconds, not the window.
 _COMMAND_CONFIRM_WINDOW_S: float = 3.0
 
+# The fan is the exception, and it is measured, not assumed.  Every other
+# watched field is a SETTING the firmware changes at once — a heater TARGET, a
+# speed level, a light mode — and lands within about two seconds.  A fan
+# command changes a physical fan, and ``cooling_fan_speed`` reports where it
+# has ramped to.  Measured on an A1 (2026-09-06), reported level over time:
+#     M106 P1 S102 (40%):  0 -> 5 @2.0s -> 6 @6.1s
+#     M106 P1 S255 (100%): 5 -> 13 @4.1s -> 14 @6.1s
+#     M106 P1 S0   (0%):  14 -> 10 @2.0s -> 1 @4.1s -> 0 @8.1s
+# So a fan needs about eight seconds to settle, and the three-second window
+# reported every working fan command as unconfirmed.  A command that lands
+# still returns the moment it does; only one that does not pays this.
+_FAN_CONFIRM_WINDOW_S: float = 10.0
+
+
+@dataclass(frozen=True)
+class _SendStamp:
+    """When a command went out, and what its field said just before it.
+
+    Carried through the call rather than stored on the adapter, so two
+    threads writing the same field cannot overwrite each other's reading.
+    """
+
+    at: float
+    prior: Any = None
+    prior_seen: float = 0.0
+
 # Models whose firmware wants an ``ftp://`` job URL instead of the
 # ``file:///sdcard/model/`` form every other Bambu reads.  See
 # _build_print_url for the measurement this comes from.  Keyed on the
@@ -1093,12 +1119,11 @@ class BambuAdapter(PrinterAdapter):
         # needs the frame that carried the field to postdate the command, or
         # the old target reads as confirmation of the new one.
         self._field_seen_at: dict[str, float] = {}
-        # What a field said just before the most recent write that watches it
-        # (value, when it arrived).  Read only by _readback_verdict, to tell
-        # "the printer never answered" apart from "it was already there".
-        self._prior_reading: dict[str, tuple[Any, float]] = {}
-        # Per-instance so a caller (or a test) can shorten the read-back wait.
-        self._confirm_window_s: float = _COMMAND_CONFIRM_WINDOW_S
+        # An OVERRIDE, not the default: ``None`` means each command uses the
+        # window calibrated for what it watches (a setting lands at once, a
+        # fan ramps).  Set it to force one window on every write, or to 0 to
+        # skip the wait entirely.
+        self._confirm_window_s: float | None = None
         # Monotonic time of the last accepted update that actually CARRIED
         # gcode_state.  Separate from _last_state_time because the cache is a
         # merge (see _on_message): a push carrying only temperatures advances
@@ -2105,7 +2130,7 @@ class BambuAdapter(PrinterAdapter):
     # Internal: write verification by read-back
     # ------------------------------------------------------------------
 
-    def _stamp_before_send(self, field_name: str | None = None) -> float:
+    def _stamp_before_send(self, field_name: str | None = None) -> _SendStamp:
         """The instant a command is about to go out, with the link already up.
 
         Taken AFTER :meth:`_ensure_mqtt` on purpose: building a session can
@@ -2121,13 +2146,15 @@ class BambuAdapter(PrinterAdapter):
         tinguishable, without this, from a command that never arrived.
         """
         self._ensure_mqtt()
+        prior: Any = None
+        prior_seen = 0.0
         if field_name is not None:
             with self._state_lock:
-                self._prior_reading[field_name] = (
-                    self._last_status.get(field_name),
-                    self._field_seen_at.get(field_name, 0.0),
-                )
-        return time.monotonic()
+                prior = self._last_status.get(field_name)
+                prior_seen = self._field_seen_at.get(field_name, 0.0)
+        # Returned, never stored: two threads writing the same field would
+        # otherwise overwrite each other's "before" reading.
+        return _SendStamp(at=time.monotonic(), prior=prior, prior_seen=prior_seen)
 
     def _await_readback(
         self,
@@ -2135,6 +2162,7 @@ class BambuAdapter(PrinterAdapter):
         matches: Any,
         *,
         sent_at: float,
+        window_s: float | None = None,
     ) -> tuple[bool, dict[str, Any]]:
         """Wait for a status frame AFTER *sent_at* that carries *field_name*
         with a value *matches* accepts.
@@ -2149,7 +2177,10 @@ class BambuAdapter(PrinterAdapter):
         tens of milliseconds and the caller pays that; one that is quiet
         costs the window, once.
         """
-        window = max(0.0, min(self._confirm_window_s, float(self._timeout)))
+        want_window = _COMMAND_CONFIRM_WINDOW_S if window_s is None else window_s
+        if self._confirm_window_s is not None:
+            want_window = self._confirm_window_s  # an explicit override wins outright
+        window = max(0.0, min(want_window, float(self._timeout)))
         deadline = time.monotonic() + window
         observed: Any = None
         seen_at = 0.0
@@ -2202,11 +2233,14 @@ class BambuAdapter(PrinterAdapter):
         field_name: str,
         matches: Any,
         *,
-        sent_at: float,
+        sent: _SendStamp,
         wire: str,
+        window_s: float | None = None,
     ) -> CommandVerdict:
         """One verdict for a write whose effect the status report shows."""
-        confirmed, evidence = self._await_readback(field_name, matches, sent_at=sent_at)
+        confirmed, evidence = self._await_readback(
+            field_name, matches, sent_at=sent.at, window_s=window_s
+        )
         evidence["sent"] = wire
         if confirmed:
             return CommandVerdict.confirmed_by(
@@ -2229,8 +2263,7 @@ class BambuAdapter(PrinterAdapter):
             str(evidence.get("corroboration")),
             f"the printer has not shown {field_name} at the requested value",
         )
-        with self._state_lock:
-            prior_value, prior_seen = self._prior_reading.get(field_name, (None, 0.0))
+        prior_value, prior_seen = sent.prior, sent.prior_seen
         if prior_seen > 0.0 and evidence["corroboration"] != "read_back_mismatch":
             try:
                 already = bool(matches(prior_value))
@@ -4204,13 +4237,13 @@ class BambuAdapter(PrinterAdapter):
         self._validate_temp(target, self._MAX_HOTEND_C, "Hotend")
         want = int(target)
         wire = f"M104 S{want}"
-        sent_at = self._stamp_before_send("nozzle_target_temper")
+        sent = self._stamp_before_send("nozzle_target_temper")
         self.send_gcode([wire])
         return self._readback_verdict(
             f"Hotend target {want}°C",
             "nozzle_target_temper",
             lambda v: int(float(v)) == want,
-            sent_at=sent_at,
+            sent=sent,
             wire=wire,
         )
 
@@ -4223,13 +4256,13 @@ class BambuAdapter(PrinterAdapter):
         self._validate_temp(target, 130.0, "Bed")
         want = int(target)
         wire = f"M140 S{want}"
-        sent_at = self._stamp_before_send("bed_target_temper")
+        sent = self._stamp_before_send("bed_target_temper")
         self.send_gcode([wire])
         return self._readback_verdict(
             f"Bed target {want}°C",
             "bed_target_temper",
             lambda v: int(float(v)) == want,
-            sent_at=sent_at,
+            sent=sent,
             wire=wire,
         )
 
@@ -4283,7 +4316,7 @@ class BambuAdapter(PrinterAdapter):
                 f"Valid profiles: {', '.join(sorted(_SPEED_PROFILES))}"
             )
         level = _SPEED_PROFILES[key]
-        sent_at = self._stamp_before_send("spd_lvl")
+        sent = self._stamp_before_send("spd_lvl")
         self._publish_command(
             {
                 "print": {
@@ -4297,7 +4330,7 @@ class BambuAdapter(PrinterAdapter):
             f"Speed profile {key}",
             "spd_lvl",
             lambda v: int(v) == level,
-            sent_at=sent_at,
+            sent=sent,
             wire=f"print_speed {level}",
         )
 
@@ -4373,7 +4406,7 @@ class BambuAdapter(PrinterAdapter):
             ids = [int(x) for x in object_ids]
         except (TypeError, ValueError) as exc:
             raise PrinterError(f"skip_objects: object ids must be integers ({exc}).") from exc
-        sent_at = self._stamp_before_send("s_obj")
+        sent = self._stamp_before_send("s_obj")
         self._publish_command(
             {
                 "print": {
@@ -4394,7 +4427,7 @@ class BambuAdapter(PrinterAdapter):
             f"Skip object(s) {', '.join(str(i) for i in ids)}",
             "s_obj",
             _all_skipped,
-            sent_at=sent_at,
+            sent=sent,
             wire=f"skip_objects {ids}",
         )
 
@@ -4428,7 +4461,7 @@ class BambuAdapter(PrinterAdapter):
             raise PrinterError(
                 f"Unknown LED mode {mode!r}. Valid modes: {', '.join(sorted(_VALID_LED_MODES))}"
             )
-        sent_at = self._stamp_before_send("lights_report")
+        sent = self._stamp_before_send("lights_report")
         self._publish_command(
             {
                 "system": {
@@ -4454,7 +4487,7 @@ class BambuAdapter(PrinterAdapter):
             f"{node_lower} {mode_lower}",
             "lights_report",
             _light_matches,
-            sent_at=sent_at,
+            sent=sent,
             wire=f"ledctrl {node_lower}={mode_lower}",
         )
 
@@ -4507,19 +4540,21 @@ class BambuAdapter(PrinterAdapter):
             raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
         speed = round(pct / 100 * 255)
         wire = f"M106 P{index} S{speed}"
-        sent_at = self._stamp_before_send(_FAN_INDEX_TO_FIELD[index])
+        sent = self._stamp_before_send(_FAN_INDEX_TO_FIELD[index])
         self.send_gcode([wire])
         # The printer reports fan level on a 0-15 scale, not the 0-255 the
-        # G-code carries; allow one step of rounding either side, except at
-        # the ends of the scale, where off and full are exact.
+        # G-code carries.  One step of slack either side, at the ends too:
+        # measured on an A1 (2026-09-06), a full-speed command settles at a
+        # reported 14, not 15, so an exact match at the top never confirms a
+        # fan that is in fact running flat out.
         want_level = round(speed / 255 * 15)
-        slack = 0 if want_level in (0, 15) else 1
         return self._readback_verdict(
             f"{node.strip().lower()} fan {pct}%",
             _FAN_INDEX_TO_FIELD[index],
-            lambda v: abs(int(float(v)) - want_level) <= slack,
-            sent_at=sent_at,
+            lambda v: abs(int(float(v)) - want_level) <= 1,
+            sent=sent,
             wire=wire,
+            window_s=_FAN_CONFIRM_WINDOW_S,
         )
 
     # ------------------------------------------------------------------

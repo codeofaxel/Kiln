@@ -45,7 +45,7 @@ def _disable_rate_limiter(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv._tool_limiter, "check", lambda *a, **kw: None)
 
 
-def _connected(*, rc: int = mqtt.MQTT_ERR_SUCCESS, window: float = 0.0) -> BambuAdapter:
+def _connected(*, rc: int = mqtt.MQTT_ERR_SUCCESS, window: float | None = 0.0) -> BambuAdapter:
     """An adapter whose mocked client answers publish() like paho does."""
     adapter = BambuAdapter(host="192.168.1.100", access_code="12345678", serial="01P00A000000001", timeout=2)
     adapter._mqtt_connected.set()
@@ -482,3 +482,48 @@ class TestAlreadyAtTheRequestedValue:
 
         assert verdict.state == CONFIRMED
         assert "already_at_requested_value" not in verdict.evidence
+
+
+class TestFanConfirmationMatchesTheHardware:
+    """The fan is the one watched field that is MEASURED, not set.
+
+    Measured on an A1 (2026-09-06) — reported level after an M106:
+        40%:  0 -> 5 @2.0s -> 6 @6.1s
+        100%: 5 -> 13 @4.1s -> 14 @6.1s
+        0%:  14 -> 10 @2.0s -> 1 @4.1s -> 0 @8.1s
+    Two things follow: full speed reports 14, not 15, and settling takes about
+    eight seconds.  A three-second window with an exact match at the ends
+    called every working fan command unconfirmed.
+    """
+
+    def test_full_speed_reported_as_fourteen_confirms(self) -> None:
+        adapter = _connected(window=1.0)
+        _reply_on_publish(adapter, cooling_fan_speed="14")
+        verdict = adapter.set_fan("part", 100)
+        assert verdict.state == CONFIRMED, verdict.evidence
+
+    def test_a_mid_ramp_reading_does_not_confirm(self) -> None:
+        """5 on the way to 6 is not yet 6; the window is what waits it out."""
+        adapter = _connected(window=0.4)
+        _reply_on_publish(adapter, cooling_fan_speed="2")
+        verdict = adapter.set_fan("part", 40)
+        assert verdict.state == ACCEPTED
+        assert verdict.evidence["corroboration"] == "read_back_mismatch"
+
+    def test_the_fan_gets_the_longer_window(self) -> None:
+        """A fan waits longer than a setting, because a fan physically ramps."""
+        from kiln.printers.bambu import _COMMAND_CONFIRM_WINDOW_S, _FAN_CONFIRM_WINDOW_S
+
+        assert _FAN_CONFIRM_WINDOW_S > _COMMAND_CONFIRM_WINDOW_S
+        adapter = _connected(window=None)  # no override: the command decides
+        adapter._timeout = 999
+        verdict = adapter.set_fan("part", 40)
+        assert verdict.evidence["window_seconds"] == _FAN_CONFIRM_WINDOW_S
+
+    def test_a_setting_keeps_the_short_window(self) -> None:
+        from kiln.printers.bambu import _COMMAND_CONFIRM_WINDOW_S
+
+        adapter = _connected(window=None)  # no override: the command decides
+        adapter._timeout = 999
+        verdict = adapter.set_light("chamber_light", "on")
+        assert verdict.evidence["window_seconds"] == _COMMAND_CONFIRM_WINDOW_S
