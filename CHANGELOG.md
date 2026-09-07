@@ -37,6 +37,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Ask any product what you can decorate on it (Pro).** Every product Kiln
+  generates now answers with its own surfaces — a soap dish's underside, a
+  pen cup's wall — instead of only the dozen that happened to be listed.
+
 - **See what your slicer will print around your part.** An Extras toggle on the
   3D stage draws the skirt, brim, supports, raft and prime tower from your
   sliced file, each labelled with its grams — from any slicer that labels its
@@ -131,6 +135,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **A US license plate frame now bolts to the plate it was made for.**
+  Earlier ones outlined the plate rather than holding it, and their slots
+  didn't line up with the studs.
+
+- **Magnet safety warnings reach you before you print, whatever you're paying.**
+
+- **Every capability names the tier it actually needs.**
 
 - **A see-through logo now carves just the mark on every product, not
   only some.**
