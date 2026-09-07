@@ -132,6 +132,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Kiln no longer tells you a temperature it can't vouch for.** When your
+  printer has stopped reporting, the hotend and bed read "unknown" and point
+  you at the machine's own display, instead of showing the last numbers Kiln
+  happened to remember.
+
 - **A Bambu error code now gets the explanation that belongs to it.** Some
   codes were read as if they came from a different part of the printer's
   reporting, so the plain-English cause could describe the wrong fault.
