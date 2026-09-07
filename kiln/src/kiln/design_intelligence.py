@@ -1927,6 +1927,38 @@ def recommend_material_for_design(
     max_hotend_temp_c: int = 300,
     supported_materials: list[str] | None = None,
 ) -> MaterialRecommendation:
+    """Recommend a material, and say what it will be extruded through.
+
+    Thin wrapper over the scorer.  The food-contact nozzle advisory is
+    attached HERE rather than inside the scoring loop because the scorer
+    has several exits — a constraint match, a safety-floor fallback, the
+    scored winner — and an advisory added on one of them is an advisory
+    that depends on which branch your wording happened to take.
+    """
+    rec = _recommend_material_for_design(
+        requirements_text,
+        printer_has_enclosure=printer_has_enclosure,
+        printer_has_direct_drive=printer_has_direct_drive,
+        max_hotend_temp_c=max_hotend_temp_c,
+        supported_materials=supported_materials,
+    )
+    if _any_keyword((requirements_text or "").lower(), _FOOD_KEYWORDS):
+        from kiln.material_safety import food_contact_nozzle_advisory
+
+        advisory = food_contact_nozzle_advisory()
+        if advisory not in rec.warnings:
+            rec.warnings.append(advisory)
+    return rec
+
+
+def _recommend_material_for_design(
+    requirements_text: str,
+    *,
+    printer_has_enclosure: bool = False,
+    printer_has_direct_drive: bool = True,
+    max_hotend_temp_c: int = 300,
+    supported_materials: list[str] | None = None,
+) -> MaterialRecommendation:
     """Recommend the best material for a set of functional requirements.
 
     Matches requirement text against known functional requirement
@@ -3402,6 +3434,17 @@ def get_design_constraints(
             )
         else:
             recommendation = recommend_material_for_design(requirements_text)
+
+    # The nozzle advisory belongs to the ASK, not to the recommender: a
+    # caller who names their own material skips that path entirely, and
+    # "make me a cereal bowl in PETG" is exactly the request that most
+    # needs it.  Guarded, so the recommender's own copy is not repeated.
+    if _any_keyword((requirements_text or "").lower(), _FOOD_KEYWORDS):
+        from kiln.material_safety import food_contact_nozzle_advisory
+
+        _advisory = food_contact_nozzle_advisory()
+        if _advisory not in recommendation.warnings:
+            recommendation.warnings.append(_advisory)
 
     # 3. Find applicable patterns
     patterns = _find_templates_from_text(requirements_text)

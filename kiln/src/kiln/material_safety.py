@@ -29,6 +29,47 @@ import re
 from typing import Any
 
 # ---------------------------------------------------------------------------
+# Food contact and the nozzle it came through
+# ---------------------------------------------------------------------------
+#
+# Choosing a food-safe filament settles the polymer and nothing else.  The
+# part is extruded through the nozzle, and a standard nozzle is brass — most
+# commonly the free-machining alloy that carries a small percentage of lead
+# for machinability.  A little of that tip wears into the print over the
+# nozzle's life, so a bowl in a food-safe polymer printed through a leaded
+# nozzle is not a food-safe bowl.
+#
+# This is stated as a hardware fact and a substitution, not a verdict: Kiln
+# free does not know which nozzle is fitted or how worn it is, and lead-free
+# brass nozzles do exist.  Saying "usually" is the honest form — the reader
+# can check their own nozzle, and the swap is cheap either way.
+#
+# Deliberately free.  Whether a given material and nozzle combination clears
+# a hard food-contact bar is a paid verdict; knowing that the nozzle is part
+# of the question at all is not something to learn after eating off the part.
+
+#: Advisory for any recommendation whose use case implies food contact.
+FOOD_CONTACT_NOZZLE_ADVISORY: str = (
+    "A food-safe filament is only half of it — the part is extruded through "
+    "the nozzle, and standard nozzles are usually a leaded brass alloy that "
+    "wears trace lead into the print over its life. For anything a person or "
+    "an animal will eat or drink from, print it through a hardened steel or "
+    "stainless nozzle, and check what yours is made of."
+)
+
+
+def food_contact_nozzle_advisory() -> str:
+    """The nozzle advisory that belongs with every food-contact answer.
+
+    One source, so each door that concludes food contact says the same
+    thing.  Kept as a function rather than a bare constant because the
+    callers are in different modules and a shared import is the seam that
+    keeps them from drifting into three slightly different warnings.
+    """
+    return FOOD_CONTACT_NOZZLE_ADVISORY
+
+
+# ---------------------------------------------------------------------------
 # Process settings database — per material
 # ---------------------------------------------------------------------------
 
