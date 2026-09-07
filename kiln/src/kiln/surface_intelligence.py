@@ -479,9 +479,42 @@ def _build_face_dict(group: dict[str, Any]) -> dict[str, Any]:
     )
     center = _face_centroid(group)
 
+    # Two different "centres", and they are not interchangeable.
+    #
+    # ``center`` is the AREA CENTROID — where the face's material
+    # balances.  ``bbox_center`` is the middle of its OUTLINE — the
+    # point ``width_mm``/``height_mm`` are symmetric about.  On a solid
+    # disc or rectangle they coincide.  On anything with a hole or an
+    # uneven distribution of material — a frame, a ring with one deep
+    # rail, an L — they do not, and the gap is the whole asymmetry:
+    # 18.4 mm on a US license-plate frame whose top rail is 29.7 mm
+    # against 12.7 mm elsewhere.
+    #
+    # Anything that PLACES content by an offset must use ``bbox_center``:
+    # an offset of +y is a promise about where the art lands relative to
+    # the face's outline, and the placement clamp already reasons in
+    # ±width/2, ±height/2 — i.e. about this point.  Applying that offset
+    # from the centroid instead put the two out of agreement by the
+    # asymmetry, so the clamp passed an offset the translate then carried
+    # off the part (found on a plate frame, 2026-09-07: top-rail text
+    # landed 18 mm high and was sheared by the outer edge; bottom-rail
+    # text landed in the window and carved air).
+    u_mid = (u_min + u_max) / 2.0
+    v_mid = (v_min + v_max) / 2.0
+    n_mid = (n_min + n_max) / 2.0
+    bbox_center = _vec_add(
+        _vec_add(_vec_scale(x_axis, u_mid), _vec_scale(y_axis, v_mid)),
+        _vec_scale(normal, n_mid),
+    )
+
     return {
         "normal": (round(normal[0], 6), round(normal[1], 6), round(normal[2], 6)),
         "center": (round(center[0], 4), round(center[1], 4), round(center[2], 4)),
+        "bbox_center": (
+            round(bbox_center[0], 4),
+            round(bbox_center[1], 4),
+            round(bbox_center[2], 4),
+        ),
         "width_mm": round(u_max - u_min, 4),
         "height_mm": round(v_max - v_min, 4),
         # Where the face SITS along its own normal, as a band.  ``width``/
@@ -693,13 +726,16 @@ def compute_face_transform(face: dict[str, Any]) -> dict[str, Any]:
         - ``height_mm``: face height.
     """
     normal = face["normal"]
-    center = face["center"]
+    # The outline's centre, not the centroid — ``width``/``height`` are
+    # symmetric about THIS point, so the corner below is only a corner
+    # when measured from it.  Older face dicts carry only ``center``.
+    center = face.get("bbox_center") or face["center"]
     width = face["width_mm"]
     height = face["height_mm"]
 
     x_axis, y_axis = _build_face_axes(normal)
 
-    # Origin = center - (width/2)*x_axis - (height/2)*y_axis
+    # Origin = bbox_center - (width/2)*x_axis - (height/2)*y_axis
     origin = (
         center[0] - (width / 2.0) * x_axis[0] - (height / 2.0) * y_axis[0],
         center[1] - (width / 2.0) * x_axis[1] - (height / 2.0) * y_axis[1],

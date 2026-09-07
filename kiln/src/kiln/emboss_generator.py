@@ -264,6 +264,193 @@ def _rotation_for_normal(normal: list[float]) -> str:
     return f"rotate(a={angle_deg:.4f}, v=[{axis[0]:.6f}, {axis[1]:.6f}, {axis[2]:.6f}])\n        "
 
 
+def _rotation_matrix_for_normal(normal: list[float]) -> list[list[float]]:
+    """The 3x3 matrix of the rotation :func:`_rotation_for_normal` emits.
+
+    Kept as a MIRROR of that function, branch for branch and threshold
+    for threshold, so a footprint predicted here lands where the SCAD
+    actually puts it.  If the clause ever changes, this changes with it —
+    ``test_emboss_placement_on_material`` pins the two together on every
+    cardinal face.
+
+    Row-major; ``_apply_rotation`` multiplies ``M @ v``.
+    """
+    n = _vec.normalize(normal)
+    if n[2] > _CARDINAL_SNAP:
+        return [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    if n[2] < -_CARDINAL_SNAP:  # rotate([180, 0, 0])
+        return [[1, 0, 0], [0, -1, 0], [0, 0, -1]]
+    if n[1] < -_CARDINAL_SNAP:  # rotate([90, 0, 0]) — FRONT
+        return [[1, 0, 0], [0, 0, -1], [0, 1, 0]]
+    if n[1] > _CARDINAL_SNAP:  # rotate([-90, 0, 0]) — BACK
+        return [[1, 0, 0], [0, 0, 1], [0, -1, 0]]
+    if n[0] < -_CARDINAL_SNAP:  # rotate([0, -90, 0]) — LEFT
+        return [[0, 0, -1], [0, 1, 0], [1, 0, 0]]
+    if n[0] > _CARDINAL_SNAP:  # rotate([0, 90, 0]) — RIGHT
+        return [[0, 0, 1], [0, 1, 0], [-1, 0, 0]]
+    # General axis-angle (Rodrigues), same axis and angle as the clause.
+    z_axis = (0.0, 0.0, 1.0)
+    axis = _vec.cross(z_axis, n)
+    axis_len = _vec.length(axis)
+    if axis_len < 1e-12:
+        return [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    ux, uy, uz = (c / axis_len for c in axis)
+    ang = math.acos(max(-1.0, min(1.0, _vec.dot(z_axis, n))))
+    c, sn = math.cos(ang), math.sin(ang)
+    t = 1.0 - c
+    return [
+        [c + ux * ux * t, ux * uy * t - uz * sn, ux * uz * t + uy * sn],
+        [uy * ux * t + uz * sn, c + uy * uy * t, uy * uz * t - ux * sn],
+        [uz * ux * t - uy * sn, uz * uy * t + ux * sn, c + uz * uz * t],
+    ]
+
+
+def _apply_rotation(m: list[list[float]], v: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (
+        m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+        m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+        m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+    )
+
+
+#: How far inside its own edge the footprint is sampled.  Absorbs the
+#: float noise between a measured glyph run and the tessellated face it
+#: was fitted to, so content sized edge-to-edge on purpose (a plate
+#: frame's rail text at margin 0) is not refused for a hair it never had.
+_FOOTPRINT_EDGE_EPS_MM = 0.05
+
+#: Grid pitch for footprint samples.  Fine enough that a hole narrower
+#: than a rail cannot hide between samples; capped so a poster-sized
+#: decoration does not turn into tens of thousands of ray casts.
+_FOOTPRINT_SAMPLE_PITCH_MM = 2.0
+_FOOTPRINT_MAX_SAMPLES_PER_AXIS = 15
+
+
+def _ray_hits_mesh(
+    origin: tuple[float, float, float],
+    direction: tuple[float, float, float],
+    triangles: list[Any],
+    max_t: float,
+) -> bool:
+    """Möller–Trumbore against every triangle; first hit wins.
+
+    Inclusive on edges (a hair of negative barycentric tolerance), so a
+    sample that lands exactly on a shared edge of two coplanar triangles
+    counts as covered rather than falling through the seam.
+    """
+    eps = 1e-9
+    tol = -1e-6
+    for tri in triangles:
+        v0, v1, v2 = tri
+        e1 = _vec.sub(v1, v0)
+        e2 = _vec.sub(v2, v0)
+        h = _vec.cross(direction, e2)
+        a = _vec.dot(e1, h)
+        if -eps < a < eps:
+            continue
+        f = 1.0 / a
+        sv = _vec.sub(origin, v0)
+        u = f * _vec.dot(sv, h)
+        if u < tol or u > 1.0 - tol:
+            continue
+        q = _vec.cross(sv, e1)
+        v = f * _vec.dot(direction, q)
+        if v < tol or u + v > 1.0 - tol:
+            continue
+        t = f * _vec.dot(e2, q)
+        if -1e-6 <= t <= max_t:
+            return True
+    return False
+
+
+def footprint_material_coverage(
+    model_path: str,
+    face: dict[str, Any],
+    anchor: tuple[float, float, float],
+    content_w: float,
+    content_h: float,
+    offset_x: float,
+    offset_y: float,
+) -> dict[str, Any]:
+    """How much of the placed content has part beneath it.
+
+    Reproduces the SCAD transform exactly — outer translate to *anchor*,
+    the face rotation, inner translate by the offsets — for a grid of
+    points over the content's footprint, then casts each along the face
+    normal INTO the body.  A hit means material: the face itself, or a
+    floor below it left by an earlier deboss, which is why this is a ray
+    cast against the whole mesh and not a containment test against the
+    face's own triangles.  Chained decorations (a second line of text
+    beside a first) must not be refused for landing on a carved floor.
+    No hit means the point is over a hole or past an edge.
+
+    :returns: ``checked`` — False when the geometry could not be
+        sampled, in which case every other field is neutral and the
+        caller must not read a verdict into it; ``total`` and ``missed``
+        sample counts; ``coverage`` in 0.0-1.0; and ``worst``, the
+        missing sample furthest from the content's centre (or None), in
+        the content's own (x, y) frame.
+
+    A check that cannot run must not masquerade as one that passed, so
+    an unreadable mesh returns ``checked=False`` and logs why.
+    """
+    blank = {
+        "checked": False, "total": 0, "missed": [],
+        "coverage": 1.0, "worst": None,
+    }
+    if content_w <= 2 * _FOOTPRINT_EDGE_EPS_MM or content_h <= 2 * _FOOTPRINT_EDGE_EPS_MM:
+        return blank
+    from kiln.surface_intelligence import _parse_mesh
+
+    # The same reader that resolved the face.  If it cannot read the
+    # file now, the face could not have come from it; say so and stand
+    # aside rather than pretend the check ran.
+    try:
+        parsed = _parse_mesh(str(model_path))
+    except Exception as exc:  # noqa: BLE001 — logged, deliberately non-fatal
+        _logger.warning(
+            "footprint check skipped — could not read %s: %s", model_path, exc
+        )
+        return blank
+    triangles = [tuple(tuple(v) for v in tri["vertices"]) for tri in parsed]
+    if not triangles:
+        return blank
+
+    normal = _vec.normalize(face["normal"])
+    rot = _rotation_matrix_for_normal(list(normal))
+    # Cast from just above the surface, into the body, far enough to
+    # cross any part — a window has no floor at ANY depth.
+    lift = 0.5
+    max_t = 1e4
+    direction = (-normal[0], -normal[1], -normal[2])
+
+    def _samples(extent: float) -> list[float]:
+        inner = extent - 2 * _FOOTPRINT_EDGE_EPS_MM
+        n = int(math.ceil(inner / _FOOTPRINT_SAMPLE_PITCH_MM)) + 1
+        n = max(3, min(_FOOTPRINT_MAX_SAMPLES_PER_AXIS, n))
+        return [-inner / 2.0 + inner * i / (n - 1) for i in range(n)]
+
+    missed: list[tuple[float, float]] = []
+    total = 0
+    for sx in _samples(content_w):
+        for sy in _samples(content_h):
+            total += 1
+            local = (offset_x + sx, offset_y + sy, lift)
+            world = _vec.add(anchor, _apply_rotation(rot, local))
+            if not _ray_hits_mesh(tuple(world), direction, triangles, max_t):
+                missed.append((round(sx, 3), round(sy, 3)))
+    worst = (
+        max(missed, key=lambda q: abs(q[0]) + abs(q[1])) if missed else None
+    )
+    return {
+        "checked": True,
+        "total": total,
+        "missed": missed,
+        "coverage": (total - len(missed)) / total if total else 1.0,
+        "worst": worst,
+    }
+
+
 def _escape_scad_string(s: str) -> str:
     """Escape a string for embedding inside an OpenSCAD double-quoted literal."""
     return s.replace("\\", "\\\\").replace('"', '\\"')
@@ -450,6 +637,31 @@ def _text_content_block(content_info: dict) -> str:
 # Normalized (per-unit-of-font-size) metrics per (text, font): one tiny probe
 # compile EVER per string+font — metrics scale linearly with font size.
 _TEXT_METRICS_CACHE: dict[tuple[str, str], tuple[float, float, float, float]] = {}
+
+
+class ContentOffFaceError(ValueError):
+    """The decoration would carve nothing: no part under any of it.
+
+    Raised by :func:`generate_emboss_scad` after every clamp has run,
+    when NONE of the content's footprint has material beneath it — it
+    sits entirely over a hole in the face.  A frame's window is inside
+    the face's bounding box, so the offset clamp is happy and the carve
+    reports success while producing an untouched part (found on a plate
+    frame, 2026-09-07: bottom-rail text landed in the window).
+
+    Why only at zero, when partial misses merely warn: measured on real
+    geometry, a decoration crossing a legitimate vent grille (40% open)
+    and one bridging a frame's window score identically — 26.7% of the
+    footprint supported in both.  No threshold above zero separates a
+    defect from a vented product, so anything above zero is disclosed as
+    a warning rather than refused, and only "carves literally nothing"
+    is treated as broken.
+
+    Content leaving the face's OUTER edge is a different failure and is
+    already impossible here: ``_clamp_offsets`` bounds every offset
+    inside the face's bbox, and since 2026-09-07 that bbox is anchored
+    on ``bbox_center`` so it is the right box.
+    """
 
 
 class TextMeasureError(RuntimeError):
@@ -751,8 +963,16 @@ def generate_emboss_scad(
     scad_path = out / scad_filename
     output_stl_path = out / f"{model_name}_{mode}.stl"
 
-    # Face geometry
-    cx, cy, cz = face["center"]
+    # Face geometry.  The placement anchor is the middle of the face's
+    # OUTLINE, because that is what the offset clamp below reasons about
+    # (±width/2, ±height/2) and what every caller means by "offset from
+    # the face centre".  ``center`` is the area centroid — the same point
+    # on a solid disc or rectangle, but on a frame, a ring with one deep
+    # rail, or any face with a hole it sits off the outline's middle by
+    # the whole asymmetry, and an offset applied from there lands off the
+    # part while the clamp reports it fine.  Older face dicts (and the
+    # hand-built ones in tests) carry only ``center``; fall back to it.
+    cx, cy, cz = face.get("bbox_center") or face["center"]
     face_w = face["width_mm"]
     face_h = face["height_mm"]
     normal = face["normal"]
@@ -842,6 +1062,44 @@ def generate_emboss_scad(
             )
             final_offset_x, final_offset_y = clamped_x, clamped_y
 
+    # The clamp above keeps content inside the face's BOUNDING BOX, which
+    # since the bbox_center anchor is the right box — so leaving the
+    # face's outer edge is already impossible.  What a bbox cannot see is
+    # a HOLE inside it: a frame's window is inside its bbox, and rail
+    # text clamped to ±height/2 still landed there and carved nothing.
+    # This asks the question a bbox cannot — is there material under
+    # this footprint? — and grades the answer rather than failing it,
+    # because a vented part legitimately has none under some of it.
+    def _check_content_on_material(content_w: float, content_h: float) -> None:
+        cov = footprint_material_coverage(
+            model_path, face, (cx, cy, cz),
+            content_w, content_h, final_offset_x, final_offset_y,
+        )
+        if not cov["checked"] or not cov["missed"]:
+            return
+        where = cov["worst"]
+        placed = (
+            f"{content_type} content {content_w:.1f}x{content_h:.1f}mm at "
+            f"offset ({final_offset_x:.1f}, {final_offset_y:.1f})mm on the "
+            f"{face.get('face_name', 'target')} face"
+        )
+        if cov["coverage"] <= 0.0:
+            raise ContentOffFaceError(
+                f"{placed} would carve nothing — no material under any of "
+                f"it.  The {face_w:.0f}x{face_h:.0f}mm face outline says it "
+                f"fits; every one of the {cov['total']} points sampled "
+                f"across the content sits over a hole in that outline.  "
+                f"Move it onto solid face or shrink it."
+            )
+        warnings.append(
+            f"{placed} crosses an opening — "
+            f"{cov['coverage'] * 100:.0f}% of it has material beneath, so "
+            f"the rest carves nothing (furthest unsupported point "
+            f"{where[0]:+.1f}, {where[1]:+.1f}mm from the content centre). "
+            f"Expected on a vented or perforated part; on a solid one it "
+            f"means the content is over a hole."
+        )
+
     # Offsets are FACE-LOCAL on every face: they ride an INNER translate
     # (post-rotation), so the face-aligning rotation itself defines the
     # in-plane axes and +offset_x/+offset_y always slide the content
@@ -912,6 +1170,7 @@ def generate_emboss_scad(
         # SVG/heightmap content fills the target box by construction, so
         # the box IS the content extent for offset clamping.
         _clamp_offsets(target_w, target_h)
+        _check_content_on_material(target_w, target_h)
     elif content_type == "heightmap":
         x_scale = target_w / content_info.get("width_px", 100)
         y_scale = target_h / content_info.get("height_px", 100)
@@ -924,6 +1183,7 @@ def generate_emboss_scad(
             heightmap_info, x_scale, y_scale, depth_mm, mode=mode,
         )
         _clamp_offsets(target_w, target_h)
+        _check_content_on_material(target_w, target_h)
     else:
         # openscad_text — caller can pre-set ``font_size`` in
         # content_info to bypass auto-sizing.  Layout owners (the
@@ -1013,6 +1273,9 @@ def generate_emboss_scad(
                 chosen *= rim_k
                 text_w_mm *= rim_k
                 text_h_mm *= rim_k
+
+        # After the rim guard, so it judges the run that will be cut.
+        _check_content_on_material(text_w_mm, text_h_mm)
 
         if measured_fit:
             f_w, f_h, f_minx, f_miny = measure_text_block_mm(
