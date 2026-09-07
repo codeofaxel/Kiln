@@ -12437,6 +12437,7 @@ def render_model_preview(
     # Redirect to visualize_model — this tool is deprecated, but we
     # preserve the ORIGINAL return-dict shape (preview_path, width, height)
     # for backward compatibility with any existing consumers.
+    from kiln.model_visualizer import host_window_deadline
     from kiln.model_visualizer import visualize_model as _viz
 
     result = _viz(
@@ -12445,6 +12446,7 @@ def render_model_preview(
         width=width,
         height=height,
         color=color if color else "",
+        deadline=host_window_deadline(),
     )
     if not result.get("success"):
         return result
@@ -12506,16 +12508,20 @@ def visualize_model(
             Ignored for colored 3MF files (per-face colors used instead).
     """
     try:
+        from kiln.model_visualizer import host_window_deadline
         from kiln.model_visualizer import visualize_model as _visualize
 
         kwargs: dict[str, Any] = {}
         if color:
             kwargs["color"] = color
+        # This call lives inside the host's request window; the engine
+        # assumes none, so the door is where the window is declared.
         return _visualize(
             file_path,
             angles=angles,
             width=width,
             height=height,
+            deadline=host_window_deadline(),
             **kwargs,
         )
     except Exception as exc:
@@ -12559,6 +12565,7 @@ def compare_renders(
     """
     try:
         from kiln.model_visualizer import compare_renders as _compare_renders
+        from kiln.model_visualizer import host_window_deadline
 
         return _compare_renders(
             paths,
@@ -12567,6 +12574,7 @@ def compare_renders(
             width=width,
             height=height,
             colors=colors,
+            deadline=host_window_deadline(),
         )
     except Exception as exc:
         logger.exception("Unexpected error in compare_renders")

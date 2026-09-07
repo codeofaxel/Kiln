@@ -667,6 +667,13 @@ class TestCallBudget:
     timed out.  Only the first backend had a budget.  So: one deadline for
     the call, handed to each backend, checked between views, and the
     angles that no longer fit are reported as skipped -- not drawn late.
+
+    The deadline is a ``time.monotonic()`` INSTANT the caller passes in,
+    not a duration the engine assumes: an instant can be shared by every
+    render one caller makes (``compare_renders`` hands one to each of its
+    models), and a caller with no request window -- the CLI -- passes
+    none and waits.  The 40 s default belongs to the MCP door, the one
+    caller that has a window; see :func:`host_window_deadline`.
     """
 
     def test_openscad_loop_skips_the_angles_past_the_budget(
@@ -676,12 +683,13 @@ class TestCallBudget:
 
         clock = [1000.0]
         monkeypatch.setattr(model_visualizer.time, "monotonic", lambda: clock[0])
-        monkeypatch.setattr(model_visualizer, "_CALL_BUDGET_S", 40.0)
         timeouts: list = []
 
         with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
              patch("subprocess.run", side_effect=_preview_run_advancing(clock, 30.0, timeouts)):
-            result = visualize_model(str(tmp_stl), output_dir=str(tmp_path / "out"))
+            result = visualize_model(
+                str(tmp_stl), output_dir=str(tmp_path / "out"), deadline=clock[0] + 40.0,
+            )
 
         # 0 s -> view 1 (40 s left) -> 30 s -> view 2 (10 s left, its
         # OpenSCAD timeout clamped to what is left) -> 60 s -> the rest skip.
@@ -733,7 +741,7 @@ class TestCallBudget:
              patch("subprocess.run", side_effect=_preview_run_advancing(clock, 0.0, [])):
             result = visualize_model(
                 str(tmp_stl), output_dir=str(tmp_path / "out"),
-                budget_s=40.0, share_link=False,
+                deadline=1040.0, share_link=False,
             )
 
         assert seen["still_deadline"] == pytest.approx(1040.0)
@@ -749,22 +757,32 @@ class TestCallBudget:
             assert "budget" in v["error"]
         assert "6 angle(s) skipped" in result["message"]
 
-    def test_a_zero_budget_disables_the_deadline(
+    def test_no_deadline_means_no_ceiling(
         self, tmp_stl: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ):
+        """The engine assumes nothing: a caller without a window waits."""
         from kiln import model_visualizer
 
         clock = [1000.0]
         monkeypatch.setattr(model_visualizer.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(model_visualizer, "_CALL_BUDGET_S", 40.0)  # must NOT apply
         timeouts: list = []
 
         with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
              patch("subprocess.run", side_effect=_preview_run_advancing(clock, 30.0, timeouts)):
-            result = visualize_model(
-                str(tmp_stl), output_dir=str(tmp_path / "out"), budget_s=0,
-            )
+            result = visualize_model(str(tmp_stl), output_dir=str(tmp_path / "out"))
 
         assert len(timeouts) == 7
         assert result["rendered"] == 7
         assert result["skipped"] == 0
         assert "skipped" not in result["message"]
+
+    def test_host_window_deadline_reads_the_knob(self, monkeypatch: pytest.MonkeyPatch):
+        from kiln import model_visualizer
+        from kiln.model_visualizer import host_window_deadline
+
+        monkeypatch.setattr(model_visualizer.time, "monotonic", lambda: 1000.0)
+        monkeypatch.setattr(model_visualizer, "_CALL_BUDGET_S", 40.0)
+        assert host_window_deadline() == pytest.approx(1040.0)
+        monkeypatch.setattr(model_visualizer, "_CALL_BUDGET_S", 0.0)
+        assert host_window_deadline() is None

@@ -795,3 +795,78 @@ def test_the_call_deadline_clamps_the_shot_timeout(
     )
     assert views is not None and len(views) == 2
     assert shots and all(t is not None and t <= 5.0 for t in shots), shots
+
+
+# ---------------------------------------------------------------------------
+# All-or-nothing means: never start a shot the SET cannot finish
+# ---------------------------------------------------------------------------
+
+
+def test_a_spent_batch_declines_before_a_lone_shot(
+    cube_stl: str, batch_stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The batch attempt is the first cost measurement, and it is enough.
+
+    Measured 2026-09-06: the batch declined at second 20 of a 40 s call,
+    the per-angle loop then spent eleven seconds on a photograph that
+    passed every check -- and discarded it, because the set could never
+    finish in the nineteen seconds left.  One browser launch + document
+    load + three.js parse is most of a lone shot's cost too, so the
+    batch's elapsed time is the estimate: with every remaining angle
+    priced at that, the set declines before the first lone shot and the
+    painter gets the whole remainder.
+    """
+    monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 0.0)
+    clock = [1000.0]
+    monkeypatch.setattr(stage_still.time, "monotonic", lambda: clock[0])
+
+    def slow_batch(*args, **kwargs):
+        clock[0] += 20.0
+        return None
+
+    lone: list = []
+    real_shoot = stage_still._shoot
+    monkeypatch.setattr(stage_still, "_shoot_batch", slow_batch)
+    monkeypatch.setattr(
+        stage_still, "_shoot",
+        lambda *a, **k: (lone.append(1), real_shoot(*a, **k))[1],
+    )
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=64, height=64,
+        deadline=clock[0] + 40.0,
+    )
+    assert views is None
+    assert lone == [], "two angles at ~20 s each cannot fit in 20 s -- no lone shot"
+
+
+def test_a_measured_shot_prices_the_rest_of_the_set(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a batch, the first shot is the measurement; the rest are priced by it."""
+    monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 0.0)
+    clock = [1000.0]
+    monkeypatch.setattr(stage_still.time, "monotonic", lambda: clock[0])
+    shots: list = []
+    real_shoot = stage_still._shoot
+
+    def ten_second_shot(*args, **kwargs):
+        shots.append(1)
+        clock[0] += 10.0
+        return real_shoot(*args, **kwargs)
+
+    monkeypatch.setattr(stage_still, "_shoot", ten_second_shot)
+    three = [*_VIEWS, ("top", "top view")]
+    rotations = {**_ROTATIONS, "top": (0, 0, 0)}
+    views = try_render_stage_views(
+        cube_stl, three, rotations,
+        output_dir=str(tmp_path / "out"), width=64, height=64,
+        deadline=clock[0] + 25.0,
+    )
+    # 25 s: shot 1 costs 10 -> 15 left, two angles still to shoot at 10
+    # each need 20.  Declining here hands the painter 15 s; shooting on
+    # would spend it all and discard three good frames.
+    assert views is None
+    assert shots == [1]
