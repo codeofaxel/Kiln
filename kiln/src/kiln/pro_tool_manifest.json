@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-07T06:35:31.311779+00:00",
+  "generated": "2026-09-07T20:34:10.853780+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -10196,9 +10196,9 @@
     },
     {
       "name": "check_magnet_design",
-      "description": "Check a proposed printed magnet design for hidden failure modes.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Check a proposed printed magnet design for hidden failure modes.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Design guidance \u00b7 Business: + Validation tests & QC plans \u00b7 Enterprise: + Child-safety & supplier vetting.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -10279,6 +10279,13 @@
         ],
         "title": "check_magnet_designArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "magnets",
+        "free": "Warnings \u2014 always free",
+        "pro": "Design guidance",
+        "business": "+ Validation tests & QC plans",
+        "enterprise": "+ Child-safety & supplier vetting"
       }
     },
     {
@@ -10404,9 +10411,9 @@
     },
     {
       "name": "generate_magnet_qc_plan",
-      "description": "Generate a Business-tier QC plan for a magnetized printed product.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Generate a Business-tier QC plan for a magnetized printed product.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Design guidance \u00b7 Business: + Validation tests & QC plans \u00b7 Enterprise: + Child-safety & supplier vetting.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -10467,6 +10474,13 @@
         ],
         "title": "generate_magnet_qc_planArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "magnets",
+        "free": "Warnings \u2014 always free",
+        "pro": "Design guidance",
+        "business": "+ Validation tests & QC plans",
+        "enterprise": "+ Child-safety & supplier vetting"
       }
     },
     {
@@ -11961,9 +11975,9 @@
     },
     {
       "name": "review_magnet_supplier_packet",
-      "description": "Review a magnet supplier packet for Enterprise-grade evidence gaps.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Review a magnet supplier packet for Enterprise-grade evidence gaps.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Design guidance \u00b7 Business: + Validation tests & QC plans \u00b7 Enterprise: + Child-safety & supplier vetting.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -11987,6 +12001,13 @@
         },
         "title": "review_magnet_supplier_packetArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "magnets",
+        "free": "Warnings \u2014 always free",
+        "pro": "Design guidance",
+        "business": "+ Validation tests & QC plans",
+        "enterprise": "+ Child-safety & supplier vetting"
       }
     },
     {
@@ -14846,7 +14867,7 @@
     },
     {
       "name": "plan_kit_plates",
-      "description": "Pack a kit's parts onto print plates \u2014 and, with a fleet, answer \"which plate on which printer, finishing when.\".\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Pack a kit's parts onto print plates \u2014 and, with a fleet (Business), answer \"which plate on which printer, finishing when.\".\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
@@ -16068,7 +16089,7 @@
     },
     {
       "name": "generate_ashtray",
-      "description": "Generate an ashtray with optional branding and QR code. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 ashtrays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate an ashtray with optional branding and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 ashtrays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -16238,7 +16259,7 @@
     },
     {
       "name": "generate_coaster",
-      "description": "Generate a coaster with optional branding and QR code. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 coasters/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a coaster with optional branding and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 coasters/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -16475,7 +16496,7 @@
     },
     {
       "name": "generate_jewelry_tray",
-      "description": "Generate a jewelry tray with optional decoration and QR code. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 jewelry trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a jewelry tray with optional decoration and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 jewelry trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -16955,7 +16976,7 @@
     },
     {
       "name": "generate_pen_cup",
-      "description": "Generate a desktop pen / brush cup with optional QR + decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 pen cups/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desktop pen / brush cup with optional decoration and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 pen cups/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
