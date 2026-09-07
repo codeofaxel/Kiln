@@ -132,6 +132,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **A see-through logo now carves just the mark on every product, not
+  only some.**
+
+- **A logo carved onto a sloped face comes out whole.** On a leaning
+  surface, like a phone stand's back panel, only part of the mark was
+  being cut.
+
+- **A picture with nothing in it is refused instead of carved.** A blank
+  or fully see-through image used to sink a shallow pool into the part.
+
 - **Kiln no longer tells you a temperature it can't vouch for.** When your
   printer has stopped reporting, the hotend and bed read "unknown" and point
   you at the machine's own display, instead of showing the last numbers Kiln
