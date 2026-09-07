@@ -542,7 +542,11 @@ def test_a_deadline_stops_the_loop_between_views(
     real = stage_paint._paint_view
     painted: list[int] = []
 
-    def slow_paint(*args, **kwargs):
+    def slow_paint(*args, cost_only=False, **kwargs):
+        # The set's pre-pass prices every view through this same
+        # function; only a real paint costs wall clock.
+        if cost_only:
+            return real(*args, cost_only=True, **kwargs)
         painted.append(1)
         clock[0] += 30.0
         return real(*args, **kwargs)
@@ -564,9 +568,14 @@ def test_a_spent_deadline_paints_nothing_and_declines(
 ) -> None:
     painted: list[int] = []
     real = stage_paint._paint_view
-    monkeypatch.setattr(
-        stage_paint, "_paint_view", lambda *a, **k: (painted.append(1), real(*a, **k))[1],
-    )
+
+    def counting(*a, cost_only=False, **k):
+        if cost_only:
+            return real(*a, cost_only=True, **k)
+        painted.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(stage_paint, "_paint_view", counting)
     views = try_paint_stage_views(
         probe, _THREE, _THREE_ROT, output_dir=str(tmp_path / "out"),
         width=64, height=48, deadline=stage_paint.time.monotonic() - 1.0,
@@ -580,3 +589,75 @@ def test_no_deadline_keeps_the_all_or_nothing_set(probe: str, tmp_path: Path) ->
         probe, _THREE, _THREE_ROT, output_dir=str(tmp_path / "out"), width=64, height=48,
     )
     assert views is not None and [v["angle"] for v in views] == ["isometric", "front", "top"]
+
+
+# ---------------------------------------------------------------------------
+# The raster cap is a property of the SET, so it is settled before painting
+# ---------------------------------------------------------------------------
+
+
+def test_an_over_cap_view_declines_before_any_painting(
+    probe: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A view over the raster cap kills the set, so ask BEFORE painting one.
+
+    Measured 2026-09-06 at 1600x1200, seven angles: the painter drew four
+    views over ~30 s, hit the cap on the fifth, and discarded all four --
+    the set is all-or-nothing, so any view over the cap dooms it from the
+    start.  The pair count is arithmetic over projected triangles and
+    costs nothing next to rasterizing them, so every view is priced up
+    front and the whole set declines before a pixel is written.
+    """
+    out = tmp_path / "out"
+    seen: list = []
+    real_count = stage_paint._pair_count
+    rasterized: list = []
+    real_raster = stage_paint._rasterize
+
+    def counted(*a, **k):
+        rasterized.append(1)
+        return real_raster(*a, **k)
+
+    def second_view_is_huge(*a, **k):
+        cost = real_count(*a, **k)
+        seen.append(1)
+        return cost._replace(total=stage_paint._PAIR_CAP + 1) if len(seen) == 2 else cost
+
+    monkeypatch.setattr(stage_paint, "_pair_count", second_view_is_huge)
+    monkeypatch.setattr(stage_paint, "_rasterize", counted)
+    views = try_paint_stage_views(
+        probe, _THREE, _THREE_ROT, output_dir=str(out), width=64, height=48,
+    )
+    assert views is None
+    assert rasterized == [], "nothing may be rasterized once the set is known impossible"
+    assert not list(out.glob("*.png")), "no view may reach disk"
+
+
+def test_a_set_inside_the_cap_still_paints_every_view(probe: str, tmp_path: Path) -> None:
+    """The pre-pass must not refuse work the rasterizer would have done."""
+    views = try_paint_stage_views(
+        probe, _THREE, _THREE_ROT, output_dir=str(tmp_path / "out"), width=64, height=48,
+    )
+    assert views is not None and len(views) == 3
+
+
+def test_the_prepass_and_the_rasterizer_agree_on_cost(probe: str, tmp_path: Path) -> None:
+    """One helper prices the view for both, so they can never disagree."""
+    counts_seen: list = []
+    real = stage_paint._pair_count
+
+    def record(*a, **k):
+        r = real(*a, **k)
+        counts_seen.append(int(r.total))
+        return r
+
+    import unittest.mock as _m
+
+    with _m.patch.object(stage_paint, "_pair_count", record):
+        try_paint_stage_views(
+            probe, _SEL, _ISO, output_dir=str(tmp_path / "o"), width=64, height=48,
+        )
+    # One pre-pass price and one rasterizer price for the single view,
+    # from the same helper on the same geometry.
+    assert len(counts_seen) == 2
+    assert counts_seen[0] == counts_seen[1]
