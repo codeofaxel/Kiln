@@ -16,6 +16,7 @@ set again — these tests are the structural proof they cannot.
 import logging
 import math
 import os
+from pathlib import Path
 
 import pytest
 
@@ -1074,3 +1075,32 @@ class TestBackgroundRect:
         m = parse_svg_to_mark(svg)
         assert m is not None and not m.is_empty
         assert m.width == pytest.approx(100.0)
+
+
+_KILN_LOGO = Path(__file__).resolve().parents[2] / "docs" / "assets" / "kiln-logo-transparent.png"
+
+
+@pytest.mark.skipif(not _KILN_LOGO.is_file(), reason="repo logo asset not present")
+class TestRealLogoReachesTheTraceDoor:
+    """The Kiln logo is white and orange line art on a transparent field.
+
+    ``image_style="auto"`` routes a mark to the trace door only when the
+    bi-level detector says so, and the detector read the flattened image —
+    on which the white strokes had already vanished.  The logo was routed
+    to photo relief, and even an explicit trace caught only the orange.
+    """
+
+    def test_detector_sees_a_mark(self):
+        from kiln.mark_geometry import is_bilevel_image
+
+        assert is_bilevel_image(str(_KILN_LOGO))
+
+    def test_trace_carries_the_white_strokes_too(self):
+        from kiln.mark_geometry import trace_image_to_mark
+
+        mark = trace_image_to_mark(str(_KILN_LOGO), max_dim=800)
+        rings = sum(len(group) for group in mark.groups)
+        # The orange alone traced as three rings (the bar and the two
+        # halves of the accent glyph); the kiln outline and the wordmark's
+        # white letters at least double that.
+        assert rings >= 6, f"only {rings} rings traced — the white strokes are missing"

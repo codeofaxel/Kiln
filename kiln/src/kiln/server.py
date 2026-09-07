@@ -1188,6 +1188,46 @@ def _terms_gate_blocks(tool_name: str) -> bool:
         return False
 
 
+def _declared_tool_arguments(tool_mgr: Any, name: str) -> set[str] | None:
+    """The argument names a registered tool declares, or None when unknowable."""
+    try:
+        tool = (tool_mgr._tools or {}).get(name)  # noqa: SLF001 — FastMCP registry
+        params = getattr(tool, "parameters", None) or {}
+        props = params.get("properties")
+        if not isinstance(props, dict):
+            return None
+        return set(props)
+    except Exception:  # noqa: BLE001 — an odd registry shape must not block calls
+        return None
+
+
+def _unknown_tool_arguments(
+    tool_mgr: Any, name: str, arguments: dict[str, Any] | None
+) -> list[str]:
+    """Argument keys a call passed that the named tool does not declare.
+
+    Empty when every key is declared, when the tool is not in this
+    registry (the SDK reports that itself), or when the declaration
+    cannot be read — this gate only ever refuses what it can SEE is wrong.
+    """
+    if not isinstance(arguments, dict) or not arguments:
+        return []
+    declared = _declared_tool_arguments(tool_mgr, name)
+    if declared is None:
+        return []
+    return sorted(k for k in arguments if k not in declared)
+
+
+def _unknown_arguments_message(tool_mgr: Any, name: str, unknown: list[str]) -> str:
+    declared = sorted(_declared_tool_arguments(tool_mgr, name) or ())
+    accepts = ", ".join(declared) if declared else "no arguments"
+    plural = "s" if len(unknown) != 1 else ""
+    return (
+        f"{name} does not accept the argument{plural}: {', '.join(unknown)}. "
+        f"It would have been silently ignored. {name} accepts: {accepts}."
+    )
+
+
 def _install_mcp_request_context_capture() -> None:
     """Capture current MCP request context so auth can read per-request metadata."""
     tool_mgr = mcp._tool_manager
@@ -1210,6 +1250,14 @@ def _install_mcp_request_context_capture() -> None:
                 # One-time consent gate — raised so the lowlevel handler returns
                 # it to the agent as a tool error to relay (see _terms_* above).
                 raise RuntimeError(_terms_consent_message())
+            unknown = _unknown_tool_arguments(self, name, arguments)
+            if unknown:
+                # The SDK's argument model ignores keys it does not declare,
+                # so a misspelt or unsupported parameter was silently thrown
+                # away and the call went ahead without it — the caller saw
+                # a success that did not do what they asked.  Refuse instead,
+                # naming the keys and what the tool does accept.
+                raise RuntimeError(_unknown_arguments_message(self, name, unknown))
             # Ask the person before a print starts.  Here rather than inside
             # the tools because sync tools run on this event loop and could
             # not await the answer.  Raises if they say no, before dispatch.

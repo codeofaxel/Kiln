@@ -27,7 +27,9 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
     """Read a PNG file and return (rows_of_grayscale, width, height).
 
     Each row is a list of ints 0-255 representing grayscale intensity.
-    Transparency is mapped to 255 (white = no emboss).
+    Transparency is resolved by the same rule as the Pillow door
+    (:func:`_alpha_is_the_ink`): flat artwork carves from its alpha
+    coverage, tonal content composites onto white (= no emboss).
     """
     with open(file_path, "rb") as f:
         data = f.read()
@@ -98,6 +100,7 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
     # Reconstruct filtered rows
     prev_row = bytes(width * bpp)
     rows: list[list[int]] = []
+    alpha_rows: list[list[int]] = []
 
     for y in range(height):
         row_start = y * stride
@@ -134,13 +137,14 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
                 r, g, b_val = raw_row[off], raw_row[off + 1], raw_row[off + 2]
                 gray_row.append(int(0.299 * r + 0.587 * g + 0.114 * b_val))
         elif color_type == 4:  # Grayscale + Alpha
+            alpha_row: list[int] = []
             for x in range(width):
                 off = x * 2
-                gray, alpha = raw_row[off], raw_row[off + 1]
-                # Blend against white background for transparent pixels
-                blended = int(gray * (alpha / 255.0) + 255 * (1 - alpha / 255.0))
-                gray_row.append(min(255, blended))
+                gray_row.append(raw_row[off])
+                alpha_row.append(raw_row[off + 1])
+            alpha_rows.append(alpha_row)
         elif color_type == 6:  # RGBA
+            alpha_row = []
             for x in range(width):
                 off = x * 4
                 r, g, b_val, alpha = (
@@ -149,11 +153,16 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
                     raw_row[off + 2],
                     raw_row[off + 3],
                 )
-                gray = int(0.299 * r + 0.587 * g + 0.114 * b_val)
-                blended = int(gray * (alpha / 255.0) + 255 * (1 - alpha / 255.0))
-                gray_row.append(min(255, blended))
+                gray_row.append(int(0.299 * r + 0.587 * g + 0.114 * b_val))
+                alpha_row.append(alpha)
+            alpha_rows.append(alpha_row)
 
         rows.append(gray_row)
+
+    if alpha_rows:
+        # The same alpha rule the Pillow door applies — decided once, over
+        # the whole image, never per pixel.
+        rows = _resolve_alpha_rows(rows, alpha_rows)
 
     return rows, width, height
 
@@ -169,6 +178,99 @@ _ALPHA_INK_DEADBAND = 16
 # erased by a white flatten, so the alpha channel is the only place the
 # mark exists.
 _ALPHA_INK_MIN_VISIBLE = 0.05
+# Flat artwork (a logo, a wordmark, line art) paints its opaque pixels in a
+# handful of tones; a photograph spreads them across the whole range.  When
+# this many tone clusters, each this wide, hold this much of the opaque
+# content, the colours are brand colours rather than depths — and the alpha
+# coverage IS the mark.
+#: Every ``style`` :func:`prepare_image_for_emboss` knows.  A caller that
+#: exposes the style as a parameter validates against this, so a style the
+#: engine would quietly treat as ``"default"`` is refused by name instead.
+IMAGE_STYLES: tuple[str, ...] = (
+    "default", "photo", "stencil", "lithophane", "coin", "portrait",
+    "composite", "medallion",
+)
+
+_ALPHA_FLAT_ART_MAX_TONES = 4
+_ALPHA_FLAT_ART_TONE_BAND = 8
+_ALPHA_FLAT_ART_COVERAGE = 0.9
+
+
+def _alpha_is_the_ink(opaque_lum_hist: list[int]) -> bool:
+    """Whether an image's alpha coverage, not its luminance, is the carve.
+
+    ``opaque_lum_hist`` is the 256-bin luminance histogram of the pixels
+    the alpha channel calls opaque, in their OWN colours (before any
+    composite).  This is the one rule every alpha-bearing image meets,
+    whichever decoder read it, so the Pillow door and the pure-Python PNG
+    door cannot disagree about what a transparent logo means.
+
+    Two kinds of content carry an alpha channel, and they want opposite
+    treatments:
+
+    * FLAT ARTWORK — a logo, a wordmark, line art.  Its colours are brand
+      colours, not depths: a white stroke and an orange stroke are the
+      same mark and want the same cut.  Reading luminance here is exactly
+      wrong — a white mark composited onto a white field vanishes, a grey
+      one carves at half the depth that was asked for.  The alpha channel
+      says where the mark IS, so the coverage becomes the ink.
+    * A PHOTOGRAPH cut out with alpha (a portrait through rembg, a product
+      shot with the background removed).  Its tones are the relief; the
+      alpha only says where the subject ends.  Compositing onto white keeps
+      every tone and turns the cut-away surround into empty field.
+
+    Flat artwork is recognised by its histogram: a few narrow tone clusters
+    hold nearly all of the opaque pixels.  A photograph never fits in that
+    few.  The white-mark rescue is kept as a second trigger for content
+    that is tonal in principle but invisible against white in practice.
+    """
+    opaque = sum(opaque_lum_hist)
+    if opaque <= 0:
+        return False
+    visible = sum(opaque_lum_hist[: 256 - _ALPHA_INK_DEADBAND])
+    if visible / opaque < _ALPHA_INK_MIN_VISIBLE:
+        return True
+    remaining = list(opaque_lum_hist)
+    covered = 0
+    for _ in range(_ALPHA_FLAT_ART_MAX_TONES):
+        peak = max(range(256), key=remaining.__getitem__)
+        if remaining[peak] == 0:
+            break
+        lo = max(0, peak - _ALPHA_FLAT_ART_TONE_BAND)
+        hi = min(255, peak + _ALPHA_FLAT_ART_TONE_BAND)
+        covered += sum(remaining[lo : hi + 1])
+        for i in range(lo, hi + 1):
+            remaining[i] = 0
+        if covered / opaque >= _ALPHA_FLAT_ART_COVERAGE:
+            return True
+    return False
+
+
+def _resolve_alpha_rows(
+    gray_rows: list[list[int]], alpha_rows: list[list[int]]
+) -> list[list[int]]:
+    """The pure-Python decoder's half of the alpha rule, over plain rows.
+
+    Same decision as :func:`_flatten_alpha_on_white`, same two outcomes:
+    the coverage becomes black ink on a white field, or the tones are
+    composited onto white.
+    """
+    hist = [0] * 256
+    for g_row, a_row in zip(gray_rows, alpha_rows, strict=True):
+        for g, a in zip(g_row, a_row, strict=True):
+            if a >= 128:
+                hist[g] += 1
+    opaque = sum(hist)
+    total = sum(len(r) for r in alpha_rows)
+    if 0 < opaque < total and _alpha_is_the_ink(hist):
+        return [[255 - a for a in a_row] for a_row in alpha_rows]
+    return [
+        [
+            min(255, int(g * (a / 255.0) + 255 * (1 - a / 255.0)))
+            for g, a in zip(g_row, a_row, strict=True)
+        ]
+        for g_row, a_row in zip(gray_rows, alpha_rows, strict=True)
+    ]
 
 
 def _flatten_alpha_on_white(img):
@@ -180,20 +282,19 @@ def _flatten_alpha_on_white(img):
     a transparent surround; decoded as black, the surround displaces the
     surface across the mark's whole bounding box.
 
-    Two cases, decided by what survives the flatten:
+    Two outcomes, decided by :func:`_alpha_is_the_ink` on the opaque
+    pixels' own colours:
 
-    * Normally, composite onto WHITE — the field convention everywhere
-      this pipeline touches pixels (the pure-Python PNG decoder blends
-      against white, the rembg step composites onto white, ImageMagick
-      SVG rasterization flattens onto white).  A transparent surround
-      then behaves exactly like the same artwork on white paper.
-    * When essentially NONE of the alpha-defined content would survive
-      against white (a white or near-white logo on a transparent
-      surround — the light variant every brand kit ships), the alpha
-      channel is the only place the mark exists, so the alpha coverage
-      IS the ink: synthesize black ink on a white field from it.  Ink
-      colour never changes carve geometry, so this is the same deboss
-      the dark variant of the mark produces.
+    * Flat artwork: the alpha coverage IS the ink — black on a white
+      field, with the alpha's own anti-aliasing as the edge.  Ink colour
+      never changes carve geometry, so a white, grey, orange or black
+      variant of the same mark all deboss identically.
+    * Tonal content (a photograph cut out with alpha): composite onto
+      WHITE — the field convention everywhere this pipeline touches pixels
+      (the pure-Python PNG decoder blends against white, the rembg step
+      composites onto white, ImageMagick SVG rasterization flattens onto
+      white).  The tones are the relief; the cut-away surround behaves
+      exactly like the same picture on white paper.
 
     Covers every way a Pillow image can carry transparency: RGBA, LA
     and PA modes, plus palette/grayscale/RGB images with a transparency
@@ -219,12 +320,13 @@ def _flatten_alpha_on_white(img):
         return bg
 
     opaque_mask = alpha.point(lambda a: 255 if a >= 128 else 0)
-    lum_hist = bg.convert("L").histogram(opaque_mask)
-    visible = sum(lum_hist[: 256 - _ALPHA_INK_DEADBAND])
-    if visible / opaque >= _ALPHA_INK_MIN_VISIBLE:
-        return bg
-
-    return ImageChops.invert(alpha)
+    # The opaque pixels' OWN tones — a composite would already have pulled
+    # every anti-aliased edge toward white and blurred the very histogram
+    # this decision reads.
+    own_tones = rgba.convert("RGB").convert("L").histogram(opaque_mask)
+    if _alpha_is_the_ink(own_tones):
+        return ImageChops.invert(alpha)
+    return bg
 
 
 def _open_grayscale(image_path: str, *, exif_transpose: bool = False):
@@ -1094,6 +1196,12 @@ def prepare_image_for_emboss(
         "width_px": w,
         "height_px": h,
         "aspect_ratio": round(w / h, 4) if h > 0 else 1.0,
+        # What the engine actually did with the style it was handed.  A
+        # caller's style is a hint; when the image is a mark on a clean
+        # field the mark wins, and the caller can report that honestly
+        # instead of echoing the style it asked for.
+        "treatment": "mark" if _mark_mode else "relief",
+        "style_applied": style,
     }
 
 

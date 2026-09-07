@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import struct
 import zlib
+from pathlib import Path
 
 import pytest
 
@@ -425,7 +426,9 @@ class TestAlphaFlattening:
 
         rows, w, h = _load_image_as_grayscale(str(p))
         assert rows[0][0] == 255
-        assert rows[10][10] == 40
+        # One flat tone on a transparent surround is artwork: the coverage
+        # is the ink, at full depth, whatever colour it was drawn in.
+        assert rows[10][10] == 0
 
     def test_white_ink_on_transparency_survives_as_alpha_ink(self, tmp_path):
         """A white mark on a transparent surround must not vanish.
@@ -450,8 +453,13 @@ class TestAlphaFlattening:
             "the white mark vanished — the alpha-as-ink fallback is gone"
         )
 
-    def test_dark_ink_on_transparency_keeps_its_tones(self, tmp_path):
-        """Visible ink keeps the plain white flatten — tones preserved."""
+    def test_flat_grey_mark_on_transparency_carves_at_full_depth(self, tmp_path):
+        """A mark's colour is identity, not depth.
+
+        A mid-grey logo used to carve at half the depth that was asked
+        for, because luminance was read as relief.  Flat artwork on a
+        transparent surround now carves from its alpha coverage.
+        """
         from PIL import Image, ImageDraw
 
         from kiln.image_to_surface import _load_image_as_grayscale
@@ -465,4 +473,118 @@ class TestAlphaFlattening:
 
         rows, w, h = _load_image_as_grayscale(str(p))
         assert rows[0][0] == 255
-        assert rows[30][30] == 128, "mid-tone ink must keep its tone"
+        assert rows[30][30] == 0, "a grey mark must carve like a black one"
+
+    @staticmethod
+    def _two_tone_logo():
+        """White strokes plus an orange accent on a transparent field —
+        the light variant of a brand kit, which is what the Kiln logo is."""
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGBA", (80, 80), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        d.rectangle([10, 10, 70, 30], outline=(255, 255, 255, 255), width=3)
+        d.line([12, 45, 68, 45], fill=(255, 100, 40, 255), width=3)
+        d.rectangle([36, 55, 44, 70], fill=(255, 255, 255, 255))
+        return img
+
+    def test_white_strokes_beside_an_orange_accent_are_still_the_mark(self, tmp_path):
+        """The white part of a two-tone logo must not vanish.
+
+        The old rescue only fired when essentially NO opaque content
+        survived a white flatten.  A logo whose accent is visible but
+        whose strokes are white lost its strokes and kept the accent —
+        the Kiln mark came out as a faint ring and nothing else.
+        """
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        p = tmp_path / "two_tone.png"
+        self._two_tone_logo().save(p)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255, "surround must stay empty field"
+        assert rows[11][40] == 0, "the white stroke is part of the mark"
+        assert rows[45][40] == 0, "the orange accent is part of the mark"
+        assert rows[62][40] == 0, "the white glyph is part of the mark"
+
+    def test_pure_python_decoder_reads_alpha_by_the_same_rule(self, tmp_path):
+        """The no-Pillow PNG door must not disagree with the Pillow door."""
+        from kiln.image_to_surface import _load_image_as_grayscale, _read_png_pixels
+
+        p = tmp_path / "two_tone.png"
+        self._two_tone_logo().save(p)
+
+        via_pillow, _, _ = _load_image_as_grayscale(str(p))
+        via_decoder, _, _ = _read_png_pixels(str(p))
+        assert via_decoder[11][40] == 0, "white stroke lost by the pure-Python door"
+        assert via_decoder == via_pillow
+
+    def test_tonal_cutout_on_transparency_keeps_its_relief(self, tmp_path):
+        """A photograph exported with alpha is relief, not a silhouette.
+
+        Its tones are the carve; the alpha only says where the subject
+        ends.  Compositing onto white keeps every tone and makes the
+        cut-away surround empty field.
+        """
+        from PIL import Image
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        px = img.load()
+        for y in range(16, 48):
+            for x in range(8, 56):
+                tone = int((x - 8) * 255 / 47)
+                px[x, y] = (tone, tone, tone, 255)
+        p = tmp_path / "cutout.png"
+        img.save(p)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255
+        assert rows[32][10] < 40, "dark end of the gradient must stay dark"
+        assert 100 < rows[32][32] < 160, "mid-tones must survive"
+        assert rows[32][54] > 220, "light end of the gradient must stay light"
+
+
+_KILN_LOGO = Path(__file__).resolve().parents[2] / "docs" / "assets" / "kiln-logo-transparent.png"
+
+
+@pytest.mark.skipif(not _KILN_LOGO.is_file(), reason="repo logo asset not present")
+class TestRealLogoThroughAProductProfile:
+    """The Kiln logo through the exact call a product profile makes.
+
+    The profiles ask for photo relief (``style="coin"`` at 300 px, deboss).
+    The logo is white and orange line art on a transparent field, and it
+    came out as a faint ring: the white strokes vanished into the white
+    flatten and the rest was posterised into the background.
+    """
+
+    def test_coin_profile_carves_only_the_mark(self, tmp_path):
+        from kiln.image_to_surface import prepare_image_for_emboss
+
+        info = prepare_image_for_emboss(
+            str(_KILN_LOGO),
+            str(tmp_path),
+            max_resolution=300,
+            invert=True,
+            style="coin",
+            flip_rows=True,
+        )
+        assert info["treatment"] == "mark"
+
+        values = [
+            float(v)
+            for line in Path(info["dat_path"]).read_text().splitlines()
+            if line.strip() and not line.startswith("#")
+            for v in line.split()
+        ]
+        # Deboss convention: 1.0 is the untouched field, 0.0 is the full cut.
+        w = info["width_px"]
+        corners = [values[0], values[w - 1], values[-w], values[-1]]
+        assert corners == [1.0] * 4, "the transparent surround must stay flush"
+        assert min(values) == 0.0, "the mark must reach the full requested depth"
+        carved = sum(1 for v in values if v < 0.98) / len(values)
+        assert 0.002 < carved < 0.05, (
+            f"{carved:.1%} of the face is cut — the mark is thin line art on "
+            "an empty field, so only a few percent may move"
+        )
