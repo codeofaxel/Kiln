@@ -1058,7 +1058,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         speed = self._validate_part_fan(node, percent)
         return self.send_gcode([f"M106 S{speed}" if speed else "M107"])
 
-    def skip_objects(self, object_ids: list[int]) -> bool:
+    def skip_objects(self, object_ids: list[int]) -> CommandVerdict:
         """Abandon objects on a live multi-object print via ``M486``.
 
         Sends the RepRap cancel-object gcode ``M486 P<index>`` over the serial
@@ -1072,7 +1072,7 @@ class SerialPrinterAdapter(PrinterAdapter):
             object_ids: zero-based M486 object indices (non-empty).
 
         Returns:
-            ``True`` once the commands are sent.
+            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
 
         Raises:
             PrinterError: If *object_ids* is empty or holds a non-integer.

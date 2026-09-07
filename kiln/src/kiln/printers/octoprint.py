@@ -1105,7 +1105,7 @@ class OctoPrintAdapter(PrinterAdapter):
         self._post("/api/job", json={"command": "cancel"})
         return PrintResult(success=True, message="Print cancelled.")
 
-    def skip_objects(self, object_ids: list[int]) -> bool:
+    def skip_objects(self, object_ids: list[int]) -> CommandVerdict:
         """Abandon objects on a live multi-object print via ``M486``.
 
         Sends the RepRap cancel-object gcode ``M486 P<index>`` through
@@ -1121,7 +1121,7 @@ class OctoPrintAdapter(PrinterAdapter):
             object_ids: zero-based M486 object indices (non-empty).
 
         Returns:
-            ``True`` once the commands are sent.
+            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
 
         Raises:
             PrinterError: If *object_ids* is empty or holds a non-integer.
@@ -1133,7 +1133,7 @@ class OctoPrintAdapter(PrinterAdapter):
         except (TypeError, ValueError) as exc:
             raise PrinterError(f"skip_objects: object ids must be integers ({exc}).") from exc
         self._post("/api/printer/command", json={"commands": [f"M486 P{i}" for i in ids]})
-        return True
+        return self._http_accepted(f"Skip object(s) {', '.join(str(i) for i in ids)}")
 
     def emergency_stop(self) -> PrintResult:
         """Perform emergency stop via M112 firmware halt.

@@ -892,7 +892,7 @@ class CrealityAdapter(PrinterAdapter):
         """
         return self._backend.set_fan(node, percent)
 
-    def skip_objects(self, object_names: list[str]) -> bool:
+    def skip_objects(self, object_names: list[str]) -> CommandVerdict:
         """Abandon named objects mid-print via the Moonraker/Klipper backend.
 
         Creality's 2024+ machines run Klipper behind Moonraker, so this

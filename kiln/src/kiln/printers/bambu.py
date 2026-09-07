@@ -2101,6 +2101,17 @@ class BambuAdapter(PrinterAdapter):
     # Internal: write verification by read-back
     # ------------------------------------------------------------------
 
+    def _stamp_before_send(self) -> float:
+        """The instant a command is about to go out, with the link already up.
+
+        Taken AFTER :meth:`_ensure_mqtt` on purpose: building a session can
+        take seconds, and a status frame landing during it would postdate a
+        stamp taken earlier — presenting a reading from before the command as
+        evidence about it.  See :meth:`_await_readback`.
+        """
+        self._ensure_mqtt()
+        return time.monotonic()
+
     def _await_readback(
         self,
         field_name: str,
@@ -2197,7 +2208,10 @@ class BambuAdapter(PrinterAdapter):
                 f"the printer's report since the command shows {field_name}="
                 f"{evidence.get('observed')!r}, not the requested value"
             ),
-        }[str(evidence["corroboration"])]
+        }.get(
+            str(evidence.get("corroboration")),
+            f"the printer has not shown {field_name} at the requested value",
+        )
         tail = ""
         if evidence.get("printer_faults"):
             tail = (
@@ -4155,7 +4169,7 @@ class BambuAdapter(PrinterAdapter):
         self._validate_temp(target, self._MAX_HOTEND_C, "Hotend")
         want = int(target)
         wire = f"M104 S{want}"
-        sent_at = time.monotonic()
+        sent_at = self._stamp_before_send()
         self.send_gcode([wire])
         return self._readback_verdict(
             f"Hotend target {want}°C",
@@ -4174,7 +4188,7 @@ class BambuAdapter(PrinterAdapter):
         self._validate_temp(target, 130.0, "Bed")
         want = int(target)
         wire = f"M140 S{want}"
-        sent_at = time.monotonic()
+        sent_at = self._stamp_before_send()
         self.send_gcode([wire])
         return self._readback_verdict(
             f"Bed target {want}°C",
@@ -4234,7 +4248,7 @@ class BambuAdapter(PrinterAdapter):
                 f"Valid profiles: {', '.join(sorted(_SPEED_PROFILES))}"
             )
         level = _SPEED_PROFILES[key]
-        sent_at = time.monotonic()
+        sent_at = self._stamp_before_send()
         self._publish_command(
             {
                 "print": {
@@ -4289,7 +4303,7 @@ class BambuAdapter(PrinterAdapter):
     # Bambu-specific: skip objects mid-print
     # ------------------------------------------------------------------
 
-    def skip_objects(self, object_ids: list[int]) -> bool:
+    def skip_objects(self, object_ids: list[int]) -> CommandVerdict:
         """Abandon one or more plate objects during a live multi-object print.
 
         Publishes Bambu's ``skip_objects`` print command.  The printer stops
@@ -4310,10 +4324,13 @@ class BambuAdapter(PrinterAdapter):
             object_ids: Label ids of the objects to abandon (non-empty).
 
         Returns:
-            ``True`` once the command is published.
+            A :class:`CommandVerdict` — ``confirmed`` once a status frame
+            after the command lists every requested id in ``s_obj``, else
+            ``accepted``.
 
         Raises:
-            PrinterError: If *object_ids* is empty or holds a non-integer id.
+            PrinterError: If *object_ids* is empty, holds a non-integer id,
+                or the command could not be sent.
         """
         if not object_ids:
             raise PrinterError("skip_objects requires at least one object id.")
@@ -4321,6 +4338,7 @@ class BambuAdapter(PrinterAdapter):
             ids = [int(x) for x in object_ids]
         except (TypeError, ValueError) as exc:
             raise PrinterError(f"skip_objects: object ids must be integers ({exc}).") from exc
+        sent_at = self._stamp_before_send()
         self._publish_command(
             {
                 "print": {
@@ -4330,7 +4348,20 @@ class BambuAdapter(PrinterAdapter):
                 }
             }
         )
-        return True
+
+        def _all_skipped(reported: Any) -> bool:
+            if not isinstance(reported, list):
+                return False
+            seen = {int(x) for x in reported if isinstance(x, (int, str)) and str(x).isdigit()}
+            return set(ids) <= seen
+
+        return self._readback_verdict(
+            f"Skip object(s) {', '.join(str(i) for i in ids)}",
+            "s_obj",
+            _all_skipped,
+            sent_at=sent_at,
+            wire=f"skip_objects {ids}",
+        )
 
     # ------------------------------------------------------------------
     # Bambu-specific: LED control
@@ -4362,7 +4393,7 @@ class BambuAdapter(PrinterAdapter):
             raise PrinterError(
                 f"Unknown LED mode {mode!r}. Valid modes: {', '.join(sorted(_VALID_LED_MODES))}"
             )
-        sent_at = time.monotonic()
+        sent_at = self._stamp_before_send()
         self._publish_command(
             {
                 "system": {
@@ -4441,7 +4472,7 @@ class BambuAdapter(PrinterAdapter):
             raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
         speed = round(pct / 100 * 255)
         wire = f"M106 P{index} S{speed}"
-        sent_at = time.monotonic()
+        sent_at = self._stamp_before_send()
         self.send_gcode([wire])
         # The printer reports fan level on a 0-15 scale, not the 0-255 the
         # G-code carries; allow one step of rounding either side, except at

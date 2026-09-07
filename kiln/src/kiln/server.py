@@ -7528,14 +7528,25 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
             )
         # Pass identifiers through as-is — each adapter coerces to its native
         # type (Bambu/OctoPrint ints, Klipper object-name strings).
-        skip(list(object_ids))
+        verdict = CommandVerdict.coerce(skip(list(object_ids)), what="skip command")
+        tail = (
+            "The printer confirms they are skipped; the rest of the plate "
+            "keeps printing."
+            if verdict.confirmed
+            else (
+                "The command was sent, and the printer has not confirmed it. "
+                "Skipping is irreversible for the objects named, so read "
+                "printer_status() before deciding the plate is saved."
+            )
+        )
         return {
-            "success": True,
+            "success": verdict.ok,
             "skipped_objects": list(object_ids),
             "plate_number": plate_number,
+            **verdict.to_dict(),
             "message": (
                 f"Asked the printer to skip {len(object_ids)} object(s): "
-                f"{list(object_ids)}. The rest of the plate keeps printing."
+                f"{list(object_ids)}. {tail}"
             ),
         }
     except (PrinterError, RuntimeError) as exc:
@@ -7665,6 +7676,20 @@ def set_temperature(
     Common PLA temperatures: tool 200-210C, bed 60C.
     Common PETG temperatures: tool 230-250C, bed 80-85C.
     Common ABS temperatures: tool 240-260C, bed 100-110C.
+
+    Branch on ``outcome`` — one field, three values, the same shape
+    ``start_print`` uses for ``print_start``:
+
+    - ``"confirmed"``: the printer, in a report AFTER the command, shows the
+      effect. Reported per heater under ``tool`` and ``bed``.
+    - ``"accepted"``: the command was sent and not refused, and the printer
+      has not shown the effect yet. Normal on a quiet printer. Read
+      ``printer_status()`` before building on it.
+    - ``"failed"``: the printer's interface refused the command.
+
+    ``accepted`` (the boolean) keeps its old meaning: sent, not refused. It
+    is never proof the printer acted. ``success`` is ``False`` only for
+    ``"failed"``.
     """
     if err := _check_auth("temperature"):
         return err
@@ -7965,6 +7990,20 @@ def set_speed_profile(profile: str) -> dict:
 
     Use ``printer_status()`` to see the current speed profile in the
     response's ``printer.speed_profile`` field.
+
+    Branch on ``outcome`` — one field, three values, the same shape
+    ``start_print`` uses for ``print_start``:
+
+    - ``"confirmed"``: the printer, in a report AFTER the command, shows the
+      effect. For a Bambu, the reported speed level moved.
+    - ``"accepted"``: the command was sent and not refused, and the printer
+      has not shown the effect yet. Normal on a quiet printer. Read
+      ``printer_status()`` before building on it.
+    - ``"failed"``: the printer's interface refused the command.
+
+    ``accepted`` (the boolean) keeps its old meaning: sent, not refused. It
+    is never proof the printer acted. ``success`` is ``False`` only for
+    ``"failed"``.
     """
     if err := _check_auth("printer_control"):
         return err
@@ -8039,6 +8078,20 @@ def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
 
     Use this to improve camera visibility, signal print completion
     (flashing), or turn lights off for overnight prints.
+
+    Branch on ``outcome`` — one field, three values, the same shape
+    ``start_print`` uses for ``print_start``:
+
+    - ``"confirmed"``: the printer, in a report AFTER the command, shows the
+      effect. For a Bambu, the light report lists that node in that mode.
+    - ``"accepted"``: the command was sent and not refused, and the printer
+      has not shown the effect yet. Normal on a quiet printer. Read
+      ``printer_status()`` before building on it.
+    - ``"failed"``: the printer's interface refused the command.
+
+    ``accepted`` (the boolean) keeps its old meaning: sent, not refused. It
+    is never proof the printer acted. ``success`` is ``False`` only for
+    ``"failed"``.
     """
     if err := _check_auth("printer_control"):
         return err
@@ -8093,6 +8146,20 @@ def set_fan(node: str = "part", percent: int = 100) -> dict:
     models (A1, A1 Mini, A2L, P1P), where a chamber command is a no-op. The
     printer's own thermal management may override a manual fan speed during
     a print.
+
+    Branch on ``outcome`` — one field, three values, the same shape
+    ``start_print`` uses for ``print_start``:
+
+    - ``"confirmed"``: the printer, in a report AFTER the command, shows the
+      effect. For a Bambu, that fan's reported level matches.
+    - ``"accepted"``: the command was sent and not refused, and the printer
+      has not shown the effect yet. Normal on a quiet printer. Read
+      ``printer_status()`` before building on it.
+    - ``"failed"``: the printer's interface refused the command.
+
+    ``accepted`` (the boolean) keeps its old meaning: sent, not refused. It
+    is never proof the printer acted. ``success`` is ``False`` only for
+    ``"failed"``.
     """
     if err := _check_auth("printer_control"):
         return err
@@ -9077,6 +9144,12 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
     G-code is validated before sending.  Commands that exceed temperature
     limits or modify firmware settings are blocked.  Use ``validate_gcode``
     to preview what would be allowed without actually sending.
+
+    Raw G-code has no general read-back, so ``outcome`` here is
+    ``"accepted"`` whenever the command was sent: the printer took the
+    bytes, and whether it EXECUTED them is not reported. Observe the
+    printer (``printer_status()``, or the machine itself) before building
+    on a G-code send. ``"failed"`` means the transport refused it.
     """
     if err := _check_auth("print"):
         return err

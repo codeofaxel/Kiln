@@ -335,3 +335,99 @@ class TestServerDoors:
         msg = result["error"]["message"]
         assert "NOT delivered" in msg or "Couldn't reach the printer" in msg
         assert "tool" not in result
+
+
+class TestTheStampIsTakenWithTheLinkUp:
+    """A frame that lands while the SESSION is being built predates the command.
+
+    ``_ensure_mqtt`` can block for seconds rebuilding a dropped session.  A
+    stamp taken before that call would sit behind any frame arriving during
+    it, so the printer's last word about the PREVIOUS command would postdate
+    this one and read as confirmation of it.
+    """
+
+    def test_a_frame_during_connect_does_not_confirm(self) -> None:
+        adapter = _connected()
+
+        connects: list[int] = []
+
+        def _slow_connect() -> Any:
+            # The printer's answer to an EARLIER command, landing while the
+            # session is being re-established.  Only the first call rebuilds
+            # the session; the publish path's own call finds it up.
+            if not connects:
+                connects.append(1)
+                _push(adapter, nozzle_target_temper=250)
+                time.sleep(0.01)
+            return adapter._mqtt_client
+
+        adapter._ensure_mqtt = _slow_connect  # type: ignore[method-assign]
+
+        verdict = adapter.set_tool_temp(250)
+
+        assert verdict.state == ACCEPTED
+        assert verdict.confirmed is False
+
+
+class TestResponsesAreJsonSafe:
+    """A verdict object left in a response would break the MCP transport."""
+
+    @mock.patch("kiln.server._get_adapter")
+    def test_every_write_door_returns_json(self, get_adapter: mock.MagicMock) -> None:
+        import json as _json
+
+        from kiln.server import (
+            send_gcode,
+            set_fan,
+            set_printer_light,
+            set_speed_profile,
+            set_temperature,
+        )
+
+        get_adapter.return_value = _connected()
+        for call in (
+            lambda: set_temperature(tool_temp=200, bed_temp=60),
+            lambda: set_speed_profile("silent"),
+            lambda: set_printer_light("chamber_light", "on"),
+            lambda: set_fan("part", 100),
+            lambda: send_gcode("G28"),
+        ):
+            _json.dumps(call())
+
+
+class TestSkipObjectsIsReadBack:
+    """Skipping is irreversible for the objects named, so "sent" is not enough.
+
+    The printer reports what it has skipped in ``s_obj``; a skip is confirmed
+    only when every requested id appears there in a frame after the command.
+    """
+
+    def test_confirmed_when_the_printer_lists_them(self) -> None:
+        adapter = _connected()
+        _reply_on_publish(adapter, s_obj=[3, 7])
+        assert adapter.skip_objects([3, 7]).confirmed
+
+    def test_a_partial_skip_list_is_not_confirmation(self) -> None:
+        adapter = _connected()
+        _reply_on_publish(adapter, s_obj=[3])
+        verdict = adapter.skip_objects([3, 7])
+        assert verdict.state == ACCEPTED
+        assert verdict.confirmed is False
+
+    def test_silence_is_not_confirmation(self) -> None:
+        adapter = _connected()
+        verdict = adapter.skip_objects([3])
+        assert verdict.state == ACCEPTED
+        assert "NOT confirmed" in verdict.message
+
+    @mock.patch("kiln.server._get_adapter")
+    def test_the_door_says_it_is_unconfirmed(self, get_adapter: mock.MagicMock) -> None:
+        from kiln.server import skip_print_objects
+
+        get_adapter.return_value = _connected()
+        result = skip_print_objects(object_ids=[3])
+
+        assert result["success"] is True
+        assert result["outcome"] == "accepted"
+        assert result["confirmed"] is False
+        assert "irreversible" in result["message"]

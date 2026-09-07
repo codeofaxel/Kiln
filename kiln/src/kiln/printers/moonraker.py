@@ -1418,7 +1418,7 @@ class MoonrakerAdapter(PrinterAdapter):
         self._send_gcode(f"M106 S{speed}" if speed else "M107")
         return self._script_accepted(f"part fan {int(percent)}%")
 
-    def skip_objects(self, object_names: list[str]) -> bool:
+    def skip_objects(self, object_names: list[str]) -> CommandVerdict:
         """Abandon named objects on a live Klipper multi-object print.
 
         Uses Klipper's ``EXCLUDE_OBJECT NAME=<name>`` — the print keeps going
