@@ -1344,7 +1344,7 @@ class OctoPrintAdapter(PrinterAdapter):
         """
         self._post(
             "/api/printer/command",
-            json={"commands": commands},
+            json={"commands": self._gcode_lines(commands)},
         )
         return self._http_accepted(f"{len(commands)} G-code line(s)")
 

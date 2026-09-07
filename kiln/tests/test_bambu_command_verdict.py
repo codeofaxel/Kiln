@@ -431,3 +431,54 @@ class TestSkipObjectsIsReadBack:
         assert result["outcome"] == "accepted"
         assert result["confirmed"] is False
         assert "irreversible" in result["message"]
+
+
+class TestAlreadyAtTheRequestedValue:
+    """A printer that reports on CHANGE says nothing when nothing changes.
+
+    Measured on Adam's A1 (2026-09-06): "chamber light off" with the light
+    already off produced no report at all, while "on" — a real change — was
+    confirmed in 2.05s.  Without this, a request the printer already
+    satisfies is indistinguishable from one that never arrived.
+    """
+
+    def test_a_no_change_request_says_so(self) -> None:
+        adapter = _connected()
+        _push(adapter, nozzle_target_temper=250)  # the printer is ALREADY at 250
+        time.sleep(0.005)
+
+        verdict = adapter.set_tool_temp(250)
+
+        assert verdict.state == ACCEPTED
+        assert verdict.confirmed is False  # still not evidence about THIS command
+        assert verdict.evidence["already_at_requested_value"] is True
+        assert verdict.evidence["reported_before_command"] == 250
+        assert "already reported" in verdict.message
+        assert "in the requested state either way" in verdict.message
+
+    def test_a_different_prior_value_is_not_called_already_there(self) -> None:
+        adapter = _connected()
+        _push(adapter, nozzle_target_temper=200)
+        time.sleep(0.005)
+
+        verdict = adapter.set_tool_temp(250)
+
+        assert verdict.state == ACCEPTED
+        assert "already_at_requested_value" not in verdict.evidence
+        assert "NOT confirmed" in verdict.message
+
+    def test_a_never_reported_field_is_not_called_already_there(self) -> None:
+        adapter = _connected()
+        verdict = adapter.set_tool_temp(250)
+        assert "already_at_requested_value" not in verdict.evidence
+
+    def test_a_real_confirmation_still_wins(self) -> None:
+        adapter = _connected()
+        _push(adapter, nozzle_target_temper=250)
+        time.sleep(0.005)
+        _reply_on_publish(adapter, nozzle_target_temper=250)
+
+        verdict = adapter.set_tool_temp(250)
+
+        assert verdict.state == CONFIRMED
+        assert "already_at_requested_value" not in verdict.evidence

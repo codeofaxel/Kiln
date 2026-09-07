@@ -3141,6 +3141,35 @@ class PrinterAdapter(ABC):
     #: this one fan; adapters reject anything else rather than guess.
     _PART_COOLING_FAN_ALIASES: frozenset[str] = frozenset({"part", "part_cooling", "cooling"})
 
+    @staticmethod
+    def _gcode_lines(commands: Any) -> list[str]:
+        """*commands* as a list of whole G-code lines, or a loud refusal.
+
+        Every adapter consumes this argument by iterating or joining it, so a
+        bare string is not a one-line script — it is eight commands, one per
+        character.  Measured on 2026-09-06: ``send_gcode("M220 S50")`` put
+        ``'M\\n2\\n2\\n0\\n \\nS\\n5\\n0'`` on the Klipper and Duet wires and eight
+        separate writes on a USB serial link, and every layer above reported
+        success.  Two callers had it (a calibration pipeline and a fleet speed
+        tool), and nothing caught either.
+
+        Refusing here is the engine fix: a caller that passes a string learns
+        immediately instead of silently corrupting what the printer executes.
+        """
+        if isinstance(commands, str):
+            raise PrinterError(
+                "send_gcode takes a LIST of G-code lines, not a string: "
+                f"{commands!r} would be sent one character at a time. "
+                f"Pass [{commands!r}] instead."
+            )
+        lines = [str(c) for c in commands]
+        if any("\n" in line for line in lines):
+            raise PrinterError(
+                "send_gcode: each list item must be ONE G-code line; "
+                "split embedded newlines into separate items."
+            )
+        return lines
+
     def _validate_part_fan(self, node: str, percent: int) -> int:
         """Validate a generic-adapter ``set_fan`` call; return the 0-255 PWM.
 

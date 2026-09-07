@@ -1367,7 +1367,7 @@ class MoonrakerAdapter(PrinterAdapter):
         Raises:
             PrinterError: If sending fails.
         """
-        script = "\n".join(commands)
+        script = "\n".join(self._gcode_lines(commands))
         self._send_gcode(script)
         return self._script_accepted(f"{len(commands)} G-code line(s)")
 

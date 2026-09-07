@@ -1329,7 +1329,7 @@ class DuetAdapter(PrinterAdapter):
         Raises:
             PrinterError: If sending fails or the firmware rejects a command.
         """
-        script = "\n".join(commands)
+        script = "\n".join(self._gcode_lines(commands))
         if not script.strip():
             return CommandVerdict.accepted_only(
                 "Nothing to send: every line was blank.", corroboration="none"

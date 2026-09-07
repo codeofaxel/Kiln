@@ -1093,6 +1093,10 @@ class BambuAdapter(PrinterAdapter):
         # needs the frame that carried the field to postdate the command, or
         # the old target reads as confirmation of the new one.
         self._field_seen_at: dict[str, float] = {}
+        # What a field said just before the most recent write that watches it
+        # (value, when it arrived).  Read only by _readback_verdict, to tell
+        # "the printer never answered" apart from "it was already there".
+        self._prior_reading: dict[str, tuple[Any, float]] = {}
         # Per-instance so a caller (or a test) can shorten the read-back wait.
         self._confirm_window_s: float = _COMMAND_CONFIRM_WINDOW_S
         # Monotonic time of the last accepted update that actually CARRIED
@@ -2101,15 +2105,28 @@ class BambuAdapter(PrinterAdapter):
     # Internal: write verification by read-back
     # ------------------------------------------------------------------
 
-    def _stamp_before_send(self) -> float:
+    def _stamp_before_send(self, field_name: str | None = None) -> float:
         """The instant a command is about to go out, with the link already up.
 
         Taken AFTER :meth:`_ensure_mqtt` on purpose: building a session can
         take seconds, and a status frame landing during it would postdate a
         stamp taken earlier — presenting a reading from before the command as
         evidence about it.  See :meth:`_await_readback`.
+
+        When *field_name* is given, what that field said just before the
+        command is remembered too, so a write that asks for the value the
+        printer is ALREADY at can say so.  Measured on an A1 (2026-09-06):
+        this printer reports a field when it CHANGES, so "turn the light off"
+        with the light already off produces no report at all — indis-
+        tinguishable, without this, from a command that never arrived.
         """
         self._ensure_mqtt()
+        if field_name is not None:
+            with self._state_lock:
+                self._prior_reading[field_name] = (
+                    self._last_status.get(field_name),
+                    self._field_seen_at.get(field_name, 0.0),
+                )
         return time.monotonic()
 
     def _await_readback(
@@ -2212,6 +2229,24 @@ class BambuAdapter(PrinterAdapter):
             str(evidence.get("corroboration")),
             f"the printer has not shown {field_name} at the requested value",
         )
+        with self._state_lock:
+            prior_value, prior_seen = self._prior_reading.get(field_name, (None, 0.0))
+        if prior_seen > 0.0 and evidence["corroboration"] != "read_back_mismatch":
+            try:
+                already = bool(matches(prior_value))
+            except (TypeError, ValueError):
+                already = False
+            if already:
+                evidence["already_at_requested_value"] = True
+                evidence["reported_before_command"] = prior_value
+                return CommandVerdict.accepted_only(
+                    f"{what}: sent over MQTT. The printer already reported "
+                    f"{field_name}={prior_value!r} before the command, and it "
+                    "reports this field when it CHANGES — so there was nothing "
+                    "for it to report, and the command itself is unconfirmed. "
+                    "The printer is in the requested state either way.",
+                    **evidence,
+                )
         tail = ""
         if evidence.get("printer_faults"):
             tail = (
@@ -4169,7 +4204,7 @@ class BambuAdapter(PrinterAdapter):
         self._validate_temp(target, self._MAX_HOTEND_C, "Hotend")
         want = int(target)
         wire = f"M104 S{want}"
-        sent_at = self._stamp_before_send()
+        sent_at = self._stamp_before_send("nozzle_target_temper")
         self.send_gcode([wire])
         return self._readback_verdict(
             f"Hotend target {want}°C",
@@ -4188,7 +4223,7 @@ class BambuAdapter(PrinterAdapter):
         self._validate_temp(target, 130.0, "Bed")
         want = int(target)
         wire = f"M140 S{want}"
-        sent_at = self._stamp_before_send()
+        sent_at = self._stamp_before_send("bed_target_temper")
         self.send_gcode([wire])
         return self._readback_verdict(
             f"Bed target {want}°C",
@@ -4248,7 +4283,7 @@ class BambuAdapter(PrinterAdapter):
                 f"Valid profiles: {', '.join(sorted(_SPEED_PROFILES))}"
             )
         level = _SPEED_PROFILES[key]
-        sent_at = self._stamp_before_send()
+        sent_at = self._stamp_before_send("spd_lvl")
         self._publish_command(
             {
                 "print": {
@@ -4338,7 +4373,7 @@ class BambuAdapter(PrinterAdapter):
             ids = [int(x) for x in object_ids]
         except (TypeError, ValueError) as exc:
             raise PrinterError(f"skip_objects: object ids must be integers ({exc}).") from exc
-        sent_at = self._stamp_before_send()
+        sent_at = self._stamp_before_send("s_obj")
         self._publish_command(
             {
                 "print": {
@@ -4393,7 +4428,7 @@ class BambuAdapter(PrinterAdapter):
             raise PrinterError(
                 f"Unknown LED mode {mode!r}. Valid modes: {', '.join(sorted(_VALID_LED_MODES))}"
             )
-        sent_at = self._stamp_before_send()
+        sent_at = self._stamp_before_send("lights_report")
         self._publish_command(
             {
                 "system": {
@@ -4472,7 +4507,7 @@ class BambuAdapter(PrinterAdapter):
             raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
         speed = round(pct / 100 * 255)
         wire = f"M106 P{index} S{speed}"
-        sent_at = self._stamp_before_send()
+        sent_at = self._stamp_before_send(_FAN_INDEX_TO_FIELD[index])
         self.send_gcode([wire])
         # The printer reports fan level on a 0-15 scale, not the 0-255 the
         # G-code carries; allow one step of rounding either side, except at
@@ -5177,7 +5212,7 @@ class BambuAdapter(PrinterAdapter):
         Raises:
             PrinterError: If the command could not be sent.
         """
-        script = "\n".join(commands)
+        script = "\n".join(self._gcode_lines(commands))
         self._publish_command(
             {
                 "print": {

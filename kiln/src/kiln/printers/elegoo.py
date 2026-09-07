@@ -1376,6 +1376,7 @@ class ElegooAdapter(PrinterAdapter):
         """
         # SDCP doesn't have a universal G-code passthrough — we send
         # each command individually as a raw G-code SDCP message.
+        commands = self._gcode_lines(commands)
         for cmd in commands:
             try:
                 self._send_command(

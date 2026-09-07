@@ -1024,6 +1024,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         Raises:
             PrinterError: If sending fails.
         """
+        commands = self._gcode_lines(commands)
         for cmd in commands:
             self._send_command(cmd)
         return CommandVerdict.accepted_only(
