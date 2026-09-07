@@ -449,17 +449,17 @@ def describe_stale_state(
     """
     if state_age_seconds is None or state_age_seconds <= max_age:
         return None
-    # The temperature clause rides in THIS sentence, not only in the
-    # dedicated note, because this is the one string the hosted surfaces
-    # (the web Monitor's stale band, the inline panel, the hosted summary)
-    # already show.  It is always true when the sentence is: the
-    # temperature fields blank on exactly this rule (see
-    # :meth:`PrinterState.__post_init__`).
+    # This sentence says nothing about temperatures ON PURPOSE.  It fires on
+    # a bare age against a fallback budget, which is a weaker thing than the
+    # temperature floor's verdict: an idle Klipper's run-state clock passes
+    # this threshold while its temperatures keep arriving every few seconds,
+    # so a temperature claim here would be false exactly where it is loudest.
+    # :attr:`PrinterState.temperature_note` is the honest carrier and travels
+    # beside this one only when the readings really were withheld.
     return (
         f"Telemetry is {state_age_seconds:.0f}s old — the printer has not "
         f"reported since, so {str(state_label).upper()} describes then, not "
-        f"now, and Kiln does not know the hotend or bed temperature. Verify "
-        f"against the machine before acting."
+        f"now. Verify against the machine before acting."
     )
 
 
@@ -601,21 +601,33 @@ class PrinterState:
                     self.state_age_seconds, self.state_stale_after_seconds
                 )
 
-        # The floor.  Three ways in, one rule out:
-        #   * the reading is STALE -- promoted just now, or named so by an
-        #     adapter that diagnosed it;
-        #   * the reading is past the budget in force without having been
-        #     promoted -- an age with no measured budget, which is what the
-        #     OctoPrint and Moonraker push caches supply, and on which
-        #     ``staleness_note`` already fires past the shipped floor.  The
-        #     temperatures blank on that same rule, so no payload can say
-        #     "these readings may be stale" beside the readings;
+        # The floor, and it fires on a VERDICT rather than on an age:
+        #   * the reading is STALE -- which the promotion above only reaches
+        #     with a budget the adapter measured for this printer, and which
+        #     on the push adapters means the printer was ASKED and did not
+        #     answer (Bambu's ``_get_cached_status`` republishes a pushall at
+        #     budget expiry and waits for the reply before a state is built,
+        #     so a machine that answers never arrives here);
         #   * there is no connection at all.
-        if not (
-            self.state is PrinterStatus.STALE
-            or self.is_stale()
-            or not self.connected
-        ):
+        #
+        # Deliberately NOT ``is_stale()``.  That is a bare age against a
+        # fallback budget, and on an adapter with no measured budget and no
+        # re-ask it is not evidence of anything: Moonraker stamps its clock
+        # only on a push carrying ``print_stats``, Klipper subscriptions send
+        # deltas, so an IDLE Klipper's run-state clock climbs past the 60s
+        # fallback for ever while its temperatures keep arriving every few
+        # seconds.  Blanking there hides live readings on a healthy machine,
+        # and a floor that cries wolf teaches people to ignore the one
+        # blanking that matters.  Measured on a Bambu A1 (2026-09-06): one
+        # reading carried a run state 200s old beside a bed temperature 2s
+        # old.  The run state and the temperatures are not one stream.
+        #
+        # Those adapters keep saying so in prose (``staleness_note``) until
+        # they supply a measured budget and an ask, which is what promotes
+        # them into the first clause with no change here.  A dead websocket
+        # is already covered: their push path bails to an HTTP query, which
+        # asks the printer on every call.
+        if not (self.state is PrinterStatus.STALE or not self.connected):
             return
         for name in TEMPERATURE_FIELDS:
             setattr(self, name, None)

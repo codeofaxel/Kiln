@@ -160,14 +160,20 @@ class TestAStaleReadingCarriesNoTemperatures:
 class TestTheRuleIsTotal:
     """No route into a PrinterState leaves a temperature Kiln cannot vouch for."""
 
-    def test_a_reading_past_the_floor_with_no_measured_budget(self) -> None:
-        """OctoPrint's and Moonraker's push caches: an age, no budget.
+    def test_a_bare_age_with_no_measured_budget_does_NOT_blank(self) -> None:
+        """The floor fires on a verdict, never on a bare age.
 
-        They are not promoted to STALE (the promotion wants a measured
-        budget), but ``staleness_note`` already fires on them past the
-        shipped floor, and every surface prints that sentence.  The
-        temperatures blank on the SAME rule, so a payload cannot say
-        "these readings may be stale" beside the readings.
+        Regression, found on real hardware 2026-09-06.  An idle Klipper
+        stamps its run-state clock only when a push carries ``print_stats``,
+        and Klipper subscriptions send deltas -- so that clock climbs past
+        the 60s fallback for ever on a perfectly healthy machine while its
+        temperatures keep arriving every few seconds.  A Bambu A1 showed the
+        same split directly: one reading carried a run state 200s old beside
+        a bed temperature 2s old.
+
+        Blanking here would hide live readings on a healthy printer, and a
+        floor that cries wolf teaches people to ignore the one blanking that
+        matters.  The prose warning still fires; the numbers stay.
         """
         past = PrinterState(
             connected=True,
@@ -178,10 +184,50 @@ class TestTheRuleIsTotal:
             state_age_seconds=STALE_STATE_WARN_AGE + 1.0,
         )
         assert past.state is PrinterStatus.IDLE  # the run state is not rewritten
-        assert past.staleness_note() is not None  # the sentence fires...
-        assert past.tool_temp_actual is None  # ...and so does the floor
-        assert past.temperature_note is not None
+        assert past.staleness_note() is not None  # the sentence still fires...
+        assert past.tool_temp_actual == 200.0  # ...but the readings survive
+        assert past.bed_temp_actual == 60.0
+        assert past.temperature_note is None
 
+    def test_the_stale_sentence_never_claims_the_temperature_is_unknown(
+        self,
+    ) -> None:
+        """Because on that path it usually is not.
+
+        ``describe_stale_state`` fires on the bare age above, where the
+        readings are still live.  A temperature claim in that sentence would
+        be false exactly where it is loudest.
+        """
+        note = PrinterState(
+            connected=True,
+            state=PrinterStatus.IDLE,
+            tool_temp_actual=200.0,
+            state_age_seconds=STALE_STATE_WARN_AGE + 1.0,
+        ).staleness_note()
+
+        assert note is not None
+        assert "temperature" not in note.lower()
+
+    def test_a_measured_budget_is_what_earns_the_blanking(self) -> None:
+        """The same age, plus a budget the adapter measured, does blank.
+
+        That is the promotion path, and on a push adapter it means the
+        printer was ASKED at budget expiry and did not answer.
+        """
+        state = PrinterState(
+            connected=True,
+            state=PrinterStatus.IDLE,
+            tool_temp_actual=200.0,
+            bed_temp_actual=60.0,
+            state_age_seconds=STALE_STATE_WARN_AGE + 1.0,
+            state_stale_after_seconds=STALE_STATE_WARN_AGE,
+        )
+
+        assert state.state is PrinterStatus.STALE
+        assert state.tool_temp_actual is None
+        assert state.temperature_note is not None
+
+    def test_a_fresh_reading_within_the_floor_is_untouched(self) -> None:
         within = PrinterState(
             connected=True,
             state=PrinterStatus.IDLE,
