@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-07T20:34:10.853780+00:00",
+  "generated": "2026-09-07T21:49:43.468329+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -16689,7 +16689,7 @@
     },
     {
       "name": "generate_license_plate_frame",
-      "description": "Generate a US license plate frame. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 license plate frames/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a license plate frame for a US or EU plate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 license plate frames/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -16779,6 +16779,11 @@
             "default": "",
             "title": "Size",
             "type": "string"
+          },
+          "plate_lip_mm": {
+            "default": 0.0,
+            "title": "Plate Lip Mm",
+            "type": "number"
           },
           "brief_id": {
             "default": "",
