@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import struct
 import zlib
+from pathlib import Path
 
 import pytest
 
@@ -194,15 +195,29 @@ class TestPrepareImageForEmboss:
     def test_minimal_png(self, tmp_path):
         from kiln.image_to_surface import prepare_image_for_emboss
 
+        # A 1x1 image is one flat tone: there is nothing in it to carve, and
+        # the engine says so instead of writing a heightmap of nothing.
         png_file = tmp_path / "test.png"
         png_file.write_bytes(_minimal_1x1_png())
+
+        with pytest.raises(ValueError, match="no visible content"):
+            prepare_image_for_emboss(str(png_file), str(tmp_path / "out"))
+
+    def test_smallest_image_with_content(self, tmp_path):
+        from PIL import Image
+
+        from kiln.image_to_surface import prepare_image_for_emboss
+
+        img = Image.new("L", (2, 2), 255)
+        img.putpixel((0, 0), 0)
+        png_file = tmp_path / "two_tone.png"
+        img.save(png_file)
 
         result = prepare_image_for_emboss(str(png_file), str(tmp_path / "out"))
 
         assert result["type"] == "heightmap"
         assert result["width_px"] >= 1
         assert result["height_px"] >= 1
-        assert "dat_path" in result
         assert os.path.isfile(result["dat_path"])
 
 
@@ -425,7 +440,9 @@ class TestAlphaFlattening:
 
         rows, w, h = _load_image_as_grayscale(str(p))
         assert rows[0][0] == 255
-        assert rows[10][10] == 40
+        # One flat tone on a transparent surround is artwork: the coverage
+        # is the ink, at full depth, whatever colour it was drawn in.
+        assert rows[10][10] == 0
 
     def test_white_ink_on_transparency_survives_as_alpha_ink(self, tmp_path):
         """A white mark on a transparent surround must not vanish.
@@ -450,8 +467,13 @@ class TestAlphaFlattening:
             "the white mark vanished — the alpha-as-ink fallback is gone"
         )
 
-    def test_dark_ink_on_transparency_keeps_its_tones(self, tmp_path):
-        """Visible ink keeps the plain white flatten — tones preserved."""
+    def test_flat_grey_mark_on_transparency_carves_at_full_depth(self, tmp_path):
+        """A mark's colour is identity, not depth.
+
+        A mid-grey logo used to carve at half the depth that was asked
+        for, because luminance was read as relief.  Flat artwork on a
+        transparent surround now carves from its alpha coverage.
+        """
         from PIL import Image, ImageDraw
 
         from kiln.image_to_surface import _load_image_as_grayscale
@@ -465,4 +487,343 @@ class TestAlphaFlattening:
 
         rows, w, h = _load_image_as_grayscale(str(p))
         assert rows[0][0] == 255
-        assert rows[30][30] == 128, "mid-tone ink must keep its tone"
+        assert rows[30][30] == 0, "a grey mark must carve like a black one"
+
+    @staticmethod
+    def _two_tone_logo():
+        """White strokes plus an orange accent on a transparent field —
+        the light variant of a brand kit, which is what the Kiln logo is."""
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGBA", (80, 80), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        d.rectangle([10, 10, 70, 30], outline=(255, 255, 255, 255), width=3)
+        d.line([12, 45, 68, 45], fill=(255, 100, 40, 255), width=3)
+        d.rectangle([36, 55, 44, 70], fill=(255, 255, 255, 255))
+        return img
+
+    def test_white_strokes_beside_an_orange_accent_are_still_the_mark(self, tmp_path):
+        """The white part of a two-tone logo must not vanish.
+
+        The old rescue only fired when essentially NO opaque content
+        survived a white flatten.  A logo whose accent is visible but
+        whose strokes are white lost its strokes and kept the accent —
+        the Kiln mark came out as a faint ring and nothing else.
+        """
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        p = tmp_path / "two_tone.png"
+        self._two_tone_logo().save(p)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255, "surround must stay empty field"
+        assert rows[11][40] == 0, "the white stroke is part of the mark"
+        assert rows[45][40] == 0, "the orange accent is part of the mark"
+        assert rows[62][40] == 0, "the white glyph is part of the mark"
+
+    def test_pure_python_decoder_reads_alpha_by_the_same_rule(self, tmp_path):
+        """The no-Pillow PNG door must not disagree with the Pillow door."""
+        from kiln.image_to_surface import _load_image_as_grayscale, _read_png_pixels
+
+        p = tmp_path / "two_tone.png"
+        self._two_tone_logo().save(p)
+
+        via_pillow, _, _ = _load_image_as_grayscale(str(p))
+        via_decoder, _, _ = _read_png_pixels(str(p))
+        assert via_decoder[11][40] == 0, "white stroke lost by the pure-Python door"
+        assert via_decoder == via_pillow
+
+    def test_tonal_cutout_on_transparency_keeps_its_relief(self, tmp_path):
+        """A photograph exported with alpha is relief, not a silhouette.
+
+        Its tones are the carve; the alpha only says where the subject
+        ends.  Compositing onto white keeps every tone and makes the
+        cut-away surround empty field.
+        """
+        from PIL import Image
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        px = img.load()
+        for y in range(16, 48):
+            for x in range(8, 56):
+                tone = int((x - 8) * 255 / 47)
+                px[x, y] = (tone, tone, tone, 255)
+        p = tmp_path / "cutout.png"
+        img.save(p)
+
+        rows, w, h = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255
+        assert rows[32][10] < 40, "dark end of the gradient must stay dark"
+        assert 100 < rows[32][32] < 160, "mid-tones must survive"
+        assert rows[32][54] > 220, "light end of the gradient must stay light"
+
+
+_KILN_LOGO = Path(__file__).resolve().parents[2] / "docs" / "assets" / "kiln-logo-transparent.png"
+
+
+@pytest.mark.skipif(not _KILN_LOGO.is_file(), reason="repo logo asset not present")
+class TestRealLogoThroughAProductProfile:
+    """The Kiln logo through the exact call a product profile makes.
+
+    The profiles ask for photo relief (``style="coin"`` at 300 px, deboss).
+    The logo is white and orange line art on a transparent field, and it
+    came out as a faint ring: the white strokes vanished into the white
+    flatten and the rest was posterised into the background.
+    """
+
+    def test_coin_profile_carves_only_the_mark(self, tmp_path):
+        from kiln.image_to_surface import prepare_image_for_emboss
+
+        info = prepare_image_for_emboss(
+            str(_KILN_LOGO),
+            str(tmp_path),
+            max_resolution=300,
+            invert=True,
+            style="coin",
+            flip_rows=True,
+        )
+        assert info["treatment"] == "mark"
+
+        values = [
+            float(v)
+            for line in Path(info["dat_path"]).read_text().splitlines()
+            if line.strip() and not line.startswith("#")
+            for v in line.split()
+        ]
+        # Deboss convention: 1.0 is the untouched field, 0.0 is the full cut.
+        w = info["width_px"]
+        corners = [values[0], values[w - 1], values[-w], values[-1]]
+        assert corners == [1.0] * 4, "the transparent surround must stay flush"
+        assert min(values) == 0.0, "the mark must reach the full requested depth"
+        carved = sum(1 for v in values if v < 0.98) / len(values)
+        assert 0.002 < carved < 0.05, (
+            f"{carved:.1%} of the face is cut — the mark is thin line art on "
+            "an empty field, so only a few percent may move"
+        )
+
+
+def _dat_values(info):
+    return [
+        float(v)
+        for line in Path(info["dat_path"]).read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+        for v in line.split()
+    ]
+
+
+class TestAlphaEdgeCases:
+    """The corners of the alpha rule, each one measured before it was pinned."""
+
+    def test_fully_transparent_image_is_refused_not_carved(self, tmp_path):
+        """A blank used to come out as a 70%-of-the-face pool with nothing in it."""
+        from PIL import Image
+
+        from kiln.image_to_surface import prepare_image_for_emboss
+
+        p = tmp_path / "blank.png"
+        Image.new("RGBA", (64, 64), (0, 0, 0, 0)).save(p)
+        with pytest.raises(ValueError, match="no visible content"):
+            prepare_image_for_emboss(
+                str(p), str(tmp_path / "out"), max_resolution=200, invert=True,
+                style="coin", flip_rows=True,
+            )
+
+    def test_faint_drop_shadow_is_not_the_mark(self, tmp_path):
+        """An exporter's soft shadow around a logo carved as a halo."""
+        from PIL import Image, ImageDraw, ImageFilter
+
+        from kiln.image_to_surface import prepare_image_for_emboss
+
+        img = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+        shadow = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+        ImageDraw.Draw(shadow).rectangle([34, 34, 84, 84], fill=(0, 0, 0, 100))
+        img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(3)))
+        ImageDraw.Draw(img).rectangle([30, 30, 80, 80], fill=(0, 0, 0, 255))
+        p = tmp_path / "shadowed.png"
+        img.save(p)
+
+        info = prepare_image_for_emboss(
+            str(p), str(tmp_path / "out"), max_resolution=120, invert=True,
+            style="default", edge_enhance=False, flip_rows=True,
+        )
+        assert info["treatment"] == "mark"
+        values = _dat_values(info)
+        carved = sum(1 for v in values if v < 0.98) / len(values)
+        square = 51 * 51 / (120 * 120)
+        assert carved < square * 1.03, (
+            f"{carved:.3f} of the face is cut for a mark covering {square:.3f} — "
+            "the shadow is being carved"
+        )
+
+    def test_tiny_alpha_mark_is_still_a_mark(self, tmp_path):
+        """The alpha channel already said it is a mark; a histogram probe
+        that needs 8x8 pixels to be sure must not overrule it."""
+        from PIL import Image
+
+        from kiln.image_to_surface import prepare_image_for_emboss
+
+        img = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+        img.putpixel((1, 1), (255, 255, 255, 255))
+        p = tmp_path / "tiny.png"
+        img.save(p)
+
+        info = prepare_image_for_emboss(
+            str(p), str(tmp_path / "out"), max_resolution=4, invert=True,
+            style="coin", flip_rows=True,
+        )
+        assert info["treatment"] == "mark"
+        values = _dat_values(info)
+        assert values[0] == 1.0, "the transparent surround must stay flush"
+        assert min(values) == 0.0, "the one opaque pixel is the whole mark"
+
+    def test_low_contrast_photo_cutout_with_real_range_keeps_relief(self, tmp_path):
+        """A gradient spanning a modest range is still tonal content.
+
+        With the flat-art tone band twice as wide as it is now, four
+        clusters covered 68 levels and a 60-level gradient was called
+        flat artwork — carved as a silhouette, its relief thrown away.
+        """
+        from PIL import Image
+
+        from kiln.image_to_surface import _load_image_as_grayscale
+
+        img = Image.new("RGBA", (80, 80), (0, 0, 0, 0))
+        px = img.load()
+        for y in range(10, 70):
+            for x in range(10, 70):
+                tone = 80 + int((x - 10) * 60 / 59)  # 80..140
+                px[x, y] = (tone, tone, tone, 255)
+        p = tmp_path / "soft.png"
+        img.save(p)
+
+        rows, _, _ = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255
+        assert 75 <= rows[40][12] <= 90, "the dark end must keep its tone"
+        assert 130 <= rows[40][68] <= 145, "the light end must keep its tone"
+
+    def test_grayscale_sixteen_bit_with_trns_carves_its_coverage(self, tmp_path):
+        import numpy as np
+        from PIL import Image
+
+        from kiln.image_to_surface import _alpha_verdict, _load_image_as_grayscale
+
+        arr = np.zeros((64, 64), dtype=np.uint16)
+        arr[16:48, 16:48] = 65535
+        p = tmp_path / "gray16.png"
+        Image.fromarray(arr, mode="I;16").save(p, transparency=0)
+        assert "transparency" in Image.open(p).info
+
+        assert _alpha_verdict(str(p)) == "ink"
+        rows, _, _ = _load_image_as_grayscale(str(p))
+        assert rows[0][0] == 255
+        assert rows[32][32] == 0
+
+
+class TestPurePythonDecoderTransparencyModes:
+    """The no-Pillow PNG door reads every way a PNG carries transparency."""
+
+    def _agree(self, path):
+        from kiln.image_to_surface import _load_image_as_grayscale, _read_png_pixels
+
+        via_decoder, _, _ = _read_png_pixels(str(path))
+        via_pillow, _, _ = _load_image_as_grayscale(str(path))
+        assert via_decoder == via_pillow
+        return via_decoder
+
+    def test_palette_with_trns(self, tmp_path):
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rectangle([10, 10, 30, 30], fill=(255, 255, 255, 255))
+        p = tmp_path / "pal.png"
+        img.convert("P").save(p)
+        rows = self._agree(p)
+        assert rows[0][0] == 255 and rows[20][20] == 0
+
+    def test_opaque_palette(self, tmp_path):
+        from PIL import Image
+
+        img = Image.new("RGB", (16, 16), (200, 200, 200))
+        img.putpixel((3, 3), (10, 10, 10))
+        p = tmp_path / "pal_opaque.png"
+        img.convert("P").save(p)
+        rows = self._agree(p)
+        assert rows[3][3] < 30 and rows[0][0] > 190
+
+    def test_grayscale_trns(self, tmp_path):
+        from PIL import Image
+
+        p = tmp_path / "l_trns.png"
+        img = Image.new("L", (20, 20), 0)
+        for y in range(6, 14):
+            for x in range(6, 14):
+                img.putpixel((x, y), 200)
+        img.save(p, transparency=0)
+        rows = self._agree(p)
+        assert rows[0][0] == 255 and rows[10][10] == 0
+
+    def test_rgb_trns(self, tmp_path):
+        from PIL import Image
+
+        img = Image.new("RGB", (20, 20), (0, 255, 0))
+        for y in range(8, 12):
+            for x in range(8, 12):
+                img.putpixel((x, y), (40, 40, 40))
+        p = tmp_path / "rgb_trns.png"
+        img.save(p, transparency=(0, 255, 0))
+        rows = self._agree(p)
+        assert rows[0][0] == 255 and rows[10][10] == 0
+
+
+class TestToneDecisionReadsTheInterior:
+    """Anti-aliased edge pixels must not decide whether artwork is flat."""
+
+    @staticmethod
+    def _bleeding_white_logo(path):
+        """A white mark whose soft edge blends toward BLACK as alpha falls —
+        the premultiplied-looking export some tools write.  On line art the
+        edge pixels rival the interior in number."""
+        from PIL import Image, ImageDraw, ImageFilter
+
+        alpha = Image.new("L", (160, 160), 0)
+        d = ImageDraw.Draw(alpha)
+        d.rectangle([20, 20, 140, 40], fill=255)
+        d.rectangle([20, 60, 40, 140], fill=255)
+        d.line([60, 140, 140, 60], fill=255, width=14)
+        alpha = alpha.filter(ImageFilter.GaussianBlur(2.5))
+        # colour = white * alpha  (bleeds to black where alpha thins)
+        colour = alpha.point(lambda a: a)
+        img = Image.merge("RGBA", (colour, colour, colour, alpha))
+        img.save(path)
+
+    def test_bleeding_edges_do_not_turn_a_logo_into_a_photo(self, tmp_path):
+        from kiln.image_to_surface import _alpha_verdict, _load_image_as_grayscale
+
+        p = tmp_path / "bleed.png"
+        self._bleeding_white_logo(p)
+        assert _alpha_verdict(str(p)) == "ink"
+        rows, _, _ = _load_image_as_grayscale(str(p))
+        assert rows[30][80] == 0, "the white bar must carve as the mark"
+        assert rows[0][0] == 255
+
+    def test_five_close_tones_are_relief_not_a_silhouette(self, tmp_path):
+        """Five flat tones eight levels apart is a soft posterised shading —
+        tonal content — not a logo in five brand colours.  A wider tone band
+        swallowed two tones per window and called it flat artwork."""
+        from PIL import Image
+
+        from kiln.image_to_surface import _alpha_verdict, _load_image_as_grayscale
+
+        img = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+        px = img.load()
+        for band, tone in enumerate((100, 108, 116, 124, 132)):
+            for y in range(10, 90):
+                for x in range(10 + band * 16, 26 + band * 16):
+                    px[x, y] = (tone, tone, tone, 255)
+        p = tmp_path / "five_tones.png"
+        img.save(p)
+        assert _alpha_verdict(str(p)) == "tones"
+        rows, _, _ = _load_image_as_grayscale(str(p))
+        assert rows[50][18] == 100 and rows[50][82] == 132

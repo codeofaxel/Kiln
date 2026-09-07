@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import paho.mqtt.client as mqtt
 import pytest
 
 from kiln.printers.bambu import (
@@ -89,7 +90,12 @@ def adapter_with_mqtt() -> BambuAdapter:
     # Mock publish result.
     publish_result = mock.MagicMock()
     publish_result.wait_for_publish = mock.MagicMock()
+    publish_result.rc = mqtt.MQTT_ERR_SUCCESS
     adapter._mqtt_client.publish.return_value = publish_result
+    # Writes wait for the printer to show their effect; a mocked printer
+    # never speaks, so do not charge every command the window.  Tests about
+    # read-back set their own.
+    adapter._confirm_window_s = 0.0
     # Pre-set a running state so start_print skips confirmation wait.
     adapter._last_status = {"gcode_state": "running"}
     # Stamp that state as having arrived AFTER whatever command a test is
@@ -1018,7 +1024,7 @@ class TestBambuAdapterTemperature:
     def test_set_tool_temp(self, adapter_with_mqtt: BambuAdapter) -> None:
         result = adapter_with_mqtt.set_tool_temp(210.0)
 
-        assert result is True
+        assert result.ok and not result.confirmed
 
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
@@ -1028,7 +1034,7 @@ class TestBambuAdapterTemperature:
     def test_set_tool_temp_off(self, adapter_with_mqtt: BambuAdapter) -> None:
         result = adapter_with_mqtt.set_tool_temp(0)
 
-        assert result is True
+        assert result.ok and not result.confirmed
 
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
@@ -1037,7 +1043,7 @@ class TestBambuAdapterTemperature:
     def test_set_bed_temp(self, adapter_with_mqtt: BambuAdapter) -> None:
         result = adapter_with_mqtt.set_bed_temp(60.0)
 
-        assert result is True
+        assert result.ok and not result.confirmed
 
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
@@ -1047,7 +1053,7 @@ class TestBambuAdapterTemperature:
     def test_set_bed_temp_off(self, adapter_with_mqtt: BambuAdapter) -> None:
         result = adapter_with_mqtt.set_bed_temp(0)
 
-        assert result is True
+        assert result.ok and not result.confirmed
 
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
@@ -1068,7 +1074,7 @@ class TestBambuAdapterTemperature:
         # It must not sit below the hottest Bambu (H2S, 350C): at the old 300C
         # net, registering an H2S with no model would refuse a 340C PPA print
         # the firmware allows.
-        assert adapter_with_mqtt.set_tool_temp(350.0) is True
+        assert adapter_with_mqtt.set_tool_temp(350.0).ok
         with pytest.raises(PrinterError, match="exceeds safety limit"):
             adapter_with_mqtt.set_tool_temp(351.0)
 
@@ -1079,7 +1085,7 @@ class TestBambuAdapterTemperature:
         # The X1E is rated 320C; before the net was raised it was clamped to
         # 300 and could not reach its own firmware ceiling.
         adapter_with_mqtt.set_safety_profile("bambu_x1e")
-        assert adapter_with_mqtt.set_tool_temp(320.0) is True
+        assert adapter_with_mqtt.set_tool_temp(320.0).ok
         with pytest.raises(PrinterError, match="exceeds safety limit"):
             adapter_with_mqtt.set_tool_temp(321.0)
 
@@ -1089,7 +1095,7 @@ class TestBambuAdapterTemperature:
         # Raising the net must not loosen a cooler machine: the A1 profile
         # (300C hotend) still caps at 300 even though the net is now 350.
         adapter_with_mqtt.set_safety_profile("bambu_a1")
-        assert adapter_with_mqtt.set_tool_temp(300.0) is True
+        assert adapter_with_mqtt.set_tool_temp(300.0).ok
         with pytest.raises(PrinterError, match="exceeds safety limit"):
             adapter_with_mqtt.set_tool_temp(320.0)
 
@@ -1104,7 +1110,7 @@ class TestBambuAdapterSendGcode:
     def test_single_command(self, adapter_with_mqtt: BambuAdapter) -> None:
         result = adapter_with_mqtt.send_gcode(["G28"])
 
-        assert result is True
+        assert result.ok and not result.confirmed
 
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
@@ -1114,7 +1120,7 @@ class TestBambuAdapterSendGcode:
     def test_multiple_commands(self, adapter_with_mqtt: BambuAdapter) -> None:
         result = adapter_with_mqtt.send_gcode(["G28", "G1 X10 Y10 Z5 F1200", "M104 S200"])
 
-        assert result is True
+        assert result.ok and not result.confirmed
 
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
@@ -1124,7 +1130,7 @@ class TestBambuAdapterSendGcode:
     def test_empty_command_list(self, adapter_with_mqtt: BambuAdapter) -> None:
         result = adapter_with_mqtt.send_gcode([])
 
-        assert result is True
+        assert result.ok and not result.confirmed
 
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
@@ -1335,6 +1341,7 @@ class TestBambuAdapterMQTTInternals:
         adapter = _adapter()
         mock_client = mock.MagicMock()
         publish_result = mock.MagicMock()
+        publish_result.rc = mqtt.MQTT_ERR_SUCCESS
         mock_client.publish.return_value = publish_result
 
         adapter._on_connect(mock_client, None, None, None)
@@ -1668,7 +1675,7 @@ class TestBambuAdapterSpeedProfile:
 
     def test_set_speed_profile_silent(self, adapter_with_mqtt: BambuAdapter) -> None:
         ok = adapter_with_mqtt.set_speed_profile("silent")
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         adapter_with_mqtt._mqtt_client.publish.assert_called_once()
         payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
         assert payload["print"]["command"] == "print_speed"
@@ -1712,7 +1719,7 @@ class TestBambuAdapterLightControl:
 
     def test_chamber_light_on(self, adapter_with_mqtt: BambuAdapter) -> None:
         ok = adapter_with_mqtt.set_light("chamber_light", "on")
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
         assert payload["system"]["command"] == "ledctrl"
         assert payload["system"]["led_node"] == "chamber_light"
@@ -2110,6 +2117,7 @@ class TestBambuAdapterAMSStatus:
         adapter._mqtt_client = mock.MagicMock()
         publish_result = mock.MagicMock()
         publish_result.wait_for_publish = mock.MagicMock()
+        publish_result.rc = mqtt.MQTT_ERR_SUCCESS
         adapter._mqtt_client.publish.return_value = publish_result
         adapter._last_status = {"gcode_state": "IDLE"}
         adapter._last_state_time = time.monotonic()

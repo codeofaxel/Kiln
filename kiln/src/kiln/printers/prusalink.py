@@ -42,6 +42,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from kiln.printers.command_verdict import CommandVerdict
 
 logger = logging.getLogger(__name__)
 
@@ -1045,7 +1046,7 @@ class PrusaLinkAdapter(PrinterAdapter):
     # PrinterAdapter -- temperature control
     # ------------------------------------------------------------------
 
-    def set_tool_temp(self, target: float) -> bool:
+    def set_tool_temp(self, target: float) -> CommandVerdict:
         """Not natively supported by Prusa Link.
 
         Prusa Link does not expose a temperature control endpoint.
@@ -1055,7 +1056,7 @@ class PrusaLinkAdapter(PrinterAdapter):
             "Temperature is managed through G-code in print files."
         )
 
-    def set_bed_temp(self, target: float) -> bool:
+    def set_bed_temp(self, target: float) -> CommandVerdict:
         """Not natively supported by Prusa Link.
 
         Prusa Link does not expose a temperature control endpoint.
@@ -1069,7 +1070,7 @@ class PrusaLinkAdapter(PrinterAdapter):
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
 
-    def send_gcode(self, commands: list[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> CommandVerdict:
         """Not supported by Prusa Link.
 
         Prusa Link does not expose a raw G-code endpoint.

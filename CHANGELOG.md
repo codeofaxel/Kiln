@@ -132,6 +132,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **A see-through logo now carves just the mark on every product, not
+  only some.**
+
+- **A logo carved onto a sloped face comes out whole.** On a leaning
+  surface, like a phone stand's back panel, only part of the mark was
+  being cut.
+
+- **A picture with nothing in it is refused instead of carved.** A blank
+  or fully see-through image used to sink a shallow pool into the part.
+
+- **Kiln no longer tells you a temperature it can't vouch for.** When your
+  printer has stopped reporting, the hotend and bed read "unknown" and point
+  you at the machine's own display, instead of showing the last numbers Kiln
+  happened to remember.
+
+- **Your printer's commands now say whether the printer actually did it.**
+  Setting a heater, fan, light or speed reports confirmed, sent-but-unconfirmed,
+  or failed, instead of "accepted" whether or not it arrived.
+
+- **Skipping a failed object waits for the printer to say it skipped it.** The
+  skip is irreversible for the parts you name, so Kiln now tells you when the
+  printer hasn't confirmed it rather than assuming.
+
 - **A Bambu error code now gets the explanation that belongs to it.** Some
   codes were read as if they came from a different part of the printer's
   reporting, so the plain-English cause could describe the wrong fault.

@@ -16,6 +16,7 @@ set again — these tests are the structural proof they cannot.
 import logging
 import math
 import os
+from pathlib import Path
 
 import pytest
 
@@ -1074,3 +1075,83 @@ class TestBackgroundRect:
         m = parse_svg_to_mark(svg)
         assert m is not None and not m.is_empty
         assert m.width == pytest.approx(100.0)
+
+
+_KILN_LOGO = Path(__file__).resolve().parents[2] / "docs" / "assets" / "kiln-logo-transparent.png"
+
+
+@pytest.mark.skipif(not _KILN_LOGO.is_file(), reason="repo logo asset not present")
+class TestRealLogoReachesTheTraceDoor:
+    """The Kiln logo is white and orange line art on a transparent field.
+
+    ``image_style="auto"`` routes a mark to the trace door only when the
+    bi-level detector says so, and the detector read the flattened image —
+    on which the white strokes had already vanished.  The logo was routed
+    to photo relief, and even an explicit trace caught only the orange.
+    """
+
+    def test_detector_sees_a_mark(self):
+        from kiln.mark_geometry import is_bilevel_image
+
+        assert is_bilevel_image(str(_KILN_LOGO))
+
+    def test_trace_carries_the_white_strokes_too(self):
+        from kiln.mark_geometry import trace_image_to_mark
+
+        mark = trace_image_to_mark(str(_KILN_LOGO), max_dim=800)
+        rings = sum(len(group) for group in mark.groups)
+        # The orange alone traced as three rings (the bar and the two
+        # halves of the accent glyph); the kiln outline and the wordmark's
+        # white letters at least double that.
+        assert rings >= 6, f"only {rings} rings traced — the white strokes are missing"
+
+
+class TestTraceCollapsesTheStaircase:
+    def test_slanted_stroke_traces_to_its_corners(self, tmp_path):
+        """A steep slanted stroke, resampled to the trace size and
+        thresholded, wobbles by about a pixel in a long beat; a sub-pixel
+        tolerance kept every wobble as a vertex (592 of them here) and the
+        carve showed a staircase along every slope."""
+        from PIL import Image, ImageDraw
+
+        from kiln.mark_geometry import trace_image_to_mark
+
+        img = Image.new("L", (2048, 2048), 255)
+        # One stroke, slope ~3.3:1, like the side of the kiln outline.
+        ImageDraw.Draw(img).line([(700, 300), (1300, 1700)], fill=0, width=12)
+        p = tmp_path / "slant.png"
+        img.save(p)
+
+        mark = trace_image_to_mark(str(p), max_dim=800)
+        (ring,) = [r for g in mark.groups for r in g]
+        assert len(ring) <= 10, f"{len(ring)} vertices for a four-corner stroke"
+
+
+class TestBilevelDetectorJudgesTheContent:
+    def test_small_photo_on_a_large_transparent_canvas_is_not_a_mark(self, tmp_path):
+        """The empty field around a cut-out must not vote it bi-level."""
+        from PIL import Image
+
+        from kiln.mark_geometry import is_bilevel_image
+
+        img = Image.new("RGBA", (400, 400), (0, 0, 0, 0))
+        px = img.load()
+        side = 178  # ~20% of the canvas
+        for y in range(20, 20 + side):
+            for x in range(20, 20 + side):
+                t = int((x - 20) * 255 / (side - 1))
+                px[x, y] = (t, t, t, 255)
+        p = tmp_path / "small_photo.png"
+        img.save(p)
+        assert not is_bilevel_image(str(p))
+
+    def test_small_logo_on_a_large_transparent_canvas_is_still_a_mark(self, tmp_path):
+        from PIL import Image, ImageDraw
+
+        from kiln.mark_geometry import is_bilevel_image
+
+        img = Image.new("RGBA", (400, 400), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rectangle([150, 150, 250, 250], outline=(255, 255, 255, 255), width=12)
+        p = tmp_path / "small_logo.png"
+        img.save(p)
+        assert is_bilevel_image(str(p))

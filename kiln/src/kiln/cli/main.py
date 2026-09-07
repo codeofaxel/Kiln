@@ -38,6 +38,7 @@ from kiln.printer_backends import (
     format_printer_types,
 )
 from kiln.printers.base import PrinterError
+from kiln.printers.command_verdict import CommandVerdict
 
 # Exception types for typed catch handlers (prefer specific over blanket Exception)
 try:
@@ -3247,8 +3248,9 @@ def temp(
                     )
                 )
                 sys.exit(1)
-            adapter.set_tool_temp(tool_temp)
+            verdict = CommandVerdict.coerce(adapter.set_tool_temp(tool_temp), what="hotend target")
             results["tool_target"] = tool_temp
+            results["tool"] = verdict.to_dict()
         if bed_temp is not None:
             if bed_temp < 0 or bed_temp > max_bed:
                 click.echo(
@@ -3259,8 +3261,9 @@ def temp(
                     )
                 )
                 sys.exit(1)
-            adapter.set_bed_temp(bed_temp)
+            verdict = CommandVerdict.coerce(adapter.set_bed_temp(bed_temp), what="bed target")
             results["bed_target"] = bed_temp
+            results["bed"] = verdict.to_dict()
 
         click.echo(format_response("success", data=results, json_mode=json_mode))
     except click.ClickException:
@@ -11458,16 +11461,19 @@ def speed(ctx: click.Context, profile: str | None, json_mode: bool) -> None:
                     )
                 )
                 sys.exit(1)
-            ok = adapter.set_speed_profile(profile)
+            verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
             data = {
                 "action": "set_speed_profile",
                 "profile": profile.strip().lower(),
-                "accepted": ok,
+                **verdict.to_dict(),
             }
             if json_mode:
                 click.echo(format_response("success", data=data, json_mode=True))
             else:
-                click.echo(f"Speed profile set to '{profile.strip().lower()}'.")
+                click.echo(
+                    f"Speed profile '{profile.strip().lower()}' "
+                    f"{'confirmed by the printer' if verdict.confirmed else 'sent, not yet confirmed'}."
+                )
         else:
             # --- get speed profile ---
             if not hasattr(adapter, "get_speed_profile"):

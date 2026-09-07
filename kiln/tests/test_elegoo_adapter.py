@@ -36,6 +36,7 @@ from kiln.printers.base import (
     PrinterError,
     PrinterStatus,
 )
+from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.elegoo import (
     _CMD_LIST_FILES,
     _CMD_START_PRINT,
@@ -459,31 +460,37 @@ class TestPrintControl:
 # Temperature control
 # ---------------------------------------------------------------------------
 
+_SENT = CommandVerdict.accepted_only("sent", corroboration="sdcp_sent")
+
 
 class TestTemperatureControl:
-    """Tests for set_tool_temp and set_bed_temp."""
+    """Tests for set_tool_temp and set_bed_temp.
+
+    The heater setters hand their line to ``send_gcode`` and return ITS
+    verdict, so the stub must answer with one.
+    """
 
     def test_set_tool_temp(self, adapter_with_ws: ElegooAdapter) -> None:
-        with mock.patch.object(adapter_with_ws, "send_gcode") as m:
+        with mock.patch.object(adapter_with_ws, "send_gcode", return_value=_SENT) as m:
             result = adapter_with_ws.set_tool_temp(210.0)
-        assert result is True
+        assert result.ok and not result.confirmed
         m.assert_called_once_with(["M104 S210"])
 
     def test_set_bed_temp(self, adapter_with_ws: ElegooAdapter) -> None:
-        with mock.patch.object(adapter_with_ws, "send_gcode") as m:
+        with mock.patch.object(adapter_with_ws, "send_gcode", return_value=_SENT) as m:
             result = adapter_with_ws.set_bed_temp(60.0)
-        assert result is True
+        assert result.ok and not result.confirmed
         m.assert_called_once_with(["M140 S60"])
 
     def test_set_tool_temp_zero(self, adapter_with_ws: ElegooAdapter) -> None:
-        with mock.patch.object(adapter_with_ws, "send_gcode"):
+        with mock.patch.object(adapter_with_ws, "send_gcode", return_value=_SENT):
             result = adapter_with_ws.set_tool_temp(0.0)
-        assert result is True
+        assert result.ok and not result.confirmed
 
     def test_set_bed_temp_zero(self, adapter_with_ws: ElegooAdapter) -> None:
-        with mock.patch.object(adapter_with_ws, "send_gcode"):
+        with mock.patch.object(adapter_with_ws, "send_gcode", return_value=_SENT):
             result = adapter_with_ws.set_bed_temp(0.0)
-        assert result is True
+        assert result.ok and not result.confirmed
 
 
 # ---------------------------------------------------------------------------
@@ -497,13 +504,13 @@ class TestSendGcode:
     def test_send_single_command(self, adapter_with_ws: ElegooAdapter) -> None:
         with mock.patch.object(adapter_with_ws, "_send_command") as m:
             result = adapter_with_ws.send_gcode(["G28"])
-        assert result is True
+        assert result.ok and not result.confirmed
         assert m.call_count == 1
 
     def test_send_multiple_commands(self, adapter_with_ws: ElegooAdapter) -> None:
         with mock.patch.object(adapter_with_ws, "_send_command") as m:
             result = adapter_with_ws.send_gcode(["G28", "G1 X10", "G1 Y10"])
-        assert result is True
+        assert result.ok and not result.confirmed
         assert m.call_count == 3
 
     def test_send_gcode_error(self, adapter_with_ws: ElegooAdapter) -> None:
@@ -532,7 +539,7 @@ class TestSetFan:
         with mock.patch.object(adapter, "_send_command_checked") as m:
             m.return_value = {"Data": {"Ack": 0}}
             ok = adapter.set_fan("part", 100)
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         m.assert_called_once_with(
             _CMD_UPDATE_SETTINGS, {"TargetFanSpeed": {"ModelFan": 100}},
         )
@@ -604,7 +611,7 @@ class TestSetFan:
             ),
         ):
             ok = adapter_with_ws.set_fan("part", 100)
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         attrs_call.assert_called_once()
 
 

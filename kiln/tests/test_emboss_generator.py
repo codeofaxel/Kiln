@@ -1183,3 +1183,27 @@ class TestRimGuardOnRoundFaces:
         size = self._final_font_size(result["scad_path"])
         t_w, _, _, _ = measure_text_block_mm("KILN", font_size=size)
         assert t_w == pytest.approx(70.0 * 0.7, abs=0.2)
+
+
+class TestCarveFollowsTheTiltedFace:
+    def test_a_leaning_backrest_is_not_carved_as_upright(self):
+        """A phone stand's backrest leans 25 degrees; snapped to vertical,
+        the carve slab crossed the plate along one band and cut only the
+        logo stroke that happened to lie on it."""
+        import math
+
+        from kiln.emboss_generator import _rotation_for_normal
+
+        tilt = math.radians(25.0)
+        clause = _rotation_for_normal([0.0, -math.cos(tilt), math.sin(tilt)])
+        assert "rotate([90, 0, 0])" not in clause
+        assert clause.startswith("rotate(a=")
+        angle = float(clause.split("a=")[1].split(",")[0])
+        assert abs(angle - 65.0) < 0.01, clause  # [0,0,1] -> 65 degrees toward -Y
+
+    def test_a_truly_cardinal_face_keeps_the_clean_rotation(self):
+        from kiln.emboss_generator import _rotation_for_normal
+
+        assert _rotation_for_normal([0.0, -1.0, 0.0]).startswith("rotate([90, 0, 0])")
+        assert _rotation_for_normal([0.0, -0.9995, 0.0316]).startswith("rotate([90, 0, 0])")
+        assert _rotation_for_normal([0.0, 0.0, 1.0]) == ""

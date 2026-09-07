@@ -332,6 +332,7 @@ from kiln.printers import (
     status_is_unreachable,
     stuck_job_note,
 )
+from kiln.printers.command_verdict import CommandVerdict
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
 from kiln.safety_profiles import export_profile as _export_profile
@@ -1188,6 +1189,46 @@ def _terms_gate_blocks(tool_name: str) -> bool:
         return False
 
 
+def _declared_tool_arguments(tool_mgr: Any, name: str) -> set[str] | None:
+    """The argument names a registered tool declares, or None when unknowable."""
+    try:
+        tool = (tool_mgr._tools or {}).get(name)  # noqa: SLF001 — FastMCP registry
+        params = getattr(tool, "parameters", None) or {}
+        props = params.get("properties")
+        if not isinstance(props, dict):
+            return None
+        return set(props)
+    except Exception:  # noqa: BLE001 — an odd registry shape must not block calls
+        return None
+
+
+def _unknown_tool_arguments(
+    tool_mgr: Any, name: str, arguments: dict[str, Any] | None
+) -> list[str]:
+    """Argument keys a call passed that the named tool does not declare.
+
+    Empty when every key is declared, when the tool is not in this
+    registry (the SDK reports that itself), or when the declaration
+    cannot be read — this gate only ever refuses what it can SEE is wrong.
+    """
+    if not isinstance(arguments, dict) or not arguments:
+        return []
+    declared = _declared_tool_arguments(tool_mgr, name)
+    if declared is None:
+        return []
+    return sorted(k for k in arguments if k not in declared)
+
+
+def _unknown_arguments_message(tool_mgr: Any, name: str, unknown: list[str]) -> str:
+    declared = sorted(_declared_tool_arguments(tool_mgr, name) or ())
+    accepts = ", ".join(declared) if declared else "no arguments"
+    plural = "s" if len(unknown) != 1 else ""
+    return (
+        f"{name} does not accept the argument{plural}: {', '.join(unknown)}. "
+        f"It would have been silently ignored. {name} accepts: {accepts}."
+    )
+
+
 def _install_mcp_request_context_capture() -> None:
     """Capture current MCP request context so auth can read per-request metadata."""
     tool_mgr = mcp._tool_manager
@@ -1210,6 +1251,14 @@ def _install_mcp_request_context_capture() -> None:
                 # One-time consent gate — raised so the lowlevel handler returns
                 # it to the agent as a tool error to relay (see _terms_* above).
                 raise RuntimeError(_terms_consent_message())
+            unknown = _unknown_tool_arguments(self, name, arguments)
+            if unknown:
+                # The SDK's argument model ignores keys it does not declare,
+                # so a misspelt or unsupported parameter was silently thrown
+                # away and the call went ahead without it — the caller saw
+                # a success that did not do what they asked.  Refuse instead,
+                # naming the keys and what the tool does accept.
+                raise RuntimeError(_unknown_arguments_message(self, name, unknown))
             # Ask the person before a print starts.  Here rather than inside
             # the tools because sync tools run on this event loop and could
             # not await the answer.  Raises if they say no, before dispatch.
@@ -7548,14 +7597,25 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
             )
         # Pass identifiers through as-is — each adapter coerces to its native
         # type (Bambu/OctoPrint ints, Klipper object-name strings).
-        skip(list(object_ids))
+        verdict = CommandVerdict.coerce(skip(list(object_ids)), what="skip command")
+        tail = (
+            "The printer confirms they are skipped; the rest of the plate "
+            "keeps printing."
+            if verdict.confirmed
+            else (
+                "The command was sent, and the printer has not confirmed it. "
+                "Skipping is irreversible for the objects named, so read "
+                "printer_status() before deciding the plate is saved."
+            )
+        )
         return {
-            "success": True,
+            "success": verdict.ok,
             "skipped_objects": list(object_ids),
             "plate_number": plate_number,
+            **verdict.to_dict(),
             "message": (
                 f"Asked the printer to skip {len(object_ids)} object(s): "
-                f"{list(object_ids)}. The rest of the plate keeps printing."
+                f"{list(object_ids)}. {tail}"
             ),
         }
     except (PrinterError, RuntimeError) as exc:
@@ -7685,6 +7745,20 @@ def set_temperature(
     Common PLA temperatures: tool 200-210C, bed 60C.
     Common PETG temperatures: tool 230-250C, bed 80-85C.
     Common ABS temperatures: tool 240-260C, bed 100-110C.
+
+    Branch on ``outcome`` — one field, three values, the same shape
+    ``start_print`` uses for ``print_start``:
+
+    - ``"confirmed"``: the printer, in a report AFTER the command, shows the
+      effect. Reported per heater under ``tool`` and ``bed``.
+    - ``"accepted"``: the command was sent and not refused, and the printer
+      has not shown the effect yet. Normal on a quiet printer. Read
+      ``printer_status()`` before building on it.
+    - ``"failed"``: the printer's interface refused the command.
+
+    ``accepted`` (the boolean) keeps its old meaning: sent, not refused. It
+    is never proof the printer acted. ``success`` is ``False`` only for
+    ``"failed"``.
     """
     if err := _check_auth("temperature"):
         return err
@@ -7801,19 +7875,29 @@ def set_temperature(
                 "Failed to compute temperature rate warnings: %s", exc
             )  # Don't let warning logic block the actual operation.
 
+        # Each heater answers with one verdict — confirmed / accepted /
+        # failed, the print_start shape — so a caller can branch on
+        # ``outcome`` instead of trusting an ``accepted`` that only ever
+        # meant "sent".  ``success`` at the top stays True unless a heater
+        # was refused; an unconfirmed heater is reported, not hidden.
+        unconfirmed: list[str] = []
         if tool_temp is not None:
-            ok = adapter.set_tool_temp(tool_temp)
-            results["tool"] = {
-                "target": tool_temp,
-                "accepted": ok,
-            }
+            verdict = CommandVerdict.coerce(adapter.set_tool_temp(tool_temp), what="hotend target")
+            results["tool"] = {"target": tool_temp, **verdict.to_dict()}
+            if not verdict.confirmed:
+                unconfirmed.append(verdict.message)
+            if not verdict.ok:
+                results["success"] = False
 
         if bed_temp is not None:
-            ok = adapter.set_bed_temp(bed_temp)
-            results["bed"] = {
-                "target": bed_temp,
-                "accepted": ok,
-            }
+            verdict = CommandVerdict.coerce(adapter.set_bed_temp(bed_temp), what="bed target")
+            results["bed"] = {"target": bed_temp, **verdict.to_dict()}
+            if not verdict.confirmed:
+                unconfirmed.append(verdict.message)
+            if not verdict.ok:
+                results["success"] = False
+        if unconfirmed:
+            rate_warnings.extend(unconfirmed)
 
         # -- Heater-off safety net ----------------------------------------
         # Some OctoPrint setups don't reliably turn off heaters at 0 deg C.
@@ -7987,6 +8071,20 @@ def set_speed_profile(profile: str) -> dict:
 
     Use ``printer_status()`` to see the current speed profile in the
     response's ``printer.speed_profile`` field.
+
+    Branch on ``outcome`` — one field, three values, the same shape
+    ``start_print`` uses for ``print_start``:
+
+    - ``"confirmed"``: the printer, in a report AFTER the command, shows the
+      effect. For a Bambu, the reported speed level moved.
+    - ``"accepted"``: the command was sent and not refused, and the printer
+      has not shown the effect yet. Normal on a quiet printer. Read
+      ``printer_status()`` before building on it.
+    - ``"failed"``: the printer's interface refused the command.
+
+    ``accepted`` (the boolean) keeps its old meaning: sent, not refused. It
+    is never proof the printer acted. ``success`` is ``False`` only for
+    ``"failed"``.
     """
     if err := _check_auth("printer_control"):
         return err
@@ -7999,12 +8097,12 @@ def set_speed_profile(profile: str) -> dict:
                 "Speed profile control is only available on Bambu Lab printers.",
                 code="UNSUPPORTED",
             )
-        ok = adapter.set_speed_profile(profile)
+        verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
         _audit("set_speed_profile", "executed", details={"profile": profile})
         return {
-            "success": True,
+            "success": verdict.ok,
             "profile": profile.strip().lower(),
-            "accepted": ok,
+            **verdict.to_dict(),
         }
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to set speed profile: {exc}")
@@ -8061,6 +8159,20 @@ def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
 
     Use this to improve camera visibility, signal print completion
     (flashing), or turn lights off for overnight prints.
+
+    Branch on ``outcome`` — one field, three values, the same shape
+    ``start_print`` uses for ``print_start``:
+
+    - ``"confirmed"``: the printer, in a report AFTER the command, shows the
+      effect. For a Bambu, the light report lists that node in that mode.
+    - ``"accepted"``: the command was sent and not refused, and the printer
+      has not shown the effect yet. Normal on a quiet printer. Read
+      ``printer_status()`` before building on it.
+    - ``"failed"``: the printer's interface refused the command.
+
+    ``accepted`` (the boolean) keeps its old meaning: sent, not refused. It
+    is never proof the printer acted. ``success`` is ``False`` only for
+    ``"failed"``.
     """
     if err := _check_auth("printer_control"):
         return err
@@ -8073,13 +8185,13 @@ def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
                 "Light control is only available on Bambu Lab printers.",
                 code="UNSUPPORTED",
             )
-        ok = adapter.set_light(node, mode)
+        verdict = CommandVerdict.coerce(adapter.set_light(node, mode), what="light")
         _audit("set_printer_light", "executed", details={"node": node, "mode": mode})
         return {
-            "success": True,
+            "success": verdict.ok,
             "node": node.strip().lower(),
             "mode": mode.strip().lower(),
-            "accepted": ok,
+            **verdict.to_dict(),
         }
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to set printer light: {exc}")
@@ -8115,6 +8227,20 @@ def set_fan(node: str = "part", percent: int = 100) -> dict:
     models (A1, A1 Mini, A2L, P1P), where a chamber command is a no-op. The
     printer's own thermal management may override a manual fan speed during
     a print.
+
+    Branch on ``outcome`` — one field, three values, the same shape
+    ``start_print`` uses for ``print_start``:
+
+    - ``"confirmed"``: the printer, in a report AFTER the command, shows the
+      effect. For a Bambu, that fan's reported level matches.
+    - ``"accepted"``: the command was sent and not refused, and the printer
+      has not shown the effect yet. Normal on a quiet printer. Read
+      ``printer_status()`` before building on it.
+    - ``"failed"``: the printer's interface refused the command.
+
+    ``accepted`` (the boolean) keeps its old meaning: sent, not refused. It
+    is never proof the printer acted. ``success`` is ``False`` only for
+    ``"failed"``.
     """
     if err := _check_auth("printer_control"):
         return err
@@ -8127,13 +8253,13 @@ def set_fan(node: str = "part", percent: int = 100) -> dict:
                 "Fan control isn't available on this printer type.",
                 code="UNSUPPORTED",
             )
-        ok = adapter.set_fan(node, percent)
+        verdict = CommandVerdict.coerce(adapter.set_fan(node, percent), what="fan")
         _audit("set_fan", "executed", details={"node": node, "percent": percent})
         return {
-            "success": True,
+            "success": verdict.ok,
             "node": node.strip().lower(),
             "percent": int(percent),
-            "accepted": ok,
+            **verdict.to_dict(),
         }
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to set fan: {exc}")
@@ -9099,6 +9225,12 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
     G-code is validated before sending.  Commands that exceed temperature
     limits or modify firmware settings are blocked.  Use ``validate_gcode``
     to preview what would be allowed without actually sending.
+
+    Raw G-code has no general read-back, so ``outcome`` here is
+    ``"accepted"`` whenever the command was sent: the printer took the
+    bytes, and whether it EXECUTED them is not reported. Observe the
+    printer (``printer_status()``, or the machine itself) before building
+    on a G-code send. ``"failed"`` means the transport refused it.
     """
     if err := _check_auth("print"):
         return err
@@ -9285,14 +9417,14 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
                 code="UNSUPPORTED",
             )
 
-        adapter.send_gcode(cmd_list)
+        verdict = CommandVerdict.coerce(adapter.send_gcode(cmd_list), what="G-code")
         _audit("send_gcode", "executed", details={"count": len(cmd_list)})
 
         result = {
-            "success": True,
+            "success": verdict.ok,
             "commands_sent": cmd_list,
             "count": len(cmd_list),
-            "message": f"Sent {len(cmd_list)} G-code command(s).",
+            **verdict.to_dict(),
         }
         if validation.warnings:
             result["warnings"] = validation.warnings
@@ -18971,6 +19103,16 @@ def decorate_surface(
         # Metadata for the face-provenance sidecar the compile records
         # (which output triangles the carve created — what painting
         # consumes instead of re-guessing regions).
+        # What the engine DID with the style it was handed: a traced mark
+        # is "stencil" whatever was asked for, a heightmap reports the style
+        # it ran and whether the image was carved as a mark or as relief.
+        _style_applied = (
+            "stencil" if content_info.get("traced_from_raster")
+            else content_info.get("style_applied", image_style)
+        )
+        _treatment = content_info.get("treatment") or (
+            "mark" if content_info.get("type") == "svg" else None
+        )
         _face_meta = {
             "mode": mode,
             "depth_mm": effective_depth,
@@ -19150,6 +19292,8 @@ def decorate_surface(
                 "scale": scale,
                 "material": material,
                 "image_style": image_style,
+                "image_style_applied": _style_applied,
+                "treatment": _treatment,
             },
             "compile_time_seconds": compile_result.get("compile_time_seconds"),
             "scad_path": scad_result["scad_path"],

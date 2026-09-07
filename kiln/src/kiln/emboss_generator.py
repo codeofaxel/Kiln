@@ -209,23 +209,35 @@ _dot = _vec.dot  # type: ignore[assignment]
 _cross = _vec.cross  # type: ignore[assignment]
 
 
+#: cos(2.5 degrees): a face this close to an axis is that axis.  Beyond it
+#: the carve follows the face's real normal.
+_CARDINAL_SNAP = 0.999
+
+
 def _rotation_for_normal(normal: list[float]) -> str:
     """Return the OpenSCAD ``rotate(...)`` clause that maps [0,0,1] to *normal*.
 
     For cardinal faces (top, bottom, front, back, left, right) this returns
     clean degree rotations.  For arbitrary normals it falls back to an
     axis-angle rotation.
+
+    The cardinal shortcut is cosmetic and only for faces that ARE cardinal.
+    It used to fire within 0.9 of an axis — 25.8 degrees — so a phone
+    stand's backrest, leaning 25 degrees off vertical, was carved as if it
+    stood upright: the 2 mm carve slab crossed the tilted plate along one
+    band, and of a whole logo only the stroke on that band was cut.  Any
+    real tilt takes the exact axis-angle path.
     """
     n = _normalize(normal)
 
-    # Cardinal-direction shortcuts (tolerance 0.9)
-    if n[2] > 0.9:
+    # Cardinal-direction shortcuts (within ~2.5 degrees of the axis)
+    if n[2] > _CARDINAL_SNAP:
         return ""  # TOP — no rotation needed
-    if n[2] < -0.9:
+    if n[2] < -_CARDINAL_SNAP:
         return "rotate([180, 0, 0])\n        "
-    if n[1] < -0.9:
+    if n[1] < -_CARDINAL_SNAP:
         return "rotate([90, 0, 0])\n        "  # FRONT
-    if n[1] > 0.9:
+    if n[1] > _CARDINAL_SNAP:
         return "rotate([-90, 0, 0])\n        "  # BACK
     # LEFT/RIGHT were swapped until 2026-08-03.  A rotation of +90 about
     # Y sends the prism's local +Z to world +X, so it belongs to the
@@ -235,9 +247,9 @@ def _rotation_for_normal(normal: list[float]) -> str:
     # overshoot — a side deboss then carved exactly the overshoot, 1.0mm,
     # whatever depth was requested.  Front/back above are unaffected and
     # were always correct.
-    if n[0] < -0.9:
+    if n[0] < -_CARDINAL_SNAP:
         return "rotate([0, -90, 0])\n        "  # LEFT  (+Z -> -X)
-    if n[0] > 0.9:
+    if n[0] > _CARDINAL_SNAP:
         return "rotate([0, 90, 0])\n        "  # RIGHT (+Z -> +X)
 
     # General axis-angle: rotate [0,0,1] → n

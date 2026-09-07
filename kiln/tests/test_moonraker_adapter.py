@@ -839,7 +839,7 @@ class TestSetToolTemp:
         with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
             ok = adapter.set_tool_temp(210.0)
 
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         # Verify M104 G-code was sent.
         call_kwargs = mock_req.call_args
         assert call_kwargs.kwargs.get("params") == {"script": "M104 S210"}
@@ -851,7 +851,7 @@ class TestSetToolTemp:
         with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
             ok = adapter.set_tool_temp(0)
 
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         call_kwargs = mock_req.call_args
         assert call_kwargs.kwargs.get("params") == {"script": "M104 S0"}
 
@@ -878,7 +878,7 @@ class TestSetBedTemp:
         with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
             ok = adapter.set_bed_temp(60.0)
 
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         call_kwargs = mock_req.call_args
         assert call_kwargs.kwargs.get("params") == {"script": "M140 S60"}
 
@@ -889,7 +889,7 @@ class TestSetBedTemp:
         with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
             ok = adapter.set_bed_temp(0)
 
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         call_kwargs = mock_req.call_args
         assert call_kwargs.kwargs.get("params") == {"script": "M140 S0"}
 
@@ -908,7 +908,7 @@ class TestSetFan:
         with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
             ok = adapter.set_fan("part", 100)
 
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         call_kwargs = mock_req.call_args
         assert call_kwargs.kwargs.get("params") == {"script": "M106 S255"}
 
@@ -986,7 +986,7 @@ class TestSendGcodePublic:
         with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
             ok = adapter.send_gcode(["G28"])
 
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         call_kwargs = mock_req.call_args
         assert call_kwargs.kwargs.get("params") == {"script": "G28"}
 
@@ -997,7 +997,7 @@ class TestSendGcodePublic:
         with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
             ok = adapter.send_gcode(["G28", "G1 X10 Y10 F300", "M104 S200"])
 
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         call_kwargs = mock_req.call_args
         assert call_kwargs.kwargs.get("params") == {"script": "G28\nG1 X10 Y10 F300\nM104 S200"}
 

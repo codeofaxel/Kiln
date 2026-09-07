@@ -138,7 +138,7 @@ class TestSetFan:
         ) as mock_send_gcode:
             ok = adapter.set_fan("part", 100)
 
-        assert ok is True
+        assert ok.ok and not ok.confirmed
         mock_send_gcode.assert_called_once_with("M106 S255")
 
     def test_aux_is_rejected(self) -> None:

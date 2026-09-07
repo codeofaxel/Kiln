@@ -1438,7 +1438,7 @@ def calibrate(
     # Step 2: Home axes
     step_start = time.time()
     try:
-        adapter.send_gcode("G28")
+        adapter.send_gcode(["G28"])
         steps.append(
             PipelineStep(
                 name="home",
@@ -1460,7 +1460,7 @@ def calibrate(
     # Step 3: Auto bed level
     step_start = time.time()
     try:
-        adapter.send_gcode("G29")
+        adapter.send_gcode(["G29"])
         steps.append(
             PipelineStep(
                 name="bed_level",
