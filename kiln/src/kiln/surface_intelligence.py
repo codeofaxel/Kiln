@@ -128,6 +128,13 @@ _FACE_NAMES: list[tuple[str, tuple[float, float, float]]] = [
     ("left", (-1.0, 0.0, 0.0)),
 ]
 
+#: The face names ``decorate_surface`` and the texture tools accept by
+#: direction — derived from the direction table above so it cannot drift
+#: from what :func:`find_named_face` resolves.  Product-semantic names
+#: (``interior_bed``, ``exterior_bottom``, ``exterior``) belong to the
+#: kiln-pro face registry, which maps each of them onto one of these.
+CARDINAL_FACE_NAMES: frozenset[str] = frozenset(name for name, _ in _FACE_NAMES)
+
 
 def _name_from_normal(normal: tuple[float, ...]) -> str:
     """Return a human-readable face name based on the normal direction.
@@ -566,11 +573,11 @@ def find_named_face(stl_path: str, face_name: str) -> dict[str, Any]:
         FileNotFoundError: If the STL file does not exist.
         ValueError: If no face matching *face_name* is found.
     """
-    valid_names = {"top", "bottom", "front", "back", "left", "right"}
     face_name_lower = face_name.lower().strip()
-    if face_name_lower not in valid_names:
+    if face_name_lower not in CARDINAL_FACE_NAMES:
         raise ValueError(
-            f"Invalid face name {face_name!r}. Must be one of: {', '.join(sorted(valid_names))}"
+            f"Invalid face name {face_name!r}. "
+            f"Must be one of: {', '.join(sorted(CARDINAL_FACE_NAMES))}"
         )
 
     tris = _parse_mesh(stl_path)

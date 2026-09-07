@@ -840,6 +840,22 @@ class _UtilityToolsPlugin:
                         "search_all_models → download_and_upload → preflight_check → start_print"
                     ),
                     "slice_and_print": "upload_file (STL) → slice_and_print",
+                    "put_a_logo_or_text_on_a_product": (
+                        "generate_<product>(...) → decorate_surface("
+                        "model_path=<output_stl>, content=<logo.svg | "
+                        "line-art.png | 'text:...'>, face=<result."
+                        "decorate_next.face>) → visualize_model. "
+                        "decorate_surface is THE tool that carves a logo, "
+                        "wordmark, text or image into any mesh; a "
+                        "generator's result carries `decorate_next` (the "
+                        "face and settings for its canvas) and "
+                        "resolve_template_decoration(template_id) resolves "
+                        "the same. Look-alikes: generate_decorated_product "
+                        "and generate_wall_plaque are PHOTO-relief pipelines "
+                        "(a picture as coin relief), not logo tools; "
+                        "apply_decoration replays a decoration you SAVED "
+                        "earlier and carves nothing new."
+                    ),
                     "show_a_mesh_file_in_3d": (
                         "import_external_mesh(mesh_path) — brings an STL/OBJ/3MF/"
                         "STEP file in as a design AND opens the interactive 3D "
