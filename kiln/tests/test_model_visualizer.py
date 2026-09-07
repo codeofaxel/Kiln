@@ -786,3 +786,23 @@ class TestCallBudget:
         assert host_window_deadline() == pytest.approx(1040.0)
         monkeypatch.setattr(model_visualizer, "_CALL_BUDGET_S", 0.0)
         assert host_window_deadline() is None
+
+    def test_an_already_spent_deadline_says_so_plainly(
+        self, tmp_stl: Path, tmp_path: Path,
+    ):
+        """A deadline already behind us is not a "0s budget that ran out".
+
+        That sentence reads like a broken clock.  The honest report is
+        that there was no time left when this render was asked for.
+        """
+        import time as _time
+
+        result = visualize_model(
+            str(tmp_stl), output_dir=str(tmp_path / "out"),
+            deadline=_time.monotonic() - 1.0, share_link=False,
+        )
+        assert result["skipped"] == 7
+        assert "0s" not in result["message"]
+        assert "no time left" in result["message"].lower()
+        assert "0s" not in result["views"][0]["error"]
+        assert "no time left" in result["views"][0]["error"].lower()

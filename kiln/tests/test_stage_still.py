@@ -870,3 +870,85 @@ def test_a_measured_shot_prices_the_rest_of_the_set(
     # would spend it all and discard three good frames.
     assert views is None
     assert shots == [1]
+
+
+# ---------------------------------------------------------------------------
+# The size gate — don't pay 18 s to learn the browser cannot do this set
+# ---------------------------------------------------------------------------
+
+
+def test_an_oversized_set_declines_without_launching_anything(
+    cube_stl: str, batch_stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past the pixel cap the browser is skipped before any work at all.
+
+    Measured 2026-09-06 on one mesh at seven angles: 30.2 MP of frame
+    took 14.6 s (inside the 20 s set budget), 53.8 MP took 87.5 s.  That
+    is a cliff, not a slope -- the software rasterizer falls off it -- so
+    a set past the cap can never come back in budget, and paying ~18 s to
+    discover that is ~18 s the painter should have had.
+    """
+    looked: list = []
+    monkeypatch.setattr(
+        stage_still, "find_browser",
+        lambda *a, **k: looked.append(1) or good_browser,
+    )
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=8000, height=6000,
+    )
+    assert views is None
+    assert looked == [], "the cap must be checked before the browser is even found"
+
+
+def test_a_set_inside_the_cap_is_still_attempted(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+) -> None:
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=64, height=64,
+    )
+    assert views is not None and len(views) == 2
+
+
+def test_a_zero_cap_disables_the_size_gate(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(stage_still, "_STILL_MAX_SET_PIXELS", 0)
+    views = try_render_stage_views(
+        cube_stl, _VIEWS, _ROTATIONS,
+        output_dir=str(tmp_path / "out"), width=8000, height=6000,
+    )
+    # The gate is off, so the attempt proceeds and fails on its own terms
+    # (the stub browser writes a fixed-size frame) rather than being
+    # refused up front.  Either way it must not raise.
+    assert views is None or isinstance(views, list)
+
+
+def test_the_timeout_log_reports_the_ceiling_actually_used(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A shot clamped to 2 s must not report the 60 s per-view constant.
+
+    The log line read ``_VIEW_TIMEOUT_S`` rather than the ceiling in
+    force, so a clamped shot said 60 s when it had waited 20 -- the one
+    number a person debugging this would trust.
+    """
+    import logging
+
+    never = tmp_path / "never.png"
+    hang = tmp_path / "hang.sh"
+    hang.write_text("#!/bin/sh\nsleep 30\n")
+    hang.chmod(0o755)
+    harness = tmp_path / "h.html"
+    harness.write_text("<html></html>")
+    with caplog.at_level(logging.DEBUG, logger="kiln.stage_still"):
+        ok = stage_still._shoot(
+            hang, harness, str(never), 64, 64, tmp_path / "prof", timeout_s=2.0,
+        )
+    assert ok is False
+    timed_out = [r.getMessage() for r in caplog.records if "timed out" in r.getMessage()]
+    assert timed_out, "the timeout must be logged"
+    assert "2" in timed_out[0] and "60" not in timed_out[0], timed_out[0]

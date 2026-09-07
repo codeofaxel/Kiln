@@ -544,13 +544,21 @@ def host_window_deadline() -> float | None:
 def _budget_skipped_view(
     label: str, description: str, *, budget_s: float, done: int, total: int,
 ) -> dict:
-    """The view entry for an angle the call's deadline left no time for."""
+    """The view entry for an angle the call's deadline left no time for.
+
+    A deadline already behind us when the call started is reported as
+    what it is.  Rounding it into "the call's 0s time budget ran out"
+    reads like a broken clock and sends the reader hunting for a bug in
+    the timer instead of for the caller that handed over a spent one.
+    """
     return {
         "angle": label,
         "description": description,
         "path": None,
         "skipped": "budget",
         "error": (
+            "Skipped: no time left in the call's budget when this render started"
+            if budget_s < 1.0 else
             f"Skipped: the call's {budget_s:.0f}s time budget ran out "
             f"after {done}/{total} angle(s)"
         ),
@@ -986,11 +994,17 @@ def visualize_model(
         skipped = [v for v in failed if v.get("skipped")]
         broken = len(failed) - len(skipped)
         if skipped:
+            spent = (
+                "there was no time left in the call's budget when this render "
+                "started"
+                if budget_s < 1.0 else
+                f"the call's {budget_s:.0f}s time budget ran out after "
+                f"{len(successful)} angle(s)"
+            )
             outcome = (
                 f"{len(skipped)} angle(s) skipped "
-                f"({', '.join(v['angle'] for v in skipped)}): the call's "
-                f"{budget_s:.0f}s time budget ran out after {len(successful)} "
-                "angle(s).  Ask for fewer angles or a smaller size, or raise "
+                f"({', '.join(v['angle'] for v in skipped)}): {spent}.  Ask for "
+                "fewer angles or a smaller size, or raise "
                 "KILN_VISUALIZE_BUDGET_S if the client's request window allows it."
                 + (f"  {broken} angle(s) failed to render." if broken else "")
             )

@@ -117,6 +117,26 @@ _STILL_GRID_COLS = 3
 _STILL_MAX_TRIANGLES = 600_000
 _STILL_MAX_BYTES = 64 * 1024 * 1024
 
+#: Frame-pixel ceiling for a whole photograph SET, supersample included.
+#: The browser's cost against frame size is a CLIFF, not a slope --
+#: measured 2026-09-06, one mesh at seven angles, this machine:
+#:
+#:     13.4 MP ->  8.6 s      30.2 MP -> 14.6 s      53.8 MP -> 87.5 s
+#:
+#: The first two land inside the 20 s set budget; the third is four
+#: times over it, because the software rasterizer falls off a memory
+#: cliff somewhere between them.  Past the cap the set can never come
+#: back in budget, so paying ~18 s to discover that is ~18 s taken from
+#: the painter, which would have spent it drawing angles the user keeps
+#: (measured: 2 of 7 angles delivered, against 5 when the browser is
+#: skipped instead).  The cap sits above the measured-good 30.2 MP with
+#: room, and well below the measured-hopeless 53.8 MP.  A cheap
+#: arithmetic check up front beats an expensive runtime discovery.
+#: Env-tunable; 0 disables.
+_STILL_MAX_SET_PIXELS = int(
+    float(os.environ.get("KILN_STAGE_STILL_MAX_MEGAPIXELS", "40") or 0) * 1_000_000
+)
+
 #: Virtual-time budget handed to the browser.  Virtual time fast-forwards
 #: timers and animation frames deterministically, so this is generous
 #: headroom, not wall-clock waiting.
@@ -442,7 +462,7 @@ def _shoot(browser: Path, harness_path: Path, png_path: str,
                 return True
             last_size = size
             time.sleep(0.3)
-        logger.debug("stage stills: browser timed out (%ss)", _VIEW_TIMEOUT_S)
+        logger.debug("stage stills: browser timed out (%.0fs)", timeout_s)
         return os.path.isfile(png_path) and os.path.getsize(png_path) > 0
     finally:
         if proc.poll() is None:
@@ -604,6 +624,23 @@ def try_render_stage_views(
         if color and not _HEX_COLOR.match(color.strip()):
             logger.debug("stage stills: colour %r is not hex — using OpenSCAD", color)
             return None
+
+        # Arithmetic before ignition.  Everything below this — finding a
+        # browser, reading the cached stage, loading the mesh — is work
+        # spent on a set the frame budget already rules out.
+        from kiln.preview_render import effective_supersample
+
+        ss = effective_supersample()
+        set_pixels = width * ss * height * ss * len(selected)
+        if _STILL_MAX_SET_PIXELS and set_pixels > _STILL_MAX_SET_PIXELS:
+            logger.debug(
+                "stage stills: %d angle(s) at %dx%d is %.1f MP of frame, past the "
+                "%.1f MP cap — the painter takes the whole budget",
+                len(selected), width, height, set_pixels / 1e6,
+                _STILL_MAX_SET_PIXELS / 1e6,
+            )
+            return None
+
         browser = find_browser()
         if browser is None:
             return None
@@ -640,10 +677,10 @@ def try_render_stage_views(
         # Lanczos-downscale to the requested size (the shared knob in
         # kiln.preview_render governs BOTH renderers, so every preview
         # surface has one crispness policy).  A raw 1x browser frame under
-        # the software rasterizer reads visibly soft.
-        from kiln.preview_render import downscale_png, effective_supersample
+        # the software rasterizer reads visibly soft.  ``ss`` is already
+        # in hand from the frame-budget check above.
+        from kiln.preview_render import downscale_png
 
-        ss = effective_supersample()
         shot_w, shot_h = width * ss, height * ss
 
         stem = Path(file_path).stem
