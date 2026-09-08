@@ -210,6 +210,32 @@ def as_status(value: Any) -> PrinterStatus | None:
         return None
 
 
+def row_run_state(row: Any) -> str | None:
+    """The run-state WORD from a serialised reading, seen through a headline.
+
+    The dict twin of :attr:`PrinterState.effective_state`, for the readers
+    that hold a payload instead of an object -- a fleet row, a relayed
+    snapshot, the panel wire.  ``state`` is the HEADLINE, which two promotions
+    may have taken over; ``last_known_state`` is what the machine was doing
+    underneath, and only those two promotions ever set it.
+
+    It exists because the cost of a classifier reading the bare headline is
+    not cosmetic.  Neither ``stale`` nor ``error`` appears in any
+    hand-written busy-word set in this codebase, so a printer whose reading
+    expired mid-job, or which raised a fault mid-job, drops out of every
+    "this machine is working" listing at once -- and the servers watching
+    that print get trimmed.  A reader asking "is anything wrong" still wants
+    the headline; this is only for readers asking what the machine is doing.
+    """
+    if not isinstance(row, dict):
+        return None
+    last = row.get("last_known_state")
+    if isinstance(last, str) and last:
+        return last
+    state = row.get("state")
+    return state if isinstance(state, str) and state else None
+
+
 def status_is_occupied(status: Any) -> bool:
     """Might a machine in *status* have work in flight?
 
@@ -674,8 +700,14 @@ class PrinterState:
         # that keeps ``is_occupied`` conservative on exactly the machine that
         # can least afford it.  A stale reading's fault survives in
         # ``print_error`` and in a headline that already says to go and look.
+        # ``print_error_code``, not ``print_error``: one function decides what
+        # counts as a real firmware error, and both halves of the payload have
+        # to agree with it.  ``format_error_code`` calls anything <= 0 "no
+        # error" -- so a bogus negative value, which is merely truthy, would
+        # otherwise promote the headline to ``error`` while the code field
+        # beside it stayed empty and the sentence named no code at all.
         if (
-            self.print_error
+            self.print_error_code is not None
             and self.connected
             and self.state is not PrinterStatus.STALE
             and self.state is not PrinterStatus.ERROR
@@ -688,7 +720,7 @@ class PrinterState:
         # state directly.  Both are the same fact to a reader.
         if (
             self.state is PrinterStatus.ERROR
-            and self.print_error
+            and self.print_error_code is not None
             and self.fault_note is None
         ):
             self.fault_note = describe_unacknowledged_fault(self.print_error_code)
@@ -752,6 +784,33 @@ class PrinterState:
         if self.last_known_state is not None:
             return self.last_known_state
         return self.state
+
+    @property
+    def confirmed_state(self) -> PrinterStatus:
+        """The run state, but only from a reading Kiln can vouch for.
+
+        The other half of :attr:`effective_state`, and the difference is not
+        academic.  Both look through a displaced headline, but they answer
+        opposite questions and must fail in opposite directions:
+
+        * "might this machine be busy" wants to see through EVERYTHING and
+          assume the worst -- :attr:`effective_state`, which reads a stale
+          reading's run state because a refused print is a retry and a second
+          print onto an occupied bed is a crash;
+        * "has this print ENDED" must not see through staleness at all.  An
+          expired reading is not evidence that anything finished, and a watch
+          closed on one is a watch closed on a print that is still running.
+          That is the whole reason ``STALE`` is absent from every terminal
+          set in this codebase.
+
+        So this sees through a FAULT -- a fresh reading whose headline a
+        latched code took over, where the run state underneath is current and
+        trustworthy -- and never through ``STALE``, which it returns as
+        itself so it matches no terminal state.
+        """
+        if self.state is PrinterStatus.STALE:
+            return PrinterStatus.STALE
+        return self.effective_state
 
     @property
     def is_occupied(self) -> bool:
@@ -2669,13 +2728,11 @@ class PrinterAdapter(ABC):
             deadline = _time.monotonic() + self._RESUME_VERIFY_TIMEOUT
             status = None
             while True:
-                # effective_state, not state: a fault promotes the
-                # HEADLINE while the machine goes on doing what it was
-                # doing, and this asks what it is doing.  Reading the bare
-                # state here would let a
-                # fault landing during the pause read as "it resumed", and
-                # report a success the printer never performed.
-                status = getattr(self.get_state(), "effective_state", None)
+                # ``confirmed_state``: it looks through a FAULT headline, so a
+                # fault raised while the machine kept working still matches here,
+                # and it is as strict about staleness as the bare state word was:
+                # an expired reading is not evidence that anything ended.
+                status = getattr(self.get_state(), "confirmed_state", None)
                 if status is not PrinterStatus.PAUSED:
                     break
                 if _time.monotonic() >= deadline:
@@ -3071,11 +3128,12 @@ class PrinterAdapter(ABC):
                 f"Cannot {action} filament: the printer did not answer a status "
                 f"request ({exc})."
             ) from exc
-        # effective_state, not state: a fault promotes the HEADLINE while
-        # the machine goes on doing what it was doing, and this asks what
-        # it is doing.  Reading the bare state here would let a
-        # faulted print through this refusal -- the one direction it must
-        # never fail in, because the extruder is over the part.
+        # ``effective_state``: a fault takes the headline while the machine
+        # goes on doing what it was doing, and this asks what it is doing.
+        # The bare state word would let a faulted print through this refusal
+        # -- the one direction it must never fail in, because the extruder is
+        # parked over the part.  Reading through staleness as well is
+        # deliberate: an expired reading cannot show a print has stopped.
         if state.effective_state == PrinterStatus.PRINTING:
             raise PrinterError(
                 f"Refusing to {action} filament while a print is running. "
@@ -4122,7 +4180,20 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
     if getattr(adapter, "_kiln_outcome_delegated", False):
         return
 
-    status = getattr(state, "state", None)
+    # ``confirmed_state``: this asks whether the JOB ended, and a fault is
+    # not an ending.  The bare state word made "printing -> error" a terminal
+    # transition the moment a machine raised a code mid-print, which recorded
+    # the running print as FAILED and then, through the idempotency ledger,
+    # blocked the real ending from ever being written.  A print that faults
+    # and recovers was filed as a failure for good.
+    #
+    # It stays exactly as strict about staleness as the bare word was --
+    # ``confirmed_state`` returns STALE for an expired reading, which is a
+    # word no transition set contains, so a printer going quiet still records
+    # nothing rather than guessing.
+    status = getattr(state, "confirmed_state", None) or getattr(
+        state, "state", None
+    )
     # The job's ending outranks the machine's current state: "completed"
     # and "cancelled" are facts about the print, and both live inside the
     # same IDLE the printer reports afterwards.

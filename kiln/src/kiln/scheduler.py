@@ -417,19 +417,20 @@ class JobScheduler:
                 #     success poisons the learning data that proven-settings
                 #     and printer rankings are built from.  It ends as
                 #     "unknown" (inferred) and the user gets asked.
-                # Strict `state` on the two branches that END a job: a
-                # reading that has gone STALE is not evidence the print
-                # finished or failed, and acting on one would close a job
-                # that is still running.  Those cases fall through to the
-                # next poll, which is what a printer going quiet for a
-                # moment should cost.
-                # effective_state, not state: a fault promotes the
-                # HEADLINE while the machine goes on doing what it was
-                # doing, and this asks what it is doing.  Reading the bare
-                # state here would match neither
-                # this branch nor the error one below on a faulted-but-idle
-                # machine, leaving the job with no outcome at all.
-                if state.effective_state == PrinterStatus.IDLE:
+                # ``confirmed_state`` on the two branches that END a job,
+                # which is exactly as strict about staleness as the bare
+                # `state` it replaced: a reading that has gone STALE is not
+                # evidence the print finished or failed, and acting on one
+                # would close a job that is still running.  Those cases fall
+                # through to the next poll, which is what a printer going
+                # quiet for a moment should cost.
+                #
+                # What it does see through is a FAULT.  A latched code takes
+                # the headline off a reading that is otherwise current, and
+                # on a faulted-but-idle machine the bare `state` matched
+                # neither this branch nor the error one below -- leaving the
+                # job with no outcome recorded at all.
+                if state.confirmed_state == PrinterStatus.IDLE:
                     pre_idle_job = self._queue.get_job(job_id)
                     queue_cancelled = bool(
                         pre_idle_job is not None
@@ -506,11 +507,11 @@ class JobScheduler:
                     self._seen_printing.discard(job_id)
                     completed.append(job_id)
 
-                # effective_state, not state: a fault raised mid-print makes
-                # the headline ERROR while the job is still running, and
-                # failing the job there would blame the model for a print
-                # that had not ended.
-                elif state.effective_state == PrinterStatus.ERROR:
+                # ``confirmed_state``: it looks through a FAULT headline, so a
+                # fault raised while the machine kept working still matches here,
+                # and it is as strict about staleness as the bare state word was:
+                # an expired reading is not evidence that anything ended.
+                elif state.confirmed_state == PrinterStatus.ERROR:
                     error_msg = f"Printer {printer_name} entered error state"
                     # A machine-reported error is a print verdict only for a
                     # job this loop actually SAW printing — an error on a

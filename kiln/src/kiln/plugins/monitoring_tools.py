@@ -447,7 +447,7 @@ class _PrintWatcher:
                         return
 
                 # Check terminal states
-                if state.effective_state == PrinterStatus.IDLE and elapsed > 30:
+                if state.confirmed_state == PrinterStatus.IDLE and elapsed > 30:
                     result = {
                         "success": True,
                         "watch_id": self._watch_id,
@@ -463,11 +463,11 @@ class _PrintWatcher:
 
                 # Every way the printer stops being watchable, including the
                 # two causes that used to hide inside "offline".
-                # effective_state, not state: a fault raised DURING a
-                # print promotes the headline to ERROR while the machine
-                # keeps printing.  Ending the watch there would report a
-                # running print as over.
-                if state.effective_state in (
+                # ``confirmed_state``: it looks through a FAULT headline, so a
+                # fault raised while the machine kept working still matches here,
+                # and it is as strict about staleness as the bare state word was:
+                # an expired reading is not evidence that anything ended.
+                if state.confirmed_state in (
                     PrinterStatus.ERROR,
                     PrinterStatus.OFFLINE,
                     PrinterStatus.UNAUTHORIZED,
@@ -502,7 +502,7 @@ class _PrintWatcher:
                     self._finish(result)
                     return
 
-                if state.effective_state == PrinterStatus.PAUSED:
+                if state.confirmed_state == PrinterStatus.PAUSED:
                     result = {
                         "success": True,
                         "watch_id": self._watch_id,
@@ -517,7 +517,7 @@ class _PrintWatcher:
                     self._finish(result)
                     return
 
-                if state.effective_state == PrinterStatus.CANCELLING:
+                if state.confirmed_state == PrinterStatus.CANCELLING:
                     result = {
                         "success": True,
                         "watch_id": self._watch_id,
@@ -1080,7 +1080,7 @@ class _MonitoringToolsPlugin:
                 # Early exit: if printer is idle with no active job, don't start
                 initial_state = adapter.get_state()
                 initial_job = adapter.get_job()
-                if initial_state.effective_state == PrinterStatus.IDLE and initial_job.completion is None:
+                if initial_state.confirmed_state == PrinterStatus.IDLE and initial_job.completion is None:
                     return {
                         "success": True,
                         "outcome": "no_active_print",

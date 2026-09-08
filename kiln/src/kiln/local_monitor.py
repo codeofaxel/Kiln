@@ -75,6 +75,7 @@ from kiln.monitor_payload import (
     compose_monitor_payload,
     is_active_print_state,
 )
+from kiln.printers.base import row_run_state
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +267,10 @@ def _direct_status(printer_name: str | None) -> tuple[dict | None, dict | None]:
 def _camera_frame(printer_name: str | None, status: dict | None) -> tuple[str | None, str | None]:
     """(base64 frame, note).  The room-camera rule lives HERE, server-side:
     a frame is fetched only while the just-read state is an active print."""
-    state = ((status or {}).get("printer") or {}).get("state")
+    # Through the headline: a print that raised a fault, or whose reading
+    # expired, is still a print on the bed.  Reading the bare word turned the
+    # camera off at the exact moment someone wanted to see what happened.
+    state = row_run_state((status or {}).get("printer") or {})
     if not is_active_print_state(state):
         return None, "camera is off while no print is active"
     try:

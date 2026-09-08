@@ -328,6 +328,7 @@ from kiln.printers import (
     diagnosed_state,
     progress_stall_note,
     read_status,
+    row_run_state,
     status_is_occupied,
     status_is_unreachable,
     stuck_job_note,
@@ -1510,7 +1511,14 @@ def _coverage_block_for(printer_name: str | None) -> dict[str, Any] | None:
         state_word = None
         try:
             adapter = _resolve_adapter(printer_name)
-            state_word = getattr(adapter.get_state(), "state", None)
+            # effective_state: this feeds the "is a print on this machine"
+            # answer, and a promoted headline is not the run state.  Reading
+            # the bare word made the coverage card say no print was running
+            # on a machine that had raised a fault mid-print.
+            _reading = adapter.get_state()
+            state_word = getattr(_reading, "effective_state", None) or getattr(
+                _reading, "state", None
+            )
             state_word = getattr(state_word, "value", state_word)
         except Exception:  # noqa: BLE001 — no adapter, or no reading, is a state and not an error
             pass
@@ -2792,12 +2800,11 @@ class _PauseKeepAlive:
             # cancel, error, or operator pressed buttons on the printer).
             try:
                 state = adapter.get_state()
-                # effective_state, not state: a fault promotes the
-                # HEADLINE while the machine goes on doing what it was
-                # doing, and this asks what it is doing.  Reading the bare
-                # state here would exit this
-                # keep-alive on a fault that arrived DURING the pause.
-                if state.effective_state != PrinterStatus.PAUSED:
+                # ``confirmed_state``: it looks through a FAULT headline, so a
+                # fault raised while the machine kept working still matches here,
+                # and it is as strict about staleness as the bare state word was:
+                # an expired reading is not evidence that anything ended.
+                if state.confirmed_state != PrinterStatus.PAUSED:
                     logger.debug(
                         "Pause keep-alive: printer state is %s, not paused — exiting loop",
                         state.state,
@@ -4266,7 +4273,9 @@ def printer_status(
             from kiln.watch_state import kiln_watch_state
 
             response["kiln_watch"] = kiln_watch_state(
-                printer_name, adapter=adapter, state_word=printer_block.get("state")
+                printer_name,
+                adapter=adapter,
+                state_word=row_run_state(printer_block),
             )
         except Exception as exc:  # noqa: BLE001 — context beside the reading, never the reading
             logger.debug("watch state unavailable for %r: %s", printer_name, exc)
@@ -7176,11 +7185,13 @@ def clear_printer_error(printer_name: str | None = None) -> dict:
         # acknowledgement that resets a board would end it far less gracefully
         # than cancel_print would.
         state = adapter.get_state()
-        # effective_state, not state: a fault promotes the HEADLINE while
-        # the machine goes on doing what it was doing, and this asks what
-        # it is doing.  Reading the bare state here would read a faulted
-        # live print as not-live and let an acknowledgement through mid-job,
-        # which is the exact thing this refusal exists to prevent.
+        # ``effective_state``: a fault takes the headline while the machine
+        # goes on doing what it was doing, and this asks what it is doing.
+        # The bare state word would read a faulted live print as not-live and
+        # let an acknowledgement through mid-job, which is the exact thing
+        # this refusal exists to prevent.  It reads through staleness too,
+        # which is the conservative direction here: a reading Kiln cannot
+        # vouch for cannot show the bed is clear either.
         if state.effective_state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
             return _error_dict(
                 f"Not clearing anything while a print is "
@@ -9666,7 +9677,7 @@ def fleet_status() -> dict:
         busy_printers = [
             p.get("name", "")
             for p in status
-            if status_is_occupied(p.get("state"))
+            if status_is_occupied(row_run_state(p))
             or str(p.get("state", "")).lower() == "starting"
         ]
         return {
@@ -11981,13 +11992,11 @@ def await_print_completion(
                 )
                 last_pct = pct
 
-            # effective_state, not state: a fault promotes the HEADLINE
-            # while the machine goes on doing what it was doing, and this
-            # asks what it is doing.  Reading the bare state here would
-            # leave a print
-            # whose machine latched an unrelated fault with no ending at all:
-            # neither this branch nor the failure one below would fire.
-            if state.effective_state == PrinterStatus.IDLE:
+            # ``confirmed_state``: it looks through a FAULT headline, so a
+            # fault raised while the machine kept working still matches here,
+            # and it is as strict about staleness as the bare state word was:
+            # an expired reading is not evidence that anything ended.
+            if state.confirmed_state == PrinterStatus.IDLE:
                 # Print hours are NOT recorded here.  The ``adapter.get_state()``
                 # above already fed the terminal transition through the
                 # adapter-generic lifecycle wrap, which banks the duration
@@ -12003,11 +12012,11 @@ def await_print_completion(
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
                 })
-            # effective_state, not state: a fault raised DURING a print
-            # makes the headline `error` while the machine keeps printing,
-            # and calling that job over would end the watch on a print that
-            # is still running.  The run state answers "has it ended".
-            if state.effective_state == PrinterStatus.ERROR:
+            # ``confirmed_state``: it looks through a FAULT headline, so a
+            # fault raised while the machine kept working still matches here,
+            # and it is as strict about staleness as the bare state word was:
+            # an expired reading is not evidence that anything ended.
+            if state.confirmed_state == PrinterStatus.ERROR:
                 return _attach_goal({
                     "success": True,
                     "outcome": "failed",

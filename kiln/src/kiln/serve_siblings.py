@@ -525,9 +525,23 @@ def printing_now() -> dict:
             # RUNNING machine as unknown.  Kiln is asking about its own
             # hardware here; nobody is commanding a printer.
             with internal_read():
-                state = adapter.get_state().state
+                reading = adapter.get_state()
+            # ``is_occupied`` rather than a word against a set kept here.
+            # This function holds the whole state, and the object can see
+            # what the word cannot: a promoted headline -- ``stale`` over a
+            # print, or ``error`` over one that raised a code mid-job -- is
+            # not in this module's active-word set, and a live print that
+            # falls out of it is a live print whose watching servers get
+            # SIGTERMed.  That is exactly the case the note above calls
+            # dangerous, arriving by a second route.
+            state = getattr(reading, "effective_state", None) or getattr(
+                reading, "state", None
+            )
             value = getattr(state, "value", str(state))
-            if value in _ACTIVE_PRINT_STATES:
+            occupied = getattr(reading, "is_occupied", None)
+            if occupied is None:
+                occupied = value in _ACTIVE_PRINT_STATES
+            if occupied:
                 active.append(f"{name} ({value})")
         except Exception as exc:
             unknown.append(f"{name}: {exc}")

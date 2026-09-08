@@ -121,7 +121,14 @@ def collect_routing_candidates(
             # which is a wrong fact about the user's hardware, not a refusal.
             with internal_read():
                 state = adapter.get_state()
-            raw_state = getattr(state, "state", None)
+            # effective_state: a candidate that raised a fault mid-print, or
+            # whose reading expired mid-print, is still running a print.  The
+            # headline word for either is absent from _BUSY_STATES, so the
+            # bare read dropped the busy penalty on exactly the machines that
+            # most deserve it.
+            raw_state = getattr(state, "effective_state", None) or getattr(
+                state, "state", None
+            )
             status = str(getattr(raw_state, "value", raw_state or "unknown")).lower()
         except Exception:
             status = "offline"

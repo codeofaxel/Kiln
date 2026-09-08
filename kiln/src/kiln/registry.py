@@ -410,6 +410,15 @@ class PrinterRegistry:
                 "site": _site_for(name),
                 "connected": state.connected,
                 "state": state.state.value,
+                # What the machine was DOING, when a promotion took the
+                # headline.  Without it every consumer of this row is handed
+                # a word it cannot see through, and a printer that went
+                # stale or faulted mid-print silently leaves the busy list.
+                "last_known_state": (
+                    state.last_known_state.value
+                    if state.last_known_state is not None
+                    else None
+                ),
                 "tool_temp_actual": state.tool_temp_actual,
                 "tool_temp_target": state.tool_temp_target,
                 "bed_temp_actual": state.bed_temp_actual,

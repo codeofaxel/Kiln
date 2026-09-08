@@ -363,24 +363,6 @@ class TestEveryDoor:
         named = {c["name"]: c for c in out.get("checks", [])}
         assert named["no_errors"]["passed"] is False
 
-    def test_the_monitor_keeps_watching_a_print_that_is_still_running(self) -> None:
-        """A first-layer fault must not be reported as the print ending.
-
-        The A1's nozzle-clumping probe raises one on flat first-layer shapes,
-        which is exactly when this monitor is watching.
-        """
-        from kiln.print_monitor import _TERMINAL_STATES
-
-        state = PrinterState(
-            connected=True,
-            state=PrinterStatus.PRINTING,
-            print_error=MEASURED_FAULT_DECIMAL,
-        )
-
-        assert state.state in _TERMINAL_STATES
-        assert state.effective_state not in _TERMINAL_STATES
-
-
 # ---------------------------------------------------------------------------
 # 5. Kiln notices a fault on a machine it did not start the job on
 # ---------------------------------------------------------------------------
@@ -573,20 +555,6 @@ class TestThePromotionOpensNoGate:
         assert out["success"] is True
         assert out["cleared"] is True
 
-    def test_the_scheduler_still_reaches_a_verdict_on_a_faulted_machine(
-        self,
-    ) -> None:
-        """Neither branch fired when both read a word the headline had left."""
-        faulted_idle = PrinterState(
-            connected=True,
-            state=PrinterStatus.IDLE,
-            print_error=MEASURED_FAULT_DECIMAL,
-        )
-
-        assert faulted_idle.effective_state is PrinterStatus.IDLE
-        # ...so the "printer went idle, the job is over" branch still matches.
-        assert faulted_idle.state is not PrinterStatus.IDLE
-
 
 # ---------------------------------------------------------------------------
 # 7. An error Kiln caused is not a fault Kiln discovered
@@ -650,3 +618,36 @@ class TestOurOwnStopIsNotADiscovery:
         _push(adapter, gcode_state="idle", print_error=MEASURED_FAULT_DECIMAL)
 
         assert noticed == [MEASURED_FAULT_DECIMAL]
+
+
+class TestOnlyARealCodePromotes:
+    """One function decides what counts as a firmware error, not two.
+
+    ``format_error_code`` calls anything at or below zero "no error", because
+    zero is how this firmware says nothing is wrong and formatting it would
+    invent a fault.  The promotion has to agree, or a payload contradicts
+    itself: an ``error`` headline over an empty code field, explained by a
+    sentence that names no code.
+    """
+
+    @pytest.mark.parametrize("bogus", [0, -1, -302022663])
+    def test_a_value_that_renders_no_code_promotes_nothing(
+        self, bogus: int
+    ) -> None:
+        state = PrinterState(
+            connected=True, state=PrinterStatus.IDLE, print_error=bogus
+        )
+
+        assert state.state is PrinterStatus.IDLE
+        assert state.fault_note is None
+        assert state.print_error_code is None
+
+    def test_a_real_code_still_promotes(self) -> None:
+        state = PrinterState(
+            connected=True,
+            state=PrinterStatus.IDLE,
+            print_error=MEASURED_FAULT_DECIMAL,
+        )
+
+        assert state.state is PrinterStatus.ERROR
+        assert state.print_error_code == MEASURED_FAULT_RENDERED

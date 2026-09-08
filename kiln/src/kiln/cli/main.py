@@ -4081,7 +4081,7 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
             job = adapter.get_job()
 
             # Terminal states
-            if state.effective_state == PrinterStatus.IDLE:
+            if state.confirmed_state == PrinterStatus.IDLE:
                 # If we never saw a print, it's already idle
                 data = {
                     "final_state": state.state.value,
@@ -4091,10 +4091,9 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
                 click.echo(format_response("success", data=data, json_mode=json_mode))
                 return
 
-            # effective_state, not state: a fault raised DURING a print
-            # promotes the headline to ERROR while the machine keeps
-            # printing, and calling the job over there would stop the wait
-            # on a print that is still running.
+            # ``effective_state``: a fault takes the headline while the machine goes
+            # on doing what it was doing, and this asks what it is doing.  Reading
+            # the bare state here would
             if state.effective_state in (
                 PrinterStatus.ERROR,
                 PrinterStatus.OFFLINE,

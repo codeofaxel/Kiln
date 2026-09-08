@@ -145,7 +145,7 @@ class _FleetToolsPlugin:
             Requires Enterprise license.
             """
             try:
-                from kiln.printers.base import status_is_occupied
+                from kiln.printers.base import row_run_state, status_is_occupied
 
                 grouped = _srv._get_registry().get_fleet_status_by_site()
                 result = {}
@@ -161,7 +161,7 @@ class _FleetToolsPlugin:
                         "busy": [
                             p["name"]
                             for p in statuses
-                            if status_is_occupied(p.get("state"))
+                            if status_is_occupied(row_run_state(p))
                         ],
                     }
                 return {"success": True, "sites": result, "site_count": len(result)}
