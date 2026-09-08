@@ -1,16 +1,19 @@
 """Placed content must land on the PART, not merely inside the face's box.
 
-Two defects, one root, found on a license-plate frame on 2026-09-07.
+Two defects, one root, found on a real frame-shaped product on
+2026-09-07.
 
-The frame's top face is a ring with one deep rail — 29.7 mm at the top,
-12.7 mm elsewhere — so its area centroid sits 18.4 mm above the middle of
-its outline.  ``generate_emboss_scad`` clamped placement offsets against
+The class of face that exposes them: a ring whose window is not centred
+in its outline, so one rail is deeper than the others.  Its area
+centroid then sits toward the deep rail, away from the middle of its
+outline.  ``generate_emboss_scad`` clamped placement offsets against
 ``±height/2`` (i.e. about the OUTLINE's middle) and then applied them
-from ``face["center"]`` (the CENTROID).  The two disagreed by exactly the
-asymmetry: top-rail text asked for at y=67.7 landed at 86.1 and was
-sheared by the outer edge at 82.55; bottom-rail text landed in the window
-and carved air.  Every symmetric product was fine, because on a disc or a
-rectangle the two centres are the same point — which is why it survived.
+from ``face["center"]`` (the CENTROID).  The two disagreed by exactly
+the asymmetry: text asked for on the deep rail landed past the outer
+edge and was sheared; text asked for on the thin rail landed in the
+window and carved air.  Every symmetric product was fine, because on a
+disc or a rectangle the two centres are the same point — which is why
+it survived.
 
 The second defect is that even a correct anchor cannot make "inside the
 bounding box" mean "on the part".  A ring's window IS inside its bbox.
@@ -79,15 +82,21 @@ needs_openscad = pytest.mark.skipif(
 )
 
 # ---------------------------------------------------------------------
-# The US plate frame that found the bug — restated, not imported, so
-# these tests judge the engine against a known geometry rather than
-# against whatever kiln-pro derives today.
+# The asymmetric ring.  Deliberately synthetic and round: a plate with a
+# window pushed OFF its centre by one number, ``WINDOW_SHIFT``.  Every
+# other dimension follows from that, so the reader sees the mechanism
+# — one rail deeper than the rest — rather than a measurement.  The
+# centroid offset is computed, not typed; it is the quantity the bug
+# was proportional to.
 # ---------------------------------------------------------------------
-FRAME_W, FRAME_H, FRAME_T = 317.5, 165.1, 5.0
-WIN_W, WIN_H = 292.1, 122.675
-TOP_RAIL, SIDE_RAIL = 29.725, 12.7
-WIN_CY = (SIDE_RAIL - TOP_RAIL) / 2.0          # window pushed down: -8.5125
-TOP_RAIL_CY = FRAME_H / 2.0 - TOP_RAIL / 2.0   # 67.6875
+FRAME_W, FRAME_H, FRAME_T = 300.0, 160.0, 5.0
+WIN_W, WIN_H = 260.0, 120.0
+WINDOW_SHIFT = -10.0                            # window pushed down
+WIN_CY = WINDOW_SHIFT
+SIDE_RAIL = (FRAME_W - WIN_W) / 2.0             # 20
+TOP_RAIL = (FRAME_H - WIN_H) / 2.0 - WIN_CY     # 30 — the deep rail
+BOTTOM_RAIL = (FRAME_H - WIN_H) / 2.0 + WIN_CY  # 10 — the thin rail
+TOP_RAIL_CY = FRAME_H / 2.0 - TOP_RAIL / 2.0    # 65
 CENTROID_Y = (WIN_W * WIN_H * -WIN_CY) / (FRAME_W * FRAME_H - WIN_W * WIN_H)
 
 
@@ -211,7 +220,7 @@ def _grille_tris():
 def meshes(tmp_path_factory):
     d = tmp_path_factory.mktemp("material")
     hw, hh = FRAME_W / 2.0, FRAME_H / 2.0
-    us = _ring_tris(
+    asym = _ring_tris(
         -hw, hw, -hh, hh,
         -WIN_W / 2.0, WIN_W / 2.0, WIN_CY - WIN_H / 2.0, WIN_CY + WIN_H / 2.0,
         0.0, FRAME_T,
@@ -222,7 +231,7 @@ def meshes(tmp_path_factory):
     # FRONT face — a ring whose axis is y.
     fw = _permute_xz_to_xy(_ring_tris(-50, 50, 0, 60, -30, 30, 15, 45, -4.0, 4.0))
     return {
-        "us_ring": _tris_to_stl(us, d / "us_ring.stl"),
+        "asym_ring": _tris_to_stl(asym, d / "asym_ring.stl"),
         "grille": _tris_to_stl(_grille_tris(), d / "grille.stl"),
         "sym_ring": _tris_to_stl(sym, d / "sym_ring.stl"),
         "box": _tris_to_stl(box, d / "box.stl"),
@@ -274,18 +283,18 @@ def _deboss_floor_bbox(stl_path: str, thickness: float):
 # 1. Two centres
 # =====================================================================
 class TestTwoCentres:
-    def test_writer_and_resolver_agree_on_the_frame(self, meshes):
-        f = resolve_decoratable_face(meshes["us_ring"], "top")
+    def test_writer_and_resolver_agree_on_the_ring(self, meshes):
+        f = resolve_decoratable_face(meshes["asym_ring"], "top")
         assert f["normal"][2] > 0.99
         assert f["width_mm"] == pytest.approx(FRAME_W)
         assert f["height_mm"] == pytest.approx(FRAME_H)
 
     def test_asymmetric_ring_has_two_different_centres(self, meshes):
-        f = resolve_decoratable_face(meshes["us_ring"], "top")
+        f = resolve_decoratable_face(meshes["asym_ring"], "top")
         # The centroid rides up toward the deep rail; the outline's middle
-        # does not move.  This 18.4 mm IS the bug's magnitude.
+        # does not move.  The gap between them IS the bug's magnitude.
         assert f["center"][1] == pytest.approx(CENTROID_Y, abs=0.02)
-        assert f["center"][1] > 18.0
+        assert f["center"][1] > 10.0
         assert f["bbox_center"] == pytest.approx((0.0, 0.0, FRAME_T), abs=1e-3)
 
     @pytest.mark.parametrize("name", ["box", "sym_ring", "disc"])
@@ -300,14 +309,14 @@ class TestTwoCentres:
 # =====================================================================
 class TestPlacementAnchor:
     def test_offsets_are_applied_from_the_outline_centre(self, meshes, tmp_path):
-        f = resolve_decoratable_face(meshes["us_ring"], "top")
+        f = resolve_decoratable_face(meshes["asym_ring"], "top")
         r = generate_emboss_scad(
-            model_path=meshes["us_ring"], content_info=_text(16), face=f,
+            model_path=meshes["asym_ring"], content_info=_text(16), face=f,
             output_dir=str(tmp_path), offset_y_mm=TOP_RAIL_CY, min_edge_margin_mm=0.0,
         )
         tx, ty, _ = _outer_translate(r["scad_path"])
-        # Not 18.39.  With the centroid as anchor the rail text lands at
-        # 86.1 and is sheared by the outer edge at 82.55.
+        # Not the centroid.  Anchored there, deep-rail text lands past
+        # the outer edge and is sheared.
         assert (tx, ty) == pytest.approx((0.0, 0.0), abs=1e-3)
 
     def test_symmetric_faces_anchor_where_they_always_did(self, meshes, tmp_path):
@@ -340,42 +349,42 @@ class TestPlacementAnchor:
 # =====================================================================
 class TestFootprintMustLandOnThePart:
     def test_text_in_the_window_is_refused(self, meshes, tmp_path):
-        f = resolve_decoratable_face(meshes["us_ring"], "top")
-        # Inside the 317x165 bbox — the clamp is happy — and over air.
+        f = resolve_decoratable_face(meshes["asym_ring"], "top")
+        # Inside the outline's bbox — the clamp is happy — and over air.
         with pytest.raises(ContentOffFaceError, match="would carve nothing"):
             generate_emboss_scad(
-                model_path=meshes["us_ring"], content_info=_text(8), face=f,
+                model_path=meshes["asym_ring"], content_info=_text(8), face=f,
                 output_dir=str(tmp_path), offset_y_mm=0.0, min_edge_margin_mm=0.0,
             )
 
     def test_text_too_tall_for_its_rail_is_disclosed(self, meshes, tmp_path):
-        f = resolve_decoratable_face(meshes["us_ring"], "top")
-        # Centred on the rail, but 40 mm of glyph on a 29.7 mm rail spills
+        f = resolve_decoratable_face(meshes["asym_ring"], "top")
+        # Centred on the rail, but 40 mm of glyph on a 30 mm rail spills
         # into the window.  Most of it still carves, so this is a warning,
         # not a refusal — the same shape a vent grille produces.
         r = generate_emboss_scad(
-            model_path=meshes["us_ring"], content_info=_text(40), face=f,
+            model_path=meshes["asym_ring"], content_info=_text(40), face=f,
             output_dir=str(tmp_path), offset_y_mm=TOP_RAIL_CY, min_edge_margin_mm=0.0,
         )
         assert any("crosses an opening" in w for w in r.get("warnings") or []), r.get("warnings")
 
     def test_rail_text_that_fits_is_accepted(self, meshes, tmp_path):
-        f = resolve_decoratable_face(meshes["us_ring"], "top")
+        f = resolve_decoratable_face(meshes["asym_ring"], "top")
         r = generate_emboss_scad(
-            model_path=meshes["us_ring"], content_info=_text(16), face=f,
+            model_path=meshes["asym_ring"], content_info=_text(16), face=f,
             output_dir=str(tmp_path), offset_y_mm=TOP_RAIL_CY, min_edge_margin_mm=0.0,
         )
         assert os.path.isfile(r["scad_path"])
 
     def test_edge_to_edge_is_accepted_and_a_fifth_of_a_millimetre_over_is_not(self, meshes):
         # The primitive, driven directly so the footprint is exact.  Content
-        # sized to the rail on purpose (a frame's rail text at margin 0)
+        # sized to the rail on purpose (rail text at margin 0)
         # must not be refused for a hair it never had; content that really
         # overhangs must be.
-        f = resolve_decoratable_face(meshes["us_ring"], "top")
+        f = resolve_decoratable_face(meshes["asym_ring"], "top")
         a = f["bbox_center"]
-        assert _missed(meshes["us_ring"], f, a, 100.0, TOP_RAIL, 0.0, TOP_RAIL_CY) == []
-        assert _missed(meshes["us_ring"], f, a, 100.0, TOP_RAIL + 0.2, 0.0, TOP_RAIL_CY)
+        assert _missed(meshes["asym_ring"], f, a, 100.0, TOP_RAIL, 0.0, TOP_RAIL_CY) == []
+        assert _missed(meshes["asym_ring"], f, a, 100.0, TOP_RAIL + 0.2, 0.0, TOP_RAIL_CY)
 
     def test_an_overhang_on_one_side_only_is_caught(self, meshes):
         f = resolve_decoratable_face(meshes["box"], "top")
@@ -387,18 +396,18 @@ class TestFootprintMustLandOnThePart:
         assert _missed(meshes["box"], f, a, 50.0, 20.0, 24.9, 0.0) == []
 
     def test_content_bridging_the_window_is_seen_not_just_its_corners(self, meshes):
-        # A tall vertical mark centred on the frame: 20 wide, 160 tall.  All
-        # four corners land on the rails (top rail from y=52.8, bottom rail
-        # to y=-69.85), and everything between them is window.  A check
+        # A tall vertical mark centred on the ring: 20 wide, 150 tall.  All
+        # four corners land on the rails (deep rail from y=50, thin rail
+        # below y=-70), and everything between them is window.  A check
         # that sampled only corners would pass it and carve nothing for
-        # most of its height; the interior grid is what refuses it.
-        f = resolve_decoratable_face(meshes["us_ring"], "top")
+        # most of its height; the interior grid is what sees it.
+        f = resolve_decoratable_face(meshes["asym_ring"], "top")
         a = f["bbox_center"]
-        missed = _missed(meshes["us_ring"], f, a, 20.0, 160.0, 0.0, 0.0)
+        missed = _missed(meshes["asym_ring"], f, a, 20.0, 150.0, 0.0, 0.0)
         assert missed
         # ...and the corners themselves were fine — this is an INTERIOR
         # miss, which is the point.
-        assert not any(abs(sy) > 79.0 for _, sy in missed)
+        assert not any(abs(sy) > 74.0 for _, sy in missed)
 
     def test_bottom_face_is_judged_in_its_flipped_frame(self, meshes, tmp_path):
         # rotate([180,0,0]) sends local +y to world -y, so the deep rail —
@@ -406,13 +415,13 @@ class TestFootprintMustLandOnThePart:
         # A sign error here would put the text in the window, so the two
         # halves of this test are what pin the flip.
         r = generate_emboss_scad(
-            model_path=meshes["us_ring"], content_info=_text(12), face=f0 if (f0 := resolve_decoratable_face(meshes["us_ring"], "bottom")) else None,
+            model_path=meshes["asym_ring"], content_info=_text(12), face=f0 if (f0 := resolve_decoratable_face(meshes["asym_ring"], "bottom")) else None,
             output_dir=str(tmp_path / "ok"), offset_y_mm=-TOP_RAIL_CY, min_edge_margin_mm=0.0,
         )
         assert not (r.get("warnings") or [])
         with pytest.raises(ContentOffFaceError):
             generate_emboss_scad(
-                model_path=meshes["us_ring"], content_info=_text(12), face=f0,
+                model_path=meshes["asym_ring"], content_info=_text(12), face=f0,
                 output_dir=str(tmp_path / "bad"), offset_y_mm=0.0, min_edge_margin_mm=0.0,
             )
 
@@ -442,14 +451,14 @@ class TestFootprintMustLandOnThePart:
         svg = tmp_path / "logo.svg"
         svg.write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40"><rect width="100" height="40"/></svg>')
         info = {"type": "svg", "svg_path": str(svg), "width": 100, "height": 40, "aspect_ratio": 2.5}
-        f = resolve_decoratable_face(meshes["us_ring"], "top")
+        f = resolve_decoratable_face(meshes["asym_ring"], "top")
         with pytest.raises(ContentOffFaceError, match="svg content"):
             generate_emboss_scad(
-                model_path=meshes["us_ring"], content_info=info, face=f,
+                model_path=meshes["asym_ring"], content_info=info, face=f,
                 output_dir=str(tmp_path / "win"), scale=0.3, offset_y_mm=0.0, min_edge_margin_mm=0.0,
             )
         generate_emboss_scad(
-            model_path=meshes["us_ring"], content_info=info, face=f,
+            model_path=meshes["asym_ring"], content_info=info, face=f,
             output_dir=str(tmp_path / "rail"), absolute_size_mm=40.0, offset_y_mm=TOP_RAIL_CY, min_edge_margin_mm=0.0,
         )
 
@@ -459,14 +468,14 @@ class TestFootprintMustLandOnThePart:
         dat = tmp_path / "flat.dat"
         dat.write_text("\n".join(" ".join("1" for _ in range(4)) for _ in range(4)))
         info = {"type": "heightmap", "dat_path": str(dat), "width_px": 4, "height_px": 4, "aspect_ratio": 1.0}
-        f = resolve_decoratable_face(meshes["us_ring"], "top")
+        f = resolve_decoratable_face(meshes["asym_ring"], "top")
         with pytest.raises(ContentOffFaceError, match="heightmap content"):
             generate_emboss_scad(
-                model_path=meshes["us_ring"], content_info=info, face=f,
+                model_path=meshes["asym_ring"], content_info=info, face=f,
                 output_dir=str(tmp_path / "win"), scale=0.3, offset_y_mm=0.0, min_edge_margin_mm=0.0,
             )
         generate_emboss_scad(
-            model_path=meshes["us_ring"], content_info=info, face=f,
+            model_path=meshes["asym_ring"], content_info=info, face=f,
             output_dir=str(tmp_path / "rail"), absolute_size_mm=20.0, offset_y_mm=TOP_RAIL_CY, min_edge_margin_mm=0.0,
         )
 
@@ -518,7 +527,7 @@ def compiled_meshes(tmp_path_factory):
     d = tmp_path_factory.mktemp("compiled")
     hw, hh = FRAME_W / 2.0, FRAME_H / 2.0
     scad = {
-        "us_ring": (
+        "asym_ring": (
             f"difference(){{ translate([{-hw},{-hh},0]) cube([{FRAME_W},{FRAME_H},{FRAME_T}]); "
             f"translate([{-WIN_W / 2.0},{WIN_CY - WIN_H / 2.0},-1]) cube([{WIN_W},{WIN_H},{FRAME_T + 2}]); }}"
         ),
@@ -576,12 +585,12 @@ class TestCompiledTruth:
             assert mine == pytest.approx(truth, abs=1e-3), f"normal {n}"
 
     def test_rail_text_compiles_onto_the_rail(self, compiled_meshes, tmp_path):
-        """The finding, end to end: text asked for at the top rail's centre
-        is carved there, fully on the rail.  Pre-fix it was carved at
-        y=82.26..82.55 — a 0.3 mm sliver at the outer edge."""
-        f = resolve_decoratable_face(compiled_meshes["us_ring"], "top")
+        """The finding, end to end: text asked for at the deep rail's centre
+        is carved there, fully on the rail.  Pre-fix only a sliver at the
+        outer edge survived."""
+        f = resolve_decoratable_face(compiled_meshes["asym_ring"], "top")
         r = generate_emboss_scad(
-            model_path=compiled_meshes["us_ring"], content_info=_text(16), face=f,
+            model_path=compiled_meshes["asym_ring"], content_info=_text(16), face=f,
             output_dir=str(tmp_path), depth_mm=1.2, offset_y_mm=TOP_RAIL_CY, min_edge_margin_mm=0.0,
         )
         subprocess.run(["openscad", "-o", r["output_stl_path"], r["scad_path"]], capture_output=True, check=True)

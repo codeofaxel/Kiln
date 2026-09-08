@@ -315,8 +315,8 @@ def _apply_rotation(m: list[list[float]], v: tuple[float, float, float]) -> tupl
 
 #: How far inside its own edge the footprint is sampled.  Absorbs the
 #: float noise between a measured glyph run and the tessellated face it
-#: was fitted to, so content sized edge-to-edge on purpose (a plate
-#: frame's rail text at margin 0) is not refused for a hair it never had.
+#: was fitted to, so content sized edge-to-edge on purpose (rail text
+#: at margin 0) is not refused for a hair it never had.
 _FOOTPRINT_EDGE_EPS_MM = 0.05
 
 #: Grid pitch for footprint samples.  Fine enough that a hole narrower
@@ -646,8 +646,8 @@ class ContentOffFaceError(ValueError):
     when NONE of the content's footprint has material beneath it — it
     sits entirely over a hole in the face.  A frame's window is inside
     the face's bounding box, so the offset clamp is happy and the carve
-    reports success while producing an untouched part (found on a plate
-    frame, 2026-09-07: bottom-rail text landed in the window).
+    reports success while producing an untouched part (found on a
+    frame-shaped product, 2026-09-07: text landed in the window).
 
     Why only at zero, when partial misses merely warn: measured on real
     geometry, a decoration crossing a legitimate vent grille (40% open)
