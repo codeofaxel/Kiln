@@ -955,6 +955,7 @@ def emboss_text_on_face(
     output_stl: str | None = None,
     emit_post_flip_preview: bool = True,
     collect_warnings: list[str] | None = None,
+    face: dict[str, Any] | None = None,
 ) -> str:
     """Apply a single line of text as emboss/deboss onto a face of an STL.
 
@@ -1007,6 +1008,15 @@ def emboss_text_on_face(
         fit/clamp warnings (explicit size clamped, offset clamped,
         rim-fit on a round face) are appended to it AND logged — the
         engine's verdicts must never vanish between here and the user.
+    :param face: A face dict already resolved against the UNDECORATED
+        body, used verbatim instead of re-resolving *body_stl*.  A
+        caller chaining carves onto one surface must pass it: the
+        second carve's *body_stl* is the first carve's output, and a
+        face re-resolved from that mesh is measured partly off the
+        first carve's own geometry.  See
+        :func:`emboss_text_lines_on_face` for the failure this
+        prevents.  ``None`` (default) resolves from *body_stl*, which
+        is right for a single carve on a fresh body.
     :returns: Absolute path to the new STL with text applied.
     :raises FileNotFoundError: If *body_stl* doesn't exist.
     :raises ValueError: If face detection fails.
@@ -1039,7 +1049,11 @@ def emboss_text_on_face(
     # products calling this build a canvas and hand it over unnamed — a
     # wedge nameplate's angled face is the whole product and is largest by
     # area, while its literal top is a millimetre-tall edge.
-    face = resolve_decoratable_face(body_stl, face_name, auto="largest")
+    # A caller that already resolved the face against the undecorated body
+    # hands it in; re-resolving here would measure it off geometry this
+    # same helper carved on the previous call.
+    if face is None:
+        face = resolve_decoratable_face(body_stl, face_name, auto="largest")
 
     # 2. Set up output paths
     if output_dir is None:
@@ -1160,6 +1174,7 @@ def emboss_text_lines_on_face(
     output_dir: str | None = None,
     hierarchy: list[float] | None = None,
     collect_warnings: list[str] | None = None,
+    face: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> str:
     """Apply multiple lines of text to a face by chaining emboss calls.
@@ -1202,6 +1217,10 @@ def emboss_text_lines_on_face(
         (round-face fitting, tight fits, degraded estimate mode) and any
         engine clamp warnings are appended to it, so nothing the
         pipeline decides is silent.  Everything is also logged.
+    :param face: Pre-resolved face dict to lay every line against,
+        instead of resolving one from *body_stl*.  Pass it when
+        *body_stl* is itself already carved and the reference surface
+        you mean is the one from before that carve.
     :returns: Final STL path with all lines applied.
     :raises DepthBelowLegibilityFloor: If *depth_mm* is below
         ``nozzle_diameter_mm × 3``.
@@ -1225,11 +1244,20 @@ def emboss_text_lines_on_face(
             nozzle_diameter_mm=nozzle_diameter_mm,
         )
 
-    # Resolve the face once so the layout math sees the same face every
-    # per-line emboss call will target.
+    # Resolve the face once, against the UNDECORATED body, and hand that
+    # same dict to every per-line call below.  Not an optimisation — the
+    # carves are chained (line 2's input mesh is line 1's output), so a
+    # face re-resolved per line is measured partly off the previous
+    # line's own glyphs.  The plane subgrouper keeps them together
+    # whenever the relief is under its 1.5mm gap (a 1.2mm floor emboss
+    # always is), so the reference creeps outward line by line and each
+    # line lands further off the real surface than the last.  Measured
+    # 2026-09-08 on a 3mm pet tag: line 2 anchored 0.65mm above the face
+    # and printed as glyphs floating in mid-air, detached from the tag.
     from kiln.surface_intelligence import resolve_decoratable_face
 
-    face = resolve_decoratable_face(body_stl, face_name, auto="largest")
+    if face is None:
+        face = resolve_decoratable_face(body_stl, face_name, auto="largest")
 
     # All sizing decisions — measured glyph metrics, the 0.85 visual
     # margin, hierarchy ratios, elliptical-face inscribed fitting, and
@@ -1267,6 +1295,9 @@ def emboss_text_lines_on_face(
             min_edge_margin_mm=min_edge_margin_mm,
             offset_y_mm=offset,
             font_size_mm=per_line_sizes[i],
+            # The face resolved above, not one re-derived from `current`
+            # — `current` already carries the previous lines' carves.
+            face=face,
             output_dir=output_dir,
             output_stl=(
                 os.path.join(output_dir, f"line_{i}.stl") if output_dir else None
