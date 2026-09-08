@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-07T21:49:43.468329+00:00",
+  "generated": "2026-09-08T01:06:05.580346+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -17846,7 +17846,7 @@
     },
     {
       "name": "list_decoratable_faces",
-      "description": "List face names that may be passed to ``decorate_surface``.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List a product's decoratable faces and the ``decorate_surface`` ``face=`` value for each.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "product_intelligence",
