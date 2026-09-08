@@ -2792,7 +2792,12 @@ class _PauseKeepAlive:
             # cancel, error, or operator pressed buttons on the printer).
             try:
                 state = adapter.get_state()
-                if state.state != PrinterStatus.PAUSED:
+                # effective_state, not state: a fault promotes the
+                # HEADLINE while the machine goes on doing what it was
+                # doing, and this asks what it is doing.  Reading the bare
+                # state here would exit this
+                # keep-alive on a fault that arrived DURING the pause.
+                if state.effective_state != PrinterStatus.PAUSED:
                     logger.debug(
                         "Pause keep-alive: printer state is %s, not paused — exiting loop",
                         state.state,
@@ -4175,6 +4180,11 @@ _LITE_PRINTER_KEYS = (
     # cache, so it is the one where a blank without a sentence would be
     # read as "this printer does not report temperatures".
     "temperature_note",
+    # What the fault in `print_error` MEANS, beside the `error` headline it
+    # produced.  Rides the lite path because lite is what the inline monitor
+    # and the hosted door poll: a state word that says "error" with no
+    # sentence sends the reader back to a number they cannot look up.
+    "fault_note",
     # How the LAST job ended — success / failed / cancelled — on its own
     # axis, so `idle` keeps meaning ready without also meaning finished.
     # The web's completion card and any poller watching for an ending need
@@ -4305,6 +4315,13 @@ def printer_status(
         temperature_note = response["printer"].get("temperature_note")
         if isinstance(temperature_note, str) and temperature_note:
             response["temperature_warning"] = temperature_note
+        # The fault, mirrored to the same place, for the same reason: the
+        # `printer` block already carries it beside the `error` state it
+        # explains, and a reader who scans only the top-level warnings must
+        # not be the one reader who misses that this machine is faulted.
+        fault_note = response["printer"].get("fault_note")
+        if isinstance(fault_note, str) and fault_note:
+            response["fault_warning"] = fault_note
         # A printer holding a job it already finished, which is also what
         # greys out Load and Unload on its own screen.  Named with its
         # remedy, because no amount of retrying from here clears it.
@@ -4734,6 +4751,12 @@ def monitor_print(
             if _pretty_err
             else ("None" if not print_error else f"Code {print_error}")
         )
+        # A code on its own is a number to go and search for.  The adapter
+        # has already looked it up; carrying its reading here is what makes
+        # the line answerable without leaving the report.
+        _fault_note = sd.get("fault_note")
+        if _fault_note:
+            error_str = f"{error_str} — {_fault_note}"
 
         # --- Snapshot ---
         snapshot_line = "No camera available"
@@ -7153,9 +7176,15 @@ def clear_printer_error(printer_name: str | None = None) -> dict:
         # acknowledgement that resets a board would end it far less gracefully
         # than cancel_print would.
         state = adapter.get_state()
-        if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+        # effective_state, not state: a fault promotes the HEADLINE while
+        # the machine goes on doing what it was doing, and this asks what
+        # it is doing.  Reading the bare state here would read a faulted
+        # live print as not-live and let an acknowledgement through mid-job,
+        # which is the exact thing this refusal exists to prevent.
+        if state.effective_state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
             return _error_dict(
-                f"Not clearing anything while a print is {state.state.value}. "
+                f"Not clearing anything while a print is "
+                f"{state.effective_state.value}. "
                 "Use cancel_print first if you mean to stop it.",
                 code="PRINTER_BUSY",
             )
@@ -9336,7 +9365,9 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
             if _z_home_cmds:
                 _live_state = None
                 try:
-                    _live_state = adapter.get_state().state
+                    # Through the headline: a fault raised mid-print must
+                    # not turn this mid-print Z-home block into a no-op.
+                    _live_state = adapter.get_state().effective_state
                 except Exception:  # noqa: BLE001 — unreachable printer: fail open
                     _live_state = None
                 if _live_state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
@@ -11950,7 +11981,13 @@ def await_print_completion(
                 )
                 last_pct = pct
 
-            if state.state == PrinterStatus.IDLE:
+            # effective_state, not state: a fault promotes the HEADLINE
+            # while the machine goes on doing what it was doing, and this
+            # asks what it is doing.  Reading the bare state here would
+            # leave a print
+            # whose machine latched an unrelated fault with no ending at all:
+            # neither this branch nor the failure one below would fire.
+            if state.effective_state == PrinterStatus.IDLE:
                 # Print hours are NOT recorded here.  The ``adapter.get_state()``
                 # above already fed the terminal transition through the
                 # adapter-generic lifecycle wrap, which banks the duration
@@ -11966,7 +12003,11 @@ def await_print_completion(
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
                 })
-            if state.state == PrinterStatus.ERROR:
+            # effective_state, not state: a fault raised DURING a print
+            # makes the headline `error` while the machine keeps printing,
+            # and calling that job over would end the watch on a print that
+            # is still running.  The run state answers "has it ended".
+            if state.effective_state == PrinterStatus.ERROR:
                 return _attach_goal({
                     "success": True,
                     "outcome": "failed",

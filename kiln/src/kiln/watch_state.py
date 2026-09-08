@@ -3,10 +3,12 @@
 The coverage statement has two layers.  Layer 1 is what the PRINTER's own
 detectors watch, from the makers' pages (kiln-pro).  This module is the
 input for layer 2 — what KILN adds on this machine — and it reports FACTS
-read from the watchers actually running in this process: the print
-watchdog Kiln attaches to a print it started, an opt-in health session, a
-background watch, whether a camera Kiln can read exists, and whether the
-kiln-pro vision detector is armed to read the frames.  Never what a
+read from the watchers actually running in this process: the live
+connection itself, which surfaces a printer's own faults on every read
+whoever started the job, the print watchdog Kiln attaches to a print it
+started, an opt-in health session, a background watch, whether a camera
+Kiln can read exists, and whether the kiln-pro vision detector is armed to
+read the frames.  Never what a
 watcher could do in principle: an unattached watchdog is reported
 unattached, a print Kiln did not start has no watchdog, and a camera
 nobody registered is not readable.
@@ -43,6 +45,28 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
 
     health = MonitorPolicy()
     return {
+        # First, because it is the only one that needs no print — and its
+        # absence from this list is what made the report read as "nothing is
+        # watching" on 2026-09-07, while Kiln's open connection was parsing
+        # the very fault the user had to point out.
+        "connection": {
+            "title": "the live connection",
+            "attached": (
+                "whenever Kiln can reach the printer, whether or not Kiln "
+                "started what it is doing"
+            ),
+            "checks": {
+                "printer_fault": (
+                    "a fault the printer itself reports, which becomes the "
+                    "machine's state on every read rather than a field under "
+                    "it, and is noticed once when it appears"
+                ),
+            },
+            "acts": (
+                "reports only; it never stops or commands a printer, because "
+                "the job may be one a person started by hand"
+            ),
+        },
         "watchdog": {
             "title": "the print watchdog",
             "attached": "to every print Kiln starts, for as long as it runs",
@@ -108,6 +132,25 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
             "acts": "raises an alert the recovery engine reads",
         },
     }
+
+
+def _connection_state(adapter: Any) -> dict[str, Any]:
+    """Whether Kiln holds a live connection to this printer.
+
+    The watcher that needs no print, and the answer to the question the
+    other blocks were quietly getting wrong.  On 2026-09-07 a filament load
+    started at the printer's own touchscreen failed with 1200-8007; the
+    watchdog was unattached, no health session and no watch were running, so
+    every block in this state read false and the report said, in effect,
+    that nothing was watching.  Kiln was connected the whole time and had
+    already parsed the code.  What was missing was not a watcher — it was
+    this fact.
+
+    ``live`` is about the connection, not about the printer being healthy:
+    an adapter the caller could resolve is one Kiln can read, and a read is
+    what surfaces a fault.
+    """
+    return {"live": adapter is not None}
 
 
 def _camera_state(adapter: Any) -> dict[str, Any]:
@@ -231,6 +274,7 @@ def kiln_watch_state(
         "printing": is_active_print_state(state_word) if isinstance(state_word, str) else None,
     }
     readers = (
+        ("connection", lambda: _connection_state(adapter), {"live": False}),
         ("camera", lambda: _camera_state(adapter), {"readable": False, "source": None}),
         ("watchdog", lambda: _watchdog_state(name), {"attached": False, "running": False}),
         ("health", lambda: _health_state(name), {"active": False}),

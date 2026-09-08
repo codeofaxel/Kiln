@@ -237,6 +237,42 @@ So the rule is on the reading itself, not on any one screen:
 
 ---
 
+## Faults Kiln Can See
+
+A fault the printer is reporting is the machine's **state**, not a field
+underneath one.  Measured on an A1 (2026-09-07): `printer_status` answered
+`idle` while the same payload carried `print_error: 302022663` --
+`1200-8007`, "failed to extrude the filament" -- and the printer's own screen
+held a modal error dialog.  Everything reading the headline saw a healthy,
+ready machine.
+
+So the rule is the same shape as the two above it: the fact that decides what
+you should do next takes the headline, and the fact it displaces is kept.
+
+- A printer reporting a fault nobody has cleared reads `error`, whatever it
+  was doing, and carries a `fault_note` naming the fault in plain language
+  with the code beside it for lookup.  The raw `print_error` and the
+  screen-form `print_error_code` are unchanged.
+- What the machine was **doing** moves to `last_known_state`, and everything
+  asking that question -- the occupancy gates, the print watches, the
+  mid-print refusals -- reads it.  A fault raised mid-print does not free the
+  bed, end the watch, or unlock a filament change.
+- `preflight_check` refuses a faulted printer.  `clear_printer_error`
+  acknowledges the latch, and refuses while a print is live.
+- A stale reading still outranks a fault: Kiln cannot vouch for a fault code
+  in a reading it cannot vouch for, and the headline already says to go and
+  look at the machine.
+
+Kiln notices a fault on any printer it is connected to, **including one it
+did not start the job on**.  The connection is already open and the code is
+already parsed; staying quiet about it would be the same dishonesty as the
+`idle` above.  It reports and does not act -- every read shows the fault, and
+the fault's leading edge raises one `printer.error` event -- because a job
+started at the printer's own touchscreen is the operator's to stop.  Only the
+print watchdog stops a machine, and it stays attached to prints Kiln started.
+
+---
+
 ## What Kiln Will NOT Do
 
 The safety system actively prevents the following:

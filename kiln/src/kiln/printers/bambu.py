@@ -56,9 +56,11 @@ from kiln.printers.base import (
     UploadResult,
     _record_print_duration,
     capture_rtsp_frame,
+    describe_unacknowledged_fault,
     diagnose_read_failure,
     diagnosed_state,
     find_ffmpeg,
+    format_error_code,
     outcome_printer_name,
 )
 from kiln.printers.command_verdict import CommandVerdict
@@ -1131,6 +1133,14 @@ class BambuAdapter(PrinterAdapter):
         # age is not the age of the state a caller is told about.  0.0 means no
         # push has ever carried it.
         self._gcode_state_time: float = 0.0
+        # When Kiln last told this printer to stop.  A cancel walks Bambu
+        # firmware through ``failed`` with a real code attached -- measured
+        # on an A1 (2026-08-14): print_error 50348044 for about four seconds
+        # -- and an error Kiln CAUSED is not a fault Kiln discovered.  The
+        # state still reports it; what this suppresses is the notice, which
+        # would otherwise announce every deliberate stop as a fault found on
+        # a machine nobody was watching.
+        self._stop_sent_at: float = 0.0
         # How often THIS printer actually reports, measured from the gaps
         # between the pushes above.  A Bambu publishes roughly once a second
         # while a print runs and far more slowly when it sits idle, so the
@@ -1803,6 +1813,12 @@ class BambuAdapter(PrinterAdapter):
         job_id_for_hook: Any = None
         file_name_for_hook: Any = None
         print_error_for_hook: int = 0
+        # The fault code the cache held BEFORE this frame, so the fault
+        # below is reported on its EDGE rather than on every push.  A
+        # printer repeats a latched code in each status message; a
+        # notification per message would be a fault reported hundreds of
+        # times, which is how a real one gets tuned out.
+        prev_print_error: int = 0
         # Seconds since we last KNEW this printer's run state, read across the
         # merge below.  ``None`` when we never have — the first frame of a
         # process has nothing behind it to measure from.
@@ -1840,6 +1856,10 @@ class BambuAdapter(PrinterAdapter):
                     prev_gcode_state = str(
                         self._last_status.get("gcode_state", "")
                     ).lower().strip()
+                    with contextlib.suppress(TypeError, ValueError):
+                        prev_print_error = int(
+                            self._last_status.get("print_error") or 0
+                        )
                     # How long since we last KNEW what this printer was doing.
                     # Read BEFORE the merge refreshes it: it is the only bound
                     # on how late an ending carried by this frame might be.
@@ -2052,6 +2072,78 @@ class BambuAdapter(PrinterAdapter):
                             "Flow-anomaly cross-check raised (non-fatal): %s",
                             exc,
                         )
+
+            # A fault Kiln can plainly see, on a printer nobody asked it to
+            # watch.  The push stream is already open and already parsed --
+            # staying silent about what it carries is the same failure of
+            # honesty as a confident "idle" over the same code.
+            if (
+                print_error_for_hook
+                and print_error_for_hook != prev_print_error
+                and not self._own_stop_settling()
+            ):
+                self._notice_fault(print_error_for_hook, lifecycle_name)
+
+    #: How long after Kiln's own stop a fault code still reads as that
+    #: stop's own noise rather than a discovery.  The measured window was
+    #: about four seconds; this is that with room for a slow reply.
+    _STOP_SETTLE_SECONDS: float = 15.0
+
+    def _own_stop_settling(self) -> bool:
+        """Is this fault the tail of a stop Kiln itself just sent?"""
+        if not self._stop_sent_at:
+            return False
+        return (time.monotonic() - self._stop_sent_at) < self._STOP_SETTLE_SECONDS
+
+    def _notice_fault(self, code: int, printer_name: str) -> None:
+        """Say, once, that this printer has raised a fault.
+
+        Deliberately REPORTS and does not act.  The watchdog is what stops a
+        machine, and it stays attached only to prints Kiln started -- Kiln is
+        not the only thing that can drive this printer, and e-stopping a job a
+        person started by hand at the touchscreen would be Kiln overriding an
+        operator who never asked it to.  But the opposite extreme is the
+        defect this exists for: on 2026-09-07 a filament load started at the
+        printer's own screen failed at its purge step with 1200-8007, Kiln
+        held the connection and parsed the code throughout, and said nothing
+        for several minutes because no Kiln-started print was in flight.
+        Noticing costs one event on a fault's leading edge; the honesty it
+        buys is the difference between a user finding out and not.
+
+        Best-effort in every direction: an unavailable bus, an unimportable
+        server module, a handler that raises -- none of them may break the
+        push path that keeps the status cache current.
+        """
+        pretty = format_error_code(code)
+        reading, _page = describe_bambu_filament_fault(
+            pretty or str(code), kind="print_error"
+        )
+        logger.warning(
+            "Printer %s reported fault %s: %s",
+            printer_name or self.name, pretty or code, reading,
+        )
+        try:
+            import kiln.server as _srv
+            from kiln.events import Event, EventType
+
+            _srv._get_event_bus().publish(
+                Event(
+                    type=EventType.PRINTER_ERROR,
+                    data={
+                        "printer_name": printer_name or self.name,
+                        "print_error": int(code),
+                        "print_error_code": pretty,
+                        "reading": reading,
+                        # How Kiln came to know, so a reader can tell a fault
+                        # a watchdog caught on Kiln's own print from one the
+                        # open connection saw on a job Kiln never started.
+                        "noticed_by": "connection",
+                    },
+                    source=f"printer:{printer_name or self.name}",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — never break the push path
+            logger.debug("fault notice not published: %s", exc)
 
     def _publish_command(
         self,
@@ -2614,6 +2706,20 @@ class BambuAdapter(PrinterAdapter):
         # this adapter and Elegoo's cannot drift into two versions of it.
         budget = stale_after if stale_after is not None else STALE_STATE_WARN_AGE
 
+        # This firmware's own reading of the code, for the sentence beside the
+        # fault headline.  The PROMOTION is not decided here -- PrinterState
+        # owns that, so every adapter reporting a print_error gets it -- but
+        # the WORDS are, because only this adapter knows what 1200-8007 means
+        # on an A1.  An adapter with no table supplies nothing and its
+        # printers get the generic sentence rather than a guess.
+        fault_note: str | None = None
+        if print_error_int:
+            pretty = format_error_code(print_error_int)
+            reading, _page = describe_bambu_filament_fault(
+                pretty or str(print_error_int), kind="print_error"
+            )
+            fault_note = describe_unacknowledged_fault(pretty, reading)
+
         return PrinterState(
             connected=True,
             state=mapped,
@@ -2634,6 +2740,7 @@ class BambuAdapter(PrinterAdapter):
             speed_profile=speed_name,
             speed_magnitude=spd_mag_int,
             print_error=print_error_int,
+            fault_note=fault_note,
             state_age_seconds=round(age, 1) if age is not None else None,
         )
 
@@ -4068,11 +4175,13 @@ class BambuAdapter(PrinterAdapter):
 
     def cancel_print(self) -> PrintResult:
         """Cancel the currently running print job."""
+        self._stop_sent_at = time.monotonic()
         self._send_print_command("stop")
         return PrintResult(success=True, message="Print cancelled.")
 
     def emergency_stop(self) -> PrintResult:
         """Perform emergency stop via M112 G-code over MQTT."""
+        self._stop_sent_at = time.monotonic()
         self.send_gcode(["M112"])
         return PrintResult(
             success=True,

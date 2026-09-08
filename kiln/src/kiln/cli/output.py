@@ -208,6 +208,8 @@ def format_status(
     bed_target = state.get("bed_temp_target")
     # Present only when the four above are blank for a trust reason.
     temperature_note = state.get("temperature_note")
+    # Present only when the printer is reporting a fault nobody has cleared.
+    fault_note = state.get("fault_note")
 
     file_name = job.get("file_name")
     completion = job.get("completion")
@@ -228,6 +230,10 @@ def format_status(
         table.add_row("Bed", format_temp(bed_actual, bed_target))
         if temperature_note:
             table.add_row("Temperatures", f"[yellow]{temperature_note}[/yellow]")
+        # Directly under the red State row it explains.  A bare "error" sends
+        # the reader to the machine with no idea what they are looking for.
+        if fault_note:
+            table.add_row("Fault", f"[red]{fault_note}[/red]")
 
         if file_name:
             table.add_row("File", file_name)
@@ -251,6 +257,8 @@ def format_status(
     ]
     if temperature_note:
         lines.append(f"Temps:     {temperature_note}")
+    if fault_note:
+        lines.append(f"Fault:     {fault_note}")
     if file_name:
         lines.append(f"File:      {file_name}")
     if completion is not None:

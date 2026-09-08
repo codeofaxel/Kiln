@@ -146,6 +146,13 @@ class MonitorResult:
 # that is still running, which is the opposite of the honesty this state
 # exists for.  A stale reading keeps the loop alive, and the age travels
 # with the report.
+#
+# Every check against this set reads ``effective_state``, for the same reason
+# and against the same mistake.  A fault raised mid-print promotes the
+# HEADLINE to ERROR while the machine keeps printing -- and a first layer is
+# exactly when the A1's nozzle-clumping probe raises one on a flat shape.
+# Reading the bare state there would close the watch on the print it was
+# opened for, and report that print as ended.
 _TERMINAL_STATES = frozenset(
     {
         PrinterStatus.IDLE,
@@ -291,11 +298,11 @@ class FirstLayerMonitor:
                     message=f"Could not read printer state: {exc}",
                 )
 
-            if state.state in _TERMINAL_STATES:
+            if state.effective_state in _TERMINAL_STATES:
                 logger.info(
                     "Printer %s entered %s during monitoring — stopping",
                     self._printer_name,
-                    state.state.value,
+                    state.effective_state.value,
                 )
                 return MonitorResult(
                     success=True,
@@ -304,7 +311,7 @@ class FirstLayerMonitor:
                     snapshot_failures=consecutive_failures,
                     duration_seconds=round(time.time() - start_time, 1),
                     message=(
-                        f"Print ended (state={state.state.value}) during first-layer "
+                        f"Print ended (state={state.effective_state.value}) during first-layer "
                         "monitoring.  Collected snapshots returned."
                     ),
                 )
@@ -431,18 +438,18 @@ class FirstLayerMonitor:
                     message=f"Could not read printer state: {exc}",
                 )
 
-            if state.state in _TERMINAL_STATES:
+            if state.effective_state in _TERMINAL_STATES:
                 logger.info(
                     "Printer %s entered %s during telemetry monitoring — stopping",
                     self._printer_name,
-                    state.state.value,
+                    state.effective_state.value,
                 )
                 return MonitorResult(
                     success=True,
                     outcome="print_ended",
                     snapshots=telemetry_snapshots,
                     duration_seconds=round(time.time() - start_time, 1),
-                    message=(f"Print ended (state={state.state.value}) during telemetry monitoring."),
+                    message=(f"Print ended (state={state.effective_state.value}) during telemetry monitoring."),
                 )
 
             # Track state transitions
@@ -522,7 +529,7 @@ class FirstLayerMonitor:
                 # Transient error — keep waiting
                 continue
 
-            if state.state in _TERMINAL_STATES:
+            if state.effective_state in _TERMINAL_STATES:
                 return False
 
         return True
@@ -537,7 +544,7 @@ class FirstLayerMonitor:
         """Build a result for when the print ends during the delay/interval."""
         try:
             state = self._adapter.get_state()
-            state_label = state.state.value
+            state_label = state.effective_state.value
         except PrinterError:
             state_label = "unknown"
 

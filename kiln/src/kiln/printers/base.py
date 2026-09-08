@@ -491,6 +491,31 @@ def describe_unknown_temperatures(state_age_seconds: float | None) -> str:
     )
 
 
+def describe_unacknowledged_fault(
+    code: str | None, reading: str | None = None
+) -> str:
+    """What a latched firmware fault means, and the one thing that clears it.
+
+    The sentence that travels with :attr:`PrinterState.fault_note`, beside a
+    headline that now reads ``error`` rather than the run state underneath.
+
+    *code* is the fault in the form the printer's own screen shows it, and
+    *reading* the adapter's plain-language gloss for that code when it has
+    one -- Bambu's ``describe_bambu_filament_fault`` supplies it, and an
+    adapter with no table for its firmware supplies nothing rather than a
+    guess.  The remedy is named either way, because a fault whose meaning
+    Kiln cannot look up still clears the same way.
+    """
+    shown = f" ({code})" if code else ""
+    gloss = f" {reading.strip()}" if reading else ""
+    return (
+        f"The printer is reporting a fault{shown} that nothing has "
+        f"acknowledged.{gloss} Clear it on the printer's own screen or with "
+        "clear_printer_error; until it is cleared Kiln reports this machine "
+        "as faulted rather than ready."
+    )
+
+
 #: The fields a person might act on with their hands.  Blanked together, by
 #: one rule, in :meth:`PrinterState.__post_init__`.
 TEMPERATURE_FIELDS: tuple[str, ...] = (
@@ -539,11 +564,15 @@ class PrinterState:
     # is not reporting an ended job (it is mid-print, or its protocol has
     # no completion signal); it never means "ended fine".
     last_job_result: JobResult | None = None
-    # What the printer was last seen doing, when :attr:`state` is ``STALE``.
-    # The age takes the headline because it decides whether anything else in
-    # the reading can be acted on -- but the run state underneath is not
-    # discarded, because it is what keeps the concurrency gates conservative.
-    # ``None`` on every state that is not ``STALE``.
+    # What the printer was last seen DOING, whenever the headline answers a
+    # different question.  Two promotions set it and nothing else does:
+    # ``STALE`` (can this reading be trusted at all) and the fault promotion
+    # (is the machine reporting something nobody has cleared).  Both take the
+    # headline because both decide what a reader should do next -- but the run
+    # state underneath is never discarded, because it is what keeps the
+    # concurrency gates conservative and what :attr:`effective_state` hands
+    # back to anything asking the "what is it doing" question.
+    # ``None`` when the headline IS the run state.
     last_known_state: PrinterStatus | None = None
     # The freshness budget in force for this reading, measured from this
     # printer's own reporting cadence (:class:`TelemetryCadence`).  Reported
@@ -564,6 +593,14 @@ class PrinterState:
     # Set beside the blanking in ``__post_init__``; ``None`` whenever the
     # temperatures above can be acted on.
     temperature_note: str | None = None
+    # The fault in :attr:`print_error` in plain language, when the printer is
+    # reporting one nobody has cleared.  Set beside the promotion to ``ERROR``
+    # in ``__post_init__`` -- an adapter may supply its own firmware's reading
+    # and the promotion keeps it, or supply nothing and get the generic
+    # sentence, but the promotion never happens WITHOUT a sentence: a headline
+    # that says "error" and nothing else is the same shrug as the "idle" it
+    # replaced.  ``None`` whenever no fault is being reported.
+    fault_note: str | None = None
 
     def __post_init__(self) -> None:
         """Promote an expired reading to ``STALE``, whoever built it.
@@ -578,6 +615,11 @@ class PrinterState:
         measured for that printer.  An adapter that queries the printer on
         every call sets neither and is untouched: it is current by
         construction, and warning about it would make the signal noise.
+
+        Then, a fault nobody has cleared becomes the HEADLINE.  Same shape
+        as the promotion above and for the same reason: a fact that decides
+        what the reader should do next cannot sit in a field underneath a
+        state word that contradicts it.
 
         Then, whatever the run state: a reading Kiln cannot vouch for
         carries NO temperatures.  Not a caveat beside the number -- the
@@ -602,6 +644,54 @@ class PrinterState:
                 self.remedy = describe_stale_remedy(
                     self.state_age_seconds, self.state_stale_after_seconds
                 )
+
+        # A fault the printer is reporting and nobody has cleared is a STATE,
+        # not a field.  Measured on an A1 (2026-09-07): ``state: "idle"``
+        # beside ``print_error: 302022663`` -- 1200-8007, "failed to extrude
+        # the filament" -- while the machine's own screen held a modal error
+        # dialog.  Every door led with the healthy word, and the contradiction
+        # underneath was visible only to a reader who already knew to look for
+        # it.  A headline that reads "idle" over a live fault is the same
+        # failure of honesty as the confident "printing" over a frozen cache,
+        # and it gets the same answer: the fact that decides what to do next
+        # takes the headline, and the fact it displaced is kept.
+        #
+        # ERROR rather than a new member, deliberately.  The vocabulary
+        # already HAS the word for "this machine is reporting something wrong"
+        # -- it is not READY, it is INDETERMINATE, the pre-flight gate refuses
+        # it, the CLI colours it red and the Monitor gives it the
+        # needs-attention layout.  Every one of those is the behaviour a
+        # latched fault should get, so a second word for the same condition
+        # would buy no new meaning and cost a fresh set of switches to forget
+        # to update.  ``STALE`` earned its member because no existing state
+        # could carry "the reading itself expired"; this one is not a new
+        # axis, it is the axis ERROR is already on.
+        #
+        # AFTER the staleness promotion, never before.  "Kiln cannot vouch for
+        # this reading" outranks anything the reading says, including a fault
+        # code inside it -- and promoting first would let the stale promotion
+        # overwrite ``last_known_state`` with ERROR, dropping the run state
+        # that keeps ``is_occupied`` conservative on exactly the machine that
+        # can least afford it.  A stale reading's fault survives in
+        # ``print_error`` and in a headline that already says to go and look.
+        if (
+            self.print_error
+            and self.connected
+            and self.state is not PrinterStatus.STALE
+            and self.state is not PrinterStatus.ERROR
+            and self.state not in UNREACHABLE_STATES
+        ):
+            self.last_known_state = self.state
+            self.state = PrinterStatus.ERROR
+        # Beside every ERROR carrying a code, however it got there -- the
+        # promotion above, or an adapter that mapped the firmware's own error
+        # state directly.  Both are the same fact to a reader.
+        if (
+            self.state is PrinterStatus.ERROR
+            and self.print_error
+            and self.fault_note is None
+        ):
+            self.fault_note = describe_unacknowledged_fault(self.print_error_code)
 
         # The floor, and it fires on a VERDICT rather than on an age:
         #   * the reading is STALE -- which the promotion above only reaches
@@ -648,13 +738,18 @@ class PrinterState:
 
     @property
     def effective_state(self) -> PrinterStatus:
-        """What the machine was doing, looking through a stale reading.
+        """What the machine was doing, looking through a displaced headline.
 
-        ``STALE`` answers "can this reading be trusted", not "what is the
-        printer doing" -- so anything asking the second question reads this
-        and gets the run state, aged but not erased.
+        ``STALE`` answers "can this reading be trusted" and a promoted
+        ``ERROR`` answers "is this machine reporting a fault" -- neither
+        answers "what is the printer doing", so anything asking the second
+        question reads this and gets the run state, displaced but not erased.
+
+        Reads :attr:`last_known_state` whenever it is set, because it is set
+        by those two promotions and by nothing else.  A gate that special-
+        cased one promotion would be a gate that silently missed the next.
         """
-        if self.state is PrinterStatus.STALE and self.last_known_state is not None:
+        if self.last_known_state is not None:
             return self.last_known_state
         return self.state
 
@@ -668,11 +763,12 @@ class PrinterState:
         symmetric -- a refused print is a retry, a second print onto an
         occupied bed is a crash.
         """
-        if self.state is PrinterStatus.STALE:
-            if self.last_known_state is None:
-                return True
-            return self.last_known_state in BUSY_STATES
-        return self.state in BUSY_STATES
+        if self.state is PrinterStatus.STALE and self.last_known_state is None:
+            return True
+        # Through the headline, whichever promotion set it.  A machine that
+        # raised a fault mid-print is still mid-print: the bed is not clear,
+        # and a router reading the bare ERROR would have called it free.
+        return self.effective_state in BUSY_STATES
 
     def freshness_budget(self, max_age: float | None = None) -> float:
         """The age past which this reading stops counting as evidence.
@@ -714,7 +810,7 @@ class PrinterState:
             "nozzle_type", "speed_profile", "speed_magnitude", "print_error",
             "state_age_seconds", "last_job_result", "last_known_state",
             "state_stale_after_seconds", "cause", "remedy",
-            "temperature_note",
+            "temperature_note", "fault_note",
         )
         for key in _EXTENDED:
             if data.get(key) is None:
@@ -2573,7 +2669,13 @@ class PrinterAdapter(ABC):
             deadline = _time.monotonic() + self._RESUME_VERIFY_TIMEOUT
             status = None
             while True:
-                status = getattr(self.get_state(), "state", None)
+                # effective_state, not state: a fault promotes the
+                # HEADLINE while the machine goes on doing what it was
+                # doing, and this asks what it is doing.  Reading the bare
+                # state here would let a
+                # fault landing during the pause read as "it resumed", and
+                # report a success the printer never performed.
+                status = getattr(self.get_state(), "effective_state", None)
                 if status is not PrinterStatus.PAUSED:
                     break
                 if _time.monotonic() >= deadline:
@@ -2969,7 +3071,12 @@ class PrinterAdapter(ABC):
                 f"Cannot {action} filament: the printer did not answer a status "
                 f"request ({exc})."
             ) from exc
-        if state.state == PrinterStatus.PRINTING:
+        # effective_state, not state: a fault promotes the HEADLINE while
+        # the machine goes on doing what it was doing, and this asks what
+        # it is doing.  Reading the bare state here would let a
+        # faulted print through this refusal -- the one direction it must
+        # never fail in, because the extruder is over the part.
+        if state.effective_state == PrinterStatus.PRINTING:
             raise PrinterError(
                 f"Refusing to {action} filament while a print is running. "
                 "Pause the print first, or wait for it to finish."
@@ -2977,7 +3084,7 @@ class PrinterAdapter(ABC):
         # Allowed, and the whole point of the paused case -- but the extruder
         # is parked over the part, so whatever comes out lands on it.  The
         # caller is told rather than left to find out.
-        paused = state.state == PrinterStatus.PAUSED
+        paused = state.effective_state == PrinterStatus.PAUSED
 
         window = self._filament_material_window(material, slot)
         if temperature is None:

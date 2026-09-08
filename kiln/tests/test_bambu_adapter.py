@@ -4122,7 +4122,12 @@ class TestTelemetryVintage:
               nozzle_temper=180)
 
         state = adapter_with_mqtt.get_state()
-        assert state.state is PrinterStatus.PAUSED
+        # The pause is reported -- under the fault that caused it.  A code
+        # nobody has cleared takes the headline (PrinterState.__post_init__)
+        # and the run state moves down one, exactly as a stale reading's
+        # does; the pause is not lost, it is answered by effective_state.
+        assert state.state is PrinterStatus.ERROR
+        assert state.effective_state is PrinterStatus.PAUSED
         assert state.print_error == 134184978
         assert state.state_age_seconds is not None
         assert state.state_age_seconds < 5.0

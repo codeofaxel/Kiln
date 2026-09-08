@@ -63,7 +63,13 @@ def test_nothing_running_reads_as_nothing_running(monkeypatch) -> None:
     assert state["health"] == {"active": False}
     assert state["watch"] == {"active": False, "count": 0}
     assert state["vision"] == {"armed": False}
-    assert set(state["watchers"]) == {"watchdog", "health", "watch", "first_layer", "vision"}
+    # ...except the connection itself, which needs no print to be watching:
+    # it is live whenever Kiln can read the printer, and it is what surfaces
+    # a fault on a job Kiln did not start.
+    assert state["connection"] == {"live": True}
+    assert set(state["watchers"]) == {
+        "connection", "watchdog", "health", "watch", "first_layer", "vision",
+    }
 
 
 def test_the_rule_words_are_read_from_the_code_not_retyped(monkeypatch) -> None:

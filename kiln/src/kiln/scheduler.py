@@ -423,7 +423,13 @@ class JobScheduler:
                 # that is still running.  Those cases fall through to the
                 # next poll, which is what a printer going quiet for a
                 # moment should cost.
-                if state.state == PrinterStatus.IDLE:
+                # effective_state, not state: a fault promotes the
+                # HEADLINE while the machine goes on doing what it was
+                # doing, and this asks what it is doing.  Reading the bare
+                # state here would match neither
+                # this branch nor the error one below on a faulted-but-idle
+                # machine, leaving the job with no outcome at all.
+                if state.effective_state == PrinterStatus.IDLE:
                     pre_idle_job = self._queue.get_job(job_id)
                     queue_cancelled = bool(
                         pre_idle_job is not None
@@ -500,7 +506,11 @@ class JobScheduler:
                     self._seen_printing.discard(job_id)
                     completed.append(job_id)
 
-                elif state.state == PrinterStatus.ERROR:
+                # effective_state, not state: a fault raised mid-print makes
+                # the headline ERROR while the job is still running, and
+                # failing the job there would blame the model for a print
+                # that had not ended.
+                elif state.effective_state == PrinterStatus.ERROR:
                     error_msg = f"Printer {printer_name} entered error state"
                     # A machine-reported error is a print verdict only for a
                     # job this loop actually SAW printing — an error on a
