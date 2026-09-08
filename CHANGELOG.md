@@ -37,6 +37,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **License plate frames now fit EU plates, in both the long and the
+  two-line size.**
+
 - **A food-safe filament is only half the answer.** Ask Kiln for anything
   food or a pet will eat from and it now tells you the nozzle matters too —
   standard brass sheds trace lead — and what to print it through instead.
@@ -139,6 +142,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **Decorations on frames and rings land where you put them.** They could
+  drift or be clipped at the edge; a decoration that would carve nothing is
+  now refused instead of quietly printing blank.
 
 - **A US license plate frame now bolts to the plate it was made for.**
   Earlier ones outlined the plate rather than holding it, and their slots
