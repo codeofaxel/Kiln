@@ -485,10 +485,9 @@ def _build_face_dict(group: dict[str, Any]) -> dict[str, Any]:
     # balances.  ``bbox_center`` is the middle of its OUTLINE — the
     # point ``width_mm``/``height_mm`` are symmetric about.  On a solid
     # disc or rectangle they coincide.  On anything with a hole or an
-    # uneven distribution of material — a frame, a ring with one deep
-    # rail, an L — they do not, and the gap is the whole asymmetry:
-    # 18.4 mm on a US license-plate frame whose top rail is 29.7 mm
-    # against 12.7 mm elsewhere.
+    # uneven distribution of material — a frame, a ring with one rail
+    # deeper than the rest, an L — they do not, and the gap is the whole
+    # asymmetry.
     #
     # Anything that PLACES content by an offset must use ``bbox_center``:
     # an offset of +y is a promise about where the art lands relative to
@@ -496,9 +495,9 @@ def _build_face_dict(group: dict[str, Any]) -> dict[str, Any]:
     # ±width/2, ±height/2 — i.e. about this point.  Applying that offset
     # from the centroid instead put the two out of agreement by the
     # asymmetry, so the clamp passed an offset the translate then carried
-    # off the part (found on a plate frame, 2026-09-07: top-rail text
-    # landed 18 mm high and was sheared by the outer edge; bottom-rail
-    # text landed in the window and carved air).
+    # off the part (found on a frame-shaped product, 2026-09-07: text on
+    # the deep rail was sheared by the outer edge; text on the thin rail
+    # landed in the window and carved air).
     u_mid = (u_min + u_max) / 2.0
     v_mid = (v_min + v_max) / 2.0
     n_mid = (n_min + n_max) / 2.0
