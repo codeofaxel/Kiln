@@ -306,9 +306,11 @@ from kiln.print_start_verdict import resolve_print_start
 from kiln.printer_backends import DEFAULT_SERIAL_BAUDRATE, format_printer_types
 from kiln.printer_intelligence import (
     diagnose_issue,
+    extract_load_step,
     get_material_settings,
     get_printer_intel,
     intel_to_dict,
+    read_load_step,
 )
 from kiln.printers import (
     STALE_STATE_WARN_AGE,
@@ -14125,6 +14127,44 @@ _FILAMENT_PATH_SYMPTOMS: tuple[str, ...] = (
     "purge",
     "load filament",
     "loading filament",
+    # Named because these are what a user says when they are ALREADY at the
+    # hot end with a tool in their hand — the exact moment the burn warning
+    # below has to have arrived, not a moment later.
+    "cold pull",
+    "atomic pull",
+    "heat creep",
+    "extruder gear",
+    "hotend",
+    "hot end",
+    "nozzle",
+    "feed path",
+    "wizard",
+)
+
+# The molten-filament burn warning, and it is deliberately in PUBLIC Kiln at
+# every tier.
+#
+# Everything else about this fault is curated depth and is paid for: which
+# step failed, what a cold pull is, why a new nozzle does not stop heat creep.
+# The hazard is not.  Free Kiln already tells a user to clear a clog — the
+# free floor above names purge_filament, and the public failure-mode data says
+# "cold pull" in as many words — so the free tier hands out the instruction
+# that creates the risk.  Charging for the sentence that makes that
+# instruction safe would be selling someone a hazard and then selling them the
+# warning, and a paywall in front of "wear gloves" is not a product decision
+# anyone should be able to make by accident.  Kiln's convention already says
+# this: safety_profiles.json ships its hotend ceilings and melt hazards to
+# everyone.
+#
+# Measured cost of its absence: a user spent three days clearing filament
+# jams bare-handed because nothing in Kiln mentioned it (2026-09-07/08).
+_MOLTEN_FILAMENT_WARNING = (
+    "SAFETY — burn hazard, read before you touch it: a blocked hot end holds "
+    "pressure behind the plug. When it lets go, molten filament sprays, and "
+    "it comes out at print temperature. Wear heat-resistant gloves, keep your "
+    "face and eyes out of the line of the nozzle, and never cup a hand under "
+    "it to catch what comes out. This applies to a cold pull, to pushing "
+    "filament through by hand, and to a purge you are standing over."
 )
 
 
@@ -14137,7 +14177,14 @@ def _normalize_hms_code(raw: str) -> str:
     8-hex module/attr prefix (e.g. ``0300_1A00``), usually the full 16 hex
     digits.
     """
-    hex_only = "".join(c for c in raw.upper() if c in "0123456789ABCDEF")
+    # The printer's screen shows a print_error as the code, a space, then a
+    # per-occurrence decimal serial ("1200-8007 031520").  A user pastes what
+    # they see.  Every digit of that serial is valid hex, so folding it in
+    # made the code LONGER — which is what the namespace check reads, and
+    # what the echoed code shows back to the user.  The serial is a separate
+    # whitespace token, so dropping it is exact, not a guess.
+    head = raw.split()[0] if raw.split() else ""
+    hex_only = "".join(c for c in head.upper() if c in "0123456789ABCDEF")
     if len(hex_only) < 8:
         return ""
     return "_".join(hex_only[i : i + 4] for i in range(0, len(hex_only), 4))
@@ -14190,6 +14237,17 @@ def troubleshoot_printer(
     Bambu's HMS wiki page for it.  With Kiln Pro (https://kiln3d.com/pricing)
     the response also carries a decoded cause, fix, and severity for the code.
 
+    Two things in ``symptom`` are read as exact signals rather than as words,
+    and both narrow the answer sharply, so say them if you know them:
+
+    * a fault code anywhere in the text (``"1200-8007"``, ``"12008007"``);
+    * which step of a load/unload wizard failed (``"fails at step 5"``).
+
+    A step number is the most useful sentence a user can offer about a load
+    failure: the response's ``load_step_reading`` says whether that step is
+    upstream of the melt zone, which rules a nozzle clog in or out before
+    anyone unscrews anything.
+
     Args:
         printer_id: Printer model identifier.
         symptom: Description of the problem.  Optional when ``hms_code`` is
@@ -14238,6 +14296,16 @@ def troubleshoot_printer(
             result["hms_code_kind"] = kind
             if link:
                 result["hms_wiki_url"] = link
+        # Which wizard step failed is the strongest thing a user can tell us
+        # about a load failure, and until now Kiln had no way to hear it. The
+        # reading is free-tier: it is arithmetic over the printer's own load
+        # sequence, not curated advice, and it is what stops someone
+        # replacing a nozzle to fix a fault upstream of the nozzle.
+        step = extract_load_step(symptom)
+        if step is not None:
+            reading = read_load_step(printer_id, step)
+            if reading is not None:
+                result["load_step_reading"] = reading
         # A clog / extrusion complaint has a test Kiln can run itself, so the
         # diagnosis names it rather than leaving the user at the touchscreen.
         _probe = f"{symptom} {code}".lower()
@@ -14248,6 +14316,10 @@ def troubleshoot_printer(
                 "fault code in plain language if one is raised. load_filament / "
                 "unload_filament drive a spool change the same way."
             )
+            # Same trigger as the next step above, because the next step is
+            # the hazard: anyone who reaches this branch is about to put a
+            # hand near a hot nozzle holding pressure.
+            result["safety"] = _MOLTEN_FILAMENT_WARNING
         return result
     except KeyError:
         return _error_dict(

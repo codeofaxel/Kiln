@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -52,11 +52,45 @@ class MaterialProfile:
 
 @dataclass(frozen=True)
 class FailureMode:
-    """Known failure pattern and resolution."""
+    """Known failure pattern and resolution.
+
+    ``codes`` and ``load_steps`` are the STRUCTURED signals a failure mode can
+    claim, and they exist because prose matching cannot carry them.  A fault
+    code and a load-wizard step number are exact facts the printer itself
+    reports; treated as words in a sentence they either miss entirely (the
+    digits appear in no ``symptom`` string) or match the wrong entry (one
+    shared word like "filament" pulls in every filament mode there is).
+
+    ``load_steps`` is the more valuable of the two, because a step number
+    narrows the cause by ELIMINATION: on a machine whose load sequence pushes
+    filament into the extruder before it purges through the nozzle, a failure
+    at the push step is upstream of the melt zone, so every melt-zone mode is
+    excluded outright.  A mode lists only the steps it can actually explain,
+    so the exclusion falls out of the data rather than a rule.
+    """
 
     symptom: str
     cause: str
     fix: str
+    codes: tuple[str, ...] = ()
+    load_steps: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class LoadStep:
+    """One step of a printer's filament-load sequence.
+
+    ``zone`` is the diagnostic payload: ``"feed"`` is everything upstream of
+    the melt zone (the path from spool to extruder gears) and ``"melt"`` is
+    the hot end itself.  A load that fails in a ``feed`` step cannot be a
+    nozzle clog — the filament never reached the nozzle — which is the single
+    fact that turns "it will not load" from a shotgun into a diagnosis.
+    """
+
+    step: int
+    name: str
+    zone: str
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -76,6 +110,9 @@ class PrinterIntel:
         quirks: List of printer-specific gotchas and tips.
         calibration: Calibration guidance keyed by procedure name.
         failure_modes: Known failure patterns with fixes.
+        load_sequence: The printer's filament-load steps, in order, each
+            marked ``feed`` or ``melt``.  Empty for a printer whose sequence
+            has not been established.
     """
 
     id: str
@@ -90,6 +127,7 @@ class PrinterIntel:
     quirks: list[str]
     calibration: dict[str, str]
     failure_modes: list[FailureMode]
+    load_sequence: list[LoadStep] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +192,149 @@ def _read_public_json() -> dict[str, Any]:
     return _public_raw
 
 
+# ---------------------------------------------------------------------------
+# Structured diagnostic signals
+# ---------------------------------------------------------------------------
+#
+# A symptom string carries two kinds of information and they are not
+# interchangeable.  The prose ("it will not extrude") is fuzzy and belongs to
+# word matching.  A fault code and a load-wizard step number are EXACT, and
+# word matching destroys them: "1200-8007" tokenises to digits that appear in
+# no symptom string, and "step 5" reduces to the word "step".  What survives
+# is whatever generic word rode along in the same sentence — which is how a
+# user describing a step-5 load failure got back an AMS wear entry.
+#
+# So codes and steps are parsed out FIRST and matched exactly.  Prose matching
+# still runs, and still contributes, but it no longer decides on its own.
+
+
+def _normalize_code(raw: object) -> str:
+    """A fault code reduced to its bare uppercase hex digits, or ``""``.
+
+    Bambu writes the same code as ``1200-8007``, ``1200_8007`` and
+    ``12008007`` depending on whether it is on the screen, in the app, or in
+    MQTT, and a screen code is often followed by a decimal serial
+    (``"1200-8007 031520"``).  Comparing the digits alone makes every one of
+    those spellings the same signal.  Fewer than 8 hex digits is not a code —
+    a bare year or a step number must never be read as one.
+    """
+    if not isinstance(raw, str):
+        return ""
+    hex_only = "".join(c for c in raw.upper() if c in "0123456789ABCDEF")
+    return hex_only if len(hex_only) >= 8 else ""
+
+
+def _normalize_codes(raw: object) -> tuple[str, ...]:
+    """The codes a failure mode claims, normalized and de-duplicated."""
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    seen: list[str] = []
+    for item in raw:
+        code = _normalize_code(item)
+        if code and code not in seen:
+            seen.append(code)
+    return tuple(seen)
+
+
+def _normalize_steps(raw: object) -> tuple[int, ...]:
+    """The load-sequence steps a failure mode claims, as sorted ints."""
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    steps: set[int] = set()
+    for item in raw:
+        try:
+            steps.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    return tuple(sorted(steps))
+
+
+#: How a user writes a wizard step in free text.  Deliberately narrow: only a
+#: word that MEANS a step, immediately followed by its number.  A looser rule
+#: ("any small integer") would read the 4 in "0.4mm nozzle" as step 4 and
+#: hand back a confidently wrong diagnosis, which is worse than no diagnosis.
+_STEP_PHRASES: tuple[str, ...] = ("step", "stage", "phase")
+
+
+def extract_load_step(symptom: str) -> int | None:
+    """The load-wizard step number named in *symptom*, or ``None``.
+
+    Accepts ``"step 5"``, ``"step5"``, ``"Step #5"``, ``"stage 5"``.  Returns
+    ``None`` when no step word is present, when the number is absent, or when
+    two different step numbers are named — an ambiguous reading is not a
+    signal, and guessing which one the user meant is how a narrowing turns
+    into a misdirection.
+    """
+    lowered = str(symptom).lower()
+    found: set[int] = set()
+    for phrase in _STEP_PHRASES:
+        start = 0
+        while True:
+            at = lowered.find(phrase, start)
+            if at < 0:
+                break
+            start = at + len(phrase)
+            tail = lowered[start : start + 6].lstrip(" \t:#-")
+            digits = ""
+            for char in tail:
+                if char.isdigit():
+                    digits += char
+                else:
+                    break
+            if digits:
+                found.add(int(digits))
+    if len(found) == 1:
+        return found.pop()
+    return None
+
+
+def _is_code_shaped(token: str) -> bool:
+    """Whether *token* is written the way Bambu writes a fault code.
+
+    Hex digits throughout, and then either a separator (``1200-8007``,
+    ``1200_8007``) or exactly the 8 or 16 digits a bare code has
+    (``12008007``).
+
+    The length rule is not fussiness.  Bambu reports ``print_error`` over
+    MQTT as a 32-bit DECIMAL — ``302022663`` is the screen's ``1200-8007`` —
+    and Kiln's own live diagnosis feeds that field into this matcher as a
+    symptom.  Every digit of a decimal is also a valid hex digit, so without
+    a length rule ``302022663`` would be read as a hex code and matched
+    against a fault it has nothing to do with: a confident answer about the
+    wrong subsystem, from a number the user never typed.  Nine digits is
+    neither 8 nor 16, so it is refused.  ``printers.base.format_error_code``
+    is what turns that decimal into the screen form, and callers with the raw
+    field should pass it through there first.
+    """
+    if not token or not all(c in "0123456789abcdefABCDEF-_" for c in token):
+        return False
+    if "-" in token or "_" in token:
+        return True
+    return len(token) in (8, 16)
+
+
+def extract_codes(symptom: str) -> tuple[str, ...]:
+    """Every Bambu-shaped fault code named in *symptom*, normalized.
+
+    Splits on non-code characters so a code embedded in a sentence is found,
+    and keeps only tokens written the way a fault code is written — so
+    ``"1200-8007"`` is a code, ``"PLA-CF"`` is not, and a raw decimal
+    ``print_error`` is not either (see :func:`_is_code_shaped`).
+    """
+    codes: list[str] = []
+    token = ""
+    for char in str(symptom) + " ":
+        if char.isalnum() or char in "-_":
+            token += char
+        else:
+            if _is_code_shaped(token):
+                code = _normalize_code(token)
+                if code and code not in codes:
+                    codes.append(code)
+            token = ""
+    return tuple(codes)
+
+
 def _build_profiles(raw: dict[str, Any]) -> dict[str, PrinterIntel]:
     """Decode a raw profile map — public, or public merged with the overlay."""
     profiles: dict[str, PrinterIntel] = {}
@@ -189,8 +370,29 @@ def _build_profiles(raw: dict[str, Any]) -> dict[str, PrinterIntel]:
                         symptom=fm["symptom"],
                         cause=fm["cause"],
                         fix=fm["fix"],
+                        codes=_normalize_codes(fm.get("codes")),
+                        load_steps=_normalize_steps(fm.get("load_steps")),
                     )
                 )
+
+            load_sequence = []
+            for raw_step in data.get("load_sequence", []):
+                try:
+                    load_sequence.append(
+                        LoadStep(
+                            step=int(raw_step["step"]),
+                            name=str(raw_step["name"]),
+                            zone=str(raw_step["zone"]),
+                            note=str(raw_step.get("note", "")),
+                        )
+                    )
+                except (KeyError, TypeError, ValueError) as step_exc:
+                    # One malformed step must not cost the profile its whole
+                    # sequence — the remaining steps still narrow a diagnosis.
+                    logger.debug(
+                        "Skipping malformed load step in '%s': %s", key, step_exc
+                    )
+            load_sequence.sort(key=lambda entry: entry.step)
 
             profiles[key] = PrinterIntel(
                 id=key,
@@ -205,6 +407,7 @@ def _build_profiles(raw: dict[str, Any]) -> dict[str, PrinterIntel]:
                 quirks=list(data.get("quirks", [])),
                 calibration=dict(data.get("calibration", {})),
                 failure_modes=failure_modes,
+                load_sequence=load_sequence,
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("Skipping malformed intel profile '%s': %s", key, exc)
@@ -344,25 +547,108 @@ def diagnose_issue(
 ) -> list[dict[str, str]]:
     """Search failure modes for matching symptoms.
 
-    Returns a list of matching ``{symptom, cause, fix}`` dicts.
+    Returns a list of matching ``{symptom, cause, fix}`` dicts, most specific
+    first.  Each carries ``matched_on`` naming the signal that selected it:
+    ``"code"``, ``"load_step"``, or ``"text"``.
+
+    Three signals, in descending order of how much they narrow:
+
+    * **code** — the printer named the fault itself.  An exact match, and the
+      only signal that can be right on its own.
+    * **load_step** — the wizard said where it failed.  Narrows by
+      elimination: only the modes that claim that step can explain it.
+    * **text** — the user's own words.  The weakest, and previously the only
+      one, which is why a sentence containing "filament" matched whichever
+      filament entry happened to be in the list.
+
+    When a code or a step is present, text matches are DROPPED rather than
+    appended.  This is the whole point: a structured signal is evidence that
+    the loose ones are noise, and burying a precise answer under four generic
+    ones is the failure being fixed here.  With neither present the historical
+    text behaviour is unchanged, so nothing that worked before regresses.
     """
     intel = get_printer_intel(printer_id)
     symptom_lower = symptom.lower()
-    matches = []
+    named_codes = extract_codes(symptom)
+    named_step = extract_load_step(symptom)
+
+    # Each match is kept with the SIZE of the claim that caught it, because
+    # size is specificity.  A mode claiming one step explains that step; a
+    # mode claiming three covers a range and happens to include it.  Both are
+    # honest matches — a broad entry should not be made to lie about its
+    # scope just to rank lower — so the ranking, not the data, is what puts
+    # the precise answer first.  Without this the generic entry still led,
+    # which is the original complaint with an extra step.
+    by_code: list[tuple[int, dict[str, str]]] = []
+    by_step: list[tuple[int, dict[str, str]]] = []
+    by_text: list[dict[str, str]] = []
+
     for fm in intel.failure_modes:
+        record = {"symptom": fm.symptom, "cause": fm.cause, "fix": fm.fix}
+        if named_codes and any(code in fm.codes for code in named_codes):
+            by_code.append((len(fm.codes), {**record, "matched_on": "code"}))
+            continue
+        if named_step is not None and named_step in fm.load_steps:
+            by_step.append((len(fm.load_steps), {**record, "matched_on": "load_step"}))
+            continue
         if (
             symptom_lower in fm.symptom.lower()
             or symptom_lower in fm.cause.lower()
             or any(word in fm.symptom.lower() for word in symptom_lower.split() if len(word) > 3)
         ):
-            matches.append(
-                {
-                    "symptom": fm.symptom,
-                    "cause": fm.cause,
-                    "fix": fm.fix,
-                }
+            by_text.append({**record, "matched_on": "text"})
+
+    if by_code or by_step:
+        # Stable sort: ties keep the curated file order.
+        by_code.sort(key=lambda pair: pair[0])
+        by_step.sort(key=lambda pair: pair[0])
+        return [match for _, match in by_code] + [match for _, match in by_step]
+    return by_text
+
+
+def read_load_step(printer_id: str, step: int) -> dict[str, Any] | None:
+    """What a failure at load-wizard *step* tells you, or ``None``.
+
+    ``None`` when the printer has no established load sequence or the number
+    is outside it — an honest silence, never an invented reading.
+
+    The ``ruled_out`` line is the payload.  A load that fails before the
+    filament ever reaches the hot end cannot be a nozzle clog, and saying so
+    is worth more than any list of causes: it is the difference between
+    checking the feed path and replacing a nozzle that was never the problem.
+    """
+    intel = get_printer_intel(printer_id)
+    for entry in intel.load_sequence:
+        if entry.step != step:
+            continue
+        total = len(intel.load_sequence)
+        reading: dict[str, Any] = {
+            "step": entry.step,
+            "of": total,
+            "name": entry.name,
+            "zone": entry.zone,
+        }
+        if entry.note:
+            reading["note"] = entry.note
+        if entry.zone == "feed":
+            melt = [s.name for s in intel.load_sequence if s.zone == "melt"]
+            reading["ruled_out"] = (
+                f"Step {entry.step} ({entry.name}) is upstream of the melt "
+                "zone — the filament has not reached the nozzle yet, so a "
+                "nozzle clog cannot be the cause of a failure here. Look at "
+                "the feed path: the spool, the tube, the cutter, the extruder "
+                "gears, and how the hot end is seated in its mount."
+                + (f" The melt zone is reached at: {', '.join(melt)}." if melt else "")
             )
-    return matches
+        elif entry.zone == "melt":
+            reading["ruled_out"] = (
+                f"Step {entry.step} ({entry.name}) is the melt zone — the "
+                "filament reached the hot end and did not come through. The "
+                "feed path above it is working, so this is the nozzle, the "
+                "heat break, or the melt itself."
+            )
+        return reading
+    return None
 
 
 def intel_to_dict(intel: PrinterIntel) -> dict[str, Any]:
@@ -383,6 +669,10 @@ def intel_to_dict(intel: PrinterIntel) -> dict[str, Any]:
         "quirks": intel.quirks,
         "calibration": intel.calibration,
         "failure_modes": [{"symptom": fm.symptom, "cause": fm.cause, "fix": fm.fix} for fm in intel.failure_modes],
+        "load_sequence": [
+            {"step": s.step, "name": s.name, "zone": s.zone, "note": s.note}
+            for s in intel.load_sequence
+        ],
     }
 
 
