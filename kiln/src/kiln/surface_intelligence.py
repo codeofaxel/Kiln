@@ -328,6 +328,13 @@ def _face_centroid(group: dict[str, Any]) -> tuple[float, float, float]:
 _Z_GAP_THRESHOLD_MM = 1.5
 
 
+# Two triangles are on the SAME plane when their offsets along the shared
+# normal differ by less than this.  Deliberately far finer than
+# ``_Z_GAP_THRESHOLD_MM``: that one decides which planes to keep together,
+# this one tells apart the planes it kept.
+_PLANE_FLATNESS_TOLERANCE_MM = 0.05
+
+
 def _subgroup_by_parallel_planes(group: dict[str, Any]) -> list[dict[str, Any]]:
     """Split a face group into sub-groups of distinct parallel planes.
 
@@ -470,6 +477,55 @@ def _select_decoratable_plane(
 # Public API
 # ---------------------------------------------------------------------------
 
+def _dominant_plane_offset(
+    group: dict[str, Any],
+    normal: tuple[float, float, float],
+    n_min: float,
+    n_max: float,
+) -> float:
+    """Offset along *normal* of the plane carrying most of the face's area.
+
+    A planar group has one plane and this is its offset — identical to the
+    midpoint, so every ordinary face is unchanged.  A group spanning more
+    than one parallel plane (a carve's glyph tops merged into the surface
+    they stand on) has a dominant one and some passengers, and content
+    belongs on the dominant one.
+    """
+    if n_max - n_min <= _PLANE_FLATNESS_TOLERANCE_MM:
+        return (n_min + n_max) / 2.0
+
+    tris = group.get("triangles") or []
+    if not tris:
+        return (n_min + n_max) / 2.0
+
+    samples: list[tuple[float, float]] = []
+    for tri in tris:
+        v1, v2, v3 = tri["vertices"]
+        mid = (
+            (v1[0] + v2[0] + v3[0]) / 3.0,
+            (v1[1] + v2[1] + v3[1]) / 3.0,
+            (v1[2] + v2[2] + v3[2]) / 3.0,
+        )
+        samples.append((_vec_dot(mid, normal), _triangle_area(v1, v2, v3)))
+    samples.sort(key=lambda s: s[0])
+
+    # Cluster at the flatness tolerance, not the subgrouper's 1.5mm gap:
+    # here we are separating planes the subgrouper deliberately kept
+    # together, so the split has to be finer than the thing that merged
+    # them.
+    clusters: list[list[tuple[float, float]]] = [[samples[0]]]
+    for i in range(1, len(samples)):
+        if samples[i][0] - samples[i - 1][0] > _PLANE_FLATNESS_TOLERANCE_MM:
+            clusters.append([])
+        clusters[-1].append(samples[i])
+
+    best = max(clusters, key=lambda c: sum(a for _o, a in c))
+    total = sum(a for _o, a in best)
+    if total <= 0:
+        return (n_min + n_max) / 2.0
+    return sum(o * a for o, a in best) / total
+
+
 def _build_face_dict(group: dict[str, Any]) -> dict[str, Any]:
     """Convert an internal face-group into the public return dict."""
     normal = group["normal"]
@@ -500,7 +556,15 @@ def _build_face_dict(group: dict[str, Any]) -> dict[str, Any]:
     # landed in the window and carved air).
     u_mid = (u_min + u_max) / 2.0
     v_mid = (v_min + v_max) / 2.0
-    n_mid = (n_min + n_max) / 2.0
+    # ACROSS the face, the middle of the outline is what an offset is a
+    # promise about (see above).  ALONG the normal it is not: a face is a
+    # PLANE, and its position there is one value, not a range to average.
+    # They differ only when the group spans more than one parallel plane —
+    # a previous carve's glyph tops merged in under the subgrouper's gap
+    # threshold — and the midpoint then floats half a relief off the real
+    # surface, which an emboss (zero penetration, exact contact) reads as
+    # a gap.  Take the plane the material is actually on.
+    n_mid = _dominant_plane_offset(group, normal, n_min, n_max)
     bbox_center = _vec_add(
         _vec_add(_vec_scale(x_axis, u_mid), _vec_scale(y_axis, v_mid)),
         _vec_scale(normal, n_mid),

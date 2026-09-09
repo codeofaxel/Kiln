@@ -1,4 +1,4 @@
-"""Regression: every line of a multi-line carve shares ONE reference face.
+"""Regression: a carve lands on the SURFACE, never on a previous carve.
 
 :func:`kiln.decoration_helpers.emboss_text_lines_on_face` applies its
 lines by CHAINING — line 2's input mesh is line 1's output.  It resolved
@@ -27,12 +27,32 @@ that change the same tag put line 2 at 0.063mm off the surface — still
 detached, still nine separate solids, just too small for anything to
 notice.  So these tests pin the contract, not the magnitude.
 
+Two doors reach this, and they need separate fixes.  Inside ONE
+multi-line call the helper can pin its own face, which is what it now
+does.  But a SECOND call — a caller decorating a design that already
+carries a carve on that face, which is what ``decorate_surface`` does
+when a user says "now add my name too" — resolves the face fresh and
+cannot be told about the first.  For that one the face resolution
+itself has to be right, so the anchor along the face normal is now the
+plane the material is actually on rather than the middle of the
+group's thickness (see ``_dominant_plane_offset``).
+
+An emboss has no margin to absorb the error: it is placed with
+``z_offset = 0.0``, so its base sits EXACTLY on the resolved plane with
+zero penetration into the body.  A deboss gets ``-depth_mm`` of bite; a
+raised carve gets nothing.  Contact is a knife edge, and any outward
+error in the plane is a gap.
+
 These tests pin:
 
 * the face a caller hands in is used VERBATIM — not re-resolved (fast);
+* the resolved plane of an already-carved face is the surface, not the
+  midpoint between surface and glyph tops (fast);
 * adding a second line does not raise the mesh higher than one line
   does, i.e. both lines stand on the same plane (slow, OpenSCAD);
-* the carve stays ONE connected solid — no line floats free (slow,
+* a SECOND, independent carve on that face lands on the surface too
+  (slow, OpenSCAD);
+* the carve stays ONE connected solid — nothing floats free (slow,
   OpenSCAD).
 """
 from __future__ import annotations
@@ -65,6 +85,24 @@ def _plate_tris(x, y, z):
     v = [
         (0, 0, 0), (x, 0, 0), (0, y, 0), (x, y, 0),
         (0, 0, z), (x, 0, z), (0, y, z), (x, y, z),
+    ]
+    quads = [
+        [0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4],
+        [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5],
+    ]
+    tris = []
+    for q in quads:
+        a, b, c, d = (v[i] for i in q)
+        tris += [(a, b, c), (a, c, d)]
+    return tris
+
+
+def _box_tris(lo, hi):
+    """Triangles of an axis-aligned box between two corners."""
+    (x0, y0, z0), (x1, y1, z1) = lo, hi
+    v = [
+        (x0, y0, z0), (x1, y0, z0), (x0, y1, z0), (x1, y1, z0),
+        (x0, y0, z1), (x1, y0, z1), (x0, y1, z1), (x1, y1, z1),
     ]
     quads = [
         [0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4],
@@ -201,6 +239,36 @@ def test_passed_face_is_used_verbatim_not_re_resolved(tmp_path, monkeypatch):
     assert dh  # module import is the surface under test
 
 
+
+def test_resolved_plane_of_an_already_carved_face_is_the_surface(tmp_path):
+    """The plane a face reports is where its material is.
+
+    A plate carrying a raised pad has both surfaces facing +Z, and the
+    subgrouper keeps them in one group while the relief is under its
+    gap threshold.  The group is then 1.2mm thick, and its midpoint is
+    0.6mm above the plate — in the air, where an emboss placed there
+    cannot touch anything.  The plate is 96% of the area; that is the
+    face.
+    """
+    from kiln.surface_intelligence import find_named_face
+
+    mesh = tmp_path / "carved.stl"
+    # 60x60x3 plate, plus a 12x12 pad standing 1.2mm proud of its top.
+    _write_binary_stl(
+        mesh,
+        _plate_tris(60, 60, 3) + _box_tris((24, 24, 3.0), (36, 36, 4.2)),
+    )
+
+    face = find_named_face(str(mesh), "top")
+    assert face["plane_min"] == pytest.approx(3.0, abs=1e-3)
+    assert face["plane_max"] == pytest.approx(4.2, abs=1e-3)
+    # The midpoint of that band is 3.6 and is where placement used to go.
+    assert face["bbox_center"][2] == pytest.approx(3.0, abs=0.01), (
+        f"top face reports its plane at z={face['bbox_center'][2]:.3f}; the "
+        f"plate surface is at 3.0 and the pad tops at 4.2, so anything but "
+        f"3.0 places content off the material"
+    )
+
 # ---------------------------------------------------------------------------
 # Slow (OpenSCAD): the lines actually land on one plane
 # ---------------------------------------------------------------------------
@@ -273,4 +341,35 @@ def test_every_line_stays_attached_to_the_body(plate_stl, tmp_path):
     assert solids == 1, (
         f"carve emitted {solids} disjoint solids — a line was placed off "
         f"the face and is floating above the part with nothing under it"
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not _OPENSCAD, reason="OpenSCAD not installed")
+def test_a_second_independent_carve_lands_on_the_surface(plate_stl, tmp_path):
+    """"Now add my name too" — a fresh call onto an already-carved face.
+
+    The multi-line helper cannot help here: this is two separate calls,
+    and the second one has no way to be told what the face looked like
+    before the first.  It has to resolve a correct plane on its own.
+    Pre-fix the second carve was anchored half a relief up and shipped
+    as loose solids floating over the part.
+    """
+    first = emboss_text_on_face(
+        plate_stl, "AAAA", face_name="top", mode="emboss",
+        offset_y_mm=12.0, scale=0.4, output_dir=str(tmp_path / "first"),
+    )
+    second = emboss_text_on_face(
+        first, "BBBB", face_name="top", mode="emboss",
+        offset_y_mm=-12.0, scale=0.4, output_dir=str(tmp_path / "second"),
+    )
+    assert _z_max(second) == pytest.approx(_z_max(first), abs=0.01), (
+        f"second carve tops out at {_z_max(second):.3f}mm against the "
+        f"first's {_z_max(first):.3f}mm — it was placed on the first "
+        f"carve's glyphs instead of on the part"
+    )
+    solids = _connected_solids(second)
+    assert solids == 1, (
+        f"second carve emitted {solids} disjoint solids — it is floating "
+        f"above the part with nothing under it"
     )
