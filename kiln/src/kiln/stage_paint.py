@@ -352,9 +352,10 @@ def _plate_texture(footprint):
                    outline=_RIM, width=2 * ov)
 
     font_px = max(14, min(28, round(tex_px / 36))) * ov
-    # find_font, not load_font: the stamp is laid out against font_px, so
-    # PIL's fixed-size fallback face would smudge the corner rather than
-    # spell "K I L N".  No real face on the host means no stamp.
+    # find_font, not load_font: this plate is a transcription of the one
+    # the photograph path shoots, pinned by the calibration tests below.
+    # A mark set in Pillow's substitute face would be legible and wrong --
+    # drift from the thing being matched.  No real face means no stamp.
     font = _fonts.find_font(font_px, bold=True)
     if font is not None:
         margin = max(10 * ov, int(font_px * 0.7))

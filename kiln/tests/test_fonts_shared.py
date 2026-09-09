@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from PIL import Image, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 from kiln import _fonts, model_visualizer, region_map, stage_paint
 
@@ -34,14 +34,10 @@ def _first_openable(candidates) -> str | None:
             ImageFont.truetype(cand, 12)
         except OSError:
             continue
+        except ImportError:
+            return None  # Pillow without FreeType: no candidate can open
         return cand
     return None
-
-
-#: Pillow >= 10.1 answers ``load_default()`` with a real TrueType face;
-#: older ones answer with a bitmap font that ``draw.text(anchor=...)``
-#: refuses.  Only the former can exercise a caller's degraded path.
-_DEFAULT_IS_TRUETYPE = isinstance(ImageFont.load_default(), ImageFont.FreeTypeFont)
 
 
 @pytest.fixture()
@@ -114,17 +110,76 @@ def test_find_font_says_none_when_the_host_has_nothing(no_faces) -> None:
     assert _fonts.find_font(19, bold=True) is None
 
 
-def test_load_font_degrades_to_pils_own_face(no_faces) -> None:
-    """No real face means PIL's built-in one — for callers that must draw."""
-    default = ImageFont.load_default()
+def test_load_font_degrades_to_something_drawable(no_faces) -> None:
+    """No real face means PIL's built-in one — and it must actually draw."""
+    draw = ImageDraw.Draw(Image.new("RGB", (120, 60)))
 
     for bold in (False, True):
         got = _fonts.load_font(19, bold=bold)
-        assert type(got) is type(default)
-        # The built-in face ignores the asked size and has no file behind
-        # it; either would be wrong for a face off the candidate list.
-        assert getattr(got, "size", None) == getattr(default, "size", None)
+        # Nothing off the candidate list: the built-in face has no file
+        # behind it.
         assert not isinstance(getattr(got, "path", None), str)
+        assert draw.textlength("Kiln", font=got) > 0
+
+
+def test_load_font_fallback_is_drawn_at_the_asked_size(no_faces) -> None:
+    """``load_default()`` answers at ~10px whatever you ask for.
+
+    A caller laying out a 21px title against a 10px face does not get a
+    smaller title, it gets a broken one.
+    """
+    for size in (11, 13, 16, 21):
+        assert _fonts.load_font(size).size == size
+
+
+def test_load_font_fallback_keeps_a_type_hierarchy(no_faces) -> None:
+    """Title, body and footnote must stay three different sizes.
+
+    This is region_map's whole reason for existing: the disclaimer is
+    burned into the image so a crop still carries it.  Flattened to one
+    size on a fontless host, the image stops explaining itself.
+    """
+    title, body, footnote = (_fonts.load_font(n) for n in (21, 13, 11))
+
+    assert title.size > body.size > footnote.size
+
+
+def test_load_font_still_answers_on_a_pillow_without_sized_defaults(
+    no_faces, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pillow < 10.1 has no ``load_default(size)``; it must still draw."""
+    unsized = ImageFont.load_default()
+
+    def load_default_without_size(size=None):
+        if size is not None:
+            raise TypeError("load_default() takes 0 positional arguments")
+        return unsized
+
+    monkeypatch.setattr(ImageFont, "load_default", load_default_without_size)
+    assert _fonts.load_font(21) is unsized
+
+
+def test_no_freetype_is_a_miss_not_a_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pillow built without FreeType raises ImportError from ``truetype``.
+
+    Every candidate will raise it, so the honest answer is "no real face"
+    — and a caller that must draw still gets the legacy bitmap one.
+    """
+    legacy = ImageFont.load_default()
+
+    def no_freetype(*args, **kwargs):
+        raise ImportError("The _imagingft C module is not installed")
+
+    def default_needs_freetype(size=None):
+        if size is not None:
+            raise ImportError("The _imagingft C module is not installed")
+        return legacy
+
+    monkeypatch.setattr(ImageFont, "truetype", no_freetype)
+    monkeypatch.setattr(ImageFont, "load_default", default_needs_freetype)
+
+    assert _fonts.find_font(19) is None
+    assert _fonts.load_font(19) is legacy
 
 
 def test_load_font_prefers_a_real_face_over_the_fallback() -> None:
@@ -214,11 +269,6 @@ def test_comparison_labels_resolve_through_the_shared_door(
     )
 
 
-@pytest.mark.skipif(
-    not _DEFAULT_IS_TRUETYPE,
-    reason="Pillow's built-in face is a bitmap font here, which compare_renders' "
-    "anchored labels cannot draw with — a gap that predates the shared resolver",
-)
 def test_comparison_labels_still_draw_with_no_face(fake_renders, no_faces) -> None:
     """Labels degrade to PIL's own face rather than vanishing."""
     result = fake_renders()
