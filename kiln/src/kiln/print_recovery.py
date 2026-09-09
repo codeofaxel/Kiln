@@ -45,6 +45,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from kiln.events import Event, EventBus, EventType
+from kiln.hotend_safety import WARNING_GCODE_COMMENT, WARNING_STEP
 from kiln.printers.safe_motion import (
     build_lift_and_home_xy,
     build_resume_preamble,
@@ -1747,6 +1748,7 @@ class PrintRecovery:
                 ]
             elif failure.failure_type == FailureType.NOZZLE_CLOG:
                 steps = [
+                    WARNING_STEP,
                     "Pause print",
                     "Heat hotend to printing temperature",
                     "Perform cold pull procedure (heat, pull, repeat 2-3 times)",
@@ -1848,6 +1850,9 @@ class PrintRecovery:
                 ]
             elif failure.failure_type == FailureType.NOZZLE_CLOG:
                 commands = [
+                    # This script heats the nozzle and then a PERSON pulls,
+                    # so the warning has to survive into the file itself.
+                    WARNING_GCODE_COMMENT,
                     "; Perform cold pull procedure",
                     "M104 S200",  # Heat for cold pull
                     "M109 S200",

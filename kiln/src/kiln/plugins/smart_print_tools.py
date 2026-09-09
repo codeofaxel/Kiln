@@ -558,7 +558,16 @@ def _build_symptom_queries(signals: dict[str, Any]) -> list[str]:
         queries.append("temperature fluctuation")
 
     if signals.get("print_error"):
-        queries.append(str(signals["print_error"]))
+        # The screen's form, not the raw field.  Bambu reports print_error as
+        # a 32-bit decimal (302022663), and the machine's own display and
+        # every searchable reference render that as 1200-8007.  The decimal
+        # matched nothing here and is not a string any user or catalog would
+        # recognise; the screen form is what the failure modes claim.
+        from kiln.printers.base import format_error_code
+
+        queries.append(
+            format_error_code(signals["print_error"]) or str(signals["print_error"])
+        )
 
     if signals.get("overhang_pct", 0) > 30:
         queries.append("overhang failure")

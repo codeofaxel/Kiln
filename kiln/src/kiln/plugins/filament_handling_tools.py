@@ -53,6 +53,7 @@ def run_filament_op(
     before this; the CLI, like ``kiln fan``, goes through the tool.
     """
     import kiln.server as _srv
+    from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING
     from kiln.printers.base import FilamentHandlingUnsupported, PrinterError
     from kiln.registry import PrinterNotFoundError
 
@@ -84,13 +85,33 @@ def run_filament_op(
             "executed" if result.success else "failed",
             details={"printer": target_name, **result.to_dict()},
         )
+        # The burn warning, at the one door every surface goes through — the
+        # MCP tools and the CLI both land here, so neither can be forgotten.
+        #
+        # Narrow on purpose. A purge IS the clog test: a person stands over
+        # the nozzle watching for a clean stream, so it always warns. A load
+        # or unload that SUCCEEDED was machine-driven and needs nothing; one
+        # that FAILED is the moment a human starts pulling at things, so that
+        # warns too. Warning on a clean spool change would be the noise that
+        # teaches people to skip the line.
+        #
+        # troubleshoot_printer names this tool as the next step in the very
+        # branch that fires its own warning — so without this, the warning
+        # stopped one call short of the moment it describes.
+        warn = action == "purge" or not result.success
         if not result.success:
+            extra = {"printer_name": target_name, "filament": result.to_dict()}
+            if warn:
+                extra["safety"] = MOLTEN_FILAMENT_WARNING
             return _srv._error_dict(
                 result.message,
                 code="FILAMENT_FAULT" if result.error_code else "FILAMENT_OP_FAILED",
-                extra={"printer_name": target_name, "filament": result.to_dict()},
+                extra=extra,
             )
-        return {"success": True, "printer_name": target_name, **result.to_dict()}
+        payload = {"success": True, "printer_name": target_name, **result.to_dict()}
+        if warn:
+            payload["safety"] = MOLTEN_FILAMENT_WARNING
+        return payload
     except FilamentHandlingUnsupported as exc:
         return _srv._error_dict(str(exc), code="UNSUPPORTED")
     except (PrinterError, RuntimeError) as exc:

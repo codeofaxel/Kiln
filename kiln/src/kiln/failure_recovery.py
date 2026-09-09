@@ -26,6 +26,8 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from kiln.hotend_safety import WARNING_STEP
+
 logger = logging.getLogger(__name__)
 
 
@@ -273,9 +275,43 @@ def _build_recovery(failure_type: FailureType, *, printer_capabilities: dict[str
         FailureType.NOZZLE_CLOG: RecoveryPlan(
             action=RecoveryAction.MAINTENANCE_REQUIRED,
             steps=[
+                WARNING_STEP,
                 "Cancel the current print",
+                # The fork. "It will not extrude" has two root causes that
+                # want OPPOSITE temperature moves, and this plan used to
+                # answer with one of them unconditionally: raise 5-10C. That
+                # is right for debris in the nozzle bore and strictly wrong
+                # for heat creep, where the plug forms ABOVE the melt zone
+                # and more heat is what put it there. The plan's own
+                # prevent_recurrence already named heat creep, so it was not
+                # even internally consistent.
+                #
+                # The cheap check comes first because a user cannot act on
+                # either branch until they know which one they are in.
+                "Work out WHICH failure this is before changing any "
+                "temperature: look at the small fan on the side of the hot "
+                "end and confirm it is spinning, and note whether the "
+                "printer is enclosed or the room is warm",
+                "If that fan has stopped, or the machine is enclosed and "
+                "running a low-temperature filament, treat it as heat creep: "
+                "the filament is softening ABOVE the melt zone, where it "
+                "should still be solid. Fix the cooling and bring the heat "
+                "DOWN — a higher nozzle temperature makes this worse, and a "
+                "new nozzle does not prevent it coming back",
+                "If the fan is fine and the machine is not running hot, "
+                "treat it as debris in the nozzle itself, where a small "
+                "temperature increase can help it clear",
                 "Heat the nozzle to printing temperature",
-                "Perform a cold pull (heat to 250C, cool to 90C, pull filament)",
+                # The old line named 250C/90C flat, for every material. That
+                # is well above an A1's PLA range and this plan does not know
+                # the material, so it stated a number it could not stand
+                # behind. The technique is what is universal; the numbers
+                # belong to the filament in the machine.
+                "Perform a cold pull: bring the nozzle to the filament's own "
+                "printing temperature, let it cool until the melt goes stiff, "
+                "then draw the filament out in one steady pull — steady, "
+                "never a jerk, which snaps it and leaves behind the debris "
+                "you were trying to remove",
                 "If clog persists, remove and clean or replace the nozzle",
                 "Reload filament (load_filament) and test extrusion with "
                 "purge_filament — it reports whether the printer raised an "
@@ -285,8 +321,18 @@ def _build_recovery(failure_type: FailureType, *, printer_capabilities: dict[str
             automated=False,
             estimated_time_minutes=30,
             risk_level="medium",
+            # print_temp is deliberately NOT here. This map is consumed
+            # programmatically — anything reading it applies the change — and
+            # the correct temperature move depends on which of the two root
+            # causes above is in play. A conditional cannot be expressed in a
+            # key/value pair, and a field that must not be acted on blindly
+            # does not belong in the map of things to act on. The judgment
+            # lives in the steps, where a human reads it.
+            #
+            # retraction stays: reducing it helps BOTH causes (less molten
+            # filament dragged up into the cold zone, less grinding), so it
+            # is safe to apply without knowing which one this is.
             settings_adjustments={
-                "print_temp": "increase by 5-10C",
                 "retraction_distance": "reduce slightly",
             },
             prevent_recurrence=[
