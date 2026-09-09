@@ -292,6 +292,34 @@ def account_required_message(
 UPGRADE_NUDGE_SCHEMA_VERSION = 1
 
 
+#: Content keys already spoken in this process.  A server process IS a
+#: session, so module-level is the whole mechanism — no store, no clock.
+#:
+#: One set, shared by every surface that rations a line, because "once per
+#: session" said by two independent counters is twice per session. The
+#: fastener advice had the first copy of this; it now claims through here.
+_SPOKEN: set[str] = set()
+
+
+def claim_once(content_key: str) -> bool:
+    """True the first time *content_key* is claimed this session, then False.
+
+    For a line that earns its place once and becomes wallpaper on repeat —
+    an upgrade nudge, an advisory, a one-time pointer. A user debugging for
+    an hour should meet the same suggestion once, not ten times: the tenth
+    showing does not persuade anyone, it teaches them to skip the field.
+    """
+    if content_key in _SPOKEN:
+        return False
+    _SPOKEN.add(content_key)
+    return True
+
+
+def reset_spoken_keys() -> None:
+    """Forget every claimed key.  For tests and long-lived hosts."""
+    _SPOKEN.clear()
+
+
 def upgrade_nudge_block(
     *,
     variant: str,

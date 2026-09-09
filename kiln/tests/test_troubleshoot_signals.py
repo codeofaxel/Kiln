@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -278,7 +279,7 @@ def test_failure_mode_signals_default_to_empty():
 
 
 def test_burn_warning_is_public_and_names_the_hazard_and_the_action():
-    from kiln.server import _MOLTEN_FILAMENT_WARNING as warning
+    from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING as warning
 
     lowered = warning.lower()
     # The hazard, and what to do about it. A warning that names neither is
@@ -289,9 +290,324 @@ def test_burn_warning_is_public_and_names_the_hazard_and_the_action():
 
 
 def test_burn_warning_fires_on_the_same_trigger_as_the_next_step():
-    from kiln.server import _FILAMENT_PATH_SYMPTOMS
+    from kiln.hotend_safety import needs_burn_warning
 
     # Everything a user says when they are already at the hot end with a tool
     # in their hand has to trip the warning, not just the word "clog".
-    for phrase in ("cold pull", "heat creep", "extruder gear", "nozzle"):
-        assert phrase in _FILAMENT_PATH_SYMPTOMS
+    for phrase in ("cold pull", "heat creep", "extruder gear", "clog"):
+        assert needs_burn_warning(phrase), phrase
+
+
+# ---------------------------------------------------------------------------
+# The safety floor reaches every door, and only the doors that need it
+# ---------------------------------------------------------------------------
+
+
+def test_the_clog_recovery_plan_leads_with_the_warning():
+    """The worst gap found in the door audit, pinned.
+
+    ``get_recovery_plan(failure_type="nozzle_clog")`` hands back a numbered
+    bare-hands procedure. ``failure_type`` is an enum the user picks, so
+    there is no symptom string for the troubleshooter's trigger list to
+    match — this door could never have been covered by that route. It is the
+    three-days-bare-handed scenario reached in a single call.
+    """
+    from kiln.failure_recovery import FailureType, _build_recovery
+    from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING
+
+    steps = _build_recovery(FailureType.NOZZLE_CLOG).steps
+    assert "glove" in steps[0].lower(), "the warning is not the first step"
+    assert MOLTEN_FILAMENT_WARNING in steps[0]
+
+
+def test_the_clog_plan_no_longer_asserts_a_material_blind_temperature():
+    # It used to say "heat to 250C, cool to 90C" for every material. This
+    # plan does not know the material, and 250C is well above an A1's PLA
+    # range — a number it could not stand behind. The technique is what is
+    # universal.
+    from kiln.failure_recovery import FailureType, _build_recovery
+
+    text = " ".join(_build_recovery(FailureType.NOZZLE_CLOG).steps)
+    assert "250C" not in text and "90C" not in text
+    assert "steady" in text and "never a jerk" in text
+
+
+def test_the_recovery_gcode_carries_the_warning_into_the_file():
+    # This script heats the nozzle and then a PERSON pulls. The warning has
+    # to survive into the G-code itself, not just the chat around it.
+    from kiln.hotend_safety import WARNING_GCODE_COMMENT
+
+    source = (
+        Path(__file__).resolve().parent.parent
+        / "src" / "kiln" / "print_recovery.py"
+    ).read_text(encoding="utf-8")
+    assert "WARNING_GCODE_COMMENT" in source
+    assert WARNING_GCODE_COMMENT.startswith("; ")
+
+
+def test_the_trigger_list_matches_intent_not_anatomy():
+    """A warning that fires on every mention of "nozzle" is wallpaper.
+
+    Wallpaper is not a safety measure, it is the appearance of one — so the
+    list must NOT fire on shopping and settings questions.
+    """
+    from kiln.hotend_safety import needs_burn_warning
+
+    # Fires: someone is about to touch a blockage.
+    for yes in (
+        "my nozzle is clogged",
+        "filament jam on the A1",
+        "it will not extrude",
+        "how do I do a cold pull",
+        "load filament fails at step 5",
+        "heat creep keeps coming back",
+    ):
+        assert needs_burn_warning(yes), f"should warn: {yes!r}"
+
+    # Silent: nobody's hand is anywhere near the hot end.
+    for no in (
+        "which nozzle should I use for ABS",
+        "what nozzle temp for PETG",
+        "my purge tower is too big",
+        "the bed levelling wizard failed",
+        "0.4 nozzle or 0.6 nozzle",
+    ):
+        assert not needs_burn_warning(no), f"should stay silent: {no!r}"
+
+
+def test_the_original_symptom_still_trips_the_warning():
+    # The tightening dropped "wizard", "purge" and bare "nozzle". Check the
+    # sentence that started all of this still fires, via "load filament".
+    from kiln.hotend_safety import needs_burn_warning
+
+    assert needs_burn_warning(
+        "Load Filament wizard fails at step 5, HMS 1200-8007"
+    )
+
+
+def test_the_ruled_out_line_carries_no_single_model_anatomy():
+    """The engine must not hardcode one machine's parts.
+
+    The first version listed the A1's spool, tube, cutter, gears and hot-end
+    mount inside a string emitted for ANY model with a load sequence. On a
+    machine that cuts at the AMS or mounts its hot end with screws, that
+    sentence names parts the user does not have — confidently.
+    """
+    source = (
+        Path(__file__).resolve().parent.parent
+        / "src" / "kiln" / "printer_intelligence.py"
+    ).read_text(encoding="utf-8")
+    ruled_out = source[source.index('reading["ruled_out"] = ('):][:1200]
+    for anatomy in ("cutter", "spool", "buckle", "seated in its mount"):
+        assert anatomy not in ruled_out, (
+            f"the generic elimination string hardcodes {anatomy!r}"
+        )
+
+
+def test_an_ams_unit_and_slot_variant_matches_the_same_fault():
+    """Bambu files one fault under sixteen spellings.
+
+    The first group's low digit is the AMS unit and the second group's
+    second digit is the slot, so the same jam on unit B slot 3 arrives as
+    0701_7200_… where unit A slot 1 arrives as 0700_7000_…  Comparing raw
+    digits, a failure mode declaring the canonical code matched only the
+    user whose filament happened to be in the first slot of the first unit.
+    """
+    from kiln.printer_intelligence import _normalize_code
+
+    assert _normalize_code("0701_7200_0002_0002") == _normalize_code(
+        "0700_7000_0002_0002"
+    )
+    # A print_error, which has no unit aliasing, is untouched.
+    assert _normalize_code("1200-8007") == "12008007"
+
+
+def test_the_clog_plan_forks_instead_of_guessing_the_temperature():
+    """"It will not extrude" has two causes that want OPPOSITE moves.
+
+    The plan used to answer with one of them unconditionally — raise 5-10C —
+    which is right for debris in the nozzle bore and strictly wrong for heat
+    creep, where the plug forms above the melt zone and more heat is what put
+    it there. It was not even self-consistent: its own prevent_recurrence
+    already named heat creep as something to avoid.
+    """
+    from kiln.failure_recovery import FailureType, _build_recovery
+
+    plan = _build_recovery(FailureType.NOZZLE_CLOG)
+    text = " ".join(plan.steps).lower()
+    assert "which failure this is" in text, "the plan does not fork"
+    assert "fan" in text, "no cheap check to tell the two apart"
+    assert "makes this worse" in text, "does not warn against raising the heat"
+
+
+def test_the_unautomatable_adjustment_is_not_in_the_automatable_map():
+    """``settings_adjustments`` is consumed programmatically.
+
+    Anything reading it applies the change, so a value whose correctness
+    depends on which root cause is in play must not sit there — a conditional
+    cannot be expressed as a key/value pair. Retraction stays, because
+    reducing it helps BOTH causes and is safe to apply without knowing which.
+    """
+    from kiln.failure_recovery import FailureType, _build_recovery
+
+    adjustments = _build_recovery(FailureType.NOZZLE_CLOG).settings_adjustments
+    assert "print_temp" not in adjustments
+    assert adjustments["retraction_distance"]
+
+
+def test_the_discriminator_comes_before_the_physical_work():
+    # A user cannot act on either branch until they know which one they are
+    # in, so the check has to precede the heating and the pull.
+    from kiln.failure_recovery import FailureType, _build_recovery
+
+    steps = [s.lower() for s in _build_recovery(FailureType.NOZZLE_CLOG).steps]
+    check = next(i for i, s in enumerate(steps) if "which failure this is" in s)
+    # "perform a cold pull", not merely "cold pull" — the safety warning at
+    # step 1 mentions the phrase too, and matching that would compare the
+    # check against the warning instead of against the instruction.
+    pull = next(i for i, s in enumerate(steps) if "perform a cold pull" in s)
+    assert check < pull
+
+
+# ---------------------------------------------------------------------------
+# The free-tier nudge
+# ---------------------------------------------------------------------------
+
+
+def _free_troubleshoot(**kwargs):
+    """Call the tool the way a free install would — kiln_pro unimportable."""
+    import kiln.printer_intelligence as pi
+    from kiln.server import troubleshoot_printer as tool
+
+    class _Block:
+        def find_spec(self, name, path=None, target=None):
+            if name.startswith("kiln_pro"):
+                raise ImportError("simulated free install")
+            return None
+
+    # Evict any already-imported kiln_pro as well as blocking the import.
+    # A meta_path hook is only consulted on a MISS, and by the time this test
+    # runs the suite has usually imported kiln_pro already — so the blocker
+    # alone measures nothing and the test silently reads paid data. (That is
+    # the same import-path trap that made the first two hand-run
+    # measurements of this wrong.)
+    blocker = _Block()
+    evicted = {
+        name: mod for name, mod in sys.modules.items()
+        if name == "kiln_pro" or name.startswith("kiln_pro.")
+    }
+    for name in evicted:
+        del sys.modules[name]
+    sys.meta_path.insert(0, blocker)
+    pi._merged_cache = None
+    try:
+        return getattr(tool, "fn", tool)(**kwargs)
+    finally:
+        sys.meta_path.remove(blocker)
+        sys.modules.update(evicted)
+        pi._merged_cache = None
+
+
+def test_the_nudge_is_specific_when_the_user_named_an_exact_signal():
+    """The sharpest honest moment to mention Pro.
+
+    Someone who typed a step number and a fault code just handed over the two
+    most precise things they can say about a load failure, and a free install
+    reads neither. Saying so is not a sales line — it is the one place the
+    difference between the tiers is concrete.
+    """
+    hint = _free_troubleshoot(
+        printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
+    )["upgrade_hint"]
+    assert "fault code" in hint and "wizard step" in hint
+    # The free floor is named too — a nudge that says only what you lack
+    # reads as a wall; one that says what you keep reads as a door.
+    assert "still tells you" in hint
+    assert "kiln3d.com" in hint
+
+
+def test_the_nudge_never_leaks_the_paid_answer():
+    # Naming the shape of the answer sells it; naming the answer gives it
+    # away. "Step 5 is upstream of the melt zone" is the product.
+    hint = _free_troubleshoot(
+        printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
+    )["upgrade_hint"].lower()
+    for leak in ("upstream", "step 5 is", "cannot be the cause", "clog cannot",
+                 "melt zone"):
+        assert leak not in hint, f"the nudge gives away {leak!r}"
+
+
+def test_the_nudge_does_not_promise_what_pro_cannot_deliver():
+    # A Prusa owner who types "step 3" gets the generic line, because the
+    # codes and load sequences only exist for Bambu in the paid data. A
+    # promise the product cannot keep costs more than the sale.
+    hint = _free_troubleshoot(
+        printer_id="prusa_mk4", symptom="load fails at step 3"
+    )["upgrade_hint"]
+    assert "fault code" not in hint
+    assert "kiln3d.com" in hint
+
+
+def test_the_generic_nudge_says_what_it_means_in_plain_words():
+    # It used to read "per-printer firmware quirks + failure-mode playbooks",
+    # which is engineer-speak at the exact moment a stuck user is reading.
+    hint = _free_troubleshoot(printer_id="bambu_a1", symptom="stringing")[
+        "upgrade_hint"
+    ]
+    for jargon in ("firmware quirks", "playbook", "overlay"):
+        assert jargon not in hint.lower()
+    assert "what goes wrong" in hint
+
+
+def test_the_nudge_is_said_once_per_session():
+    """The tenth showing does not persuade — it teaches people to skip the field.
+
+    A user debugging a stuck load calls this tool repeatedly. Repeating the
+    same suggestion every time costs the nudge every FUTURE moment it would
+    have been welcome, which is a worse trade than the impression gained.
+    """
+    from kiln.tiers_and_terms import reset_spoken_keys
+
+    reset_spoken_keys()
+    try:
+        first = _free_troubleshoot(
+            printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
+        )["upgrade_hint"]
+        second = _free_troubleshoot(
+            printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
+        )["upgrade_hint"]
+        assert first, "the nudge never fired at all"
+        assert second == "", "the nudge repeated within one session"
+    finally:
+        reset_spoken_keys()
+
+
+def test_a_paid_caller_never_spends_the_session_claim():
+    # A caller with the depth gets no nudge and must not consume the one
+    # showing a later free caller in the same process would have had.
+    from kiln.server import troubleshoot_printer as tool
+    from kiln.tiers_and_terms import claim_once, reset_spoken_keys
+
+    reset_spoken_keys()
+    try:
+        getattr(tool, "fn", tool)(printer_id="bambu_a1", symptom="stringing")
+        assert claim_once("troubleshoot_printer.upgrade_hint") is True
+    finally:
+        reset_spoken_keys()
+
+
+def test_every_rationed_line_counts_against_one_session_claim():
+    # Two independent "once per session" counters say the same thing twice
+    # per session. The fastener advice had the first copy of this mechanism
+    # and now claims through the shared one.
+    from kiln.fastener_advice import reset_emitted_content_keys
+    from kiln.tiers_and_terms import claim_once, reset_spoken_keys
+
+    reset_spoken_keys()
+    try:
+        assert claim_once("shared-key") is True
+        assert claim_once("shared-key") is False
+        reset_emitted_content_keys()  # must clear the SHARED set
+        assert claim_once("shared-key") is True
+    finally:
+        reset_spoken_keys()

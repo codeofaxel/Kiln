@@ -37,6 +37,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **A burn warning before Kiln sends you to a hot nozzle.** Clearing a
+  blockage can spray molten filament, so every tier gets told to glove up
+  first.
+
 - **License plate frames now fit EU plates, in both the long and the
   two-line size.**
 
@@ -142,6 +146,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **A filament load that fails now gets a narrowed answer, not a list of
+  everything it could be (Pro).** Tell Kiln what your printer showed you and
+  it rules causes out.
+
+- **"It won't extrude" no longer gets one answer to a problem that has two
+  opposite fixes.** Kiln works out which one you have before it tells you
+  what to change.
 
 - **Decorations on frames and rings land where you put them.** They could
   drift or be clipped at the edge; a decoration that would carve nothing is

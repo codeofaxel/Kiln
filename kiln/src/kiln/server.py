@@ -278,6 +278,7 @@ try:
     from kiln_pro.payments.manager import PaymentManager
 except ImportError:
     PaymentManager = None  # Available in kiln-pro
+from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING, needs_burn_warning
 from kiln.persistence import get_db
 from kiln.pipelines import (
     PipelineState as _PipelineState,  # noqa: F401 — used by plugins/pipeline_tools.py via _srv
@@ -306,6 +307,7 @@ from kiln.print_start_verdict import resolve_print_start
 from kiln.printer_backends import DEFAULT_SERIAL_BAUDRATE, format_printer_types
 from kiln.printer_intelligence import (
     diagnose_issue,
+    extract_codes,
     extract_load_step,
     get_material_settings,
     get_printer_intel,
@@ -14115,58 +14117,11 @@ def get_material_recommendation(
 # Symptom words that mean "filament is not coming through" — the case
 # purge_filament exists to test.  Matched as substrings of the lowercased
 # symptom (plus the normalized HMS code) in troubleshoot_printer.
-_FILAMENT_PATH_SYMPTOMS: tuple[str, ...] = (
-    "clog",
-    "under-extrusion",
-    "under extrusion",
-    "underextrusion",
-    "no extrusion",
-    "not extruding",
-    "filament stuck",
-    "filament jam",
-    "purge",
-    "load filament",
-    "loading filament",
-    # Named because these are what a user says when they are ALREADY at the
-    # hot end with a tool in their hand — the exact moment the burn warning
-    # below has to have arrived, not a moment later.
-    "cold pull",
-    "atomic pull",
-    "heat creep",
-    "extruder gear",
-    "hotend",
-    "hot end",
-    "nozzle",
-    "feed path",
-    "wizard",
-)
-
-# The molten-filament burn warning, and it is deliberately in PUBLIC Kiln at
-# every tier.
-#
-# Everything else about this fault is curated depth and is paid for: which
-# step failed, what a cold pull is, why a new nozzle does not stop heat creep.
-# The hazard is not.  Free Kiln already tells a user to clear a clog — the
-# free floor above names purge_filament, and the public failure-mode data says
-# "cold pull" in as many words — so the free tier hands out the instruction
-# that creates the risk.  Charging for the sentence that makes that
-# instruction safe would be selling someone a hazard and then selling them the
-# warning, and a paywall in front of "wear gloves" is not a product decision
-# anyone should be able to make by accident.  Kiln's convention already says
-# this: safety_profiles.json ships its hotend ceilings and melt hazards to
-# everyone.
-#
-# Measured cost of its absence: a user spent three days clearing filament
-# jams bare-handed because nothing in Kiln mentioned it (2026-09-07/08).
-_MOLTEN_FILAMENT_WARNING = (
-    "SAFETY — burn hazard, read before you touch it: a blocked hot end holds "
-    "pressure behind the plug. When it lets go, molten filament sprays, and "
-    "it comes out at print temperature. Wear heat-resistant gloves, keep your "
-    "face and eyes out of the line of the nozzle, and never cup a hand under "
-    "it to catch what comes out. This applies to a cold pull, to pushing "
-    "filament through by hand, and to a purge you are standing over."
-)
-
+# The trigger list, the warning, and the question "does this text describe
+# touching a hot end?" all live in kiln.hotend_safety — this is not the only
+# door that sends a hand toward one. The recovery plans, the recovery G-code
+# and the purge tool all do too, and a warning copied into each drifts in
+# five directions.
 
 def _normalize_hms_code(raw: str) -> str:
     """Normalize a Bambu HMS code to uppercase 4-hex groups joined by ``_``.
@@ -14270,14 +14225,66 @@ def troubleshoot_printer(
         has_private_depth = bool(
             intel.quirks or intel.calibration or intel.failure_modes
         )
-        upgrade_hint = (
-            ""
-            if has_private_depth
-            else (
-                "Kiln Pro adds per-printer firmware quirks + "
-                "failure-mode playbooks. See https://kiln3d.com/pricing"
-            )
+        # The nudge, and WHEN it fires matters more than what it says.
+        #
+        # A user who typed a wizard step or a fault code has just handed over
+        # the two most precise things they can say about a load failure, and
+        # on a free install nothing reads either one. That is the honest
+        # moment to mention Pro — not because the moment is persuasive, but
+        # because it is the moment the difference is real and specific.
+        #
+        # It names the SHAPE of the paid answer, never the answer: leaking
+        # "step 5 is upstream of the melt zone" into the upsell would be
+        # selling something while giving it away, and doing neither well.
+        #
+        # Gated on Bambu because that is where the codes and the load
+        # sequences actually exist in the paid data. Telling a Prusa owner
+        # that Pro reads their fault code would be a nudge Pro cannot honour,
+        # and a promise the product does not keep costs more than the sale.
+        named_signals = bool(
+            extract_codes(symptom) or extract_load_step(symptom) is not None
         )
+        # Said ONCE per session, and only when there is something to say.
+        # A user debugging a stuck load calls this repeatedly, and the tenth
+        # showing of the same suggestion persuades nobody — it teaches them
+        # this field is noise, which costs the nudge every future moment it
+        # would have been welcome. The claim is the shared one every rationed
+        # line in Kiln counts against, so two surfaces cannot each spend
+        # their own "once".
+        from kiln.tiers_and_terms import claim_once
+
+        if has_private_depth:
+            upgrade_hint = ""
+        else:
+            if named_signals and intel.firmware == "bambu":
+                # Leads with what the free tier does NOT do, then what it
+                # still DOES, then what Pro adds. That order is deliberate:
+                # opening by telling users they did something clever and
+                # then putting a wall behind it is praise-then-withhold,
+                # which is felt even when it is true. Naming the free floor
+                # is what makes this a door rather than a wall.
+                #
+                # It names the SHAPE of the paid answer, never the answer —
+                # "which side of the hot end", not "step 5 is upstream of
+                # the melt zone", which would sell it and give it away at
+                # once.
+                text = (
+                    "Kiln's free tier can't read a fault code or a wizard "
+                    "step here — it still tells you it's a filament-path "
+                    "problem and how to clear it safely. Kiln Pro reads "
+                    "them: which side of the hot end the failure is on, and "
+                    "what your printer's code means on your model. "
+                    "https://kiln3d.com/pricing"
+                )
+            else:
+                text = (
+                    "Kiln Pro adds the known failures for your exact printer "
+                    "model — what goes wrong, and what fixed it. "
+                    "See https://kiln3d.com/pricing"
+                )
+            upgrade_hint = (
+                text if claim_once("troubleshoot_printer.upgrade_hint") else ""
+            )
         result = {
             "success": True,
             "printer": intel.display_name,
@@ -14308,8 +14315,7 @@ def troubleshoot_printer(
                 result["load_step_reading"] = reading
         # A clog / extrusion complaint has a test Kiln can run itself, so the
         # diagnosis names it rather than leaving the user at the touchscreen.
-        _probe = f"{symptom} {code}".lower()
-        if any(k in _probe for k in _FILAMENT_PATH_SYMPTOMS) or code.startswith(("1200_", "0700_7")):
+        if needs_burn_warning(symptom, code) or code.startswith(("1200_", "0700_7")):
             result["filament_next_step"] = (
                 "Kiln can test the melt zone directly: purge_filament heats the "
                 "nozzle and extrudes a short length, reporting the printer's own "
@@ -14319,7 +14325,7 @@ def troubleshoot_printer(
             # Same trigger as the next step above, because the next step is
             # the hazard: anyone who reaches this branch is about to put a
             # hand near a hot nozzle holding pressure.
-            result["safety"] = _MOLTEN_FILAMENT_WARNING
+            result["safety"] = MOLTEN_FILAMENT_WARNING
         return result
     except KeyError:
         return _error_dict(

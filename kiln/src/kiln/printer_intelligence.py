@@ -13,6 +13,16 @@ Usage::
     print(intel.materials["PLA"])       # {"hotend": 200, "bed": 60, ...}
     print(intel.quirks)                 # ["PTFE tube degrades above 240C...", ...]
     print(intel.failure_modes[0])       # {"symptom": ..., "cause": ..., "fix": ...}
+    print(intel.load_sequence)          # [LoadStep(step=1, zone="feed", ...), ...]
+
+Load-failure diagnosis::
+
+    from kiln.printer_intelligence import extract_load_step, read_load_step
+
+    step = extract_load_step("load fails at step 5")
+    read_load_step("bambu_a1", step)["ruled_out"]
+    # "Step 5 ... is upstream of the melt zone ... a nozzle clog cannot be
+    #  the cause of a failure here."
 
 Speed intelligence::
 
@@ -220,8 +230,26 @@ def _normalize_code(raw: object) -> str:
     """
     if not isinstance(raw, str):
         return ""
-    hex_only = "".join(c for c in raw.upper() if c in "0123456789ABCDEF")
-    return hex_only if len(hex_only) >= 8 else ""
+    head = raw.split()[0] if raw.split() else ""
+    hex_only = "".join(c for c in head.upper() if c in "0123456789ABCDEF")
+    if len(hex_only) < 8:
+        return ""
+    # Bambu files ONE fault under sixteen spellings: the first group's low
+    # digit is the AMS unit (A/B/C/D) and the second group's second digit is
+    # the slot, so the same jam on unit B slot 3 arrives as 0701_7200_…
+    # where unit A slot 1 arrives as 0700_7000_…  Comparing raw digits, a
+    # failure mode declaring the canonical code matched only the user whose
+    # filament happened to be in the first slot of the first unit — measured:
+    # 0701_7200_0002_0002 did not match 0700_7000_0002_0002.  The adapter
+    # already knows this rule and is the one place that should; borrowing it
+    # keeps the two from drifting.
+    try:
+        from kiln.printers.bambu import normalize_bambu_hms
+
+        canonical = normalize_bambu_hms(hex_only)[0].replace("_", "")
+    except Exception:  # noqa: BLE001 — matching must survive without the adapter
+        return hex_only
+    return canonical[: len(hex_only)] if canonical else hex_only
 
 
 def _normalize_codes(raw: object) -> tuple[str, ...]:
@@ -632,12 +660,29 @@ def read_load_step(printer_id: str, step: int) -> dict[str, Any] | None:
             reading["note"] = entry.note
         if entry.zone == "feed":
             melt = [s.name for s in intel.load_sequence if s.zone == "melt"]
+            # What to check is the sequence's OWN earlier steps, named from
+            # the data.  The first version of this sentence listed the A1's
+            # anatomy — spool, tube, cutter, extruder gears, hot-end mount —
+            # hardcoded into a string emitted for every model that has a
+            # sequence.  That is the engine carrying one instance's facts: on
+            # a machine that cuts at the AMS rather than the toolhead, or
+            # mounts its hot end with screws rather than a buckle, the
+            # generic sentence would confidently name parts the user does not
+            # have.  Earlier steps are per-model data and cannot be wrong.
+            upstream = [
+                s.name for s in intel.load_sequence
+                if s.zone == "feed" and s.step <= entry.step
+            ]
             reading["ruled_out"] = (
                 f"Step {entry.step} ({entry.name}) is upstream of the melt "
                 "zone — the filament has not reached the nozzle yet, so a "
-                "nozzle clog cannot be the cause of a failure here. Look at "
-                "the feed path: the spool, the tube, the cutter, the extruder "
-                "gears, and how the hot end is seated in its mount."
+                "nozzle clog cannot be the cause of a failure here."
+                + (
+                    " Everything up to and including this step is the feed "
+                    f"path: {', '.join(upstream)}."
+                    if upstream
+                    else ""
+                )
                 + (f" The melt zone is reached at: {', '.join(melt)}." if melt else "")
             )
         elif entry.zone == "melt":
