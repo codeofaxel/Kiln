@@ -1667,7 +1667,14 @@ class OctoPrintAdapter(PrinterAdapter):
         # Safety: refuse if printer is actively printing
         try:
             state = self.get_state()
-            if state.state == PrinterStatus.PRINTING:
+            # ``effective_state``: a no-op on this backend today, because it
+            # supplies no staleness budget and so can never carry a displaced
+            # headline.  It is here anyway, because the day this adapter
+            # measures a cadence -- which the promotion note in base.py
+            # anticipates -- the bare word silently stops matching on a
+            # printer that is mid-print, and a firmware update goes through
+            # on a live job.
+            if state.effective_state == PrinterStatus.PRINTING:
                 raise PrinterError("Cannot update firmware while printing. Wait for the current print to finish.")
         except PrinterError:
             raise

@@ -534,9 +534,9 @@ def printing_now() -> dict:
             # falls out of it is a live print whose watching servers get
             # SIGTERMed.  That is exactly the case the note above calls
             # dangerous, arriving by a second route.
-            state = getattr(reading, "effective_state", None) or getattr(
-                reading, "state", None
-            )
+            from kiln.printers.base import effective_state_of
+
+            state = effective_state_of(reading)
             value = getattr(state, "value", str(state))
             occupied = getattr(reading, "is_occupied", None)
             if occupied is None:

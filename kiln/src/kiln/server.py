@@ -326,6 +326,7 @@ from kiln.printers import (
     describe_stale_state,
     diagnose_read_failure,
     diagnosed_state,
+    effective_state_of,
     progress_stall_note,
     read_status,
     row_run_state,
@@ -1516,9 +1517,7 @@ def _coverage_block_for(printer_name: str | None) -> dict[str, Any] | None:
             # the bare word made the coverage card say no print was running
             # on a machine that had raised a fault mid-print.
             _reading = adapter.get_state()
-            state_word = getattr(_reading, "effective_state", None) or getattr(
-                _reading, "state", None
-            )
+            state_word = effective_state_of(_reading)
             state_word = getattr(state_word, "value", state_word)
         except Exception:  # noqa: BLE001 — no adapter, or no reading, is a state and not an error
             pass
@@ -4192,6 +4191,9 @@ _LITE_PRINTER_KEYS = (
     # and the hosted door poll: a state word that says "error" with no
     # sentence sends the reader back to a number they cannot look up.
     "fault_note",
+    # ...and what clears it, as its own key.  A poller with one line of room
+    # renders what happened; a surface with more renders both.
+    "fault_remedy",
     # How the LAST job ended — success / failed / cancelled — on its own
     # axis, so `idle` keeps meaning ready without also meaning finished.
     # The web's completion card and any poller watching for an ending need

@@ -250,13 +250,18 @@ So the rule is the same shape as the two above it: the fact that decides what
 you should do next takes the headline, and the fact it displaces is kept.
 
 - A printer reporting a fault nobody has cleared reads `error`, whatever it
-  was doing, and carries a `fault_note` naming the fault in plain language
-  with the code beside it for lookup.  The raw `print_error` and the
-  screen-form `print_error_code` are unchanged.
+  was doing.  A `fault_note` says what happened, in plain language with the
+  code beside it for lookup, and a `fault_remedy` says what clears it -- two
+  fields, so a surface with one line of room shows the half about your
+  printer.  The raw `print_error` and the screen-form `print_error_code` are
+  unchanged.
 - What the machine was **doing** moves to `last_known_state`, and everything
-  asking that question -- the occupancy gates, the print watches, the
-  mid-print refusals -- reads it.  A fault raised mid-print does not free the
-  bed, end the watch, or unlock a filament change.
+  asking that question reads through it.  A fault raised mid-print does not
+  free the bed, end the watch, unlock a filament change, or get the print
+  recorded as failed.  Two accessors, because the question splits: *has it
+  ended* looks through a fault but never through silence, since an expired
+  reading is not evidence anything finished; *might it be busy* looks through
+  both and fails closed.
 - `preflight_check` refuses a faulted printer.  `clear_printer_error`
   acknowledges the latch, and refuses while a print is live.
 - A stale reading still outranks a fault: Kiln cannot vouch for a fault code

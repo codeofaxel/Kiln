@@ -664,3 +664,39 @@ class TestTheLastLoops:
 
         assert out["printer"]["state"] == "error"
         assert out["kiln_watch"]["printing"] is True
+
+
+class TestNoMidPrintGuardReadsTheBareHeadline:
+    """The rule, pinned once, so the next adapter cannot reopen the hole.
+
+    A guard that refuses an action WHILE A PRINT IS RUNNING is asking what
+    the machine is doing, and the headline is not that.  On OctoPrint and
+    Moonraker the bare read is a no-op today only because neither adapter
+    supplies a staleness budget, so no promotion can reach them -- a
+    coincidence, not a design, and one base.py explicitly expects to end.
+    """
+
+    @pytest.mark.parametrize(
+        "module,cls_name",
+        [
+            ("kiln.printers.octoprint", "OctoPrintAdapter"),
+            ("kiln.printers.moonraker", "MoonrakerAdapter"),
+        ],
+    )
+    def test_the_firmware_update_guard_reads_through_the_headline(
+        self, module: str, cls_name: str
+    ) -> None:
+        """A firmware update mid-print restarts the host; on Moonraker that
+        restarts Klipper, which is a hard halt on a live job."""
+        import importlib
+
+        from kiln.printers.base import PrinterError
+
+        cls = getattr(importlib.import_module(module), cls_name)
+        adapter = mock.MagicMock()
+        adapter.get_state.return_value = _state(
+            PrinterStatus.PRINTING, fault=True
+        )
+
+        with pytest.raises(PrinterError, match="(?i)while printing"):
+            cls.update_firmware(adapter)

@@ -210,6 +210,38 @@ def as_status(value: Any) -> PrinterStatus | None:
         return None
 
 
+def effective_state_of(reading: Any) -> PrinterStatus | None:
+    """:attr:`PrinterState.effective_state` from anything state-shaped.
+
+    The call sites asking this hold a reading an adapter handed them, which
+    may be a duck-typed stand-in without the property.  Retyping the
+    ``getattr`` fallback at each of them is how one of them ends up spelling
+    it differently, which is the same drift the two properties exist to stop.
+    """
+    return _state_attr(reading, "effective_state")
+
+
+def confirmed_state_of(reading: Any) -> PrinterStatus | None:
+    """:attr:`PrinterState.confirmed_state` from anything state-shaped."""
+    return _state_attr(reading, "confirmed_state")
+
+
+def _state_attr(reading: Any, name: str) -> Any:
+    """*name* off *reading* when it is a real status, else its ``state``.
+
+    The ``isinstance`` is load-bearing and not defensive noise.  A test
+    double or a duck-typed adapter answers ANY attribute -- a ``Mock``
+    hands back a fresh truthy child object -- so a plain
+    ``getattr(x, name, None) or getattr(x, "state", None)`` silently
+    returns that child instead of the state, and every comparison against
+    it is then False.  A pre-existing resume test caught exactly this.
+    """
+    value = getattr(reading, name, None)
+    if isinstance(value, PrinterStatus):
+        return value
+    return getattr(reading, "state", None)
+
+
 def row_run_state(row: Any) -> str | None:
     """The run-state WORD from a serialised reading, seen through a headline.
 
@@ -536,9 +568,25 @@ def describe_unacknowledged_fault(
     gloss = f" {reading.strip()}" if reading else ""
     return (
         f"The printer is reporting a fault{shown} that nothing has "
-        f"acknowledged.{gloss} Clear it on the printer's own screen or with "
-        "clear_printer_error; until it is cleared Kiln reports this machine "
-        "as faulted rather than ready."
+        f"acknowledged.{gloss}"
+    )
+
+
+def describe_fault_remedy() -> str:
+    """What CLEARS a latched fault, in one sentence.
+
+    Split from :func:`describe_unacknowledged_fault` for the reason
+    :attr:`PrinterState.cause` and :attr:`PrinterState.remedy` are two fields
+    and not one: what happened and what to do about it are read by different
+    people at different moments, and a surface that can only show one line
+    should be able to choose.  Joined, they were a single 380-character
+    string that ended by telling a person reading a web page to call a tool
+    they do not have.
+    """
+    return (
+        "Clear it on the printer's own screen, or with clear_printer_error. "
+        "Until it is cleared Kiln reports this machine as faulted rather "
+        "than ready."
     )
 
 
@@ -627,6 +675,11 @@ class PrinterState:
     # that says "error" and nothing else is the same shrug as the "idle" it
     # replaced.  ``None`` whenever no fault is being reported.
     fault_note: str | None = None
+    # What CLEARS the fault above.  Its own field, not the tail of
+    # ``fault_note``, so a surface with room for one line shows what happened
+    # rather than an instruction naming a tool its reader has no access to.
+    # Same split, and the same reason, as ``cause`` beside ``remedy``.
+    fault_remedy: str | None = None
 
     def __post_init__(self) -> None:
         """Promote an expired reading to ``STALE``, whoever built it.
@@ -724,6 +777,12 @@ class PrinterState:
             and self.fault_note is None
         ):
             self.fault_note = describe_unacknowledged_fault(self.print_error_code)
+        if (
+            self.state is PrinterStatus.ERROR
+            and self.fault_note is not None
+            and self.fault_remedy is None
+        ):
+            self.fault_remedy = describe_fault_remedy()
 
         # The floor, and it fires on a VERDICT rather than on an age:
         #   * the reading is STALE -- which the promotion above only reaches
@@ -869,7 +928,7 @@ class PrinterState:
             "nozzle_type", "speed_profile", "speed_magnitude", "print_error",
             "state_age_seconds", "last_job_result", "last_known_state",
             "state_stale_after_seconds", "cause", "remedy",
-            "temperature_note", "fault_note",
+            "temperature_note", "fault_note", "fault_remedy",
         )
         for key in _EXTENDED:
             if data.get(key) is None:
@@ -2732,7 +2791,7 @@ class PrinterAdapter(ABC):
                 # fault raised while the machine kept working still matches here,
                 # and it is as strict about staleness as the bare state word was:
                 # an expired reading is not evidence that anything ended.
-                status = getattr(self.get_state(), "confirmed_state", None)
+                status = confirmed_state_of(self.get_state())
                 if status is not PrinterStatus.PAUSED:
                     break
                 if _time.monotonic() >= deadline:
@@ -4191,9 +4250,7 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
     # ``confirmed_state`` returns STALE for an expired reading, which is a
     # word no transition set contains, so a printer going quiet still records
     # nothing rather than guessing.
-    status = getattr(state, "confirmed_state", None) or getattr(
-        state, "state", None
-    )
+    status = confirmed_state_of(state)
     # The job's ending outranks the machine's current state: "completed"
     # and "cancelled" are facts about the print, and both live inside the
     # same IDLE the printer reports afterwards.

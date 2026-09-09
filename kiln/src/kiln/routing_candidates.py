@@ -126,9 +126,9 @@ def collect_routing_candidates(
             # headline word for either is absent from _BUSY_STATES, so the
             # bare read dropped the busy penalty on exactly the machines that
             # most deserve it.
-            raw_state = getattr(state, "effective_state", None) or getattr(
-                state, "state", None
-            )
+            from kiln.printers.base import effective_state_of
+
+            raw_state = effective_state_of(state)
             status = str(getattr(raw_state, "value", raw_state or "unknown")).lower()
         except Exception:
             status = "offline"

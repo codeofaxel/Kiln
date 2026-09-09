@@ -651,3 +651,60 @@ class TestOnlyARealCodePromotes:
 
         assert state.state is PrinterStatus.ERROR
         assert state.print_error_code == MEASURED_FAULT_RENDERED
+
+
+class TestTheFaultCopyIsTwoThings:
+    """What happened and what clears it are read at different moments.
+
+    Joined, they were one 380-character string that ended by telling a person
+    reading a web page to call an MCP tool.  Split, a surface with one line of
+    room can show the half that is about their printer.
+    """
+
+    def test_the_note_says_what_happened_and_stops(
+        self, adapter: BambuAdapter
+    ) -> None:
+        _push(adapter, gcode_state="idle", print_error=MEASURED_FAULT_DECIMAL)
+
+        note = adapter.get_state().fault_note
+
+        assert MEASURED_FAULT_RENDERED in note
+        assert "nozzle" in note.lower()
+        # No instruction, and above all no tool name.
+        assert "clear_printer_error" not in note
+
+    def test_the_remedy_says_what_clears_it(self, adapter: BambuAdapter) -> None:
+        _push(adapter, gcode_state="idle", print_error=MEASURED_FAULT_DECIMAL)
+
+        remedy = adapter.get_state().fault_remedy
+
+        assert remedy
+        assert "screen" in remedy.lower()
+
+    def test_both_ride_the_lite_path(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        from kiln import server
+
+        state = PrinterState(
+            connected=True,
+            state=PrinterStatus.IDLE,
+            print_error=MEASURED_FAULT_DECIMAL,
+        )
+        adapter = MagicMock()
+        adapter.get_state.return_value = state
+        adapter.get_job.return_value = JobProgress()
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            out = server.printer_status(detail="lite")
+
+        assert out["printer"]["fault_note"]
+        assert out["printer"]["fault_remedy"]
+
+    def test_a_healthy_printer_carries_neither(self) -> None:
+        state = PrinterState(connected=True, state=PrinterStatus.IDLE)
+
+        data = state.to_dict()
+
+        assert "fault_note" not in data
+        assert "fault_remedy" not in data

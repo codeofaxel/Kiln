@@ -210,6 +210,7 @@ def format_status(
     temperature_note = state.get("temperature_note")
     # Present only when the printer is reporting a fault nobody has cleared.
     fault_note = state.get("fault_note")
+    fault_remedy = state.get("fault_remedy")
 
     file_name = job.get("file_name")
     completion = job.get("completion")
@@ -234,6 +235,8 @@ def format_status(
         # the reader to the machine with no idea what they are looking for.
         if fault_note:
             table.add_row("Fault", f"[red]{fault_note}[/red]")
+        if fault_remedy:
+            table.add_row("", fault_remedy)
 
         if file_name:
             table.add_row("File", file_name)
@@ -259,6 +262,8 @@ def format_status(
         lines.append(f"Temps:     {temperature_note}")
     if fault_note:
         lines.append(f"Fault:     {fault_note}")
+    if fault_remedy:
+        lines.append(f"           {fault_remedy}")
     if file_name:
         lines.append(f"File:      {file_name}")
     if completion is not None:
