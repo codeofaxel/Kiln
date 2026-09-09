@@ -82,6 +82,20 @@ def _push(adapter: BambuAdapter, **fields: Any) -> None:
     adapter._on_message(adapter._mqtt_client, None, msg)
 
 
+def _join_fault_notices(timeout: float = 5.0) -> None:
+    """Wait for the off-thread fault notices to finish publishing.
+
+    The notice is deliberately not published on the MQTT callback thread
+    (see ``BambuAdapter._notice_fault``), so a test that asserts on what was
+    published has to wait for the thread that publishes it.
+    """
+    import threading
+
+    for t in threading.enumerate():
+        if t.name == "kiln-fault-notice":
+            t.join(timeout)
+
+
 # ---------------------------------------------------------------------------
 # 1. The measured reading -- the headline stops saying "idle"
 # ---------------------------------------------------------------------------
@@ -416,6 +430,30 @@ class TestKilnNoticesWhatItDidNotStart:
 
         assert noticed == []
 
+    def test_the_notice_never_blocks_the_telemetry_thread(
+        self, adapter: BambuAdapter
+    ) -> None:
+        """This runs inside paho's ``on_message``, which is serial.
+
+        Anything slow here delays every later push for this printer, and a
+        status cache that stops advancing is the exact failure the rest of
+        this adapter exists to report. The first publish also imports
+        ``kiln.server``, which loads the whole plugin surface.
+        """
+        import time
+
+        bus = mock.MagicMock()
+        bus.publish.side_effect = lambda _e: time.sleep(0.5)
+
+        with mock.patch("kiln.server._get_event_bus", return_value=bus):
+            started = time.monotonic()
+            _push(
+                adapter, gcode_state="idle", print_error=MEASURED_FAULT_DECIMAL
+            )
+            blocked = time.monotonic() - started
+
+        assert blocked < 0.2, f"on_message blocked for {blocked:.2f}s"
+
     def test_the_notice_reports_and_never_commands(
         self, adapter: BambuAdapter
     ) -> None:
@@ -427,6 +465,7 @@ class TestKilnNoticesWhatItDidNotStart:
 
         with mock.patch("kiln.server._get_event_bus", return_value=bus):
             _push(adapter, gcode_state="idle", print_error=MEASURED_FAULT_DECIMAL)
+            _join_fault_notices()
 
         assert len(published) == 1
         event = published[0]
@@ -708,3 +747,39 @@ class TestTheFaultCopyIsTwoThings:
 
         assert "fault_note" not in data
         assert "fault_remedy" not in data
+
+
+class TestTheReadingNamesTheCodeOnce:
+    """Every caller already names the code before handing over the reading.
+
+    Two of them did, in two different spellings: "The printer raised
+    0502-4007 during the purge: The printer reported 0502_4007, a code Kiln
+    has no reading for."  The reading says what the code MEANS and stops.
+    """
+
+    def test_an_unknown_code_is_not_restated_by_its_own_reading(self) -> None:
+        from kiln.printers.bambu import describe_bambu_filament_fault
+
+        reading, _url = describe_bambu_filament_fault(
+            "0502-4007", kind="print_error"
+        )
+
+        assert "0502" not in reading
+        assert "no reading" in reading
+
+    def test_a_family_fallback_is_not_restated_either(self) -> None:
+        from kiln.printers.bambu import describe_bambu_filament_fault
+
+        reading, _url = describe_bambu_filament_fault(
+            "0300-400C", kind="print_error"
+        )
+
+        assert "0300" not in reading
+        assert "extruder" in reading
+
+    def test_the_composed_note_names_it_exactly_once(self) -> None:
+        state = PrinterState(
+            connected=True, state=PrinterStatus.IDLE, print_error=84033543
+        )
+
+        assert state.fault_note.count("0502") == 1

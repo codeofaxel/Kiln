@@ -630,20 +630,23 @@ def describe_bambu_filament_fault(
     if kind == "print_error":
         hex_only = "".join(c for c in str(code).upper() if c in "0123456789ABCDEF")
         prefix = hex_only[:8]
-        grouped = _hms_group(prefix) if len(prefix) == 8 else str(code)
         reading = _BAMBU_PRINT_ERROR_FAULTS.get(prefix)
         if reading:
             return f"{reading}.", None
+        # These two say what the code MEANS and stop.  They used to open by
+        # naming the code again -- and every caller already names it, so the
+        # composed sentence printed it twice, in two different spellings:
+        # "The printer raised 0502-4007 ...: The printer reported 0502_4007,
+        # a code Kiln has no reading for."
         family = _BAMBU_PRINT_ERROR_FAMILIES.get(prefix[:4])
         if family:
             return (
-                f"The printer reported {grouped}, {family}. Bambu publishes no "
-                "page for this code.",
+                f"This is {family}, and Bambu publishes no page for it.",
                 None,
             )
         return (
-            f"The printer reported {grouped}, a code Kiln has no reading for. "
-            "Bambu publishes no page for print_error codes.",
+            "Kiln has no reading for this code, and Bambu publishes none "
+            "either.",
             None,
         )
 
@@ -2122,6 +2125,26 @@ class BambuAdapter(PrinterAdapter):
             "Printer %s reported fault %s: %s",
             printer_name or self.name, pretty or code, reading,
         )
+        # Off the network thread, deliberately.  This runs inside paho's
+        # ``on_message``, which processes pushes serially -- so anything slow
+        # here delays every subsequent telemetry frame for this printer, and
+        # a status cache that stops advancing is the exact failure the rest
+        # of this file exists to report.  Measured: publishing inline blocked
+        # the callback for as long as the slowest subscriber took, and the
+        # FIRST publish also imports ``kiln.server``, which loads the whole
+        # plugin surface.  One short-lived thread per fault edge, and a fault
+        # edge is rare.
+        threading.Thread(
+            target=self._publish_fault_event,
+            args=(code, pretty, reading, printer_name or self.name),
+            name="kiln-fault-notice",
+            daemon=True,
+        ).start()
+
+    def _publish_fault_event(
+        self, code: int, pretty: str | None, reading: str, printer_name: str
+    ) -> None:
+        """Announce the fault on the event bus.  Never raises."""
         try:
             import kiln.server as _srv
             from kiln.events import Event, EventType
@@ -2130,7 +2153,7 @@ class BambuAdapter(PrinterAdapter):
                 Event(
                     type=EventType.PRINTER_ERROR,
                     data={
-                        "printer_name": printer_name or self.name,
+                        "printer_name": printer_name,
                         "print_error": int(code),
                         "print_error_code": pretty,
                         "reading": reading,
@@ -2139,7 +2162,7 @@ class BambuAdapter(PrinterAdapter):
                         # open connection saw on a job Kiln never started.
                         "noticed_by": "connection",
                     },
-                    source=f"printer:{printer_name or self.name}",
+                    source=f"printer:{printer_name}",
                 )
             )
         except Exception as exc:  # noqa: BLE001 — never break the push path
