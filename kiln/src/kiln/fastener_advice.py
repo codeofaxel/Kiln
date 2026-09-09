@@ -44,8 +44,8 @@ HOLE_SIZING = "hole_sizing"
 #: Content keys already spoken in this process.  The MCP server is one
 #: long-lived process per session, so process lifetime IS session
 #: lifetime; nothing is written to disk and nothing survives a restart.
-#: Tests reset it with :func:`reset_emitted_content_keys`.
-_EMITTED: set[str] = set()
+#: Kept as a name only for the reset below; the claims themselves live in
+#: the shared session set in :mod:`kiln.tiers_and_terms`.
 
 #: The one benefit line, written once.  Every seam's note ends with it,
 #: so there is exactly one sentence to review and one to leak-grep.
@@ -76,15 +76,21 @@ _AGENT_INSTRUCTION = (
 
 def reset_emitted_content_keys() -> None:
     """Forget every key spoken so far.  For tests and long-lived hosts."""
-    _EMITTED.clear()
+    from kiln.tiers_and_terms import reset_spoken_keys
+
+    reset_spoken_keys()
 
 
 def _claim(content_key: str) -> bool:
-    """True the first time ``content_key`` is asked for, False after."""
-    if content_key in _EMITTED:
-        return False
-    _EMITTED.add(content_key)
-    return True
+    """True the first time ``content_key`` is asked for, False after.
+
+    Delegates to the shared session claim in ``kiln.tiers_and_terms`` so
+    every rationed line in Kiln counts against ONE set. Two independent
+    "once per session" counters say the same thing twice per session.
+    """
+    from kiln.tiers_and_terms import claim_once
+
+    return claim_once(content_key)
 
 
 def _block(
