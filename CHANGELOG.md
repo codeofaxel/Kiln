@@ -37,6 +37,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln notices a fault on your printer even when it didn't start the job.**
+  Load filament from the printer's own screen and have it fail, and Kiln says
+  so instead of waiting to be asked.
+
 - **License plate frames now fit EU plates, in both the long and the
   two-line size.**
 
@@ -142,6 +146,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **A printer with a fault no longer reports itself as ready.** Kiln leads
+  with the fault and says what it is in plain language, with the printer's own
+  code beside it to look up.
+
+- **A print that hits a recoverable fault is no longer recorded as failed.**
+  It stays a live print, keeps its progress and whatever is watching it, and
+  gets the outcome it actually earned.
 
 - **Decorations on frames and rings land where you put them.** They could
   drift or be clipped at the edge; a decoration that would carve nothing is
