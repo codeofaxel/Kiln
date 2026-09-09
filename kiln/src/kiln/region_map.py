@@ -50,6 +50,8 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from kiln import _fonts
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -125,32 +127,6 @@ _MAX_LEGEND_ROWS = 12
 #: leader line back to the point it labels.
 _CALLOUT_GAP_PX = 4
 _LEADER_AFTER_PX = 6
-
-_FONT_CANDIDATES_REGULAR = (
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/System/Library/Fonts/HelveticaNeue.ttc",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "C:\\Windows\\Fonts\\arial.ttf",
-)
-_FONT_CANDIDATES_BOLD = (
-    "/System/Library/Fonts/HelveticaNeue.ttc",
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "C:\\Windows\\Fonts\\arialbd.ttf",
-)
-
-
-def _font(size: int, *, bold: bool = False) -> Any:
-    """Best available sans face at ``size``, falling back to PIL's bitmap."""
-    from PIL import ImageFont
-
-    for cand in _FONT_CANDIDATES_BOLD if bold else _FONT_CANDIDATES_REGULAR:
-        try:
-            return ImageFont.truetype(cand, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
-
 
 # ---------------------------------------------------------------------------
 # Region palette
@@ -427,7 +403,7 @@ def _draw_brand(draw: Any, x: int, y: int) -> int:
     shell = [(12.76, 7), (7, 7), (1.6, 25), (30.4, 25), (25, 7), (19.24, 7)]
     draw.line([(px(u), py(v)) for u, v in shell], fill=_HEADER_FG, width=2)
 
-    font = _font(16, bold=True)
+    font = _fonts.load_font(16, bold=True)
     tracking = 16 * 0.15
     cx = x + 34.0
     for ch, color in (("K", _HEADER_FG), ("I", _EMBER), ("L", _HEADER_FG),
@@ -449,18 +425,18 @@ def _draw_header(
     draw.line([(divider, 16), (divider, _HEADER_H - 16)], fill=_HEADER_RULE, width=1)
 
     tx = divider + 18
-    title_font = _font(19, bold=True)
+    title_font = _fonts.load_font(19, bold=True)
     draw.text((tx, 12), title.upper(), fill=_HEADER_FG, font=title_font)
     if subject:
         sx = tx + draw.textlength(title.upper(), font=title_font) + 12
-        draw.text((sx, 16), subject, fill=_HEADER_SUB, font=_font(13))
-    draw.text((tx, 40), REGION_MAP_DISCLAIMER, fill=_HEADER_SUB, font=_font(13))
+        draw.text((sx, 16), subject, fill=_HEADER_SUB, font=_fonts.load_font(13))
+    draw.text((tx, 40), REGION_MAP_DISCLAIMER, fill=_HEADER_SUB, font=_fonts.load_font(13))
 
-    right_font = _font(13)
+    right_font = _fonts.load_font(13)
     count_text = f"{region_count} region{'s' if region_count != 1 else ''}"
     tw = draw.textlength(count_text, font=right_font)
     draw.text((width - 18 - tw, 14), count_text, fill=_HEADER_FG, font=right_font)
-    url_font = _font(12)
+    url_font = _fonts.load_font(12)
     uw = draw.textlength(_BRAND_URL, font=url_font)
     draw.text((width - 18 - uw, 40), _BRAND_URL, fill=_HEADER_SUB, font=url_font)
 
@@ -473,7 +449,7 @@ def _draw_footer(draw: Any, width: int, height: int, *, note: str) -> None:
     text = _FOOTER_DISCLAIMER
     if note:
         text = f"{text}  {note}"
-    font = _font(12)
+    font = _fonts.load_font(12)
     draw.text((18, top + 12), text, fill=_FOOTER_FG, font=font)
     made = f"Made with Kiln \u00b7 {_BRAND_URL}"
     mw = draw.textlength(made, font=font)
@@ -544,7 +520,7 @@ def _draw_callouts(
     field: tuple[int, int, int, int],
 ) -> None:
     """Numbered discs on the object — the identification that survives a crop."""
-    font = _font(13, bold=True)
+    font = _fonts.load_font(13, bold=True)
     radii: dict[int, int] = {}
     widths: dict[int, float] = {}
     origin: dict[int, tuple[float, float]] = {}
@@ -600,18 +576,18 @@ def _draw_legend(
 
     pad = 16
     draw.text(
-        (x0 + pad, y0 + 14), "REGIONS", fill=_FOOTER_FG, font=_font(12, bold=True)
+        (x0 + pad, y0 + 14), "REGIONS", fill=_FOOTER_FG, font=_fonts.load_font(12, bold=True)
     )
     draw.text(
         (x0 + pad, y0 + 32),
         "label colors, not filament",
         fill=(126, 132, 140),
-        font=_font(11),
+        font=_fonts.load_font(11),
     )
 
-    row_font = _font(13)
-    small_font = _font(11)
-    num_font = _font(11, bold=True)
+    row_font = _fonts.load_font(13)
+    small_font = _fonts.load_font(11)
+    num_font = _fonts.load_font(11, bold=True)
     y = y0 + 58
     row_h = 30
     swatch = 20

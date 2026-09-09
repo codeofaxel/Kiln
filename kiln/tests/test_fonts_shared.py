@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageFont
 
-from kiln import _fonts, model_visualizer, stage_paint
+from kiln import _fonts, model_visualizer, region_map, stage_paint
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -226,3 +226,68 @@ def test_comparison_labels_still_draw_with_no_face(fake_renders, no_faces) -> No
     assert result["success"], result.get("error")
     with Image.open(result["comparison_path"]) as img:
         assert img.size[0] > 0 and img.size[1] > 0
+
+
+# ---------------------------------------------------------------------------
+# Caller: region_map's header, legend and callouts
+# ---------------------------------------------------------------------------
+
+
+def _two_region_square():
+    """The smallest input the map renderer accepts: two faces, two regions."""
+    tris = [
+        ((0.0, 0.0, 0.0), (20.0, 0.0, 0.0), (20.0, 20.0, 0.0)),
+        ((0.0, 0.0, 0.0), (20.0, 20.0, 0.0), (0.0, 20.0, 0.0)),
+    ]
+    return tris, [0, 1]
+
+
+def test_region_map_chrome_reads_the_shared_list(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Emptying the shared list must change the map's burned-in chrome.
+
+    The header strip is where the "these are labels, not filament"
+    sentence lives, so it is drawn text and nothing else.  A private list
+    inside region_map would render it identically both times.
+    """
+    if _first_openable(_fonts._CANDIDATES_REGULAR) is None:
+        pytest.skip("host has no font from the shared candidate list")
+
+    tris, face_region = _two_region_square()
+
+    def header_band(name: str) -> np.ndarray:
+        out = tmp_path / name
+        region_map.render_region_map(
+            tris,
+            face_region,
+            output_path=str(out),
+            width=500,
+            height=380,
+            supersample=1,
+        )
+        with Image.open(out) as img:
+            return np.asarray(img.convert("RGB"))[: region_map._HEADER_H]
+
+    lettered = header_band("with-faces.png")
+    monkeypatch.setattr(_fonts, "_CANDIDATES_REGULAR", ())
+    monkeypatch.setattr(_fonts, "_CANDIDATES_BOLD", ())
+    fallback = header_band("no-faces.png")
+
+    assert not np.array_equal(lettered, fallback), (
+        "emptying the shared list left the region-map header byte-identical — "
+        "region_map is not resolving through kiln._fonts"
+    )
+
+
+def test_region_map_still_renders_with_no_face(tmp_path, no_faces) -> None:
+    """The disclaimer must still get burned in, in PIL's own face."""
+    tris, face_region = _two_region_square()
+    out = tmp_path / "no-faces.png"
+
+    result = region_map.render_region_map(
+        tris, face_region, output_path=str(out), width=500, height=380, supersample=1
+    )
+
+    assert result.path == str(out)
+    assert out.stat().st_size > 0
