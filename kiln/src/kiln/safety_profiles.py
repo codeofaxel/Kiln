@@ -49,6 +49,8 @@ from dataclasses import replace as _dc_replace
 from pathlib import Path
 from typing import Any
 
+from kiln.catalog_keys import printer_key_candidates
+
 logger = logging.getLogger(__name__)
 
 _DATA_FILE = Path(__file__).resolve().parent / "data" / "safety_profiles.json"
@@ -707,9 +709,12 @@ def get_profile(printer_id: str, *, variant: str | None = None) -> SafetyProfile
     _load()
     _load_local_overrides()
     normalised = _normalise(printer_id)
-    candidates = [normalised]
-    if normalised.startswith("creality_"):
-        candidates.append(normalised.removeprefix("creality_"))
+    # The shared spelling resolver's candidates ("Creality K1C" → k1c), with
+    # this module's own normalisation kept first so an override keyed the
+    # old way still matches exactly.
+    candidates = [normalised] + [
+        c for c in printer_key_candidates(printer_id) if c != normalised
+    ]
 
     # The curated answer, variant included.  Computed once and used for both
     # branches below so the profile a caller is handed and the ceiling an

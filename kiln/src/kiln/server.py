@@ -68,6 +68,7 @@ from pathlib import Path
 from types import MethodType
 from typing import Any
 
+from kiln import tool_context as _tool_context
 from kiln.mcp_compat import (
     FastMCP,
     ask_user_to_confirm,
@@ -83,6 +84,7 @@ from kiln.print_consent import (
     reset_consent,
     set_consent,
 )
+from kiln.tool_args import parse_json_array, parse_json_object
 
 with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
@@ -1235,6 +1237,61 @@ def _unknown_arguments_message(tool_mgr: Any, name: str, unknown: list[str]) -> 
     )
 
 
+def _coerce_arguments(tool_mgr: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """The two safe argument coercions, applied at the one door every call uses.
+
+    See ``kiln.tool_args.coerce_tool_arguments``.  An unreadable registry
+    entry means no coercion, never a blocked call.
+    """
+    try:
+        tool = (tool_mgr._tools or {}).get(name)  # noqa: SLF001 — FastMCP registry
+        arg_model = tool.fn_metadata.arg_model
+    except Exception:  # noqa: BLE001
+        return arguments
+    from kiln.tool_args import coerce_tool_arguments
+
+    return coerce_tool_arguments(arg_model, arguments)
+
+
+def _invalid_arguments_result(
+    tool_mgr: Any, name: str, exc: BaseException, convert_result: bool
+) -> Any | None:
+    """Kiln's failure envelope for an ARGUMENT validation error, else ``None``.
+
+    FastMCP validates arguments against a generated ``<tool>Arguments`` model
+    and wraps the pydantic error in a ``ToolError``; the agent used to
+    receive that as a stack trace it had to parse ("Input should be a valid
+    string [type=string_type, input_value={...}]").  Only that model's errors
+    are converted — a pydantic error a tool raised from its own body is
+    somebody else's exception and passes through untouched.
+    """
+    cause = exc.__cause__
+    try:
+        from pydantic import ValidationError
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(cause, ValidationError):
+        return None
+    try:
+        tool = (tool_mgr._tools or {}).get(name)  # noqa: SLF001 — FastMCP registry
+        arg_model = tool.fn_metadata.arg_model
+    except Exception:  # noqa: BLE001
+        return None
+    if getattr(cause, "title", None) != getattr(arg_model, "__name__", object()):
+        return None
+    from kiln.tool_args import invalid_arguments_envelope
+
+    envelope = invalid_arguments_envelope(
+        name, cause, sorted(_declared_tool_arguments(tool_mgr, name) or ())
+    )
+    if not convert_result:
+        return envelope
+    try:
+        return tool.fn_metadata.convert_result(envelope)
+    except Exception:  # noqa: BLE001 — fall back to the raise the caller expects
+        return None
+
+
 def _install_mcp_request_context_capture() -> None:
     """Capture current MCP request context so auth can read per-request metadata."""
     tool_mgr = mcp._tool_manager
@@ -1251,6 +1308,7 @@ def _install_mcp_request_context_capture() -> None:
         convert_result: bool = False,
     ):
         token = _current_mcp_request_context.set(context)
+        tool_token = _tool_context.enter_tool(name)
         consent_token = None
         try:
             if _terms_gate_blocks(name):
@@ -1269,6 +1327,10 @@ def _install_mcp_request_context_capture() -> None:
             # the tools because sync tools run on this event loop and could
             # not await the answer.  Raises if they say no, before dispatch.
             consent_token = await _obtain_print_consent(name, arguments, context)
+            # ``null`` for a non-Optional field and a bare string for a list
+            # field are coerced here, once, for every tool — see
+            # kiln.tool_args.  Everything else pydantic still judges.
+            arguments = _coerce_arguments(self, name, arguments or {})
             try:
                 result = await original_call_tool(
                     name,
@@ -1276,16 +1338,25 @@ def _install_mcp_request_context_capture() -> None:
                     context=context,
                     convert_result=convert_result,
                 )
-            except Exception:
+            except Exception as exc:
                 # A tool that RAISES was invisible to every counter here:
                 # the recorder below only runs on a call that returned, so
                 # the loudest failure a tool can have produced no signal at
-                # all.  Count it and re-raise untouched — the agent must
-                # still see the exception it was going to see.
+                # all.  Count it as a CALL too — a raise is a call that
+                # happened, and a tool raising on every call otherwise reads
+                # "N failures, 0 calls" and never reaches the rate floor.
                 with contextlib.suppress(Exception):
-                    from kiln.daily_stats import record_tool_failure
+                    from kiln.daily_stats import record_tool_call, record_tool_failure
 
+                    record_tool_call(name)
                     record_tool_failure(name)
+                # An ARGUMENT validation error becomes Kiln's own failure
+                # envelope naming the bad fields and the accepted ones; any
+                # other exception is re-raised untouched — the agent must
+                # still see the exception it was going to see.
+                envelope = _invalid_arguments_result(self, name, exc, convert_result)
+                if envelope is not None:
+                    return envelope
                 raise
             # Best-effort usage tally — only after a call that returned
             # (a tool that raised is not counted); cannot affect the
@@ -1314,6 +1385,7 @@ def _install_mcp_request_context_capture() -> None:
         finally:
             if consent_token is not None:
                 reset_consent(consent_token)
+            _tool_context.leave_tool(tool_token)
             _current_mcp_request_context.reset(token)
 
     tool_mgr.call_tool = MethodType(_call_tool_with_context, tool_mgr)
@@ -13516,16 +13588,25 @@ def resolve_model_source(file_path: str) -> dict:
 
 
 @mcp.tool()
-def validate_openscad_code(code: str) -> dict:
+def validate_openscad_code(scad_code: str = "", code: str = "") -> dict:
     """Validate OpenSCAD code without generating geometry.
 
     Compiles the code and returns structured error/warning information
     with line numbers.  Use this to check code before calling
     generate_model with OpenSCAD.
 
-    :param code: OpenSCAD source code to validate.
+    :param scad_code: OpenSCAD source code to validate — the same parameter
+        name ``compile_scad`` / ``analyze_scad_code`` / ``tweak_and_compile_scad``
+        take, so a session that has been compiling can validate without
+        learning a second spelling.
+    :param code: Alias of ``scad_code`` kept for callers that learned it.
     :returns: Dict with ``valid``, ``errors``, and ``warnings``.
     """
+    code = scad_code or code
+    if not code.strip():
+        return _error_dict(
+            "Pass the OpenSCAD source as scad_code.", code="VALIDATION_ERROR"
+        )
     try:
         gen = _get_generation_provider("openscad")
         result = gen.validate_scad(code)
@@ -14405,7 +14486,7 @@ def run_quick_print(
     profile_path: str | None = None,
     material: str | None = None,
     use_ams: str | None = None,
-    ams_mapping: str | None = None,
+    ams_mapping: str | list[int] | None = None,
     skip_validation: bool = False,
 ) -> dict:
     """Full print pipeline: validate + slice + safety-check + upload + print (recommended one-shot tool).
@@ -14446,21 +14527,9 @@ def run_quick_print(
     if err := _check_auth("print"):
         return err
     try:
-        parsed_ams_mapping: list[int] | None = None
-        if ams_mapping:
-            import json as _json_ams
-            try:
-                parsed_ams_mapping = _json_ams.loads(ams_mapping)
-            except _json_ams.JSONDecodeError as exc:
-                return _error_dict(
-                    f"Invalid JSON in ams_mapping: {exc}",
-                    code="VALIDATION_ERROR",
-                )
-            if not isinstance(parsed_ams_mapping, list):
-                return _error_dict(
-                    "ams_mapping must be a JSON array of integers (e.g. [0, 2])",
-                    code="VALIDATION_ERROR",
-                )
+        parsed_ams_mapping, _arg_err = parse_json_array(ams_mapping, "ams_mapping")
+        if _arg_err is not None:
+            return _arg_err
 
         # Tri-state use_ams: "auto"/None -> None (pipeline auto-resolves),
         # "true"/"false" -> bool.
@@ -14503,12 +14572,12 @@ def run_reslice_and_print(
     model_path: str,
     printer_name: str | None = None,
     printer_id: str | None = None,
-    overrides: str | None = None,
+    overrides: str | dict[str, Any] | None = None,
     profile_path: str | None = None,
     slicer_path: str | None = None,
     material: str | None = None,
     use_ams: bool | None = None,
-    ams_mapping: str | None = None,
+    ams_mapping: str | list[int] | None = None,
     skip_validation: bool = False,
 ) -> dict:
     """Reslice with custom slicer overrides + print (use for retries with adjusted settings).
@@ -14554,40 +14623,12 @@ def run_reslice_and_print(
     if err := _check_auth("print"):
         return err
     try:
-        parsed_overrides: dict[str, str] | None = None
-        if overrides:
-            import json
-
-            try:
-                parsed_overrides = json.loads(overrides)
-                if not isinstance(parsed_overrides, dict):
-                    return _error_dict(
-                        'overrides must be a JSON object (e.g. {"brim_width": "8"})',
-                        code="VALIDATION_ERROR",
-                    )
-            except json.JSONDecodeError as exc:
-                return _error_dict(
-                    f"Invalid JSON in overrides: {exc}",
-                    code="VALIDATION_ERROR",
-                )
-
-        # Parse ams_mapping JSON if provided
-        parsed_ams_mapping: list[int] | None = None
-        if ams_mapping:
-            import json as _json_ams
-
-            try:
-                parsed_ams_mapping = _json_ams.loads(ams_mapping)
-                if not isinstance(parsed_ams_mapping, list):
-                    return _error_dict(
-                        "ams_mapping must be a JSON array of integers (e.g. [0, 2])",
-                        code="VALIDATION_ERROR",
-                    )
-            except _json_ams.JSONDecodeError as exc:
-                return _error_dict(
-                    f"Invalid JSON in ams_mapping: {exc}",
-                    code="VALIDATION_ERROR",
-                )
+        parsed_overrides, _arg_err = parse_json_object(overrides, "overrides")
+        if _arg_err is not None:
+            return _arg_err
+        parsed_ams_mapping, _arg_err = parse_json_array(ams_mapping, "ams_mapping")
+        if _arg_err is not None:
+            return _arg_err
 
         # Prefer per-model speeds for the machine this print is FOR — an
         # unnamed printer_id used to mean "no model speeds", and the type
@@ -14650,7 +14691,7 @@ def multi_copy_print(
     printer_name: str | None = None,
     printer_id: str | None = None,
     spacing_mm: float = 10.0,
-    overrides: str | None = None,
+    overrides: str | dict[str, Any] | None = None,
     slicer_path: str | None = None,
 ) -> dict:
     """Print multiple copies of a model arranged on one build plate.
@@ -14697,22 +14738,9 @@ def multi_copy_print(
 
     try:
         # --- Parse overrides ---
-        parsed_overrides: dict[str, str] | None = None
-        if overrides:
-            import json
-
-            try:
-                parsed_overrides = json.loads(overrides)
-                if not isinstance(parsed_overrides, dict):
-                    return _error_dict(
-                        "overrides must be a JSON object.",
-                        code="VALIDATION_ERROR",
-                    )
-            except json.JSONDecodeError as exc:
-                return _error_dict(
-                    f"Invalid JSON in overrides: {exc}",
-                    code="VALIDATION_ERROR",
-                )
+        parsed_overrides, _arg_err = parse_json_object(overrides, "overrides")
+        if _arg_err is not None:
+            return _arg_err
 
         # --- Detect slicer and choose strategy ---
         from kiln.slicer import find_slicer, supports_duplicate_flag
@@ -16316,7 +16344,23 @@ def check_printer_material_support(
             "success": True,
             "printer_id": report.printer_id,
             "materials": report.materials,
+            "profile_source": report.resolved_from,
         }
+        if report.resolved_from == "default":
+            # The generic profile answered, not this machine.  Say so and
+            # name the nearest curated ids — a K1C spelled "creality_k1c"
+            # used to be told ASA needs an enclosure it already has, with
+            # nothing marking the answer as generic.
+            from kiln.catalog_keys import suggest_keys
+
+            nearest = suggest_keys(printer_id, list_compatibility_printers())
+            result["profile_is_default"] = True
+            result["note"] = (
+                f"No compatibility profile for '{printer_id}'; this answer comes "
+                f"from the generic default profile, not from that machine."
+                + (f" Did you mean: {', '.join(nearest)}?" if nearest else "")
+            )
+            result["suggested_printer_ids"] = nearest
         mat_lower = material_id.lower()
         if mat_lower in report.materials:
             mat_info = report.materials[mat_lower]
@@ -16578,9 +16622,9 @@ def reprint_with_material(
     material_id: str,
     printer_name: str | None = None,
     printer_id: str | None = None,
-    extra_overrides: str | None = None,
+    extra_overrides: str | dict[str, Any] | None = None,
     use_ams: bool | None = None,
-    ams_mapping: str | None = None,
+    ams_mapping: str | list[int] | None = None,
 ) -> dict:
     """Reprint a model with a different material — auto-adjusts temperatures,
     speeds, and retraction for the new material.
@@ -16634,16 +16678,11 @@ def reprint_with_material(
         overrides = dict(mat_result["overrides"])
 
         # Step 2: Merge extra overrides if provided
-        if extra_overrides:
-            try:
-                extra = _json.loads(extra_overrides)
-                if isinstance(extra, dict):
-                    overrides.update(extra)
-            except _json.JSONDecodeError as exc:
-                return _error_dict(
-                    f"Invalid JSON in extra_overrides: {exc}",
-                    code="VALIDATION_ERROR",
-                )
+        extra, _arg_err = parse_json_object(extra_overrides, "extra_overrides")
+        if _arg_err is not None:
+            return _arg_err
+        if extra:
+            overrides.update(extra)
 
         # Step 3: Delegate to run_reslice_and_print
         result = run_reslice_and_print(
@@ -16679,8 +16718,8 @@ def smart_reprint(
     material_id: str,
     printer_name: str | None = None,
     printer_id: str | None = None,
-    search_dirs: str | None = None,
-    extra_overrides: str | None = None,
+    search_dirs: str | list[str] | None = None,
+    extra_overrides: str | dict[str, Any] | None = None,
     auto_ams: bool = True,
     brief_id: str = "",
 ) -> dict:
@@ -16776,13 +16815,11 @@ def smart_reprint(
                 _os.path.expanduser("~/3d_prints"),
                 "/tmp",
             ]
-            if search_dirs:
-                try:
-                    extra_dirs = _json.loads(search_dirs)
-                    if isinstance(extra_dirs, list):
-                        default_dirs = [str(d) for d in extra_dirs] + default_dirs
-                except _json.JSONDecodeError:
-                    pass
+            extra_dirs, _dirs_err = parse_json_array(search_dirs, "search_dirs")
+            if _dirs_err is not None:
+                return _dirs_err
+            if extra_dirs:
+                default_dirs = [str(d) for d in extra_dirs] + default_dirs
 
             # Strip extension from search name for flexible matching
             base_name = file_name
@@ -17013,11 +17050,11 @@ def smart_reprint(
 
 @mcp.tool()
 def multi_material_print(
-    objects_json: str,
+    objects_json: str | list[dict[str, Any]],
     printer_name: str | None = None,
     printer_id: str | None = None,
     auto_ams: bool = True,
-    extra_overrides: str | None = None,
+    extra_overrides: str | dict[str, Any] | None = None,
     slicer_path: str | None = None,
 ) -> dict:
     """Print multiple objects in different materials/colors on one build plate.
@@ -17091,16 +17128,12 @@ def multi_material_print(
         import tempfile
 
         # Parse input
-        try:
-            objects = _json.loads(objects_json)
-            if not isinstance(objects, list) or not objects:
-                return _error_dict(
-                    "objects_json must be a non-empty JSON array.",
-                    code="VALIDATION_ERROR",
-                )
-        except _json.JSONDecodeError as exc:
+        objects, _arg_err = parse_json_array(objects_json, "objects_json")
+        if _arg_err is not None:
+            return _arg_err
+        if not objects:
             return _error_dict(
-                f"Invalid JSON in objects_json: {exc}",
+                "objects_json must be a non-empty JSON array.",
                 code="VALIDATION_ERROR",
             )
 
@@ -17314,13 +17347,11 @@ def multi_material_print(
             merged_overrides["bed_temperature"] = str(max_bed)
 
         # Merge extra overrides
-        if extra_overrides:
-            try:
-                extra = _json.loads(extra_overrides)
-                if isinstance(extra, dict):
-                    merged_overrides.update(extra)
-            except _json.JSONDecodeError:
-                pass
+        extra, _arg_err = parse_json_object(extra_overrides, "extra_overrides")
+        if _arg_err is not None:
+            return _arg_err
+        if extra:
+            merged_overrides.update(extra)
 
         # Step 4: AMS slot mapping
         ams_mapping_list: list[int] | None = None
@@ -17463,7 +17494,7 @@ def multi_material_print(
 
 @mcp.tool()
 def merge_multicolor_gcode(
-    parts: str,
+    parts: str | list[dict[str, Any]],
     output_path: str = "",
 ) -> dict:
     """Merge separately-sliced gcode files into one multi-tool gcode.
@@ -17504,11 +17535,12 @@ def merge_multicolor_gcode(
     if err := _check_auth("slicer"):
         return err
     try:
-        import json as _json
 
-        parsed_parts = _json.loads(parts) if isinstance(parts, str) else parts
-        if not isinstance(parsed_parts, list):
-            return _error_dict("parts must be a JSON array of part objects.")
+        parsed_parts, _arg_err = parse_json_array(parts, "parts")
+        if _arg_err is not None:
+            return _arg_err
+        if not parsed_parts:
+            return _error_dict("parts must be a non-empty JSON array of part objects.")
         for p in parsed_parts:
             if not isinstance(p, dict):
                 return _error_dict("Each part must be a JSON object.")

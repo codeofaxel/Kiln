@@ -34,6 +34,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from kiln.catalog_keys import resolve_material_key, resolve_printer_key
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -784,10 +786,17 @@ class TroubleshootingResult:
 
 @dataclass
 class PrinterCompatibilityReport:
-    """Whether a printer can handle a specific material (or all materials)."""
+    """Whether a printer can handle a specific material (or all materials).
+
+    ``resolved_from`` says how ``printer_id`` was found: ``"exact"`` (the
+    caller's spelling names a curated profile), ``"prefix"`` (a curated
+    sibling), or ``"default"`` (the generic profile — the answer is not
+    about this machine, and the door must say so).
+    """
 
     printer_id: str
     materials: dict[str, dict[str, Any]]
+    resolved_from: str = "exact"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1244,6 +1253,7 @@ def get_material_profile(material_id: str) -> MaterialProfile | None:
     :param material_id: Material key (e.g. ``"petg"``, ``"nylon"``).
     """
     kb = _get_kb()
+    material_id = resolve_material_key(material_id, kb.materials) or material_id
     data = kb.materials.get(material_id.lower())
     if data is None:
         # Not in the curated catalog. A kiln-pro Business+ user may have
@@ -2515,7 +2525,7 @@ def estimate_load_capacity(
     weaker than the square basis, and the reasoning says so.
     """
     kb = _get_kb()
-    material_key = material_id.lower()
+    material_key = resolve_material_key(material_id, kb.load_tables) or material_id.lower()
     material_data = kb.load_tables.get(material_key)
     if material_data is None:
         return None
@@ -2634,7 +2644,7 @@ def check_environment_compatibility(
 ) -> EnvironmentReport | None:
     """Check if a material survives in a described environment."""
     kb = _get_kb()
-    material_key = material_id.lower()
+    material_key = resolve_material_key(material_id, kb.environment) or material_id.lower()
     material_data = kb.environment.get(material_key)
     if material_data is None:
         return None
@@ -3527,8 +3537,8 @@ def troubleshoot_print_issue(
         ``"warping"``, ``"poor adhesion"``).
     """
     kb = _get_kb()
-    material_key = material_id.lower()
-    data = kb.troubleshooting.get(material_key)
+    material_key = resolve_material_key(material_id, kb.troubleshooting)
+    data = kb.troubleshooting.get(material_key) if material_key else None
     if data is None:
         return None
 
@@ -3590,38 +3600,49 @@ def check_printer_material_compatibility(
         returns compatibility for all known materials on this printer.
     """
     kb = _get_kb()
-    printer_key = printer_id.lower()
-
-    # Try exact match, then prefix match, then 'default' fallback
-    compat_data = kb.printer_compatibility.get(printer_key)
+    # Spelling first ("Creality K1C", "creality_k1c", "K1-C" → k1c), then a
+    # prefix match, then the generic profile — and the report SAYS which,
+    # because a K1C answered from ``default`` was told ASA needs an
+    # enclosure it already has, and nothing marked the answer as generic.
+    resolved_from = "exact"
+    printer_key = resolve_printer_key(printer_id, kb.printer_compatibility)
+    compat_data = kb.printer_compatibility.get(printer_key) if printer_key else None
     if compat_data is None:
+        lowered = printer_id.lower()
         for key in kb.printer_compatibility:
-            if key.startswith(printer_key) or printer_key.startswith(key):
+            if key == "default":
+                continue
+            if key.startswith(lowered) or lowered.startswith(key):
                 compat_data = kb.printer_compatibility[key]
                 printer_key = key
+                resolved_from = "prefix"
                 break
     if compat_data is None:
         compat_data = kb.printer_compatibility.get("default")
         if compat_data is None:
             return None
         printer_key = "default"
+        resolved_from = "default"
 
     if material_id:
-        mat_key = material_id.lower()
+        mat_key = resolve_material_key(material_id, compat_data) or material_id.lower()
         mat_data = compat_data.get(mat_key)
         if mat_data is None:
             return PrinterCompatibilityReport(
                 printer_id=printer_key,
                 materials={mat_key: {"status": "unknown", "notes": "No data available."}},
+                resolved_from=resolved_from,
             )
         return PrinterCompatibilityReport(
             printer_id=printer_key,
             materials={mat_key: mat_data},
+            resolved_from=resolved_from,
         )
 
     return PrinterCompatibilityReport(
         printer_id=printer_key,
         materials=compat_data,
+        resolved_from=resolved_from,
     )
 
 

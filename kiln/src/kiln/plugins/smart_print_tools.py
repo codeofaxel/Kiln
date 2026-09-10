@@ -9,13 +9,13 @@ no manual imports needed.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
 from typing import Any
 
 from kiln.print_start_verdict import resolve_print_start
+from kiln.tool_args import parse_json_object
 from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class _SmartPrintToolsPlugin:
             printer_name: str | None = None,
             material: str | None = None,
             printer_id: str | None = None,
-            custom_overrides: str | None = None,
+            custom_overrides: str | dict[str, Any] | None = None,
             skip_diagnosis: bool = False,
             skip_validation: bool = False,
             preview_token: str | None = None,
@@ -107,21 +107,12 @@ class _SmartPrintToolsPlugin:
             # ------------------------------------------------------------------
             # 0. Parse custom_overrides early so we can fail fast on bad JSON.
             # ------------------------------------------------------------------
-            extra_overrides: dict[str, str] = {}
-            if custom_overrides:
-                try:
-                    parsed = json.loads(custom_overrides)
-                    if not isinstance(parsed, dict):
-                        return _srv._error_dict(
-                            "custom_overrides must be a JSON object (key-value pairs).",
-                            code="VALIDATION_ERROR",
-                        )
-                    extra_overrides = {str(k): str(v) for k, v in parsed.items()}
-                except json.JSONDecodeError as exc:
-                    return _srv._error_dict(
-                        f"custom_overrides is not valid JSON: {exc}",
-                        code="VALIDATION_ERROR",
-                    )
+            parsed, _arg_err = parse_json_object(custom_overrides, "custom_overrides")
+            if _arg_err is not None:
+                return _arg_err
+            extra_overrides: dict[str, str] = {
+                str(k): str(v) for k, v in (parsed or {}).items()
+            }
 
             # ------------------------------------------------------------------
             # 1. Resolve adapter + effective printer_id.

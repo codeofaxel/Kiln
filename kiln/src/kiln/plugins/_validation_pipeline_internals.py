@@ -1465,8 +1465,12 @@ def _step_estimate(report: _PipelineReport, working_path: str) -> None:
         report.model_info["estimated_filament_g"] = filament_g
         report.model_info["estimated_cost_usd"] = cost_usd
         _estimate_available = True
-    except (ImportError, AttributeError):
-        pass
+    except Exception as exc:  # noqa: BLE001 — an estimate is a courtesy, never a crash
+        # A native .3mf, a flat STL, a reader that cannot open the file: the
+        # estimator raised out of the whole pipeline for each of these
+        # (validate_and_prepare on a Bambu owner's .3mf, 2026-08-27).  The
+        # bounding-box fallback below answers instead, and says why.
+        report.model_info["estimate_note"] = f"exact estimate unavailable: {exc}"
 
     if not _estimate_available:
         # Fallback: rough estimate from bounding box volume

@@ -132,8 +132,22 @@ class _EstimateToolsPlugin:
                     printer_name=printer_name,
                 )
 
-                # 2. Slice the model
-                result = slice_file(input_path, profile=effective_profile)
+                # 2. Bed-fit gate, then slice.  Without the gate an oversized
+                # part reached the slicer and came back as an opaque "output
+                # file was not created" (bambu_p1s, 2026-08-24), where
+                # slice_model says EXCEEDS_BED with the dimensions.  Same
+                # helper, same refusal shape, so the two doors cannot differ.
+                from kiln.plugins.slicer_tools import (
+                    _apply_bed_fit_gate,
+                    _gate_error_response,
+                )
+
+                effective_input, gate_err, gate_info = _apply_bed_fit_gate(
+                    input_path, effective_printer_id, True,
+                )
+                if gate_err is not None:
+                    return _gate_error_response(gate_err)
+                result = slice_file(effective_input, profile=effective_profile)
 
                 # 3. Parse gcode metadata
                 meta = None

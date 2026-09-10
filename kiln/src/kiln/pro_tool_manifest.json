@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-09T23:19:30.320870+00:00",
+  "generated": "2026-09-10T22:45:41.577304+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -230,8 +230,16 @@
       "parameters": {
         "properties": {
           "assembly_json": {
-            "title": "Assembly Json",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
+            "title": "Assembly Json"
           },
           "output_dir": {
             "anyOf": [
@@ -530,6 +538,10 @@
                 "type": "string"
               },
               {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -540,6 +552,10 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
               },
               {
                 "type": "null"
@@ -687,8 +703,16 @@
       "parameters": {
         "properties": {
           "assembly_json": {
-            "title": "Assembly Json",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
+            "title": "Assembly Json"
           },
           "output_dir": {
             "default": "./assembly_manual",
@@ -7852,6 +7876,10 @@
                 "type": "string"
               },
               {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -11982,9 +12010,17 @@
       "parameters": {
         "properties": {
           "supplier_fields_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
             "default": "",
-            "title": "Supplier Fields Json",
-            "type": "string"
+            "title": "Supplier Fields Json"
           },
           "max_temp_c": {
             "anyOf": [
@@ -14527,9 +14563,17 @@
             "type": "string"
           },
           "pipeline_result_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
             "default": "{}",
-            "title": "Pipeline Result Json",
-            "type": "string"
+            "title": "Pipeline Result Json"
           },
           "fleet_mode": {
             "default": false,
@@ -15395,14 +15439,30 @@
             "type": "string"
           },
           "settings": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
             "default": "{}",
-            "title": "Settings",
-            "type": "string"
+            "title": "Settings"
           },
           "temps": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
             "default": "{}",
-            "title": "Temps",
-            "type": "string"
+            "title": "Temps"
           },
           "speed": {
             "default": 0,

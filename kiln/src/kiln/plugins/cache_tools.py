@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_args import parse_json_object
+
 _logger = logging.getLogger(__name__)
 
 
@@ -54,8 +56,8 @@ class _CacheToolsPlugin:
             source_id: str | None = None,
             prompt: str | None = None,
             tags: str | None = None,
-            dimensions: str | None = None,
-            metadata: str | None = None,
+            dimensions: str | dict[str, Any] | None = None,
+            metadata: str | dict[str, Any] | None = None,
         ) -> dict:
             """Add a 3D model file to the local cache for reuse across jobs.
 
@@ -82,8 +84,12 @@ class _CacheToolsPlugin:
                 from kiln.model_cache import get_model_cache
 
                 tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
-                dim_dict = _json.loads(dimensions) if dimensions else None
-                meta_dict = _json.loads(metadata) if metadata else None
+                dim_dict, _arg_err = parse_json_object(dimensions, "dimensions")
+                if _arg_err is not None:
+                    return _arg_err
+                meta_dict, _arg_err = parse_json_object(metadata, "metadata")
+                if _arg_err is not None:
+                    return _arg_err
 
                 cache = get_model_cache()
                 entry = cache.add(

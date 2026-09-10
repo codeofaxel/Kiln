@@ -14,7 +14,30 @@ import json
 import logging
 from typing import Any
 
+from kiln.tool_args import parse_json_object
+
 _logger = logging.getLogger(__name__)
+
+
+def _assembly_state(assembly_json: Any) -> dict[str, Any]:
+    """The assembly state a tool was handed, whatever shape it arrived in.
+
+    Five doors take the state ``create_assembly`` returned; agents hand it
+    back as the object at least as often as the string, and pydantic used
+    to refuse the object outright.  Raises ``ValueError`` with the parse
+    error's own message so each door's existing ``except`` reports it.
+    """
+    state, err = parse_json_object(assembly_json, "assembly_json")
+    if err is not None:
+        # The doors' own ``except json.JSONDecodeError`` branch reports this
+        # as "Invalid assembly JSON: ..." — the same envelope they always
+        # returned for a bad string, now for a bad object too.
+        raise json.JSONDecodeError(err["error"]["message"], "", 0)
+    if not state:
+        raise json.JSONDecodeError(
+            "assembly_json is required: pass the state create_assembly returned.", "", 0
+        )
+    return state
 
 
 class _AssemblyToolsPlugin:
@@ -62,7 +85,7 @@ class _AssemblyToolsPlugin:
 
         @mcp.tool()
         def add_assembly_part(
-            assembly_json: str,
+            assembly_json: str | dict[str, Any],
             part_id: str,
             file_path: str,
             position_x: float = 0.0,
@@ -90,7 +113,7 @@ class _AssemblyToolsPlugin:
             try:
                 from kiln.assembly import Assembly, AssemblyPart
 
-                assembly = Assembly.from_dict(json.loads(assembly_json))
+                assembly = Assembly.from_dict(_assembly_state(assembly_json))
                 part = AssemblyPart(
                     part_id=part_id,
                     file_path=file_path,
@@ -113,7 +136,7 @@ class _AssemblyToolsPlugin:
 
         @mcp.tool()
         def add_assembly_interface(
-            assembly_json: str,
+            assembly_json: str | dict[str, Any],
             part_a_id: str,
             part_b_id: str,
             joint_type: str = "clearance_fit",
@@ -154,7 +177,7 @@ class _AssemblyToolsPlugin:
             try:
                 from kiln.assembly import Assembly, FastenerSpec, MatingInterface
 
-                assembly = Assembly.from_dict(json.loads(assembly_json))
+                assembly = Assembly.from_dict(_assembly_state(assembly_json))
                 fastener_spec = _parse_fastener_spec_arg(fastener, FastenerSpec)
                 interface = MatingInterface(
                     part_a_id=part_a_id,
@@ -174,7 +197,7 @@ class _AssemblyToolsPlugin:
 
         @mcp.tool()
         def validate_assembly(
-            assembly_json: str,
+            assembly_json: str | dict[str, Any],
             *,
             printer_id: str | None = None,
         ) -> dict:
@@ -199,7 +222,7 @@ class _AssemblyToolsPlugin:
                 from kiln.assembly import Assembly
                 from kiln.assembly import validate_assembly as _validate
 
-                assembly = Assembly.from_dict(json.loads(assembly_json))
+                assembly = Assembly.from_dict(_assembly_state(assembly_json))
                 validated = _validate(assembly, printer_id=printer_id)
                 response = {"success": True, "data": validated.to_dict()}
                 # Surface the heuristic-grade upgrade nudge when the assembly
@@ -232,7 +255,7 @@ class _AssemblyToolsPlugin:
 
         @mcp.tool()
         def check_assembly_clearances(
-            assembly_json: str,
+            assembly_json: str | dict[str, Any],
             default_clearance_mm: float = 0.2,
         ) -> dict:
             """Check clearances between all mating parts in an assembly.
@@ -248,7 +271,7 @@ class _AssemblyToolsPlugin:
             try:
                 from kiln.assembly import Assembly, check_all_clearances
 
-                assembly = Assembly.from_dict(json.loads(assembly_json))
+                assembly = Assembly.from_dict(_assembly_state(assembly_json))
                 checks = check_all_clearances(
                     assembly,
                     default_clearance_mm=default_clearance_mm,
@@ -265,7 +288,7 @@ class _AssemblyToolsPlugin:
 
         @mcp.tool()
         def compose_assembly_parts(
-            assembly_json: str,
+            assembly_json: str | dict[str, Any],
             output_path: str,
         ) -> dict:
             """Compose all assembly parts into a single output STL file.
@@ -284,7 +307,7 @@ class _AssemblyToolsPlugin:
             try:
                 from kiln.assembly import Assembly, compose_assembly
 
-                assembly = Assembly.from_dict(json.loads(assembly_json))
+                assembly = Assembly.from_dict(_assembly_state(assembly_json))
                 result = compose_assembly(assembly, output_path)
                 response = {"success": True, "data": result}
                 # Assemblies are legitimately multi-body, but parts that

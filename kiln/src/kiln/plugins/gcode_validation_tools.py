@@ -46,7 +46,7 @@ class _GcodeValidationToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        def validate_gcode(commands: str) -> dict:
+        def validate_gcode(commands: str | list[str]) -> dict:
             """Validate G-code syntax and basic safety (generic, no printer-specific limits).
 
             For printer-specific safety validation (PTFE temp caps, speed limits),
@@ -66,6 +66,8 @@ class _GcodeValidationToolsPlugin:
             """
             from kiln.gcode import validate_gcode as _validate_gcode_impl
 
+            if isinstance(commands, list):
+                commands = "\n".join(str(c) for c in commands)
             raw_lines = re.split(r"[\n\r]+", commands.strip())
             cmd_list = [line.strip() for line in raw_lines if line.strip()]
 
@@ -88,7 +90,7 @@ class _GcodeValidationToolsPlugin:
 
         @mcp.tool()
         def validate_gcode_safe(
-            commands: str,
+            commands: str | list[str],
             printer_id: str = "",
         ) -> dict:
             """Validate G-code with printer-specific safety limits (PTFE temp caps, speed limits).
@@ -109,6 +111,8 @@ class _GcodeValidationToolsPlugin:
                 return err
             try:
                 if printer_id:
+                    if isinstance(commands, list):
+                        commands = "\n".join(str(c) for c in commands)
                     result = validate_gcode_for_printer(commands, printer_id)
                     profile = get_profile(printer_id)
                     profile_info = {

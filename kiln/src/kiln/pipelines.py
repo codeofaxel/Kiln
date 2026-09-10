@@ -636,11 +636,26 @@ def quick_print(
     def _slice() -> PipelineStep:
         step_start = time.time()
         try:
+            from kiln.printers.upload_prep import slice_overrides_for_adapter
             from kiln.slicer import slice_file
+            from kiln.slicer_profiles import profile_with_overrides
+
+            # A printer that uploads a wrapped 3MF needs the gcode sliced
+            # for it (relative E, no slicer start/end block).  Decided from
+            # the TARGET adapter, before the slicer runs, by the same helper
+            # the upload step uses — so the two halves cannot disagree.
+            slice_profile = ctx["effective_profile"]
+            try:
+                ctx["adapter"] = _resolve_pipeline_adapter(printer_name)
+                prep = slice_overrides_for_adapter(ctx["adapter"])
+                if prep:
+                    slice_profile = profile_with_overrides(slice_profile, prep)
+            except Exception:  # noqa: BLE001 — the upload step reports an unreachable printer
+                pass
 
             result = slice_file(
                 ctx["model_path"],
-                profile=ctx["effective_profile"],
+                profile=slice_profile,
                 slicer_path=slicer_path,
             )
             ctx["gcode_path"] = result.output_path
@@ -696,16 +711,28 @@ def quick_print(
     def _upload() -> PipelineStep:
         step_start = time.time()
         try:
+            from kiln.printers.upload_prep import prepare_upload_for_adapter
+
             adapter = _resolve_pipeline_adapter(printer_name)
             ctx["adapter"] = adapter
-            upload_result = adapter.upload_file(ctx["gcode_path"])
-            remote_name = getattr(upload_result, "file_name", None) or os.path.basename(ctx["gcode_path"])
+            # Bambu printers take a wrapped 3MF, not raw gcode.  This door
+            # uploaded the .gcode and started a job the firmware ignored
+            # (bambu_p1s, 2026-08-23); the wrap now goes through the one
+            # helper every print door shares.
+            model = ctx.get("model_path") or ""
+            upload_path, wrapped = prepare_upload_for_adapter(
+                adapter,
+                ctx["gcode_path"],
+                stl_paths=[model] if model.lower().endswith(".stl") else None,
+            )
+            upload_result = adapter.upload_file(upload_path)
+            remote_name = getattr(upload_result, "file_name", None) or os.path.basename(upload_path)
             ctx["remote_name"] = remote_name
             return PipelineStep(
                 name="upload",
                 success=True,
                 message=f"Uploaded {remote_name}",
-                data={"remote_name": remote_name},
+                data={"remote_name": remote_name, "wrapped_3mf": wrapped},
                 duration_seconds=time.time() - step_start,
             )
         except Exception as exc:
@@ -915,7 +942,7 @@ def reslice_and_print(
     Returns:
         :class:`PipelineResult` with step-by-step outcomes.
     """
-    effective_overrides = overrides or {}
+    effective_overrides = dict(overrides or {})  # own copy: the prep below adds keys
 
     # Shared mutable state between step closures.
     # ctx["model_path"] is the EFFECTIVE path used by downstream steps —
@@ -1045,6 +1072,18 @@ def reslice_and_print(
         try:
             from kiln.slicer_profiles import resolve_slicer_profile
 
+            # A wrapping target (Bambu) needs relative E and no slicer
+            # start/end block; the wrap step documents it and the upload
+            # step decides it from the same adapter.
+            try:
+                from kiln.printers.upload_prep import slice_overrides_for_adapter
+
+                for _k, _v in slice_overrides_for_adapter(
+                    _resolve_pipeline_adapter(printer_name)
+                ).items():
+                    effective_overrides.setdefault(_k, _v)
+            except Exception:  # noqa: BLE001 — the upload step reports an unreachable printer
+                pass
             ctx["effective_profile"] = resolve_slicer_profile(
                 effective_pid, overrides=effective_overrides
             )
@@ -1138,28 +1177,17 @@ def reslice_and_print(
             # Bambu printers need gcode wrapped in a 3MF with proprietary
             # BambuStudio start/end sequences for the extruder to function.
             # Other adapters (OctoPrint, Moonraker, Serial) upload raw gcode.
-            upload_path = ctx["gcode_path"]
-            wrapped_3mf = False
-            if (
-                hasattr(adapter, "wrap_gcode_as_3mf")
-                and upload_path.endswith(".gcode")
-            ):
-                try:
-                    wrap_kwargs: dict[str, Any] = {}
-                    if effective_overrides.get("temperature"):
-                        wrap_kwargs["hotend_temp"] = int(effective_overrides["temperature"])
-                    if effective_overrides.get("bed_temperature"):
-                        wrap_kwargs["bed_temp"] = int(effective_overrides["bed_temperature"])
-                    upload_path = adapter.wrap_gcode_as_3mf(
-                        upload_path, **wrap_kwargs
-                    )
-                    wrapped_3mf = True
-                    logger.info("Wrapped gcode as Bambu 3MF: %s", upload_path)
-                except Exception:
-                    logger.warning(
-                        "Bambu 3MF wrapping failed, uploading raw gcode",
-                        exc_info=True,
-                    )
+            # One helper, shared with slice_and_print and quick_print.
+            from kiln.printers.upload_prep import prepare_upload_for_adapter
+
+            _hot = effective_overrides.get("temperature")
+            _bed = effective_overrides.get("bed_temperature")
+            upload_path, wrapped_3mf = prepare_upload_for_adapter(
+                adapter,
+                ctx["gcode_path"],
+                hotend_temp=int(_hot) if _hot else None,
+                bed_temp=int(_bed) if _bed else None,
+            )
 
             upload_result = adapter.upload_file(upload_path)
             remote_name = getattr(upload_result, "file_name", None) or os.path.basename(upload_path)

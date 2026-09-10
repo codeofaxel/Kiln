@@ -15,6 +15,8 @@ import logging
 import os
 from typing import Any
 
+from kiln.tool_args import parse_json_object
+
 _logger = logging.getLogger(__name__)
 
 
@@ -497,7 +499,7 @@ class _EnterpriseToolsPlugin:
             client_secret: str = "",
             redirect_uri: str = "",
             allowed_domains: str = "",
-            role_mapping: str = "",
+            role_mapping: str | dict[str, str] = "",
         ) -> dict:
             """Configure SSO (OIDC or SAML) for Enterprise authentication.
 
@@ -528,14 +530,13 @@ class _EnterpriseToolsPlugin:
                     )
 
                 domains = [d.strip() for d in allowed_domains.split(",") if d.strip()] if allowed_domains else []
-                mapping: dict[str, str] = {}
-                if role_mapping:
-                    import json as _json
-
-                    try:
-                        mapping = _json.loads(role_mapping)
-                    except _json.JSONDecodeError:
-                        return _srv._error_dict("role_mapping must be valid JSON.", code="INVALID_INPUT")
+                _mapping, _arg_err = parse_json_object(role_mapping, "role_mapping")
+                if _arg_err is not None:
+                    return _srv._error_dict(
+                        "role_mapping must be a JSON object mapping IdP groups to roles.",
+                        code="INVALID_INPUT",
+                    )
+                mapping: dict[str, str] = {str(k): str(v) for k, v in (_mapping or {}).items()}
 
                 config = SSOConfig(
                     protocol=proto,

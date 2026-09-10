@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln.print_start_verdict import resolve_print_start
+from kiln.tool_args import parse_json_object
 from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
@@ -956,7 +957,7 @@ class _SlicerToolsPlugin:
         def reslice_with_overrides(
             input_path: str,
             printer_id: str | None = None,
-            overrides: str | None = None,
+            overrides: str | dict[str, Any] | None = None,
             output_dir: str | None = None,
             slicer_path: str | None = None,
             auto_center: bool = True,
@@ -987,8 +988,8 @@ class _SlicerToolsPlugin:
                 input_path: Path to the input file (STL, 3MF, STEP, OBJ, AMF).
                 printer_id: Printer model ID for bundled profile selection
                     (e.g. ``"prusa_mini"``, ``"bambu_a1"``).
-                overrides: JSON string of key-value pairs to override in the slicer
-                    profile (e.g. ``'{"brim_width": "8", "fill_density": "25%"}'``).
+                overrides: Slicer keys to override, as a JSON object or its
+                    string form (e.g. ``{"brim_width": "8", "fill_density": "25%"}``).
                 output_dir: Directory for the output G-code.  Defaults to the
                     system temp directory.
                 slicer_path: Explicit path to the slicer binary.  Auto-detected
@@ -1001,7 +1002,6 @@ class _SlicerToolsPlugin:
             if err := _srv._check_auth("slicer"):
                 return err
 
-            import json as _json
 
             from kiln.slicer_profiles import (
                 profile_with_overrides,
@@ -1024,24 +1024,13 @@ class _SlicerToolsPlugin:
                     code="UNSUPPORTED_FORMAT",
                 )
 
-            # -- Parse overrides (accept both JSON string and dict) --
-            parsed_overrides: dict[str, str] = {}
-            if overrides is not None:
-                if isinstance(overrides, dict):
-                    parsed_overrides = {str(k): str(v) for k, v in overrides.items()}
-                else:
-                    try:
-                        parsed_overrides = _json.loads(overrides)
-                    except (_json.JSONDecodeError, TypeError) as exc:
-                        return _srv._error_dict(
-                            f"Invalid overrides JSON: {exc}",
-                            code="VALIDATION_ERROR",
-                        )
-                    if not isinstance(parsed_overrides, dict):
-                        return _srv._error_dict(
-                            f"Overrides must be a JSON object (dict), got {type(parsed_overrides).__name__}.",
-                            code="VALIDATION_ERROR",
-                        )
+            # -- Parse overrides: a JSON object, its string form, or nothing --
+            _parsed, _arg_err = parse_json_object(overrides, "overrides")
+            if _arg_err is not None:
+                return _arg_err
+            parsed_overrides: dict[str, str] = {
+                str(k): str(v) for k, v in (_parsed or {}).items()
+            }
 
             try:
                 from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
@@ -1670,21 +1659,15 @@ class _SlicerToolsPlugin:
                 # exposes wrap_gcode_as_3mf() for this.  Pass the (possibly
                 # bed-centered) STL so the LCD thumbnail matches the sliced
                 # geometry.
-                upload_path = result.output_path
-                if hasattr(adapter, "wrap_gcode_as_3mf") and result.output_path.endswith(".gcode"):
-                    try:
-                        _stl_paths = (
-                            [effective_input] if effective_input.lower().endswith(".stl") else None
-                        )
-                        upload_path = adapter.wrap_gcode_as_3mf(
-                            result.output_path, stl_paths=_stl_paths,
-                        )
-                        _logger.info("Wrapped gcode as Bambu 3MF: %s", upload_path)
-                    except Exception:
-                        _logger.warning(
-                            "Bambu 3MF wrapping failed, uploading raw gcode",
-                            exc_info=True,
-                        )
+                from kiln.printers.upload_prep import prepare_upload_for_adapter
+
+                upload_path, _wrapped = prepare_upload_for_adapter(
+                    adapter,
+                    result.output_path,
+                    stl_paths=(
+                        [effective_input] if effective_input.lower().endswith(".stl") else None
+                    ),
+                )
 
                 # Post-wrap safety verification — refuse to upload a 3MF
                 # that has no homing sequence or off-bed coordinates.

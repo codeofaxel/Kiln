@@ -976,13 +976,19 @@ class _DesignToolsPlugin:
                     }
                 result = _troubleshoot(material, symptom.strip())
                 if result is None:
+                    from kiln.catalog_keys import suggest_material_keys
                     from kiln.design_intelligence import list_troubleshooting_materials
 
-                    available = ", ".join(list_troubleshooting_materials())
+                    known = list_troubleshooting_materials()
+                    nearest = suggest_material_keys(material, known)
+                    hint = (
+                        f" Did you mean: {', '.join(nearest)}?" if nearest
+                        else f" Available: {', '.join(known)}"
+                    )
                     return {
                         "success": False,
-                        "error": f"No troubleshooting data for '{material}'. "
-                        f"Available: {available}",
+                        "error": f"No troubleshooting data for '{material}'.{hint}",
+                        "suggested_material_ids": nearest,
                     }
                 out = result.to_dict()
                 out["success"] = True
