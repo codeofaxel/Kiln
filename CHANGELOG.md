@@ -151,6 +151,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **A logged nozzle change records the nozzle that came out, not the one going
+  in (Pro).**
+
+- **Kiln says when a nozzle change hasn't reached your wear history yet (Pro).**
+
+- **A nozzle you just fitted no longer reads as one Kiln has been measuring.**
+
 - **A filament load that fails now gets a narrowed answer, not a list of
   everything it could be (Pro).** Tell Kiln what your printer showed you and
   it rules causes out.
