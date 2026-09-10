@@ -338,7 +338,7 @@ emailing adam@kiln3d.com.
 | **Comments you posted on others' PRs** | Remain visible on the host design's history (to preserve review context, like GitHub) but the author name can be anonymized on request (your name becomes "a former collaborator"). |
 | **Org + team data** | Retained while the org exists. When the last member of an org leaves, we notify the admins + give 30 days to wind down before deleting org data. Pending invites that are never accepted are purged after 30 days. |
 | **Workshop access logs (reflog)** | 365 days rolling, then automatic purge. Auditors can request longer retention under a DPA. |
-| **Usage heartbeats** | 90 days rolling — then aggregated into tier-level counters and raw rows purged. |
+| **Usage heartbeats** | Daily rows stay in the live database for 60 days, then move to a secured, tamper-evident archive kept for 7 years (audit and compliance). Separately, a minimal anonymous record per install — a random installation ID, the first and last dates it checked in, and the last app version + OS platform — is kept indefinitely so we can count installs over time. The installation ID is generated locally, is never sent with a signed-in request, and is not linked to any account — including if you create one later. Opting out of telemetry (`KILN_TELEMETRY=false`) stops both. |
 | **Opt-in community datasets** | Retained indefinitely as anonymous data. You can't delete a specific contribution once it's aggregated (we strip the auth_user_id on ingestion, so we can't trace records back to you). Only opt in if you're comfortable with permanent donation. |
 | Security telemetry (hashed) | 90 days rolling — then automatic purge |
 | Email support threads | 2 years from last reply, then deletion |
