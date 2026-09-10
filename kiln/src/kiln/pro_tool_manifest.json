@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-08T01:06:05.580346+00:00",
+  "generated": "2026-09-09T23:19:30.320870+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -15543,6 +15543,23 @@
             "default": "",
             "title": "Client Event Id",
             "type": "string"
+          },
+          "previous_material": {
+            "default": "",
+            "title": "Previous Material",
+            "type": "string"
+          },
+          "previous_diameter_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Previous Diameter Mm"
           }
         },
         "required": [
