@@ -65,7 +65,7 @@ If you are using Kiln on behalf of an organization, you represent
 that you have authority to bind that organization, and "you"
 refers to both you personally and the organization.
 
-These Terms incorporate our [Privacy Policy](https://kiln3d.com/privacy)
+These Terms incorporate our [Privacy Policy](https://www.kiln3d.com/privacy)
 by reference.
 
 ### 1.2 Definitions
@@ -229,7 +229,7 @@ referring to the product in documentation or articles).
 
 Kiln offers paid subscription tiers (currently Pro, Business, and
 Enterprise). Tier features, limits, and prices are listed at
-[kiln3d.com/pricing](https://kiln3d.com/pricing), and Business and
+[kiln3d.com/pricing](https://www.kiln3d.com/pricing), and Business and
 Enterprise tiers may be provided pursuant to an Order Form that
 sets the subscription term, fees, and any additional tier-specific
 terms. We may change tier features or pricing with **at least 30
@@ -430,11 +430,11 @@ right that §4.2 reserves to the Business and Enterprise tiers.
 ### 6.2 Privacy, security, and data processing (DPA / SCCs)
 
 Our handling of personal data is governed by our
-[Privacy Policy](https://kiln3d.com/privacy), incorporated into
+[Privacy Policy](https://www.kiln3d.com/privacy), incorporated into
 these Terms by reference. Our security posture — including
 encryption, access controls, audit logging, subprocessors, and the
 compliance roadmap — is published at
-[kiln3d.com/security](https://kiln3d.com/security).
+[kiln3d.com/security](https://www.kiln3d.com/security).
 
 For **Business and Enterprise customers processing personal data**,
 a **Data Processing Addendum (DPA)** incorporating the **Standard
@@ -1261,7 +1261,7 @@ changes, we will:
 1. Update the "Last updated" date and increment the version
    number at the top;
 2. Maintain a visible version history at
-   [kiln3d.com/terms](https://kiln3d.com/terms), with prior
+   [kiln3d.com/terms](https://www.kiln3d.com/terms), with prior
    versions of the canonical document preserved in its public
    change history (the version-controlled history of the canonical
    `TERMS_OF_USE.md` file, reachable from `kiln3d.com/terms`);

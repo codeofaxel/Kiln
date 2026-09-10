@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-04-21 · Version 2.2*
+*Last updated: 2026-09-10 · Version 2.3*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -89,14 +89,14 @@ only if you write to us).
 | **Rendered previews** | Paid users who push to the cloud | Auto-generated thumbnails + preview images of your designs so you can browse your library visually | Supabase Storage (`kiln_cloud_meshes` blob storage) | Contract (§6(1)(b)) |
 | **Org + team data** | Paid users on Business / Enterprise who create or join orgs | Org names, membership rosters, team assignments, role grants, email addresses of people you invite to your org (before they accept) | Supabase DB (`kiln_cloud_orgs`, `kiln_cloud_org_memberships`, `kiln_cloud_memberships`, `kiln_cloud_team_memberships`, `kiln_cloud_org_teams`) | Contract (§6(1)(b)) |
 | **Workshop access logs** | Paid users who push to the cloud | Who pushed / pulled / viewed / cloned which design + when, for audit trail + collaboration accountability | Supabase DB (`kiln_cloud_reflog`) | Legitimate interest — collaborative-work audit (§6(1)(f)) |
-| **Usage heartbeats** | All Kiln installs (free + paid) | One row per install per UTC day. Anonymous installation UUID (random, generated locally at `~/.kiln/installation_id`, never derived from user identity) + a salted SHA-256 hash of the OS-level machine ID for unique-device counting. Records: Kiln version, printer model + adapter type + count, daily counts (prints / generations / decorations / textures / slices / downloads / print-hours), `pro_installed` flag, OS platform, paywall-denial counts, and per-tool call counts (which tool names were used and how many times — names and counts only). **No email, no IP, no hostname, no MAC, no file paths, no design content, no G-code, no tool arguments.** Default ON; opt out with `KILN_TELEMETRY=false`. See §3.1 for full disclosure. | Supabase DB (`usage_heartbeats`) | Legitimate interest — product improvement, paywall integrity (§6(1)(f)) |
+| **Usage heartbeats** | All Kiln installs (free + paid) | One row per install per UTC day. Anonymous installation UUID (random, generated locally at `~/.kiln/installation_id`, never derived from user identity) + a salted SHA-256 hash of the OS-level machine ID for unique-device counting. Records: Kiln version, printer model(s) of registered printers (names only — never printer ids, addresses, or serials) + adapter type + count, daily counts (prints / generations / decorations / textures / slices / downloads / print-hours), `pro_installed` flag, OS platform, paywall-denial counts. **No email, no IP, no hostname, no MAC, no file paths, no design content, no G-code.** Default ON; opt out with `KILN_TELEMETRY=false`. See §3.1 for full disclosure. | Supabase DB (`usage_heartbeats`) | Legitimate interest — product improvement, paywall integrity (§6(1)(f)) |
 | **Local product data** | **Every user — free and paid** | Print job history, printer configuration, billing records, event logs — everything you do with physical printers | **On your machine only**, in `~/.kiln/`. We cannot see it and cannot retrieve it. | Not applicable — we can't see it |
 | **Support interactions** | Anyone who emails us | Email you send to us, support ticket content | Our email provider + internal tooling | Legitimate interest (§6(1)(f)) |
 | **Security telemetry** | Paid users (free users never hit authed endpoints) | Coarse IP bucket hash, hashed device fingerprint, client version, timestamped security event type — all cryptographically hashed before storage | Supabase (`license_security_events` table) | Legitimate interest — fraud + abuse prevention (§6(1)(f)) |
 | **Cookies (workshop)** | Visitors to `app.kiln3d.com` (paid-tier web workshop) | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
 | **Cookies (marketing site)** | Visitors to `kiln3d.com` who explicitly grant consent via the cookie banner — only present if we're running paid acquisition campaigns and you've opted in | Consent record (`kiln_consent`); when granted, optional analytics + advertising cookies (see §3.2) | Your browser | Consent (§6(1)(a)) — opt-in; no strictly-necessary cookies on the marketing site |
 | **Fulfillment orders** | Paid users who route through Craftcloud | Ship-to address, model file, material + finish choice | Passed through to Craftcloud; not retained by us beyond the order record | Contract (§6(1)(b)) |
-| **Opt-in community datasets** | Any user (free or paid) who explicitly opts in | If you explicitly opt in via `community_share`, we accept anonymized print outcome records (printer model, material, settings hash, success/fail outcome) and recovery strategies — never your email, auth_user_id, tenant_id, file names, or geometry | Supabase DB (`community_prints`, `community_recoveries`) | Consent (§6(1)(a)) |
+| **Anonymous community learning** | All Kiln installs (free + paid) | Anonymized print + recovery outcome records — printer model, material, settings hash, success/fail outcome, recovery strategy — never your email, auth_user_id, tenant_id, file names, or geometry. Default ON; opt out with `KILN_COMMUNITY_OPT_IN=false`. | Supabase DB (`community_prints`, `community_recoveries`) | Legitimate interest — collective product improvement (§6(1)(f)) |
 
 **What we deliberately do NOT collect:** browsing history outside
 `kiln3d.com`, your 3D models (beyond fulfillment pass-through),
@@ -136,12 +136,11 @@ runs don't inflate user-count estimates).
 - installation UUID + UTC date
 - device fingerprint (or empty string if machine-ID resolution failed)
 - Kiln version (e.g. `0.5.0`)
-- printer model + adapter type (Bambu / Creality / OctoPrint / Moonraker / Serial) + printer count
+- printer model(s) — the default printer's model plus the model names of other registered printers (names only, capped; never printer ids, network addresses, or serials) + adapter type (Bambu / Creality / OctoPrint / Moonraker / Serial) + printer count
 - daily activity counts: prints, generations, decorations, textures, slices, downloads, print-hours
 - `pro_installed` boolean (is `kiln-pro` installed alongside?)
 - OS platform string (`darwin`, `linux`, `windows`)
 - aggregate counts of textures used, decoration types, slicer profiles, marketplace sources, paywall denials — always counts, never user-attributable details
-- per-tool call counts: which tool names were invoked and how many times today (e.g. `generate_coaster: 4`) — tool names and counts only, never the arguments passed to them, capped to the busiest tools
 
 **What we never send:** email, IP address, MAC address, hostname,
 username, file paths, design content, G-code, model bytes, prompts,
@@ -157,13 +156,15 @@ with third parties.
 `KILN_TELEMETRY=false` (or `0`, `no`, `off`) before starting
 Kiln. The heartbeat thread is a no-op when telemetry is disabled.
 
-## 3.2 Marketing-site analytics
+## 3.2 Page analytics
 
-The marketing site (`kiln3d.com`) uses **Vercel Web Analytics** —
-Vercel's first-party privacy-preserving analytics service. We
-enabled it in May 2026 to answer "is the marketing site getting
+The marketing site (`kiln3d.com`) and the web workshop
+(`app.kiln3d.com`) use **Vercel Web Analytics** — Vercel's
+first-party privacy-preserving analytics service. We enabled it on
+the marketing site in May 2026 to answer "is the site getting
 traffic, where do visitors land, what's the bounce rate" before
-turning on paid acquisition.
+turning on paid acquisition, and extended it to the workshop in
+August 2026 to answer the same question of the product's own pages.
 
 **Vercel Web Analytics processes:** page URL, referrer, anonymous
 visitor count via a daily-rotating IP+user-agent hash (NEVER the
@@ -176,11 +177,14 @@ hashed visitor count, or any data that survives the daily salt
 rotation. There is no consent banner because there's nothing to
 consent to.
 
-**Scope:** marketing site (`kiln3d.com`) only. The web workshop
-(`app.kiln3d.com`) is **not** instrumented with Vercel Web
-Analytics — its traffic is already captured by Supabase auth
-events for authenticated users, and we don't want to add a
-redundant data surface.
+**Scope:** the marketing site (`kiln3d.com`) and the web workshop
+(`app.kiln3d.com`). The workshop was previously excluded on the
+reasoning that authenticated traffic was already captured by
+Supabase auth events; that turned out to be false for the pages
+that matter — an auth event says an account was active, never
+which page it was on — so the workshop is now instrumented too.
+It remains page counts only: nothing here is tied to your account,
+and it is never joined to it.
 
 **Subprocessor:** Vercel Inc. (already our hosting subprocessor —
 see §5). The same SCC posture for international transfers
@@ -197,9 +201,17 @@ load **only** when both gates are open: (1) the corresponding
 integration ID is configured for the deployment, and (2) you
 have granted explicit consent via the cookie preferences banner
 — `analytics` for GA4, `advertising` for Meta Pixel and Google
-Ads. With either gate closed, no third-party script loads, no
-event fires, no cookie is written. The cookie banner is not
+Ads. With either gate closed, no third-party script loads in your
+browser and no cookie is written. The cookie banner is not
 shown when there is nothing to consent to.
+
+Separately from the banner, our server reports account signups,
+first paid-limit hits, and completed payments to Google Analytics
+as counts. Those carry a one-way hash of your email or account id
+— never the address — plus the plan and amount. They run whether
+or not you consent, because they are not browser tracking: no
+script loads, nothing is stored on your device, and nothing is
+joined to your browsing anywhere.
 
 **What gets shared (when active):**
 
@@ -208,10 +220,7 @@ shown when there is nothing to consent to.
   measurement quality, we send SHA-256-hashed versions of any
   identifiers you've already provided to us — typically your
   email if you signed up. Meta receives the hash, not the raw
-  value, and cannot reverse it. Our server-side Conversions API
-  forwarder (`api.kiln3d.com`) pairs each browser fire with a
-  server fire sharing the same `event_id`, so Meta dedupes the
-  pair and we don't double-count.
+  value, and cannot reverse it.
 - **Google Analytics 4:** page views with anonymized IP, browser
   / OS family, country, referrer, in-session events.
 - **Google Ads conversion tracking:** binary "signup conversion
@@ -339,7 +348,7 @@ emailing adam@kiln3d.com.
 | **Org + team data** | Retained while the org exists. When the last member of an org leaves, we notify the admins + give 30 days to wind down before deleting org data. Pending invites that are never accepted are purged after 30 days. |
 | **Workshop access logs (reflog)** | 365 days rolling, then automatic purge. Auditors can request longer retention under a DPA. |
 | **Usage heartbeats** | Daily rows stay in the live database for 60 days, then move to a secured, tamper-evident archive kept for 7 years (audit and compliance). Separately, a minimal anonymous record per install — a random installation ID, the first and last dates it checked in, and the last app version + OS platform — is kept indefinitely so we can count installs over time. The installation ID is generated locally, is never sent with a signed-in request, and is not linked to any account — including if you create one later. Daily totals (installs that checked in, the activity they reported, and the printer models and connection types, app versions and platforms in use) are kept indefinitely too, with no installation ID or device fingerprint in them. Opting out of telemetry (`KILN_TELEMETRY=false`) stops all three from then on. |
-| **Opt-in community datasets** | Retained indefinitely as anonymous data. You can't delete a specific contribution once it's aggregated (we strip the auth_user_id on ingestion, so we can't trace records back to you). Only opt in if you're comfortable with permanent donation. |
+| **Anonymous community learning** | Retained indefinitely as anonymous data. You can't delete a specific contribution once it's aggregated (we strip the auth_user_id on ingestion, so we can't trace records back to you). Opt out anytime with `KILN_COMMUNITY_OPT_IN=false` — future contributions stop; past ones can't be pulled back out. |
 | Security telemetry (hashed) | 90 days rolling — then automatic purge |
 | Email support threads | 2 years from last reply, then deletion |
 | Local data on your machine | **Indefinitely, until you delete it** — we cannot see it and cannot delete it for you |
@@ -370,14 +379,22 @@ The **web workshop** (`app.kiln3d.com`) uses:
 - A **CSRF protection token** for form submissions.
 - **`localStorage`** for UI preferences (collapsed sidebars,
   recently-opened designs) — not transmitted to us.
+- **Vercel Web Analytics** — page counts only, and cookieless: the
+  page path, the referrer, and coarse device/country. It stores
+  nothing on your device; visitor counts come from a hash that is
+  re-salted daily (§3.2), so it cannot follow you across days or to
+  any other site, and it is never joined to your account. Vercel
+  already serves every page here as our host, so it adds no new
+  recipient of your data and needs no consent banner to be lawful.
 
 We do **not** use Segment, Mixpanel, Amplitude, or any cross-site
 tracking platform whose business model is audience resale. The
 only third-party analytics that may run on `kiln3d.com` are
 Google Analytics 4 and Meta Pixel — and only with your explicit
-consent (see §3.2). Neither is loaded on the web workshop
-(`app.kiln3d.com`) at all. Vercel Web Analytics is first-party,
-cookieless, and the only analytics that runs without consent.
+consent (see §3.2). **Neither is loaded on the web workshop
+(`app.kiln3d.com`) at all.** Vercel Web Analytics is first-party,
+cookieless, and the only analytics that runs without consent — it
+now covers both the marketing site and the workshop.
 
 ## 9. Your rights
 
@@ -523,7 +540,7 @@ new purposes), we will:
 - Update the "Last updated" date and increment the version number
   at the top of this document;
 - Preserve prior versions in the public Git history at
-  https://github.com/codeofaxel/Kiln/blob/main/policies/PRIVACY.md.
+  https://github.com/codeofaxel/Kiln/blob/main/PRIVACY.md.
 
 Non-material changes (typos, reorganization) are pushed
 immediately and noted in Git history.
