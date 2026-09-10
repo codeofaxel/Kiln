@@ -15408,10 +15408,16 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
 
         sig_params = []
         for pname, pschema in properties.items():
-            # Resolve type — handle anyOf (Optional) by picking first
-            # concrete type.
-            json_type = pschema.get("type", "string")
-            if json_type not in _type_map and "anyOf" in pschema:
+            # Resolve type.  An Optional parameter (``float | None``) has no
+            # top-level "type" at all -- only an anyOf of the concrete type
+            # and null -- so anyOf is consulted whenever "type" is absent,
+            # never only when a defaulted value happens to be unknown.  The
+            # first concrete non-null variant wins; str stays the fallback.
+            # (Defaulting the missing "type" to "string" first meant this
+            # branch could never run, and every optional non-string
+            # parameter was published as str.)
+            json_type = pschema.get("type")
+            if json_type is None and "anyOf" in pschema:
                 for variant in pschema["anyOf"]:
                     if variant.get("type") in _type_map:
                         json_type = variant["type"]
