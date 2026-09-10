@@ -37,6 +37,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln now tells you where your printer's own nozzle setting lives.** Model
+  by model, so the machine can be corrected to match the nozzle you actually
+  fitted — and where no manufacturer instructions exist, it says so rather
+  than guess.
+
 - **A burn warning before Kiln sends you to a hot nozzle.** Clearing a
   blockage can spray molten filament, so every tier gets told to glove up
   first.
@@ -150,6 +155,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **Printer questions no longer answer a different question.** Asked
+  something Kiln has no verified answer for, it now says so instead of
+  returning a related fact with a confident label.
 
 - **A filament load that fails now gets a narrowed answer, not a list of
   everything it could be (Pro).** Tell Kiln what your printer showed you and
