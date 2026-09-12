@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-09-12T01:57:44.880486+00:00",
-  "tool_count": 418,
+  "generated": "2026-09-12T09:13:02.480770+00:00",
+  "tool_count": 419,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -12291,6 +12291,34 @@
           }
         },
         "title": "fleet_cancelArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_nozzle_agreement",
+      "description": "Which registered machines disagree with Kiln's nozzle record, and which matter first (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          }
+        },
+        "title": "fleet_nozzle_agreementArguments",
         "type": "object"
       }
     },
