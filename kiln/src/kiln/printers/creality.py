@@ -9,6 +9,7 @@ from urllib.parse import urlparse, urlunparse
 import requests
 
 from kiln.printers.base import (
+    NozzleSetting,
     FilamentOpPlan,
     FilamentOpResult,
     FirmwareStatus,
@@ -779,6 +780,11 @@ class CrealityAdapter(PrinterAdapter):
     def set_safety_profile(self, profile_id: str) -> None:
         super().set_safety_profile(profile_id)
         self._backend.set_safety_profile(profile_id)
+
+    def read_nozzle_setting(self) -> NozzleSetting | None:
+        """The nozzle setting in the machine's Klipper configuration, via the
+        Moonraker backend -- the same read a stock Moonraker printer gets."""
+        return self._backend.read_nozzle_setting()
 
     def get_printer_config(self) -> dict | None:
         """Klipper config sections, via the Moonraker backend.

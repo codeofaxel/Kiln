@@ -27,6 +27,7 @@ from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
 from kiln.printers.base import (
+    NozzleSetting,
     FilamentHandlingUnsupported,
     FilamentOpPlan,
     FilamentOpResult,
@@ -642,6 +643,26 @@ class PrusaLinkAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
     # PrinterAdapter -- state queries
     # ------------------------------------------------------------------
+
+    def read_nozzle_setting(self) -> NozzleSetting | None:
+        """The nozzle diameter this printer holds in its own settings.
+
+        Served on the printer's info endpoint as one value for the machine;
+        a multi-tool printer reports its first tool.  PrusaLink exposes no
+        nozzle material, so that is always ``None`` here.
+        """
+        try:
+            info = self._get_json("/api/v1/info")
+        except PrinterError:
+            return None
+        raw = info.get("nozzle_diameter") if isinstance(info, dict) else None
+        try:
+            diameter = float(raw) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            diameter = None
+        if diameter is None:
+            return None
+        return NozzleSetting(material=None, diameter_mm=diameter, source="prusalink_info")
 
     def get_state(self) -> PrinterState:
         """Retrieve the current printer state and temperatures.

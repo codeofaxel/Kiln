@@ -602,6 +602,42 @@ TEMPERATURE_FIELDS: tuple[str, ...] = (
 )
 
 
+@dataclass(frozen=True)
+class NozzleSetting:
+    """The nozzle a printer HOLDS ON RECORD for itself, read off the machine.
+
+    This is the machine's own setting -- what a person entered on its screen
+    or in its configuration -- never a measurement: consumer printers do not
+    sense the nozzle fitted to them.  Kiln keeps a separate record of what
+    you told Kiln is fitted, and kiln-pro compares the two so a swapped
+    nozzle the printer was never told about is caught before it prints
+    (https://kiln3d.com).
+
+    :param material: The alloy word exactly as the machine reports it
+        (``"stainless_steel"``), or ``None`` when this backend holds no
+        material setting at all.
+    :param diameter_mm: The nozzle diameter, or ``None`` when not held.
+    :param source: Which of the backend's own channels it was read from,
+        e.g. ``"bambu_mqtt_report"`` / ``"klipper_configfile"``.
+    :param age_seconds: How long ago the machine stated this, when the
+        backend answers from a cache; ``None`` for a read made just now.
+    :param stale_after_seconds: The backend's own budget for how long that
+        cache is worth serving; ``None`` when there is no cache.
+    :param firmware_version: The firmware the reading was taken under, when
+        the backend reports one.
+    """
+
+    material: str | None
+    diameter_mm: float | None
+    source: str
+    age_seconds: float | None = None
+    stale_after_seconds: float | None = None
+    firmware_version: str | None = None
+
+    def is_empty(self) -> bool:
+        return self.material is None and self.diameter_mm is None
+
+
 @dataclass
 class PrinterState:
     """Snapshot of the printer's current state and temperatures."""
@@ -3790,6 +3826,18 @@ class PrinterAdapter(ABC):
         "sensor_enabled": True}``), or ``None`` if no filament sensor is
         available.  This is an optional method -- the default implementation
         returns ``None``.
+        """
+        return None
+
+    def read_nozzle_setting(self) -> NozzleSetting | None:
+        """The nozzle this printer holds on record for itself, or ``None``.
+
+        Optional.  A backend whose protocol exposes the machine's own nozzle
+        setting returns it as a :class:`NozzleSetting`; the default knows
+        nothing and says so.  ``None`` means "this backend cannot say", which
+        is a different fact from "the machine agrees with anything" and must
+        never be read as one.  Sends no command and changes nothing on the
+        printer.
         """
         return None
 

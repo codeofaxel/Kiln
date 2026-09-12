@@ -23,6 +23,7 @@ from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
 from kiln.printers.base import (
+    NozzleSetting,
     DEFAULT_LOAD_LENGTH_MM,
     DEFAULT_PURGE_LENGTH_MM,
     DEFAULT_UNLOAD_LENGTH_MM,
@@ -752,6 +753,34 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
     # PrinterAdapter -- state queries
     # ------------------------------------------------------------------
+
+    def read_nozzle_setting(self) -> NozzleSetting | None:
+        """The nozzle diameter in OctoPrint's current printer profile.
+
+        OctoPrint holds this in its own settings for the connected printer;
+        the firmware behind it has no such field.  No material is held, so
+        that is always ``None`` here.
+        """
+        try:
+            payload = self._get_json("/api/printerprofiles")
+        except PrinterError:
+            return None
+        profiles = payload.get("profiles") if isinstance(payload, dict) else None
+        if not isinstance(profiles, dict):
+            return None
+        current = next(
+            (p for p in profiles.values() if isinstance(p, dict) and p.get("current")),
+            None,
+        )
+        extruder = current.get("extruder") if isinstance(current, dict) else None
+        raw = extruder.get("nozzleDiameter") if isinstance(extruder, dict) else None
+        try:
+            diameter = float(raw) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            diameter = None
+        if diameter is None:
+            return None
+        return NozzleSetting(material=None, diameter_mm=diameter, source="octoprint_printer_profile")
 
     def get_state(self) -> PrinterState:
         """Retrieve the current printer state and temperatures.

@@ -38,6 +38,7 @@ from typing import Any, ClassVar
 import paho.mqtt.client as mqtt
 
 from kiln.printers.base import (
+    NozzleSetting,
     DEFAULT_PURGE_LENGTH_MM,
     STALE_STATE_WARN_AGE,
     FilamentOpPlan,
@@ -2766,6 +2767,44 @@ class BambuAdapter(PrinterAdapter):
             fault_note=fault_note,
             state_age_seconds=round(age, 1) if age is not None else None,
         )
+
+    def read_nozzle_setting(self) -> NozzleSetting | None:
+        """The nozzle this printer was told it has, from its own status report.
+
+        ``nozzle_type`` and ``nozzle_diameter`` are fields of the ``print``
+        report the printer pushes; they hold whatever was set on the machine.
+        Answered from the same cache as :meth:`get_state`, with that reading's
+        age and the cache's own freshness budget, so a machine that has gone
+        quiet is reported as such.  ``None`` when the report carries neither.
+        """
+        state = self.get_state()
+        material = str(state.nozzle_type or "").strip() or None
+        diameter: float | None = None
+        try:
+            diameter = float(state.nozzle_diameter) if state.nozzle_diameter not in (None, "") else None
+        except (TypeError, ValueError):
+            diameter = None
+        if material is None and diameter is None:
+            return None
+        return NozzleSetting(
+            material=material,
+            diameter_mm=diameter,
+            source="bambu_mqtt_report",
+            age_seconds=state.state_age_seconds,
+            stale_after_seconds=state.state_stale_after_seconds,
+            firmware_version=self._printer_firmware_version(),
+        )
+
+    def _printer_firmware_version(self) -> str | None:
+        """The printer firmware from the cached module list, when it holds
+        one.  The list is filled by another read and not requested here."""
+        with self._state_lock:
+            modules = list(self._fw_modules)
+        for mod in modules:
+            if isinstance(mod, dict) and str(mod.get("name") or "").casefold() == "ota":
+                version = str(mod.get("sw_ver") or "").strip()
+                return version or None
+        return None
 
     def get_state(self) -> PrinterState:
         """Retrieve the current printer state and temperatures.

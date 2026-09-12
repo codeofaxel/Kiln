@@ -29,6 +29,7 @@ from kiln.printers.base import (
     FirmwareUpdateResult,
     IdentityConflict,
     JobProgress,
+    NozzleSetting,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,

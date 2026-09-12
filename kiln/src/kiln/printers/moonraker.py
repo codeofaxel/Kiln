@@ -25,6 +25,7 @@ from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
 from kiln.printers.base import (
+    NozzleSetting,
     DEFAULT_LOAD_LENGTH_MM,
     DEFAULT_PURGE_LENGTH_MM,
     DEFAULT_UNLOAD_LENGTH_MM,
@@ -1512,6 +1513,52 @@ class MoonrakerAdapter(PrinterAdapter):
             return set()
         result = data.get("result", data)
         return {str(k).upper() for k in result} if isinstance(result, dict) else set()
+
+    def read_nozzle_setting(self) -> NozzleSetting | None:
+        """Klipper's own nozzle setting, from the configuration it is running.
+
+        The diameter is ``[extruder] nozzle_diameter`` in the resolved
+        configuration; Klipper has no field for the nozzle material, so it is
+        reported only when the operator keeps it in the documented
+        ``[gcode_macro KILN_NOZZLE]`` ``variable_material``.  Read over the
+        same query every other Klipper read uses; nothing is sent to the
+        printer.  ``None`` when the configuration holds neither.
+        """
+        try:
+            payload = self._get_json("/printer/objects/query", params={"configfile": "settings"})
+        except PrinterError:
+            return None
+        settings = _safe_get(payload, "result", "status", "configfile", "settings", default={}) or {}
+        extruder = settings.get("extruder") if isinstance(settings, dict) else None
+        diameter: float | None = None
+        if isinstance(extruder, dict):
+            try:
+                diameter = float(extruder.get("nozzle_diameter"))
+            except (TypeError, ValueError):
+                diameter = None
+        material: str | None = None
+        for section, body in settings.items():
+            if str(section).casefold() == "gcode_macro kiln_nozzle" and isinstance(body, dict):
+                word = str(body.get("variable_material") or "").strip().strip("'\"")
+                material = word or None
+                break
+        if diameter is None and material is None:
+            return None
+        return NozzleSetting(
+            material=material,
+            diameter_mm=diameter,
+            source="klipper_configfile",
+            firmware_version=self._software_version(),
+        )
+
+    def _software_version(self) -> str | None:
+        """Klipper's ``software_version`` from ``/printer/info``, or ``None``."""
+        try:
+            info = self._get_json("/printer/info")
+        except PrinterError:
+            return None
+        version = str(_safe_get(info, "result", "software_version", default="") or "").strip()
+        return version or None
 
     def _klipper_can_extrude(self) -> tuple[str, str] | None:
         """Klipper's own ``extruder.can_extrude`` — a real signal, read

@@ -15391,7 +15391,12 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         # so we use a factory to freeze the value.
         def _make_stub(_name: str):
             def _stub(**kwargs):
-                return _pro_api_call(_name, **kwargs)
+                # A nozzle tool is about a printer only this process can
+                # reach: read it here and send the reading with the request,
+                # so the hosted side can compare it with the record it holds.
+                from kiln.printer_nozzle_reading import with_local_reading
+
+                return _pro_api_call(_name, **with_local_reading(_name, kwargs))
             return _stub
 
         stub = _make_stub(name)
