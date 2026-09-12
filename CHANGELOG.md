@@ -37,6 +37,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln now checks whether your printer still thinks it has the old nozzle.**
+  On a Bambu, Klipper, Creality, Prusa or OctoPrint printer it's connected to,
+  Kiln reads the machine's own nozzle setting and tells you when it doesn't
+  match the nozzle you recorded.
+
 - **Kiln now tells you where your printer's own nozzle setting lives.** Model
   by model, so the machine can be corrected to match the nozzle you actually
   fitted — and where no manufacturer instructions exist, it says so rather
