@@ -8325,7 +8325,7 @@ def set_fan(node: str = "part", percent: int = 100) -> dict:
     Supported on Bambu Lab, OctoPrint, Moonraker/Klipper printers, and
     Elegoo's Centauri Carbon (FDM). Prusa Link has no raw G-code endpoint, so
     fan control isn't available there
-    (https://github.com/prusa3d/Prusa-Link/issues/832). Elegoo's resin/MSLA
+    (https://github.com/prusa3d/Prusa-Link/issues/832). some Elegoo models
     printers (Saturn, Mars) have no part-cooling fan and are refused.
 
     Args:

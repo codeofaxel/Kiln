@@ -571,11 +571,11 @@ class TestSetFan:
         with pytest.raises(PrinterError):
             adapter.set_fan("part", 101)
 
-    def test_resin_machine_is_refused(self, adapter_with_ws: ElegooAdapter) -> None:
+    def test_machine_without_a_fan_is_refused(self, adapter_with_ws: ElegooAdapter) -> None:
         adapter_with_ws._last_status["Name"] = "Saturn 4 Ultra"
         with (
             mock.patch.object(adapter_with_ws, "_send_command_checked") as m,
-            pytest.raises(PrinterError, match="resin"),
+            pytest.raises(PrinterError, match="no part-cooling fan"),
         ):
             adapter_with_ws.set_fan("part", 100)
         m.assert_not_called()

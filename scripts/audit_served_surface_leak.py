@@ -85,6 +85,23 @@ RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # config interface and may be named; prose about the vendor may not.
     ("infrastructure internals",
      re.compile(r"(?<![A-Z_])Supabase\b|\bRLS\b|service[- ]role\s+key")),
+    # A machine class Kiln does not ship, named as something Kiln reads,
+    # drives, supports or classifies.  Material words alone ("resin" as a
+    # filament, "laser-sintered" as a process) do not trip; a class paired
+    # with machine/printer/adapter/support/type, a "supports <class>" claim,
+    # or two classes listed together as machines do.
+    ("unannounced machine class",
+     re.compile(r"\b(?:resin|msla|cnc|laser|plasma|wire[ _-]?edm|metal[ _-]?am|"
+                r"bioprint(?:er|ing)?|injection[ _-]?mou?ld(?:er|ing)?|robotic[ _-]?arm)"
+                r"[ _-]?(?:machine|printer|cutter|mill|fleet|backend|adapter|support|"
+                r"type|device)s?\b"
+                # "SLA" alone is also the uptime term on the pricing page, so it
+                # only counts beside a machine noun, never beside "support".
+                r"|\bsla[ _-]?(?:machine|printer)s?\b"
+                r"|\b(?:support(?:s|ed)?|drives?|driving|reads?|controls?|runs?)\s+"
+                r"(?:a\s+|an\s+|your\s+|the\s+)?(?:resin|msla|cnc|laser|plasma)\b"
+                r"|\b(?:resin|msla|cnc|laser|plasma)\s*(?:or|and|/)\s*"
+                r"(?:resin|msla|cnc|laser|plasma)\b", re.IGNORECASE)),
 )
 
 # Consciously reviewed served texts that trip a rule for a non-leak reason.

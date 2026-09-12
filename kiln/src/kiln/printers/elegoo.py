@@ -112,12 +112,12 @@ _ACK_SUCCESS = 0
 _ACK_FAILURE = 1
 _ACK_FILE_NOT_FOUND = 2
 
-# This adapter also talks to resin/MSLA printers (Saturn, Mars) that have
+# This adapter also talks to Elegoo models (Saturn, Mars) that have
 # no part-cooling fan concept at all, and SDCP has no machine-type enum to
 # gate on -- only the free-text Name/MachineName the printer reports at
 # connect time.  set_fan() refuses unless that name matches one of these
 # substrings (case-insensitive), so an unrecognized or undetermined machine
-# fails closed rather than risk sending a fan command to a resin printer.
+# fails closed rather than risk sending a fan command to a machine without one.
 # The only FDM family this adapter documents today is Centauri Carbon.
 _FDM_MACHINE_NAME_SUBSTRINGS: tuple[str, ...] = ("centauri",)
 
@@ -1434,7 +1434,7 @@ class ElegooAdapter(PrinterAdapter):
 
         Only the single default part-cooling fan is supported. Refuses on
         any machine that doesn't report an FDM-family name (this adapter
-        also talks to resin/MSLA printers with no part-cooling fan at all,
+        also talks to Elegoo models with no part-cooling fan at all,
         and SDCP has no machine-type field to gate on structurally --
         see :data:`_FDM_MACHINE_NAME_SUBSTRINGS`).
 
@@ -1470,7 +1470,7 @@ class ElegooAdapter(PrinterAdapter):
                 "Fan control isn't available on this printer. Kiln only "
                 "supports it on Elegoo's FDM line (Centauri Carbon) -- "
                 f"this machine reports as {machine_name or 'unknown'!r}, "
-                "and Elegoo's resin/MSLA printers have no part-cooling fan."
+                "and some Elegoo models have no part-cooling fan at all."
             )
 
         self._send_command_checked(

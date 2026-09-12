@@ -61,6 +61,9 @@ _OVERLAY_FILE = _j("_pro", "_overlay.json")
 #: (pinned by ``test_every_rule_has_a_fixture``), so a rule added later
 #: cannot ship unpinned the way the self-label rule did.
 _LEAK_SHAPES: tuple[tuple[str, str], ...] = (
+    # 2026-09-12: a served tool description named two machine classes Kiln
+    # does not ship; the rule is pinned by each of its alternations.
+    ("unannounced machine class", "not_applicable -- a resin or CNC machine: no nozzle"),
     ("private-tier self-label", f"these curated values are the engineering {_LABEL}"),
     ("private module or file path", f"see ``{_PRIV}/_rest/org_admin_authz.py``"),
     ("private module or file path", f"pipes through :mod:`{_PRIV}.recovery.mid_print_engine`"),
@@ -122,6 +125,14 @@ _ALTERNATIVES: dict[str, tuple[str, ...]] = {
         "the permission check the cloud RLS will run",
         "needs the service-role key to write",
     ),
+    "unannounced machine class": (
+        "not_applicable -- a resin or CNC machine: no nozzle",
+        "its resin machines have no nozzle",
+        "Only for CNC-type devices.",
+        "does not support laser control",
+        "tightens to any machine when CNC / laser adapters land",
+        "Kiln reads the SLA printer's own setting",
+    ),
 }
 
 #: Wording that sells the upgrade or names the interface.  None of it may trip
@@ -135,6 +146,13 @@ _ALLOWED_WORDING: tuple[str, ...] = (
     "Needs ``KILN_CLOUD_SUPABASE_SECRET`` or ``SUPABASE_SERVICE_ROLE_KEY``.",
     "Grounded in ASTM D638 and ISO 527 tensile methodology.",
     "Jobs are executed in priority order, with FIFO tie-breaking.",
+    "The filament / resin / stock material.",
+    "or an alternative process (CNC, SLA) outside the printer.",
+    "the implant clearances are for laser-sintered devices",
+    "some Elegoo models have no part-cooling fan at all.",
+    "99.9% uptime SLA - dedicated support, sub-24h",
+    "priority support and an SLA",
+    "print shops across FDM, SLA, SLS, MJF, and metal",
 )
 
 
