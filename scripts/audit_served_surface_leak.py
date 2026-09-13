@@ -90,6 +90,15 @@ RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # filament, "laser-sintered" as a process) do not trip; a class paired
     # with machine/printer/adapter/support/type, a "supports <class>" claim,
     # or two classes listed together as machines do.
+    #
+    # SCOPE, decided 2026-09-12 and deliberate: this gate reads SERVED text,
+    # not source.  The device-type names and the two non-FDM adapter methods
+    # in printers/base.py have been public since 2026-02-11 and ship in every
+    # release; they read as adapter scaffolding, and removing them now would
+    # be a dated, visible retraction that says more than the names do.  Leave
+    # them until the classes actually ship.  What must never happen is the
+    # reverse: a NEW name, or any of it reaching a description, help text, the
+    # manifest, a data note or the marketing site.
     ("unannounced machine class",
      re.compile(r"\b(?:resin|msla|cnc|laser|plasma|wire[ _-]?edm|metal[ _-]?am|"
                 r"bioprint(?:er|ing)?|injection[ _-]?mou?ld(?:er|ing)?|robotic[ _-]?arm)"

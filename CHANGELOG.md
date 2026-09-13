@@ -42,6 +42,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   Kiln reads the nozzle setting that printer holds and tells you when it
   doesn't match the nozzle you recorded.
 
+- **See which of your printers disagree with Kiln about their nozzle, worst
+  first (Business+).** The same nozzle check across every printer Kiln can
+  read, in one pass — contradicts, unconfirmed, or unreadable, never a silent
+  "fine" — with the ones running abrasive filament ranked first. Served via
+  kiln-pro; see https://kiln3d.com/pricing.
+
 - **Kiln now tells you where your printer's own nozzle setting lives.** Model
   by model, so the machine can be corrected to match the nozzle you actually
   fitted — and where no manufacturer instructions exist, it says so rather
