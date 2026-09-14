@@ -20,12 +20,14 @@ Covers:
 
 from __future__ import annotations
 
+import importlib
 import threading
 import time
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+import kiln.scheduler
 from kiln.events import EventBus, EventType
 from kiln.printers.base import (
     JobProgress,
@@ -1772,7 +1774,7 @@ class TestSchedulerFederation:
             connected=True, state=PrinterStatus.PRINTING
         )
         scheduler.tick()  # watched printing
-        queue.get_job(job_id).started_at = time.time() - 7300  # past 2h cap
+        queue.get_job(job_id).started_at = time.time() - 43300  # past 12h default stuck timeout
         scheduler.tick()  # stuck detection fires
 
         row = db.get_print_outcome(job_id)
@@ -1837,3 +1839,150 @@ class TestSchedulerFederation:
         assert row is not None
         assert row["outcome"] == "success"
         assert row["determined_by"] == "observed"
+
+
+# ---------------------------------------------------------------------------
+# Stuck-job timeout: env override + never re-queue
+# ---------------------------------------------------------------------------
+# The scheduler's stuck-timeout is a QUEUE-side guess, not a machine verdict.
+# Re-queueing a "stuck" job re-prints the file from zero while the original
+# print may still be running (2026-09-13 U1 duplicate-print accident: a 2h05m
+# print was judged stuck at the 2h hard cap, re-dispatched, and the same
+# object ended up printed three times).  The fix: the timeout is
+# env-overridable (KILN_STUCK_JOB_TIMEOUT_SECONDS, default 12h) and a stuck
+# job is permanently failed — never re-queued.  Dispatch failures still go
+# through _requeue_or_fail's retry path unchanged.
+
+
+class TestStuckJobTimeout:
+    """Stuck PRINTING jobs: env-overridable timeout, never re-queued."""
+
+    def test_stuck_job_fails_and_is_never_redispatched(
+        self, queue, registry, event_bus, scheduler,
+    ):
+        """A PRINTING job over the stuck timeout ends FAILED with exactly
+        one dispatch — the pre-fix behavior re-queued it for a second."""
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING
+        )
+        scheduler.tick()  # watched printing
+        queue.get_job(job_id).started_at = time.time() - 43300  # past 12h default
+        result = scheduler.tick()  # stuck detection fires
+
+        assert result["failed"][0]["job_id"] == job_id
+        assert queue.get_job(job_id).status == JobStatus.FAILED
+        assert job_id not in scheduler.active_jobs
+        # The core regression: no second dispatch of the same file.
+        assert len(result["dispatched"]) == 0
+        result2 = scheduler.tick()
+        assert result2["dispatched"] == []
+        assert queue.get_job(job_id).status == JobStatus.FAILED
+
+    def test_stuck_job_publishes_job_failed_event(
+        self, queue, registry, event_bus, scheduler,
+    ):
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING
+        )
+        scheduler.tick()  # watched printing
+        queue.get_job(job_id).started_at = time.time() - 43300
+        scheduler.tick()  # stuck detection fires
+
+        events = event_bus.recent_events(EventType.JOB_FAILED)
+        stuck_events = [e for e in events if e.data.get("job_id") == job_id]
+        assert len(stuck_events) == 1
+        assert "timed out" in stuck_events[0].data["error"]
+        # The requeue path publishes JOB_SUBMITTED; stuck must not.
+        submitted = event_bus.recent_events(EventType.JOB_SUBMITTED)
+        assert all(e.data.get("job_id") != job_id for e in submitted)
+
+    def test_stuck_timeout_env_override(
+        self, queue, registry, event_bus, monkeypatch,
+    ):
+        """KILN_STUCK_JOB_TIMEOUT_SECONDS lowers the stuck threshold: a
+        30-min-old PRINTING job (under the 2h legacy cap) is declared stuck
+        when the env var is set to 1800."""
+        monkeypatch.setenv("KILN_STUCK_JOB_TIMEOUT_SECONDS", "1800")
+        try:
+            importlib.reload(kiln.scheduler)  # re-reads env at module load
+
+            adapter = make_mock_adapter(name="printer-1")
+            registry.register("printer-1", adapter)
+            job_id = queue.submit(file_name="benchy.gcode")
+
+            scheduler = JobScheduler(
+                queue, registry, event_bus, poll_interval=0.1, max_retries=0,
+            )
+            try:
+                scheduler.tick()  # dispatch
+                adapter.get_state.return_value = PrinterState(
+                    connected=True, state=PrinterStatus.PRINTING
+                )
+                scheduler.tick()  # watched printing
+                # 30 min ago: under the old 2h cap (no stuck), over 1800s.
+                queue.get_job(job_id).started_at = time.time() - 1900
+                scheduler.tick()  # stuck detection fires with env timeout
+
+                assert queue.get_job(job_id).status == JobStatus.FAILED
+            finally:
+                scheduler.stop()
+        finally:
+            monkeypatch.delenv("KILN_STUCK_JOB_TIMEOUT_SECONDS")
+            importlib.reload(kiln.scheduler)  # restore default constant
+
+    def test_stuck_timeout_env_invalid_value_falls_back_to_default(
+        self, monkeypatch,
+    ):
+        """A garbage KILN_STUCK_JOB_TIMEOUT_SECONDS falls back to the
+        12h default instead of crashing at import."""
+        monkeypatch.setenv("KILN_STUCK_JOB_TIMEOUT_SECONDS", "not-a-number")
+        try:
+            reloaded = importlib.reload(kiln.scheduler)
+            assert reloaded._STUCK_JOB_TIMEOUT_SECONDS == 43200.0
+        finally:
+            monkeypatch.delenv("KILN_STUCK_JOB_TIMEOUT_SECONDS")
+            importlib.reload(kiln.scheduler)
+
+    def test_stuck_timeout_env_override_loads_from_env(
+        self, monkeypatch,
+    ):
+        """A valid KILN_STUCK_JOB_TIMEOUT_SECONDS is read at module load."""
+        monkeypatch.setenv("KILN_STUCK_JOB_TIMEOUT_SECONDS", "900")
+        try:
+            reloaded = importlib.reload(kiln.scheduler)
+            assert reloaded._STUCK_JOB_TIMEOUT_SECONDS == 900.0
+        finally:
+            monkeypatch.delenv("KILN_STUCK_JOB_TIMEOUT_SECONDS")
+            importlib.reload(kiln.scheduler)
+
+    def test_dispatch_failure_still_uses_retry_path(
+        self, queue, registry, event_bus, scheduler,
+    ):
+        """Only the stuck branch changed: a start_print dispatch failure
+        with retries remaining still re-queues the job."""
+        adapter = make_mock_adapter(name="printer-1", start_print_success=False)
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+
+        scheduler = JobScheduler(
+            queue, registry, event_bus, poll_interval=0.1,
+            max_retries=2, retry_backoff_base=0.0,
+        )
+        try:
+            scheduler.tick()  # dispatch fails -> re-queued for retry
+
+            job = queue.get_job(job_id)
+            assert job.status == JobStatus.QUEUED
+            assert scheduler._retry_counts.get(job_id) == 1
+        finally:
+            scheduler.stop()

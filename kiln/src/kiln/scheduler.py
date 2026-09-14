@@ -16,6 +16,7 @@ import threading
 import time
 from typing import Any
 
+from kiln import parse_float_env
 from kiln.events import EventBus, EventType
 from kiln.print_start_verdict import resolve_print_start
 from kiln.printers.base import PrinterError, PrinterStatus
@@ -26,7 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 # Jobs in PRINTING state longer than this are considered stuck.
-_STUCK_JOB_TIMEOUT_SECONDS: float = 7200.0  # 2 hours
+# Env-overridable: KILN_STUCK_JOB_TIMEOUT_SECONDS (default 12h).
+# A long print is NOT evidence of a hung printer; the old hard-coded
+# 2h value caused real duplicate prints (2026-09-13 U1 accident).
+_STUCK_JOB_TIMEOUT_SECONDS: float = parse_float_env(
+    "KILN_STUCK_JOB_TIMEOUT_SECONDS", 43200.0
+)
 
 
 class JobScheduler:
@@ -39,7 +45,9 @@ class JobScheduler:
         scheduler.stop()    # graceful shutdown
 
     The scheduler polls every ``poll_interval`` seconds (default 5).
-    Jobs stuck in PRINTING state for over 2 hours are auto-failed.
+    Jobs stuck in PRINTING longer than the stuck timeout
+    (env KILN_STUCK_JOB_TIMEOUT_SECONDS, default 12h) are marked
+    failed — never re-queued (re-queue re-prints the file).
     """
 
     def __init__(
@@ -558,7 +566,29 @@ class JobScheduler:
                             )
                             with self._lock:
                                 self._active_jobs.pop(job_id, None)
-                            self._requeue_or_fail(job_id, error_msg, failed, printer_name=printer_name)
+                            # A stuck-timeout is a QUEUE-side guess, not a
+                            # machine verdict. Re-queueing it re-prints the
+                            # file from zero (2026-09-13 duplicate-print
+                            # accident). Fail it permanently; a human
+                            # decides whether the machine is really hung.
+                            self._retry_counts.pop(job_id, None)
+                            self._retry_not_before.pop(job_id, None)
+                            self._seen_printing.discard(job_id)
+                            self._queue.mark_failed(job_id, error_msg)
+                            self._event_bus.publish(
+                                EventType.JOB_FAILED,
+                                {"job_id": job_id, "error": error_msg},
+                                source="scheduler",
+                            )
+                            if printer_name:
+                                # Record the resolution locally but never
+                                # federate it: the stuck-timeout says nothing
+                                # about the model (contribute=False).
+                                self._auto_record_outcome(
+                                    job_id, printer_name, "failed",
+                                    error_msg=error_msg,
+                                )
+                            failed.append({"job_id": job_id, "error": error_msg})
                             continue
                     except Exception as exc:
                         logger.debug("Failed to check stuck job %s: %s", job_id, exc)
