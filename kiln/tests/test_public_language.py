@@ -21,6 +21,32 @@ def _load_gate():
 _GATE = _load_gate()
 
 
+_INTERNAL_TIER = "".join(("found", "er"))
+
+
+def test_catches_the_internal_tier_name_in_source() -> None:
+    text = f"# measured on the {_INTERNAL_TIER}'s A1"
+    findings = _GATE.find_violations(text, source="kiln/tests/test_example.py")
+    assert "internal tier name" in [finding.rule for finding in findings]
+
+
+def test_catches_the_internal_tier_surface_in_any_file() -> None:
+    text = f"three printer models on the {_INTERNAL_TIER} dashboard's tile"
+    findings = _GATE.find_violations(text, source="README.md")
+    assert [finding.rule for finding in findings] == ["internal tier surface"]
+
+
+def test_catches_the_internal_tier_name_in_a_commit_message() -> None:
+    text = f"fix: the bit the {_INTERNAL_TIER} measured on an A1"
+    findings = _GATE.find_violations(text, source="abcd123", commit_message=True)
+    assert "internal tier name" in [finding.rule for finding in findings]
+
+
+def test_allows_the_ordinary_word_in_prose() -> None:
+    text = f"a small team; one {_INTERNAL_TIER} reads everything."
+    assert _GATE.find_violations(text, source="policies/TERMS_OF_USE.md") == []
+
+
 def test_catches_retired_provider_name() -> None:
     text = "provider=" + "".join(("sculp", "teo"))
     findings = _GATE.find_violations(text, source="example.py")

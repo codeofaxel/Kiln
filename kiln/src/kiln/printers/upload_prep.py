@@ -8,8 +8,8 @@ on the adapter).  Every other adapter uploads the G-code as-is.
 Three doors send a sliced file to a printer — ``slice_and_print``,
 ``reslice_and_print`` and ``quick_print`` — and each carried its own copy of
 this decision, or none: ``quick_print`` uploaded raw ``.gcode`` to a P1S and
-started a job the firmware ignored (2026-08-23, the founder dashboard's
-bambu_p1s row).  One helper, every door.
+started a job the firmware ignored (2026-08-23, seen in our own install
+telemetry).  One helper, every door.
 """
 
 from __future__ import annotations

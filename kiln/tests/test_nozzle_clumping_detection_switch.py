@@ -8,7 +8,7 @@ meets printer state.  This suite pins:
 
 * one door, ``read_nozzle_clumping_detection``; a backend with no such
   switch returns None, and None is "cannot say", never "off";
-* the Bambu read decodes the bit the founder's A1 was measured to flip
+* the Bambu read decodes the bit a real A1 was measured to flip
   (``home_flag`` bit 24, 2026-09-15), for that family ONLY -- any other
   model gets an honest "unverified", never a decoded guess;
 * ``printer_status`` and ``preflight_check`` carry it as a plain fact,
@@ -29,7 +29,7 @@ from kiln.printers.base import (
     PrinterStatus,
 )
 
-#: The two raw ``home_flag`` values read off the founder's A1 with the
+#: The two raw ``home_flag`` values read off a real A1 with the
 #: screen switch ON and OFF.  Everything else in the report was identical.
 HOME_FLAG_ON = 863978896
 HOME_FLAG_OFF = 847201680

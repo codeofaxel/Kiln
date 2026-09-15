@@ -63,11 +63,23 @@ _BINARY_SUFFIXES = {
 # empty and makes accidental reintroduction fail this gate.
 _RETIRED_PROVIDER = "".join(("sculp", "teo"))
 
+# The tier above enterprise, and the internal dashboard named after it, are
+# not words a customer may meet.  Assembled from parts for the same reason the
+# retired provider above is: this file is public source, so a repository-wide
+# search for the word itself has to come back empty.
+_INTERNAL_TIER = "".join(("found", "er"))
+
 
 @dataclass(frozen=True)
 class Rule:
     name: str
     pattern: re.Pattern[str]
+    #: File suffixes this rule judges; empty means every file.  The internal
+    #: tier name is an ordinary English word in prose — the terms page uses it
+    #: for the person who answers support — so the bare-word rule is scoped to
+    #: source, where the word can only mean the tier or the surface named
+    #: after it.  Commit messages carry no suffix and are judged by every rule.
+    suffixes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -121,6 +133,27 @@ _PUBLIC_RULES = (
             re.IGNORECASE,
         ),
     ),
+    # Public Kiln's tier ladder stops at enterprise.  The tier above it must
+    # not appear in public source at all.  kiln-pro's suite already forbids
+    # it, but that suite reads this repository AFTER a push, so the word was
+    # public before anything said so; this is the same rule at the door it
+    # actually leaves by (2026-09-15: four files, two of them shipped source).
+    Rule(
+        "internal tier name",
+        re.compile(rf"\b{_INTERNAL_TIER}\b", re.IGNORECASE),
+        suffixes=(".py", ".pyi"),
+    ),
+    # Any file, including prose and commit messages: naming the internal
+    # surface, or whose machine a measurement came from, tells a stranger
+    # more than the bare word does.
+    Rule(
+        "internal tier surface",
+        re.compile(
+            rf"\b{_INTERNAL_TIER}(?:['’]s)?[- ](?:dashboard|tier|seat|account|licen[cs]e)\b|"
+            rf"\b{_INTERNAL_TIER}['’]s\s+\w+",
+            re.IGNORECASE,
+        ),
+    ),
 )
 
 _COMMIT_RULES = (
@@ -153,12 +186,16 @@ def find_violations(
     findings: list[Finding] = []
     rules = _PUBLIC_RULES + (_COMMIT_RULES if commit_message else ())
 
+    suffix = Path(source).suffix.lower()
+
     for line_number, line in enumerate(text.splitlines(), 1):
         if _RETIRED_PROVIDER in line.lower():
             findings.append(
                 Finding(source, line_number, "retired public provider", line.strip())
             )
         for rule in rules:
+            if rule.suffixes and not commit_message and suffix not in rule.suffixes:
+                continue
             if rule.pattern.search(line):
                 findings.append(
                     Finding(source, line_number, rule.name, line.strip())

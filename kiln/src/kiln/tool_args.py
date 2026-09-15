@@ -9,7 +9,7 @@ before pydantic ever sees it), or nothing.  A tool typed ``overrides: str |
 None`` raised on the first two — the SDK parses any string whose annotation
 is not bare ``str``, then pydantic rejects the dict — so the docstring's own
 example never worked (``reslice_with_overrides`` from v1.4.0 through
-v1.4.1.1; three printer models on the founder dashboard's failure tile).
+v1.4.1.1; three printer models in our own failure telemetry).
 Such a parameter is annotated ``str | dict[str, Any] | None`` (or the list
 twin) and its body calls :func:`parse_json_object` / :func:`parse_json_array`.
 

@@ -1,6 +1,6 @@
 """The tool door accepts the argument shapes agents actually send.
 
-Fifteen tool failures across five printer models on the founder dashboard
+Fifteen tool failures across five printer models in our own telemetry
 (2026-09-10) traced to the DOOR, not the printers: a JSON object handed to a
 ``str | None`` parameter, ``null`` for a non-Optional field, a bare string for
 a list field, a sibling tool's parameter name.  Each raised out of pydantic
