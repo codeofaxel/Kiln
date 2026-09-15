@@ -584,8 +584,16 @@ class JobScheduler:
             except Exception as exc:
                 logger.warning("Error checking job %s on %s: %s", job_id, printer_name, exc)
 
-        # Phase 2: Dispatch queued jobs to idle printers
-        idle_printers = self._registry.get_idle_printers()
+        # Phase 2: Dispatch queued jobs to idle printers -- only when a job is
+        # waiting.  Reading every printer is not free: a Bambu counts each read
+        # as use, so a scheduler polling an empty queue every few seconds kept
+        # every server's connection alive and the printer's rationed LAN slots
+        # full (measured 2026-09-15: four idle servers, all four slots, 10-14
+        # hours).  An empty queue has nothing a free printer could take.
+        if self._queue.pending_count() == 0:
+            idle_printers: list[str] = []
+        else:
+            idle_printers = self._registry.get_idle_printers()
 
         # Filter out printers that already have active jobs
         with self._lock:

@@ -2111,6 +2111,11 @@ class BambuAdapter(PrinterAdapter):
         self._mqtt_connected.set()
         with self._state_lock:
             self._connected = True
+        # A connection paho restores on its own after a drop never passes
+        # _ensure_mqtt, and the idle reaper stops the first time it finds the
+        # connection down -- so without this, one network blip left the slot
+        # held for the rest of the process.  Idempotent: a live reaper stays.
+        self._start_idle_reaper()
 
         # Request a full status dump.
         self._publish_command(
