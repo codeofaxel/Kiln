@@ -549,6 +549,24 @@ def describe_unknown_temperatures(state_age_seconds: float | None) -> str:
     )
 
 
+def describe_missing_chamber_sensor() -> str:
+    """Why there is no chamber temperature from this machine, ever.
+
+    The sentence beside the two blanked chamber fields on a model with no
+    chamber sensor.  It says what the machine LACKS rather than what the
+    reading lacks, because the two blanks look identical and mean opposite
+    things: the trust floor's blank clears when the printer reports again,
+    this one never will.  It deliberately names no number and no model --
+    the firmware's placeholder is exactly the number a reader must not
+    act on, and the model is already beside it in ``printer_model``.
+    """
+    return (
+        "This printer has no chamber temperature sensor, so there is no "
+        "chamber reading to report. Any chamber figure its firmware sends is "
+        "a placeholder, not a measurement."
+    )
+
+
 def describe_unacknowledged_fault(
     code: str | None, reading: str | None = None
 ) -> str:
@@ -716,6 +734,24 @@ class PrinterState:
     # rather than an instruction naming a tool its reader has no access to.
     # Same split, and the same reason, as ``cause`` beside ``remedy``.
     fault_remedy: str | None = None
+    # Whether this MACHINE has a chamber temperature sensor, as far as the
+    # adapter can tell.  ``True``: a sensor produced the chamber fields.
+    # ``False``: the model has none, so any number in them is not a
+    # measurement and is blanked below.  ``None``: not established -- the
+    # honest default for every adapter whose protocol only fills the field
+    # when a named sensor exists (Klipper's ``temperature_sensor chamber``,
+    # a Duet chamber heater), and for a model nobody has judged.  Only an
+    # adapter whose protocol publishes the field for EVERY model regardless
+    # of hardware has to say anything here, and it says so from the
+    # catalogue (``has_chamber_sensor``), never from the value.
+    chamber_sensor: bool | None = None
+    # Why the two chamber fields are empty, when they are empty because the
+    # machine has nothing to measure them with.  Its own sentence rather
+    # than a clause of ``temperature_note``, because that one is about a
+    # reading Kiln cannot vouch for and this one is about the hardware:
+    # the first passes when the printer reports again, this one never does.
+    # ``None`` whenever :attr:`chamber_sensor` is not ``False``.
+    chamber_note: str | None = None
 
     def __post_init__(self) -> None:
         """Promote an expired reading to ``STALE``, whoever built it.
@@ -743,7 +779,22 @@ class PrinterState:
         state is kept through staleness because a gate needs it to fail
         closed; a temperature has no such consumer, and the only thing a
         stale one can do is be believed.
+
+        Before any of that: a chamber temperature from a machine with no
+        chamber sensor is not a reading, whatever the firmware put in the
+        field.  Measured on a Bambu A1 (2026-09-14): ``chamber_temper: 5``
+        beside a 22.5 C bed, idle, freshly powered on -- an open-frame
+        bed-slinger reporting a fridge-cold chamber it does not have, and
+        every door quoting it.  About the MACHINE rather than this reading,
+        so it runs first and independently of the trust floor below: a
+        sensorless model is sensorless whether or not the cache is fresh.
         """
+        if self.chamber_sensor is False:
+            self.chamber_temp_actual = None
+            self.chamber_temp_target = None
+            if self.chamber_note is None:
+                self.chamber_note = describe_missing_chamber_sensor()
+
         if not (
             self.state is PrinterStatus.STALE
             or self.state in UNREACHABLE_STATES
@@ -965,6 +1016,7 @@ class PrinterState:
             "state_age_seconds", "last_job_result", "last_known_state",
             "state_stale_after_seconds", "cause", "remedy",
             "temperature_note", "fault_note", "fault_remedy",
+            "chamber_sensor", "chamber_note",
         )
         for key in _EXTENDED:
             if data.get(key) is None:

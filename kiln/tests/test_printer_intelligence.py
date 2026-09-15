@@ -47,6 +47,8 @@ PUBLIC_PROFILE_FIELDS = {
     "extruder_type",
     "hotend_type",
     "has_enclosure",
+    # true / false / null -- every row answers, null meaning unstated.
+    "has_chamber_sensor",
     "has_abl",
     "has_input_shaping",
     "build_volume_mm",

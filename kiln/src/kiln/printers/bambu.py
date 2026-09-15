@@ -37,6 +37,7 @@ from typing import Any, ClassVar
 
 import paho.mqtt.client as mqtt
 
+from kiln.printer_intelligence import chamber_sensor_for_model
 from kiln.printers.base import (
     DEFAULT_PURGE_LENGTH_MM,
     STALE_STATE_WARN_AGE,
@@ -1370,6 +1371,28 @@ class BambuAdapter(PrinterAdapter):
             if family:
                 return family, product_name
         return None, ""
+
+    def _chamber_lookup_model(self) -> str | None:
+        """The catalogue id the chamber-sensor fact is looked up by.
+
+        The config-declared model first -- it owns every behaviour decision
+        (see :meth:`get_printer_info`'s safety boundary) -- and otherwise
+        the serial-prefix family, which is Bambu's own documented scheme
+        and needs no live channel.  ``None`` when nothing names the machine.
+
+        Deliberately NOT :meth:`get_printer_info`.  That reads the firmware's
+        ``product_name`` under ``_state_lock``, and this is called from
+        :meth:`_build_state_from_cache`, which the backoff-cooldown branch of
+        :meth:`get_state` invokes while already HOLDING that lock: a
+        non-reentrant lock taken twice on one thread, and every status read
+        during a cooldown hangs forever (caught by the adapter suite's
+        hang-dump, not by reasoning).  The serial prefix is a pure string
+        lookup, which is what a state builder may do.
+        """
+        if self._printer_model:
+            return self._printer_model
+        family = _BAMBU_MODEL_FAMILIES.get(self._serial[:3].upper())
+        return f"bambu_{family}" if family else None
 
     def _identity_families(self) -> tuple[str | None, str | None, str]:
         """``(serial_family, mqtt_family, product_name)`` — the single
@@ -2744,6 +2767,16 @@ class BambuAdapter(PrinterAdapter):
             )
             fault_note = describe_unacknowledged_fault(pretty, reading)
 
+        # ``chamber_temper`` arrives in every report from every Bambu, so
+        # its presence says nothing about whether the machine has a chamber
+        # thermistor -- an A1 publishes ``5`` at room temperature.  The
+        # MODEL decides, from the catalogue, and the number is passed on
+        # only when the catalogue says a sensor is there to have produced
+        # it.  Unknown model, unknown answer: no number, and no claim that
+        # there is no sensor either.
+        chamber_sensor = chamber_sensor_for_model(self._chamber_lookup_model())
+        chamber_temper = status.get("chamber_temper") if chamber_sensor else None
+
         return PrinterState(
             connected=True,
             state=mapped,
@@ -2753,7 +2786,8 @@ class BambuAdapter(PrinterAdapter):
             tool_temp_target=status.get("nozzle_target_temper"),
             bed_temp_actual=status.get("bed_temper"),
             bed_temp_target=status.get("bed_target_temper"),
-            chamber_temp_actual=status.get("chamber_temper"),
+            chamber_temp_actual=chamber_temper,
+            chamber_sensor=chamber_sensor,
             cooling_fan_speed=status.get("cooling_fan_speed"),
             aux_fan_speed=status.get("big_fan1_speed"),
             chamber_fan_speed=status.get("big_fan2_speed"),

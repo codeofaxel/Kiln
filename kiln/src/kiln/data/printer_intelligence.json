@@ -3,7 +3,8 @@
     "version": "1.0.0",
     "description": "Printer intelligence database: firmware quirks, material compatibility, calibration guidance, and known failure modes. Keyed by the same printer_id as safety_profiles.json.",
     "updated": "2025-02-11",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (each printer's quirks, its calibration recipes, and the failures it is known for) is available in Kiln Pro; see https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (each printer's quirks, its calibration recipes, and the failures it is known for) is available in Kiln Pro; see https://kiln3d.com/pricing.",
+    "has_chamber_sensor_note": "has_chamber_sensor: whether the machine has a chamber temperature sensor whose reading its firmware reports. true/false only where a primary source settles it; null means unknown, never false, and every row must answer. Bambu rows come from Bambu Studio's own per-printer configuration (resources/printers/<model_id>.json): a chamber temperature is shown only where support_chamber_temp_display, or failing that support_chamber, is true. Read by adapters whose protocol publishes a chamber field for every model regardless of hardware."
   },
   "default": {
     "display_name": "Generic FDM Printer",
@@ -11,6 +12,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": false,
     "materials": {
       "PLA": {
@@ -49,6 +51,7 @@
     "extruder_type": "bowden",
     "hotend_type": "ptfe_lined",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": false,
     "materials": {
       "PLA": {
@@ -82,6 +85,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "ptfe_lined",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -120,6 +124,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -158,6 +163,7 @@
     "extruder_type": "bowden",
     "hotend_type": "ptfe_lined",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": false,
     "materials": {
       "PLA": {
@@ -191,6 +197,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -229,6 +236,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -267,6 +275,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -305,6 +314,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -338,6 +348,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -371,6 +382,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -409,6 +421,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -452,6 +465,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -490,6 +504,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -528,6 +543,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -571,6 +587,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -609,6 +626,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -647,6 +665,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "ptfe_lined",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -680,6 +699,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -718,6 +738,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -756,6 +777,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -794,6 +816,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -837,6 +860,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -875,6 +899,7 @@
     "extruder_type": "bowden",
     "hotend_type": "ptfe_lined",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -913,6 +938,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": true,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -966,6 +992,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": true,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1019,6 +1046,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": false,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1052,6 +1080,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": true,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1105,6 +1134,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": false,
     "has_abl": true,
     "build_volume_mm": [
       256,
@@ -1153,6 +1183,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": false,
     "has_abl": true,
     "build_volume_mm": [
       330,
@@ -1206,6 +1237,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": true,
     "has_abl": true,
     "build_volume_mm": [
       340,
@@ -1279,6 +1311,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1327,6 +1360,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1360,6 +1394,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1403,6 +1438,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1431,6 +1467,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1479,6 +1516,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1522,6 +1560,7 @@
     "extruder_type": "bowden",
     "hotend_type": "ptfe_lined",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": false,
     "materials": {
       "PLA": {
@@ -1555,6 +1594,7 @@
     "extruder_type": "bowden",
     "hotend_type": "ptfe_lined",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": false,
     "materials": {
       "PLA": {
@@ -1588,6 +1628,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": false,
     "materials": {
       "PLA": {
@@ -1626,6 +1667,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1664,6 +1706,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "ptfe_lined",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1697,6 +1740,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1730,6 +1774,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1768,6 +1813,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1806,6 +1852,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1844,6 +1891,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1882,6 +1930,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1920,6 +1969,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1958,6 +2008,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "ptfe_lined",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -1991,6 +2042,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -2034,6 +2086,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": false,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -2067,6 +2120,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": false,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -2100,6 +2154,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": true,
     "materials": {
@@ -2173,6 +2228,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": true,
     "materials": {
@@ -2221,6 +2277,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": true,
     "materials": {
@@ -2269,6 +2326,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": true,
     "materials": {
@@ -2317,6 +2375,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": true,
     "materials": {
@@ -2365,6 +2424,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": true,
     "build_volume_mm": [
@@ -2433,6 +2493,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": true,
     "build_volume_mm": [
@@ -2501,6 +2562,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": true,
     "build_volume_mm": [
@@ -2574,6 +2636,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": true,
     "build_volume_mm": [
@@ -2632,6 +2695,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -2675,6 +2739,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": false,
     "materials": {
@@ -2763,6 +2828,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": false,
     "materials": {
@@ -2856,6 +2922,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": null,
     "has_abl": true,
     "has_input_shaping": false,
     "materials": {
@@ -2919,6 +2986,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": true,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -2992,6 +3060,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": true,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -3065,6 +3134,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": true,
     "has_abl": true,
     "materials": {
       "PLA": {
@@ -3138,6 +3208,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
+    "has_chamber_sensor": true,
     "has_abl": true,
     "materials": {
       "PLA": {

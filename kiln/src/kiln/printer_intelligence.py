@@ -115,6 +115,11 @@ class PrinterIntel:
         hotend_type: ``"all_metal"`` or ``"ptfe_lined"``.
         has_enclosure: Whether the printer has a stock enclosure.
         has_abl: Whether automatic bed leveling is available.
+        has_chamber_sensor: Whether the machine has a chamber temperature
+            sensor its firmware reports.  ``None`` where no primary source
+            has settled it -- unknown is never "no": an enclosure is not a
+            sensor (the P1S has one and not the other), and an open frame
+            is not proof either way for a machine someone has instrumented.
         capabilities: Extended model facts such as camera and multicolor support.
         materials: Material compatibility map (name → settings).
         quirks: List of printer-specific gotchas and tips.
@@ -138,6 +143,7 @@ class PrinterIntel:
     calibration: dict[str, str]
     failure_modes: list[FailureMode]
     load_sequence: list[LoadStep] = field(default_factory=list)
+    has_chamber_sensor: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +442,7 @@ def _build_profiles(raw: dict[str, Any]) -> dict[str, PrinterIntel]:
                 calibration=dict(data.get("calibration", {})),
                 failure_modes=failure_modes,
                 load_sequence=load_sequence,
+                has_chamber_sensor=_stated_bool(data.get("has_chamber_sensor")),
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("Skipping malformed intel profile '%s': %s", key, exc)
@@ -706,6 +713,7 @@ def intel_to_dict(intel: PrinterIntel) -> dict[str, Any]:
         "hotend_type": intel.hotend_type,
         "has_enclosure": intel.has_enclosure,
         "has_abl": intel.has_abl,
+        "has_chamber_sensor": intel.has_chamber_sensor,
         "capabilities": intel.capabilities,
         "materials": {
             name: {"hotend": mp.hotend, "bed": mp.bed, "fan": mp.fan, "notes": mp.notes}
@@ -743,6 +751,43 @@ def _load_raw() -> None:
             continue
         _raw_cache[key] = data
     _raw_loaded = True
+
+
+def _stated_bool(value: Any) -> bool | None:
+    """A catalogue boolean that may be unstated.
+
+    Only a literal ``true`` / ``false`` counts; anything else is "nobody has
+    written this down", which is a different answer from either.
+    """
+    return value if isinstance(value, bool) else None
+
+
+def chamber_sensor_for_model(printer_id: str | None) -> bool | None:
+    """Whether *printer_id* has a chamber temperature sensor, per the catalogue.
+
+    ``True`` / ``False`` only where the public catalogue states
+    ``has_chamber_sensor`` for exactly this id; ``None`` for an unknown id,
+    an empty one, or a row that never recorded the fact.
+
+    EXACT match, deliberately not :func:`_get_raw`'s prefix match.  That
+    fuzziness is fine for quirks and calibration prose and wrong for a fact
+    that decides whether a number is a measurement: ``bambu_x1`` must not
+    borrow the X1C's answer, and ``bambu`` must not borrow anyone's.
+
+    Public data only, at every tier -- whether the machine can measure its
+    chamber is a physical fact about the hardware, the same band as
+    ``has_enclosure``, and a paid caller and a free one are told the same
+    thing.  Read by adapters whose protocol publishes a chamber field for
+    every model regardless of hardware (Bambu's ``chamber_temper``), which
+    is the one case where the field's presence says nothing.
+    """
+    if not printer_id:
+        return None
+    _load_raw()
+    entry = _raw_cache.get(printer_id.lower().replace("-", "_").strip())
+    if entry is None:
+        return None
+    return _stated_bool(entry.get("has_chamber_sensor"))
 
 
 def _get_raw(printer_id: str) -> dict[str, Any] | None:

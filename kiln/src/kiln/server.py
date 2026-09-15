@@ -4270,6 +4270,13 @@ _LITE_PRINTER_KEYS = (
     # ...and what clears it, as its own key.  A poller with one line of room
     # renders what happened; a surface with more renders both.
     "fault_remedy",
+    # Whether this machine can measure its chamber at all, and the sentence
+    # beside the blank chamber fields when it cannot.  On the lite path for
+    # the same reason `temperature_note` is: it is the polled shape, and a
+    # blank chamber with no sentence reads as a printer that went quiet
+    # rather than a machine that has no thermistor there.
+    "chamber_sensor",
+    "chamber_note",
     # How the LAST job ended — success / failed / cancelled — on its own
     # axis, so `idle` keeps meaning ready without also meaning finished.
     # The web's completion card and any poller watching for an ending need
