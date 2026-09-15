@@ -4805,6 +4805,7 @@ def monitor_print(
         bed_actual = sd.get("bed_temp_actual")
         bed_target = sd.get("bed_temp_target")
         chamber_actual = sd.get("chamber_temp_actual")
+        chamber_note = sd.get("chamber_note")
         # Set when the temperature fields are blank for a TRUST reason (the
         # reading is stale), never when the printer simply has no such
         # sensor.  The two absences must read differently: "N/A" says the
@@ -5119,6 +5120,11 @@ def monitor_print(
         ]
         if chamber_actual is not None:
             lines.append(f"- Chamber: {chamber_actual:.0f}°C")
+        elif chamber_note:
+            # The line is present and says why there is no number.  A blank
+            # where the chamber used to be reads as "the printer went quiet",
+            # which is the silence the chamber-sensor rule exists to end.
+            lines.append(f"- Chamber: {chamber_note}")
         if temperature_note:
             lines.append(f"- Temperatures: {temperature_note}")
         lines.extend(

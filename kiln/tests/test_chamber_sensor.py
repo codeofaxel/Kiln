@@ -339,6 +339,9 @@ class TestDoors:
         with patch("kiln.server._get_adapter", return_value=self._a1_adapter()):
             text = monitor_print(include_snapshot=False)
         assert "Chamber: 5" not in text
+        # The line is still there, and it says why -- a blank where the
+        # chamber used to be reads as "the printer went quiet".
+        assert "Chamber: This printer has no chamber temperature sensor" in text
 
     def test_ambient_check_has_no_chamber_to_judge(self) -> None:
         from kiln.server import check_ambient_conditions

@@ -130,8 +130,8 @@
       0.2,
       0.28
     ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "chamber_temp_c": 60,
+    "chamber_heated": true
   },
   "bambu_p2s": {
     "printer_id": "bambu_p2s",
