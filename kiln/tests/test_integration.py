@@ -458,7 +458,7 @@ def event_bus():
 @pytest.fixture
 def print_queue(event_bus):
     """In-memory PrintQueue wired to the test event bus."""
-    return PrintQueue(event_bus=event_bus)
+    return PrintQueue()
 
 
 @pytest.fixture
@@ -1155,7 +1155,7 @@ class TestFleetRegistryScheduling:
 
     def test_scheduler_dispatches_to_correct_printer(self, event_bus, registry):
         """When a job targets a specific printer, scheduler should use it."""
-        queue = PrintQueue(event_bus=event_bus)
+        queue = PrintQueue()
         voron = _make_idle_adapter("voron")
         ender = _make_idle_adapter("ender")
 
@@ -1183,7 +1183,7 @@ class TestFleetRegistryScheduling:
 
     def test_any_printer_job_dispatches_to_first_idle(self, event_bus, registry):
         """Jobs with printer_name=None should dispatch to any idle printer."""
-        queue = PrintQueue(event_bus=event_bus)
+        queue = PrintQueue()
         voron = _make_idle_adapter("voron")
         ender = _make_idle_adapter("ender")
 
@@ -1209,7 +1209,7 @@ class TestFleetRegistryScheduling:
 
     def test_multi_printer_parallel_dispatch(self, event_bus, registry):
         """Multiple idle printers should each receive a job in a single tick."""
-        queue = PrintQueue(event_bus=event_bus)
+        queue = PrintQueue()
 
         printers = {}
         for name in ["printer-1", "printer-2", "printer-3"]:
@@ -1238,7 +1238,7 @@ class TestFleetRegistryScheduling:
 
     def test_offline_printer_excluded_from_dispatch(self, event_bus, registry):
         """Printers that fail to respond should not receive jobs."""
-        queue = PrintQueue(event_bus=event_bus)
+        queue = PrintQueue()
 
         good_adapter = _make_idle_adapter("good")
         bad_adapter = _make_idle_adapter("bad")

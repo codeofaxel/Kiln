@@ -83,6 +83,31 @@ def make_mock_adapter(
     return adapter
 
 
+class _Clock:
+    """A monotonic clock the tests can move by hours in a millisecond."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _run_silent(scheduler: JobScheduler, clock: _Clock, *, hours: float, step_minutes: float = 5.0) -> list[dict]:
+    """Tick through *hours* of wall time with the adapter's readings unchanged.
+
+    Returns every ``failed`` entry the ticks reported, in order.
+    """
+    failed: list[dict] = []
+    for _ in range(int(hours * 60 / step_minutes)):
+        clock.advance(step_minutes * 60)
+        failed.extend(scheduler.tick()["failed"])
+    return failed
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -1754,14 +1779,16 @@ class TestSchedulerFederation:
         assert row is not None and row["outcome"] == "cancelled"
         assert calls == []
 
-    def test_stuck_timeout_guess_contributes_nothing(
+    def test_idle_after_a_stall_is_unknown_and_contributes_nothing(
         self, queue, registry, event_bus, tmp_path, monkeypatch,
     ):
-        """The stuck-job timeout is the queue's guess ('may be disconnected
-        or hung') — a real print over the timeout is still running, so
-        federating it would write false failures against live geometry."""
+        """A print that stalled and then went idle with nothing named was
+        not watched to its end: it is recorded ``unknown`` (the user is
+        asked), never ``success``, and never federated."""
         calls = self._capture_contributions(monkeypatch)
         scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        clock = _Clock()
+        scheduler._clock = clock
         adapter = make_mock_adapter(name="printer-1")
         registry.register("printer-1", adapter)
         job_id = queue.submit(file_name="benchy.gcode")
@@ -1771,12 +1798,20 @@ class TestSchedulerFederation:
         adapter.get_state.return_value = PrinterState(
             connected=True, state=PrinterStatus.PRINTING
         )
+        adapter.get_job.return_value = JobProgress(
+            file_name="benchy.gcode", completion=5.0, current_layer=2,
+        )
         scheduler.tick()  # watched printing
-        queue.get_job(job_id).started_at = time.time() - 7300  # past 2h cap
-        scheduler.tick()  # stuck detection fires
+        _run_silent(scheduler, clock, hours=1)  # frozen past the stall threshold
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE
+        )
+        clock.advance(5)
+        scheduler.tick()  # idle, nothing named
 
         row = db.get_print_outcome(job_id)
-        assert row is not None and row["outcome"] == "failed"
+        assert row is not None and row["outcome"] == "unknown"
+        assert row["determined_by"] == "inferred"
         assert calls == []
 
     def test_decided_row_contributes_nothing(
@@ -1837,3 +1872,270 @@ class TestSchedulerFederation:
         assert row is not None
         assert row["outcome"] == "success"
         assert row["determined_by"] == "observed"
+
+
+# ---------------------------------------------------------------------------
+# The queue never ends a print the printer has not ended
+# ---------------------------------------------------------------------------
+# The scheduler used to fail any job over two hours of wall-clock while the
+# printer was STILL REPORTING PRINTING, then hand it to the retry path — which
+# reset it to QUEUED and dispatched the same file again the moment the machine
+# went idle.  A 2h05m print on a Snapmaker U1 was printed three times that way
+# (2026-09-13).  Now a watched job is never failed by the queue at all: a stall
+# or a loss of contact is announced (event + job_status) and the job stays
+# PRINTING with its printer reserved until the machine ends it or a person
+# cancels it.
+#
+# Every test here builds the scheduler with retries ENABLED (max_retries=2, the
+# production default).  The shared ``scheduler`` fixture uses 0, under which
+# the old code already failed permanently and the re-queue could never be
+# seen — a test written against that fixture passed on the broken code.
+
+
+class TestWatchedPrintIsNeverGivenUp:
+
+    @pytest.fixture(autouse=True)
+    def _fresh_motion_store(self):
+        from kiln.printers import progress_motion as pm
+
+        pm.reset_progress_observations()
+        yield
+        pm.reset_progress_observations()
+
+    @staticmethod
+    def _watched_print(queue, registry, event_bus, *, hours_old: float = 3.0):
+        """Dispatch one job and watch it reach PRINTING.
+
+        ``hours_old`` back-dates ``started_at`` so the print already looks
+        older than the retired two-hour cap: on the old code that alone
+        re-queued it, which is the regression these tests pin.
+        """
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler = JobScheduler(
+            queue, registry, event_bus, poll_interval=0.1,
+            max_retries=2, retry_backoff_base=0.0,
+        )
+        clock = _Clock()
+        scheduler._clock = clock
+        scheduler.tick()  # dispatch
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING
+        )
+        adapter.get_job.return_value = JobProgress(
+            file_name="benchy.gcode", completion=5.0, current_layer=2,
+        )
+        scheduler.tick()  # watched printing
+        queue.get_job(job_id).started_at = time.time() - hours_old * 3600
+        return scheduler, adapter, job_id, clock
+
+    @staticmethod
+    def _events(event_bus, kind, job_id):
+        return [e for e in event_bus.recent_events(kind) if e.data.get("job_id") == job_id]
+
+    def _still_printing(self, queue, scheduler, event_bus, job_id):
+        assert queue.get_job(job_id).status == JobStatus.PRINTING
+        assert job_id in scheduler.active_jobs
+        assert self._events(event_bus, EventType.JOB_SUBMITTED, job_id) == []
+        assert self._events(event_bus, EventType.JOB_FAILED, job_id) == []
+
+    @staticmethod
+    def _advance_moving(scheduler, adapter, clock, hours: int):
+        for hour in range(1, hours + 1):
+            clock.advance(3600)
+            adapter.get_job.return_value = JobProgress(
+                file_name="benchy.gcode", completion=5.0 + hour * 6, current_layer=2 + hour * 20,
+            )
+            assert scheduler.tick()["failed"] == []
+
+    def test_long_print_that_keeps_moving_is_left_alone(self, queue, registry, event_bus):
+        """Fourteen hours of a print whose layers keep advancing: still
+        PRINTING, still watched, never re-queued.  The old code re-queued it
+        at hour two."""
+        scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        self._advance_moving(scheduler, adapter, clock, hours=14)
+        self._still_printing(queue, scheduler, event_bus, job_id)
+        assert scheduler.watch_note(job_id)["state"] == "moving"
+        assert scheduler.watch_alerts() == []
+
+    def test_stalled_print_is_announced_once_and_never_ended(self, queue, registry, event_bus):
+        """Layer and percent frozen while the printer says PRINTING for a
+        day: one JOB_STALLED event, a note on the job, and the job is still
+        open -- nothing failed, nothing re-sent."""
+        scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        assert _run_silent(scheduler, clock, hours=24) == []
+
+        self._still_printing(queue, scheduler, event_bus, job_id)
+        stalled = self._events(event_bus, EventType.JOB_STALLED, job_id)
+        assert len(stalled) == 1
+        assert stalled[0].data["printer_name"] == "printer-1"
+        assert "has not actually moved" in stalled[0].data["note"]
+        note = scheduler.watch_note(job_id)
+        assert note["state"] == "stalled"
+        assert note["since_seconds"] >= 23 * 3600
+        assert "resume_print(force=True)" in note["note"]
+        assert [a["job_id"] for a in scheduler.watch_alerts()] == [job_id]
+        # A later tick changes nothing: no dispatch, no ending.
+        assert scheduler.tick()["dispatched"] == []
+        assert queue.get_job(job_id).status == JobStatus.PRINTING
+
+    def test_stall_that_resumes_clears_the_alert(self, queue, registry, event_bus):
+        scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        _run_silent(scheduler, clock, hours=1)
+        assert scheduler.watch_note(job_id)["state"] == "stalled"
+
+        self._advance_moving(scheduler, adapter, clock, hours=13)
+        self._still_printing(queue, scheduler, event_bus, job_id)
+        assert scheduler.watch_note(job_id)["state"] == "moving"
+        assert scheduler.watch_alerts() == []
+        assert len(self._events(event_bus, EventType.JOB_STALLED, job_id)) == 1
+
+    def test_stall_announced_again_only_after_it_cleared(self, queue, registry, event_bus):
+        scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        _run_silent(scheduler, clock, hours=1)
+        self._advance_moving(scheduler, adapter, clock, hours=1)
+        _run_silent(scheduler, clock, hours=1)
+        assert len(self._events(event_bus, EventType.JOB_STALLED, job_id)) == 2
+
+    def test_unreachable_printer_is_announced_and_the_job_stays_open(
+        self, queue, registry, event_bus,
+    ):
+        """Reads that raise for a day: one JOB_NO_CONTACT, a note that says
+        the print may still be running, and the job is still open.  The
+        old code logged the error every poll and never said a word."""
+        scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        adapter.get_state.side_effect = PrinterError("connection refused")
+        assert _run_silent(scheduler, clock, hours=24, step_minutes=60) == []
+
+        self._still_printing(queue, scheduler, event_bus, job_id)
+        silent = self._events(event_bus, EventType.JOB_NO_CONTACT, job_id)
+        assert len(silent) == 1
+        assert silent[0].data["cause"] == "read_failed"
+        note = scheduler.watch_note(job_id)
+        assert note["state"] == "no_contact"
+        assert "may still be running" in note["note"]
+        assert "cancel this job" in note["note"]
+
+    def test_offline_and_stale_readings_are_no_contact(self, queue, registry, event_bus):
+        scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        adapter.get_state.return_value = PrinterState(connected=False, state=PrinterStatus.OFFLINE)
+        _run_silent(scheduler, clock, hours=1, step_minutes=15)
+        assert scheduler.watch_note(job_id)["state"] == "no_contact"
+        assert self._events(event_bus, EventType.JOB_NO_CONTACT, job_id)[0].data["cause"] == "unreachable"
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.STALE,
+            last_known_state=PrinterStatus.PRINTING, state_age_seconds=3600.0,
+        )
+        _run_silent(scheduler, clock, hours=1, step_minutes=15)
+        assert scheduler.watch_note(job_id)["state"] == "no_contact"
+        # Still one episode: the cause changed, the silence did not end.
+        assert len(self._events(event_bus, EventType.JOB_NO_CONTACT, job_id)) == 1
+        self._still_printing(queue, scheduler, event_bus, job_id)
+
+    def test_printer_back_after_a_gap_that_names_completed_is_a_success(
+        self, queue, registry, event_bus, tmp_path,
+    ):
+        """Wi-Fi drops for ten hours on a twelve-hour print.  When the
+        printer answers again saying it COMPLETED, that is the machine's
+        verdict and it is recorded as such.  The old code would have
+        re-queued the job at hour two and re-printed the part."""
+        from kiln.persistence import KilnDB
+
+        db = KilnDB(str(tmp_path / "sched.db"))
+        scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        scheduler._persistence = db
+        db.save_print_outcome({
+            "job_id": job_id, "printer_name": "printer-1", "file_name": "benchy.gcode",
+            "outcome": "pending", "agent_id": "auto", "determined_by": "observed",
+        })
+        adapter.get_state.side_effect = PrinterError("connection refused")
+        _run_silent(scheduler, clock, hours=10, step_minutes=60)
+
+        adapter.get_state.side_effect = None
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE, last_job_result=JobResult.COMPLETED,
+        )
+        clock.advance(60)
+        result = scheduler.tick()
+        assert result["completed"] == [job_id]
+        assert queue.get_job(job_id).status == JobStatus.COMPLETED
+        row = db.get_print_outcome(job_id)
+        assert row["outcome"] == "success" and row["determined_by"] == "observed"
+
+    def test_printer_back_after_a_gap_naming_nothing_is_unknown(
+        self, queue, registry, event_bus, tmp_path,
+    ):
+        """Same gap, but the printer names no ending (OctoPrint, RRF): the
+        ending was not watched, so it is UNKNOWN and the user is asked --
+        not banked as a success on the strength of an idle reading."""
+        from kiln.persistence import KilnDB
+
+        db = KilnDB(str(tmp_path / "sched.db"))
+        scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        scheduler._persistence = db
+        db.save_print_outcome({
+            "job_id": job_id, "printer_name": "printer-1", "file_name": "benchy.gcode",
+            "outcome": "pending", "agent_id": "auto", "determined_by": "observed",
+        })
+        adapter.get_state.side_effect = PrinterError("connection refused")
+        _run_silent(scheduler, clock, hours=10, step_minutes=60)
+
+        adapter.get_state.side_effect = None
+        adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.IDLE)
+        clock.advance(60)
+        scheduler.tick()
+        assert queue.get_job(job_id).status == JobStatus.COMPLETED
+        row = db.get_print_outcome(job_id)
+        assert row["outcome"] == "unknown" and row["determined_by"] == "inferred"
+        assert "no trustworthy reading" in row["notes"]
+
+    def test_paused_printer_is_neither_stalled_nor_silent(self, queue, registry, event_bus):
+        """PAUSED is a state that is supposed to be frozen.  A printer that
+        keeps answering PAUSED for a day is the user's business."""
+        scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.PAUSED)
+        assert _run_silent(scheduler, clock, hours=24, step_minutes=60) == []
+        self._still_printing(queue, scheduler, event_bus, job_id)
+        assert scheduler.watch_alerts() == []
+        assert self._events(event_bus, EventType.JOB_STALLED, job_id) == []
+        assert self._events(event_bus, EventType.JOB_NO_CONTACT, job_id) == []
+
+    def test_watch_note_is_none_for_a_job_not_being_watched(self, queue, registry, event_bus):
+        scheduler = JobScheduler(queue, registry, event_bus, poll_interval=0.1, max_retries=2)
+        assert scheduler.watch_note("nope") is None
+        assert scheduler.watch_alerts() == []
+
+    def test_job_status_tool_carries_the_watch(self, queue, registry, event_bus, monkeypatch):
+        import kiln.server as _srv
+        from kiln.plugins.queue_tools import job_status, queue_summary
+
+        scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        _run_silent(scheduler, clock, hours=1)
+        monkeypatch.setattr(_srv, "_scheduler", scheduler)
+        monkeypatch.setattr(_srv, "_get_queue", lambda: queue)
+        monkeypatch.setattr(_srv, "_get_registry", lambda: registry)
+
+        status = job_status(job_id)
+        assert status["job"]["status"] == "printing"
+        assert status["watch"]["state"] == "stalled"
+        summary = queue_summary()
+        assert [a["job_id"] for a in summary["watch_alerts"]] == [job_id]
+
+        monkeypatch.setattr(_srv, "_scheduler", None)
+        assert "watch" not in job_status(job_id)
+
+    def test_dispatch_failure_still_retries(self, queue, registry, event_bus):
+        """Only watched prints stopped being ended by the queue.  A
+        start_print the printer refused never started a print, so retrying
+        it is safe."""
+        adapter = make_mock_adapter(name="printer-1", start_print_success=False)
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler = JobScheduler(
+            queue, registry, event_bus, poll_interval=0.1, max_retries=2, retry_backoff_base=0.0,
+        )
+        scheduler.tick()
+        assert queue.get_job(job_id).status == JobStatus.QUEUED
+        assert self._events(event_bus, EventType.JOB_SUBMITTED, job_id)

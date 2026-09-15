@@ -57,7 +57,7 @@ class TestEventType:
         assert EventType.FILE_UPLOADED.value == "file.uploaded"
 
     def test_all_members_count(self):
-        assert len(EventType) == 65
+        assert len(EventType) == 66  # JOB_STUCK_TIMEOUT retired (never published); JOB_STALLED + JOB_NO_CONTACT added
 
     def test_recovery_events(self):
         # Recovery events surface kiln-pro's auto_recover lifecycle on

@@ -14,19 +14,116 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from kiln.events import EventBus, EventType
 from kiln.print_start_verdict import resolve_print_start
-from kiln.printers.base import PrinterError, PrinterStatus
+from kiln.printers.base import PrinterError, PrinterStatus, status_is_unreachable
+from kiln.printers.progress_motion import (
+    WATCHED_ENDING_MAX_GAP_S,
+    Motion,
+    MotionVerdict,
+    observe_progress,
+    stall_threshold_seconds,
+)
 from kiln.queue import JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
 
 logger = logging.getLogger(__name__)
 
 
-# Jobs in PRINTING state longer than this are considered stuck.
-_STUCK_JOB_TIMEOUT_SECONDS: float = 7200.0  # 2 hours
+# ---------------------------------------------------------------------------
+# What the scheduler will, and will not, conclude about a print it watches
+# ---------------------------------------------------------------------------
+#
+# THE QUEUE NEVER ENDS A PRINT THE PRINTER HAS NOT ENDED.  It used to: any
+# job over two hours of wall-clock was failed while the printer was still
+# reporting PRINTING, then handed to the retry path, which reset it to
+# QUEUED and dispatched the same file again the moment the machine went
+# idle.  A 2h05m print on a Snapmaker U1 was printed three times that way,
+# the second plate dropping onto the first one's finished part (reported
+# 2026-09-13).  A long print is a long print.
+#
+# The tempting replacement -- give up after N hours of no progress or no
+# contact -- is the same mistake with a longer fuse.  A printer whose Wi-Fi
+# dropped keeps printing.  A machine paused at its own screen while
+# reporting RUNNING (measured on an A1, 2026-08-11) is waiting for a person,
+# not failed.  Any N picks a moment to write "failed" over a print that may
+# finish, and that record feeds the learning data.
+#
+# So the scheduler SAYS what it sees, the moment it sees it, and keeps the
+# printer reserved:
+#
+#   moving      a progress axis advanced -- judged by ``progress_motion``,
+#               the same detector the status tools and the resume gate read,
+#               so the queue cannot disagree with them about whether a
+#               machine is moving;
+#   stalled     fresh telemetry, PRINTING, nothing moved past the measured
+#               threshold -- announced once per episode as JOB_STALLED and
+#               carried on job_status / queue_summary;
+#   no contact  no trustworthy reading (unreachable, stale cache, a read
+#               that raised) for longer than that same threshold -- announced
+#               once per episode as JOB_NO_CONTACT and carried the same way.
+#
+# The job stays PRINTING, the printer stays busy so nothing is dispatched
+# onto an occupied bed, and the only doors out are the machine's own -- an
+# idle reading ends the job -- and a person who knows the print is over
+# cancelling it.
+#
+# What Kiln saw still shapes the ENDING.  Idle after continuous, moving
+# contact with no named result is recorded as success (an inference, never
+# federated).  Idle right after a stall, or after a contact gap longer than
+# the watched-ending bound, with no named result is recorded as UNKNOWN and
+# the user is asked -- a stalled print that was power-cycled must not be
+# banked as a success.
+
+
+@dataclass
+class JobWatch:
+    """What the scheduler currently knows about one job it is watching.
+
+    All times are the scheduler's monotonic clock.
+    """
+
+    printer_name: str
+    #: Last reading Kiln could vouch for: connected, not stale, not an
+    #: unreachable state, and the read did not raise.
+    last_contact: float
+    #: The motion verdict of the last trustworthy reading, if any.
+    last_verdict: MotionVerdict | None = None
+    #: Why the ending Kiln is about to record should be doubted, set on each
+    #: trustworthy reading from what came BEFORE it -- ``None`` when the
+    #: previous reading was moving and recent.
+    ending_doubt: str | None = None
+    #: Episode flags: each condition is announced once, not once per poll.
+    stall_announced: bool = False
+    no_contact_announced: bool = False
+
+    def stalled(self) -> bool:
+        return self.last_verdict is not None and self.last_verdict.stalled
+
+    def moving(self) -> bool:
+        return self.last_verdict is not None and self.last_verdict.motion is Motion.MOVING
+
+    def silent_for(self, now: float) -> float:
+        return max(0.0, now - self.last_contact)
+
+
+def _no_contact_note(printer_name: str, silent_seconds: float, cause: str) -> str:
+    minutes = int(silent_seconds // 60)
+    what = {
+        "stale": "its last reading is stale",
+        "unreachable": "it is unreachable",
+        "read_failed": "every read is failing",
+    }.get(cause, "it is not answering")
+    return (
+        f"Kiln has had no trustworthy reading from {printer_name} for "
+        f"{minutes} minutes -- {what}. The print may still be running; Kiln "
+        f"cannot tell from here. The job stays open and the printer stays "
+        f"reserved until the machine answers again. If you can see the print "
+        f"is over, cancel this job."
+    )
 
 
 class JobScheduler:
@@ -38,8 +135,11 @@ class JobScheduler:
         ...
         scheduler.stop()    # graceful shutdown
 
-    The scheduler polls every ``poll_interval`` seconds (default 5).
-    Jobs stuck in PRINTING state for over 2 hours are auto-failed.
+    The scheduler polls every ``poll_interval`` seconds (default 5).  It
+    never ends a print the printer has not ended: a job that stops moving
+    or stops answering is announced (JOB_STALLED / JOB_NO_CONTACT, and on
+    ``job_status``) and stays PRINTING with its printer reserved until the
+    machine reports idle or a person cancels it.  See the module comment.
     """
 
     def __init__(
@@ -70,6 +170,15 @@ class JobScheduler:
         # start, and claiming success for it would be a guess.
         self._seen_printing: set[str] = set()
         self._retry_not_before: dict[str, float] = {}  # job_id -> earliest retry timestamp
+        # job_id -> what Kiln currently knows about the print it dispatched.
+        # Opened at dispatch, so a job whose printer never answers still has
+        # a last-contact time to measure silence from.
+        self._watch: dict[str, JobWatch] = {}
+        # job_id -> why the latest reading could not be trusted
+        # ("unreachable" / "stale" / "read_failed"), for the note's wording.
+        self._contact_cause: dict[str, str] = {}
+        # Monotonic clock, overridable so tests can drive hours in a second.
+        self._clock = time.monotonic
         self._lock = threading.Lock()
 
     @property
@@ -129,8 +238,7 @@ class JobScheduler:
 
         *machine_reported* marks the exhausting failure as the PRINTER's own
         verdict (error state observed while the job was being watched) rather
-        than the queue's (stuck-timeout guess, unregistered printer, dispatch
-        error).  Only a machine verdict is eligible for community
+        than the queue's (unregistered printer, dispatch error).  Only a machine verdict is eligible for community
         contribution — see :meth:`_auto_record_outcome`.
         """
         count = self._retry_counts.get(job_id, 0)
@@ -141,8 +249,9 @@ class JobScheduler:
             self._retry_not_before[job_id] = time.time() + delay
             # Reset the job back to QUEUED so a future tick can redispatch it.
             # The retry is a fresh physical print — the next attempt must
-            # earn its own "seen printing" observation.
+            # earn its own "seen printing" observation and its own clock.
             self._seen_printing.discard(job_id)
+            self._watch.pop(job_id, None)
             with self._lock:
                 job = self._queue.get_job(job_id)
                 job.status = JobStatus.QUEUED
@@ -170,9 +279,29 @@ class JobScheduler:
             return True
 
         # Retries exhausted — mark permanently failed
-        self._retry_counts.pop(job_id, None)
-        self._retry_not_before.pop(job_id, None)
-        self._seen_printing.discard(job_id)
+        self._fail_permanently(
+            job_id, error_msg, failed_list, printer_name=printer_name,
+            contribute=machine_reported,
+        )
+        return False
+
+    def _fail_permanently(
+        self,
+        job_id: str,
+        error_msg: str,
+        failed_list: list[dict[str, str]],
+        printer_name: str | None = None,
+        *,
+        contribute: bool = False,
+        determined_by: str = "observed",
+    ) -> None:
+        """Mark *job_id* FAILED for good and tell everyone who listens.
+
+        The one ending shared by the retry path (retries exhausted) and the
+        safety-latch path, so the JOB_FAILED event, the outcome row and the
+        tick report cannot drift apart.
+        """
+        self._forget_watch(job_id)
         self._queue.mark_failed(job_id, error_msg)
         self._event_bus.publish(
             EventType.JOB_FAILED,
@@ -182,10 +311,165 @@ class JobScheduler:
         if printer_name:
             self._auto_record_outcome(
                 job_id, printer_name, "failed", error_msg=error_msg,
-                contribute=machine_reported,
+                determined_by=determined_by, contribute=contribute,
             )
         failed_list.append({"job_id": job_id, "error": error_msg})
-        return False
+
+    def _forget_watch(self, job_id: str) -> None:
+        """Drop every per-watch record for a job that is no longer active."""
+        self._retry_counts.pop(job_id, None)
+        self._retry_not_before.pop(job_id, None)
+        self._seen_printing.discard(job_id)
+        self._watch.pop(job_id, None)
+        self._contact_cause.pop(job_id, None)
+
+    # ------------------------------------------------------------------
+    # Watching: say what is seen, decide nothing the printer has not
+    # ------------------------------------------------------------------
+
+    def watch_note(self, job_id: str) -> dict[str, Any] | None:
+        """What Kiln currently knows about a job it is watching, for the
+        queue tools -- or ``None`` for a job it is not watching.
+
+        ``state`` is one of ``moving`` / ``stalled`` / ``no_contact`` /
+        ``watching`` (contact, but no verdict yet).  ``note`` is the one
+        plain-English sentence to show a person, present only when there is
+        something to say.
+        """
+        watch = self._watch.get(job_id)
+        if watch is None:
+            return None
+        now = self._clock()
+        silent = watch.silent_for(now)
+        note: dict[str, Any] = {"printer_name": watch.printer_name}
+        if silent >= stall_threshold_seconds():
+            cause = self._contact_cause.get(job_id, "unreachable")
+            note.update(
+                state="no_contact", since_seconds=round(silent),
+                note=_no_contact_note(watch.printer_name, silent, cause),
+            )
+        elif watch.stalled():
+            assert watch.last_verdict is not None
+            note.update(
+                state="stalled",
+                since_seconds=round(watch.last_verdict.frozen_for_seconds or 0.0),
+                note=watch.last_verdict.note(),
+            )
+        elif watch.moving():
+            note.update(state="moving")
+        else:
+            note.update(state="watching")
+        return note
+
+    def watch_alerts(self) -> list[dict[str, Any]]:
+        """Every watched job that currently needs a person: stalled or out
+        of contact.  Empty when everything is moving."""
+        alerts = []
+        for job_id in list(self._watch):
+            note = self.watch_note(job_id)
+            if note and note["state"] in ("stalled", "no_contact"):
+                alerts.append({"job_id": job_id, **note})
+        return alerts
+
+    def _observe(
+        self, job_id: str, printer_name: str, adapter: Any, state: Any, job: Any, now: float,
+    ) -> None:
+        """Record one trustworthy-or-not reading of a watched job.
+
+        Feeds every reading to the progress-motion detector, refreshes the
+        last-contact time on readings Kiln can vouch for, and announces a
+        stall or a loss of contact ONCE per episode.  Decides nothing about
+        the job itself.
+        """
+        watch = self._watch.get(job_id)
+        if watch is None:
+            # Watched before this process dispatched it (a restart); start
+            # the record here rather than have no record at all.
+            watch = self._watch[job_id] = JobWatch(printer_name, last_contact=now)
+        verdict = observe_progress(adapter, state, job, now=now)
+
+        connected = bool(getattr(state, "connected", False))
+        headline = getattr(state, "state", None)
+        if not connected or status_is_unreachable(headline):
+            self._observe_silence(job_id, printer_name, now, cause="unreachable")
+            return
+        if headline is PrinterStatus.STALE:
+            self._observe_silence(job_id, printer_name, now, cause="stale")
+            return
+
+        # A trustworthy reading.  Before overwriting, judge what came before
+        # it: that is what decides whether an ending seen on THIS reading
+        # was actually watched.
+        gap = watch.silent_for(now)
+        if watch.stalled():
+            watch.ending_doubt = (
+                f"the printer had not moved for "
+                f"{int((watch.last_verdict.frozen_for_seconds or 0) // 60)} minutes "
+                f"right before it went idle"
+            )
+        elif gap > WATCHED_ENDING_MAX_GAP_S:
+            watch.ending_doubt = (
+                f"Kiln had no trustworthy reading for {int(gap // 60)} minutes "
+                f"right before the printer went idle"
+            )
+        else:
+            watch.ending_doubt = None
+
+        if watch.no_contact_announced:
+            logger.info("Job %s: %s is answering again", job_id, printer_name)
+            watch.no_contact_announced = False
+        watch.last_contact = now
+        watch.last_verdict = verdict
+        self._contact_cause.pop(job_id, None)
+
+        if verdict.stalled and not watch.stall_announced:
+            watch.stall_announced = True
+            logger.warning("Job %s on %s: %s", job_id, printer_name, verdict.note())
+            self._event_bus.publish(
+                EventType.JOB_STALLED,
+                {
+                    "job_id": job_id,
+                    "printer_name": printer_name,
+                    "frozen_for_seconds": round(verdict.frozen_for_seconds or 0.0),
+                    "layer": verdict.layer,
+                    "percent": verdict.percent,
+                    "note": verdict.note(),
+                },
+                source="scheduler",
+            )
+        elif verdict.motion is Motion.MOVING and watch.stall_announced:
+            # Only positive evidence ends a stall episode; an UNKNOWN in
+            # between (a pause, a state change) does not re-arm the alarm.
+            watch.stall_announced = False
+            logger.info("Job %s on %s is moving again", job_id, printer_name)
+
+    def _observe_silence(self, job_id: str, printer_name: str, now: float, *, cause: str) -> None:
+        """A reading Kiln cannot vouch for.  The clock keeps running; once
+        the silence outlasts the stall threshold it is announced once."""
+        watch = self._watch.get(job_id)
+        if watch is None:
+            watch = self._watch[job_id] = JobWatch(printer_name, last_contact=now)
+        self._contact_cause[job_id] = cause
+        silent = watch.silent_for(now)
+        if silent >= stall_threshold_seconds() and not watch.no_contact_announced:
+            watch.no_contact_announced = True
+            note = _no_contact_note(printer_name, silent, cause)
+            logger.warning("Job %s on %s: %s", job_id, printer_name, note)
+            self._event_bus.publish(
+                EventType.JOB_NO_CONTACT,
+                {
+                    "job_id": job_id,
+                    "printer_name": printer_name,
+                    "silent_for_seconds": round(silent),
+                    "cause": cause,
+                    "note": note,
+                },
+                source="scheduler",
+            )
+
+    def _ending_doubt(self, job_id: str) -> str | None:
+        watch = self._watch.get(job_id)
+        return watch.ending_doubt if watch else None
 
     def _rank_printers(self, available: list[str], job) -> list[str]:
         """Reorder available printers by historical success rate for this job.
@@ -235,10 +519,9 @@ class JobScheduler:
         gated, best-effort).  Call sites set it ONLY for machine-testimony
         verdicts about prints this scheduler watched: a job seen printing
         that ended idle (success), or one whose printer reported an error
-        state mid-watch (failed).  The queue's own words — stuck-timeout
-        ("may be disconnected or hung" is a guess, and a real print over the
-        timeout is still running), unregistered printer, safety latch — are
-        queue events, not verdicts on the model, and contributing them would
+        state mid-watch (failed).  The queue's own words — unregistered
+        printer, safety latch, an ending it doubts — are queue events, not
+        verdicts on the model, and contributing them would
         poison a corpus keyed by the model's geometry.  ``unknown`` and
         ``cancelled`` never contribute (the helper refuses non-verdicts, and
         the call sites don't ask).
@@ -375,17 +658,7 @@ class JobScheduler:
                     error_msg = f"Job stopped due to safety latch on {printer_name}: {estop_reason}"
                     with self._lock:
                         self._active_jobs.pop(job_id, None)
-                        self._retry_counts.pop(job_id, None)
-                        self._retry_not_before.pop(job_id, None)
-                    self._queue.mark_failed(job_id, error_msg)
-                    self._event_bus.publish(
-                        EventType.JOB_FAILED,
-                        {"job_id": job_id, "error": error_msg},
-                        source="scheduler",
-                    )
-                    self._auto_record_outcome(job_id, printer_name, "failed", error_msg=error_msg)
-                    self._seen_printing.discard(job_id)
-                    failed.append({"job_id": job_id, "error": error_msg})
+                    self._fail_permanently(job_id, error_msg, failed, printer_name=printer_name)
                     continue
 
                 adapter = self._registry.get(printer_name)
@@ -406,6 +679,9 @@ class JobScheduler:
                 # the outcome would be banked as "unknown" instead of watched.
                 if getattr(state, "is_occupied", False) is True:
                     self._seen_printing.add(job_id)
+
+                now = self._clock()
+                self._observe(job_id, printer_name, adapter, state, job_progress, now)
 
                 # Printer returned to idle -- the job has ENDED.  How it
                 # ended is only as certain as what this loop actually saw:
@@ -444,8 +720,6 @@ class JobScheduler:
                         self._queue.mark_completed(job_id)
                     with self._lock:
                         self._active_jobs.pop(job_id, None)
-                        self._retry_counts.pop(job_id, None)
-                        self._retry_not_before.pop(job_id, None)
                     if not queue_cancelled:
                         self._event_bus.publish(
                             EventType.JOB_COMPLETED,
@@ -488,6 +762,21 @@ class JobScheduler:
                                 determined_by="observed",
                                 contribute=True,
                             )
+                        elif named is None and (doubt := self._ending_doubt(job_id)):
+                            # Idle with nothing named, and the reading
+                            # before this one was a stall or a silence:
+                            # the ending was not watched.  A stalled print
+                            # that was power-cycled or stopped at the
+                            # screen must not be banked as a success.
+                            self._auto_record_outcome(
+                                job_id, printer_name, "unknown",
+                                error_msg=(
+                                    f"The printer went idle but {doubt}, so "
+                                    f"Kiln did not see how this print ended. "
+                                    f"Outcome needs the user's answer."
+                                ),
+                                determined_by="inferred",
+                            )
                         else:
                             self._auto_record_outcome(
                                 job_id, printer_name, "success",
@@ -504,7 +793,7 @@ class JobScheduler:
                             ),
                             determined_by="inferred",
                         )
-                    self._seen_printing.discard(job_id)
+                    self._forget_watch(job_id)
                     completed.append(job_id)
 
                 # ``confirmed_state``: it looks through a FAULT headline, so a
@@ -530,8 +819,8 @@ class JobScheduler:
                 # ...and `effective_state` on the branch that only WATCHES
                 # one.  The last thing the printer said is still the best
                 # answer to "is this printing", so a stale reading keeps the
-                # STARTING promotion and the stuck-job clock running instead
-                # of silently skipping both.
+                # STARTING promotion instead of silently skipping it (the
+                # watch above already counted it as silence).
                 elif state.effective_state == PrinterStatus.PRINTING:
                     # Promote STARTING -> PRINTING when the printer confirms
                     try:
@@ -540,28 +829,6 @@ class JobScheduler:
                             self._queue.mark_printing(job_id)
                     except Exception as exc:
                         logger.debug("Failed to promote job %s to PRINTING: %s", job_id, exc)
-
-                    # Stuck job detection: fail jobs in PRINTING too long
-                    try:
-                        job = self._queue.get_job(job_id)
-                        if job.started_at is not None and (time.time() - job.started_at) > _STUCK_JOB_TIMEOUT_SECONDS:
-                            error_msg = (
-                                f"Job timed out after "
-                                f"{_STUCK_JOB_TIMEOUT_SECONDS / 3600:.0f}h "
-                                f"— printer may be disconnected or hung"
-                            )
-                            logger.warning(
-                                "Stuck job detected: %s on %s (%.0f min)",
-                                job_id,
-                                printer_name,
-                                (time.time() - job.started_at) / 60,
-                            )
-                            with self._lock:
-                                self._active_jobs.pop(job_id, None)
-                            self._requeue_or_fail(job_id, error_msg, failed, printer_name=printer_name)
-                            continue
-                    except Exception as exc:
-                        logger.debug("Failed to check stuck job %s: %s", job_id, exc)
 
                     # Publish progress event
                     if job_progress.completion is not None:
@@ -582,7 +849,11 @@ class JobScheduler:
                     self._active_jobs.pop(job_id, None)
                 self._requeue_or_fail(job_id, error_msg, failed, printer_name=printer_name)
             except Exception as exc:
+                # A read that raises is a printer Kiln cannot see.  Nothing
+                # is decided on it; it counts as silence, which is announced
+                # once it outlasts the threshold.
                 logger.warning("Error checking job %s on %s: %s", job_id, printer_name, exc)
+                self._observe_silence(job_id, printer_name, self._clock(), cause="read_failed")
 
         # Phase 2: Dispatch queued jobs to idle printers -- only when a job is
         # waiting.  Reading every printer is not free: a Bambu counts each read
@@ -666,6 +937,7 @@ class JobScheduler:
                     self._queue.mark_printing(next_job.id)
                     with self._lock:
                         self._active_jobs[next_job.id] = printer_name
+                    self._watch[next_job.id] = JobWatch(printer_name, last_contact=self._clock())
                     self._event_bus.publish(
                         EventType.JOB_STARTED,
                         {

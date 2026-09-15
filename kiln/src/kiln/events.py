@@ -86,7 +86,12 @@ class EventType(enum.Enum):
     JOB_COMPLETED = "job.completed"
     JOB_FAILED = "job.failed"
     JOB_CANCELLED = "job.cancelled"
-    JOB_STUCK_TIMEOUT = "job.stuck_timeout"
+    # A watched print that stopped moving, or stopped answering, while the
+    # queue still holds it open.  Published once per episode by the
+    # scheduler; the job stays PRINTING until the printer ends it or a
+    # person cancels it.
+    JOB_STALLED = "job.stalled"
+    JOB_NO_CONTACT = "job.no_contact"
 
     # Printer state
     PRINTER_CONNECTED = "printer.connected"

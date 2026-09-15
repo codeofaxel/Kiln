@@ -203,23 +203,66 @@ def submit_job(
         )
 
 
+def _watch_note(job_id: str) -> dict | None:
+    """The scheduler's current view of a watched job, or ``None``.
+
+    Reads the scheduler only if one is running -- never constructs one --
+    so a hosted or queue-only process answers as it always did.
+    """
+    import kiln.server as _srv
+
+    scheduler = getattr(_srv, "_scheduler", None)
+    if scheduler is None:
+        return None
+    try:
+        return scheduler.watch_note(job_id)
+    except Exception:
+        _logger.debug("watch note unavailable for %s", job_id, exc_info=True)
+        return None
+
+
+def _watch_alerts() -> list[dict]:
+    import kiln.server as _srv
+
+    scheduler = getattr(_srv, "_scheduler", None)
+    if scheduler is None:
+        return []
+    try:
+        return scheduler.watch_alerts()
+    except Exception:
+        _logger.debug("watch alerts unavailable", exc_info=True)
+        return []
+
+
 def job_status(job_id: str) -> dict:
     """Get the status of a queued or completed print job.
 
     Args:
         job_id: The job ID returned by ``submit_job``.
 
-    Returns the full job record including status, timing, and metadata.
+    Returns the full job record including status, timing, and metadata,
+    plus ``watch`` when the scheduler is watching it: ``state`` is
+    ``moving`` / ``stalled`` / ``no_contact`` / ``watching`` and ``note``
+    is the sentence to show a person when it is not moving.
     """
     import kiln.server as _srv
     from kiln.queue import JobNotFoundError
 
     try:
         job = _srv._get_queue().get_job(job_id)
-        return {
+        response = {
             "success": True,
             "job": job.to_dict(),
         }
+        watch = _watch_note(job_id)
+        if watch is not None:
+            # What the scheduler has seen of this print: moving, stalled,
+            # or out of contact.  A stalled or silent job is still PRINTING
+            # here on purpose -- the queue never ends a print the printer
+            # has not ended -- so this is where a reader learns it needs
+            # a person.
+            response["watch"] = watch
+        return response
     except JobNotFoundError:
         return _srv._error_dict(f"Job not found: {job_id!r}", code="NOT_FOUND")
     except Exception as exc:
@@ -230,7 +273,10 @@ def job_status(job_id: str) -> dict:
 def queue_summary() -> dict:
     """Get an overview of the print job queue.
 
-    Returns counts by status, next job to execute, and recent jobs.
+    Returns counts by status, next job to execute, recent jobs, and
+    ``watch_alerts``: watched prints that have stalled or stopped answering
+    and need a person (they stay active until the printer ends them or
+    someone cancels).
     """
     import kiln.server as _srv
 
@@ -294,6 +340,9 @@ def queue_summary() -> dict:
             "dispatch_blocked": dispatch_blocked,
             "dispatch_block_reason": dispatch_block_reason,
             "emergency_latched_printers": emergency_latched_printers,
+            # Watched prints that currently need a person: stalled, or out
+            # of contact.  They are counted as active above on purpose.
+            "watch_alerts": _watch_alerts(),
         }
         if finished_on_record is not None:
             response["finished_jobs_on_record"] = finished_on_record

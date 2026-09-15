@@ -36,9 +36,6 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from kiln import parse_int_env
-from kiln.events import Event, EventType
-
 logger = logging.getLogger(__name__)
 
 
@@ -202,10 +199,6 @@ class JobStateMachine:
         return cls._TRANSITIONS.get(status, frozenset())
 
 
-# Stuck job timeout — configurable via environment variable.
-_STUCK_JOB_TIMEOUT_MINUTES: int = parse_int_env("KILN_STUCK_JOB_TIMEOUT_MINUTES", 30)
-
-
 class PrintQueue:
     """Thread-safe print job queue with optional SQLite persistence.
 
@@ -217,16 +210,10 @@ class PrintQueue:
     to QUEUED since the printer state is unknown after a restart.
     """
 
-    def __init__(
-        self,
-        db_path: str | None = None,
-        *,
-        event_bus: Any | None = None,
-    ) -> None:
+    def __init__(self, db_path: str | None = None) -> None:
         self._jobs: dict[str, PrintJob] = {}
         self._lock = threading.Lock()
         self._db: sqlite3.Connection | None = None
-        self._event_bus: Any | None = event_bus  # kiln.events.EventBus
         # idempotency_key -> job_id, for jobs held in memory.  Terminal
         # jobs dropped by _reload_from_db are still deduplicated via the
         # DB lookup in _find_by_key_locked — a key names one intent for
@@ -803,74 +790,6 @@ class PrintQueue:
                 key = job.status.value
                 counts[key] = counts.get(key, 0) + 1
             return counts
-
-    # ------------------------------------------------------------------
-    # Stuck job detection
-    # ------------------------------------------------------------------
-
-    def check_stuck_jobs(self, *, timeout_minutes: int | None = None) -> list[PrintJob]:
-        """Scan for jobs stuck in STARTING or PRINTING and auto-fail them.
-
-        A job is considered stuck if it has been in STARTING or PRINTING
-        state for longer than *timeout_minutes* (default read from
-        ``KILN_STUCK_JOB_TIMEOUT_MINUTES``, falling back to 30).
-
-        Each auto-failed job is transitioned to FAILED with
-        ``error="stuck_timeout"`` and a :data:`JOB_STUCK_TIMEOUT` event
-        is published if an event bus is available.
-
-        Args:
-            timeout_minutes: Override the default timeout.
-
-        Returns:
-            List of jobs that were auto-failed.
-        """
-        timeout = timeout_minutes if timeout_minutes is not None else _STUCK_JOB_TIMEOUT_MINUTES
-        cutoff = time.time() - (timeout * 60)
-        failed_jobs: list[PrintJob] = []
-
-        with self._lock:
-            candidates = [
-                j
-                for j in self._jobs.values()
-                if j.status in (JobStatus.STARTING, JobStatus.PRINTING)
-                and j.started_at is not None
-                and j.started_at < cutoff
-            ]
-
-        for job in candidates:
-            previous_status = job.status.value
-            previous_started_at = job.started_at
-            try:
-                self.mark_failed(job.id, "stuck_timeout")
-                failed_jobs.append(job)
-                logger.warning(
-                    "Auto-failed stuck job %s (was %s for %.0f min)",
-                    job.id,
-                    previous_status,
-                    (time.time() - (previous_started_at or 0)) / 60,
-                )
-                self._publish_stuck_timeout(job)
-            except (InvalidStateTransition, JobNotFoundError):
-                # Job was already transitioned by another thread — skip.
-                pass
-
-        return failed_jobs
-
-    def _publish_stuck_timeout(self, job: PrintJob) -> None:
-        """Publish a JOB_STUCK_TIMEOUT event if an event bus is wired."""
-        if self._event_bus is None:
-            return
-        try:
-            self._event_bus.publish(
-                Event(
-                    type=EventType.JOB_STUCK_TIMEOUT,
-                    data=job.to_dict(),
-                    source="queue",
-                )
-            )
-        except Exception:
-            logger.exception("Failed to publish stuck timeout event for job %s", job.id)
 
     # ------------------------------------------------------------------
     # Internal
