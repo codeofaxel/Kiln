@@ -7,6 +7,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **A long print is never mistaken for a stuck one.** Kiln used to give up
+  after two hours and could send the same file again. It now leaves a running
+  print alone and tells you when one stops moving. Thanks to @qjkme.
+
+- **An emergency stop says whether it landed.** Kiln checks the printer really
+  stopped, and tells you to stop it by hand when it can't confirm. Stopping
+  all your printers reaches every one at once.
+
+- **A monitored print no longer reports failure after it started.** It says
+  the print started, and the first-layer check actually runs. `kiln watch`
+  works again.
+
+- **The safety watchdog covers every print Kiln starts, and leaves when that
+  print ends.** It no longer cancels a print your printer paused itself, like
+  a filament runout.
+
 - **Bambu's H2D, H2D Pro, H2C and X2D are now supported.** Paid tiers add
   per-material guidance for each one, plus additional depth.
 
