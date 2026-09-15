@@ -82,7 +82,7 @@ class TestMJPEGProxyUnit:
         info = proxy.stop()
         assert info.active is False
 
-    @patch("kiln.streaming.HTTPServer")
+    @patch("kiln.streaming.ThreadingHTTPServer")
     @patch("kiln.streaming.requests.get")
     @patch("kiln.streaming.threading.Thread")
     def test_start_sets_state(self, mock_thread_cls, mock_get, mock_server_cls):
@@ -106,7 +106,7 @@ class TestMJPEGProxyUnit:
         proxy._running = False
         proxy._stop_event.set()
 
-    @patch("kiln.streaming.HTTPServer")
+    @patch("kiln.streaming.ThreadingHTTPServer")
     @patch("kiln.streaming.requests.get")
     @patch("kiln.streaming.threading.Thread")
     def test_start_creates_server(self, mock_thread_cls, mock_get, mock_server_cls):
@@ -123,7 +123,7 @@ class TestMJPEGProxyUnit:
         proxy._running = False
         proxy._stop_event.set()
 
-    @patch("kiln.streaming.HTTPServer")
+    @patch("kiln.streaming.ThreadingHTTPServer")
     @patch("kiln.streaming.requests.get")
     @patch("kiln.streaming.threading.Thread")
     def test_start_starts_threads(self, mock_thread_cls, mock_get, mock_server_cls):
@@ -140,7 +140,7 @@ class TestMJPEGProxyUnit:
         proxy._running = False
         proxy._stop_event.set()
 
-    @patch("kiln.streaming.HTTPServer")
+    @patch("kiln.streaming.ThreadingHTTPServer")
     @patch("kiln.streaming.requests.get")
     @patch("kiln.streaming.threading.Thread")
     def test_start_when_running_returns_current(self, mock_thread_cls, mock_get, mock_server_cls):
@@ -157,7 +157,7 @@ class TestMJPEGProxyUnit:
         proxy._running = False
         proxy._stop_event.set()
 
-    @patch("kiln.streaming.HTTPServer")
+    @patch("kiln.streaming.ThreadingHTTPServer")
     @patch("kiln.streaming.requests.get")
     @patch("kiln.streaming.threading.Thread")
     def test_stop_sets_inactive(self, mock_thread_cls, mock_get, mock_server_cls):
@@ -171,7 +171,7 @@ class TestMJPEGProxyUnit:
         assert info.active is False
         assert proxy.active is False
 
-    @patch("kiln.streaming.HTTPServer")
+    @patch("kiln.streaming.ThreadingHTTPServer")
     @patch("kiln.streaming.requests.get")
     @patch("kiln.streaming.threading.Thread")
     def test_stop_calls_server_shutdown(self, mock_thread_cls, mock_get, mock_server_cls):
@@ -186,7 +186,7 @@ class TestMJPEGProxyUnit:
 
         mock_server.shutdown.assert_called_once()
 
-    @patch("kiln.streaming.HTTPServer")
+    @patch("kiln.streaming.ThreadingHTTPServer")
     @patch("kiln.streaming.requests.get")
     @patch("kiln.streaming.threading.Thread")
     def test_stop_clears_url(self, mock_thread_cls, mock_get, mock_server_cls):
@@ -200,7 +200,7 @@ class TestMJPEGProxyUnit:
         assert status.local_url is None
         assert status.source_url is None
 
-    @patch("kiln.streaming.HTTPServer")
+    @patch("kiln.streaming.ThreadingHTTPServer")
     @patch("kiln.streaming.requests.get")
     @patch("kiln.streaming.threading.Thread")
     def test_frames_served_starts_at_zero(self, mock_thread_cls, mock_get, mock_server_cls):
@@ -214,7 +214,7 @@ class TestMJPEGProxyUnit:
         proxy._running = False
         proxy._stop_event.set()
 
-    @patch("kiln.streaming.HTTPServer")
+    @patch("kiln.streaming.ThreadingHTTPServer")
     @patch("kiln.streaming.requests.get")
     @patch("kiln.streaming.threading.Thread")
     def test_status_printer_name(self, mock_thread_cls, mock_get, mock_server_cls):
@@ -229,7 +229,7 @@ class TestMJPEGProxyUnit:
         proxy._running = False
         proxy._stop_event.set()
 
-    @patch("kiln.streaming.HTTPServer")
+    @patch("kiln.streaming.ThreadingHTTPServer")
     @patch("kiln.streaming.requests.get")
     @patch("kiln.streaming.threading.Thread")
     def test_connected_clients_starts_at_zero(self, mock_thread_cls, mock_get, mock_server_cls):
@@ -243,7 +243,7 @@ class TestMJPEGProxyUnit:
         proxy._running = False
         proxy._stop_event.set()
 
-    @patch("kiln.streaming.HTTPServer")
+    @patch("kiln.streaming.ThreadingHTTPServer")
     @patch("kiln.streaming.requests.get")
     @patch("kiln.streaming.threading.Thread")
     def test_start_stop_start(self, mock_thread_cls, mock_get, mock_server_cls):

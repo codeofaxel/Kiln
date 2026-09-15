@@ -28,9 +28,11 @@ import os
 import posixpath
 import socket
 import ssl
+import struct
 import sys
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
@@ -41,6 +43,7 @@ from kiln.printer_intelligence import chamber_sensor_for_model
 from kiln.printers.base import (
     DEFAULT_PURGE_LENGTH_MM,
     STALE_STATE_WARN_AGE,
+    CameraStreamError,
     FilamentOpPlan,
     FilamentOpResult,
     JobProgress,
@@ -54,6 +57,7 @@ from kiln.printers.base import (
     PrinterState,
     PrinterStatus,
     PrintResult,
+    StreamCapability,
     TelemetryCadence,
     UploadResult,
     _record_print_duration,
@@ -859,6 +863,190 @@ def _find_ffmpeg() -> str | None:
     camera needs it too); this name stays so tests can patch it here.
     """
     return find_ffmpeg()
+
+
+# ---------------------------------------------------------------------------
+# Camera — the LAN video protocol of the A1 / P1 series (port 6000)
+# ---------------------------------------------------------------------------
+#
+# Bambu's own P1 live-view troubleshooting page states the transport: the
+# camera image travels over TCP-TLS, and the printer-side port is 6000.  The
+# printer expects one 80-byte authentication packet after the handshake,
+# then pushes frames continuously, each as a 16-byte little-endian header
+# (payload size, itrack 0, flags 1, 0) followed by exactly that many bytes
+# of JPEG.  ``_capture_jpeg_frame`` (one still) and ``BambuPort6000Source``
+# (the relay's continuous feed) share the packet, the TLS context and the
+# framing below — one implementation of the protocol, not two.
+
+#: The printer-side port for the TLS + JPEG camera feed (A1 / P1 series).
+_CAMERA_PORT = 6000
+
+#: Per-frame header: payload size, itrack, flags, reserved — all uint32 LE.
+_CAMERA_FRAME_HEADER = struct.Struct("<IIII")
+
+#: Auth packet head: inlined payload size 0x40, type 0x3000, flags, zero.
+_CAMERA_AUTH_HEAD = struct.pack("<IIII", 0x40, 0x3000, 0, 0)
+
+#: Largest frame the reader will assemble; a header claiming more is a
+#: protocol fault (or a stream that is not the camera's), not a picture.
+_CAMERA_MAX_FRAME = 10 * 1024 * 1024
+
+#: With no frame for this long on an OPEN connection the feed is stalled;
+#: the relay tears down and reconnects rather than serving a frozen frame.
+_CAMERA_IDLE_SECONDS = 30.0
+
+# Which LAN video channel each Bambu family speaks, keyed on the family
+# names in ``_BAMBU_MODEL_FAMILIES`` (the CONFIG-declared model decides, as
+# for every other behaviour).  A family absent from both sets is tried on
+# port 6000 first — ``get_snapshot`` has always done so for every model —
+# and the curated per-model record of what each machine can stream, with
+# its preconditions, is kiln-pro's (https://kiln3d.com).
+_PORT_6000_FAMILIES: frozenset[str] = frozenset({"a1", "a1_mini", "p1p", "p1s"})
+_RTSPS_FAMILIES: frozenset[str] = frozenset(
+    {"x1c", "x1e", "p2s", "h2c", "h2d", "h2d_pro", "h2s"}
+)
+
+
+def _camera_auth_packet(access_code: str) -> bytes:
+    """The 80-byte packet the camera port expects after the TLS handshake."""
+    return (
+        _CAMERA_AUTH_HEAD
+        + _MQTT_USERNAME.encode("ascii").ljust(32, b"\x00")
+        + access_code.encode("ascii").ljust(32, b"\x00")
+    )
+
+
+def _read_port6000_frames(
+    ssock: ssl.SSLSocket,
+    stop: threading.Event,
+    *,
+    first_frame_timeout: float,
+    idle_timeout: float = _CAMERA_IDLE_SECONDS,
+) -> Iterator[bytes]:
+    """Yield whole JPEGs from an authenticated camera socket.
+
+    Framed by the printer's own header, never by scanning for JPEG markers,
+    and indifferent to how the bytes are chunked on the wire.  Raises
+    :class:`CameraStreamError` when the printer closes the connection
+    before its first frame (the way it answers a wrong access code) or
+    goes quiet for longer than the timeout.
+    """
+    buf = bytearray()
+    payload_size: int | None = None
+    frames = 0
+    ssock.settimeout(first_frame_timeout)
+    while not stop.is_set():
+        try:
+            chunk = ssock.recv(16384)
+        except TimeoutError:
+            if frames == 0:
+                raise CameraStreamError(
+                    "The printer accepted the camera connection but sent no "
+                    f"video within {first_frame_timeout:g}s. Check that the "
+                    "camera's video (live view) setting is on in the "
+                    "printer's LAN settings.",
+                    code="CAMERA_UNREACHABLE",
+                ) from None
+            raise CameraStreamError(
+                f"No camera frame for {idle_timeout:g}s; reconnecting.",
+                code="CAMERA_UNREACHABLE",
+            ) from None
+        if not chunk:
+            if frames == 0:
+                raise CameraStreamError(
+                    "The printer closed the camera connection without sending "
+                    "a frame. Check the LAN access code, and that the camera's "
+                    "video (live view) setting is on in the printer's LAN "
+                    "settings.",
+                    code="CAMERA_REFUSED",
+                )
+            return
+        buf += chunk
+        while True:
+            if payload_size is None:
+                if len(buf) < _CAMERA_FRAME_HEADER.size:
+                    break
+                size, _itrack, _flags, _zero = _CAMERA_FRAME_HEADER.unpack_from(buf)
+                del buf[: _CAMERA_FRAME_HEADER.size]
+                if not 0 < size <= _CAMERA_MAX_FRAME:
+                    raise CameraStreamError(
+                        f"The camera port sent a frame header of {size} bytes, "
+                        "which is not a picture; the connection is not the "
+                        "camera feed Kiln expects.",
+                        code="CAMERA_UNREACHABLE",
+                    )
+                payload_size = size
+            if len(buf) < payload_size:
+                break
+            frame = bytes(buf[:payload_size])
+            del buf[:payload_size]
+            payload_size = None
+            frames += 1
+            if frames == 1:
+                ssock.settimeout(idle_timeout)
+            yield frame
+
+
+class BambuPort6000Source:
+    """The relay's frame source for an A1 / P1 camera: ONE authenticated
+    connection, every frame the printer pushes, until stopped.
+
+    Holds the finished auth packet rather than the access code, so nothing
+    on the object can leak the credential; ``label`` is safe for a status
+    reply or a log line.
+    """
+
+    kind = "bambu_port6000"
+
+    def __init__(
+        self,
+        host: str,
+        auth_packet: bytes,
+        tls_context: ssl.SSLContext,
+        *,
+        port: int = _CAMERA_PORT,
+        timeout: float = 5.0,
+    ) -> None:
+        self._host = host
+        self._port = port
+        self._auth = auth_packet
+        self._ctx = tls_context
+        self._timeout = timeout
+        self.label = f"bambu-port6000://{host}:{port}"
+
+    def frames(self, stop: threading.Event) -> Iterator[bytes]:
+        try:
+            sock = socket.create_connection((self._host, self._port), timeout=self._timeout)
+        except OSError as exc:
+            raise CameraStreamError(
+                f"Nothing answered on the camera port ({self._host}:{self._port}): "
+                "the printer may be off, its camera's video (live view) setting "
+                "may be off, or this model streams over RTSPS instead. "
+                f"({exc.__class__.__name__})",
+                code="CAMERA_UNREACHABLE",
+            ) from exc
+        try:
+            ssock = self._ctx.wrap_socket(sock, server_hostname=self._host)
+        except (ssl.SSLError, OSError) as exc:
+            sock.close()
+            raise CameraStreamError(
+                f"The camera port ({self._host}:{self._port}) answered but did "
+                "not complete a TLS handshake: the camera's video (live view) "
+                "setting may be off in the printer's LAN settings, or this "
+                f"model streams over RTSPS instead. ({exc.__class__.__name__})",
+                code="CAMERA_UNREACHABLE",
+            ) from exc
+        try:
+            ssock.sendall(self._auth)
+            yield from _read_port6000_frames(ssock, stop, first_frame_timeout=self._timeout)
+        except (TimeoutError, OSError) as exc:
+            raise CameraStreamError(
+                f"The camera connection dropped: {exc.__class__.__name__}.",
+                code="CAMERA_UNREACHABLE",
+            ) from exc
+        finally:
+            with contextlib.suppress(OSError):
+                ssock.close()
 
 
 # ---------------------------------------------------------------------------
@@ -5549,65 +5737,96 @@ class BambuAdapter(PrinterAdapter):
         # Fallback to RTSPS (X1 series, port 322) via ffmpeg.
         return self._capture_rtsps_frame()
 
-    def _capture_jpeg_frame(self, *, timeout: float = 5.0) -> bytes | None:
-        """Capture a JPEG frame via the TLS+JPEG protocol on port 6000.
+    def _camera_auth_packet(self) -> bytes:
+        """The 80-byte camera auth packet for this printer's access code."""
+        return _camera_auth_packet(self._access_code)
 
-        The A1/P1 series printers stream sequential JPEG frames over a
-        TLS socket.  Authentication uses an 80-byte binary packet with
-        the username and LAN access code.
+    def _camera_tls_context(self) -> ssl.SSLContext:
+        """The TLS context the camera port is opened with.
+
+        The printer's camera certificate is self-signed like its MQTT one,
+        but the fingerprint pin guards the MQTT session, not this port —
+        so hostname and chain checks are off here, on top of the configured
+        context.
+        """
+        ctx = self._build_tls_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
+    def camera_frame_source(
+        self, *, port: int | None = None, timeout: float | None = None
+    ) -> BambuPort6000Source:
+        """The relay's continuous port-6000 source for this printer."""
+        return BambuPort6000Source(
+            self._host,
+            self._camera_auth_packet(),
+            self._camera_tls_context(),
+            port=_CAMERA_PORT if port is None else port,
+            timeout=float(self._timeout if timeout is None else timeout),
+        )
+
+    def _capture_jpeg_frame(self, *, timeout: float = 5.0) -> bytes | None:
+        """Capture ONE JPEG frame via the TLS+JPEG protocol on port 6000.
+
+        The A1/P1 series printers push sequential JPEG frames over a TLS
+        socket; this opens the same source the relay reads, takes the
+        first frame, and hangs up.
 
         :param timeout: Maximum time in seconds to wait for a complete frame.
         :returns: JPEG bytes, or ``None`` if capture fails.
         """
-        import struct
-        import time
-
-        _CAMERA_PORT = 6000
-        _JPEG_SOI = b"\xff\xd8\xff"  # JPEG Start of Image
-        _JPEG_EOI = b"\xff\xd9"      # JPEG End of Image
-
-        # Build 80-byte auth packet.
-        auth_data = struct.pack("<II", 0x40, 0x3000)
-        auth_data += struct.pack("<II", 0, 0)
-        auth_data += _MQTT_USERNAME.encode("ascii").ljust(32, b"\x00")
-        auth_data += self._access_code.encode("ascii").ljust(32, b"\x00")
-
-        ctx = self._build_tls_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
-        sock = socket.create_connection((self._host, _CAMERA_PORT), timeout=timeout)
+        source = self.camera_frame_source(timeout=timeout)
+        stop = threading.Event()
         try:
-            ssock = ctx.wrap_socket(sock, server_hostname=self._host)
-        except ssl.SSLError as exc:
-            sock.close()
-            logger.debug("Camera TLS handshake failed: %s", exc)
-            return None
-
-        try:
-            ssock.sendall(auth_data)
-
-            buf = b""
-            start_time = time.monotonic()
-            while time.monotonic() - start_time < timeout:
-                chunk = ssock.recv(8192)
-                if not chunk:
-                    break
-                buf += chunk
-
-                start_idx = buf.find(_JPEG_SOI)
-                if start_idx == -1:
-                    continue
-
-                end_idx = buf.find(_JPEG_EOI, start_idx + 3)
-                if end_idx != -1:
-                    return buf[start_idx : end_idx + 2]
-        except (TimeoutError, OSError) as exc:
-            logger.debug("Camera JPEG read failed: %s", exc)
-        finally:
-            ssock.close()
-
+            for frame in source.frames(stop):
+                stop.set()
+                return frame
+        except CameraStreamError as exc:
+            logger.debug("Port 6000 JPEG capture failed: %s", exc)
         return None
+
+    def _family(self) -> str:
+        """The config-declared family (``"a1"`` for ``bambu_a1``), or ``""``."""
+        model = self._printer_model
+        return model[len("bambu_") :] if model.startswith("bambu_") else model
+
+    def stream_capability(self) -> StreamCapability:
+        """Whether Kiln's local relay can carry this printer's live video.
+
+        A camera the user registered is answered by the base contract.  For
+        the printer's own camera the CONFIG-declared family decides: the
+        A1 / P1 families speak the port-6000 feed the relay reads; the X1,
+        P2S and H2 families stream RTSPS, which needs ffmpeg and which the
+        relay does not re-mux — snapshots still work there.  An undeclared
+        model is tried on port 6000 first, as ``get_snapshot`` always has.
+        """
+        if self._external_camera is not None:
+            return super().stream_capability()
+        if self._family() in _RTSPS_FAMILIES:
+            return StreamCapability(
+                False,
+                "rtsp",
+                "This model's camera streams over RTSPS (port 322), which "
+                "needs ffmpeg and which Kiln's local relay does not carry. "
+                "Snapshots still work with ffmpeg installed.",
+                requires=("ffmpeg",),
+            )
+        return StreamCapability(
+            True,
+            "bambu_port6000",
+            requires=(
+                "LAN Only mode with the printer's LAN access code",
+                "the camera's video (live view) setting on in the printer's LAN settings",
+            ),
+        )
+
+    def frame_source(self) -> Any | None:
+        if self._external_camera is not None:
+            return super().frame_source()
+        if not self.stream_capability().available:
+            return None
+        return self.camera_frame_source()
 
     def _capture_rtsps_frame(self) -> bytes | None:
         """Capture a frame via RTSPS on port 322 using ffmpeg (X1 series)."""

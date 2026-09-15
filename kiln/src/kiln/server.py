@@ -1562,6 +1562,32 @@ def _pro_bridge():
     return pro_features
 
 
+def _video_route_block_for(printer_name: str | None) -> dict[str, Any] | None:
+    """What kiln-pro knows about live video from *printer_name*'s model.
+
+    Interface contract only: public Kiln knows that kiln-pro keeps a
+    per-model record of which printers can stream to the relay, over which
+    channel, and what must be on for it to answer; the record and its shape
+    are kiln-pro's (https://kiln3d.com).  ``None`` without kiln-pro,
+    without a resolvable model, or on any failure — never raises, because a
+    start must not fail over a courtesy line.
+    """
+    try:
+        pro = _pro_bridge()
+        if pro is None or not pro.is_available("device_intelligence"):
+            return None
+        model = _resolve_printer_model_live(printer_name)
+        if not model:
+            return None
+        block = pro.device_intelligence.live_video_block(model)
+        if not isinstance(block, dict) or not block.get("statement"):
+            return None
+        return block
+    except Exception as exc:  # noqa: BLE001 — a missing courtesy line is not a failure
+        logger.debug("live video route unavailable for %r: %s", printer_name, exc)
+        return None
+
+
 def _coverage_block_for(printer_name: str | None) -> dict[str, Any] | None:
     """What is watching *printer_name*'s print, as the monitor wire carries it.
 
@@ -11660,7 +11686,20 @@ def webcam_stream(
     action: str = "status",
     port: int = 8081,
 ) -> dict:
-    """Control the MJPEG webcam streaming proxy.
+    """Control the local live-video relay for the print monitor.
+
+    ONE connection to the printer's camera, re-served as an MJPEG stream on
+    this machine so every viewer shares it.  Reads an HTTP MJPEG webcam
+    (OctoPrint, Moonraker, a camera you registered) or a Bambu A1 / P1
+    camera's own port-6000 feed.  The reply's ``capability`` says whether
+    this printer can be relayed and, when not, why — an X1 / P2S / H2
+    camera streams RTSPS, which the relay does not carry (snapshots still
+    work).  ``stream`` carries the frame's age and the measured frame rate:
+    ``live`` is false when the picture may be frozen.
+
+    Local-only: the relay reads the camera over your LAN and serves on
+    loopback, so on the hosted server it says so instead of starting.
+    Snapshots (``printer_snapshot``, ``monitor_print``) are unchanged.
 
     Args:
         printer_name: Target printer.  Omit for the default printer.
@@ -11676,37 +11715,38 @@ def webcam_stream(
             return {"success": True, "stream": info.to_dict()}
 
         if action == "start":
+            from kiln.runtime_env import is_hosted_multitenant
+            from kiln.streaming import LOCAL_ONLY_MESSAGE, plan_relay
+
+            if is_hosted_multitenant():
+                return _error_dict(LOCAL_ONLY_MESSAGE, code="LOCAL_ONLY")
+
             if printer_name:
                 adapter = _get_registry().get(printer_name)
             else:
                 adapter = _get_adapter()
 
-            stream_url = adapter.get_stream_url()
-            if stream_url is None:
-                return _error_dict(
-                    "Webcam streaming not available for this printer.",
-                    code="NO_STREAM",
-                )
-            if stream_url.lower().startswith(("rtsp://", "rtsps://")) and (
-                getattr(adapter, "external_camera", None) is not None
-            ):
-                # The local proxy relays MJPEG over HTTP; it cannot re-mux
-                # RTSP.  Say so instead of starting a proxy that serves
-                # nothing — the user already has the URL they registered.
-                return _error_dict(
-                    "Your camera's stream is RTSP, which Kiln's local MJPEG "
-                    "proxy cannot relay. Open the RTSP URL you registered in "
-                    "a video player directly; snapshots and monitoring still "
-                    "read frames from it.",
-                    code="RTSP_NOT_PROXIED",
-                )
+            plan = plan_relay(adapter)
+            route = _video_route_block_for(printer_name)
+            if plan.source is None:
+                extra: dict[str, Any] = {"capability": plan.capability.to_dict()}
+                if route:
+                    extra["video_route"] = route
+                return _error_dict(plan.message or "", code=plan.code or "NO_STREAM", extra=extra)
 
             info = _get_stream_proxy().start(
-                source_url=stream_url,
+                frame_source=plan.source,
                 port=port,
                 printer_name=printer_name or "default",
             )
-            return {"success": True, "stream": info.to_dict()}
+            reply: dict[str, Any] = {
+                "success": True,
+                "stream": info.to_dict(),
+                "capability": plan.capability.to_dict(),
+            }
+            if route:
+                reply["video_route"] = route
+            return reply
 
         return _error_dict(
             f"Unknown action {action!r}. Use 'start', 'stop', or 'status'.",

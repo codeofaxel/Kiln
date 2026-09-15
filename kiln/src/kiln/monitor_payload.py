@@ -23,6 +23,13 @@ The axes, mirroring the web resolver's inputs exactly:
   own structured refusal, which is a different fact from the transport
   failing.
 * ``camera`` / ``camera_note`` — optional context, never an error.
+* ``video`` / ``video_note`` — a live stream the panel can play from this
+  machine's relay, or in words why there is none.  ``live_url`` is the
+  relay's loopback MJPEG endpoint; ``frame_age_seconds`` and ``live`` say
+  whether the picture is current, so a frozen frame is never presented as
+  live.  Composed only by a door on the printer's own machine and only
+  while a print is on it (the room-camera rule, server-side); the hosted
+  relay door carries a note saying video is local-only.
 * ``account`` — who is watching, where a door cares.  The hosted door never
   composes this axis (its callers are signed in structurally); the local
   door reports ``signed_in`` so the panel can offer the sign-in invitation
@@ -51,6 +58,16 @@ ACTIVE_PRINT_STATES = frozenset(
 )
 
 
+#: The ``video`` block's keys, in the order the panel reads them.
+VIDEO_KEYS: tuple[str, ...] = (
+    "live_url",
+    "source",
+    "frame_age_seconds",
+    "live",
+    "measured_fps",
+)
+
+
 def is_active_print_state(state: Any) -> bool:
     """True when the machine's state word means a print is on it."""
     return isinstance(state, str) and state in ACTIVE_PRINT_STATES
@@ -65,6 +82,8 @@ def compose_monitor_payload(
     camera_note: str | None,
     account: dict[str, Any] | None = None,
     coverage: dict[str, Any] | None = None,
+    video: dict[str, Any] | None = None,
+    video_note: str | None = None,
 ) -> dict[str, Any]:
     """The ``kiln.monitor.v1`` snapshot — pure composition, no I/O.
 
@@ -112,4 +131,12 @@ def compose_monitor_payload(
             "by_status": coverage.get("by_status") or {},
             "known": bool(coverage.get("known")),
         }
+    if video:
+        # The relay's answer, projected to what the panel needs and nothing
+        # more: where to play, what is feeding it, and how old the newest
+        # frame is.  Unknown keys are dropped here so a relay field can
+        # never leak onto the wire by accident.
+        payload["video"] = {key: video.get(key) for key in VIDEO_KEYS}
+    if video_note:
+        payload["video_note"] = video_note
     return payload

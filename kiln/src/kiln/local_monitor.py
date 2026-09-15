@@ -286,6 +286,72 @@ def _camera_frame(printer_name: str | None, status: dict | None) -> tuple[str | 
         return None, "camera unavailable"
 
 
+#: What the panel document may load from, beyond itself.  A host applies
+#: the restrictive default policy to a panel that declares nothing (no
+#: image may load from any origin but the document's own), so the relay's
+#: loopback origin is named here — the ONE loosening this panel asks for,
+#: and the reason the video relay is pinned to :data:`VIDEO_RELAY_PORT`.
+PANEL_CSP: dict[str, list[str]] = {
+    "resourceDomains": ["http://127.0.0.1:8081", "http://localhost:8081"],
+}
+
+#: The relay port the panel's video is served on.  The panel document's
+#: content-security policy names this loopback origin, so a relay started
+#: for the panel always lands where the host lets the panel load from.
+VIDEO_RELAY_PORT = 8081
+
+
+def _video_block(
+    printer_name: str | None, status: dict | None
+) -> tuple[dict[str, Any] | None, str | None]:
+    """(video block, note) — the relay's live stream for the panel.
+
+    The room-camera rule lives HERE, server-side, exactly as for the still:
+    the relay runs only while the just-read state is an active print, and a
+    relay left running after the print ends is stopped on the next poll.
+    Starting is idempotent (``webcam_stream`` returns the running relay for
+    the same printer), so the panel asks on every poll and never has to
+    remember whether it asked before.  A refusal — this model streams RTSPS,
+    the camera's video setting is off, the hosted server has no printer —
+    comes back as the note, never as an error.
+    """
+    from kiln.server import _get_stream_proxy, webcam_stream
+
+    state = row_run_state((status or {}).get("printer") or {})
+    if not is_active_print_state(state):
+        try:
+            proxy = _get_stream_proxy()
+            if proxy.active and (proxy.printer_name or "default") == (printer_name or "default"):
+                proxy.stop()
+        except Exception as exc:  # noqa: BLE001 — a relay that would not stop is context, not a failure
+            logger.debug("monitor video relay stop failed: %s", exc)
+        return None, "video is off while no print is active"
+    try:
+        reply = webcam_stream(printer_name=printer_name, action="start", port=VIDEO_RELAY_PORT)
+    except Exception as exc:  # noqa: BLE001 — no video is context, not an error
+        logger.debug("monitor video relay unavailable: %s", exc)
+        return None, "live video unavailable"
+    if not isinstance(reply, dict) or reply.get("success") is not True:
+        err = (reply or {}).get("error") if isinstance(reply, dict) else None
+        message = err.get("message") if isinstance(err, dict) else err
+        return None, str(message or "live video unavailable")
+    stream = reply.get("stream") or {}
+    block = {
+        "live_url": stream.get("local_url"),
+        "source": stream.get("source_kind"),
+        "frame_age_seconds": stream.get("frame_age_seconds"),
+        "live": bool(stream.get("live")),
+        "measured_fps": stream.get("measured_fps"),
+    }
+    if not block["live_url"]:
+        return None, "live video unavailable"
+    # A relay that is up but has no current frame says why, beside the
+    # block: the panel keeps the stream element ready and shows the note
+    # instead of a frozen picture.
+    note = None if block["live"] else stream.get("last_error")
+    return block, (str(note) if note else None)
+
+
 def _coverage_block(printer_name: str | None) -> dict[str, Any] | None:
     """kiln-pro's coverage block for this printer's model, when present.
 
@@ -301,6 +367,7 @@ def _coverage_block(printer_name: str | None) -> dict[str, Any] | None:
 def compose_local_payload(
     printer_name: str | None = None,
     include_camera: bool = False,
+    include_video: bool = False,
 ) -> dict[str, Any]:
     """The ``kiln.monitor.v1`` snapshot for THIS machine's printer.
 
@@ -314,6 +381,10 @@ def compose_local_payload(
     camera_note: str | None = None
     if include_camera:
         camera_b64, camera_note = _camera_frame(printer_name, status)
+    video: dict[str, Any] | None = None
+    video_note: str | None = None
+    if include_video:
+        video, video_note = _video_block(printer_name, status)
     payload = compose_monitor_payload(
         bridge={
             "online": True,
@@ -328,6 +399,8 @@ def compose_local_payload(
         camera_note=camera_note,
         account={"signed_in": _signed_in()},
         coverage=_coverage_block(printer_name),
+        video=video,
+        video_note=video_note,
     )
     if printer_name:
         # The panel polls with the same argument the entry call named, so a
@@ -382,7 +455,7 @@ def _register_resource(mcp: Any) -> bool:
                 "temperatures, and connection state on Kiln's dark surface."
             ),
             mime_type="text/html;profile=mcp-app",
-            meta={"ui": {"prefersBorder": False}},
+            meta={"ui": {"prefersBorder": False, "csp": PANEL_CSP}},
             fn=_document,
         )
     )
@@ -408,7 +481,9 @@ def _register_snapshot_verb(mcp: Any) -> bool:
                          "visibility": ["app"]}},
         )
         def kiln_monitor_snapshot(
-            printer_name: str | None = None, include_camera: bool = False
+            printer_name: str | None = None,
+            include_camera: bool = False,
+            include_video: bool = False,
         ) -> dict:
             """Internal support for Kiln's inline print monitor.
 
@@ -417,7 +492,9 @@ def _register_snapshot_verb(mcp: Any) -> bool:
             """
             return {
                 MONITOR_STRUCTURED_CONTENT_KEY: compose_local_payload(
-                    printer_name=printer_name, include_camera=include_camera
+                    printer_name=printer_name,
+                    include_camera=include_camera,
+                    include_video=include_video,
                 )
             }
 

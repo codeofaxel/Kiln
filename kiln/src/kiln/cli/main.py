@@ -7434,20 +7434,27 @@ def stream(ctx: click.Context, port: int, do_stop: bool, json_mode: bool) -> Non
                 click.echo("Stream stopped.")
             return
 
+        from kiln.runtime_env import is_hosted_multitenant
+        from kiln.streaming import LOCAL_ONLY_MESSAGE, plan_relay
+
+        if is_hosted_multitenant():
+            click.echo(format_error(LOCAL_ONLY_MESSAGE, code="LOCAL_ONLY", json_mode=json_mode))
+            sys.exit(1)
+
         adapter = _get_adapter_from_ctx(ctx)
-        stream_url = adapter.get_stream_url()
-        if stream_url is None:
+        plan = plan_relay(adapter)
+        if plan.source is None:
             click.echo(
                 format_error(
-                    "Webcam streaming not available for this printer.",
-                    code="NO_STREAM",
+                    plan.message or "Webcam streaming not available for this printer.",
+                    code=plan.code or "NO_STREAM",
                     json_mode=json_mode,
                 )
             )
             sys.exit(1)
 
         printer_name = ctx.obj.get("printer") or "default"
-        info = proxy.start(source_url=stream_url, port=port, printer_name=printer_name)
+        info = proxy.start(frame_source=plan.source, port=port, printer_name=printer_name)
         if json_mode:
             click.echo(_json.dumps({"status": "success", "data": info.to_dict()}, indent=2))
         else:

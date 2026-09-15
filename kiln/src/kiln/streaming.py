@@ -1,30 +1,162 @@
-"""MJPEG streaming proxy for webcam feeds.
+"""Live-video relay: one printer connection, every viewer.
 
-Reads an MJPEG stream from the upstream printer (OctoPrint or Moonraker)
-and re-serves it over a local HTTP endpoint so that multiple clients can
-connect without putting extra load on the printer.
+The relay reads frames from ONE upstream source and re-serves them as an
+MJPEG stream on a local HTTP endpoint, so several viewers share a single
+printer connection instead of each opening their own.  Two kinds of source
+feed it today:
 
-Uses only stdlib :mod:`http.server` and :mod:`threading` — no new
-dependencies.
+* :class:`HttpMjpegSource` — an upstream HTTP MJPEG URL (OctoPrint,
+  Moonraker, a camera the user registered).
+* a printer's own protocol, supplied by its adapter — a Bambu A1 / P1
+  camera speaks TLS + framed JPEG on port 6000 and its adapter hands the
+  relay a source that does (``BambuAdapter.camera_frame_source``).
+
+The contract a source honours is :class:`FrameSource`: a ``kind`` and a
+credential-free ``label`` for status, and ``frames(stop)`` yielding whole
+JPEGs until asked to stop.  A source that cannot open raises
+:class:`~kiln.printers.base.CameraStreamError` with the reason in words; the
+relay records that reason on its status and retries with a backoff rather
+than failing silently.
+
+Fan-out is by frame SEQUENCE: each viewer waits for a frame newer than the
+one it last sent, so a viewer that keeps up never misses a frame and a slow
+one skips to the latest rather than falling behind.  Every served part and
+the status carry the frame's AGE, and ``live`` is true only while a frame
+arrived within the freshness budget — a frozen picture is never presented
+as live, the way ``PrinterState.state_age_seconds`` keeps a stale reading
+from posing as current.
+
+Local-only by design: the relay reads the printer over the LAN and serves
+on loopback.  The hosted server has no printer, so :meth:`MJPEGProxy.start`
+refuses there with a message that says so.  Uses only stdlib
+:mod:`http.server` and :mod:`threading` — no new dependencies.
 """
 
 from __future__ import annotations
 
+import collections
 import logging
 import os
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Protocol, runtime_checkable
 
 import requests
+
+from kiln.printers.base import (
+    RTSP_NOT_RELAYED_REASON,
+    CameraStreamError,
+    StreamCapability,
+    redact_url_credentials,
+)
 
 logger = logging.getLogger(__name__)
 
 _MAX_FRAME_SIZE: int = 10 * 1024 * 1024  # 10MB max frame size
 _BOUNDARY = b"--kilnframe"
 _CONTENT_TYPE = f"multipart/x-mixed-replace; boundary={_BOUNDARY.decode()}"
+
+#: A frame older than this is not "live" — the picture may be frozen.  Ten
+#: seconds covers the slowest camera Kiln relays (a P1 pushes about one
+#: frame every two seconds) with room for a hiccup, and is short enough
+#: that a printer that stopped answering reads as stale within one poll.
+LIVE_BUDGET_SECONDS: float = 10.0
+
+#: Window the measured frame rate is averaged over.
+_FPS_WINDOW_SECONDS: float = 10.0
+
+#: Wait between reconnect attempts after the upstream fails or ends.
+_RECONNECT_BACKOFF_SECONDS: float = 2.0
+
+#: The relay reads the printer over the LAN and serves on loopback; the
+#: hosted server has neither.  One wording for every door.
+LOCAL_ONLY_MESSAGE = (
+    "Live video plays only on the computer connected to the printer: Kiln's "
+    "relay reads the camera over your local network and serves it on this "
+    "machine. The hosted server has no printer to read. Run Kiln locally "
+    "(kiln serve, or the MCP server on that machine) to watch live; "
+    "snapshots and monitoring still work here."
+)
+
+
+# ---------------------------------------------------------------------------
+# Sources
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class FrameSource(Protocol):
+    """What the relay reads: whole JPEG frames, until asked to stop."""
+
+    kind: str
+    label: str
+
+    def frames(self, stop: threading.Event) -> Iterator[bytes]: ...
+
+
+class HttpMjpegSource:
+    """An upstream HTTP MJPEG stream (OctoPrint, Moonraker, a user camera)."""
+
+    kind = "http_mjpeg"
+
+    def __init__(self, url: str, *, timeout: float = 10.0) -> None:
+        self._url = url
+        self._timeout = timeout
+        self.label = redact_url_credentials(url) or url
+
+    def frames(self, stop: threading.Event) -> Iterator[bytes]:
+        try:
+            resp = requests.get(self._url, stream=True, timeout=self._timeout)
+        except requests.RequestException as exc:
+            raise CameraStreamError(
+                f"The camera stream did not answer: {exc.__class__.__name__}.",
+                code="CAMERA_UNREACHABLE",
+            ) from exc
+        if not resp.ok:
+            resp.close()
+            raise CameraStreamError(
+                f"The camera stream answered HTTP {resp.status_code}.",
+                code="CAMERA_REFUSED" if resp.status_code in (401, 403) else "CAMERA_UNREACHABLE",
+            )
+        try:
+            buf = bytearray()
+            in_frame = False
+            for chunk in resp.iter_content(chunk_size=4096):
+                if stop.is_set():
+                    return
+                buf.extend(chunk)
+                if len(buf) > _MAX_FRAME_SIZE:
+                    logger.warning("MJPEG frame buffer exceeded %d bytes, resetting", _MAX_FRAME_SIZE)
+                    buf = bytearray()
+                    in_frame = False
+                    continue
+                while True:
+                    if not in_frame:
+                        start = buf.find(b"\xff\xd8")
+                        if start == -1:
+                            # Keep last byte in case marker is split
+                            if len(buf) > 1:
+                                buf = buf[-1:]
+                            break
+                        buf = buf[start:]
+                        in_frame = True
+                    end = buf.find(b"\xff\xd9")
+                    if end == -1:
+                        break
+                    frame = bytes(buf[: end + 2])
+                    buf = buf[end + 2 :]
+                    in_frame = False
+                    yield frame
+        except requests.RequestException as exc:
+            raise CameraStreamError(
+                f"The camera stream dropped: {exc.__class__.__name__}.",
+                code="CAMERA_UNREACHABLE",
+            ) from exc
+        finally:
+            resp.close()
 
 
 # ---------------------------------------------------------------------------
@@ -34,18 +166,100 @@ _CONTENT_TYPE = f"multipart/x-mixed-replace; boundary={_BOUNDARY.decode()}"
 
 @dataclass
 class StreamInfo:
-    """Status information for the MJPEG proxy."""
+    """Status information for the relay.
+
+    ``frame_age_seconds`` is how long ago the newest frame arrived from the
+    printer; ``live`` is whether that is within :data:`LIVE_BUDGET_SECONDS`.
+    ``measured_fps`` is the rate the printer actually pushed over the last
+    few seconds — measured, never a spec-sheet number.  ``last_error`` is the
+    upstream's most recent refusal in words, cleared by the next frame.
+    """
 
     active: bool
     local_url: str | None = None
     source_url: str | None = None
+    source_kind: str | None = None
     printer_name: str | None = None
     connected_clients: int = 0
     frames_served: int = 0
+    frames_received: int = 0
     uptime_seconds: float = 0.0
+    frame_age_seconds: float | None = None
+    measured_fps: float | None = None
+    live: bool = False
+    last_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# ---------------------------------------------------------------------------
+# The door's plan — one helper every door calls
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RelayPlan:
+    """What a door does with a start request: relay ``source``, or refuse.
+
+    ``source`` is ``None`` exactly when the relay has nothing to carry;
+    ``code`` and ``message`` are then the refusal every door reports the
+    same way.  ``capability`` rides both outcomes so the reply always says
+    what the printer can do.
+    """
+
+    capability: StreamCapability
+    source: FrameSource | None = None
+    code: str | None = None
+    message: str | None = None
+
+
+def plan_relay(adapter: Any) -> RelayPlan:
+    """Decide, for *adapter*, whether the relay can start and on what.
+
+    The one place the tool, the CLI and the monitor doors resolve a start
+    request, so a backend that learns a new protocol is picked up by every
+    door at once.  A user-registered RTSP camera keeps its own refusal code
+    (``RTSP_NOT_PROXIED``) because callers already read it.
+    """
+    capability = _capability_of(adapter)
+    if not capability.available:
+        if capability.channel == "rtsp" and getattr(adapter, "external_camera", None) is not None:
+            return RelayPlan(capability, None, "RTSP_NOT_PROXIED", RTSP_NOT_RELAYED_REASON)
+        return RelayPlan(
+            capability,
+            None,
+            "NO_STREAM",
+            capability.reason or "Webcam streaming not available for this printer.",
+        )
+    source = adapter.frame_source() if hasattr(adapter, "frame_source") else None
+    if not isinstance(source, FrameSource):
+        # A duck-typed adapter (a mock, a third-party backend) answers the
+        # older contract only: its stream URL is the source.
+        url = adapter.get_stream_url()
+        source = HttpMjpegSource(url) if isinstance(url, str) and url else None
+    if source is None:
+        return RelayPlan(capability, None, "NO_STREAM", "Webcam streaming not available for this printer.")
+    return RelayPlan(capability, source)
+
+
+def _capability_of(adapter: Any) -> StreamCapability:
+    """*adapter*'s capability answer, or one derived from its stream URL.
+
+    Only a real :class:`StreamCapability` is trusted — a mocked or
+    third-party adapter without the method is answered from the older
+    contract (``get_stream_url``), the way ``adapter_has_camera`` trusts
+    only a real bool.
+    """
+    answer = adapter.stream_capability() if hasattr(adapter, "stream_capability") else None
+    if isinstance(answer, StreamCapability):
+        return answer
+    url = adapter.get_stream_url()
+    if not isinstance(url, str) or not url:
+        return StreamCapability(False, None, "Webcam streaming not available for this printer.")
+    if url.lower().startswith(("rtsp://", "rtsps://")):
+        return StreamCapability(False, "rtsp", RTSP_NOT_RELAYED_REASON)
+    return StreamCapability(True, "http_mjpeg")
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +268,7 @@ class StreamInfo:
 
 
 class MJPEGProxy:
-    """Background HTTP server that proxies an upstream MJPEG stream.
+    """Background HTTP server that relays one frame source to many viewers.
 
     Usage::
 
@@ -62,21 +276,31 @@ class MJPEGProxy:
         proxy.start("http://octoprint.local/webcam/?action=stream", port=8081)
         # Stream available at http://localhost:8081/stream
         proxy.stop()
+
+    Or with a printer's own source::
+
+        proxy.start(frame_source=adapter.frame_source(), port=8081)
     """
 
     def __init__(self) -> None:
-        self._server: HTTPServer | None = None
+        self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
-        self._source_url: str | None = None
+        self._frame_source: FrameSource | None = None
         self._printer_name: str | None = None
         self._started_at: float | None = None
         self._port: int = 8081
         self._lock = threading.RLock()
 
-        # Shared state for the handler
+        # Shared frame state: one condition, a sequence number, and the
+        # newest frame.  Viewers wait for a sequence newer than their last.
+        self._cond = threading.Condition()
         self._latest_frame: bytes | None = None
-        self._frame_lock = threading.Lock()
-        self._frame_event = threading.Event()
+        self._latest_seq: int = 0
+        self._latest_at: float | None = None  # monotonic
+        self._recent: collections.deque[float] = collections.deque()
+        self._frames_received: int = 0
+        self._last_error: str | None = None
+
         self._connected_clients: int = 0
         self._frames_served: int = 0
         self._running = False
@@ -89,36 +313,66 @@ class MJPEGProxy:
     def active(self) -> bool:
         return self._running
 
+    @property
+    def printer_name(self) -> str | None:
+        return self._printer_name
+
     def start(
         self,
-        source_url: str,
+        source_url: str | None = None,
         port: int = 8081,
         printer_name: str | None = None,
         *,
         host: str | None = None,
+        frame_source: FrameSource | None = None,
     ) -> StreamInfo:
-        """Start the proxy server.
+        """Start the relay.
 
         Args:
-            source_url: Upstream MJPEG stream URL.
+            source_url: Upstream MJPEG stream URL (wrapped in an
+                :class:`HttpMjpegSource`).  Either this or *frame_source*.
             port: Local port to serve on.
             printer_name: Name of the printer (for status reporting).
             host: Bind address.  Defaults to ``KILN_STREAM_HOST`` env var,
                 then ``127.0.0.1``.
+            frame_source: A source speaking the printer's own protocol.
 
-        Returns:
-            :class:`StreamInfo` with the local URL.
+        A relay already running for the SAME printer is returned as is; one
+        running for another printer is stopped first, so a start can never
+        hand back a different machine's picture.
+
+        Raises:
+            RuntimeError: on the hosted multi-tenant server, which has no
+                printer to read — see :data:`LOCAL_ONLY_MESSAGE`.
+            ValueError: with neither a URL nor a source.
         """
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            raise RuntimeError(LOCAL_ONLY_MESSAGE)
+        if frame_source is None:
+            if not source_url:
+                raise ValueError("start() needs a source_url or a frame_source")
+            frame_source = HttpMjpegSource(source_url)
+
         with self._lock:
             if self._running:
-                return self.status()
+                if self._printer_name == printer_name:
+                    return self.status()
+                self.stop()
 
-            self._source_url = source_url
+            self._frame_source = frame_source
             self._printer_name = printer_name
             self._port = port
             self._started_at = time.time()
             self._frames_served = 0
+            self._frames_received = 0
             self._connected_clients = 0
+            self._latest_frame = None
+            self._latest_seq = 0
+            self._latest_at = None
+            self._recent.clear()
+            self._last_error = None
             self._running = True
             self._stop_event.clear()
 
@@ -141,43 +395,46 @@ class MJPEGProxy:
                 with proxy._lock:
                     proxy._connected_clients += 1
 
+                # Start one behind the newest so a viewer sees the latest
+                # frame at once instead of waiting for the next push.
+                last_sent = max(0, proxy._latest_seq - 1)
                 try:
                     while proxy._running:
-                        proxy._frame_event.wait(timeout=5.0)
-                        proxy._frame_event.clear()
-
-                        with proxy._frame_lock:
+                        with proxy._cond:
+                            if proxy._latest_seq <= last_sent or proxy._latest_frame is None:
+                                proxy._cond.wait(timeout=1.0)
+                                continue
                             frame = proxy._latest_frame
-
-                        if frame is None:
-                            continue
-
+                            seq = proxy._latest_seq
+                            age = time.monotonic() - (proxy._latest_at or time.monotonic())
+                        last_sent = seq
                         try:
                             self.wfile.write(_BOUNDARY + b"\r\n")
                             self.wfile.write(b"Content-Type: image/jpeg\r\n")
-                            self.wfile.write(f"Content-Length: {len(frame)}\r\n\r\n".encode())
+                            self.wfile.write(f"Content-Length: {len(frame)}\r\n".encode())
+                            self.wfile.write(f"X-Frame-Sequence: {seq}\r\n".encode())
+                            self.wfile.write(f"X-Frame-Age-Seconds: {age:.3f}\r\n\r\n".encode())
                             self.wfile.write(frame)
                             self.wfile.write(b"\r\n")
                             self.wfile.flush()
                             with proxy._lock:
                                 proxy._frames_served += 1
-                        except (BrokenPipeError, ConnectionResetError):
+                        except (BrokenPipeError, ConnectionResetError, OSError):
                             break
                 finally:
                     with proxy._lock:
-                        proxy._connected_clients = max(
-                            0,
-                            proxy._connected_clients - 1,
-                        )
+                        proxy._connected_clients = max(0, proxy._connected_clients - 1)
 
             def log_message(self, format: str, *args: Any) -> None:
                 # Suppress default HTTP logging
                 pass
 
         bind_host = host or os.environ.get("KILN_STREAM_HOST", "127.0.0.1")
-        self._server = HTTPServer((bind_host, port), Handler)
+        server = ThreadingHTTPServer((bind_host, port), Handler)
+        server.daemon_threads = True
+        self._server = server
         self._thread = threading.Thread(
-            target=lambda: self._server.serve_forever(poll_interval=0.1),
+            target=lambda: server.serve_forever(poll_interval=0.1),
             daemon=True,
             name="kiln-mjpeg-server",
         )
@@ -191,25 +448,23 @@ class MJPEGProxy:
         )
         self._reader_thread.start()
 
-        logger.info(
-            "MJPEG proxy started on port %d -> %s",
-            port,
-            source_url,
-        )
+        logger.info("MJPEG relay started on port %d <- %s", port, frame_source.label)
         return self.status()
 
     def stop(self) -> StreamInfo:
-        """Stop the proxy server and clean up."""
+        """Stop the relay and release the printer connection."""
         info = self.status()
         with self._lock:
             self._running = False
 
         # Signal any waiting threads
         self._stop_event.set()
-        self._frame_event.set()
+        with self._cond:
+            self._cond.notify_all()
 
         if self._server is not None:
             self._server.shutdown()
+            self._server.server_close()
             self._server = None
 
         if self._thread is not None:
@@ -221,97 +476,85 @@ class MJPEGProxy:
             self._reader_thread = None
 
         with self._lock:
-            self._source_url = None
+            self._frame_source = None
             self._started_at = None
             self._connected_clients = 0
 
         info.active = False
-        logger.info("MJPEG proxy stopped")
+        info.live = False
+        logger.info("MJPEG relay stopped")
         return info
 
     def status(self) -> StreamInfo:
-        """Return current proxy status."""
-        with self._lock:
+        """Return current relay status, frame age included."""
+        with self._lock, self._cond:
             uptime = 0.0
             if self._started_at and self._running:
                 uptime = time.time() - self._started_at
+            now = time.monotonic()
+            age = None if self._latest_at is None else max(0.0, now - self._latest_at)
+            fps = None
+            if len(self._recent) >= 2:
+                span = self._recent[-1] - self._recent[0]
+                if span > 0:
+                    fps = round((len(self._recent) - 1) / span, 2)
+            source = self._frame_source
             return StreamInfo(
                 active=self._running,
                 local_url=(f"http://localhost:{self._port}/stream" if self._running else None),
-                source_url=self._source_url,
+                source_url=source.label if source is not None else None,
+                source_kind=source.kind if source is not None else None,
                 printer_name=self._printer_name,
                 connected_clients=self._connected_clients,
                 frames_served=self._frames_served,
+                frames_received=self._frames_received,
                 uptime_seconds=round(uptime, 1),
+                frame_age_seconds=None if age is None else round(age, 3),
+                measured_fps=fps,
+                live=bool(self._running and age is not None and age <= LIVE_BUDGET_SECONDS),
+                last_error=self._last_error,
             )
 
-    def _read_upstream(self) -> None:
-        """Background thread that reads MJPEG frames from the upstream."""
-        if not self._source_url:
-            return
+    # -- upstream ---------------------------------------------------------
 
+    def _publish(self, frame: bytes) -> None:
+        now = time.monotonic()
+        with self._cond:
+            self._latest_frame = frame
+            self._latest_seq += 1
+            self._latest_at = now
+            self._frames_received += 1
+            self._last_error = None
+            self._recent.append(now)
+            while self._recent and now - self._recent[0] > _FPS_WINDOW_SECONDS:
+                self._recent.popleft()
+            self._cond.notify_all()
+
+    def _note_error(self, message: str) -> None:
+        with self._cond:
+            self._last_error = message
+
+    def _read_upstream(self) -> None:
+        """Background thread: read the source, publish, reconnect on loss."""
+        source = self._frame_source
+        if source is None:
+            return
         while self._running:
             try:
-                resp = requests.get(
-                    self._source_url,
-                    stream=True,
-                    timeout=10,
-                )
-                if not resp.ok:
-                    logger.warning(
-                        "Upstream stream returned %d",
-                        resp.status_code,
-                    )
-                    self._stop_event.wait(2.0)
-                    continue
-
-                buf = bytearray()
-                in_frame = False
-
-                for chunk in resp.iter_content(chunk_size=4096):
+                for frame in source.frames(self._stop_event):
                     if not self._running:
                         break
-                    buf.extend(chunk)
-
-                    if len(buf) > _MAX_FRAME_SIZE:
-                        logger.warning("MJPEG frame buffer exceeded %d bytes, resetting", _MAX_FRAME_SIZE)
-                        buf = bytearray()
-                        in_frame = False
+                    if len(frame) > _MAX_FRAME_SIZE:
+                        logger.warning("Dropping oversized frame (%d bytes)", len(frame))
                         continue
-
-                    while True:
-                        if not in_frame:
-                            # Look for JPEG start marker
-                            start = buf.find(b"\xff\xd8")
-                            if start == -1:
-                                # Keep last byte in case marker is split
-                                if len(buf) > 1:
-                                    buf = buf[-1:]
-                                break
-                            buf = buf[start:]
-                            in_frame = True
-
-                        # Look for JPEG end marker
-                        end = buf.find(b"\xff\xd9")
-                        if end == -1:
-                            break
-
-                        # Extract complete JPEG frame
-                        frame = bytes(buf[: end + 2])
-                        buf = buf[end + 2 :]
-                        in_frame = False
-
-                        if len(frame) > _MAX_FRAME_SIZE:
-                            logger.warning("Dropping oversized MJPEG frame (%d bytes)", len(frame))
-                            continue
-
-                        with self._frame_lock:
-                            self._latest_frame = frame
-                        self._frame_event.set()
-
-            except requests.RequestException:
-                logger.debug("Upstream stream error, reconnecting...", exc_info=True)
-                self._stop_event.wait(2.0)
-            except Exception:
-                logger.exception("Unexpected error in MJPEG reader")
-                self._stop_event.wait(2.0)
+                    self._publish(frame)
+                if self._running:
+                    self._note_error("The camera stream ended; reconnecting.")
+            except CameraStreamError as exc:
+                logger.debug("relay source refused: %s", exc)
+                self._note_error(str(exc))
+            except Exception as exc:  # noqa: BLE001 — keep the relay alive, name the fault
+                logger.exception("Unexpected error in relay reader")
+                self._note_error(f"Relay reader error: {exc}")
+            if self._running:
+                self._stop_event.wait(_RECONNECT_BACKOFF_SECONDS)

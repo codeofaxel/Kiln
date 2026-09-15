@@ -2068,6 +2068,67 @@ def _external_stream_url(camera: ExternalCamera | None, printer_stream_url: str 
     return camera.stream_url
 
 
+# ---------------------------------------------------------------------------
+# Live video — the capability contract, and the reasons a source can refuse
+# ---------------------------------------------------------------------------
+
+
+class CameraStreamError(PrinterError):
+    """A live-video source could not be opened, with the reason in words.
+
+    ``code`` is ``CAMERA_REFUSED`` when the printer answered and said no (the
+    LAN access code, or the camera's own video setting on the printer) and
+    ``CAMERA_UNREACHABLE`` when nothing answered on the camera port at all.
+    A relay reports the message on its status rather than retrying in
+    silence, so a viewer is never shown a black frame with no explanation.
+    """
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class StreamCapability:
+    """Whether this printer can feed Kiln's local live-video relay, and why not.
+
+    The interface contract for live video, the way ``can_snapshot`` and
+    ``snapshot_source`` are for stills: a backend answers from what it can
+    OBSERVE (its own protocol, a camera the user registered, whether ffmpeg
+    is on the path) — ``channel`` names the transport the relay would read,
+    ``reason`` says in plain words why there is nothing to relay, and
+    ``requires`` lists what the printer side must have on for the channel to
+    answer.  ``available`` is about the RELAY: a printer whose only stream is
+    RTSP can still take snapshots, and the reason says so.
+    """
+
+    available: bool
+    channel: str | None
+    reason: str | None = None
+    requires: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "available": self.available,
+            "channel": self.channel,
+            "reason": self.reason,
+            "requires": list(self.requires),
+        }
+
+
+def _is_rtsp(url: str | None) -> bool:
+    return bool(url) and str(url).lower().startswith(("rtsp://", "rtsps://"))
+
+
+#: The reason a user-registered RTSP camera cannot be relayed — one wording,
+#: shared by the capability answer and the ``webcam_stream`` refusal.
+RTSP_NOT_RELAYED_REASON = (
+    "Your camera's stream is RTSP, which Kiln's local MJPEG proxy cannot "
+    "relay. Open the RTSP URL you registered in a video player directly; "
+    "snapshots and monitoring still read frames from it."
+)
+
+
 def adapter_has_camera(adapter: Any) -> bool:
     """Whether *adapter* can produce a frame: its own camera, or the user's.
 
@@ -3695,6 +3756,62 @@ class PrinterAdapter(ABC):
         a log (see :func:`redact_url_credentials`).
         """
         return _external_stream_url(self._external_camera, None)
+
+    # -- live video (optional) -----------------------------------------
+
+    def stream_capability(self) -> StreamCapability:
+        """Whether Kiln's local relay can carry this printer's live video.
+
+        The default answers from the stream URL: an http(s) MJPEG URL (the
+        user's registered camera first, then the backend's own) can be
+        relayed; an RTSP one cannot (the relay re-serves MJPEG over HTTP and
+        does not re-mux); no URL means no live video from this backend.
+        Adapters whose camera speaks its own protocol override this.
+        """
+        camera = self._external_camera
+        if camera is not None:
+            if camera.stream_url is None:
+                return StreamCapability(
+                    False,
+                    None,
+                    "The camera you registered gives stills only "
+                    "(camera_snapshot_url). Register a camera_stream_url "
+                    "for live video.",
+                )
+            if _is_rtsp(camera.stream_url):
+                return StreamCapability(False, "rtsp", RTSP_NOT_RELAYED_REASON)
+            return StreamCapability(True, "http_mjpeg")
+        url = self.get_stream_url()
+        if url is None:
+            if getattr(self.capabilities, "can_snapshot", False):
+                reason = (
+                    "This printer backend has no live video stream Kiln can "
+                    "relay; snapshots still work."
+                )
+            else:
+                reason = "This printer has no camera Kiln can read."
+            return StreamCapability(False, None, reason)
+        if _is_rtsp(url):
+            return StreamCapability(
+                False,
+                "rtsp",
+                "This printer's stream is RTSP, which Kiln's local relay does "
+                "not carry; snapshots still work.",
+            )
+        return StreamCapability(True, "http_mjpeg")
+
+    def frame_source(self) -> Any | None:
+        """The relay's frame source for this printer, or ``None``.
+
+        ``None`` exactly when :meth:`stream_capability` says the relay has
+        nothing to carry — the reason lives there, not here.
+        """
+        if not self.stream_capability().available:
+            return None
+        from kiln.streaming import HttpMjpegSource
+
+        url = self.get_stream_url()
+        return HttpMjpegSource(url) if url else None
 
     # -- a camera the user supplied ------------------------------------
     #
