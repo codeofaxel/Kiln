@@ -943,9 +943,8 @@ def _read_port6000_frames(
             if frames == 0:
                 raise CameraStreamError(
                     "The printer accepted the camera connection but sent no "
-                    f"video within {first_frame_timeout:g}s. Check that the "
-                    "camera's video (live view) setting is on in the "
-                    "printer's LAN settings.",
+                    f"video within {first_frame_timeout:g}s. On models with a "
+                    "LAN-mode liveview switch, check it is on.",
                     code="CAMERA_UNREACHABLE",
                 ) from None
             raise CameraStreamError(
@@ -956,9 +955,9 @@ def _read_port6000_frames(
             if frames == 0:
                 raise CameraStreamError(
                     "The printer closed the camera connection without sending "
-                    "a frame. Check the LAN access code, and that the camera's "
-                    "video (live view) setting is on in the printer's LAN "
-                    "settings.",
+                    "a frame. Check the LAN access code; on models with a "
+                    "LAN-mode liveview switch, check it is on (the video "
+                    "toggle on an A1's screen does not gate this feed).",
                     code="CAMERA_REFUSED",
                 )
             return
@@ -1021,8 +1020,9 @@ class BambuPort6000Source:
         except OSError as exc:
             raise CameraStreamError(
                 f"Nothing answered on the camera port ({self._host}:{self._port}): "
-                "the printer may be off, its camera's video (live view) setting "
-                "may be off, or this model streams over RTSPS instead. "
+                "the printer may be off, a LAN-mode liveview switch may be off "
+                "on models that have one, or this model streams over RTSPS "
+                "instead. "
                 f"({exc.__class__.__name__})",
                 code="CAMERA_UNREACHABLE",
             ) from exc
@@ -1032,9 +1032,9 @@ class BambuPort6000Source:
             sock.close()
             raise CameraStreamError(
                 f"The camera port ({self._host}:{self._port}) answered but did "
-                "not complete a TLS handshake: the camera's video (live view) "
-                "setting may be off in the printer's LAN settings, or this "
-                f"model streams over RTSPS instead. ({exc.__class__.__name__})",
+                "not complete a TLS handshake: a LAN-mode liveview switch may "
+                "be off on models that have one, or this model streams over "
+                f"RTSPS instead. ({exc.__class__.__name__})",
                 code="CAMERA_UNREACHABLE",
             ) from exc
         try:
@@ -5816,10 +5816,10 @@ class BambuAdapter(PrinterAdapter):
         return StreamCapability(
             True,
             "bambu_port6000",
-            requires=(
-                "LAN Only mode with the printer's LAN access code",
-                "the camera's video (live view) setting on in the printer's LAN settings",
-            ),
+            # Measured on an A1 (2026-09-15): the screen's camera video toggle
+            # does NOT switch this feed off, so it is not a requirement here.
+            # Models with a LAN-mode liveview switch are recorded by kiln-pro.
+            requires=("LAN Only mode with the printer's LAN access code",),
         )
 
     def frame_source(self) -> Any | None:

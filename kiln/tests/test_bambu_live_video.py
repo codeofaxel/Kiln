@@ -166,7 +166,7 @@ class TestThePort6000FrameSource:
                 next(iter(source.frames(threading.Event())))
         assert excinfo.value.code == "CAMERA_REFUSED"
         assert "access code" in str(excinfo.value)
-        assert "video" in str(excinfo.value).lower()
+        assert "liveview" in str(excinfo.value).lower()
 
     def test_a_dead_port_is_named_as_unreachable(self):
         from kiln.printers.base import CameraStreamError
@@ -176,7 +176,7 @@ class TestThePort6000FrameSource:
             with pytest.raises(CameraStreamError) as excinfo:
                 next(iter(source.frames(threading.Event())))
         assert excinfo.value.code == "CAMERA_UNREACHABLE"
-        assert "6000" in str(excinfo.value) or "video" in str(excinfo.value).lower()
+        assert "6000" in str(excinfo.value) or "liveview" in str(excinfo.value).lower()
 
     def test_a_closed_port_is_unreachable_too(self):
         from kiln.printers.base import CameraStreamError
@@ -289,7 +289,10 @@ class TestStreamCapability:
         assert cap.available is True
         assert cap.channel == "bambu_port6000"
         assert cap.reason is None
-        assert any("video" in r.lower() for r in cap.requires)
+        assert any("lan" in r.lower() for r in cap.requires)
+        # Measured 2026-09-15 on an A1: the screen's video toggle does not
+        # gate the feed, so it must not be listed as a requirement.
+        assert not any("toggle" in r.lower() or "setting" in r.lower() for r in cap.requires)
 
     def test_an_rtsps_family_says_the_relay_cannot_carry_it(self):
         with FakeBambuCamera(access_code=ACCESS_CODE) as server:
