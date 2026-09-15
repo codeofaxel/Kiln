@@ -290,6 +290,33 @@ class TestTheRelayRecordsWhatHappened:
         assert f"creality_k1|http_mjpeg|user_same_host|addr_{mjpeg_server}_webcam_action_stream" in keys
 
 
+class TestAKlipperMachineOnItsOwnAddress:
+    """The machines this counter exists for keep their host on a wrapped
+    backend: a Creality adapter delegates to a Moonraker adapter, so "is this
+    camera on the printer itself" has to read through the wrapper."""
+
+    @staticmethod
+    def _creality(host: str = "http://192.168.1.50"):
+        """A Creality adapter without a network: its constructor probes for
+        Moonraker, so the probe answers the way a ready printer does."""
+        from kiln.printers.creality import CrealityAdapter
+
+        ready = mock.MagicMock(ok=True, status_code=200)
+        ready.json.return_value = {"result": {"klippy_state": "ready"}}
+        with mock.patch("kiln.printers.creality.requests.get", return_value=ready):
+            return CrealityAdapter(host, timeout=5, retries=1)
+
+    def test_a_creality_printers_camera_on_its_own_address_is_same_host(self):
+        adapter = self._creality()
+        adapter.set_external_camera(stream_url="http://192.168.1.50:8080/?action=stream")
+        assert streaming._video_source(adapter) == ("user_same_host", "addr_8080_action_stream")
+
+    def test_a_camera_on_another_host_is_not(self):
+        adapter = self._creality()
+        adapter.set_external_camera(stream_url="http://192.168.1.99:8080/?action=stream")
+        assert streaming._video_source(adapter) == ("user_other", None)
+
+
 # ---------------------------------------------------------------------------
 # A refusal offers the camera check where the printer type has one
 # ---------------------------------------------------------------------------
