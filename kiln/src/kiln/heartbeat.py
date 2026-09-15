@@ -529,6 +529,15 @@ def _send_heartbeat() -> None:
                 # have an MMU"; nothing server-side can see it.  Kind
                 # names only — never a gate map, a colour, or a spool.
                 "multi_material_seen": stats.get("multi_material_seen", {}),
+                # Whether live video from a printer's camera worked —
+                # {"<model>|<channel>|<source>|<event>": count_today} over
+                # the closed vocabularies in kiln.streaming, plus the
+                # results of camera checks a user asked for.  The only
+                # evidence of which cameras Kiln can really show: a feed
+                # opening or refusing happens on the user's own machine.
+                # Tokens only — the key's shape cannot spell a host, a
+                # path or a URL (daily_stats._VIDEO_KEY_RE).
+                "video_outcomes": _top_n(stats.get("video_outcomes", {}), 200),
                 # Upgrade-nudge funnel — {stage: count_today}.  A closed
                 # five-value vocabulary, not tool names.  This is the
                 # only way the funnel is ever seen: the offer, the

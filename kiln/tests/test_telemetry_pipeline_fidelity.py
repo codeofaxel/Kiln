@@ -177,6 +177,30 @@ def test_every_breakdown_map_leaves_the_machine(pipeline):
         )
 
 
+def test_a_video_outcome_reaches_the_dashboard_complete(pipeline):
+    """Whether live video worked on a model has to survive the whole chain.
+
+    The relay is the only place that knows it, and the answer lives on the
+    user's own machine: nothing server-side can see a camera feed open or
+    refuse.  Same day, and across midnight in the complete-day block.
+    """
+    sent = pipeline
+
+    daily_stats.record_video_outcome("creality_k1", "http_mjpeg", "user_same_host", "live")
+    daily_stats.record_camera_check("creality_k1", "creality_mjpeg_8080", "mjpeg")
+    expected = {
+        "creality_k1|http_mjpeg|user_same_host|live": 1,
+        "creality_k1|check|creality_mjpeg_8080|mjpeg": 1,
+    }
+
+    heartbeat._send_heartbeat()
+    assert sent[0]["p_details"]["video_outcomes"] == expected
+
+    _FakeDate._today = real_date(2026, 7, 26)
+    heartbeat._send_heartbeat()
+    assert sent[1]["p_details"]["previous_day"]["video_outcomes"] == expected
+
+
 def test_bridge_running_ships_in_the_payload(pipeline):
     """The field that says whether print hours can recover on their own.
 

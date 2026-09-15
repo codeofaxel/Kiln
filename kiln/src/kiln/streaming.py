@@ -35,14 +35,17 @@ refuses there with a message that says so.  Uses only stdlib
 from __future__ import annotations
 
 import collections
+import contextlib
 import logging
 import os
 import threading
 import time
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -80,6 +83,186 @@ LOCAL_ONLY_MESSAGE = (
     "(kiln serve, or the MCP server on that machine) to watch live; "
     "snapshots and monitoring still work here."
 )
+
+
+# ---------------------------------------------------------------------------
+# What the relay tells Kiln about live video — closed vocabularies
+# ---------------------------------------------------------------------------
+#
+# The relay is the one place that knows whether a printer's camera really
+# gave live video: which feed it opened, whether frames arrived, how fast,
+# and why the printer refused.  It records that once per session through
+# ``kiln.daily_stats.record_video_outcome`` as four tokens, and these tuples
+# are the only words each token may take.  This module is their one home:
+# the camera check and the dashboard read them from here.
+
+#: The feed the relay read, or tried to.
+VIDEO_CHANNELS: tuple[str, ...] = (
+    "bambu_port6000", "http_mjpeg", "rtsp", "webrtc", "none", "other",
+)
+
+#: Whose camera: the printer's own, a camera the user registered that is
+#: served from the printer's own address, or one elsewhere.
+VIDEO_SOURCES: tuple[str, ...] = ("printer", "user_same_host", "user_other")
+
+#: What happened, at most once per session each.
+VIDEO_EVENTS: tuple[str, ...] = (
+    "start", "live",
+    "fps_lt1", "fps_1to5", "fps_5to15", "fps_15up",
+    "refused_access", "refused_unreachable", "refused_no_stream",
+    "refused_rtsp", "refused_webrtc", "refused_other",
+)
+
+#: The shape of a stream path on the printer's own address, recorded with
+#: its port as ``addr_<port>_<class>`` when a user-registered camera there
+#: goes live.  A class, never the path: the text could carry a token.
+ADDRESS_PATH_CLASSES: tuple[str, ...] = (
+    "action_stream", "webcam_action_stream", "stream", "video", "root", "other",
+)
+
+#: What a camera check found at an address (see :mod:`kiln.camera_check`).
+CHECK_RESULTS: tuple[str, ...] = (
+    "mjpeg", "jpeg", "webrtc_signalling", "html", "http_error", "unreachable", "other",
+)
+
+#: Appended to a refusal on a printer type that has a camera check.
+CHECK_OFFER = "Ask Kiln to check this printer's camera to see what it serves."
+
+#: Frames a session must receive before its rate is measured once.
+_FPS_MIN_FRAMES = 5
+
+#: Plan-level refusals already recorded, keyed by day: a print monitor asks
+#: for video on every poll, and one refused printer must read as one
+#: refusal, not a count of polls.
+_PLAN_RECORDED: set[tuple[str, ...]] = set()
+_PLAN_RECORDED_LOCK = threading.Lock()
+
+
+def video_model_for(printer_name: str | None) -> str:
+    """The config-declared model of the printer a relay was aimed at, as a key token.
+
+    ``"unknown"`` when nothing resolves — never a guess, never a raise.
+    """
+    try:
+        from kiln.daily_stats import video_model_token
+        from kiln.printer_model_resolver import resolve_printer_model_for
+
+        return video_model_token(resolve_printer_model_for(printer_name))
+    except Exception:  # noqa: BLE001 — telemetry never breaks a start
+        return "unknown"
+
+
+def _fps_bucket(fps: float) -> str:
+    if fps < 1:
+        return "fps_lt1"
+    if fps < 5:
+        return "fps_1to5"
+    if fps < 15:
+        return "fps_5to15"
+    return "fps_15up"
+
+
+def _channel_token(channel: str | None) -> str:
+    if not channel:
+        return "none"
+    return channel if channel in VIDEO_CHANNELS else "other"
+
+
+def _hostname(value: object) -> str | None:
+    """The bare, lowercased host of a URL or host string, or ``None``."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    parsed = urlparse(text if "://" in text else f"//{text}")
+    return (parsed.hostname or "").lower() or None
+
+
+def _adapter_host(adapter: Any) -> str | None:
+    """The printer's own host, from the attribute its adapter keeps it in."""
+    for holder in (adapter, getattr(adapter, "_backend", None)):
+        if holder is None:
+            continue
+        for attr in ("_host", "host", "_base_url"):
+            host = _hostname(getattr(holder, attr, None))
+            if host:
+                return host
+    return None
+
+
+def _address_event(url: str) -> str | None:
+    """``addr_<port>_<path class>`` for a stream URL, or ``None``."""
+    parsed = urlparse(url)
+    try:
+        port = parsed.port or {"http": 80, "https": 443, "rtsp": 554}.get(parsed.scheme.lower())
+    except ValueError:
+        return None
+    if not port or not 0 < port < 65536:
+        return None
+    path = (parsed.path or "/").rstrip("/") or "/"
+    action_stream = "stream" in parse_qs(parsed.query).get("action", [])
+    if path == "/" and action_stream:
+        cls = "action_stream"
+    elif path == "/webcam" and action_stream:
+        cls = "webcam_action_stream"
+    elif path == "/stream":
+        cls = "stream"
+    elif path == "/video":
+        cls = "video"
+    elif path == "/" and not parsed.query:
+        cls = "root"
+    else:
+        cls = "other"
+    return f"addr_{port}_{cls}"
+
+
+def _video_source(adapter: Any) -> tuple[str, str | None]:
+    """(source token, address event) for what the relay would read."""
+    camera = getattr(adapter, "external_camera", None)
+    if camera is None:
+        return "printer", None
+    stream = getattr(camera, "stream_url", None)
+    camera_host = _hostname(stream)
+    if camera_host and camera_host == _adapter_host(adapter):
+        return "user_same_host", _address_event(stream)
+    return "user_other", None
+
+
+def _record_outcome(model: str, channel: str, source: str, event: str) -> None:
+    try:
+        from kiln.daily_stats import record_video_outcome
+
+        record_video_outcome(model, channel, source, event)
+    except Exception:  # noqa: BLE001 — telemetry never breaks the relay
+        logger.debug("video outcome not recorded", exc_info=True)
+
+
+def _record_plan_refusal(printer_name: str | None, channel: str, source: str, event: str) -> None:
+    """Record a refusal decided before any connection, once per process-day."""
+    today = date.today().isoformat()
+    key = (today, printer_name or "", channel, source, event)
+    with _PLAN_RECORDED_LOCK:
+        if key in _PLAN_RECORDED:
+            return
+        stale = {k for k in _PLAN_RECORDED if k[0] != today}
+        _PLAN_RECORDED.difference_update(stale)
+        _PLAN_RECORDED.add(key)
+    _record_outcome(video_model_for(printer_name), channel, source, event)
+
+
+@dataclass(frozen=True)
+class VideoObservation:
+    """What :func:`plan_relay` knew about a session, stamped on its source.
+
+    The relay reads it from the source it is handed, so every door that
+    starts the relay from a plan records the session without knowing the
+    counter exists.  The model is resolved when a session starts, not per
+    poll.
+    """
+
+    printer_name: str | None
+    channel: str
+    source: str
+    address_event: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -212,25 +395,48 @@ class RelayPlan:
     source: FrameSource | None = None
     code: str | None = None
     message: str | None = None
+    #: True when the printer type has a camera check a user can run
+    #: (``PrinterAdapter.camera_check_ids``); a refusal then says so.
+    check_available: bool = False
 
 
-def plan_relay(adapter: Any) -> RelayPlan:
+def plan_relay(adapter: Any, printer_name: str | None = None) -> RelayPlan:
     """Decide, for *adapter*, whether the relay can start and on what.
 
     The one place the tool, the CLI and the monitor doors resolve a start
     request, so a backend that learns a new protocol is picked up by every
     door at once.  A user-registered RTSP camera keeps its own refusal code
     (``RTSP_NOT_PROXIED``) because callers already read it.
+
+    It is also where a refusal decided before any connection is recorded
+    (once per process-day), and where a relayable source is stamped with a
+    :class:`VideoObservation` for the relay to record the session against.
+    ``printer_name`` names the machine the start was aimed at; omitted, it
+    means the default printer.
     """
     capability = _capability_of(adapter)
+    source_token, address_event = _video_source(adapter)
+    check_ids = getattr(adapter, "camera_check_ids", ())
+    check_available = isinstance(check_ids, tuple) and len(check_ids) > 0
+
+    def _refuse(code: str, message: str, channel: str, event: str) -> RelayPlan:
+        _record_plan_refusal(printer_name, channel, source_token, event)
+        if check_available:
+            message = f"{message} {CHECK_OFFER}"
+        return RelayPlan(capability, None, code, message, check_available=check_available)
+
     if not capability.available:
+        channel = _channel_token(capability.channel)
+        event = {"rtsp": "refused_rtsp", "webrtc": "refused_webrtc"}.get(
+            capability.channel or "", "refused_no_stream"
+        )
         if capability.channel == "rtsp" and getattr(adapter, "external_camera", None) is not None:
-            return RelayPlan(capability, None, "RTSP_NOT_PROXIED", RTSP_NOT_RELAYED_REASON)
-        return RelayPlan(
-            capability,
-            None,
+            return _refuse("RTSP_NOT_PROXIED", RTSP_NOT_RELAYED_REASON, channel, event)
+        return _refuse(
             "NO_STREAM",
             capability.reason or "Webcam streaming not available for this printer.",
+            channel,
+            event,
         )
     source = adapter.frame_source() if hasattr(adapter, "frame_source") else None
     if not isinstance(source, FrameSource):
@@ -239,8 +445,19 @@ def plan_relay(adapter: Any) -> RelayPlan:
         url = adapter.get_stream_url()
         source = HttpMjpegSource(url) if isinstance(url, str) and url else None
     if source is None:
-        return RelayPlan(capability, None, "NO_STREAM", "Webcam streaming not available for this printer.")
-    return RelayPlan(capability, source)
+        return _refuse(
+            "NO_STREAM", "Webcam streaming not available for this printer.",
+            "none", "refused_no_stream",
+        )
+    # A source that cannot carry the observation relays unrecorded.
+    with contextlib.suppress(AttributeError):
+        source.video_observation = VideoObservation(  # type: ignore[attr-defined]
+            printer_name=printer_name,
+            channel=_channel_token(getattr(source, "kind", None) or capability.channel),
+            source=source_token,
+            address_event=address_event,
+        )
+    return RelayPlan(capability, source, check_available=check_available)
 
 
 def _capability_of(adapter: Any) -> StreamCapability:
@@ -309,6 +526,15 @@ class MJPEGProxy:
         # Upstream reader thread
         self._reader_thread: threading.Thread | None = None
 
+        # The current session's observation (see VideoObservation) and what
+        # it has already recorded — each event at most once per session.
+        self._observation: VideoObservation | None = None
+        self._session_model: str = "unknown"
+        self._session_live = False
+        self._session_refused = False
+        self._session_fps_recorded = False
+        self._session_first_frame_at: float | None = None
+
     @property
     def active(self) -> bool:
         return self._running
@@ -361,6 +587,15 @@ class MJPEGProxy:
                     return self.status()
                 self.stop()
 
+            observation = getattr(frame_source, "video_observation", None)
+            self._observation = observation if isinstance(observation, VideoObservation) else None
+            self._session_model = (
+                video_model_for(self._observation.printer_name) if self._observation else "unknown"
+            )
+            self._session_live = False
+            self._session_refused = False
+            self._session_fps_recorded = False
+            self._session_first_frame_at = None
             self._frame_source = frame_source
             self._printer_name = printer_name
             self._port = port
@@ -449,6 +684,7 @@ class MJPEGProxy:
         self._reader_thread.start()
 
         logger.info("MJPEG relay started on port %d <- %s", port, frame_source.label)
+        self._record_session("start")
         return self.status()
 
     def stop(self) -> StreamInfo:
@@ -519,6 +755,8 @@ class MJPEGProxy:
 
     def _publish(self, frame: bytes) -> None:
         now = time.monotonic()
+        first = False
+        fps_event: str | None = None
         with self._cond:
             self._latest_frame = frame
             self._latest_seq += 1
@@ -528,11 +766,57 @@ class MJPEGProxy:
             self._recent.append(now)
             while self._recent and now - self._recent[0] > _FPS_WINDOW_SECONDS:
                 self._recent.popleft()
+            if not self._session_live:
+                self._session_live = first = True
+                self._session_first_frame_at = now
+            elif (
+                not self._session_fps_recorded
+                and self._frames_received >= _FPS_MIN_FRAMES
+                and self._session_first_frame_at is not None
+                and now > self._session_first_frame_at
+            ):
+                # Over the whole session rather than the status window, so
+                # a camera slower than one frame per two seconds still gets
+                # its rate measured.
+                self._session_fps_recorded = True
+                fps_event = _fps_bucket(
+                    (self._frames_received - 1) / (now - self._session_first_frame_at)
+                )
             self._cond.notify_all()
+        # Recorded outside the frame lock: a disk write must never hold up
+        # the viewers waiting on this frame.
+        if first:
+            self._record_session("live")
+            if self._observation is not None and self._observation.address_event:
+                self._record_session(self._observation.address_event)
+        if fps_event:
+            self._record_session(fps_event)
 
     def _note_error(self, message: str) -> None:
         with self._cond:
             self._last_error = message
+
+    #: A source's refusal code → the event recorded for the session.
+    _REFUSAL_EVENTS: ClassVar[dict[str, str]] = {
+        "CAMERA_REFUSED": "refused_access",
+        "CAMERA_UNREACHABLE": "refused_unreachable",
+    }
+
+    def _note_refusal(self, exc: CameraStreamError) -> None:
+        """Name the refusal on status, and record the session's first one."""
+        self._note_error(str(exc))
+        with self._cond:
+            if self._session_live or self._session_refused:
+                return
+            self._session_refused = True
+        self._record_session(self._REFUSAL_EVENTS.get(exc.code, "refused_other"))
+
+    def _record_session(self, event: str) -> None:
+        """Record one event for the current session, when it has an observation."""
+        observation = self._observation
+        if observation is None:
+            return
+        _record_outcome(self._session_model, observation.channel, observation.source, event)
 
     def _read_upstream(self) -> None:
         """Background thread: read the source, publish, reconnect on loss."""
@@ -552,7 +836,7 @@ class MJPEGProxy:
                     self._note_error("The camera stream ended; reconnecting.")
             except CameraStreamError as exc:
                 logger.debug("relay source refused: %s", exc)
-                self._note_error(str(exc))
+                self._note_refusal(exc)
             except Exception as exc:  # noqa: BLE001 — keep the relay alive, name the fault
                 logger.exception("Unexpected error in relay reader")
                 self._note_error(f"Relay reader error: {exc}")

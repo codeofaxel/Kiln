@@ -329,6 +329,11 @@ def _empty_day() -> dict[str, Any]:
         # never the parameter VALUES, which are the user's own
         # dimensions and say what they are building.
         "template_uses": {},       # {"shelf_bracket": 3, "stackable_bin": 1}
+        # Whether live video from a printer's camera worked, as classes:
+        # {"<model>|<channel>|<source>|<event>": count}.  Written by the
+        # relay (kiln.streaming) and the camera check (kiln.camera_check),
+        # the only two places that know; see record_video_outcome.
+        "video_outcomes": {},
         # Print-counting bookkeeping — see _PENDING_STARTS_MAX above.
         # Local only: get_daily_stats() never returns these, so nothing
         # here reaches the heartbeat.
@@ -357,6 +362,7 @@ _ROLLOVER_MAPS = (
     "marketplace_sources", "template_uses",
     "surface_sessions", "surface_events",
     "multi_material_seen",
+    "video_outcomes",
 )
 
 
@@ -747,7 +753,13 @@ def record_print_hours_for_job(
         _logger.debug("record_print_hours_for_job(%s) failed: %s", job_id, exc)
 
 
-def _record_name_count(bucket: str, tool_name: str) -> None:
+def _record_name_count(
+    bucket: str,
+    tool_name: str,
+    *,
+    pattern: re.Pattern[str] | None = None,
+    max_distinct: int | None = None,
+) -> None:
     """Increment ``data[bucket][tool_name]`` for today.  Never raises.
 
     The three name→count maps (tool calls, tier denials, account-wall
@@ -771,15 +783,18 @@ def _record_name_count(bucket: str, tool_name: str) -> None:
     if not isinstance(tool_name, str):
         return
     name = tool_name.strip()
-    if not _TOOL_NAME_RE.match(name):
-        return  # not a real tool name — drop rather than pollute the map
+    # Resolved at call time, not bound as defaults: the tool-name rules are
+    # module constants a caller (or a test) may repoint.
+    if not (pattern or _TOOL_NAME_RE).match(name):
+        return  # not a well-formed key — drop rather than pollute the map
+    cap = _TOOL_CALLS_MAX_DISTINCT if max_distinct is None else max_distinct
     try:
         with _lock:
             data = _read()
             buckets = data.get(bucket, {})
             if not isinstance(buckets, dict):
                 buckets = {}
-            if name not in buckets and len(buckets) >= _TOOL_CALLS_MAX_DISTINCT:
+            if name not in buckets and len(buckets) >= cap:
                 return  # cap distinct names; existing ones still counted below
             buckets[name] = int(buckets.get(name, 0)) + 1
             data[bucket] = buckets
@@ -932,6 +947,68 @@ def record_multi_material_seen(kind: str) -> None:
     _record_name_count("multi_material_seen", kind)
 
 
+#: One video-outcome key: ``model|channel|source|event``, four lowercase
+#: tokens.  The SHAPE is the privacy boundary: a host, a URL, a path or a
+#: query cannot be spelled in it, so no caller mistake can put one into the
+#: heartbeat.  The vocabulary each slot draws from lives in
+#: :mod:`kiln.streaming`; this module checks shape only, and the dashboard
+#: drops any token outside the vocabulary.
+_VIDEO_KEY_RE = re.compile(
+    r"^[a-z0-9][a-z0-9_]{0,47}\|[a-z0-9_]{1,24}\|[a-z0-9_]{1,32}\|[a-z0-9_]{1,40}$"
+)
+
+#: Distinct video keys kept per day.  A busy install meets a few models and
+#: a few outcomes; a runaway writer must not grow the file or the payload.
+_VIDEO_OUTCOMES_MAX_DISTINCT = 200
+
+_VIDEO_MODEL_UNSAFE = re.compile(r"[^a-z0-9]+")
+
+
+def video_model_token(raw: object) -> str:
+    """A printer model as a video-outcome key token, or ``"unknown"``.
+
+    The config-declared model is free text ("Saturn 4 Ultra 16K"); the key
+    needs a token.  Lowercased, every run of other characters folded to one
+    underscore, capped at 48.  Nothing is mapped or guessed — a model the
+    catalogue spells differently stays spelled the owner's way.
+    """
+    if not isinstance(raw, str):
+        return "unknown"
+    token = _VIDEO_MODEL_UNSAFE.sub("_", raw.strip().lower()).strip("_")[:48].rstrip("_")
+    return token or "unknown"
+
+
+def record_video_outcome(model: object, channel: str, source: str, event: str) -> None:
+    """Count one thing live video did on a printer model today.
+
+    ``channel``, ``source`` and ``event`` come from the closed vocabularies
+    in :mod:`kiln.streaming`; the relay and the planning helper every door
+    calls are the only writers, once per session (see
+    ``kiln.streaming.MJPEGProxy``).  A key that is not four well-formed
+    tokens is dropped.  Silent by contract.
+    """
+    key = f"{video_model_token(model)}|{channel}|{source}|{event}"
+    _record_name_count(
+        "video_outcomes", key,
+        pattern=_VIDEO_KEY_RE, max_distinct=_VIDEO_OUTCOMES_MAX_DISTINCT,
+    )
+
+
+def record_camera_check(model: object, probe_id: str, result: str) -> None:
+    """Count one camera-check result for a printer model today.
+
+    Written only by :func:`kiln.camera_check.run_camera_checks`, which runs
+    when a user asks for the check — never on its own.  ``probe_id`` names
+    which address was tried (a token, never the address); ``result`` is one
+    of ``kiln.streaming.CHECK_RESULTS``.  Silent by contract.
+    """
+    key = f"{video_model_token(model)}|check|{probe_id}|{result}"
+    _record_name_count(
+        "video_outcomes", key,
+        pattern=_VIDEO_KEY_RE, max_distinct=_VIDEO_OUTCOMES_MAX_DISTINCT,
+    )
+
+
 def get_daily_stats() -> dict[str, Any]:
     """Return today's counters and breakdowns."""
     data = _read()
@@ -973,6 +1050,8 @@ def get_daily_stats() -> dict[str, Any]:
         "surface_events": data.get("surface_events", {}),
         # Same contract again: recorded, rolled over, returned.
         "multi_material_seen": data.get("multi_material_seen", {}),
+        # Same contract again: recorded, rolled over, returned.
+        "video_outcomes": data.get("video_outcomes", {}),
         # The last COMPLETE day's counters (see _archive_completed_day).
         # The heartbeat reports these because the same-day counters it
         # can see at server startup are structurally near-empty.
