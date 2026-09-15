@@ -1335,6 +1335,20 @@ _AUTH_NEEDLES: tuple[str, ...] = (
     "invalid credentials",
 )
 
+def reads_as_credentials_refusal(message: str | None) -> bool:
+    """True when *message* names refused credentials, not reachability.
+
+    The one reading of :data:`_AUTH_NEEDLES`, shared by the adapter-layer
+    diagnosis and by printer status, so the two cannot drift into calling
+    one failure by two names.  It reads words, so an adapter must keep
+    credential words OUT of any message that is not a refusal -- advice such
+    as "check the access code" inside a no-answer message is exactly what
+    once turned a full printer into a wrong access code.
+    """
+    text = (message or "").lower()
+    return any(needle in text for needle in _AUTH_NEEDLES)
+
+
 _SLOT_NEEDLES: tuple[str, ...] = (
     "already connected",
     "connections at once",
@@ -1375,7 +1389,7 @@ def diagnose_read_failure(
     """
     text = (message or "").lower()
 
-    if any(needle in text for needle in _AUTH_NEEDLES):
+    if reads_as_credentials_refusal(message):
         return ReadDiagnosis(
             state=PrinterStatus.UNAUTHORIZED,
             cause=CAUSE_WRONG_ACCESS_CODE,

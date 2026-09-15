@@ -4163,25 +4163,15 @@ def _reads_as_auth_failure(message: str) -> bool:
     The adapters raise one exception type for both, so the classification
     reads the message.  Deliberately narrow: only words that name an
     authentication problem count, and anything unmatched is treated as the
-    ordinary unreachable case — a false "offline" costs a glance at a power
+    ordinary unreachable case -- a false "offline" costs a glance at a power
     switch, while a credentials error dressed as offline hides the actual
-    fix.
+    fix.  The word list is the adapter diagnosis's own
+    (:func:`kiln.printers.base.reads_as_credentials_refusal`); this door
+    used to keep a copy of it.
     """
-    text = (message or "").lower()
-    return any(
-        needle in text
-        for needle in (
-            "not authorized",
-            "unauthorized",
-            "unauthorised",
-            "access code",
-            "api key",
-            "api-key",
-            "forbidden",
-            "authentication",
-            "invalid credentials",
-        )
-    )
+    from kiln.printers.base import reads_as_credentials_refusal
+
+    return reads_as_credentials_refusal(message)
 
 
 def _unreachable_evidence(printer_name: str | None = None) -> dict[str, Any]:

@@ -102,6 +102,26 @@ _TLS_FINGERPRINT_ENV = "KILN_BAMBU_TLS_FINGERPRINT"
 # already closed, and then to power-cycle a printer that was never at fault
 # (2026-08-14 field report).  ``_other_clients_hint`` appends the measured
 # count when there is one.
+#: CONNACK refusals that mean the printer rejected the login.  MQTT 3.1.1
+#: numbers them 4 ("bad user name or password") and 5 ("not authorized");
+#: paho 2 hands ``on_connect`` a ReasonCode carrying the MQTT 5 values 134 and
+#: 135 for the same two answers, so a check on 4 and 5 alone never fires.
+_CONNACK_CREDENTIAL_REFUSALS: frozenset[int] = frozenset({4, 5, 134, 135})
+
+
+def _connack_code(reason_code: Any) -> int:
+    """The number in a CONNACK answer, whichever paho callback style sent it."""
+    if reason_code is None:
+        return 0
+    value = getattr(reason_code, "value", None)
+    if isinstance(value, int):
+        return value
+    try:
+        return int(reason_code)
+    except (TypeError, ValueError):
+        return 0
+
+
 _SINGLE_CLIENT_MSG = (
     "MQTT connection rejected — something else is already connected. "
     "Bambu printers allow only a few LAN clients at once."
@@ -1405,6 +1425,11 @@ class BambuAdapter(PrinterAdapter):
         # ``None``.  Cleared the moment it is put back.  In-memory: a process
         # that dies mid-print restores nothing, and says so in the note.
         self._restore_nozzle_detection: dict[str, Any] | None = None
+        # The printer's answer to the login currently being made, when it
+        # refused: ``(code, reason)``.  Lets the connect wait stop the moment
+        # the printer has answered instead of waiting out the timeout, and
+        # lets the error say which answer it was.
+        self._connack_refusal: tuple[int, str] | None = None
         self._fw_modules_requested = False  # one get_version request per session
 
         # State cache -- updated by MQTT messages.
@@ -1953,16 +1978,26 @@ class BambuAdapter(PrinterAdapter):
                 client.on_disconnect = self._on_disconnect
 
                 self._mqtt_connected.clear()
+                self._connack_refusal = None
                 # Use connect_async so the TCP handshake happens in the
                 # background network thread instead of blocking the caller.
                 # Prevents scheduler TimeoutError on slow/flaky networks.
                 client.connect_async(self._host, _MQTT_PORT, keepalive=60)
                 client.loop_start()
 
-                # Wait for the connection to be established.
-                if not self._mqtt_connected.wait(timeout=self._timeout):
+                # Wait for the printer's answer: connected, refused, or none.
+                if not self._await_connack(self._timeout):
+                    refusal = getattr(self, "_connack_refusal", None)
                     self._safe_stop_client(client)
                     self._backoff.record_failure()
+                    if refusal is not None:
+                        raise PrinterError(self._refusal_message(*refusal))
+                    # No answer to the login at all.  Measured 2026-09-15 on
+                    # an A1 whose slots were all taken: TCP connects, then the
+                    # TLS handshake times out.  A refused login is answered
+                    # and reported above, so this message carries no
+                    # credential words -- they would turn a full printer into
+                    # a wrong access code (reads_as_credentials_refusal).
                     raise PrinterError(
                         f"Couldn't reach the printer at {self._host} — "
                         f"no response within {self._timeout}s.\n"
@@ -1974,9 +2009,9 @@ class BambuAdapter(PrinterAdapter):
                         "or another machine using the printer, then try "
                         "again.\n"
                         "  If that's not it: check the printer is powered "
-                        "on and on this network, LAN Mode is on, and the "
-                        "access code is current (printer screen → Settings "
-                        "→ Network)."
+                        "on and on this network, and that LAN Mode is on "
+                        "(printer screen → Settings → Network).  A refused "
+                        "login is reported separately, not as this."
                     )
 
                 # Certificate policy check (pin/explicit fingerprint) after TLS handshake.
@@ -2050,21 +2085,19 @@ class BambuAdapter(PrinterAdapter):
     ) -> None:
         """MQTT on_connect callback."""
         # Check for auth failure or rejected connection before proceeding.
-        try:
-            rc = int(reason_code) if reason_code is not None else 0
-        except (TypeError, ValueError):
-            # paho-mqtt v2 passes a ReasonCode object
-            rc = reason_code.value if hasattr(reason_code, "value") else 0
+        rc = _connack_code(reason_code)
         if rc != 0:
             logger.warning(
                 "MQTT connection rejected by %s (reason_code=%s)",
                 self._host,
                 reason_code,
             )
-            # On auth failure (rc=5 "Not authorized", rc=4 "Bad credentials"),
-            # stop the client to prevent infinite reconnect spam that floods
-            # the printer's MQTT broker and can destabilize other connections.
-            if rc in (4, 5):
+            # Recorded first, so the connect wait sees the answer at once.
+            self._connack_refusal = (rc, str(reason_code))
+            # On a refused login, stop the client to prevent reconnect spam
+            # that floods the printer's broker and can destabilize other
+            # connections.
+            if rc in _CONNACK_CREDENTIAL_REFUSALS:
                 logger.warning(
                     "Stopping MQTT client for %s due to auth failure — "
                     "check access code and re-register the printer",
@@ -2088,6 +2121,36 @@ class BambuAdapter(PrinterAdapter):
                 }
             },
             client=client,
+        )
+
+    def _await_connack(self, timeout: float) -> bool:
+        """Wait for the printer to answer the login.  ``True`` once connected;
+        ``False`` the moment it refuses, or when *timeout* passes unanswered."""
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            if self._mqtt_connected.is_set():
+                return True
+            if getattr(self, "_connack_refusal", None) is not None:
+                return False
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            self._mqtt_connected.wait(timeout=min(0.05, remaining))
+
+    def _refusal_message(self, code: int, reason: str) -> str:
+        """The error for a login the printer answered and refused."""
+        if code in _CONNACK_CREDENTIAL_REFUSALS:
+            return (
+                f"The printer at {self._host} answered and refused Kiln's "
+                f"access code ({reason}).  On the printer's screen open "
+                "Settings → Network, copy the current access code, and update "
+                "it in Kiln's config -- a restarted printer can issue a new one "
+                "that looks the same."
+            )
+        return (
+            f"The printer at {self._host} answered and turned the connection "
+            f"away ({reason}).  Bambu printers allow only a few connections at "
+            "once." + self._other_clients_hint()
         )
 
     def _on_disconnect(
