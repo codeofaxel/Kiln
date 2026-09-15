@@ -295,6 +295,16 @@ class TestBambuAdapter:
         assert result[0].chamber_sensor is False
         assert result[0].chamber_temp_actual is None
 
+    def test_bare_instance_builds_a_state_with_unknown_chamber(self) -> None:
+        # The state builder is exercised on an adapter that never ran
+        # ``__init__`` (see test_finished_state_distinction).  It must still
+        # build, and a machine nobody named is an unknown model: no chamber
+        # number, and no claim that there is no sensor.
+        bare = object.__new__(BambuAdapter)
+        state = BambuAdapter._build_state_from_cache(bare, _idle_report(chamber=38.0))
+        assert state.chamber_temp_actual is None
+        assert state.chamber_sensor is None
+
     def test_unknown_model_reports_unknown_not_a_number(self) -> None:
         # Neither config nor serial names the machine: Kiln cannot say a
         # sensor produced the number, so it does not quote it -- and does

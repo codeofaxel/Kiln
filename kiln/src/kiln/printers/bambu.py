@@ -1613,9 +1613,16 @@ class BambuAdapter(PrinterAdapter):
         hang-dump, not by reasoning).  The serial prefix is a pure string
         lookup, which is what a state builder may do.
         """
-        if self._printer_model:
-            return self._printer_model
-        family = _BAMBU_MODEL_FAMILIES.get(self._serial[:3].upper())
+        # ``getattr`` rather than attribute access: the state builder is
+        # called on instances that never ran ``__init__`` (tests build a
+        # state from a bare ``object.__new__(BambuAdapter)``, exactly the way
+        # the adapter does from MQTT), and it was a pure function of the
+        # report until this lookup.  An instance nobody named is an unknown
+        # model, which already means "no chamber number, and no claim".
+        declared = getattr(self, "_printer_model", "")
+        if declared:
+            return declared
+        family = _BAMBU_MODEL_FAMILIES.get(getattr(self, "_serial", "")[:3].upper())
         return f"bambu_{family}" if family else None
 
     def _identity_families(self) -> tuple[str | None, str | None, str]:
