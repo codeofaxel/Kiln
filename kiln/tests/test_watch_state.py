@@ -15,7 +15,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 from kiln import watch_state
-from kiln.print_watchdog import DEFAULT_STALL_SECONDS, DEFAULT_TOOL_DROP_C
+from kiln.print_watchdog import DEFAULT_TOOL_DROP_C
+from kiln.printers.progress_motion import stall_threshold_seconds
 
 
 class _Adapter:
@@ -76,7 +77,8 @@ def test_the_rule_words_are_read_from_the_code_not_retyped(monkeypatch) -> None:
     _quiet(monkeypatch)
     words = watch_state.kiln_watch_state("default", adapter=_Adapter())["watchers"]
     assert f"{DEFAULT_TOOL_DROP_C:.0f} °C" in words["watchdog"]["red"]["tool_drop"]
-    assert f"{DEFAULT_STALL_SECONDS:.0f} s" in words["watchdog"]["red"]["stalled_layer"]
+    assert "stalled_layer" not in words["watchdog"]["red"], "a stall never stops a machine"
+    assert f"{stall_threshold_seconds() / 60:.0f} minutes" in words["watchdog"]["yellow"]["stalled"]
     # Every rule the watchdog can raise has words, and no words describe a rule it cannot.
     from kiln import print_watchdog
 
@@ -106,7 +108,7 @@ def test_a_watchdog_is_reported_only_while_attached_and_alive(monkeypatch) -> No
     server._print_watchdogs["default"] = _Dog(True)
     live = watch_state.kiln_watch_state("default", adapter=_Adapter())["watchdog"]
     assert live["attached"] and live["running"] and live["yellow_flags"] == 1
-    assert live["poll_seconds"] == 2.5 and live["stall_seconds"] == 90.0
+    assert live["poll_seconds"] == 2.5 and live["stall_seconds"] == stall_threshold_seconds()
 
     server._print_watchdogs["default"] = _Dog(False)
     dead = watch_state.kiln_watch_state("default", adapter=_Adapter())["watchdog"]

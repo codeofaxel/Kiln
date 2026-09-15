@@ -60,8 +60,9 @@ logger = logging.getLogger(__name__)
 #               so the queue cannot disagree with them about whether a
 #               machine is moving;
 #   stalled     fresh telemetry, PRINTING, nothing moved past the measured
-#               threshold -- announced once per episode as JOB_STALLED and
-#               carried on job_status / queue_summary;
+#               threshold -- the detector itself announces the edge once,
+#               as PRINT_STALLED, whoever was looking; the queue carries it
+#               on job_status / queue_summary;
 #   no contact  no trustworthy reading (unreachable, stale cache, a read
 #               that raised) for longer than that same threshold -- announced
 #               once per episode as JOB_NO_CONTACT and carried the same way.
@@ -96,8 +97,9 @@ class JobWatch:
     #: trustworthy reading from what came BEFORE it -- ``None`` when the
     #: previous reading was moving and recent.
     ending_doubt: str | None = None
-    #: Episode flags: each condition is announced once, not once per poll.
-    stall_announced: bool = False
+    #: Loss of contact is the queue's own knowledge (the detector never sees
+    #: a reading that did not arrive), so the queue announces it -- once per
+    #: episode, not once per poll.
     no_contact_announced: bool = False
 
     def stalled(self) -> bool:
@@ -137,9 +139,10 @@ class JobScheduler:
 
     The scheduler polls every ``poll_interval`` seconds (default 5).  It
     never ends a print the printer has not ended: a job that stops moving
-    or stops answering is announced (JOB_STALLED / JOB_NO_CONTACT, and on
-    ``job_status``) and stays PRINTING with its printer reserved until the
-    machine reports idle or a person cancels it.  See the module comment.
+    or stops answering is announced (PRINT_STALLED from the detector,
+    JOB_NO_CONTACT from here, and on ``job_status``) and stays PRINTING
+    with its printer reserved until the machine reports idle or a person
+    cancels it.  See the module comment.
     """
 
     def __init__(
@@ -376,10 +379,10 @@ class JobScheduler:
     ) -> None:
         """Record one trustworthy-or-not reading of a watched job.
 
-        Feeds every reading to the progress-motion detector, refreshes the
-        last-contact time on readings Kiln can vouch for, and announces a
-        stall or a loss of contact ONCE per episode.  Decides nothing about
-        the job itself.
+        Feeds every reading to the progress-motion detector (which announces
+        a stall's edge itself), refreshes the last-contact time on readings
+        Kiln can vouch for, and announces a loss of contact ONCE per
+        episode.  Decides nothing about the job itself.
         """
         watch = self._watch.get(job_id)
         if watch is None:
@@ -421,27 +424,6 @@ class JobScheduler:
         watch.last_contact = now
         watch.last_verdict = verdict
         self._contact_cause.pop(job_id, None)
-
-        if verdict.stalled and not watch.stall_announced:
-            watch.stall_announced = True
-            logger.warning("Job %s on %s: %s", job_id, printer_name, verdict.note())
-            self._event_bus.publish(
-                EventType.JOB_STALLED,
-                {
-                    "job_id": job_id,
-                    "printer_name": printer_name,
-                    "frozen_for_seconds": round(verdict.frozen_for_seconds or 0.0),
-                    "layer": verdict.layer,
-                    "percent": verdict.percent,
-                    "note": verdict.note(),
-                },
-                source="scheduler",
-            )
-        elif verdict.motion is Motion.MOVING and watch.stall_announced:
-            # Only positive evidence ends a stall episode; an UNKNOWN in
-            # between (a pause, a state change) does not re-arm the alarm.
-            watch.stall_announced = False
-            logger.info("Job %s on %s is moving again", job_id, printer_name)
 
     def _observe_silence(self, job_id: str, printer_name: str, now: float, *, cause: str) -> None:
         """A reading Kiln cannot vouch for.  The clock keeps running; once

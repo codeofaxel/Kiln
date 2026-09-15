@@ -732,7 +732,7 @@ def test_the_fabricated_elapsed_is_gone():
 
     # The old code produced exactly this.  Pin the number so nobody
     # reintroduces the formula and calls it a refactor.
-    assert 5939 == int((60 / (1 - 99 / 100)) - 60)
+    assert int((60 / (1 - 99 / 100)) - 60) == 5939
     assert job.print_time_seconds != 5939
     # Kiln did not start this print, so it does not know when it began.
     assert job.print_time_seconds is None
@@ -815,3 +815,68 @@ def test_start_print_stamps_the_clock():
     # Inside the non-resume block: a resume 3MF continues the print that is
     # already running, so restamping it would reset a clock mid-print.
     assert source.index("is_resume_mode_3mf") < source.index("note_job_start")
+
+
+# ---------------------------------------------------------------------------
+# The stall EDGE is announced by the detector, once, whoever was looking
+# ---------------------------------------------------------------------------
+
+
+def _listen(kind):
+    """Count edges by subscription on the server bus: its history is
+    bounded, so slicing it would lie once a long run fills it."""
+    import kiln.server as _srv
+    from kiln.events import EventType
+
+    seen: list = []
+    _srv._get_event_bus().subscribe(getattr(EventType, kind), seen.append)
+    return seen
+
+
+def test_the_stall_edge_is_announced_once_and_cleared_once():
+    stalled = _listen("PRINT_STALLED")
+    cleared = _listen("PRINT_STALL_CLEARED")
+
+    pm.observe_progress(BAMBU, _state(), _job(2, 5.0), now=0.0)
+    pm.observe_progress(BAMBU, _state(), _job(2, 5.0), now=16 * MINUTE)
+    pm.observe_progress(BAMBU, _state(), _job(2, 5.0), now=30 * MINUTE)
+    pm.observe_progress(BAMBU, _state(), _job(2, 5.0), now=60 * MINUTE)
+    assert len(stalled) == 1, "one episode, one announcement -- not one per poll"
+    assert stalled[0].source == "progress_motion"
+    assert stalled[0].data["layer"] == 2 and stalled[0].data["percent"] == 5.0
+    assert "has not actually moved" in stalled[0].data["note"]
+
+    pm.observe_progress(BAMBU, _state(), _job(3, 7.0), now=61 * MINUTE)
+    assert len(cleared) == 1
+    assert len(stalled) == 1
+
+
+def test_a_second_episode_is_announced_again():
+    stalled = _listen("PRINT_STALLED")
+    pm.observe_progress(BAMBU, _state(), _job(2, 5.0), now=0.0)
+    pm.observe_progress(BAMBU, _state(), _job(2, 5.0), now=16 * MINUTE)
+    pm.observe_progress(BAMBU, _state(), _job(3, 7.0), now=17 * MINUTE)  # moving
+    pm.observe_progress(BAMBU, _state(), _job(3, 7.0), now=40 * MINUTE)  # frozen again
+    assert len(stalled) == 2
+
+
+def test_a_pause_ends_the_episode_without_calling_it_moving():
+    cleared = _listen("PRINT_STALL_CLEARED")
+    pm.observe_progress(BAMBU, _state(), _job(2, 5.0), now=0.0)
+    pm.observe_progress(BAMBU, _state(), _job(2, 5.0), now=16 * MINUTE)
+    pm.observe_progress(BAMBU, _state(PrinterStatus.PAUSED), _job(2, 5.0), now=17 * MINUTE)
+    assert len(cleared) == 0
+    assert pm.observation_key(BAMBU) not in pm._stalled_keys
+
+
+def test_an_announcement_failure_never_reaches_the_caller(monkeypatch):
+    import kiln.server as _srv
+
+    class _Broken:
+        def publish(self, *a, **k):
+            raise RuntimeError("bus down")
+
+    monkeypatch.setattr(_srv, "_get_event_bus", lambda: _Broken())
+    pm.observe_progress(BAMBU, _state(), _job(2, 5.0), now=0.0)
+    verdict = pm.observe_progress(BAMBU, _state(), _job(2, 5.0), now=16 * MINUTE)
+    assert verdict.motion is pm.Motion.STALLED

@@ -7,10 +7,8 @@ lifecycle itself is exercised in a dedicated test at the bottom.
 
 from __future__ import annotations
 
-import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 import pytest
 
@@ -18,7 +16,6 @@ from kiln.print_watchdog import (
     DEFAULT_BED_DROP_C,
     DEFAULT_NO_RISE_TIMEOUT_S,
     DEFAULT_POLL_INTERVAL,
-    DEFAULT_STALL_SECONDS,
     DEFAULT_TOOL_DROP_C,
     DEFAULT_WARMUP_TIMEOUT_S,
     HEATING_RISE_C,
@@ -28,7 +25,6 @@ from kiln.print_watchdog import (
     Flag,
     PrintWatchdog,
 )
-
 
 # --------------------------------------------------------------------------
 # Test doubles
@@ -54,6 +50,21 @@ class FakeState:
 class FakeJob:
     current_layer: int | None = 10
     completion: float | None = 12.5
+    print_time_left_seconds: int | None = None
+
+
+#: The shared detector's threshold, plus a minute: long enough that frozen
+#: counters read as a stall.  The watchdog owns no stall number of its own.
+STALL_S: float = 15 * 60 + 60
+
+
+@pytest.fixture(autouse=True)
+def _fresh_motion_store():
+    from kiln.printers import progress_motion as pm
+
+    pm.reset_progress_observations()
+    yield
+    pm.reset_progress_observations()
 
 
 class FakeAdapter:
@@ -345,24 +356,26 @@ class TestWarmupGrace:
         assert flag is not None
         assert flag.rule == "tool_not_heating"
 
-    def test_stall_timer_holds_while_warming_then_releases(self):
-        wd, adapter, clock, _ = _make_watchdog()
+    def test_a_warming_heater_never_becomes_a_stall_verdict(self):
+        """Heating is not a fault and a stall is not a red flag: a print
+        held at the same layer through a slow warmup and beyond raises
+        nothing red, and emergency_stop is never called."""
+        wd, adapter, clock, anomalies = _make_watchdog()
         adapter.state.tool_temp_target = 220.0
         adapter.state.tool_temp_actual = 25.0
         wd.step()
 
-        clock.advance(DEFAULT_STALL_SECONDS + 30.0)
+        clock.advance(STALL_S)
         adapter.state.tool_temp_actual = 100.0  # still climbing
-        assert wd.step() is None  # no stall while warming
+        assert wd.step() is None
 
-        adapter.state.tool_temp_actual = 220.0  # arrived; the hold ends
+        adapter.state.tool_temp_actual = 220.0  # arrived
         wd.step()
-        clock.advance(DEFAULT_STALL_SECONDS + 1.0)
+        clock.advance(STALL_S)
 
-        flag = wd.step()
-
-        assert flag is not None
-        assert flag.rule == "stalled_layer"
+        assert wd.step() is None
+        assert adapter.emergency_stops == 0
+        assert [f.rule for f in anomalies if f.kind == "red"] == []
 
     def test_missing_reading_does_not_stop_the_check(self):
         wd, adapter, _, _ = _make_watchdog()
@@ -517,51 +530,98 @@ class TestWarmupGrace:
 # --------------------------------------------------------------------------
 
 
-class TestStalledLayer:
-    def test_stalls_trigger_after_threshold_expires(self):
-        wd, adapter, clock, _ = _make_watchdog()
-        # First tick establishes baseline progress.
-        wd.step()
-        assert wd.anomaly_triggered is False
+class TestStalledPrintIsReportedNeverStopped:
+    """A print that stops moving is a yellow flag from the shared detector.
 
-        # Hold the printer at the same layer; advance past stall threshold.
-        clock.advance(DEFAULT_STALL_SECONDS + 1.0)
-        flag = wd.step()
+    It used to be a red flag at 90 seconds: nothing measured supported the
+    number, a Bambu's whole-percent counter alone freezes longer than that
+    on any print over 2.5 hours, a clog does not freeze the counters at all,
+    and the idempotent trip switched off every real rule for the rest of
+    the print.  These tests fail on that code.
+    """
 
-        assert flag is not None
-        assert flag.rule == "stalled_layer"
-        assert adapter.emergency_stops == 1
-        assert flag.context["stalled_seconds"] >= DEFAULT_STALL_SECONDS
-
-    def test_layer_advance_resets_stall_timer(self):
-        wd, adapter, clock, _ = _make_watchdog()
+    def test_frozen_counters_are_a_yellow_flag_once_and_never_an_estop(self):
+        wd, adapter, clock, anomalies = _make_watchdog()
         wd.step()  # baseline
-
-        # Advance almost to the stall threshold, but bump the layer.
-        clock.advance(DEFAULT_STALL_SECONDS - 1.0)
-        adapter.job.current_layer += 1
-        adapter.job.completion = 20.0
+        clock.advance(STALL_S)
+        assert wd.step() is None  # no RED flag
+        clock.advance(60.0)
         assert wd.step() is None
 
-        # Now advance past the original threshold — should NOT trip
-        # because the counter reset on the layer bump.
-        clock.advance(DEFAULT_STALL_SECONDS - 1.0)
-        flag = wd.step()
+        assert adapter.emergency_stops == 0
+        assert wd.anomaly_triggered is False
+        stalls = [f for f in anomalies if f.rule == "stalled"]
+        assert len(stalls) == 1
+        assert stalls[0].kind == "yellow"
+        assert "has not actually moved" in stalls[0].message
+        assert stalls[0].context["frozen_for_seconds"] >= 15 * 60
 
-        assert flag is None
+    def test_ninety_seconds_is_not_a_stall(self):
+        """The retired trip point, on the print that would have died there."""
+        wd, adapter, clock, anomalies = _make_watchdog()
+        wd.step()
+        clock.advance(91.0)
+        assert wd.step() is None
+        assert adapter.emergency_stops == 0
+        assert [f for f in anomalies if f.rule == "stalled"] == []
+
+    def test_a_moving_countdown_holds_the_flag_quiet(self):
+        """A huge first layer: counters frozen, but the printer's own ETA is
+        ticking down.  The detector's guard keeps the watchdog silent."""
+        wd, adapter, clock, anomalies = _make_watchdog()
+        adapter.job.print_time_left_seconds = 3600
+        wd.step()
+        clock.advance(STALL_S)
+        adapter.job.print_time_left_seconds = 3000
+        assert wd.step() is None
+        assert [f for f in anomalies if f.rule == "stalled"] == []
+
+    def test_layer_advance_keeps_it_quiet(self):
+        wd, adapter, clock, anomalies = _make_watchdog()
+        wd.step()
+        clock.advance(STALL_S - 120.0)  # inside the threshold
+        adapter.job.current_layer += 1
+        assert wd.step() is None
+        clock.advance(STALL_S - 120.0)  # inside it again, measured from the move
+        assert wd.step() is None
+        assert [f for f in anomalies if f.rule == "stalled"] == []
         assert adapter.emergency_stops == 0
 
     def test_no_stall_check_when_not_printing(self):
-        wd, adapter, clock, _ = _make_watchdog()
+        wd, adapter, clock, anomalies = _make_watchdog()
         adapter.state.state = "paused"
         wd.step()
+        clock.advance(STALL_S * 5)
+        assert wd.step() is None
+        assert [f for f in anomalies if f.rule == "stalled"] == []
 
-        clock.advance(DEFAULT_STALL_SECONDS * 5)
+    def test_a_stall_no_longer_disarms_the_real_rules(self):
+        """The failure that made the old rule dangerous twice over: after a
+        (false) stall trip the watchdog slept, so a real fault later in the
+        print was never acted on.  Now a stall is reported and the watchdog
+        keeps guarding."""
+        wd, adapter, clock, anomalies = _make_watchdog()
+        wd.step()
+        clock.advance(STALL_S)
+        wd.step()
+        assert [f for f in anomalies if f.rule == "stalled"]
+
+        adapter.state.print_error = 50348044  # the machine's own fault
         flag = wd.step()
 
-        assert flag is None
-        assert adapter.emergency_stops == 0
+        assert flag is not None and flag.rule == "print_error"
+        assert adapter.emergency_stops == 1
 
+    def test_a_second_stall_on_the_same_print_is_reported_again(self):
+        wd, adapter, clock, anomalies = _make_watchdog()
+        wd.step()
+        clock.advance(STALL_S)
+        wd.step()
+        adapter.job.current_layer += 5  # moving again
+        wd.step()
+        clock.advance(STALL_S)
+        wd.step()
+        assert len([f for f in anomalies if f.rule == "stalled"]) == 2
 
 # --------------------------------------------------------------------------
 # Yellow flags — do NOT trigger e-stop

@@ -86,11 +86,9 @@ class EventType(enum.Enum):
     JOB_COMPLETED = "job.completed"
     JOB_FAILED = "job.failed"
     JOB_CANCELLED = "job.cancelled"
-    # A watched print that stopped moving, or stopped answering, while the
-    # queue still holds it open.  Published once per episode by the
-    # scheduler; the job stays PRINTING until the printer ends it or a
-    # person cancels it.
-    JOB_STALLED = "job.stalled"
+    # The queue is holding a job open on a printer it has had no trustworthy
+    # reading from.  Published once per episode by the scheduler; the job
+    # stays PRINTING until the printer ends it or a person cancels it.
     JOB_NO_CONTACT = "job.no_contact"
 
     # Printer state
@@ -104,6 +102,14 @@ class EventType(enum.Enum):
     PRINT_PAUSED = "print.paused"
     PRINT_RESUMED = "print.resumed"
     PRINT_COMPLETED = "print.completed"
+    # A printer that says PRINTING with current telemetry has not actually
+    # moved past the measured threshold (kiln.printers.progress_motion).
+    # Published ONCE per episode by the detector itself, whoever was looking
+    # -- the scheduler, the print watchdog or a status read -- and cleared
+    # when a progress axis moves again.  Reported, never acted on: a stall
+    # needs a person, not an emergency stop.
+    PRINT_STALLED = "print.stalled"
+    PRINT_STALL_CLEARED = "print.stall_cleared"
     PRINT_FAILED = "print.failed"
     PRINT_CANCELLED = "print.cancelled"
     PRINT_PROGRESS = "print.progress"

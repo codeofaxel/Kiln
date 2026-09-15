@@ -39,9 +39,9 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
     from kiln.print_watchdog import (
         DEFAULT_BED_DROP_C,
         DEFAULT_POLL_INTERVAL,
-        DEFAULT_STALL_SECONDS,
         DEFAULT_TOOL_DROP_C,
     )
+    from kiln.printers.progress_motion import stall_threshold_seconds
 
     health = MonitorPolicy()
     return {
@@ -79,9 +79,13 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
                 "bed_drop": f"the bed dropping {DEFAULT_BED_DROP_C:.0f} °C below its target",
                 "tool_warmup_timeout": "the hotend never reaching its target",
                 "bed_warmup_timeout": "the bed never reaching its target",
-                "stalled_layer": f"no progress for {DEFAULT_STALL_SECONDS:.0f} s while printing",
             },
             "yellow": {
+                "stalled": (
+                    f"no progress for {stall_threshold_seconds() / 60:.0f} minutes while "
+                    f"printing, judged against the printer's own countdown -- reported "
+                    f"to you, never acted on"
+                ),
                 "wifi_weak": "a weak Wi-Fi signal",
                 "chamber_fan_stalled": "a stalled chamber fan",
                 "tool_warmup_slow": "the hotend warming slowly",
@@ -166,6 +170,12 @@ def _camera_state(adapter: Any) -> dict[str, Any]:
     return {"readable": readable, "source": "printer" if readable and own else None}
 
 
+def _stall_threshold_seconds() -> float:
+    from kiln.printers.progress_motion import stall_threshold_seconds
+
+    return stall_threshold_seconds()
+
+
 def _watchdog_state(printer_name: str) -> dict[str, Any]:
     from kiln import server as _srv
 
@@ -182,7 +192,8 @@ def _watchdog_state(printer_name: str) -> dict[str, Any]:
         "attached": True,
         "running": bool(status.get("running")),
         "poll_seconds": getattr(watchdog, "_poll_interval", None),
-        "stall_seconds": getattr(watchdog, "_stall_seconds", None),
+        # The stall rule's number is the shared detector's, not the watchdog's.
+        "stall_seconds": _stall_threshold_seconds(),
         "red_flags": len(status.get("red_flags") or []),
         "yellow_flags": len(status.get("yellow_flags") or []),
     }

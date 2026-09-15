@@ -25,13 +25,25 @@ Red flags (any triggers e-stop):
 * Tool temperature drops > 30°C below setpoint, after it first reaches it
 * Bed temperature drops > 15°C below setpoint, after it first reaches it
 * A heater stops climbing while still below its setpoint
-* No layer progress for > 90 seconds while printing and not heating
 * Printer reports any configured HMS blocklist code
 
-Yellow flags (logged, no e-stop):
+Yellow flags (logged and passed to ``on_anomaly``, no e-stop):
 
 * WiFi signal weaker than -80 dBm
 * Chamber fan stalled (speed reported as 0 while printing)
+* The print has stopped moving -- judged by
+  :mod:`kiln.printers.progress_motion`, the one stall detector every
+  surface reads (measured threshold, held quiet while the printer's own
+  countdown still moves)
+
+A stall is deliberately NOT a red flag.  It used to be: 90 seconds with no
+layer or percent change sent an emergency stop.  Nothing measured supported
+that number; the counters it watched freeze on every long print (a Bambu
+reports whole percents, so past 2.5 hours one percent alone takes longer
+than that) and do NOT freeze on a clog, where the firmware keeps executing
+moves.  Worse, a trip is idempotent, so a false stall trip switched off the
+thermal and fault rules for the rest of the print.  The machine's own
+faults and its temperatures stop it; a stall is told to a person.
 """
 
 from __future__ import annotations
@@ -60,8 +72,6 @@ DEFAULT_TOOL_DROP_C: float = 30.0
 #: more thermal mass so the threshold is tighter.
 DEFAULT_BED_DROP_C: float = 15.0
 
-#: Seconds without layer or completion progress before we trip.
-DEFAULT_STALL_SECONDS: float = 90.0
 
 #: How often the watchdog polls the printer, in seconds.
 DEFAULT_POLL_INTERVAL: float = 2.5
@@ -91,8 +101,9 @@ DEFAULT_NO_RISE_TIMEOUT_S: float = 120.0
 #:
 #: "Still climbing" alone leaves one state with no detector: a heater that
 #: keeps rising, arbitrarily slowly, toward a target it never arrives at.
-#: A rise of 1°C per 119s satisfies the rule above forever, and the layer
-#: stall timer is paused while warming, so nothing reports it.
+#: A rise of 1°C per 119s satisfies the rule above forever, and the stall
+#: detector sees a machine that is not yet in a state expected to move, so
+#: nothing reports it.
 #:
 #: This ends the AMBIGUITY rather than delivering a verdict.  "Below
 #: setpoint early in a print" is genuinely ambiguous; thirty minutes in it
@@ -341,7 +352,6 @@ class PrintWatchdog:
             ``state.hms_code`` and ``state.print_error`` (formatted hex).
         tool_drop_c: Override for tool-temp drop threshold.
         bed_drop_c: Override for bed-temp drop threshold.
-        stall_seconds: Override for layer-stall timeout.
         no_rise_timeout_s: Override for how long a warming heater may
             show no temperature rise before the gap counts as a failure.
         warmup_timeout_s: Override for how long a heater may warm toward a
@@ -361,7 +371,6 @@ class PrintWatchdog:
         *,
         tool_drop_c: float = DEFAULT_TOOL_DROP_C,
         bed_drop_c: float = DEFAULT_BED_DROP_C,
-        stall_seconds: float = DEFAULT_STALL_SECONDS,
         no_rise_timeout_s: float = DEFAULT_NO_RISE_TIMEOUT_S,
         warmup_timeout_s: float = DEFAULT_WARMUP_TIMEOUT_S,
         time_fn: Callable[[], float] = time.monotonic,
@@ -372,7 +381,6 @@ class PrintWatchdog:
         self._hms_blocklist = {c.strip().upper() for c in (hms_blocklist or []) if c}
         self._tool_drop_c = float(tool_drop_c)
         self._bed_drop_c = float(bed_drop_c)
-        self._stall_seconds = float(stall_seconds)
         self._no_rise_timeout_s = float(no_rise_timeout_s)
         self._time = time_fn
 
@@ -383,9 +391,6 @@ class PrintWatchdog:
 
         # Observed state.
         self.anomaly_triggered: bool = False
-        self._last_completion: float | None = None
-        self._last_layer: int | None = None
-        self._last_progress_time: float | None = None
         self._last_state: Any = None
         self._last_job: Any = None
         self._flags: list[Flag] = []
@@ -430,11 +435,10 @@ class PrintWatchdog:
         self._thread.start()
         logger.info(
             "PrintWatchdog started (poll=%.1fs, tool_drop=%.0f°C, "
-            "bed_drop=%.0f°C, stall=%.0fs, hms_blocklist=%d)",
+            "bed_drop=%.0f°C, hms_blocklist=%d)",
             self._poll_interval,
             self._tool_drop_c,
             self._bed_drop_c,
-            self._stall_seconds,
             len(self._hms_blocklist),
         )
 
@@ -456,9 +460,6 @@ class PrintWatchdog:
             return {
                 "running": self._thread is not None and self._thread.is_alive(),
                 "anomaly_triggered": self.anomaly_triggered,
-                "last_completion": self._last_completion,
-                "last_layer": self._last_layer,
-                "last_progress_time": self._last_progress_time,
                 "flags": [f.to_dict() for f in self._flags],
                 "red_flags": [f.to_dict() for f in self._flags if f.kind == "red"],
                 "yellow_flags": [f.to_dict() for f in self._flags if f.kind == "yellow"],
@@ -513,7 +514,7 @@ class PrintWatchdog:
         # (and thousands of recorded flags) for one fact the caller already
         # knows.  The condition is reported when it appears; it is not
         # re-reported until the next print.
-        for yellow in self._evaluate_yellow_flags(state):
+        for yellow in self._evaluate_yellow_flags(state, job):
             if yellow.rule in self._yellow_seen:
                 continue
             self._yellow_seen.add(yellow.rule)
@@ -580,11 +581,6 @@ class PrintWatchdog:
 
         # Only run the remaining checks if the printer is actively printing.
         if not _is_printing(state):
-            # Reset progress tracking so a stall timer doesn't accumulate
-            # while paused / idle.
-            self._last_completion = None
-            self._last_layer = None
-            self._last_progress_time = now
             # A new print gets to hear about a condition again — "the WiFi was
             # weak on your last print" is not a useful thing to withhold.
             self._yellow_seen.clear()
@@ -598,7 +594,6 @@ class PrintWatchdog:
         # immediately; a warning is recorded and passed on without stopping
         # anything, which it can only do because reporting and stopping are
         # separate acts.
-        warming = False
         for watch, actual_key, target_key in (
             (self._tool, "tool_temp_actual", "tool_temp_target"),
             (self._bed, "bed_temp_actual", "bed_temp_target"),
@@ -612,38 +607,38 @@ class PrintWatchdog:
                 self._yellow_seen.add(verdict.warning.rule)
                 logger.warning("PrintWatchdog yellow: %s", verdict.warning.message)
                 self._notify(verdict.warning)
-            warming = warming or verdict.warming
-
-        # --- Layer / completion stall --------------------------------
-        if warming:
-            # Heating blocks the G-code stream, so no progress is expected.
-            self._last_progress_time = now
-        progressed = self._update_progress(job, now)
-        if not progressed and self._last_progress_time is not None:
-            stalled = now - self._last_progress_time
-            if stalled >= self._stall_seconds:
-                return Flag(
-                    kind="red",
-                    rule="stalled_layer",
-                    message=(
-                        f"No layer/completion progress for {stalled:.0f}s "
-                        f"while state=printing (last layer={self._last_layer}, "
-                        f"last completion={self._last_completion})"
-                    ),
-                    timestamp=now,
-                    context={
-                        "stalled_seconds": float(stalled),
-                        "last_layer": self._last_layer,
-                        "last_completion": self._last_completion,
-                    },
-                )
 
         return None
 
-    def _evaluate_yellow_flags(self, state: Any) -> list[Flag]:
+    def _evaluate_yellow_flags(self, state: Any, job: Any = None) -> list[Flag]:
         """Return all yellow flags firing this tick."""
         now = self._time()
         flags: list[Flag] = []
+
+        # --- Stopped moving ------------------------------------------
+        # The shared detector's verdict; this watchdog keeps no progress
+        # ledger of its own.  Reported once per stall episode: the
+        # ``_yellow_seen`` mark is dropped the moment a primary axis moves,
+        # so a second stall on the same print is reported again.
+        from kiln.printers.progress_motion import Motion, observe_progress
+
+        verdict = observe_progress(self._adapter, state, job, now=now)
+        if verdict.stalled:
+            flags.append(
+                Flag(
+                    kind="yellow",
+                    rule="stalled",
+                    message=verdict.note() or "The print has stopped moving.",
+                    timestamp=now,
+                    context={
+                        "frozen_for_seconds": float(verdict.frozen_for_seconds or 0.0),
+                        "layer": verdict.layer,
+                        "percent": verdict.percent,
+                    },
+                )
+            )
+        elif verdict.motion is Motion.MOVING:
+            self._yellow_seen.discard("stalled")
 
         # --- WiFi signal ----------------------------------------------
         wifi = _getattr(state, "wifi_signal")
@@ -677,28 +672,6 @@ class PrintWatchdog:
                 )
 
         return flags
-
-    def _update_progress(self, job: Any, now: float) -> bool:
-        """Record progress; return True if layer or completion advanced."""
-        if job is None:
-            return False
-
-        layer = _getattr(job, "current_layer")
-        completion = _getattr(job, "completion")
-
-        advanced = False
-        if layer is not None and layer != self._last_layer:
-            self._last_layer = int(layer)
-            advanced = True
-        if completion is not None and (
-            self._last_completion is None or completion > self._last_completion
-        ):
-            self._last_completion = float(completion)
-            advanced = True
-
-        if advanced or self._last_progress_time is None:
-            self._last_progress_time = now
-        return advanced
 
     def _notify(self, flag: Flag) -> None:
         """Record a flag and hand it to the caller.  Stops nothing.

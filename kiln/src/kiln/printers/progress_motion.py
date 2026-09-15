@@ -280,6 +280,12 @@ class MotionVerdict:
 _lock = threading.Lock()
 _anchors: dict[str, ProgressSample] = {}
 _latest: dict[str, ProgressSample] = {}
+#: printer keys currently inside a stall EPISODE -- announced once when the
+#: verdict first turns stalled, cleared when a primary axis moves again.
+#: Kept here, in the detector, so the announcement does not depend on who
+#: happened to be looking: the scheduler, the watchdog and a status read
+#: all feed the same observation, and none of them announces on its own.
+_stalled_keys: set[str] = set()
 #: printer name → (normalised job label, ``time.monotonic()`` at start).
 _job_starts: dict[str, tuple[str | None, float]] = {}
 #: printer key → ``time.monotonic()`` of the last status read.
@@ -298,12 +304,14 @@ def reset_progress_observations(adapter: Any = None) -> None:
             _latest.clear()
             _job_starts.clear()
             _last_looks.clear()
+            _stalled_keys.clear()
         else:
             key = observation_key(adapter)
             _anchors.pop(key, None)
             _latest.pop(key, None)
             _job_starts.pop(key, None)
             _last_looks.pop(key, None)
+            _stalled_keys.discard(key)
 
 
 def _round_percent(value: Any) -> float | None:
@@ -489,10 +497,77 @@ def observe_progress(
                 "job changed", "state changed",
             ):
                 _anchors[key] = current
-            return verdict
+            edge = _stall_edge(key, verdict)
+        if edge is not None:
+            _announce_stall_edge(edge, adapter, verdict, current)
+        return verdict
     except Exception:  # noqa: BLE001 — a detector must never break its caller
         logger.debug("progress-motion observation failed", exc_info=True)
         return MotionVerdict(Motion.UNKNOWN, None, "observation failed")
+
+
+def _stall_edge(key: str, verdict: MotionVerdict) -> str | None:
+    """Which edge of a stall episode this verdict crosses, if any.
+
+    Caller holds the lock.  ``"stalled"`` the first time a printer's verdict
+    turns stalled; ``"cleared"`` when a primary axis moves again.  A job
+    change or a state change (the print ended, or was paused) ends the
+    episode silently: the machine is not "moving again", it is doing
+    something else, and the next print starts with a clean slate.
+    """
+    if verdict.stalled:
+        if key in _stalled_keys:
+            return None
+        _stalled_keys.add(key)
+        return "stalled"
+    if key not in _stalled_keys:
+        return None
+    if verdict.motion is Motion.MOVING:
+        _stalled_keys.discard(key)
+        return "cleared"
+    if verdict.reason in ("job changed", "state changed"):
+        _stalled_keys.discard(key)
+    return None
+
+
+def _announce_stall_edge(edge: str, adapter: Any, verdict: MotionVerdict, sample: ProgressSample) -> None:
+    """Say it once, on the event bus and in the log.  NEVER RAISES.
+
+    Called outside the lock.  The bus is the server's, reached the same way
+    the adapters reach it for a fault's leading edge; with no server (a bare
+    library import, a unit test) the log line is the announcement.
+    """
+    try:
+        from kiln.printers.base import outcome_printer_name
+
+        printer_name = outcome_printer_name(adapter)
+    except Exception:  # noqa: BLE001
+        printer_name = str(getattr(adapter, "name", None) or "printer")
+    data: dict[str, Any] = {
+        "printer_name": printer_name,
+        "job": sample.job_label,
+        "layer": verdict.layer,
+        "percent": verdict.percent,
+        "frozen_for_seconds": round(verdict.frozen_for_seconds or 0.0),
+    }
+    if edge == "stalled":
+        data["note"] = verdict.note()
+        logger.warning("%s: %s", printer_name, data["note"])
+    else:
+        logger.info("%s is moving again (layer %s, %s%%)", printer_name, verdict.layer, verdict.percent)
+    try:
+        import kiln.server as _srv
+        from kiln.events import Event, EventType
+
+        _srv._get_event_bus().publish(
+            Event(
+                type=EventType.PRINT_STALLED if edge == "stalled" else EventType.PRINT_STALL_CLEARED,
+                data=data,
+                source="progress_motion",
+            )
+        )
+    except Exception:  # noqa: BLE001 — an announcement must never break the detector
+        logger.debug("stall edge not published", exc_info=True)
 
 
 def progress_stall_note(

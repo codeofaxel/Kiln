@@ -275,6 +275,11 @@ already parsed; staying quiet about it would be the same dishonesty as the
 the fault's leading edge raises one `printer.error` event -- because a job
 started at the printer's own touchscreen is the operator's to stop.  Only the
 print watchdog stops a machine, and it stays attached to prints Kiln started.
+It stops a machine only for what the machine itself proves: a fault code it
+reports, or a temperature that violates physics.  A print that has stopped
+moving is reported -- one `print.stalled` event, the same sentence on every
+status surface -- and never stopped.  A stall needs a person, not an
+emergency halt.
 
 ---
 

@@ -1934,6 +1934,18 @@ class TestWatchedPrintIsNeverGivenUp:
     def _events(event_bus, kind, job_id):
         return [e for e in event_bus.recent_events(kind) if e.data.get("job_id") == job_id]
 
+    @staticmethod
+    def _listen(kind):
+        """Stall edges are announced by the detector on the SERVER bus,
+        whoever was looking -- not by the scheduler on its own.  Counted by
+        subscription: the bus history is bounded, so slicing it lies once a
+        long run fills it."""
+        import kiln.server as _srv
+
+        seen: list = []
+        _srv._get_event_bus().subscribe(kind, seen.append)
+        return seen
+
     def _still_printing(self, queue, scheduler, event_bus, job_id):
         assert queue.get_job(job_id).status == JobStatus.PRINTING
         assert job_id in scheduler.active_jobs
@@ -1961,15 +1973,14 @@ class TestWatchedPrintIsNeverGivenUp:
 
     def test_stalled_print_is_announced_once_and_never_ended(self, queue, registry, event_bus):
         """Layer and percent frozen while the printer says PRINTING for a
-        day: one JOB_STALLED event, a note on the job, and the job is still
-        open -- nothing failed, nothing re-sent."""
+        day: one PRINT_STALLED event from the detector, a note on the job,
+        and the job is still open -- nothing failed, nothing re-sent."""
         scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        stalled = self._listen(EventType.PRINT_STALLED)
         assert _run_silent(scheduler, clock, hours=24) == []
 
         self._still_printing(queue, scheduler, event_bus, job_id)
-        stalled = self._events(event_bus, EventType.JOB_STALLED, job_id)
         assert len(stalled) == 1
-        assert stalled[0].data["printer_name"] == "printer-1"
         assert "has not actually moved" in stalled[0].data["note"]
         note = scheduler.watch_note(job_id)
         assert note["state"] == "stalled"
@@ -1982,6 +1993,8 @@ class TestWatchedPrintIsNeverGivenUp:
 
     def test_stall_that_resumes_clears_the_alert(self, queue, registry, event_bus):
         scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        stalled = self._listen(EventType.PRINT_STALLED)
+        cleared = self._listen(EventType.PRINT_STALL_CLEARED)
         _run_silent(scheduler, clock, hours=1)
         assert scheduler.watch_note(job_id)["state"] == "stalled"
 
@@ -1989,14 +2002,16 @@ class TestWatchedPrintIsNeverGivenUp:
         self._still_printing(queue, scheduler, event_bus, job_id)
         assert scheduler.watch_note(job_id)["state"] == "moving"
         assert scheduler.watch_alerts() == []
-        assert len(self._events(event_bus, EventType.JOB_STALLED, job_id)) == 1
+        assert len(stalled) == 1
+        assert len(cleared) == 1
 
     def test_stall_announced_again_only_after_it_cleared(self, queue, registry, event_bus):
         scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
+        stalled = self._listen(EventType.PRINT_STALLED)
         _run_silent(scheduler, clock, hours=1)
         self._advance_moving(scheduler, adapter, clock, hours=1)
         _run_silent(scheduler, clock, hours=1)
-        assert len(self._events(event_bus, EventType.JOB_STALLED, job_id)) == 2
+        assert len(stalled) == 2
 
     def test_unreachable_printer_is_announced_and_the_job_stays_open(
         self, queue, registry, event_bus,
@@ -2099,7 +2114,6 @@ class TestWatchedPrintIsNeverGivenUp:
         assert _run_silent(scheduler, clock, hours=24, step_minutes=60) == []
         self._still_printing(queue, scheduler, event_bus, job_id)
         assert scheduler.watch_alerts() == []
-        assert self._events(event_bus, EventType.JOB_STALLED, job_id) == []
         assert self._events(event_bus, EventType.JOB_NO_CONTACT, job_id) == []
 
     def test_watch_note_is_none_for_a_job_not_being_watched(self, queue, registry, event_bus):
