@@ -9,12 +9,12 @@ from urllib.parse import urlparse, urlunparse
 import requests
 
 from kiln.printers.base import (
-    NozzleSetting,
     FilamentOpPlan,
     FilamentOpResult,
     FirmwareStatus,
     FirmwareUpdateResult,
     JobProgress,
+    NozzleSetting,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,

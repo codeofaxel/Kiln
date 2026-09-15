@@ -38,13 +38,13 @@ from typing import Any, ClassVar
 import paho.mqtt.client as mqtt
 
 from kiln.printers.base import (
-    NozzleSetting,
     DEFAULT_PURGE_LENGTH_MM,
     STALE_STATE_WARN_AGE,
     FilamentOpPlan,
     FilamentOpResult,
     JobProgress,
     JobResult,
+    NozzleSetting,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,

@@ -111,6 +111,7 @@ __all__ = [
     "MoonrakerAdapter",
     "Motion",
     "MotionVerdict",
+    "NozzleSetting",
     "OctoPrintAdapter",
     "PrinterAdapter",
     "PrinterCapabilities",

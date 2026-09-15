@@ -23,7 +23,6 @@ from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
 from kiln.printers.base import (
-    NozzleSetting,
     DEFAULT_LOAD_LENGTH_MM,
     DEFAULT_PURGE_LENGTH_MM,
     DEFAULT_UNLOAD_LENGTH_MM,
@@ -33,6 +32,7 @@ from kiln.printers.base import (
     FirmwareStatus,
     FirmwareUpdateResult,
     JobProgress,
+    NozzleSetting,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,
