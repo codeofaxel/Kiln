@@ -101,6 +101,42 @@ def consult_capacity(
     )
 
 
+def consult_clumping_detection(
+    *,
+    printer_model: str | None,
+    reading: dict[str, Any] | None,
+    file: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """What a nozzle-clumping-detection switch reading MEANS on this model.
+
+    Returns the block from
+    ``kiln_pro.device_intelligence.detection_intelligence.clumping_switch_block``
+    -- the composed statement, ``warnings`` (a part placed in the probe's
+    detection area, a slicing mode the probe does not run in, a file with
+    no tower behind an ON switch), the detection area and the defeating
+    modes -- or ``None`` without kiln-pro.  *reading* is the
+    ``nozzle_clumping_detection`` status block public Kiln reads off the
+    machine; *file* is :func:`kiln.nozzle_clumping_detection.file_facts`.
+    """
+    try:
+        from kiln_pro.device_intelligence.detection_intelligence import (
+            clumping_switch_block,
+        )
+    except ImportError:
+        return None
+    facts = file or {}
+    try:
+        return clumping_switch_block(
+            printer_model,
+            reading,
+            footprint=facts.get("footprint"),
+            print_mode=facts.get("print_mode"),
+            prime_tower_in_file=facts.get("prime_tower_in_file"),
+        )
+    except Exception:  # noqa: BLE001 -- a sentence beside the check, never the check
+        return None
+
+
 def consult_abrasive_escalation(
     filament_material: str,
     printer_id: str,

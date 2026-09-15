@@ -4373,6 +4373,17 @@ def printer_status(
         }
         if detail == "full":
             response["capabilities"] = adapter.capabilities.to_dict()
+            # The printer's own nozzle-clumping-detection switch, as a plain
+            # fact beside the state it belongs to.  Full detail only: it is
+            # a cache read, but a poller does not need the sentence every
+            # few seconds, and an ON reading's advice belongs where a person
+            # reads, not where a loop does.  Absent when the backend cannot
+            # say -- never guessed.
+            from kiln.nozzle_clumping_detection import read_switch, status_block
+
+            _switch = read_switch(adapter)
+            if _switch is not None:
+                response["nozzle_clumping_detection"] = status_block(_switch)
         # What Kiln itself is watching on this machine, right now — the
         # watchdog attached at print start, an opt-in health session, a
         # background watch, a readable camera.  Live facts from this
@@ -6336,6 +6347,12 @@ def start_print(
             positives (thin first-layer geometry, certain grip/case models).
             Disables the A1/A1-mini eddy-current clump probe (first after
             the layer-3 walls, then once per ~8 g of filament; A1 series only).
+            Kiln never turns the probe ON: with the default nothing is sent
+            and the printer's own screen switch governs -- ``printer_status``
+            and ``preflight_check`` read that switch and, when it is on,
+            repeat the printer's own warning that the probe leaks onto the
+            model unless the slice carries a purge tower.  Whether ``False``
+            overrides that switch for the print has not been verified.
         bed_type: Bed surface type (Bambu only).  Default ``"auto"``.
         plate_number: Plate index in multi-plate 3MF files (Bambu only).
             Default ``1``.
@@ -8902,6 +8919,50 @@ def preflight_check(
                     errors.append(_msg)
         except Exception as exc:
             logger.debug("Multi-material check skipped: %s", exc)
+
+        # -- Nozzle clumping detection (advisory) --------------------------
+        # The printer's own switch, read off the machine.  ON carries the
+        # printer's own warning -- the probe leaks onto the model unless the
+        # slice has a purge tower -- and what to do about it; OFF says the
+        # probe will not run; a model the read is unverified on says so and
+        # is never reported as off.  Advisory at every state: the switch is
+        # the user's choice and the print is not unsafe either way.
+        # With a local file and a switch that is not OFF, the file is read
+        # too: a tower or not, the mode, where the part sits -- and kiln-pro,
+        # when installed, judges those against the model's detection area
+        # and the modes the probe does not run in.  An OFF switch reads no
+        # file: there is nothing to warn about.
+        try:
+            from kiln import _pro_nozzle_bridge
+            from kiln.nozzle_clumping_detection import (
+                file_facts,
+                preflight_entry_for_file,
+                read_switch,
+                status_block,
+            )
+
+            _switch = read_switch(adapter)
+            if _switch is not None:
+                _facts = (
+                    file_facts(file_path)
+                    if file_path and _switch.enabled is not False
+                    else None
+                )
+                _entry = preflight_entry_for_file(_switch, _facts)
+                if _switch.enabled is not False:
+                    _judged = _pro_nozzle_bridge.consult_clumping_detection(
+                        printer_model=_pf_model,
+                        reading=status_block(_switch),
+                        file=_facts,
+                    )
+                    if isinstance(_judged, dict):
+                        _entry["detail"] = _judged
+                        _entry["warnings"] = list(_judged.get("warnings") or [])
+                        if _entry["warnings"]:
+                            _entry["message"] += " " + " ".join(_entry["warnings"])
+                checks.append(_entry)
+        except Exception as exc:  # noqa: BLE001 -- a sentence beside the checks, never a check
+            logger.debug("Nozzle clumping detection check skipped: %s", exc)
 
         # -- Material mismatch check (optional) ----------------------------
         _strict_material = os.environ.get("KILN_STRICT_MATERIAL_CHECK", "true").lower() in ("1", "true", "yes")

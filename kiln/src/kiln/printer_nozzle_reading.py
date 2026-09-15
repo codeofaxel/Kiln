@@ -82,7 +82,12 @@ def observe_printer_nozzle(printer_id: str) -> dict[str, Any] | None:
     machine used, or ``None``), ``nozzle_diameter_mm``, ``read_from``,
     ``firmware_version``, ``state_age_seconds``, ``stale_after_seconds``,
     ``read_at`` (when the machine said it), and ``value_kind``
-    (``"configured"``: a setting, never a measurement).
+    (``"configured"``: a setting, never a measurement).  When the backend
+    can also read the machine's own nozzle-clumping-detection switch
+    (:mod:`kiln.nozzle_clumping_detection`), ``clumping_detection`` carries
+    it: ``enabled`` (``True`` / ``False`` / ``None`` for a model the read
+    is unverified on, with ``unverified_reason``), ``read_from``, and the
+    same age and budget stamps.
     """
     try:
         resolved = resolve_machine(printer_id)
@@ -102,7 +107,7 @@ def observe_printer_nozzle(printer_id: str) -> dict[str, Any] | None:
         setting = _with_deadline(read, LIVE_READ_DEADLINE_S)
         if setting is None or getattr(setting, "is_empty", lambda: True)():
             return None
-        return {
+        observation = {
             "machine": registered_name,
             "fingerprint": fingerprint_of(adapter),
             "family": str(getattr(adapter, "name", "") or "").casefold(),
@@ -116,6 +121,18 @@ def observe_printer_nozzle(printer_id: str) -> dict[str, Any] | None:
             "read_at": _said_at(setting.age_seconds),
             "value_kind": "configured",
         }
+        # The printer's own nozzle-clumping-detection switch is one more fact
+        # off the same report, so it rides the same observation rather than
+        # a second wire: the hosted doors that take a reading get it for
+        # free, and a backend that cannot say sends nothing.
+        from kiln.nozzle_clumping_detection import read_switch, status_block
+
+        switch = _with_deadline(lambda: read_switch(adapter), LIVE_READ_DEADLINE_S)
+        if switch is not None:
+            block = status_block(switch)
+            block.pop("statement", None)  # the sentence is composed where the model is known
+            observation["clumping_detection"] = block
+        return observation
     except Exception:  # noqa: BLE001 -- a read that fails is a read that did not happen
         logger.debug("printer_nozzle_reading: read unavailable", exc_info=True)
         return None

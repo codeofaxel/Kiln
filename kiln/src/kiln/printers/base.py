@@ -656,6 +656,55 @@ class NozzleSetting:
         return self.material is None and self.diameter_mm is None
 
 
+@dataclass(frozen=True)
+class NozzleClumpingDetection:
+    """Whether a printer's own "nozzle clumping detection" switch is on, read
+    off the machine.
+
+    Some printers can feel for a blob on the nozzle by driving the toolhead
+    off the bed and probing.  The probe is a screen switch on the machine,
+    and it has a cost the printer's own screen states when it is turned on:
+    the nozzle leaks a little during each probe, and that ooze lands on the
+    model unless the slice carries a purge (prime) tower to absorb it.  So
+    Kiln reads the switch and says so wherever a user meets printer state.
+    The detector is a convenience the printer offers, not a fail-safe, and
+    nothing built on this reading may present it as one.
+
+    :param enabled: ``True`` / ``False`` when the backend has DECODED the
+        switch for this machine; ``None`` when the machine reports the
+        channel but the decoding has not been verified for this model.  A
+        ``None`` is "unknown", never "off": a reading nobody could verify
+        must not be served as a verdict.
+    :param source: Which of the backend's channels it was read from.
+    :param age_seconds: How long ago the machine stated this, when the
+        backend answers from a cache; ``None`` for a read made just now.
+    :param stale_after_seconds: The backend's own freshness budget for
+        that cache; ``None`` when there is no cache.
+    :param firmware_version: The firmware the reading was taken under,
+        when the backend reports one.
+    :param unverified_reason: Why ``enabled`` is ``None`` -- required
+        whenever it is, so an unknown always says why it is unknown.
+    """
+
+    enabled: bool | None
+    source: str
+    age_seconds: float | None = None
+    stale_after_seconds: float | None = None
+    firmware_version: str | None = None
+    unverified_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.enabled is None and not (self.unverified_reason or "").strip():
+            raise ValueError(
+                "NozzleClumpingDetection: an undecoded reading must say why "
+                "(unverified_reason) -- unknown never travels unexplained"
+            )
+
+    def is_decoded(self) -> bool:
+        """``True`` when the backend vouches for the on/off value."""
+        return self.enabled is not None
+
+
 @dataclass
 class PrinterState:
     """Snapshot of the printer's current state and temperatures."""
@@ -4007,6 +4056,20 @@ class PrinterAdapter(ABC):
         is a different fact from "the machine agrees with anything" and must
         never be read as one.  Sends no command and changes nothing on the
         printer.
+        """
+        return None
+
+    def read_nozzle_clumping_detection(self) -> NozzleClumpingDetection | None:
+        """Whether this printer's own nozzle-clumping-detection switch is on,
+        or ``None``.
+
+        Optional.  A backend whose protocol exposes the machine's own switch
+        returns a :class:`NozzleClumpingDetection`; the default knows nothing
+        and says so.  ``None`` means "this backend cannot say" -- a different
+        fact from "off", and never to be read as one.  A backend that can see
+        the channel but has not verified its meaning for this model returns
+        a reading with ``enabled=None`` and the reason.  Sends no command and
+        changes nothing on the printer.
         """
         return None
 

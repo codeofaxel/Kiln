@@ -48,6 +48,7 @@ from kiln.printers.base import (
     FilamentOpResult,
     JobProgress,
     JobResult,
+    NozzleClumpingDetection,
     NozzleSetting,
     PrinterAdapter,
     PrinterCapabilities,
@@ -287,6 +288,27 @@ _NOZZLE_CLUMP_MESSAGE = (
     "CLI: kiln print <file> --no-nozzle-check.  "
     "MCP: start_print(file, nozzle_clog_detect=False)."
 )
+
+
+#: The bit of the ``home_flag`` field on the ``print`` status report that
+#: follows the screen switch Print Options > Nozzle clumping detection: set
+#: when the switch is ON, clear when it is OFF.  Bambu does not document the
+#: field's bits.  MEASURED, not read from a spec: three raw report dumps off
+#: one A1 (LAN mode, idle, 2026-09-15) while the switch was flipped ON, OFF,
+#: ON -- this bit was the only field that changed besides temperatures,
+#: wifi signal and the sequence counter.  The dump did not capture the
+#: firmware version.
+HOME_FLAG_NOZZLE_CLUMPING_DETECT_BIT: int = 1 << 24
+
+#: The model families the bit above has actually been measured on.  A
+#: reading is DECODED only for these; every other Bambu model gets an
+#: honest "unverified" rather than a value inferred across models -- the
+#: A1 mini shares the feature and the screen switch and is still not here,
+#: because it has not been measured.  Widen this set by measuring, never by
+#: analogy.  Keyed by the family ids of :data:`_BAMBU_MODEL_FAMILIES`.
+NOZZLE_CLUMPING_FLAG_MEASURED_FAMILIES: frozenset[str] = frozenset({"a1"})
+
+NOZZLE_CLUMPING_FLAG_SOURCE = "bambu_mqtt_home_flag"
 
 
 def _is_nozzle_clump_error(error_code: int) -> bool:
@@ -2642,6 +2664,14 @@ class BambuAdapter(PrinterAdapter):
         These commands must be sent **before** the ``project_file``
         command to take effect for the upcoming print.
 
+        Whether they override the printer's own screen switch (Print
+        Options > Nozzle clumping detection, readable through
+        :meth:`read_nozzle_clumping_detection`) for that print, and whether
+        they flip the switch itself, has NOT been verified on any machine.
+        Kiln never turns the switch on: with the default
+        ``nozzle_clog_detect=True`` nothing is sent and the printer's own
+        switch governs.
+
         Note: the layer-3 seed probe is also hardcoded into the timelapse
         G-code section.  For complete bypass, users should also edit the
         slicer's machine G-code to skip the timelapse probing (change
@@ -3016,6 +3046,53 @@ class BambuAdapter(PrinterAdapter):
             age_seconds=state.state_age_seconds,
             stale_after_seconds=state.state_stale_after_seconds,
             firmware_version=self._printer_firmware_version(),
+        )
+
+    def read_nozzle_clumping_detection(self) -> NozzleClumpingDetection | None:
+        """Whether the screen switch "Nozzle clumping detection" is on, from
+        the printer's own status report.
+
+        Decoded from :data:`HOME_FLAG_NOZZLE_CLUMPING_DETECT_BIT` of the
+        ``home_flag`` field -- but ONLY for a machine whose family is in
+        :data:`NOZZLE_CLUMPING_FLAG_MEASURED_FAMILIES`.  Any other model
+        returns a reading with ``enabled=None`` and the reason: the mapping
+        was measured on one A1, Bambu publishes nothing about the field, and
+        a value inferred across models would be a guess wearing a verdict.
+        Answered from the same cache as :meth:`get_state`, with that reading's
+        age and the cache's own freshness budget.  ``None`` when the printer
+        is unreachable or the report carries no usable ``home_flag``.  Reads
+        only; sends nothing.
+        """
+        state = self.get_state()
+        if not state.connected:
+            return None
+        with self._state_lock:
+            raw = self._last_status.get("home_flag")
+        try:
+            flag = int(raw)
+        except (TypeError, ValueError):
+            return None
+        stamps = {
+            "source": NOZZLE_CLUMPING_FLAG_SOURCE,
+            "age_seconds": state.state_age_seconds,
+            "stale_after_seconds": state.state_stale_after_seconds,
+            "firmware_version": self._printer_firmware_version(),
+        }
+        serial_family, mqtt_family, _product = self._identity_families()
+        family = serial_family or mqtt_family
+        if family not in NOZZLE_CLUMPING_FLAG_MEASURED_FAMILIES:
+            label = f"the {family.replace('_', ' ').upper()}" if family else "this model"
+            return NozzleClumpingDetection(
+                enabled=None,
+                unverified_reason=(
+                    f"how {label} reports its nozzle clumping detection switch "
+                    "has not been verified; the bit Kiln reads was measured on "
+                    "an A1 only, and it is not inferred across models"
+                ),
+                **stamps,
+            )
+        return NozzleClumpingDetection(
+            enabled=bool(flag & HOME_FLAG_NOZZLE_CLUMPING_DETECT_BIT), **stamps,
         )
 
     def _printer_firmware_version(self) -> str | None:
