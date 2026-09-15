@@ -110,7 +110,9 @@ class EmergencyRecord:
 
     :param printer_id: Identifier of the stopped printer.
     :param success: ``True`` if the stop was executed (or printer was
-        already stopped).
+        already stopped).  ``False`` when the adapter could not confirm its
+        own stop, even if the fallback G-code was delivered after it:
+        delivery is not confirmation.
     :param reason: Why the stop was triggered.
     :param timestamp: Unix timestamp when the stop was recorded.
     :param actions_taken: Printer-specific shutdown actions performed
@@ -224,13 +226,15 @@ def _engagement_refusal() -> type[BaseException]:
 class EmergencyCoordinator:
     """Central coordinator for emergency stops and safety interlocks.
 
-    All public methods are thread-safe.  The coordinator maintains four
+    All public methods are thread-safe.  The coordinator maintains five
     pieces of mutable state protected by a single lock:
 
     - **interlocks** -- ``{(printer_id, name): SafetyInterlock}``
     - **stop_history** -- ordered list of :class:`EmergencyRecord`
     - **stopped_printers** -- set of printer IDs currently in E-stop state
     - **latches** -- per-printer persistent latch metadata
+    - **unconfirmed_stops** -- an adapter's "sent but not confirmed" answer,
+      held only until the stop that produced it writes its record
     """
 
     def __init__(self) -> None:
@@ -239,6 +243,7 @@ class EmergencyCoordinator:
         self._stop_history: list[EmergencyRecord] = []
         self._stopped_printers: set[str] = set()
         self._latches: dict[str, EmergencyLatch] = {}
+        self._unconfirmed_stops: dict[str, str] = {}
         self._debounce_seconds = self._resolve_debounce_seconds()
         self._persist_enabled = os.environ.get(_PERSIST_ENABLED_ENV, "1").strip().lower() not in ("0", "false", "no")
         self._load_persisted_state()
@@ -461,6 +466,16 @@ class EmergencyCoordinator:
                 printer_id,
                 exc,
             )
+
+        # An adapter that sent its stop but could not confirm it landed did not
+        # execute a stop, however the fallback G-code after it went: delivery
+        # is not confirmation.  Its own words are kept, because they carry the
+        # instruction that matters -- stop the machine at the machine.  Read
+        # after every command has gone out, never in front of one.
+        with self._lock:
+            unconfirmed = self._unconfirmed_stops.pop(printer_id, None)
+        if unconfirmed is not None:
+            error = unconfirmed if error is None else f"{error}. {unconfirmed}"
 
         # Belt-and-suspenders: an emergency also darkens this printer's AMS
         # dryer(s), scope-matched to the printer stop.  Best-effort and never
@@ -815,6 +830,7 @@ class EmergencyCoordinator:
 
         # Prefer the adapter's hardware-level emergency stop (M112 or
         # firmware equivalent).  This is the fastest path to halt.
+        unconfirmed: str | None = None
         try:
             result = adapter.emergency_stop()
             if result.success:
@@ -828,6 +844,11 @@ class EmergencyCoordinator:
                 "Hardware emergency_stop() reported failure for %s: %s — falling back to G-code",
                 printer_id,
                 result.message,
+            )
+            # Kept for the record: the fallback below is one more attempt, and
+            # its delivery says nothing about whether the machine stopped.
+            unconfirmed = str(getattr(result, "message", "") or "") or (
+                "The printer did not confirm the emergency stop."
             )
         except Exception as exc:
             logger.warning(
@@ -860,6 +881,11 @@ class EmergencyCoordinator:
                     exc,
                 )
                 last_error = exc
+
+        if unconfirmed is not None:
+            # After every stop command has gone out, never in front of one.
+            with self._lock:
+                self._unconfirmed_stops[printer_id] = unconfirmed
 
         if last_error is not None:
             raise PrinterError(

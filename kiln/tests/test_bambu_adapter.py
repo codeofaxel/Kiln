@@ -1003,15 +1003,150 @@ class TestBambuAdapterPrintControl:
         assert payload["print"]["command"] == "resume"
 
     def test_emergency_stop(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """Sent is not stopped: a printer still reporting running was not stopped.
+
+        This used to assert success for any send, which is how an M112 that no
+        Bambu is known to obey reported every emergency stop as done.
+        """
+        _printer_answers_stop(adapter_with_mqtt, gcode_state="RUNNING")
+
         result = adapter_with_mqtt.emergency_stop()
 
         assert isinstance(result, PrintResult)
-        assert result.success is True
-        assert "emergency" in result.message.lower() or "m112" in result.message.lower()
+        assert result.success is False
+        assert "not confirmed" in result.message.lower()
+        assert "stop it at the machine" in result.message.lower()
 
-        call_args = adapter_with_mqtt._mqtt_client.publish.call_args
-        payload = json.loads(call_args[0][1])
-        assert "gcode_line" in str(payload) or "M112" in str(payload)
+
+def _published(adapter: BambuAdapter) -> list[dict[str, Any]]:
+    """Every payload the adapter published, in order."""
+    return [json.loads(call.args[1]) for call in adapter._mqtt_client.publish.call_args_list]
+
+
+def _printer_answers_stop(adapter: BambuAdapter, **frame: Any) -> None:
+    """The printer reports *frame* the moment the ``stop`` command reaches it."""
+    delivered = adapter._mqtt_client.publish.return_value
+
+    def _publish(topic: str, payload: str, qos: int = 0) -> Any:
+        if json.loads(payload).get("print", {}).get("command") == "stop":
+            _push(adapter, **frame)
+        return delivered
+
+    adapter._mqtt_client.publish.side_effect = _publish
+
+
+class TestBambuEmergencyStop:
+    """The stop the firmware obeys goes first, and success is what it reported back."""
+
+    def test_the_stop_command_goes_first(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.emergency_stop()
+
+        assert _published(adapter_with_mqtt)[0]["print"]["command"] == "stop"
+
+    def test_the_heater_cut_goes_out_before_m112(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """On firmware that honors M112 nothing after it may run, so the
+        heaters are cut first, in one line."""
+        adapter_with_mqtt.emergency_stop()
+
+        lines = [
+            p["print"]["param"]
+            for p in _published(adapter_with_mqtt)
+            if p["print"]["command"] == "gcode_line"
+        ]
+        assert lines == ["M104 S0\nM140 S0", "M112"]
+
+    @pytest.mark.parametrize("state", ["FAILED", "IDLE"])
+    def test_a_report_after_the_stop_confirms_it(
+        self, adapter_with_mqtt: BambuAdapter, state: str
+    ) -> None:
+        _printer_answers_stop(
+            adapter_with_mqtt, gcode_state=state, nozzle_target_temper=0, bed_target_temper=0
+        )
+
+        result = adapter_with_mqtt.emergency_stop()
+
+        assert result.success is True
+        assert result.message.startswith("Emergency stop confirmed")
+        assert "hotend 0 (confirmed)" in result.message
+        assert "bed 0 (confirmed)" in result.message
+
+    def test_a_stopped_reading_from_before_the_command_does_not_confirm(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """A cached ``failed`` is about the last job, not about this stop."""
+        _push(adapter_with_mqtt, gcode_state="FAILED")
+
+        result = adapter_with_mqtt.emergency_stop()  # and nothing is reported after it
+
+        assert result.success is False
+        assert "not confirmed" in result.message.lower()
+        assert "stop it at the machine" in result.message.lower()
+
+    def test_a_read_back_that_fails_never_reports_success(
+        self, adapter_with_mqtt: BambuAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _printer_answers_stop(adapter_with_mqtt, gcode_state="FAILED")
+
+        def _unreadable() -> Any:
+            raise RuntimeError("status cache unreadable")
+
+        monkeypatch.setattr(adapter_with_mqtt, "_estop_snapshot", _unreadable, raising=False)
+
+        result = adapter_with_mqtt.emergency_stop()
+
+        assert result.success is False
+        assert "stop it at the machine" in result.message.lower()
+
+    @pytest.mark.parametrize("refused", ["stop", "M112"])
+    def test_one_failed_publish_never_blocks_the_others(
+        self, adapter_with_mqtt: BambuAdapter, refused: str
+    ) -> None:
+        delivered = adapter_with_mqtt._mqtt_client.publish.return_value
+        reached: list[tuple[str, str | None]] = []
+
+        def _publish(topic: str, payload: str, qos: int = 0) -> Any:
+            body = json.loads(payload)["print"]
+            if refused in (body.get("command"), body.get("param")):
+                raise OSError("socket closed mid-publish")
+            reached.append((body["command"], body.get("param")))
+            return delivered
+
+        adapter_with_mqtt._mqtt_client.publish.side_effect = _publish
+
+        result = adapter_with_mqtt.emergency_stop()
+
+        everything = [("stop", None), ("gcode_line", "M104 S0\nM140 S0"), ("gcode_line", "M112")]
+        assert reached == [sent for sent in everything if refused not in sent]
+        assert result.success is False  # and nothing reported back
+        assert f"Not sent: {refused}." in result.message
+
+    def test_confirmation_returns_as_soon_as_the_printer_reports(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        adapter_with_mqtt._confirm_window_s = None  # the real window, not the fixture's zero
+        _printer_answers_stop(adapter_with_mqtt, gcode_state="FAILED")
+
+        started = time.monotonic()
+        result = adapter_with_mqtt.emergency_stop()
+        took = time.monotonic() - started
+
+        assert result.message.startswith("Emergency stop confirmed")
+        assert took < BambuAdapter._ESTOP_CONFIRM_TIMEOUT_S / 2
+
+    def test_a_stop_that_never_left_the_process_says_so_without_waiting(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        adapter_with_mqtt._confirm_window_s = None  # nothing to wait for must cost nothing
+        adapter_with_mqtt._mqtt_client.publish.side_effect = OSError("network unreachable")
+
+        started = time.monotonic()
+        result = adapter_with_mqtt.emergency_stop()
+        took = time.monotonic() - started
+
+        assert result.success is False
+        assert result.message.startswith("Emergency stop NOT sent")
+        assert "stop it at the machine" in result.message.lower()
+        assert took < BambuAdapter._ESTOP_CONFIRM_TIMEOUT_S / 2
 
 
 # ---------------------------------------------------------------------------

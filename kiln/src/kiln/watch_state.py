@@ -73,7 +73,7 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
             "poll_seconds": DEFAULT_POLL_INTERVAL,
             "acts": "emergency-stops the printer on a red flag",
             "red": {
-                "print_error": "an error the printer itself reports",
+                "print_error": "an error the printer reports while it keeps printing",
                 "hms_blocklist": "a printer fault code on the block list",
                 "tool_drop": f"the hotend dropping {DEFAULT_TOOL_DROP_C:.0f} °C below its target",
                 "bed_drop": f"the bed dropping {DEFAULT_BED_DROP_C:.0f} °C below its target",

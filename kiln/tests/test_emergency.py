@@ -642,6 +642,40 @@ class TestSendEmergencyGcode:
         # Earlier commands were still attempted
         assert len(adapter.gcode_calls) == 4
 
+    def test_an_unconfirmed_hardware_stop_is_not_recorded_as_success(self):
+        """Delivery is not confirmation.
+
+        An adapter that sent its stop and could not see it land says so.  The
+        fallback G-code going out after it must not turn that answer into a
+        record that calls the stop executed -- the adapter's own words are the
+        ones that tell the operator to stop the machine by hand.
+        """
+        said = (
+            "Emergency stop SENT but NOT confirmed: the printer still reports "
+            "printing 5s later. Stop it at the machine now, with its own screen "
+            "or its power switch."
+        )
+
+        class _Unconfirmed(_FakeAdapter):
+            def emergency_stop(self) -> _FakeResult:
+                self.estop_calls += 1
+                return _FakeResult(success=False, message=said)
+
+        adapter = _Unconfirmed()
+        fake_server = mock.MagicMock()
+        fake_server._registry = _make_registry({"voron": adapter})
+
+        coord = EmergencyCoordinator()
+        with mock.patch.dict("sys.modules", {"kiln.server": fake_server}):
+            record = coord.emergency_stop("voron")
+
+        assert record.success is False
+        assert record.error == said
+        # The fallback still went out, and the machine is still treated as
+        # halted: an unconfirmed stop is an indeterminate one.
+        assert len(adapter.gcode_calls) == len(_FDM_EMERGENCY_GCODE)
+        assert coord.is_stopped("voron") is True
+
 
 # Helper for test that needs separate setup
 def coord_send_gcode_with_adapter(adapter, registry):

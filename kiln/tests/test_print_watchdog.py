@@ -19,12 +19,15 @@ from kiln.print_watchdog import (
     DEFAULT_TOOL_DROP_C,
     DEFAULT_WARMUP_TIMEOUT_S,
     HEATING_RISE_C,
+    MAX_ESTOP_ATTEMPTS,
     MIN_ACTIVE_TARGET_C,
+    PRINT_ERROR_PERSIST_S,
     REACHED_MARGIN_C,
     WARMUP_WARN_FRACTION,
     Flag,
     PrintWatchdog,
 )
+from kiln.printers.base import PrinterState, PrinterStatus, PrintResult
 
 # --------------------------------------------------------------------------
 # Test doubles
@@ -57,6 +60,15 @@ class FakeJob:
 #: counters read as a stall.  The watchdog owns no stall number of its own.
 STALL_S: float = 15 * 60 + 60
 
+#: A real Bambu fault code: 1200-8007, "failed to extrude the filament",
+#: measured on an A1 on 2026-09-07.  Which fault it names does not matter to
+#: the rules under test -- only that the printer reports one.
+A_FAULT: int = 302022663
+
+#: The code a cancel walks an A1's firmware through (measured 2026-08-14), and
+#: the one the 2026-08-13 emergency stop was raised on.
+CANCEL_CODE: int = 50348044
+
 
 @pytest.fixture(autouse=True)
 def _fresh_motion_store():
@@ -68,11 +80,23 @@ def _fresh_motion_store():
 
 
 class FakeAdapter:
-    """Records calls to ``emergency_stop`` and lets tests mutate state."""
+    """Records calls to ``emergency_stop`` and lets tests mutate state.
 
-    def __init__(self, state: FakeState | None = None, job: FakeJob | None = None):
+    ``stop_results`` is what each ``emergency_stop()`` call answers, in order,
+    the last one repeating; an exception instance is raised instead.  The
+    default answers a bare ``True``, as older doubles do, which the watchdog
+    counts as a confirmed stop.
+    """
+
+    def __init__(
+        self,
+        state: FakeState | None = None,
+        job: FakeJob | None = None,
+        stop_results: list[object] | None = None,
+    ):
         self.state = state if state is not None else FakeState()
         self.job = job if job is not None else FakeJob()
+        self.stop_results: list[object] = list(stop_results) if stop_results is not None else [True]
         self.emergency_stops = 0
         self.get_state_calls = 0
         self.get_job_calls = 0
@@ -88,9 +112,12 @@ class FakeAdapter:
         self.get_job_calls += 1
         return self.job
 
-    def emergency_stop(self) -> bool:
+    def emergency_stop(self) -> object:
+        answer = self.stop_results[min(self.emergency_stops, len(self.stop_results) - 1)]
         self.emergency_stops += 1
-        return True
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
 
 
 class FakeClock:
@@ -131,6 +158,31 @@ def _make_watchdog(
         **kwargs,
     )
     return wd, adapter, clock, anomalies
+
+
+def _raise_print_error(wd: PrintWatchdog, adapter: FakeAdapter, clock: FakeClock, code: int) -> Flag | None:
+    """Hold *code* on a printing reading across the persistence window.
+
+    Returns what the second poll raised.  The first sighting must raise
+    nothing: a code that has not stood yet is still news in transit.
+    """
+    adapter.state.print_error = code
+    assert wd.step() is None
+    clock.advance(PRINT_ERROR_PERSIST_S)
+    return wd.step()
+
+
+def _reading(state: PrinterStatus, print_error: int = 0) -> PrinterState:
+    """A real reading, so an uncleared code takes the headline as it does live."""
+    return PrinterState(
+        connected=True,
+        state=state,
+        tool_temp_actual=220.0,
+        tool_temp_target=220.0,
+        bed_temp_actual=60.0,
+        bed_temp_target=60.0,
+        print_error=print_error,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -212,10 +264,10 @@ class TestBedTempDrop:
 
 class TestPrintError:
     def test_nonzero_print_error_triggers_estop(self):
-        wd, adapter, _, anomalies = _make_watchdog()
-        adapter.state.print_error = 0x03008014  # Bambu HMS code
+        """A code the printer keeps printing through, once it has stood."""
+        wd, adapter, clock, anomalies = _make_watchdog()
 
-        flag = wd.step()
+        flag = _raise_print_error(wd, adapter, clock, 0x03008014)  # Bambu HMS code
 
         assert flag is not None
         assert flag.rule == "print_error"
@@ -255,6 +307,191 @@ class TestPrintError:
         assert adapter.emergency_stops == 1
 
 
+class TestAFaultTheMachineHasActedOn:
+    """Bambu firmware reports ``print_error`` once it has ALREADY acted.
+
+    It pauses the job or ends it.  An emergency stop on top of that cancels a
+    recoverable pause or lands on a print that is already over -- harmless
+    only while the stop itself did nothing, and a ten-hour print killed for a
+    filament runout once it does.
+    """
+
+    def test_replay_2026_08_13_a_print_the_printer_already_failed_is_not_stopped(self):
+        """The server log on the A1, 21:02: the outcome hook recorded
+        ``prev='running'→new='failed', hms=50348044``, then the watchdog raised
+        ``RED FLAG [print_error]`` and dispatched an emergency stop onto a print
+        the printer had already failed.  Replayed at the watchdog's cadence."""
+        wd, adapter, clock, _ = _make_watchdog()
+        adapter.state = _reading(PrinterStatus.PRINTING)
+        assert wd.step() is None
+
+        adapter.state = _reading(PrinterStatus.ERROR, CANCEL_CODE)  # failed, code attached
+        for _ in range(8):  # twenty seconds of the code standing
+            clock.advance(DEFAULT_POLL_INTERVAL)
+            assert wd.step() is None
+
+        adapter.state = _reading(PrinterStatus.IDLE)
+        clock.advance(DEFAULT_POLL_INTERVAL)
+        assert wd.step() is None
+
+        assert adapter.emergency_stops == 0
+        assert wd.status()["red_flags"] == []
+
+    def test_a_paused_print_reporting_a_code_is_never_cancelled(self):
+        """Ten minutes of polls on a print the firmware paused for a fault."""
+        wd, adapter, clock, anomalies = _make_watchdog()
+        adapter.state = _reading(PrinterStatus.PAUSED, A_FAULT)
+        # Live, the fault takes the headline and the pause sits underneath it.
+        assert adapter.state.state is PrinterStatus.ERROR
+
+        for _ in range(int(600 / DEFAULT_POLL_INTERVAL)):
+            assert wd.step() is None
+            clock.advance(DEFAULT_POLL_INTERVAL)
+
+        assert adapter.emergency_stops == 0
+        assert [f for f in anomalies if f.kind == "red"] == []
+
+
+class TestAFaultThePrinterIsPrintingThrough:
+    """A code that stands while the machine keeps printing is the one to stop for."""
+
+    def test_the_same_code_standing_while_printing_stops_the_machine(self):
+        wd, adapter, clock, anomalies = _make_watchdog()
+        adapter.state = _reading(PrinterStatus.PRINTING, A_FAULT)
+        # A live reading puts the fault on top and the run state underneath;
+        # the rule has to read through the one to the other.
+        assert adapter.state.state is PrinterStatus.ERROR
+
+        assert wd.step() is None  # first sighting
+        clock.advance(PRINT_ERROR_PERSIST_S / 2)
+        assert wd.step() is None  # has not stood long enough yet
+        clock.advance(PRINT_ERROR_PERSIST_S / 2)
+        flag = wd.step()
+
+        assert flag is not None and flag.kind == "red" and flag.rule == "print_error"
+        assert flag.context["print_error"] == A_FAULT
+        assert adapter.emergency_stops == 1
+        assert [f.rule for f in anomalies] == ["print_error"]
+
+    def test_a_code_gone_on_the_next_poll_stops_nothing(self):
+        wd, adapter, clock, _ = _make_watchdog()
+        adapter.state = _reading(PrinterStatus.PRINTING, A_FAULT)
+        assert wd.step() is None
+
+        clock.advance(PRINT_ERROR_PERSIST_S)
+        adapter.state = _reading(PrinterStatus.PRINTING)
+        assert wd.step() is None
+
+        # Back again: a new sighting, not the old one continued.
+        clock.advance(PRINT_ERROR_PERSIST_S)
+        adapter.state = _reading(PrinterStatus.PRINTING, A_FAULT)
+        assert wd.step() is None
+        clock.advance(DEFAULT_POLL_INTERVAL)
+        assert wd.step() is None
+
+        assert adapter.emergency_stops == 0
+
+    def test_a_code_during_a_stop_kiln_asked_for_stops_nothing(self):
+        """Stopping a Bambu walks its firmware through a real code; that code
+        is the stop's own noise, not a fault to stop the machine for."""
+        from kiln.auto_record_hook import register_cancel_intent
+        from kiln.printers.base import outcome_printer_name
+
+        wd, adapter, clock, _ = _make_watchdog()
+        register_cancel_intent(outcome_printer_name(adapter))
+        adapter.state = _reading(PrinterStatus.PRINTING, CANCEL_CODE)
+
+        assert wd.step() is None
+        clock.advance(PRINT_ERROR_PERSIST_S)
+        assert wd.step() is None
+        clock.advance(DEFAULT_POLL_INTERVAL)
+        assert wd.step() is None
+
+        assert adapter.emergency_stops == 0
+
+
+# --------------------------------------------------------------------------
+# A stop the printer did not confirm
+# --------------------------------------------------------------------------
+
+
+class TestAnUnconfirmedStop:
+    """A stop nobody saw land must not put the watchdog to sleep."""
+
+    NOT_CONFIRMED = PrintResult(
+        success=False,
+        message=(
+            "Emergency stop SENT but NOT confirmed: the printer still reports "
+            "printing 5s later. Stop it at the machine now, with its own screen "
+            "or its power switch."
+        ),
+    )
+
+    def test_it_is_retried_while_the_fault_stands_then_latched(self, monkeypatch):
+        noted: list[object] = []
+        monkeypatch.setattr("kiln.print_watchdog.note_cancel_requested", noted.append)
+        wd, adapter, clock, anomalies = _make_watchdog(
+            adapter=FakeAdapter(stop_results=[self.NOT_CONFIRMED])
+        )
+
+        flag = _raise_print_error(wd, adapter, clock, A_FAULT)
+
+        assert flag is not None and flag.rule == "print_error"
+        assert adapter.emergency_stops == 1
+        assert wd.anomaly_triggered is False, "a stop nobody saw land must not latch"
+
+        # The stop files its own intent; that must not read as somebody else's
+        # stop and silence the fault it is retrying against.
+        for attempt in range(2, MAX_ESTOP_ATTEMPTS + 1):
+            clock.advance(DEFAULT_POLL_INTERVAL)
+            assert wd.step() is not None  # the fault still stands
+            assert adapter.emergency_stops == attempt
+        assert wd.anomaly_triggered is True  # the ceiling
+
+        clock.advance(DEFAULT_POLL_INTERVAL)
+        assert wd.step() is None
+        assert adapter.emergency_stops == MAX_ESTOP_ATTEMPTS
+        # Filed once: a retried stop is the same ending, not another one.
+        assert len(noted) == 1
+        # Recorded and handed on once, with the stop's own answer attached.
+        assert [f.rule for f in anomalies] == ["print_error"]
+        assert anomalies[0].context["estop_confirmed"] is False
+        assert "stop it at the machine" in anomalies[0].context["estop_result"].lower()
+        assert len(wd.status()["red_flags"]) == 1
+
+    def test_a_confirmed_stop_latches_after_one_call(self):
+        confirmed = PrintResult(
+            success=True,
+            message="Emergency stop confirmed: the printer left printing 1.2s after the stop command.",
+        )
+        wd, adapter, clock, anomalies = _make_watchdog(adapter=FakeAdapter(stop_results=[confirmed]))
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 220.0
+        assert wd.step() is None  # arrived
+        adapter.state.tool_temp_actual = 220.0 - (DEFAULT_TOOL_DROP_C + 5.0)
+
+        assert wd.step() is not None
+        assert wd.anomaly_triggered is True
+
+        for _ in range(5):
+            clock.advance(DEFAULT_POLL_INTERVAL)
+            assert wd.step() is None
+        assert adapter.emergency_stops == 1
+        assert [f.rule for f in anomalies] == ["tool_drop"]
+        assert anomalies[0].context["estop_confirmed"] is True
+
+    def test_a_poll_with_nothing_left_to_stop_for_latches_without_another_stop(self):
+        wd, adapter, clock, _ = _make_watchdog(adapter=FakeAdapter(stop_results=[self.NOT_CONFIRMED]))
+        assert _raise_print_error(wd, adapter, clock, A_FAULT) is not None
+        assert wd.anomaly_triggered is False
+
+        # The printer ended the job after all, a little late.
+        adapter.state.state = "error"
+        clock.advance(DEFAULT_POLL_INTERVAL)
+        assert wd.step() is None
+
+        assert wd.anomaly_triggered is True
+        assert adapter.emergency_stops == 1
 
 
 # --------------------------------------------------------------------------
@@ -606,8 +843,7 @@ class TestStalledPrintIsReportedNeverStopped:
         wd.step()
         assert [f for f in anomalies if f.rule == "stalled"]
 
-        adapter.state.print_error = 50348044  # the machine's own fault
-        flag = wd.step()
+        flag = _raise_print_error(wd, adapter, clock, 50348044)  # the machine's own fault
 
         assert flag is not None and flag.rule == "print_error"
         assert adapter.emergency_stops == 1
@@ -676,8 +912,8 @@ class TestYellowFlags:
 
 class TestLatching:
     def test_subsequent_steps_after_trip_do_not_spam_estop(self):
-        wd, adapter, _, _ = _make_watchdog()
-        adapter.state.print_error = 0x03008014
+        wd, adapter, clock, _ = _make_watchdog()
+        _raise_print_error(wd, adapter, clock, 0x03008014)
 
         wd.step()
         wd.step()
@@ -692,10 +928,9 @@ class TestLatching:
         def cb(flag: Flag) -> None:
             calls.append(flag)
 
-        wd, adapter, _, _ = _make_watchdog(on_anomaly=cb)
-        adapter.state.print_error = 42
+        wd, adapter, clock, _ = _make_watchdog(on_anomaly=cb)
+        _raise_print_error(wd, adapter, clock, 42)
 
-        wd.step()
         wd.step()
         wd.step()
 
@@ -704,9 +939,8 @@ class TestLatching:
         assert len(calls) == 1
 
     def test_status_reports_trip_after_anomaly(self):
-        wd, adapter, _, _ = _make_watchdog()
-        adapter.state.print_error = 1
-        wd.step()
+        wd, adapter, clock, _ = _make_watchdog()
+        _raise_print_error(wd, adapter, clock, 1)
 
         status = wd.status()
         assert status["anomaly_triggered"] is True
@@ -728,25 +962,28 @@ class TestErrorHandling:
         assert wd.step() is None
         assert wd.anomaly_triggered is False
 
-    def test_estop_failure_still_latches_and_invokes_callback(self):
+    def test_an_estop_that_raises_is_unconfirmed_and_still_invokes_callback(self):
+        """A stop that raised is a stop nobody saw land.
+
+        This used to assert the watchdog latched anyway, which put it to sleep
+        on a print that, for all anyone knew, was still running.
+        """
         calls: list[Flag] = []
+        wd, adapter, clock, _ = _make_watchdog(
+            adapter=FakeAdapter(stop_results=[RuntimeError("mqtt disconnected")]),
+            on_anomaly=calls.append,
+        )
 
-        def cb(flag: Flag) -> None:
-            calls.append(flag)
+        _raise_print_error(wd, adapter, clock, 1)
 
-        wd, adapter, _, _ = _make_watchdog(on_anomaly=cb)
-
-        def explode() -> None:
-            raise RuntimeError("mqtt disconnected")
-
-        adapter.emergency_stop = explode  # type: ignore[assignment]
-        adapter.state.print_error = 1
-
-        wd.step()
-
-        assert wd.anomaly_triggered is True
+        assert wd.anomaly_triggered is False
         assert len(calls) == 1
         assert calls[0].rule == "print_error"
+        assert calls[0].context["estop_confirmed"] is False
+
+        clock.advance(DEFAULT_POLL_INTERVAL)
+        wd.step()
+        assert adapter.emergency_stops == 2  # commanded again while the fault stands
 
 
 # --------------------------------------------------------------------------

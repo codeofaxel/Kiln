@@ -14,18 +14,39 @@ Design notes:
 * Testable — all time reads go through an injectable clock
   (:attr:`time_fn`), and :meth:`step` performs one poll cycle
   synchronously so unit tests never spawn real threads.
-* Idempotent trip — once a red flag fires, e-stop is called exactly once
-  and the watchdog puts itself to sleep.  Subsequent :meth:`status`
-  calls still report the trip.
+* A trip latches on a stop the printer CONFIRMED.  Once ``emergency_stop()``
+  says the machine left printing, the watchdog puts itself to sleep and
+  :meth:`status` keeps reporting the trip.  A stop that raised, returned
+  nothing, or came back unconfirmed is commanded again on each following
+  poll while a red flag still fires, up to :data:`MAX_ESTOP_ATTEMPTS`; a
+  poll on which no red flag fires is the machine answering, and latches
+  without another stop.  Latching on a stop nobody saw land would leave a
+  running print with its watchdog asleep.
 
 Red flags (any triggers e-stop):
 
-* ``state.print_error`` non-zero
-* ``state.hms_code`` (or equivalent) matches a blocklist entry
+* A non-zero ``print_error`` the printer is printing through: the same code
+  on polls at least :data:`PRINT_ERROR_PERSIST_S` apart, from a reading that
+  still says printing, with no stop of Kiln's own in flight
+* ``state.hms_code`` (or ``print_error`` as hex) matches the user's HMS
+  blocklist, in any state
 * Tool temperature drops > 30°C below setpoint, after it first reaches it
 * Bed temperature drops > 15°C below setpoint, after it first reaches it
 * A heater stops climbing while still below its setpoint
-* Printer reports any configured HMS blocklist code
+
+A fault code alone is deliberately NOT a red flag.  Bambu firmware reports
+``print_error`` once it has ALREADY acted: it pauses the job (filament
+runout, an AMS problem, a clog or inspection pause) or ends it, and a cancel
+walks the firmware through a real code of its own.  An emergency stop on
+those would cancel a recoverable pause -- a ten-hour print paused for
+runout, killed by the thing meant to protect it -- or land on a print that
+is already over, which is what the stop on 2026-08-13 did: the printer had
+already reported ``failed`` with 50348044 when the watchdog read the code.
+So when the machine has acted (paused, failed, idle, cancelling, busy) the
+watchdog stops nothing and announces nothing new; the adapter already
+publishes the fault's leading edge.  The blocklist keeps its any-state,
+first-poll behaviour because it is the user's explicit instruction, and it
+is empty unless configured.
 
 Yellow flags (logged and passed to ``on_anomaly``, no e-stop):
 
@@ -55,7 +76,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from kiln.auto_record_hook import note_cancel_requested
+from kiln.auto_record_hook import cancel_intent_pending, note_cancel_requested
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +139,22 @@ DEFAULT_WARMUP_TIMEOUT_S: float = 1800.0
 #: Fraction of that ceiling at which a warning is raised.  Logged and sent
 #: to ``on_anomaly``; it stops nothing.
 WARMUP_WARN_FRACTION: float = 0.5
+
+#: How long the SAME non-zero ``print_error`` must stand, across polls of a
+#: reading that still says printing, before it counts as a fault the printer
+#: is printing through.  Measured on an A1 (2026-08-14): a cancel walks the
+#: firmware through ``failed`` carrying print_error 50348044 for about four
+#: seconds.  Status pushes are merges, so a code can reach the cache a frame
+#: before the state word that explains it; a code younger than that transient
+#: is still news in transit, not a machine ignoring its own fault.
+PRINT_ERROR_PERSIST_S: float = 5.0
+
+#: How many emergency stops one trip may command while the printer does not
+#: confirm them.  Bounded so a printer that never confirms -- unreachable, or
+#: ignoring the command -- is not commanded forever; past it the watchdog
+#: latches and says why, and the person at the machine is the remedy every
+#: unconfirmed stop has already named.
+MAX_ESTOP_ATTEMPTS: int = 3
 
 
 # --------------------------------------------------------------------------
@@ -343,6 +380,9 @@ class PrintWatchdog:
     Args:
         adapter: Any object with ``get_state()``, ``get_job()``, and
             ``emergency_stop()`` methods (see :class:`PrinterAdapter`).
+            ``emergency_stop()`` answers whether the printer confirmed the
+            stop -- a result whose ``success`` is True -- and any other
+            answer is treated as a stop that did not land.
         poll_interval_sec: Seconds between polls when running as a thread.
         on_anomaly: Optional callback invoked with the triggering
             :class:`Flag` when a red flag fires.  Exceptions in the
@@ -350,6 +390,9 @@ class PrintWatchdog:
         hms_blocklist: HMS codes that trigger e-stop when the printer
             reports them.  Compared case-insensitively against
             ``state.hms_code`` and ``state.print_error`` (formatted hex).
+            Matched in any state, on the first poll: the list is the user's
+            explicit instruction, so it does not wait to see whether the
+            machine acts on the fault itself.
         tool_drop_c: Override for tool-temp drop threshold.
         bed_drop_c: Override for bed-temp drop threshold.
         no_rise_timeout_s: Override for how long a warming heater may
@@ -397,6 +440,12 @@ class PrintWatchdog:
         # Yellow rules already reported for the current print, so a condition
         # that holds for hours is reported once rather than every poll.
         self._yellow_seen: set[str] = set()
+        # The print_error rule's evidence: the code a printing reading carried
+        # and when it was first seen.  Dropped whenever the conditions lapse.
+        self._error_streak: tuple[int, float] | None = None
+        # Emergency stops commanded for the current trip that the printer has
+        # not confirmed.  0 while no trip is outstanding.
+        self._estop_attempts: int = 0
 
         # One object per heater, same rules in both — a drop only counts once
         # its heater has arrived, and a heater that never arrives is judged
@@ -475,7 +524,7 @@ class PrintWatchdog:
         Factored out of :meth:`_run_loop` so tests can drive the watchdog
         deterministically without spawning threads.
         """
-        # Once tripped, do nothing — don't spam e-stop.
+        # Once latched, do nothing — don't spam e-stop.
         if self.anomaly_triggered:
             return None
 
@@ -504,6 +553,11 @@ class PrintWatchdog:
 
         # --- Red flags ------------------------------------------------
         red = self._evaluate_red_flags(state, job)
+        if self._estop_attempts:
+            # A stop this watchdog sent is still unconfirmed, so this poll is
+            # its follow-up: send it again, or see that it landed.
+            self._follow_up(red, state)
+            return red
         if red is not None:
             self._trip(red)
             return red
@@ -544,16 +598,34 @@ class PrintWatchdog:
         """Return the first red flag that fires this tick, or ``None``."""
         now = self._time()
 
-        # --- print_error (HMS numeric) -------------------------------
+        # --- print_error: a fault the printer is printing through ----
+        # Judged on the CONFIRMED run state: an uncleared code takes the
+        # headline as ``error`` while the state underneath still says
+        # ``printing``, and a stale reading is evidence of nothing.  Any other
+        # state means the firmware has acted -- paused the job, ended it, or
+        # is cancelling -- and the fault is for the person it stopped for.
         print_error = _getattr(state, "print_error")
-        if print_error:
-            return Flag(
-                kind="red",
-                rule="print_error",
-                message=f"Printer reported print_error={print_error} (hex: {int(print_error):08X})",
-                timestamp=now,
-                context={"print_error": int(print_error)},
-            )
+        code = _as_code(print_error)
+        if code and _confirmed_state_word(state) == "printing":
+            streak = self._error_streak
+            if streak is None or streak[0] != code:
+                self._error_streak = (code, now)
+            elif now - streak[1] >= PRINT_ERROR_PERSIST_S and not self._kiln_stop_in_flight():
+                stood = now - streak[1]
+                return Flag(
+                    kind="red",
+                    rule="print_error",
+                    message=(
+                        f"Printer reported print_error={code} (hex: {code:08X}) "
+                        f"and kept printing through it for {stood:.0f}s"
+                    ),
+                    timestamp=now,
+                    context={"print_error": code, "persisted_seconds": float(stood)},
+                )
+        else:
+            # Gone, or answered by the firmware.  The adapter announced the
+            # fault's leading edge already; there is nothing to add here.
+            self._error_streak = None
 
         # --- HMS blocklist match -------------------------------------
         hms_code = _getattr(state, "hms_code")
@@ -609,6 +681,24 @@ class PrintWatchdog:
                 self._notify(verdict.warning)
 
         return None
+
+    def _kiln_stop_in_flight(self) -> bool:
+        """Has Kiln asked this printer to stop, with the ending not yet seen?
+
+        A stop Kiln asked for walks Bambu firmware through a real code, and
+        that code is the stop's own noise.  False while this watchdog's own
+        stop is outstanding, though: the intent it filed would otherwise read
+        as somebody else's stop and silence the very fault it is retrying.
+        """
+        if self._estop_attempts:
+            return False
+        try:
+            from kiln.printers.base import outcome_printer_name
+
+            return cancel_intent_pending(outcome_printer_name(self._adapter))
+        except Exception:  # noqa: BLE001 — an unreadable intent is no stop in flight
+            logger.debug("PrintWatchdog: cancel-intent read failed", exc_info=True)
+            return False
 
     def _evaluate_yellow_flags(self, state: Any, job: Any = None) -> list[Flag]:
         """Return all yellow flags firing this tick."""
@@ -694,7 +784,12 @@ class PrintWatchdog:
                 logger.exception("PrintWatchdog: on_anomaly callback raised")
 
     def _trip(self, flag: Flag) -> None:
-        """Handle a red-flag trip: log, e-stop, callback, and latch."""
+        """A red flag's first stop: log, record, e-stop, callback.
+
+        Latches only when the printer confirmed the stop.  An unconfirmed
+        stop leaves the watchdog awake, and :meth:`_follow_up` handles each
+        poll after it.
+        """
         logger.error(
             "PrintWatchdog RED FLAG [%s]: %s | context=%s",
             flag.rule,
@@ -702,8 +797,6 @@ class PrintWatchdog:
             flag.context,
         )
         self._record_flag(flag)
-        with self._lock:
-            self.anomaly_triggered = True
 
         # This door bypasses the EmergencyCoordinator (it holds the adapter
         # and halts it directly, which is the point — no lookups between a
@@ -723,25 +816,94 @@ class PrintWatchdog:
                 "PrintWatchdog: cancel-intent registration failed", exc_info=True
             )
 
-        # Emergency stop — isolated try/except so a failed e-stop still
-        # fires the callback and sets the latch.
+        self._estop_attempts = 1
         try:
-            self._adapter.emergency_stop()
-            logger.error("PrintWatchdog: emergency_stop() dispatched")
-        except Exception:
-            logger.exception("PrintWatchdog: emergency_stop() FAILED")
+            confirmed, said = self._command_stop()
         finally:
             # An e-stop ends the print as surely as a cancel does, and it is
             # the ending we are most certain was not a clean finish.  Noted
             # AFTER the halt is dispatched: this touches the database, and
             # nothing queues in front of stopping the machine.  In
             # ``finally`` so a failed e-stop still records why the print
-            # ended — that is the case worth learning from.
+            # ended — that is the case worth learning from.  Once per trip:
+            # a retried stop is the same ending, not another one.
             note_cancel_requested(self._adapter)
+
+        # The stop's own answer rides with the flag, so whatever the callback
+        # files says whether the machine was actually stopped.
+        with self._lock:
+            flag.context["estop_confirmed"] = confirmed
+            if said:
+                flag.context["estop_result"] = said
+        self._settle(confirmed, flag)
 
         # Recording stays above the e-stop and dispatch stays below it, so a
         # red flag's ordering is exactly what it has always been.
         self._dispatch(flag)
+
+    def _follow_up(self, red: Flag | None, state: Any) -> None:
+        """A poll after a stop the printer has not confirmed.
+
+        Recording and dispatch happened once, on the trip; a follow-up only
+        decides whether to command the stop again.
+        """
+        if red is None:
+            # Nothing left to stop for: the machine answered the stop, or the
+            # condition behind it is gone.  Commanding another stop to a
+            # printer that shows no reason for one is not the safer act.
+            logger.error(
+                "PrintWatchdog: no red flag on the poll after an unconfirmed "
+                "emergency stop (printer reads %s); treating the stop as "
+                "confirmed by observation and sending no further stop",
+                _confirmed_state_word(state) or "unknown",
+            )
+            self._latch()
+            return
+        self._estop_attempts += 1
+        confirmed, _said = self._command_stop()
+        self._settle(confirmed, red)
+
+    def _command_stop(self) -> tuple[bool, str | None]:
+        """Send one emergency stop: ``(confirmed, what it said)``.  Never raises."""
+        try:
+            result = self._adapter.emergency_stop()
+        except Exception as exc:
+            logger.exception("PrintWatchdog: emergency_stop() FAILED")
+            return False, f"emergency_stop() raised: {exc}"
+        said = getattr(result, "message", None)
+        return _stop_confirmed(result), (str(said) if said else None)
+
+    def _settle(self, confirmed: bool, flag: Flag) -> None:
+        """Latch on a confirmed stop; otherwise say so, and latch at the ceiling."""
+        attempt = self._estop_attempts
+        if confirmed:
+            logger.error(
+                "PrintWatchdog: emergency stop confirmed for [%s] (attempt %d/%d)",
+                flag.rule,
+                attempt,
+                MAX_ESTOP_ATTEMPTS,
+            )
+            self._latch()
+            return
+        logger.error(
+            "Emergency stop NOT confirmed (attempt %d/%d) — stop the printer at the machine",
+            attempt,
+            MAX_ESTOP_ATTEMPTS,
+        )
+        if attempt >= MAX_ESTOP_ATTEMPTS:
+            logger.error(
+                "PrintWatchdog: stopped retrying after %d unconfirmed emergency "
+                "stops while [%s] still fires, so a printer that never confirms "
+                "is not commanded forever. It may still be running — stop it at "
+                "the machine.",
+                attempt,
+                flag.rule,
+            )
+            self._latch()
+
+    def _latch(self) -> None:
+        with self._lock:
+            self.anomaly_triggered = True
 
     def _record_flag(self, flag: Flag) -> None:
         with self._lock:
@@ -770,6 +932,49 @@ def _is_printing(state: Any) -> bool:
     # PrinterStatus enum has .value == "printing"; strings or enum-likes work.
     value = getattr(s, "value", s)
     return str(value).lower() == "printing"
+
+
+def _confirmed_state_word(state: Any) -> str | None:
+    """The run state from a reading Kiln can vouch for, as a lowercase word.
+
+    :func:`~kiln.printers.base.confirmed_state_of` looks through a fault
+    headline and never through staleness; a dict reading has no headline to
+    look through and gives its ``state`` as it stands.
+    """
+    if isinstance(state, dict):
+        value = state.get("state")
+    else:
+        from kiln.printers.base import confirmed_state_of
+
+        value = confirmed_state_of(state)
+    if value is None:
+        return None
+    return str(getattr(value, "value", value)).lower()
+
+
+def _as_code(value: Any) -> int:
+    """A fault field as an int; 0 when it is absent or unreadable."""
+    if not value:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _stop_confirmed(result: Any) -> bool:
+    """Did an ``emergency_stop()`` answer say the printer confirmed the stop?
+
+    A result carrying ``success`` counts only when that is literally True.  A
+    bare truthy answer with no ``success`` at all is what older test doubles
+    return, and counts.  ``None``, ``False`` or ``success=False`` is a stop
+    nobody saw land.
+    """
+    if result is None:
+        return False
+    if hasattr(result, "success"):
+        return result.success is True
+    return bool(result)
 
 
 def _parse_dbm(signal: Any) -> int | None:

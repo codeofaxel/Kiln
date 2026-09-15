@@ -464,6 +464,54 @@ def test_a_spontaneous_fault_still_records_failed(_no_db_writes, monkeypatch):
     assert _no_db_writes[-1].get("failure_mode")
 
 
+def test_a_bambu_emergency_stop_files_its_ending_before_it_waits(_no_db_writes, monkeypatch):
+    """The Bambu emergency stop reads back whether the job ended, so the
+    ending lands while the call is still running.
+
+    Every door noted the stop after the adapter returned, which used to be
+    sooner than any ending could arrive.  A stop that waits for the ending
+    makes that too late: the stop's own fault code -- 50348044 on an A1 --
+    would be filed as a machine failure, with a failure mode made up from
+    it.  So the adapter files the intent itself, as soon as its commands are
+    out.
+    """
+    from unittest import mock
+
+    from kiln.printers.bambu import BambuAdapter
+
+    adapter = _bambu(monkeypatch)
+    adapter._mqtt_client = mock.MagicMock()
+    adapter._mqtt_client.publish.return_value = mock.MagicMock(rc=0)
+    monkeypatch.setattr(BambuAdapter, "_ensure_mqtt", lambda self: self._mqtt_client)
+    _push(adapter, "RUNNING")
+
+    read_back = adapter._estop_snapshot
+
+    def _the_ending_lands_while_kiln_waits():
+        if adapter._last_status.get("gcode_state") == "RUNNING":
+            payload = {
+                "print": {
+                    "command": "push_status",
+                    "gcode_state": "FAILED",
+                    "subtask_name": "bracket",
+                    "gcode_file": "/sdcard/bracket.3mf",
+                    "print_error": 50348044,
+                }
+            }
+            adapter._on_message(
+                None, None, SimpleNamespace(payload=json.dumps(payload).encode())
+            )
+        return read_back()
+
+    monkeypatch.setattr(adapter, "_estop_snapshot", _the_ending_lands_while_kiln_waits)
+
+    result = adapter.emergency_stop()  # no caller notes anything afterwards
+
+    assert result.success is True
+    assert _outcomes(_no_db_writes) == ["cancelled"]
+    assert _no_db_writes[-1].get("failure_mode") in (None, "")
+
+
 # ---------------------------------------------------------------------------
 # Pending rows: opened under the name their resolvers will look up
 # ---------------------------------------------------------------------------

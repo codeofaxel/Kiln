@@ -276,10 +276,19 @@ the fault's leading edge raises one `printer.error` event -- because a job
 started at the printer's own touchscreen is the operator's to stop.  Only the
 print watchdog stops a machine, and it stays attached to prints Kiln started.
 It stops a machine only for what the machine itself proves: a fault code it
-reports, or a temperature that violates physics.  A print that has stopped
-moving is reported -- one `print.stalled` event, the same sentence on every
-status surface -- and never stopped.  A stall needs a person, not an
-emergency halt.
+keeps printing through, or a temperature that violates physics.  A print
+that has stopped moving is reported -- one `print.stalled` event, the same
+sentence on every status surface -- and never stopped.  A stall needs a
+person, not an emergency halt.
+
+The watchdog stops a machine only when the machine has not already acted.
+A fault the printer paused or ended the job for -- filament runout, an AMS
+problem, a clog -- is reported, never cancelled; the same code has to stand
+for five seconds while the printer keeps printing before the watchdog stops
+it (a code on your own HMS block list still stops it at once).  The Bambu
+emergency stop is read back, and when no report shows the job ending it says
+plainly that it could not confirm the stop and that the machine must be
+stopped at its own screen or power switch.
 
 ---
 

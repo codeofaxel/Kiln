@@ -194,13 +194,22 @@ def _write_durable_cancel_intent(printer: str, at: float) -> None:
         _logger.debug("durable cancel intent write failed: %s", exc)
 
 
-def _consume_durable_cancel_intent(printer: str) -> bool:
-    """Read-and-clear the durable intent.  ``True`` only if one was live.
+def _durable_intent_live(raw: Any) -> bool:
+    """Is a stored intent stamp inside its age bound?
 
     Stamped with the wall clock, because a monotonic one means nothing to
     the process that reads it.  That makes the value vulnerable to a clock
     change in a way the in-memory half is not, so a stamp in the FUTURE is
     treated as no intent rather than as an eternally valid one.
+    """
+    if not raw:
+        return False
+    age = time.time() - float(raw)
+    return 0 <= age <= _CANCEL_INTENT_MAX_AGE_S
+
+
+def _consume_durable_cancel_intent(printer: str) -> bool:
+    """Read-and-clear the durable intent.  ``True`` only if one was live.
 
     Never raises: a database that will not answer must cost a print its
     label, never its recording.
@@ -215,10 +224,20 @@ def _consume_durable_cancel_intent(printer: str) -> bool:
             return False
         # Cleared by overwrite — one row per printer, reused, never grows.
         db.set_setting(key, "")
-        age = time.time() - float(raw)
-        return 0 <= age <= _CANCEL_INTENT_MAX_AGE_S
+        return _durable_intent_live(raw)
     except Exception as exc:  # noqa: BLE001
         _logger.debug("durable cancel intent read failed: %s", exc)
+        return False
+
+
+def _peek_durable_cancel_intent(printer: str) -> bool:
+    """Is a durable intent live?  Reads without clearing.  Never raises."""
+    try:
+        from kiln.persistence import get_db
+
+        return _durable_intent_live(get_db().get_setting(_CANCEL_INTENT_KEY.format(printer)))
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("durable cancel intent peek failed: %s", exc)
         return False
 
 
@@ -277,6 +296,14 @@ class _HookState:
         in_memory = ts is not None and time.monotonic() - ts <= _CANCEL_INTENT_TTL_S
         durable = _consume_durable_cancel_intent(printer)
         return in_memory or durable
+
+    def cancel_intent_pending(self, printer: str) -> bool:
+        """What :meth:`consume_cancel_intent` would answer now, spending nothing."""
+        with self._lock:
+            ts = self._cancel_intents.get(printer)
+        if ts is not None and time.monotonic() - ts <= _CANCEL_INTENT_TTL_S:
+            return True
+        return _peek_durable_cancel_intent(printer)
 
     def clear_cancel_intent(self, printer: str) -> None:
         """Drop any intent without consuming it as an answer."""
@@ -358,6 +385,27 @@ def clear_cancel_intent(printer_name: str) -> None:
         _HOOK_STATE.clear_cancel_intent(printer_name)
     except Exception as exc:  # noqa: BLE001
         _logger.debug("clear_cancel_intent failed (non-fatal): %s", exc)
+
+
+def cancel_intent_pending(printer_name: str) -> bool:
+    """Is a stop Kiln asked for still in flight on ``printer_name``?
+
+    The read half of :func:`register_cancel_intent`.  It answers exactly what
+    the next terminal transition would -- a live in-memory intent, or a
+    durable one inside its age bound -- and spends nothing, because consuming
+    the intent is that transition's job.
+
+    For a caller that must not mistake the tail of a deliberate stop for a
+    fault the machine raised on its own: stopping a Bambu walks its firmware
+    through a real error code (measured on an A1, 2026-08-14).
+
+    Never raises; an unreadable record reads as no stop in flight.
+    """
+    try:
+        return _HOOK_STATE.cancel_intent_pending(printer_name)
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("cancel_intent_pending failed (non-fatal): %s", exc)
+        return False
 
 
 def _failure_mode_from_code(print_error_code: int) -> str:
@@ -806,6 +854,7 @@ def reconcile_pending_outcomes(
 
 
 __all__ = [
+    "cancel_intent_pending",
     "fire_terminal_state_hook",
     "clear_cancel_intent",
     "note_cancel_requested",

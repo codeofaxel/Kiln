@@ -4810,13 +4810,201 @@ class BambuAdapter(PrinterAdapter):
         self._send_print_command("stop")
         return PrintResult(success=True, message="Print cancelled.")
 
+    #: How long :meth:`emergency_stop` watches the status reports for the stop
+    #: to land, and how often it looks.  It returns the moment a report shows
+    #: the stop landed, so the whole window is paid only by a printer that has
+    #: not answered.  A Bambu publishes roughly once a second while a print
+    #: runs, so five seconds is several chances for it to say it stopped.
+    _ESTOP_CONFIRM_TIMEOUT_S: float = 5.0
+    _ESTOP_CONFIRM_INTERVAL_S: float = 0.5
+
+    #: What a report that arrived after the stop must say for the stop to
+    #: count: the job ended (``failed``, ``idle``, ``finish``) or is ending
+    #: (``cancelling``).  ``pause`` is absent on purpose -- a paused job can
+    #: resume, which is exactly what an emergency stop has to rule out.
+    _ESTOP_LANDED: frozenset[PrinterStatus] = frozenset(
+        {PrinterStatus.ERROR, PrinterStatus.IDLE, PrinterStatus.CANCELLING}
+    )
+
     def emergency_stop(self) -> PrintResult:
-        """Perform emergency stop via M112 G-code over MQTT."""
+        """Stop the job, cut both heaters, send M112 -- then read back whether it landed.
+
+        What is and is not verified on Bambu hardware:
+
+        * ``stop`` (the print command): honored.  :meth:`cancel_print` relies
+          on it, and on an A1 (2026-08-14) a cancel walked the firmware
+          through ``failed`` carrying print_error 50348044 for about four
+          seconds.
+        * ``M104 S0`` / ``M140 S0`` over ``gcode_line``: honored --
+          :meth:`set_tool_temp` and :meth:`set_bed_temp` confirm those
+          targets by read-back.
+        * ``M112`` over ``gcode_line``, on any Bambu: UNVERIFIED.  Nothing
+          measured in either repository shows a Bambu acting on it, and the
+          firmware never acknowledges a ``gcode_line``.
+
+        Hence the order.  ``stop`` goes first: it is the command the firmware
+        is known to obey.  The heater cut goes second as ONE ``gcode_line``,
+        not through the typed setters, because each of those blocks on its
+        own read-back window and sequential waits do not belong in an
+        emergency path.  ``M112`` goes last, as best effort: on firmware that
+        does honor it the command processor halts, and anything sent after it
+        may never run.  Each publish is attempted on its own, so one that
+        fails never prevents the next.
+
+        The result is the read-back, never the send.  ``success`` is True only
+        when a report that ARRIVED AFTER the stop went out says the job ended
+        (``failed``, ``idle``, ``finish``) or is ending (``cancelling``).  A
+        cached reading from before the command never confirms, and a
+        read-back that fails for any reason reports the stop unconfirmed.  The
+        heater targets are reported from post-command reports as well --
+        confirmed or not yet confirmed, never assumed.
+
+        HARDWARE CHECKLIST (A1, to be run by Adam):
+
+        1. Start a short print from Bambu Studio; wait for RUNNING and
+           layer >= 2.
+        2. Call emergency_stop through Kiln.  Record: seconds until
+           gcode_state leaves running; the final gcode_state; the nozzle and
+           bed targets after 10 s; whether the toolhead parks; any screen
+           prompt; any print_error raised, and whether clear_error is needed
+           before the next print.
+        3. Mid-print, from a REPL, send only ``send_gcode(["M112"])``: does
+           anything happen?
+        4. Run one full multi-colour AMS print with the watchdog armed: no
+           red flag expected.
+        5. With the watchdog armed, trigger a filament-runout pause: Kiln
+           must NOT cancel the print.
+        """
+        # First, so the fault code this stop itself produces is never
+        # announced as a fault Kiln discovered (see _own_stop_settling).
         self._stop_sent_at = time.monotonic()
-        self.send_gcode(["M112"])
+        try:
+            # Stamped once the session is up, like every read-back here: a
+            # report landing while a session is being built predates the stop.
+            sent = self._stamp_before_send().at
+        except Exception as exc:  # noqa: BLE001 — every command below is still attempted
+            logger.error("Bambu emergency stop: no MQTT session before sending: %s", exc)
+            sent = time.monotonic()
+
+        commands = (
+            ("stop", lambda: self._send_print_command("stop")),
+            ("M104 S0 + M140 S0", lambda: self.send_gcode(["M104 S0", "M140 S0"])),
+            ("M112", lambda: self.send_gcode(["M112"])),
+        )
+        not_sent: list[str] = []
+        for label, send in commands:
+            try:
+                send()
+            except Exception as exc:  # noqa: BLE001 — one failed publish never blocks the next
+                logger.error("Bambu emergency stop: %s was NOT sent: %s", label, exc)
+                not_sent.append(label)
+
+        if len(not_sent) == len(commands):
+            # Nothing left this process, so there is nothing to wait for.
+            return PrintResult(
+                success=False,
+                message=(
+                    "Emergency stop NOT sent: none of the stop commands reached the "
+                    "printer's connection. Stop it at the machine now, with its own "
+                    "screen or its power switch."
+                ),
+            )
+
+        # Filed the moment the commands are out, before the wait below.  The
+        # read-back waits FOR the ending, so the ending lands while this call
+        # is still running: a caller that notes the stop after it returns is
+        # too late, and the lifecycle would file the stop's own fault code as
+        # a machine failure.  After the sends, never in front of them -- this
+        # touches the database.
+        from kiln.auto_record_hook import note_cancel_requested
+
+        note_cancel_requested(self)
+        return self._confirm_emergency_stop(sent, not_sent)
+
+    def _estop_snapshot(self) -> tuple[float, Any, tuple[float, Any], tuple[float, Any]]:
+        """When gcode_state was last carried and what it says, plus each heater
+        target as ``(when last carried, value)``."""
+        with self._state_lock:
+            return (
+                self._gcode_state_time,
+                self._last_status.get("gcode_state"),
+                (
+                    self._field_seen_at.get("nozzle_target_temper", 0.0),
+                    self._last_status.get("nozzle_target_temper"),
+                ),
+                (
+                    self._field_seen_at.get("bed_target_temper", 0.0),
+                    self._last_status.get("bed_target_temper"),
+                ),
+            )
+
+    @staticmethod
+    def _heater_cut_word(reading: tuple[float, Any], sent: float) -> str:
+        """``confirmed`` only when a report after *sent* shows the target at 0."""
+        seen_at, value = reading
+        try:
+            cut = seen_at > sent and int(float(value)) == 0
+        except (TypeError, ValueError):
+            cut = False
+        return "confirmed" if cut else "not yet confirmed"
+
+    def _confirm_emergency_stop(self, sent: float, not_sent: list[str]) -> PrintResult:
+        """Watch the reports for the stop to land.  Never raises, never guesses.
+
+        The window is :attr:`_ESTOP_CONFIRM_TIMEOUT_S` unless the adapter's own
+        read-back override (``_confirm_window_s``) says otherwise.
+        """
+        window = (
+            self._ESTOP_CONFIRM_TIMEOUT_S
+            if self._confirm_window_s is None
+            else max(0.0, self._confirm_window_s)
+        )
+        unsent = f" Not sent: {', '.join(not_sent)}." if not_sent else ""
+        state_at = 0.0
+        status = PrinterStatus.UNKNOWN
+        try:
+            deadline = time.monotonic() + window
+            while True:
+                state_at, raw_state, nozzle, bed = self._estop_snapshot()
+                word = raw_state.lower() if isinstance(raw_state, str) else "unknown"
+                status = _STATE_MAP.get(word, PrinterStatus.UNKNOWN)
+                if state_at > sent and status in self._ESTOP_LANDED:
+                    return PrintResult(
+                        success=True,
+                        message=(
+                            "Emergency stop confirmed: the printer left printing "
+                            f"{state_at - sent:.1f}s after the stop command. Heater targets: "
+                            f"hotend 0 ({self._heater_cut_word(nozzle, sent)}), "
+                            f"bed 0 ({self._heater_cut_word(bed, sent)}).{unsent}"
+                        ),
+                    )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(self._ESTOP_CONFIRM_INTERVAL_S, remaining))
+        except Exception:  # noqa: BLE001 — an unreadable report is an unconfirmed stop
+            logger.exception("Bambu emergency stop: read-back failed")
+            return PrintResult(
+                success=False,
+                message=(
+                    "Emergency stop SENT but NOT confirmed: Kiln could not read the "
+                    "printer's state back. Stop it at the machine now, with its own "
+                    f"screen or its power switch.{unsent}"
+                ),
+            )
+        if state_at > sent:
+            reported = f"the printer still reports {status.value} {window:g}s later"
+        else:
+            reported = (
+                f"the printer has not reported its state in the {window:g}s since "
+                f"(its last report said {status.value})"
+            )
         return PrintResult(
-            success=True,
-            message="Emergency stop triggered (M112 sent).",
+            success=False,
+            message=(
+                f"Emergency stop SENT but NOT confirmed: {reported}. Stop it at the "
+                f"machine now, with its own screen or its power switch.{unsent}"
+            ),
         )
 
     def clear_error(self) -> PrintResult:
