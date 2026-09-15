@@ -37,6 +37,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Watch your print live, not one frame every thirty seconds.** Kiln now
+  shows a Bambu A1 or P1 camera (or any OctoPrint or Moonraker webcam) as
+  live video in your print monitor, and tells you how old the picture is
+  so a frozen frame never passes as live. Live video plays only on the
+  computer connected to the printer.
+
 - **Kiln now checks whether your printer still thinks it has the old nozzle.**
   On a Bambu, Klipper, Creality, Prusa or OctoPrint printer it's connected to,
   Kiln reads the nozzle setting that printer holds and tells you when it
