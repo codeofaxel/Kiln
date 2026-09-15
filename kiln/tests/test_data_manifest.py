@@ -79,6 +79,41 @@ class TestBundledDataManifest:
             )
 
 
+class TestPublicProfileFields:
+    """The positive half of the printer catalogue's schema statement.
+
+    ``PUBLIC_PROFILE_FIELDS`` names what a printer row carries and
+    ``RESERVED_FIELD_MARKERS`` names what it must not.  A field in both
+    would be a schema that contradicts itself, and each half is read by
+    a different sweep, so neither would notice on its own.
+    """
+
+    def test_the_two_halves_do_not_overlap(self) -> None:
+        both = (
+            data_manifest.PUBLIC_PROFILE_FIELDS
+            & data_manifest.RESERVED_FIELD_MARKERS
+        )
+        assert not both, f"field is both carried and reserved: {sorted(both)}"
+
+    def test_every_printer_row_carries_exactly_these_fields(self) -> None:
+        """The declaration is what the catalogue actually holds.
+
+        ``test_printer_intelligence.py`` asserts the same thing through
+        the loader; this asserts it of the constant itself, so a field
+        added to the list without being added to the rows fails here
+        rather than shipping as a promise the data does not keep.
+        """
+        catalogue = data_manifest.load("printer_intelligence.json")
+        rows = {
+            key: value
+            for key, value in catalogue.items()
+            if not key.startswith("_")
+        }
+        assert rows, "the printer catalogue has no rows to check"
+        for key, row in rows.items():
+            assert set(row) == data_manifest.PUBLIC_PROFILE_FIELDS, key
+
+
 class TestReservedMarkersAreAbsent:
     """Reserved field names and schema ids, absent from every printer file.
 

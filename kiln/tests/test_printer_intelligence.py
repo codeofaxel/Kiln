@@ -27,6 +27,7 @@ from unittest import mock
 
 import pytest
 
+from kiln.data_manifest import PUBLIC_PROFILE_FIELDS
 from kiln.printer_intelligence import (
     _DATA_FILE,
     FailureMode,
@@ -40,22 +41,6 @@ from kiln.printer_intelligence import (
 )
 
 from .conftest import requires_printer_intelligence_overlay
-
-PUBLIC_PROFILE_FIELDS = {
-    "display_name",
-    "firmware",
-    "extruder_type",
-    "hotend_type",
-    "has_enclosure",
-    # true / false / null -- every row answers, null meaning unstated.
-    "has_chamber_sensor",
-    "has_abl",
-    "has_input_shaping",
-    "build_volume_mm",
-    "max_hotend_temp",
-    "max_bed_temp",
-    "materials",
-}
 
 # ===================================================================
 # Fixtures

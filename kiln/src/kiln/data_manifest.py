@@ -89,6 +89,36 @@ PROSE_EXCLUDED_KEYS: frozenset[str] = frozenset(
     {"start_gcode", "end_gcode", "settings", "bed_shape", "_sources", "_meta"}
 )
 
+#: Every key a printer row in ``printer_intelligence.json`` carries.  This
+#: is the POSITIVE half of the sentence below: that one names the fields
+#: reserved OUT of the public catalogue, and until now nothing named the
+#: ones that are in it, so "the schema is fixed" was a claim with no
+#: subject.  Each entry is a physical fact about the machine or a safety
+#: ceiling -- the band that is public at every tier -- and every row
+#: answers every key, ``null`` where nobody has settled the fact.
+#:
+#: Read it, do not copy it.  The list had been retyped in the test suite
+#: here and again in kiln-pro's catalogue gate, and on 2026-09-15
+#: ``has_chamber_sensor`` shipped into the rows while both copies still
+#: named eleven keys -- so the gate whose job is to notice a widened
+#: public schema reported the new field as an illegal extra instead.
+PUBLIC_PROFILE_FIELDS: frozenset[str] = frozenset(
+    {
+        "display_name",
+        "firmware",
+        "extruder_type",
+        "hotend_type",
+        "has_enclosure",
+        "has_chamber_sensor",
+        "has_abl",
+        "has_input_shaping",
+        "build_volume_mm",
+        "max_hotend_temp",
+        "max_bed_temp",
+        "materials",
+    }
+)
+
 #: Field names reserved out of the bundled catalogues.  The printer
 #: catalogue's schema is fixed, and these markers must not appear anywhere
 #: in the printer-keyed files -- the test suite sweeps for them.
