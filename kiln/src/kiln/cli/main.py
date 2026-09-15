@@ -10995,12 +10995,14 @@ def watch(printer: str | None, delay: int, checks: int, interval: int, use_json:
         adapter = _make_adapter(cfg)
 
         policy = MonitorPolicy(
-            delay_seconds=delay,
-            num_checks=checks,
-            interval_seconds=interval,
-            auto_pause=True,
+            first_layer_delay_seconds=delay,
+            first_layer_check_count=checks,
+            first_layer_interval_seconds=interval,
+            auto_pause_on_failure=True,
         )
-        monitor = FirstLayerMonitor(adapter, policy=policy, monitor_id="cli")
+        monitor = FirstLayerMonitor(
+            adapter, printer or str(cfg.get("name") or "default"), policy=policy
+        )
 
         if not use_json:
             total_wait = delay + checks * interval
@@ -11010,13 +11012,13 @@ def watch(printer: str | None, delay: int, checks: int, interval: int, use_json:
                 f"(~{total_wait}s total)..."
             )
 
-        result = monitor.run()
+        result = monitor.monitor()
 
         if use_json:
             click.echo(
                 json.dumps(
                     {
-                        "status": "success" if result.outcome == "success" else "error",
+                        "status": "success" if result.success else "error",
                         "data": result.to_dict(),
                     },
                     indent=2,
@@ -11024,11 +11026,11 @@ def watch(printer: str | None, delay: int, checks: int, interval: int, use_json:
             )
         else:
             click.echo(f"Outcome: {result.outcome}")
-            click.echo(f"Elapsed: {result.elapsed_seconds:.1f}s")
+            click.echo(f"Elapsed: {result.duration_seconds:.1f}s")
             if result.snapshots:
                 click.echo(f"Snapshots captured: {len(result.snapshots)}")
-                for snap in result.snapshots:
-                    idx = snap.get("check_index", "?")
+                for number, snap in enumerate(result.snapshots, 1):
+                    idx = snap.get("snapshot_index", number)
                     pct = snap.get("completion_percent")
                     pct_str = f" ({pct:.0f}%)" if pct is not None else ""
                     click.echo(f"  Snapshot {idx}{pct_str}")

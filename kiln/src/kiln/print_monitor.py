@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -180,8 +181,9 @@ class FirstLayerMonitor:
         result = monitor.monitor()
         # result.snapshots contains base64-encoded images for the agent
 
-    The :meth:`monitor` call is **blocking** — run it in a background
-    thread when called from the MCP layer.
+    The :meth:`monitor` call is **blocking**.  A caller that must not wait --
+    the MCP layer -- calls :meth:`start`, which runs that same session on a
+    daemon thread, and reads the outcome with :meth:`result`.
     """
 
     def __init__(
@@ -196,8 +198,75 @@ class FirstLayerMonitor:
         self._printer_name = printer_name
         self._policy = policy or MonitorPolicy()
         self._event_bus = event_bus
+        # Background session state (see :meth:`start`).  One lock guards
+        # both, so a reader never sees a finished thread without its result.
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._result: MonitorResult | None = None
 
     # -- public API --------------------------------------------------------
+
+    def start(self, *, monitoring_mode: str | None = None) -> None:
+        """Run :meth:`monitor` on a daemon thread; read it with :meth:`result`.
+
+        The same session :meth:`monitor` runs -- not a second implementation of
+        it.  This only moves it off the caller's thread, because the session
+        sleeps for minutes and a tool call must not.  Calling it again while a
+        session exists starts nothing.
+
+        Raises:
+            RuntimeError: If the thread cannot be started.  Nothing is left
+                half-started: a later :meth:`start` may try again.
+        """
+        with self._lock:
+            if self._thread is not None:
+                return
+            thread = threading.Thread(
+                target=self._run_in_background,
+                kwargs={"monitoring_mode": monitoring_mode},
+                name=f"kiln-first-layer-{self._printer_name}",
+                daemon=True,
+            )
+            self._thread = thread
+        try:
+            thread.start()
+        except Exception:
+            with self._lock:
+                self._thread = None
+            raise
+
+    def result(self) -> MonitorResult | None:
+        """The finished session's result, or ``None`` while none has finished."""
+        with self._lock:
+            return self._result
+
+    @property
+    def running(self) -> bool:
+        """Whether a background session is still in progress."""
+        with self._lock:
+            thread = self._thread
+            finished = self._result is not None
+        return thread is not None and thread.is_alive() and not finished
+
+    def _run_in_background(self, *, monitoring_mode: str | None) -> None:
+        """Thread body: run the session, and always leave a result behind.
+
+        A session that raises ends as an ``error`` result, never as a monitor
+        that reads "still in progress" forever.
+        """
+        try:
+            outcome = self.monitor(monitoring_mode=monitoring_mode)
+        except Exception as exc:  # noqa: BLE001 — a crash must end as a result, not as silence
+            logger.exception(
+                "First-layer monitor on %s stopped with an error", self._printer_name
+            )
+            outcome = MonitorResult(
+                success=False,
+                outcome="error",
+                message=f"The first-layer monitor stopped with an error: {exc}",
+            )
+        with self._lock:
+            self._result = outcome
 
     def monitor(self, *, monitoring_mode: str | None = None) -> MonitorResult:
         """Run the first-layer monitoring session (blocking).

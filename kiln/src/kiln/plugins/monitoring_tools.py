@@ -135,6 +135,65 @@ def _detect_phase(completion: float | None) -> str:
 # ---------------------------------------------------------------------------
 
 
+#: Finished first-layer monitors kept for ``first_layer_status`` to read.  A
+#: finished monitor holds its snapshots -- base64 images included -- until
+#: someone asks for them, and a caller that never asks must not grow the
+#: process without bound.  The oldest finished monitors go first.
+_MAX_FINISHED_MONITORS = 16
+
+
+def _file_monitor(monitor_id: str, monitor: object) -> None:
+    """File *monitor* for ``first_layer_status``, retiring the oldest finished ones."""
+    import kiln.server as _srv
+
+    monitors = _srv._first_layer_monitors
+    finished = [
+        mid
+        for mid, filed in list(monitors.items())
+        if getattr(filed, "result", lambda: None)() is not None
+    ]
+    for mid in finished[: max(0, len(finished) - _MAX_FINISHED_MONITORS + 1)]:
+        monitors.pop(mid, None)
+    monitors[monitor_id] = monitor
+
+
+def _launch_first_layer_monitor(
+    adapter: object,
+    printer_name: str,
+    *,
+    delay: int,
+    checks: int,
+    interval: int,
+    auto_pause: bool,
+) -> dict:
+    """Start a first-layer monitor on its own thread and file it.
+
+    Raises whatever stops the monitor from starting.  The caller has already
+    started the print, so it reports that as a warning, never as a failure.
+    """
+    import kiln.server as _srv
+    from kiln.print_monitor import FirstLayerMonitor, MonitorPolicy
+
+    policy = MonitorPolicy(
+        first_layer_delay_seconds=delay,
+        first_layer_check_count=checks,
+        first_layer_interval_seconds=interval,
+        auto_pause_on_failure=auto_pause,
+    )
+    try:
+        bus = _srv._get_event_bus()
+    except Exception:  # noqa: BLE001 — events are optional; the monitor still runs
+        bus = None
+    monitor = FirstLayerMonitor(adapter, printer_name, policy=policy, event_bus=bus)
+    monitor.start()
+    monitor_id = secrets.token_hex(6)
+    _file_monitor(monitor_id, monitor)
+    return {
+        "monitor_id": monitor_id,
+        "monitor_status": "started",
+        "first_layer_policy": policy.to_dict(),
+    }
+
 class _PrintWatcher:
     """Background thread that monitors a running print.
 
@@ -1432,55 +1491,66 @@ class _MonitoringToolsPlugin:
                     "start_monitored_print", "print_started", details={"file": file_name}
                 )
 
-                # Set up first-layer monitoring in background
-                from kiln.print_monitor import FirstLayerMonitor, MonitorPolicy
-
-                monitor_id = secrets.token_hex(6)
-                policy = MonitorPolicy(
-                    delay_seconds=first_layer_delay,
-                    num_checks=first_layer_checks,
-                    interval_seconds=first_layer_interval,
-                    auto_pause=auto_pause,
-                )
-                monitor = FirstLayerMonitor(
-                    adapter,
-                    policy=policy,
-                    monitor_id=monitor_id,
-                )
-                _srv._first_layer_monitors[monitor_id] = monitor
-                monitor.start()
-
+                # The printer's answer decides this tool's answer, and it is
+                # read before anything else is set up.  Once the printer has the
+                # job, nothing that fails after this point may be reported as a
+                # failure to start: a caller told "failed" about a print that is
+                # running sends the same file again onto an occupied bed.
                 verdict = resolve_print_start(
                     adapter, print_result, sent_at=sent_at, file_name=file_name,
                 )
-                if verdict.ok:
-                    lead = (
-                        "Print started"
-                        if verdict.confirmed
-                        else "Print command accepted (not yet confirmed running)"
-                    )
-                    monitored_message = (
-                        f"{lead} and first-layer monitor launched (id={monitor_id}). "
-                        "Use watch_print_status or check back after "
-                        f"~{first_layer_delay + first_layer_checks * first_layer_interval}s "
-                        "for first-layer snapshots."
-                    )
-                else:
-                    monitored_message = (
-                        f"The printer did not start {file_name}. "
-                        f"{verdict.message} The first-layer monitor was "
-                        f"launched anyway (id={monitor_id}) and will find "
-                        f"nothing to look at."
-                    )
-                return {
-                    "success": verdict.ok,
+                if not verdict.ok:
+                    return {
+                        "success": False,
+                        "print_start": verdict.state,
+                        "print_result": verdict.to_dict(),
+                        "monitor_status": "not_started",
+                        "message": (
+                            f"The printer did not start {file_name}. {verdict.message} "
+                            "No first-layer monitor was started."
+                        ),
+                    }
+                lead = (
+                    "Print started"
+                    if verdict.confirmed
+                    else "Print command accepted (not yet confirmed running)"
+                )
+                response: dict = {
+                    "success": True,
                     "print_start": verdict.state,
                     "print_result": verdict.to_dict(),
-                    "monitor_id": monitor_id,
-                    "monitor_status": "started",
-                    "first_layer_policy": policy.to_dict(),
-                    "message": monitored_message,
                 }
+                try:
+                    response.update(
+                        _launch_first_layer_monitor(
+                            adapter,
+                            _srv._resolve_effective_printer_name(printer_name),
+                            delay=first_layer_delay,
+                            checks=first_layer_checks,
+                            interval=first_layer_interval,
+                            auto_pause=auto_pause,
+                        )
+                    )
+                    response["message"] = (
+                        f"{lead} and the first-layer monitor is running "
+                        f"(id={response['monitor_id']}). Check first_layer_status after "
+                        f"~{first_layer_delay + first_layer_checks * first_layer_interval}s."
+                    )
+                except Exception as exc:  # noqa: BLE001 — the printer has the job; this is a warning
+                    _logger.exception(
+                        "First-layer monitor could not start after the print did"
+                    )
+                    response["monitor_status"] = "not_started"
+                    response["warning"] = (
+                        f"The first-layer monitor could not start ({exc}). Watch the "
+                        "first layer yourself with watch_print_status or the "
+                        "printer's camera."
+                    )
+                    response["message"] = (
+                        f"{lead}. The printer has the job, so do not start it again. "
+                        "The first-layer monitor could not start; see warning."
+                    )
+                return response
             except PrinterNotFoundError:
                 return _srv._error_dict(
                     f"Printer {printer_name!r} not found.", code="NOT_FOUND"
