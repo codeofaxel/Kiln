@@ -135,6 +135,20 @@ class TestTheKeyShapeIsThePrivacyBoundary:
         assert "action_stream" in streaming.ADDRESS_PATH_CLASSES
 
 
+class TestAPathClassCanBeSaidInWords:
+    """An observed address is served as a port and a path shape; the shape
+    words live beside the classifier and must agree with it."""
+
+    @pytest.mark.parametrize("cls", [c for c in streaming.ADDRESS_PATH_CLASSES if c != "other"])
+    def test_every_path_class_has_a_shape_the_classifier_agrees_with(self, cls):
+        shape = streaming.ADDRESS_PATH_SHAPES[cls]
+        assert streaming._address_event(f"http://printer.local:8080{shape}") == f"addr_8080_{cls}"
+
+    def test_other_has_no_shape(self):
+        assert "other" not in streaming.ADDRESS_PATH_SHAPES
+        assert set(streaming.ADDRESS_PATH_SHAPES) < set(streaming.ADDRESS_PATH_CLASSES)
+
+
 class TestTheModelIsTheOneTheRelayWasAimedAt:
     def test_the_config_declared_model_is_used(self, monkeypatch):
         import kiln.printer_model_resolver as resolver

@@ -120,6 +120,18 @@ ADDRESS_PATH_CLASSES: tuple[str, ...] = (
     "action_stream", "webcam_action_stream", "stream", "video", "root", "other",
 )
 
+#: What each path class looks like, for saying an observed address in words
+#: ("port 8080 at /?action=stream").  ``other`` has no shape: it is, by
+#: definition, none of these.  A round-trip test pins every shape to the
+#: classifier above, so the words cannot drift from the rule.
+ADDRESS_PATH_SHAPES: dict[str, str] = {
+    "action_stream": "/?action=stream",
+    "webcam_action_stream": "/webcam/?action=stream",
+    "stream": "/stream",
+    "video": "/video",
+    "root": "/",
+}
+
 #: What a camera check found at an address (see :mod:`kiln.camera_check`).
 CHECK_RESULTS: tuple[str, ...] = (
     "mjpeg", "jpeg", "webrtc_signalling", "html", "http_error", "unreachable", "other",
