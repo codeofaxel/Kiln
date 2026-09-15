@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-12T09:50:28.697974+00:00",
+  "generated": "2026-09-15T02:22:15.841413+00:00",
   "tool_count": 419,
   "categories": {
     "product_generators": {
@@ -13552,7 +13552,7 @@
     },
     {
       "name": "answer_printer_question",
-      "description": "Answer one factual question about one printer, including whether it protects against thermal runaway.",
+      "description": "Answer one question about one printer: a hardware fact, whether it protects against thermal runaway, or which screw goes where when you take an assembly apart.",
       "tier": "free",
       "access": "free",
       "category": "print_intelligence",
