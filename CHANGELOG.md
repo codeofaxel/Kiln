@@ -37,6 +37,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Taking your printer apart? Ask Kiln first.** It tells you what to unplug,
+  how many screws to expect and which key fits. Kiln Pro adds which screw goes
+  in which hole.
+
 - **Watch your print live, not one frame every thirty seconds.** Kiln now
   shows a Bambu A1 or P1 camera (or any OctoPrint or Moonraker webcam) as
   live video in your print monitor, and tells you how old the picture is
