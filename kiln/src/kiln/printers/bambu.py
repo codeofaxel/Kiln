@@ -290,25 +290,86 @@ _NOZZLE_CLUMP_MESSAGE = (
 )
 
 
-#: The bit of the ``home_flag`` field on the ``print`` status report that
-#: follows the screen switch Print Options > Nozzle clumping detection: set
-#: when the switch is ON, clear when it is OFF.  Bambu does not document the
-#: field's bits.  MEASURED, not read from a spec: three raw report dumps off
-#: one A1 (LAN mode, idle, 2026-09-15) while the switch was flipped ON, OFF,
-#: ON -- this bit was the only field that changed besides temperatures,
-#: wifi signal and the sequence counter.  The dump did not capture the
-#: firmware version.
-HOME_FLAG_NOZZLE_CLUMPING_DETECT_BIT: int = 1 << 24
+#: Where a Bambu printer states its nozzle clumping detection setting in its
+#: ``print`` status report.  The report's own fields say which layout it
+#: speaks, so nothing here depends on the model:
+#:
+#: * ``home_flag`` (integer): bit 24 set = the setting is ON, bit 25 set = the
+#:   printer HAS the setting.  Measured 2026-09-15 on an A1 by flipping the
+#:   screen switch while dumping the report: bit 24 followed the screen both
+#:   ways and bit 25 stayed set.
+#: * ``cfg`` / ``fun`` (hex strings, newer firmware): ``cfg`` bit 24 = ON,
+#:   ``fun`` bit 13 = the printer HAS the setting.  When both layouts are in a
+#:   report, this one wins.
+#: * a three-way setting on newer firmware: ``fun2`` bit 15 = the printer
+#:   offers it, and ``cfg`` bits 43-44 hold 0 = off, 1 = on, 2 = automatic.
+#:   A printer that offers it has it INSTEAD of the plain on/off setting.
+#:
+#: The ``cfg`` / ``fun`` / ``fun2`` layouts are not yet exercised against a
+#: real printer; the ``home_flag`` layout is.
+_CLUMP_HOME_FLAG_ON_BIT = 24
+_CLUMP_HOME_FLAG_SUPPORTED_BIT = 25
+_CLUMP_CFG_ON_BIT = 24
+_CLUMP_FUN_SUPPORTED_BIT = 13
+_CLUMP_FUN2_THREE_WAY_BIT = 15
+_CLUMP_CFG_THREE_WAY_SHIFT = 43
+_CLUMP_THREE_WAY_MODES: dict[int, str] = {0: "off", 1: "on", 2: "auto"}
+#: What ``nozzle_blob_detect_v2`` takes for each three-way mode.
+_CLUMP_THREE_WAY_VALUES: dict[str, int] = {"off": 0, "on": 1, "auto": 2}
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
-#: The model families the bit above has actually been measured on.  A
-#: reading is DECODED only for these; every other Bambu model gets an
-#: honest "unverified" rather than a value inferred across models -- the
-#: A1 mini shares the feature and the screen switch and is still not here,
-#: because it has not been measured.  Widen this set by measuring, never by
-#: analogy.  Keyed by the family ids of :data:`_BAMBU_MODEL_FAMILIES`.
-NOZZLE_CLUMPING_FLAG_MEASURED_FAMILIES: frozenset[str] = frozenset({"a1"})
+CLUMP_SOURCE_HOME_FLAG = "bambu_mqtt_home_flag"
+CLUMP_SOURCE_CFG = "bambu_mqtt_cfg"
+CLUMP_SOURCE_THREE_WAY = "bambu_mqtt_cfg_smart"
 
-NOZZLE_CLUMPING_FLAG_SOURCE = "bambu_mqtt_home_flag"
+
+def _hex_flag(raw: Any) -> int | None:
+    """A hex flag field of the report as an integer, or ``None`` when absent
+    or holding no hex digits.  Bits count from the least significant end, so
+    a string of any length is read by position."""
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if text[:2].lower() == "0x":
+        text = text[2:]
+    digits = "".join(c for c in text if c in _HEX_DIGITS)
+    return int(digits, 16) if digits else None
+
+
+def decode_nozzle_clumping_switch(status: dict[str, Any]) -> tuple[str, bool, str | None] | None:
+    """``(source, supported, mode)`` from a ``print`` report, or ``None`` when
+    the report states nothing about the setting.
+
+    *mode* is ``"on"`` / ``"off"`` / ``"auto"``, or ``None`` when the printer
+    has no such setting or states a value this decoder does not recognise.
+    Read in the order the layouts take precedence: the three-way setting when
+    the printer offers it, else the newer plain setting, else ``home_flag``.
+    """
+    cfg = _hex_flag(status.get("cfg"))
+    fun = _hex_flag(status.get("fun"))
+    fun2 = _hex_flag(status.get("fun2"))
+    raw_home = status.get("home_flag")
+    home_flag = raw_home if isinstance(raw_home, int) and not isinstance(raw_home, bool) else None
+
+    def on_off(flags: int, bit: int) -> str:
+        return "on" if (flags >> bit) & 1 else "off"
+
+    if fun2 is not None and (fun2 >> _CLUMP_FUN2_THREE_WAY_BIT) & 1:
+        mode = None if cfg is None else _CLUMP_THREE_WAY_MODES.get((cfg >> _CLUMP_CFG_THREE_WAY_SHIFT) & 0b11)
+        return CLUMP_SOURCE_THREE_WAY, True, mode
+    if fun is not None:
+        if not (fun >> _CLUMP_FUN_SUPPORTED_BIT) & 1:
+            return CLUMP_SOURCE_CFG, False, None
+        if cfg is not None:
+            return CLUMP_SOURCE_CFG, True, on_off(cfg, _CLUMP_CFG_ON_BIT)
+        if home_flag is not None:
+            return CLUMP_SOURCE_HOME_FLAG, True, on_off(home_flag, _CLUMP_HOME_FLAG_ON_BIT)
+        return CLUMP_SOURCE_CFG, True, None
+    if home_flag is not None:
+        if not (home_flag >> _CLUMP_HOME_FLAG_SUPPORTED_BIT) & 1:
+            return CLUMP_SOURCE_HOME_FLAG, False, None
+        return CLUMP_SOURCE_HOME_FLAG, True, on_off(home_flag, _CLUMP_HOME_FLAG_ON_BIT)
+    return None
 
 
 def _is_nozzle_clump_error(error_code: int) -> bool:
@@ -1338,12 +1399,12 @@ class BambuAdapter(PrinterAdapter):
         # Static per session; cached on first sight.  Lets get_ams_status
         # resolve AMS unit type (e.g. "ams_f1/0") which print.ams.ams[] omits.
         self._fw_modules: list[Any] = []
-        # Armed when Kiln turned the printer's own nozzle-clumping-detection
-        # switch OFF for a print it was asked to skip the probe on, and read
-        # it ON beforehand; cleared the moment it is put back.  In-memory:
-        # a process that dies mid-print restores nothing, and says so in the
-        # start_print note.
-        self._restore_nozzle_detection: bool = False
+        # What to put back when Kiln turned the printer's own nozzle clumping
+        # detection OFF for a print it was asked to skip the probe on and had
+        # read it on or automatic beforehand: ``{"three_way", "mode"}``, or
+        # ``None``.  Cleared the moment it is put back.  In-memory: a process
+        # that dies mid-print restores nothing, and says so in the note.
+        self._restore_nozzle_detection: dict[str, Any] | None = None
         self._fw_modules_requested = False  # one get_version request per session
 
         # State cache -- updated by MQTT messages.
@@ -2185,7 +2246,7 @@ class BambuAdapter(PrinterAdapter):
             # A print Kiln skipped the probe on has ended: put the printer's
             # own switch back where Kiln found it.  Keyed on the state edge
             # alone, not on job identity -- a switch owes nothing to a job id.
-            if self._restore_nozzle_detection and prev_gcode_state:
+            if getattr(self, "_restore_nozzle_detection", None) and prev_gcode_state:
                 with self._state_lock:
                     _ended_state = str(self._last_status.get("gcode_state") or "")
                 self._maybe_restore_nozzle_detection(prev_gcode_state, _ended_state)
@@ -2737,78 +2798,102 @@ class BambuAdapter(PrinterAdapter):
             }
         )
 
-    def _skip_nozzle_detection_for_print(self, kwargs: dict[str, Any]) -> str:
-        """Turn the probe off for this print, remembering whether to put it back.
+    def _clumping_setting_is_three_way(self) -> bool:
+        """Whether this printer's report offers the three-way setting."""
+        try:
+            with self._state_lock:
+                status = dict(self._last_status)
+        except AttributeError:
+            return False
+        decoded = decode_nozzle_clumping_switch(status)
+        return decoded is not None and decoded[0] == CLUMP_SOURCE_THREE_WAY
 
-        MEASURED 2026-09-15: the skip IS the printer's own screen switch, not
-        a per-print override -- it flips OFF and stays off.  So the switch is
-        read first, and the restore is armed ONLY when it read ON: a user who
-        had it OFF keeps it OFF, and a model whose read is unverified is never
-        forced ON on a guess.  ``restore_nozzle_detection=False`` in *kwargs*
-        opts out (a batch that wants it off).  Returns the sentence for the
-        print result, or ``""`` when there is nothing to say.
+    def _skip_nozzle_detection_for_print(self, kwargs: dict[str, Any]) -> str:
+        """Turn the probe off for this print, remembering what to put back.
+
+        MEASURED 2026-09-15: the skip IS the printer's own setting, not a
+        per-print override -- it flips OFF and stays off.  So the setting is
+        read first, and the restore is armed ONLY when it read on or
+        automatic, to exactly that value: a printer whose setting was off
+        stays off, and one Kiln could not read is never forced on.  A printer
+        offering the three-way setting is sent that setting's own command;
+        the rest get the plain one.  ``restore_nozzle_detection=False`` in
+        *kwargs* opts out (a batch that wants it off).  Returns the sentence
+        for the print result, or ``""`` when there is nothing to say.
         """
         restore = bool(kwargs.get("restore_nozzle_detection", True))
         before = None
         if restore:
             try:
                 before = self.read_nozzle_clumping_detection()
-            except Exception:  # noqa: BLE001 -- an unreadable switch is "cannot say"
+            except Exception:  # noqa: BLE001 -- an unreadable setting is "cannot say"
                 before = None
-        self._disable_nozzle_detection()
-        if not restore:
-            self._restore_nozzle_detection = False
-            return (
-                "Kiln turned the printer's nozzle clumping detection switch off "
-                "for this print and will leave it off (restore_nozzle_detection=False)."
-            )
-        if before is not None and before.enabled is True:
-            self._restore_nozzle_detection = True
-            return (
-                "Kiln turned the printer's nozzle clumping detection switch off "
-                "for this print and will turn it back on when the print ends. "
-                "If Kiln is not running when it ends, switch it on again on "
-                "the printer's screen."
-            )
-        self._restore_nozzle_detection = False
-        if before is not None and before.enabled is False:
-            return ""
-        return (
-            "Kiln asked the printer to skip the nozzle clumping probe. On this "
-            "printer Kiln could not read whether the switch was on beforehand, "
-            "so it will not turn it back on afterwards: that may leave the "
-            "printer's own switch off -- check Print Options after the print."
-        )
-
-    def _restore_nozzle_detection_now(self, reason: str) -> bool:
-        """Put the switch back ON if Kiln turned it off and still owes that.
-
-        ``True`` when the enable was sent.  Measured 2026-09-15:
-        ``print_option`` with ``nozzle_blob_detect: true`` turns the screen
-        switch back on.  Sent at most once per arming.
-        """
-        if not self._restore_nozzle_detection:
-            return False
-        self._restore_nozzle_detection = False
-        logger.info("Restoring the printer's nozzle clumping detection switch (%s)", reason)
-        try:
+        three_way = self._clumping_setting_is_three_way()
+        if three_way:
             self._publish_command(
                 {
                     "print": {
                         "sequence_id": self._next_seq(),
                         "command": "print_option",
-                        "nozzle_blob_detect": True,
+                        "nozzle_blob_detect_v2": _CLUMP_THREE_WAY_VALUES["off"],
                     }
                 }
             )
+        else:
+            self._disable_nozzle_detection()
+        self._restore_nozzle_detection = None
+        if not restore:
+            return (
+                "Kiln turned the printer's nozzle clumping detection off for this "
+                "print and will leave it off (restore_nozzle_detection=False)."
+            )
+        if before is not None and before.enabled is True:
+            prior = before.mode or "on"
+            self._restore_nozzle_detection = {"three_way": three_way, "mode": prior}
+            back = "set it back to automatic" if prior == "auto" else "turn it back on"
+            return (
+                "Kiln turned the printer's nozzle clumping detection off for this "
+                f"print and will {back} when the print ends. If Kiln is not "
+                "running when it ends, set it again in the printer's own settings."
+            )
+        if before is not None and (before.enabled is False or before.supported is False):
+            return ""
+        return (
+            "Kiln asked the printer to skip the nozzle clumping probe. On this "
+            "printer Kiln could not read whether the switch was on beforehand, "
+            "so it will not turn it back on afterwards: that may leave the "
+            "printer's own setting off -- check it after the print."
+        )
+
+    def _restore_nozzle_detection_now(self, reason: str) -> bool:
+        """Put the setting back if Kiln turned it off and still owes that.
+
+        ``True`` when the command was sent.  Measured 2026-09-15:
+        ``print_option`` with ``nozzle_blob_detect: true`` turns the A1's
+        screen switch back on.  A three-way printer gets its prior mode back
+        through ``nozzle_blob_detect_v2``.  Sent at most once per arming, and
+        safe on an adapter that never ran ``__init__``.
+        """
+        memo = getattr(self, "_restore_nozzle_detection", None)
+        if not memo:
+            return False
+        self._restore_nozzle_detection = None
+        logger.info("Restoring the printer's nozzle clumping detection (%s)", reason)
+        payload: dict[str, Any] = {"sequence_id": self._next_seq(), "command": "print_option"}
+        if memo.get("three_way"):
+            payload["nozzle_blob_detect_v2"] = _CLUMP_THREE_WAY_VALUES.get(str(memo.get("mode")), 1)
+        else:
+            payload["nozzle_blob_detect"] = True
+        try:
+            self._publish_command({"print": payload})
         except Exception:  # noqa: BLE001 -- best effort; the note told the user how to do it by hand
             logger.debug("nozzle clumping detection restore failed", exc_info=True)
             return False
         return True
 
     def _maybe_restore_nozzle_detection(self, prev_state: str | None, new_state: str | None) -> None:
-        """On the print's terminal transition, put the switch back."""
-        if not self._restore_nozzle_detection:
+        """On the print's terminal transition, put the setting back."""
+        if not getattr(self, "_restore_nozzle_detection", None):
             return
         try:
             from kiln.auto_record_hook import is_terminal_transition
@@ -3167,51 +3252,44 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def read_nozzle_clumping_detection(self) -> NozzleClumpingDetection | None:
-        """Whether the screen switch "Nozzle clumping detection" is on, from
-        the printer's own status report.
+        """The printer's own nozzle clumping detection setting, from its status
+        report (:func:`decode_nozzle_clumping_switch`).
 
-        Decoded from :data:`HOME_FLAG_NOZZLE_CLUMPING_DETECT_BIT` of the
-        ``home_flag`` field -- but ONLY for a machine whose family is in
-        :data:`NOZZLE_CLUMPING_FLAG_MEASURED_FAMILIES`.  Any other model
-        returns a reading with ``enabled=None`` and the reason: the mapping
-        was measured on one A1, Bambu publishes nothing about the field, and
-        a value inferred across models would be a guess wearing a verdict.
-        Answered from the same cache as :meth:`get_state`, with that reading's
-        age and the cache's own freshness budget.  ``None`` when the printer
-        is unreachable or the report carries no usable ``home_flag``.  Reads
-        only; sends nothing.
+        Every Bambu model states it the same ways, and states whether it has
+        the setting at all, so a printer without one is reported as having
+        none rather than as unknown.  Answered from the same cache as
+        :meth:`get_state`, with that reading's age and the cache's own
+        freshness budget.  ``None`` when the printer is unreachable or the
+        report says nothing about the setting.  Reads only; sends nothing.
         """
         state = self.get_state()
         if not state.connected:
             return None
         with self._state_lock:
-            raw = self._last_status.get("home_flag")
-        try:
-            flag = int(raw)
-        except (TypeError, ValueError):
+            status = dict(self._last_status)
+        decoded = decode_nozzle_clumping_switch(status)
+        if decoded is None:
             return None
+        source, supported, mode = decoded
         stamps = {
-            "source": NOZZLE_CLUMPING_FLAG_SOURCE,
+            "source": source,
             "age_seconds": state.state_age_seconds,
             "stale_after_seconds": state.state_stale_after_seconds,
             "firmware_version": self._printer_firmware_version(),
+            "supported": supported,
         }
-        serial_family, mqtt_family, _product = self._identity_families()
-        family = serial_family or mqtt_family
-        if family not in NOZZLE_CLUMPING_FLAG_MEASURED_FAMILIES:
-            label = f"the {family.replace('_', ' ').upper()}" if family else "this model"
+        if not supported:
+            return NozzleClumpingDetection(enabled=None, **stamps)
+        if mode is None:
             return NozzleClumpingDetection(
                 enabled=None,
                 unverified_reason=(
-                    f"how {label} reports its nozzle clumping detection switch "
-                    "has not been verified; the bit Kiln reads was measured on "
-                    "an A1 only, and it is not inferred across models"
+                    "the printer reported a nozzle clumping detection value "
+                    "Kiln does not recognise"
                 ),
                 **stamps,
             )
-        return NozzleClumpingDetection(
-            enabled=bool(flag & HOME_FLAG_NOZZLE_CLUMPING_DETECT_BIT), **stamps,
-        )
+        return NozzleClumpingDetection(enabled=mode != "off", mode=mode, **stamps)
 
     def _printer_firmware_version(self) -> str | None:
         """The printer firmware from the cached module list, when it holds

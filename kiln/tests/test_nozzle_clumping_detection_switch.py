@@ -67,7 +67,7 @@ class TestTheDoor:
 
 
 class TestBambu:
-    def _adapter(self, monkeypatch, *, serial, home_flag, age=3.0, modules=None, connected=True):
+    def _adapter(self, monkeypatch, *, serial, home_flag=None, report=None, age=3.0, modules=None, connected=True):
         from kiln.printers.bambu import BambuAdapter
 
         adapter = BambuAdapter(host="192.168.1.9", access_code="12345678", serial=serial, timeout=2)
@@ -77,7 +77,10 @@ class TestBambu:
             state_age_seconds=age, state_stale_after_seconds=45.0,
         )
         monkeypatch.setattr(adapter, "get_state", lambda: state)
-        adapter._last_status = {} if home_flag is None else {"home_flag": home_flag}
+        if report is not None:
+            adapter._last_status = dict(report)
+        else:
+            adapter._last_status = {} if home_flag is None else {"home_flag": home_flag}
         adapter._fw_modules = list(modules or [])
         return adapter
 
@@ -88,6 +91,7 @@ class TestBambu:
         assert out == NozzleClumpingDetection(
             enabled=True, source="bambu_mqtt_home_flag",
             age_seconds=120.0, stale_after_seconds=45.0, firmware_version="01.04.00.00",
+            supported=True, mode="on",
         )
 
     def test_the_measured_bit_reads_off(self, monkeypatch):
@@ -96,7 +100,7 @@ class TestBambu:
 
     def test_only_bit_24_decides(self, monkeypatch):
         """Every other bit of the flag is somebody else's business."""
-        on_only = 1 << 24
+        on_only = (1 << 24) | (1 << 25)  # bit 25: the printer has the setting
         assert self._adapter(monkeypatch, serial=A1_SERIAL, home_flag=on_only).read_nozzle_clumping_detection().enabled is True
         everything_but = (HOME_FLAG_ON | 0xFFFF) & ~(1 << 24)
         assert self._adapter(monkeypatch, serial=A1_SERIAL, home_flag=everything_but).read_nozzle_clumping_detection().enabled is False
@@ -110,19 +114,15 @@ class TestBambu:
     def test_an_unreachable_machine_is_none(self, monkeypatch):
         assert self._adapter(monkeypatch, serial=A1_SERIAL, home_flag=HOME_FLAG_ON, connected=False).read_nozzle_clumping_detection() is None
 
-    def test_another_model_is_unverified_never_decoded(self, monkeypatch):
-        """The bit was measured on one A1.  A P1S carrying the same flag value
-        gets no verdict -- a reading nobody could verify is unknown, never off."""
+    def test_every_bambu_model_decodes_from_the_report(self, monkeypatch):
+        """The printer states the switch in its own report, in a layout that
+        does not depend on the model -- so a P1S is read the way the A1 is."""
         out = self._adapter(monkeypatch, serial=P1S_SERIAL, home_flag=HOME_FLAG_OFF).read_nozzle_clumping_detection()
-        assert out is not None
-        assert out.enabled is None and not out.is_decoded()
-        assert "not been verified" in out.unverified_reason
-        assert out.source == "bambu_mqtt_home_flag"
+        assert out.enabled is False and out.supported is True and out.mode == "off"
 
-    def test_the_a1_mini_is_unverified_too(self, monkeypatch):
-        """Same feature, same screen switch, never measured: no inference across models."""
+    def test_the_a1_mini_decodes_too(self, monkeypatch):
         out = self._adapter(monkeypatch, serial="030MINI000000000", home_flag=HOME_FLAG_ON).read_nozzle_clumping_detection()
-        assert out.enabled is None
+        assert out.enabled is True and out.mode == "on"
 
     def test_no_firmware_stamp_when_the_module_list_is_cold(self, monkeypatch):
         assert self._adapter(monkeypatch, serial=A1_SERIAL, home_flag=HOME_FLAG_ON).read_nozzle_clumping_detection().firmware_version is None
@@ -322,6 +322,7 @@ class TestTheSwitchTravelsWithTheNozzleReading:
         assert obs["clumping_detection"] == {
             "enabled": True, "read_from": "bambu_mqtt_home_flag", "value_kind": "switch",
             "state_age_seconds": 2.0, "stale_after_seconds": 45.0, "firmware_version": None,
+            "supported": None, "mode": None,
         }
 
     def test_an_unverified_switch_rides_with_its_reason(self, monkeypatch):
@@ -546,14 +547,14 @@ class TestRestoreAfterASkippedPrint:
     def test_on_before_means_off_now_and_on_again_when_the_print_ends(self, monkeypatch):
         adapter, sent = self._adapter(monkeypatch, _reading(True))
         note = adapter._skip_nozzle_detection_for_print({})
-        assert adapter._restore_nozzle_detection is True
+        assert bool(adapter._restore_nozzle_detection) is True
         assert "turn it back on" in note
         assert any(p.get("print", {}).get("nozzle_blob_detect") is False for p in sent)
         assert not self._enables(sent)
 
         adapter._maybe_restore_nozzle_detection("running", "finish")
         assert len(self._enables(sent)) == 1
-        assert adapter._restore_nozzle_detection is False
+        assert bool(adapter._restore_nozzle_detection) is False
         adapter._maybe_restore_nozzle_detection("running", "finish")
         assert len(self._enables(sent)) == 1, "restored once, never again"
 
@@ -568,12 +569,12 @@ class TestRestoreAfterASkippedPrint:
         adapter, sent = self._adapter(monkeypatch, _reading(True))
         adapter._skip_nozzle_detection_for_print({})
         adapter._maybe_restore_nozzle_detection("prepare", "running")
-        assert not self._enables(sent) and adapter._restore_nozzle_detection is True
+        assert not self._enables(sent) and bool(adapter._restore_nozzle_detection) is True
 
     def test_off_before_is_left_off(self, monkeypatch):
         adapter, sent = self._adapter(monkeypatch, _reading(False))
         note = adapter._skip_nozzle_detection_for_print({})
-        assert adapter._restore_nozzle_detection is False
+        assert bool(adapter._restore_nozzle_detection) is False
         adapter._maybe_restore_nozzle_detection("running", "finish")
         assert not self._enables(sent)
         assert note == ""
@@ -581,7 +582,7 @@ class TestRestoreAfterASkippedPrint:
     def test_unverified_is_never_forced_on_and_says_so(self, monkeypatch):
         adapter, sent = self._adapter(monkeypatch, _reading(None, "not verified on this model"))
         note = adapter._skip_nozzle_detection_for_print({})
-        assert adapter._restore_nozzle_detection is False
+        assert bool(adapter._restore_nozzle_detection) is False
         assert "may leave" in note and "switch" in note
         adapter._maybe_restore_nozzle_detection("running", "finish")
         assert not self._enables(sent)
@@ -589,12 +590,12 @@ class TestRestoreAfterASkippedPrint:
     def test_a_backend_that_cannot_read_never_forces_on(self, monkeypatch):
         adapter, sent = self._adapter(monkeypatch, None)
         note = adapter._skip_nozzle_detection_for_print({})
-        assert adapter._restore_nozzle_detection is False and "may leave" in note
+        assert bool(adapter._restore_nozzle_detection) is False and "may leave" in note
 
     def test_the_opt_out_leaves_it_off_on_purpose(self, monkeypatch):
         adapter, sent = self._adapter(monkeypatch, _reading(True))
         note = adapter._skip_nozzle_detection_for_print({"restore_nozzle_detection": False})
-        assert adapter._restore_nozzle_detection is False
+        assert bool(adapter._restore_nozzle_detection) is False
         assert "leave it off" in note
         adapter._maybe_restore_nozzle_detection("running", "finish")
         assert not self._enables(sent)
@@ -603,7 +604,7 @@ class TestRestoreAfterASkippedPrint:
         adapter, sent = self._adapter(monkeypatch, _reading(True))
         adapter._skip_nozzle_detection_for_print({})
         adapter._restore_nozzle_detection_now("the print never started")
-        assert len(self._enables(sent)) == 1 and adapter._restore_nozzle_detection is False
+        assert len(self._enables(sent)) == 1 and bool(adapter._restore_nozzle_detection) is False
 
     def test_the_enable_command_is_the_measured_one(self, monkeypatch):
         adapter, sent = self._adapter(monkeypatch, _reading(True))
@@ -621,3 +622,163 @@ class TestTheStartPrintDoorCarriesTheOptOut:
 
         params = inspect.signature(server.start_print).parameters
         assert params["restore_nozzle_detection"].default is True
+
+
+# ---------------------------------------------------------------------------
+# Every Bambu: the printer states the switch, and whether it has one
+# ---------------------------------------------------------------------------
+
+
+def _hex(value: int) -> str:
+    return format(value, "x")
+
+
+def _layout_adapter(monkeypatch, report, serial="22E00A123456789"):
+    from kiln.printers.bambu import BambuAdapter
+
+    adapter = BambuAdapter(host="192.168.1.9", access_code="12345678", serial=serial, timeout=2)
+    state = PrinterState(connected=True, state=PrinterStatus.IDLE, state_age_seconds=1.0, state_stale_after_seconds=45.0)
+    monkeypatch.setattr(adapter, "get_state", lambda: state)
+    adapter._last_status = dict(report)
+    adapter._fw_modules = []
+    return adapter
+
+
+class TestEveryReportLayout:
+    def test_a_printer_that_reports_no_switch_says_so(self, monkeypatch):
+        no_support = HOME_FLAG_OFF & ~(1 << 25)
+        out = _layout_adapter(monkeypatch, {"home_flag": no_support}).read_nozzle_clumping_detection()
+        assert out.supported is False and out.enabled is None and out.mode is None
+        assert not out.is_decoded()
+
+    def test_the_newer_layout_reads_on_and_off(self, monkeypatch):
+        fun = _hex(1 << 13)
+        on = _layout_adapter(monkeypatch, {"cfg": _hex(1 << 24), "fun": fun, "aux": "0", "stat": "0"}).read_nozzle_clumping_detection()
+        off = _layout_adapter(monkeypatch, {"cfg": _hex(1 << 5), "fun": fun, "aux": "0", "stat": "0"}).read_nozzle_clumping_detection()
+        assert (on.enabled, on.mode, on.supported, on.source) == (True, "on", True, "bambu_mqtt_cfg")
+        assert (off.enabled, off.mode) == (False, "off")
+
+    def test_the_newer_layout_says_when_the_printer_has_no_switch(self, monkeypatch):
+        out = _layout_adapter(monkeypatch, {"cfg": _hex(1 << 24), "fun": _hex(1 << 12)}).read_nozzle_clumping_detection()
+        assert out.supported is False and out.enabled is None
+
+    def test_the_newer_layout_wins_over_home_flag(self, monkeypatch):
+        report = {"home_flag": HOME_FLAG_ON, "cfg": _hex(0), "fun": _hex(1 << 13)}
+        out = _layout_adapter(monkeypatch, report).read_nozzle_clumping_detection()
+        assert out.enabled is False
+
+    @pytest.mark.parametrize("value, mode, enabled", [(0, "off", False), (1, "on", True), (2, "auto", True)])
+    def test_the_three_way_setting(self, monkeypatch, value, mode, enabled):
+        report = {"cfg": _hex(value << 43), "fun": _hex(1 << 13), "fun2": _hex(1 << 15)}
+        out = _layout_adapter(monkeypatch, report).read_nozzle_clumping_detection()
+        assert (out.mode, out.enabled, out.supported, out.source) == (mode, enabled, True, "bambu_mqtt_cfg_smart")
+
+    def test_the_three_way_setting_takes_priority(self, monkeypatch):
+        report = {"cfg": _hex(2 << 43), "fun": _hex(1 << 13), "fun2": _hex(1 << 15), "home_flag": HOME_FLAG_OFF}
+        assert _layout_adapter(monkeypatch, report).read_nozzle_clumping_detection().mode == "auto"
+
+    def test_a_long_flag_string_is_read_by_position(self, monkeypatch):
+        fun2 = "1" + "0" * 30 + _hex(1 << 15).rjust(8, "0")
+        report = {"cfg": _hex(1 << 43), "fun2": "0x" + fun2}
+        assert _layout_adapter(monkeypatch, report).read_nozzle_clumping_detection().mode == "on"
+
+    def test_an_unrecognised_three_way_value_is_unverified(self, monkeypatch):
+        report = {"cfg": _hex(3 << 43), "fun2": _hex(1 << 15)}
+        out = _layout_adapter(monkeypatch, report).read_nozzle_clumping_detection()
+        assert out.enabled is None and out.supported is True and out.unverified_reason
+
+    def test_fields_that_do_not_parse_say_nothing(self, monkeypatch):
+        assert _layout_adapter(monkeypatch, {"cfg": "zz", "fun": ""}).read_nozzle_clumping_detection() is None
+
+
+class TestTheContractCarriesSupportAndMode:
+    def test_a_printer_without_the_switch_needs_no_reason(self):
+        NozzleClumpingDetection(enabled=None, source="x", supported=False)
+
+    def test_a_mode_is_one_of_three(self):
+        with pytest.raises(ValueError):
+            NozzleClumpingDetection(enabled=True, source="x", mode="maybe")
+
+
+def _no_switch():
+    return NozzleClumpingDetection(enabled=None, source="bambu_mqtt_home_flag", supported=False)
+
+
+def _auto():
+    return NozzleClumpingDetection(enabled=True, source="bambu_mqtt_cfg_smart", supported=True, mode="auto")
+
+
+class TestNoSwitchAndAutoWhereAUserMeetsThem:
+    def test_status_says_the_printer_has_no_switch(self):
+        from kiln import server
+
+        with patch("kiln.server._get_adapter", return_value=_status_adapter(_no_switch())):
+            out = server.printer_status()
+        block = out["nozzle_clumping_detection"]
+        assert block["supported"] is False and block["enabled"] is None
+        assert "no nozzle clumping detection" in block["statement"]
+
+    def test_auto_is_said_as_automatic_with_the_tower_warning(self):
+        from kiln import server
+
+        with patch("kiln.server._get_adapter", return_value=_status_adapter(_auto())):
+            out = server.printer_status()
+        block = out["nozzle_clumping_detection"]
+        assert block["mode"] == "auto" and "automatic" in block["statement"]
+        assert "purge" in block["statement"]
+
+    @patch("kiln.server._get_adapter")
+    @patch("kiln.server._get_temp_limits", return_value=(280.0, 120.0))
+    @patch("kiln.server.get_db")
+    @patch("kiln.server._registry")
+    def test_a_printer_without_the_switch_adds_no_preflight_check(self, mock_registry, mock_get_db, mock_limits, mock_adapter):
+        mock_adapter.return_value.get_state.return_value = _pf_state()
+        mock_adapter.return_value.read_nozzle_clumping_detection.return_value = _no_switch()
+        mock_registry.count = 1
+        mock_registry.list_names.return_value = ["default"]
+        from kiln.server import preflight_check
+
+        checks = [c for c in preflight_check()["checks"] if c["name"] == "nozzle_clumping_detection"]
+        assert checks == []
+
+
+class TestTheThreeWaySettingIsRestoredExactly:
+    def _adapter(self, monkeypatch, mode_value):
+        adapter = _layout_adapter(monkeypatch, {"cfg": _hex(mode_value << 43), "fun": _hex(1 << 13), "fun2": _hex(1 << 15)})
+        sent: list[dict] = []
+        monkeypatch.setattr(adapter, "_publish_command", lambda payload: sent.append(payload))
+        return adapter, sent
+
+    @staticmethod
+    def _v2(sent):
+        return [p["print"]["nozzle_blob_detect_v2"] for p in sent if "nozzle_blob_detect_v2" in p.get("print", {})]
+
+    def test_auto_goes_off_for_the_print_and_back_to_auto(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, 2)
+        note = adapter._skip_nozzle_detection_for_print({})
+        assert self._v2(sent) == [0]
+        assert not any("nozzle_blob_detect" in p.get("print", {}) for p in sent), "the plain switch command is not sent to a three-way printer"
+        assert "automatic" in note
+        adapter._maybe_restore_nozzle_detection("running", "finish")
+        assert self._v2(sent) == [0, 2]
+
+    def test_on_goes_back_to_on(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, 1)
+        adapter._skip_nozzle_detection_for_print({})
+        adapter._restore_nozzle_detection_now("test")
+        assert self._v2(sent) == [0, 1]
+
+    def test_off_stays_off(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, 0)
+        adapter._skip_nozzle_detection_for_print({})
+        adapter._maybe_restore_nozzle_detection("running", "finish")
+        assert self._v2(sent) == [0]
+
+
+class TestAnAdapterBuiltWithoutInit:
+    def test_the_report_path_does_not_trip_on_the_missing_memo(self):
+        from kiln.printers.bambu import BambuAdapter
+
+        adapter = BambuAdapter.__new__(BambuAdapter)
+        adapter._maybe_restore_nozzle_detection("running", "finish")
+        assert adapter._restore_nozzle_detection_now("test") is False

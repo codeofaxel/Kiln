@@ -670,11 +670,11 @@ class NozzleClumpingDetection:
     The detector is a convenience the printer offers, not a fail-safe, and
     nothing built on this reading may present it as one.
 
-    :param enabled: ``True`` / ``False`` when the backend has DECODED the
-        switch for this machine; ``None`` when the machine reports the
-        channel but the decoding has not been verified for this model.  A
-        ``None`` is "unknown", never "off": a reading nobody could verify
-        must not be served as a verdict.
+    :param enabled: ``True`` when the probe is armed (the setting is on, or
+        automatic), ``False`` when it is off; ``None`` when the printer has
+        no such setting (``supported=False``) or reported a value the backend
+        cannot decode.  A ``None`` is never "off": a reading nobody could
+        verify must not be served as a verdict.
     :param source: Which of the backend's channels it was read from.
     :param age_seconds: How long ago the machine stated this, when the
         backend answers from a cache; ``None`` for a read made just now.
@@ -683,7 +683,12 @@ class NozzleClumpingDetection:
     :param firmware_version: The firmware the reading was taken under,
         when the backend reports one.
     :param unverified_reason: Why ``enabled`` is ``None`` -- required
-        whenever it is, so an unknown always says why it is unknown.
+        whenever it is, unless the printer reported it has no such setting,
+        so an unknown always says why it is unknown.
+    :param supported: Whether the printer reports that it has the setting at
+        all; ``None`` when the backend cannot say.
+    :param mode: ``"on"`` / ``"off"`` / ``"auto"`` (a printer that offers an
+        automatic setting decides per print when to probe), or ``None``.
     """
 
     enabled: bool | None
@@ -692,9 +697,17 @@ class NozzleClumpingDetection:
     stale_after_seconds: float | None = None
     firmware_version: str | None = None
     unverified_reason: str | None = None
+    supported: bool | None = None
+    mode: str | None = None
 
     def __post_init__(self) -> None:
-        if self.enabled is None and not (self.unverified_reason or "").strip():
+        if self.mode is not None and self.mode not in ("on", "off", "auto"):
+            raise ValueError(f"NozzleClumpingDetection: unknown mode {self.mode!r}")
+        if (
+            self.enabled is None
+            and self.supported is not False
+            and not (self.unverified_reason or "").strip()
+        ):
             raise ValueError(
                 "NozzleClumpingDetection: an undecoded reading must say why "
                 "(unverified_reason) -- unknown never travels unexplained"

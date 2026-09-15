@@ -8954,7 +8954,9 @@ def preflight_check(
             )
 
             _switch = read_switch(adapter)
-            if _switch is not None:
+            # A printer that reports it has no such setting has nothing to
+            # warn about before a print; the status read still says so.
+            if _switch is not None and _switch.supported is not False:
                 _facts = (
                     file_facts(file_path)
                     if file_path and _switch.enabled is not False

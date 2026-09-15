@@ -9,12 +9,12 @@ and every door that shows printer state -- the status read, the pre-flight
 -- says the same thing through this module, so no door grows its own idea
 of what an ON reading asks of the slice.
 
-Three states, and they are said differently on purpose.  ON carries the
-printer's own warning and what a user can do about it.  OFF says the probe
-will not run.  UNVERIFIED -- the machine reports the channel but nobody
-has confirmed what it means on this model -- is reported as unknown, with
-the reason, and never as a verdict either way: a reading nobody could
-verify is not "off".
+Each state is said differently on purpose.  ON and AUTOMATIC carry the
+printer maker's warning and what a user can do about it.  OFF says the
+probe will not run.  NO SETTING says the printer reports it has none.
+UNKNOWN -- the printer reported something Kiln does not recognise -- is
+reported with the reason, and never as a verdict either way: a reading
+nobody could verify is not "off".
 
 The detector is a convenience the printer offers, not a fail-safe, and
 nothing here presents it as one.  Which models carry the switch, where the
@@ -41,27 +41,47 @@ CHECK_NAME = "nozzle_clumping_detection"
 #: measured 2026-09-15 on the A1, the ``print_option`` command it sends turns
 #: the switch OFF, so the adapter reads it first and turns it back on when
 #: the print ends (``BambuAdapter._skip_nozzle_detection_for_print``).
-_ON_STATEMENT = (
-    "Nozzle clumping detection is on for this printer, read off its own "
-    "switch. The printer's own screen warns that enabling it may leave "
-    "traces on the model and asks for the purge (prime) tower to be on when "
-    "slicing: each probe leaks a little filament, and without a tower that "
-    "ooze lands on the print. Kiln's slicers add no prime tower to a "
-    "single-filament file, so for a single-colour print either accept the "
-    "marks, slice with a prime tower in the printer maker's own slicer, or "
-    "turn the switch off on the printer's screen. Kiln can ask the printer "
-    "to skip the probe with start_print(nozzle_clog_detect=False): that "
-    "turns the printer's own switch off for the print, and Kiln turns it back "
-    "on when the print ends. "
+_TOWER_CAUTION = (
+    "Each probe leaks a little filament, and the printer maker says to slice "
+    "with a purge (prime) tower or that ooze can leave marks on the model. "
+    "Kiln's slicers add no prime tower to a single-filament file, so for a "
+    "single-colour print either accept the marks, slice with a prime tower in "
+    "the printer maker's own slicer, or turn the setting off in the printer's "
+    "own settings."
+)
+
+_NOT_A_FAIL_SAFE = (
     "The detector is not a fail-safe: do not leave a print unattended on its "
     "strength."
 )
 
+_ON_STATEMENT = " ".join((
+    "Nozzle clumping detection is on for this printer, read off its own settings.",
+    _TOWER_CAUTION,
+    "Kiln can ask the printer to skip the probe with "
+    "start_print(nozzle_clog_detect=False): that turns the printer's own "
+    "setting off for the print, and Kiln turns it back on when the print ends.",
+    _NOT_A_FAIL_SAFE,
+))
+
+_AUTO_STATEMENT = " ".join((
+    "Nozzle clumping detection is set to automatic on this printer, read off "
+    "its own settings: the printer decides when to probe.",
+    _TOWER_CAUTION,
+    "Kiln can ask the printer to skip the probe with "
+    "start_print(nozzle_clog_detect=False): that turns the printer's own "
+    "setting off for the print, and Kiln sets it back to automatic when the "
+    "print ends.",
+    _NOT_A_FAIL_SAFE,
+))
+
 _OFF_STATEMENT = (
     "Nozzle clumping detection is off for this printer, read off its own "
-    "switch: the probe will not run this print, and the printer will not "
+    "settings: the probe will not run this print, and the printer will not "
     "feel for a blob on the nozzle."
 )
+
+_NO_SETTING_STATEMENT = "This printer reports that it has no nozzle clumping detection."
 
 
 def read_switch(adapter: Any) -> NozzleClumpingDetection | None:
@@ -83,7 +103,11 @@ def read_switch(adapter: Any) -> NozzleClumpingDetection | None:
 
 
 def statement(reading: NozzleClumpingDetection) -> str:
-    """The one sentence for *reading*, in the words the three states get."""
+    """The one sentence for *reading*, in the words each state gets."""
+    if reading.supported is False:
+        return _NO_SETTING_STATEMENT
+    if reading.mode == "auto":
+        return _AUTO_STATEMENT
     if reading.enabled is True:
         return _ON_STATEMENT
     if reading.enabled is False:
@@ -92,7 +116,7 @@ def statement(reading: NozzleClumpingDetection) -> str:
     return (
         "Whether nozzle clumping detection is on for this printer is not "
         f"verified: {reason}. Kiln reports it as unknown rather than as a "
-        "verdict either way; the switch is on the printer's own screen."
+        "verdict either way; the setting is in the printer's own settings."
     )
 
 
@@ -105,9 +129,11 @@ def status_block(reading: NozzleClumpingDetection) -> dict[str, Any]:
         "state_age_seconds": reading.age_seconds,
         "stale_after_seconds": reading.stale_after_seconds,
         "firmware_version": reading.firmware_version,
+        "supported": reading.supported,
+        "mode": reading.mode,
         "statement": statement(reading),
     }
-    if reading.enabled is None:
+    if reading.enabled is None and reading.supported is not False:
         block["unverified_reason"] = reading.unverified_reason
     return block
 
