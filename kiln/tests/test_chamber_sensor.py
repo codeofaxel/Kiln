@@ -93,6 +93,11 @@ class TestCatalogue:
         assert chamber_sensor_for_model("bambu_a1") is False
         assert chamber_sensor_for_model("bambu_p1s") is False
         assert chamber_sensor_for_model("bambu_x1c") is True
+        # The one non-Bambu FDM machine the catalogue has settled: Elegoo's
+        # own wiki documents replacing its chamber thermistor.  Its adapter
+        # reads TempOfBox from a real sensor, so the flag changes nothing
+        # there; it is recorded so the row answers rather than shrugs.
+        assert chamber_sensor_for_model("elegoo_centauri_carbon") is True
 
     def test_accessor_is_unknown_where_nothing_is_stated(self) -> None:
         # A model the catalogue has never judged for this fact, and no model

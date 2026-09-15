@@ -4,7 +4,7 @@
     "description": "Printer intelligence database: firmware quirks, material compatibility, calibration guidance, and known failure modes. Keyed by the same printer_id as safety_profiles.json.",
     "updated": "2025-02-11",
     "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (each printer's quirks, its calibration recipes, and the failures it is known for) is available in Kiln Pro; see https://kiln3d.com/pricing.",
-    "has_chamber_sensor_note": "has_chamber_sensor: whether the machine has a chamber temperature sensor whose reading its firmware reports. true/false only where a primary source settles it; null means unknown, never false, and every row must answer. Bambu rows come from Bambu Studio's own per-printer configuration (resources/printers/<model_id>.json): a chamber temperature is shown only where support_chamber_temp_display, or failing that support_chamber, is true. Read by adapters whose protocol publishes a chamber field for every model regardless of hardware."
+    "has_chamber_sensor_note": "has_chamber_sensor: whether the machine has a chamber temperature sensor whose reading its firmware reports. true/false only where a primary source settles it; null means unknown, never false, and every row must answer. Bambu rows come from Bambu Studio's own per-printer configuration (resources/printers/<model_id>.json): a chamber temperature is shown only where support_chamber_temp_display, or failing that support_chamber, is true. The Elegoo Centauri Carbon row comes from Elegoo's own wiki, which carries a chamber-thermistor replacement procedure for it (B0C2N1). Read by adapters whose protocol publishes a chamber field for every model regardless of hardware."
   },
   "default": {
     "display_name": "Generic FDM Printer",
@@ -1394,7 +1394,7 @@
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": true,
-    "has_chamber_sensor": null,
+    "has_chamber_sensor": true,
     "has_abl": true,
     "materials": {
       "PLA": {
