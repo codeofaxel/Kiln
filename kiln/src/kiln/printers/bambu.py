@@ -4857,9 +4857,17 @@ class BambuAdapter(PrinterAdapter):
         cached reading from before the command never confirms, and a
         read-back that fails for any reason reports the stop unconfirmed.  The
         heater targets are reported from post-command reports as well --
-        confirmed or not yet confirmed, never assumed.
+        confirmed or not yet confirmed, never assumed.  Right after the
+        commands the stop asks for a full status report: an idle or finished
+        Bambu reports far more slowly than a printing one, and without asking,
+        a stop that reaches a machine doing nothing would sit out the window
+        and read as unconfirmed.
 
-        HARDWARE CHECKLIST (A1, to be run by Adam):
+        Because this stop is real, a false positive in the print watchdog's
+        temperature rules now costs a real stop, where before it cost only an
+        M112 that nothing shows a Bambu obeying.
+
+        HARDWARE CHECKLIST (A1, not yet run):
 
         1. Start a short print from Bambu Studio; wait for RUNNING and
            layer >= 2.
@@ -4874,6 +4882,10 @@ class BambuAdapter(PrinterAdapter):
            red flag expected.
         5. With the watchdog armed, trigger a filament-runout pause: Kiln
            must NOT cancel the print.
+        6. Cancel a print without clearing its error, then start a new print;
+           record whether print_error returns to 0 once the new job is
+           running.  If it does not, the fault rule would stop that new print
+           after 5 s.
         """
         # First, so the fault code this stop itself produces is never
         # announced as a fault Kiln discovered (see _own_stop_settling).
@@ -4919,7 +4931,31 @@ class BambuAdapter(PrinterAdapter):
         from kiln.auto_record_hook import note_cancel_requested
 
         note_cancel_requested(self)
+        # After the intent is filed, because the answer can carry the ending.
+        self._request_report_after_stop()
         return self._confirm_emergency_stop(sent, not_sent)
+
+    def _request_report_after_stop(self) -> None:
+        """Ask for one full status report, straight after the stop commands.
+
+        An idle or finished Bambu pushes far more slowly than a printing one
+        (see ``_cadence``), so a stop that reaches a machine doing nothing
+        could otherwise wait out the whole read-back window and come back
+        "not confirmed" for a printer that was never running.  Published
+        directly, not through :meth:`_get_cached_status`: its forced refresh
+        is rate-limited and fires only on a stale cache, so it would usually
+        decline exactly here.  A request that fails changes no verdict -- the
+        read-back still confirms only on a report that arrived after the stop.
+        """
+        try:
+            self._publish_command(
+                {"pushing": {"sequence_id": self._next_seq(), "command": "pushall"}}
+            )
+        except Exception as exc:  # noqa: BLE001 — the read-back decides, not this request
+            logger.debug("Bambu emergency stop: status request not sent: %s", exc)
+            return
+        with self._state_lock:
+            self._last_forced_refresh = time.monotonic()
 
     def _estop_snapshot(self) -> tuple[float, Any, tuple[float, Any], tuple[float, Any]]:
         """When gcode_state was last carried and what it says, plus each heater
@@ -4972,7 +5008,7 @@ class BambuAdapter(PrinterAdapter):
                     return PrintResult(
                         success=True,
                         message=(
-                            "Emergency stop confirmed: the printer left printing "
+                            f"Emergency stop confirmed: the printer reports {status.value} "
                             f"{state_at - sent:.1f}s after the stop command. Heater targets: "
                             f"hotend 0 ({self._heater_cut_word(nozzle, sent)}), "
                             f"bed 0 ({self._heater_cut_word(bed, sent)}).{unsent}"

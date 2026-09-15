@@ -81,6 +81,9 @@ from kiln.server import (
     emergency_status as server_emergency_status,
 )
 from kiln.server import (
+    emergency_stop as server_emergency_stop,
+)
+from kiln.server import (
     emergency_trip_input as server_emergency_trip_input,
 )
 from kiln.server import (
@@ -605,6 +608,63 @@ class TestEmergencyTools:
         result = server_clear_emergency_stop("default", "operator confirmed", acknowledged_by="adam")
         assert result["success"] is True
         assert result["cleared"] is True
+
+    _NOT_CONFIRMED = (
+        "Emergency stop SENT but NOT confirmed: the printer still reports printing "
+        "5s later. Stop it at the machine now, with its own screen or its power switch."
+    )
+
+    @staticmethod
+    def _record(printer_id, success, error=None):
+        from kiln.emergency import EmergencyReason, EmergencyRecord
+
+        return EmergencyRecord(
+            printer_id=printer_id,
+            success=success,
+            reason=EmergencyReason.USER_REQUEST,
+            timestamp=0.0,
+            error=error,
+        )
+
+    @patch("kiln.emergency.get_emergency_coordinator")
+    def test_emergency_stop_the_printer_did_not_confirm_is_not_a_success(self, mock_get_coord):
+        coord = MagicMock()
+        coord.emergency_stop.return_value = self._record("workshop", False, self._NOT_CONFIRMED)
+        mock_get_coord.return_value = coord
+
+        result = server_emergency_stop(printer_name="workshop")
+
+        assert result["success"] is False
+        assert result["emergency_stop"]["success"] is False
+        assert result["emergency_stop"]["error"] == self._NOT_CONFIRMED
+
+    @patch("kiln.emergency.get_emergency_coordinator")
+    def test_fleet_stop_with_one_unconfirmed_printer_is_not_a_success(self, mock_get_coord):
+        coord = MagicMock()
+        coord.emergency_stop_all.return_value = [
+            self._record("a1", True),
+            self._record("garage", False, self._NOT_CONFIRMED),
+        ]
+        mock_get_coord.return_value = coord
+
+        result = server_emergency_stop()
+
+        assert result["success"] is False
+        assert [row["printer_id"] for row in result["emergency_stop"]] == ["a1", "garage"]
+        assert result["not_confirmed_stopped"] == [
+            {"printer_name": "garage", "error": self._NOT_CONFIRMED}
+        ]
+
+    @patch("kiln.emergency.get_emergency_coordinator")
+    def test_fleet_stop_with_every_printer_confirmed_is_a_success(self, mock_get_coord):
+        coord = MagicMock()
+        coord.emergency_stop_all.return_value = [self._record("a1", True), self._record("garage", True)]
+        mock_get_coord.return_value = coord
+
+        result = server_emergency_stop()
+
+        assert result["success"] is True
+        assert result["not_confirmed_stopped"] == []
 
     @patch("kiln.server._ESTOP_INPUT_TOKEN", "abc123")
     def test_emergency_trip_input_requires_token(self):

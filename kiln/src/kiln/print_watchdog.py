@@ -15,13 +15,16 @@ Design notes:
   (:attr:`time_fn`), and :meth:`step` performs one poll cycle
   synchronously so unit tests never spawn real threads.
 * A trip latches on a stop the printer CONFIRMED.  Once ``emergency_stop()``
-  says the machine left printing, the watchdog puts itself to sleep and
-  :meth:`status` keeps reporting the trip.  A stop that raised, returned
-  nothing, or came back unconfirmed is commanded again on each following
-  poll while a red flag still fires, up to :data:`MAX_ESTOP_ATTEMPTS`; a
-  poll on which no red flag fires is the machine answering, and latches
-  without another stop.  Latching on a stop nobody saw land would leave a
-  running print with its watchdog asleep.
+  says the job ended, the watchdog puts itself to sleep and :meth:`status`
+  keeps reporting the trip.  A stop that raised, returned nothing, or came
+  back unconfirmed is commanded again on each following poll, up to
+  :data:`MAX_ESTOP_ATTEMPTS`, until a poll on which no red flag fires AND the
+  printer's own state shows the job ended (idle, error, cancelling); that
+  poll latches without another stop.  A red flag going quiet is not that
+  observation: the heater cut alone drops the targets below
+  :data:`MIN_ACTIVE_TARGET_C`, which silences the temperature rules while the
+  job keeps moving, and a paused job can resume.  Latching on a stop nobody
+  saw land would leave a running print with its watchdog asleep.
 
 Red flags (any triggers e-stop):
 
@@ -155,6 +158,13 @@ PRINT_ERROR_PERSIST_S: float = 5.0
 #: latches and says why, and the person at the machine is the remedy every
 #: unconfirmed stop has already named.
 MAX_ESTOP_ATTEMPTS: int = 3
+
+#: The run states that show a stopped job: it ended (idle, error) or is
+#: ending (cancelling).  After a stop the printer did not confirm, only one of
+#: these lets a poll with no red flag count as the stop having landed.
+#: ``paused`` is not one -- a paused job can resume -- and neither is a reading
+#: that shows nothing (stale, offline, unknown).
+_JOB_ENDED_STATES: frozenset[str] = frozenset({"idle", "error", "cancelling"})
 
 
 # --------------------------------------------------------------------------
@@ -446,6 +456,9 @@ class PrintWatchdog:
         # Emergency stops commanded for the current trip that the printer has
         # not confirmed.  0 while no trip is outstanding.
         self._estop_attempts: int = 0
+        # The rule the outstanding stop was commanded for, so a follow-up that
+        # finds no flag firing can still say what it is retrying.
+        self._tripped_rule: str | None = None
 
         # One object per heater, same rules in both — a drop only counts once
         # its heater has arrived, and a heater that never arrives is judged
@@ -817,6 +830,7 @@ class PrintWatchdog:
             )
 
         self._estop_attempts = 1
+        self._tripped_rule = flag.rule
         try:
             confirmed, said = self._command_stop()
         finally:
@@ -835,7 +849,7 @@ class PrintWatchdog:
             flag.context["estop_confirmed"] = confirmed
             if said:
                 flag.context["estop_result"] = said
-        self._settle(confirmed, flag)
+        self._settle(confirmed, flag.rule)
 
         # Recording stays above the e-stop and dispatch stays below it, so a
         # red flag's ordering is exactly what it has always been.
@@ -845,23 +859,32 @@ class PrintWatchdog:
         """A poll after a stop the printer has not confirmed.
 
         Recording and dispatch happened once, on the trip; a follow-up only
-        decides whether to command the stop again.
+        decides whether to command the stop again.  It latches without one
+        only when no red flag fires AND the printer's own state shows the job
+        ended.  A red flag going quiet is not evidence of that: once the
+        watchdog has decided a print must stop, the heater cut alone silences
+        the temperature rules while the job keeps moving cold.
         """
-        if red is None:
-            # Nothing left to stop for: the machine answered the stop, or the
-            # condition behind it is gone.  Commanding another stop to a
-            # printer that shows no reason for one is not the safer act.
+        observed = _confirmed_state_word(state)
+        if red is None and observed in _JOB_ENDED_STATES:
             logger.error(
-                "PrintWatchdog: no red flag on the poll after an unconfirmed "
-                "emergency stop (printer reads %s); treating the stop as "
-                "confirmed by observation and sending no further stop",
-                _confirmed_state_word(state) or "unknown",
+                "PrintWatchdog: the printer reads %s after the unconfirmed "
+                "emergency stop, so the job has ended; the stop is confirmed by "
+                "observation and no further stop is sent",
+                observed,
             )
             self._latch()
             return
+        if red is None:
+            logger.error(
+                "PrintWatchdog: no red flag after the unconfirmed emergency stop, "
+                "but the printer reads %s, which does not show the job ended; "
+                "commanding the stop again",
+                observed or "nothing readable",
+            )
         self._estop_attempts += 1
         confirmed, _said = self._command_stop()
-        self._settle(confirmed, red)
+        self._settle(confirmed, red.rule if red is not None else (self._tripped_rule or "unknown"))
 
     def _command_stop(self) -> tuple[bool, str | None]:
         """Send one emergency stop: ``(confirmed, what it said)``.  Never raises."""
@@ -873,13 +896,13 @@ class PrintWatchdog:
         said = getattr(result, "message", None)
         return _stop_confirmed(result), (str(said) if said else None)
 
-    def _settle(self, confirmed: bool, flag: Flag) -> None:
+    def _settle(self, confirmed: bool, rule: str) -> None:
         """Latch on a confirmed stop; otherwise say so, and latch at the ceiling."""
         attempt = self._estop_attempts
         if confirmed:
             logger.error(
                 "PrintWatchdog: emergency stop confirmed for [%s] (attempt %d/%d)",
-                flag.rule,
+                rule,
                 attempt,
                 MAX_ESTOP_ATTEMPTS,
             )
@@ -892,12 +915,12 @@ class PrintWatchdog:
         )
         if attempt >= MAX_ESTOP_ATTEMPTS:
             logger.error(
-                "PrintWatchdog: stopped retrying after %d unconfirmed emergency "
-                "stops while [%s] still fires, so a printer that never confirms "
-                "is not commanded forever. It may still be running — stop it at "
-                "the machine.",
+                "PrintWatchdog: stopped retrying after %d emergency stops for [%s] "
+                "that the printer never confirmed, so a printer that never "
+                "confirms is not commanded forever. It may still be running — "
+                "stop it at the machine.",
                 attempt,
-                flag.rule,
+                rule,
             )
             self._latch()
 

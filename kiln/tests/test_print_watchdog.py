@@ -462,7 +462,7 @@ class TestAnUnconfirmedStop:
     def test_a_confirmed_stop_latches_after_one_call(self):
         confirmed = PrintResult(
             success=True,
-            message="Emergency stop confirmed: the printer left printing 1.2s after the stop command.",
+            message="Emergency stop confirmed: the printer reports error 1.2s after the stop command.",
         )
         wd, adapter, clock, anomalies = _make_watchdog(adapter=FakeAdapter(stop_results=[confirmed]))
         adapter.state.tool_temp_target = 220.0
@@ -480,18 +480,68 @@ class TestAnUnconfirmedStop:
         assert [f.rule for f in anomalies] == ["tool_drop"]
         assert anomalies[0].context["estop_confirmed"] is True
 
-    def test_a_poll_with_nothing_left_to_stop_for_latches_without_another_stop(self):
+    @pytest.mark.parametrize("reads", ["idle", "error", "cancelling"])
+    def test_a_quiet_poll_that_shows_the_job_ended_latches_without_another_stop(self, reads):
         wd, adapter, clock, _ = _make_watchdog(adapter=FakeAdapter(stop_results=[self.NOT_CONFIRMED]))
         assert _raise_print_error(wd, adapter, clock, A_FAULT) is not None
         assert wd.anomaly_triggered is False
 
         # The printer ended the job after all, a little late.
-        adapter.state.state = "error"
+        adapter.state.print_error = 0
+        adapter.state.state = reads
         clock.advance(DEFAULT_POLL_INTERVAL)
         assert wd.step() is None
 
         assert wd.anomaly_triggered is True
         assert adapter.emergency_stops == 1
+
+    def test_a_heater_cut_that_silences_the_rules_is_not_the_job_ending(self):
+        """The heater cut lands and the job does not stop: with the targets off
+        no temperature rule can fire, and the print keeps moving cold."""
+        wd, adapter, clock, _ = _make_watchdog(adapter=FakeAdapter(stop_results=[self.NOT_CONFIRMED]))
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 220.0
+        assert wd.step() is None  # arrived
+        adapter.state.tool_temp_actual = 220.0 - (DEFAULT_TOOL_DROP_C + 5.0)
+        assert wd.step() is not None
+        assert adapter.emergency_stops == 1
+
+        adapter.state.tool_temp_target = 0.0
+        adapter.state.bed_temp_target = 0.0
+        clock.advance(DEFAULT_POLL_INTERVAL)
+        assert wd.step() is None  # nothing red: the rules have gone quiet
+
+        assert adapter.emergency_stops == 2  # but the job still reads printing
+        assert wd.anomaly_triggered is False
+
+    @pytest.mark.parametrize("reads", ["printing", "paused", "busy", "stale", "offline", "unknown"])
+    def test_a_quiet_poll_that_does_not_show_the_job_ended_commands_the_stop_again(self, reads):
+        """A paused job can resume; stale, offline and unknown observed nothing."""
+        wd, adapter, clock, _ = _make_watchdog(adapter=FakeAdapter(stop_results=[self.NOT_CONFIRMED]))
+        assert _raise_print_error(wd, adapter, clock, A_FAULT) is not None
+
+        adapter.state.print_error = 0
+        adapter.state.state = reads
+        clock.advance(DEFAULT_POLL_INTERVAL)
+        assert wd.step() is None
+
+        assert adapter.emergency_stops == 2
+        assert wd.anomaly_triggered is False
+
+    def test_quiet_polls_that_never_show_the_job_ended_still_stop_at_the_ceiling(self):
+        wd, adapter, clock, _ = _make_watchdog(adapter=FakeAdapter(stop_results=[self.NOT_CONFIRMED]))
+        assert _raise_print_error(wd, adapter, clock, A_FAULT) is not None
+        adapter.state.print_error = 0  # quiet from here on, still printing
+
+        for attempt in range(2, MAX_ESTOP_ATTEMPTS + 1):
+            clock.advance(DEFAULT_POLL_INTERVAL)
+            assert wd.step() is None
+            assert adapter.emergency_stops == attempt
+        assert wd.anomaly_triggered is True
+
+        clock.advance(DEFAULT_POLL_INTERVAL)
+        wd.step()
+        assert adapter.emergency_stops == MAX_ESTOP_ATTEMPTS
 
 
 # --------------------------------------------------------------------------

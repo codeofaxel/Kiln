@@ -7225,16 +7225,28 @@ def emergency_stop(
             )
 
         coord = get_emergency_coordinator()
+        # The verdict is the records' own.  A stop the printer did not confirm,
+        # or one Kiln declined to send, is not a success -- and a caller told
+        # "success" has no reason to walk to the machine.  Read from the dicts
+        # the response carries, so the verdict and the records cannot disagree.
         if printer_name:
             result = coord.emergency_stop(printer_name, reason=reason_enum, source=source, note=note)
             _audit("emergency_stop", f"executed for {printer_name}")
-            return {"success": True, "emergency_stop": result.to_dict()}
+            record = result.to_dict()
+            return {"success": bool(record.get("success")), "emergency_stop": record}
         else:
             results = coord.emergency_stop_all(reason=reason_enum, source=source, note=note)
             _audit("emergency_stop", "executed for ALL printers")
+            records = [r.to_dict() for r in results]
+            not_confirmed = [
+                {"printer_name": row.get("printer_id"), "error": row.get("error")}
+                for row in records
+                if not row.get("success")
+            ]
             return {
-                "success": True,
-                "emergency_stop": [r.to_dict() for r in results],
+                "success": not not_confirmed,
+                "emergency_stop": records,
+                "not_confirmed_stopped": not_confirmed,
             }
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to execute emergency stop: {exc}. Check that the printer is online.")

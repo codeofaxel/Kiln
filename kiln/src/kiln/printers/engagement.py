@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -126,15 +127,28 @@ def _read_store() -> dict[str, Any]:
 
 
 def _write_store(data: dict[str, Any]) -> None:
-    """Replace the record atomically.  Never raises into a caller."""
+    """Replace the record atomically.  Never raises into a caller.
+
+    Each write gets a temp file of its own.  With one shared name, two writers
+    at once -- a fleet stop asks every printer's gate together -- could move a
+    file the other was still writing into place, and a torn record reads back
+    as no engagement at all.
+    """
     data["version"] = _SCHEMA_VERSION
+    tmp: str | None = None
     try:
         path = _store_path()
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2, sort_keys=True))
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+        with os.fdopen(fd, "w") as handle:
+            handle.write(json.dumps(data, indent=2, sort_keys=True))
         os.replace(tmp, path)
+        tmp = None
     except (OSError, ValueError, TypeError):
         logger.debug("engagement store could not be written", exc_info=True)
+    finally:
+        if tmp is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
 
 
 @dataclass(frozen=True)

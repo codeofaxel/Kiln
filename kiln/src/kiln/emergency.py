@@ -31,12 +31,14 @@ Usage::
 
 from __future__ import annotations
 
+import contextvars
 import enum
 import json
 import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -48,6 +50,14 @@ logger = logging.getLogger(__name__)
 _PERSIST_SETTING_KEY = "emergency_latch_state_v1"
 _PERSIST_ENABLED_ENV = "KILN_EMERGENCY_PERSIST"
 _DEFAULT_DEBOUNCE_SECONDS = 2.0
+
+#: Most printers a fleet-wide emergency stop commands at once.  Each printer's
+#: stop runs on its own worker, so a printer that is slow to confirm -- a
+#: Bambu reads back for up to five seconds -- never delays another printer's
+#: stop command, and a fleet stop takes as long as its slowest printer rather
+#: than the sum of them.  The cap only bounds how many threads one call may
+#: start; past it, the remaining stops queue behind the first to finish.
+_FLEET_STOP_MAX_WORKERS = 32
 
 
 def _as_float(value: Any) -> float | None:
@@ -545,7 +555,14 @@ class EmergencyCoordinator:
         :param reason: Why the stop was triggered.
         :param source: Human/agent/system source label for audit context.
         :param note: Optional short note for latch records.
-        :returns: List of :class:`EmergencyRecord` for each printer.
+        :returns: List of :class:`EmergencyRecord` for each printer, in
+            printer-id order.
+
+        Every printer's stop is commanded at once, one worker each (up to
+        :data:`_FLEET_STOP_MAX_WORKERS`), so the call takes as long as the
+        slowest printer's stop and no printer waits on another's read-back.
+        A printer whose stop raises still gets a failed record, and never
+        stops the rest.
         """
         printer_ids: set[str] = set()
 
@@ -562,10 +579,57 @@ class EmergencyCoordinator:
         except ImportError:
             pass
 
-        results: list[EmergencyRecord] = []
-        for printer_id in sorted(printer_ids):
-            results.append(self.emergency_stop(printer_id, reason=reason, source=source, note=note))
-        return results
+        ordered = sorted(printer_ids)
+        if not ordered:
+            return []
+        # Every printer at once.  Each worker runs in its own copy of the
+        # caller's context: a thread does not inherit context variables, and
+        # without the copy every stop event would lose the actor that asked
+        # for it (see kiln.events.current_actor_context).
+        with ThreadPoolExecutor(
+            max_workers=min(len(ordered), _FLEET_STOP_MAX_WORKERS),
+            thread_name_prefix="kiln-fleet-estop",
+        ) as pool:
+            futures = [
+                pool.submit(
+                    contextvars.copy_context().run,
+                    self._stop_one_of_fleet,
+                    printer_id,
+                    reason,
+                    source,
+                    note,
+                )
+                for printer_id in ordered
+            ]
+        return [future.result() for future in futures]
+
+    def _stop_one_of_fleet(
+        self,
+        printer_id: str,
+        reason: EmergencyReason,
+        source: str,
+        note: str | None,
+    ) -> EmergencyRecord:
+        """One printer's part of a fleet stop.  Never raises.
+
+        A stop that fails before it can write its own record still answers
+        with a failed one, so it can never take the other printers' stops, or
+        the report of them, down with it.
+        """
+        try:
+            return self.emergency_stop(printer_id, reason=reason, source=source, note=note)
+        except Exception as exc:  # noqa: BLE001 — one printer never sinks the fleet stop
+            logger.exception("EMERGENCY STOP failed for %s during a fleet stop", printer_id)
+            return EmergencyRecord(
+                printer_id=printer_id,
+                success=False,
+                reason=reason,
+                timestamp=time.time(),
+                error=(
+                    f"Kiln's emergency stop for this printer failed ({exc}). Stop it at "
+                    "the machine now, with its own screen or its power switch."
+                ),
+            )
 
     # -- interlock management ----------------------------------------------
 
@@ -901,7 +965,7 @@ class EmergencyCoordinator:
         A real emergency leaves the whole physical unit dark, so an emergency
         stop also halts active AMS drying — scope-matched to the printer stop.
         A single-printer stop halts only that printer's dryers;
-        :meth:`emergency_stop_all` loops per printer and so halts every dryer.
+        :meth:`emergency_stop_all` stops every printer and so halts every dryer.
         Routine stops (``cancel_print``) never reach this path and leave the
         dryer running.
 

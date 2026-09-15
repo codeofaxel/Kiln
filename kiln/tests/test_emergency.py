@@ -275,6 +275,124 @@ class TestEmergencyStopAll:
         assert ids == sorted(ids)
 
 
+class TestFleetStopCommandsEveryPrinterAtOnce:
+    """A fleet stop must not make one printer's stop wait on another's read-back.
+
+    A Bambu's emergency stop reads back for up to five seconds.  Run one after
+    another, the twentieth printer's stop command would leave only after the
+    other nineteen had each finished waiting.
+    """
+
+    CONFIRM_SECONDS = 1.0
+
+    class _SlowToConfirm(_FakeAdapter):
+        """A printer whose own stop takes a while to confirm, as a read-back does."""
+
+        def __init__(self, seconds: float) -> None:
+            super().__init__()
+            self._seconds = seconds
+            self.called_at: float | None = None
+            self.returned_at: float | None = None
+
+        def emergency_stop(self) -> _FakeResult:
+            self.estop_calls += 1
+            self.called_at = time.monotonic()
+            time.sleep(self._seconds)
+            self.returned_at = time.monotonic()
+            return _FakeResult(success=True, message="confirmed")
+
+    @staticmethod
+    def _server_with(printers):
+        fake_server = mock.MagicMock()
+        fake_server._registry = _make_registry(printers)
+        return fake_server
+
+    def test_every_printer_is_told_to_stop_before_any_finishes_confirming(self):
+        printers = {
+            name: self._SlowToConfirm(self.CONFIRM_SECONDS)
+            for name in ("zeta", "alpha", "mid", "beta")
+        }
+        coord = EmergencyCoordinator()
+
+        started = time.monotonic()
+        with mock.patch.dict("sys.modules", {"kiln.server": self._server_with(printers)}):
+            records = coord.emergency_stop_all()
+        took = time.monotonic() - started
+
+        assert [r.printer_id for r in records] == ["alpha", "beta", "mid", "zeta"]
+        assert all(r.success for r in records)
+        # Every stop was commanded before any one of them finished confirming.
+        assert max(p.called_at for p in printers.values()) < min(
+            p.returned_at for p in printers.values()
+        )
+        assert took < self.CONFIRM_SECONDS * len(printers) / 2
+
+    def test_one_printer_whose_stop_blows_up_never_sinks_the_rest(self):
+        class _RaisesEverywhere(_FakeAdapter):
+            def emergency_stop(self) -> _FakeResult:
+                self.estop_calls += 1
+                raise RuntimeError("adapter offline")
+
+            def send_gcode(self, commands: list[str]) -> bool:
+                self.gcode_calls.append(commands)
+                raise RuntimeError("adapter offline")
+
+        printers = {
+            "a": _FakeAdapter(),
+            "b": _FakeAdapter(),
+            "c": _RaisesEverywhere(),
+            "d": _FakeAdapter(),
+        }
+        coord = EmergencyCoordinator()
+        stop_one = coord.emergency_stop
+
+        def _the_record_store_breaks_for_b(printer_id, **kwargs):
+            if printer_id == "b":
+                raise RuntimeError("the record store broke")
+            return stop_one(printer_id, **kwargs)
+
+        with mock.patch.dict("sys.modules", {"kiln.server": self._server_with(printers)}), \
+             mock.patch.object(coord, "emergency_stop", side_effect=_the_record_store_breaks_for_b):
+            records = coord.emergency_stop_all()
+
+        assert [r.printer_id for r in records] == ["a", "b", "c", "d"]
+        assert [r.success for r in records] == [True, False, False, True]
+        assert "the record store broke" in (records[1].error or "")
+        assert "stop it at the machine" in (records[1].error or "").lower()
+        assert printers["a"].estop_calls == 1
+        assert printers["d"].estop_calls == 1
+
+    def test_each_stop_carries_the_callers_context(self):
+        """A thread does not inherit context variables.  The actor that asked
+        for a fleet stop must still be on every printer's stop."""
+        from kiln.events import current_actor_context
+
+        seen: dict[str, object] = {}
+
+        class _Witness(_FakeAdapter):
+            def __init__(self, name: str) -> None:
+                super().__init__()
+                self._name = name
+
+            def emergency_stop(self) -> _FakeResult:
+                seen[self._name] = current_actor_context.get()
+                return _FakeResult(success=True)
+
+        printers = {name: _Witness(name) for name in ("a1", "garage")}
+        coord = EmergencyCoordinator()
+        token = current_actor_context.set({"caller_id": "operator-7"})
+        try:
+            with mock.patch.dict("sys.modules", {"kiln.server": self._server_with(printers)}):
+                coord.emergency_stop_all()
+        finally:
+            current_actor_context.reset(token)
+
+        assert seen == {
+            "a1": {"caller_id": "operator-7"},
+            "garage": {"caller_id": "operator-7"},
+        }
+
+
 # ---------------------------------------------------------------------------
 # 4. Interlock registration, update, and checking
 # ---------------------------------------------------------------------------

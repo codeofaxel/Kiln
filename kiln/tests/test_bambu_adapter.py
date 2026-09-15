@@ -1035,6 +1035,18 @@ def _printer_answers_stop(adapter: BambuAdapter, **frame: Any) -> None:
     adapter._mqtt_client.publish.side_effect = _publish
 
 
+def _printer_answers_status_request(adapter: BambuAdapter, **frame: Any) -> None:
+    """An idle printer: silent through the stop, it reports *frame* only when asked."""
+    delivered = adapter._mqtt_client.publish.return_value
+
+    def _publish(topic: str, payload: str, qos: int = 0) -> Any:
+        if json.loads(payload).get("pushing", {}).get("command") == "pushall":
+            _push(adapter, **frame)
+        return delivered
+
+    adapter._mqtt_client.publish.side_effect = _publish
+
+
 class TestBambuEmergencyStop:
     """The stop the firmware obeys goes first, and success is what it reported back."""
 
@@ -1051,13 +1063,13 @@ class TestBambuEmergencyStop:
         lines = [
             p["print"]["param"]
             for p in _published(adapter_with_mqtt)
-            if p["print"]["command"] == "gcode_line"
+            if p.get("print", {}).get("command") == "gcode_line"
         ]
         assert lines == ["M104 S0\nM140 S0", "M112"]
 
-    @pytest.mark.parametrize("state", ["FAILED", "IDLE"])
+    @pytest.mark.parametrize(("state", "reads"), [("FAILED", "error"), ("IDLE", "idle")])
     def test_a_report_after_the_stop_confirms_it(
-        self, adapter_with_mqtt: BambuAdapter, state: str
+        self, adapter_with_mqtt: BambuAdapter, state: str, reads: str
     ) -> None:
         _printer_answers_stop(
             adapter_with_mqtt, gcode_state=state, nozzle_target_temper=0, bed_target_temper=0
@@ -1066,7 +1078,9 @@ class TestBambuEmergencyStop:
         result = adapter_with_mqtt.emergency_stop()
 
         assert result.success is True
-        assert result.message.startswith("Emergency stop confirmed")
+        # What was observed, not a claim about what the machine was doing
+        # before: "left printing" is false for a printer that was idle.
+        assert result.message.startswith(f"Emergency stop confirmed: the printer reports {reads} ")
         assert "hotend 0 (confirmed)" in result.message
         assert "bed 0 (confirmed)" in result.message
 
@@ -1105,7 +1119,9 @@ class TestBambuEmergencyStop:
         reached: list[tuple[str, str | None]] = []
 
         def _publish(topic: str, payload: str, qos: int = 0) -> Any:
-            body = json.loads(payload)["print"]
+            body = json.loads(payload).get("print")
+            if body is None:  # the status request after the stop, not a stop command
+                return delivered
             if refused in (body.get("command"), body.get("param")):
                 raise OSError("socket closed mid-publish")
             reached.append((body["command"], body.get("param")))
@@ -1147,6 +1163,43 @@ class TestBambuEmergencyStop:
         assert result.message.startswith("Emergency stop NOT sent")
         assert "stop it at the machine" in result.message.lower()
         assert took < BambuAdapter._ESTOP_CONFIRM_TIMEOUT_S / 2
+
+    def test_an_idle_printer_that_reports_only_when_asked_is_confirmed(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """An idle Bambu reports far more slowly than a printing one.  Without a
+        status request, a stop that reaches a machine doing nothing waits out
+        the window and reads as unconfirmed -- and across a fleet stop, a
+        verdict that fails on idle printers teaches people to ignore it."""
+        adapter_with_mqtt._last_status = {"gcode_state": "IDLE"}
+        _printer_answers_status_request(adapter_with_mqtt, gcode_state="IDLE")
+        asked_before = adapter_with_mqtt._last_forced_refresh
+
+        result = adapter_with_mqtt.emergency_stop()
+
+        assert result.success is True
+        assert result.message.startswith("Emergency stop confirmed: the printer reports idle ")
+        assert adapter_with_mqtt._last_forced_refresh > asked_before
+
+    def test_a_status_request_that_fails_changes_no_verdict(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        delivered = adapter_with_mqtt._mqtt_client.publish.return_value
+
+        def _publish(topic: str, payload: str, qos: int = 0) -> Any:
+            body = json.loads(payload)
+            if "pushing" in body:
+                raise OSError("socket closed on the status request")
+            if body["print"]["command"] == "stop":
+                _push(adapter_with_mqtt, gcode_state="FAILED")
+            return delivered
+
+        adapter_with_mqtt._mqtt_client.publish.side_effect = _publish
+
+        result = adapter_with_mqtt.emergency_stop()
+
+        assert result.success is True
+        assert "Not sent" not in result.message
 
 
 # ---------------------------------------------------------------------------

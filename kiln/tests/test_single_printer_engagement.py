@@ -844,3 +844,45 @@ class TestItSpeaksEnglishNotSchema:
         assert engagement.reason_in_english("something_new") == (
             "Kiln is working with this printer"
         )
+
+
+class TestTheStoreSurvivesWritersAtOnce:
+    def test_two_writers_at_once_never_share_a_temp_file(self, monkeypatch):
+        """A fleet stop asks every printer's gate together, so two store writes
+        can overlap.  Through one shared temp name, one writer could move a file
+        the other was still writing into place, and a torn record reads back
+        as no engagement at all."""
+        import os
+        import threading
+
+        store = engagement._store_path()  # the isolated record the suite fixture points at
+        both_inside = threading.Barrier(2, timeout=5)
+        moved_from: list[str] = []
+        real_replace = os.replace
+
+        def _replace(src, dst):
+            if str(dst) != str(store):
+                return real_replace(src, dst)
+            moved_from.append(str(src))
+            try:
+                both_inside.wait()  # hold the first writer until the second arrives
+            except threading.BrokenBarrierError:
+                pass
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(os, "replace", _replace)
+        writers = [
+            threading.Thread(
+                target=engagement._write_store, args=({"engaged": None, "writer": n},)
+            )
+            for n in (1, 2)
+        ]
+        for writer in writers:
+            writer.start()
+        for writer in writers:
+            writer.join(10)
+
+        assert len(moved_from) == 2
+        assert moved_from[0] != moved_from[1]
+        stored = json.loads(store.read_text())
+        assert stored["writer"] in (1, 2)
