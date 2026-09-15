@@ -12,6 +12,7 @@ loaded by the test suite without modification.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import os
 import sys
@@ -668,6 +669,49 @@ requires_printer_compatibility_overlay = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # License tier bypass for tests
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _isolate_print_watchers():
+    """No test may inherit a watch an earlier test left running.
+
+    Kiln counts watched MACHINES process-wide — live entries in
+    ``kiln.server._watchers`` plus the print health monitor's sessions — and
+    refuses a NEW watch past the tier's limit, which is one machine on the
+    free tier every test runs as.  So one test that starts a watch and never
+    stops it spends the only slot for the rest of the worker process, and
+    every later test that watches anything gets a refusal back instead of a
+    watch.
+
+    Measured 2026-09-15: ``test_plugin_tools.py``'s idle-printer watch test
+    left one watcher behind, and in that same process six tests in
+    ``test_vision_monitoring.py`` failed on the refusal — the file passes on
+    its own.  In CI the victims moved between runs as the parallel workers'
+    mix changed, which is what made a leak read as flakiness.
+
+    Cleared as TEARDOWN, so a test that starts a watch and reads it within
+    itself is unaffected.  ``stop()`` first, not a bare dict clear, so the
+    watcher's thread exits instead of polling a printer for the rest of the
+    run.  No-op when the modules were never imported.
+    """
+    yield
+    server_mod = sys.modules.get("kiln.server")
+    watchers = getattr(server_mod, "_watchers", None) if server_mod else None
+    if isinstance(watchers, dict) and watchers:
+        for watcher in list(watchers.values()):
+            with contextlib.suppress(Exception):  # teardown must never mask a failure
+                watcher.stop()
+        watchers.clear()
+    monitor_mod = sys.modules.get("kiln.print_health_monitor")
+    if monitor_mod is not None:
+        with contextlib.suppress(Exception):
+            monitor = monitor_mod.get_print_health_monitor()
+            sessions = getattr(monitor, "_sessions", None)
+            if isinstance(sessions, dict) and sessions:
+                for session in list(sessions.values()):
+                    with contextlib.suppress(Exception):
+                        monitor.stop_monitoring(getattr(session, "printer_name", ""))
+                sessions.clear()
+
 
 @pytest.fixture(autouse=True)
 def _isolate_printer_registry():

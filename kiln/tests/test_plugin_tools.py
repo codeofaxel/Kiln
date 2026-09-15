@@ -204,15 +204,19 @@ class TestWatchPrint:
         self, _mock_bus, _mock_auth, monitoring_tools,
     ) -> None:
         from kiln.printers import PrinterStatus
+        from kiln.printers.base import JobProgress, PrinterState
 
+        # Real state objects, not mocks: watch_print reads
+        # ``confirmed_state``, and a MagicMock answers every attribute, so a
+        # mocked "idle" printer was never idle here -- the tool started a
+        # real watcher, the assertion below failed, and the watcher it left
+        # running spent the free tier's one watch slot for the rest of the
+        # process (2026-09-15).
         adapter = MagicMock()
-        mock_state = MagicMock()
-        mock_state.state = PrinterStatus.IDLE
-        adapter.get_state.return_value = mock_state
-
-        mock_job = MagicMock()
-        mock_job.completion = None
-        adapter.get_job.return_value = mock_job
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE,
+        )
+        adapter.get_job.return_value = JobProgress()
 
         with patch("kiln.server._get_adapter", return_value=adapter), \
              patch("kiln.server._registry"):
