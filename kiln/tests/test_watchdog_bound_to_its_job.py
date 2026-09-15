@@ -501,3 +501,65 @@ def test_a_watchdog_leaving_does_not_take_the_next_prints_watchdog_with_it():
 
     release("a1", later)
     assert "a1" not in server._print_watchdogs
+
+
+# ---------------------------------------------------------------------------
+# Pins for rules the tests above did not reach
+# ---------------------------------------------------------------------------
+
+
+def test_a_print_under_another_name_is_never_adopted_so_kilns_own_print_keeps_its_watchdog(incidents):
+    """The printer runs something else first; Kiln's print arrives later.
+
+    Adopting the first job the printer shows would bind the watchdog to the
+    wrong print, and Kiln's own print, arriving after an outage, would then
+    read as "different" and walk the watchdog off the print it guards.
+    """
+    a1 = _bambu("a1")
+    clock = _Clock()
+    watchdog = _armed(a1, clock)
+    _reports(a1, subtask_name="gasket")  # not the file Kiln sent: not adopted
+    assert watchdog.step() is None
+
+    clock.advance(OUT_OF_SIGHT_S)
+    _reports(a1, subtask_name="bracket")  # Kiln's own print is the one running now
+    assert watchdog.step() is None
+    assert _attached(a1, watchdog)
+
+    clock.advance(pw.DEFAULT_POLL_INTERVAL)
+    _reports(a1, subtask_name="bracket", nozzle=180.0)
+    flag = watchdog.step()
+
+    assert flag is not None and flag.rule == "tool_drop"  # still guarding Kiln's print
+    assert _stops(a1) == 1
+
+
+def test_the_safety_doc_states_the_limits_the_watchdog_uses():
+    """docs/SAFETY.md quotes both limits in words a reader acts on; they must be the code's."""
+    import pathlib
+
+    doc = (pathlib.Path(__file__).resolve().parents[2] / "docs" / "SAFETY.md").read_text(encoding="utf-8")
+    assert f"within {pw.DEFAULT_NEVER_ACTIVE_TIMEOUT_S / 60:.0f} minutes" in doc
+    assert f"for more than {pm.WATCHED_ENDING_MAX_GAP_S / 60:.0f} minutes" in doc
+
+
+def test_a_cloud_reprint_of_the_same_file_under_a_new_job_id_retires_the_watchdog(incidents):
+    """Ids decide when both sides carry one.
+
+    The same file started again from the vendor's cloud has the same name and a
+    new job id.  Names alone would call it the same print and leave the
+    watchdog policing somebody else's reprint.
+    """
+    a1 = _bambu("a1")
+    clock = _Clock()
+    watchdog = _armed(a1, clock)
+    _reports(a1, subtask_name="bracket", task_id="5001")  # Kiln's print, carrying a real id
+    assert watchdog.step() is None
+
+    clock.advance(OUT_OF_SIGHT_S)
+    _reports(a1, subtask_name="bracket", task_id="5002", nozzle=180.0)  # same file, new job
+    assert watchdog.step() is None
+
+    assert not _attached(a1, watchdog)
+    assert _stops(a1) == 0
+    assert incidents == []

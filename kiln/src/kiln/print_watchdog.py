@@ -94,7 +94,12 @@ bound one inside a single poll, with no stop in between that any read saw, is
 absorbed as the same print.  A merged status (Bambu's) can pair a fresh run
 state with a name left from before Kiln lost sight, until the full report it
 requests on reconnecting lands; a read inside that window takes the old name
-for the print.  And a brief pass through idle mid-print retires
+for the print.  On a Bambu, binding reads the name ``get_job`` reports,
+which prefers ``gcode_file`` over ``subtask_name``; an A1 has reported
+``subtask_name`` as the uploaded file's name on real prints (2026-08 and
+2026-09), while ``gcode_file`` on a project print is unverified on hardware,
+so a plate-style name there would leave the watchdog unbound, never
+misbound.  And a brief pass through idle mid-print retires
 the watchdog on the ending edge with nothing to re-attach it; the one claim
 that a Bambu does that (``auto_record_hook._TERMINAL_STATE_DEBOUNCE_S``) is a
 comment with no measurement behind it.

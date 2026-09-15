@@ -280,7 +280,7 @@ when it sees that print end, so it does not stay behind to police the next job
 on that machine.  When there is no ending to see, the watchdog leaves without
 stopping anything in two cases: the printer takes up no job within 30 minutes
 of accepting the print, or Kiln loses sight of the print -- no readable report
-for more than two minutes, or a report that nothing is running -- and then
+for more than 2 minutes, or a report that nothing is running -- and then
 finds the printer running a print it can tell is a different one, by its name,
 its job number or its start time.  When Kiln cannot tell, the watchdog stays:
 a print the printer reports under a name that does not match the file Kiln
