@@ -241,7 +241,7 @@ class TestPreflight:
         assert check["enabled"] is True
         assert "purge" in check["message"] or "prime" in check["message"]
         assert "nozzle_clog_detect=False" in check["message"]
-        assert "leaves it off" in check["message"]  # measured: the skip is the switch, not a per-print override
+        assert "turns it back on" in check["message"]  # measured: the skip is the switch; Kiln restores it
         assert result["ready"] is True
 
     @patch("kiln.server._get_adapter")
@@ -516,3 +516,108 @@ class TestTheFaultTheCardThrew:
 
         reading, _page = describe_bambu_filament_fault("0500ABCD", kind="print_error")
         assert "AMS" not in reading
+
+
+# ---------------------------------------------------------------------------
+# Leave the machine as you found it: the skip is the printer's own switch
+# ---------------------------------------------------------------------------
+
+
+class TestRestoreAfterASkippedPrint:
+    """``nozzle_clog_detect=False`` flips the printer's own switch OFF and
+    leaves it off (measured 2026-09-15).  So Kiln reads the switch before it
+    sends the skip and, when the print ends, puts back what it found -- only
+    when it found ON, only once, never forcing ON for someone who had it OFF."""
+
+    def _adapter(self, monkeypatch, reading):
+        from kiln.printers.bambu import BambuAdapter
+
+        adapter = BambuAdapter(host="192.168.1.9", access_code="12345678", serial=A1_SERIAL, timeout=2)
+        sent: list[dict] = []
+        monkeypatch.setattr(adapter, "_publish_command", lambda payload: sent.append(payload))
+        monkeypatch.setattr(adapter, "read_nozzle_clumping_detection", lambda: reading)
+        return adapter, sent
+
+    @staticmethod
+    def _enables(sent):
+        return [p for p in sent if p.get("print", {}).get("command") == "print_option"
+                and p["print"].get("nozzle_blob_detect") is True]
+
+    def test_on_before_means_off_now_and_on_again_when_the_print_ends(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, _reading(True))
+        note = adapter._skip_nozzle_detection_for_print({})
+        assert adapter._restore_nozzle_detection is True
+        assert "turn it back on" in note
+        assert any(p.get("print", {}).get("nozzle_blob_detect") is False for p in sent)
+        assert not self._enables(sent)
+
+        adapter._maybe_restore_nozzle_detection("running", "finish")
+        assert len(self._enables(sent)) == 1
+        assert adapter._restore_nozzle_detection is False
+        adapter._maybe_restore_nozzle_detection("running", "finish")
+        assert len(self._enables(sent)) == 1, "restored once, never again"
+
+    def test_a_cancelled_or_failed_print_restores_too(self, monkeypatch):
+        for end in ("failed", "idle"):
+            adapter, sent = self._adapter(monkeypatch, _reading(True))
+            adapter._skip_nozzle_detection_for_print({})
+            adapter._maybe_restore_nozzle_detection("running", end)
+            assert len(self._enables(sent)) == 1, end
+
+    def test_a_non_terminal_transition_restores_nothing(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, _reading(True))
+        adapter._skip_nozzle_detection_for_print({})
+        adapter._maybe_restore_nozzle_detection("prepare", "running")
+        assert not self._enables(sent) and adapter._restore_nozzle_detection is True
+
+    def test_off_before_is_left_off(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, _reading(False))
+        note = adapter._skip_nozzle_detection_for_print({})
+        assert adapter._restore_nozzle_detection is False
+        adapter._maybe_restore_nozzle_detection("running", "finish")
+        assert not self._enables(sent)
+        assert note == ""
+
+    def test_unverified_is_never_forced_on_and_says_so(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, _reading(None, "not verified on this model"))
+        note = adapter._skip_nozzle_detection_for_print({})
+        assert adapter._restore_nozzle_detection is False
+        assert "may leave" in note and "switch" in note
+        adapter._maybe_restore_nozzle_detection("running", "finish")
+        assert not self._enables(sent)
+
+    def test_a_backend_that_cannot_read_never_forces_on(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, None)
+        note = adapter._skip_nozzle_detection_for_print({})
+        assert adapter._restore_nozzle_detection is False and "may leave" in note
+
+    def test_the_opt_out_leaves_it_off_on_purpose(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, _reading(True))
+        note = adapter._skip_nozzle_detection_for_print({"restore_nozzle_detection": False})
+        assert adapter._restore_nozzle_detection is False
+        assert "leave it off" in note
+        adapter._maybe_restore_nozzle_detection("running", "finish")
+        assert not self._enables(sent)
+
+    def test_a_start_that_failed_restores_immediately(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, _reading(True))
+        adapter._skip_nozzle_detection_for_print({})
+        adapter._restore_nozzle_detection_now("the print never started")
+        assert len(self._enables(sent)) == 1 and adapter._restore_nozzle_detection is False
+
+    def test_the_enable_command_is_the_measured_one(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, _reading(True))
+        adapter._skip_nozzle_detection_for_print({})
+        adapter._restore_nozzle_detection_now("test")
+        cmd = self._enables(sent)[0]["print"]
+        assert cmd == {"sequence_id": cmd["sequence_id"], "command": "print_option", "nozzle_blob_detect": True}
+
+
+class TestTheStartPrintDoorCarriesTheOptOut:
+    def test_the_tool_accepts_restore_nozzle_detection(self):
+        import inspect
+
+        from kiln import server
+
+        params = inspect.signature(server.start_print).parameters
+        assert params["restore_nozzle_detection"].default is True

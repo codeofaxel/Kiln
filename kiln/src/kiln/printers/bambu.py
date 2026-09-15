@@ -1338,6 +1338,12 @@ class BambuAdapter(PrinterAdapter):
         # Static per session; cached on first sight.  Lets get_ams_status
         # resolve AMS unit type (e.g. "ams_f1/0") which print.ams.ams[] omits.
         self._fw_modules: list[Any] = []
+        # Armed when Kiln turned the printer's own nozzle-clumping-detection
+        # switch OFF for a print it was asked to skip the probe on, and read
+        # it ON beforehand; cleared the moment it is put back.  In-memory:
+        # a process that dies mid-print restores nothing, and says so in the
+        # start_print note.
+        self._restore_nozzle_detection: bool = False
         self._fw_modules_requested = False  # one get_version request per session
 
         # State cache -- updated by MQTT messages.
@@ -2176,6 +2182,13 @@ class BambuAdapter(PrinterAdapter):
             # frame of a process, which is exactly when the hook block is
             # skipped for want of a previous state.
             lifecycle_name = outcome_printer_name(self)
+            # A print Kiln skipped the probe on has ended: put the printer's
+            # own switch back where Kiln found it.  Keyed on the state edge
+            # alone, not on job identity -- a switch owes nothing to a job id.
+            if self._restore_nozzle_detection and prev_gcode_state:
+                with self._state_lock:
+                    _ended_state = str(self._last_status.get("gcode_state") or "")
+                self._maybe_restore_nozzle_detection(prev_gcode_state, _ended_state)
             # _state_lock has been released here (outside the `with`).
             # Fire the hook — it's idempotent per (printer, job_id)
             # and cheap when no terminal transition occurred.
@@ -2723,6 +2736,86 @@ class BambuAdapter(PrinterAdapter):
                 }
             }
         )
+
+    def _skip_nozzle_detection_for_print(self, kwargs: dict[str, Any]) -> str:
+        """Turn the probe off for this print, remembering whether to put it back.
+
+        MEASURED 2026-09-15: the skip IS the printer's own screen switch, not
+        a per-print override -- it flips OFF and stays off.  So the switch is
+        read first, and the restore is armed ONLY when it read ON: a user who
+        had it OFF keeps it OFF, and a model whose read is unverified is never
+        forced ON on a guess.  ``restore_nozzle_detection=False`` in *kwargs*
+        opts out (a batch that wants it off).  Returns the sentence for the
+        print result, or ``""`` when there is nothing to say.
+        """
+        restore = bool(kwargs.get("restore_nozzle_detection", True))
+        before = None
+        if restore:
+            try:
+                before = self.read_nozzle_clumping_detection()
+            except Exception:  # noqa: BLE001 -- an unreadable switch is "cannot say"
+                before = None
+        self._disable_nozzle_detection()
+        if not restore:
+            self._restore_nozzle_detection = False
+            return (
+                "Kiln turned the printer's nozzle clumping detection switch off "
+                "for this print and will leave it off (restore_nozzle_detection=False)."
+            )
+        if before is not None and before.enabled is True:
+            self._restore_nozzle_detection = True
+            return (
+                "Kiln turned the printer's nozzle clumping detection switch off "
+                "for this print and will turn it back on when the print ends. "
+                "If Kiln is not running when it ends, switch it on again on "
+                "the printer's screen."
+            )
+        self._restore_nozzle_detection = False
+        if before is not None and before.enabled is False:
+            return ""
+        return (
+            "Kiln asked the printer to skip the nozzle clumping probe. On this "
+            "printer Kiln could not read whether the switch was on beforehand, "
+            "so it will not turn it back on afterwards: that may leave the "
+            "printer's own switch off -- check Print Options after the print."
+        )
+
+    def _restore_nozzle_detection_now(self, reason: str) -> bool:
+        """Put the switch back ON if Kiln turned it off and still owes that.
+
+        ``True`` when the enable was sent.  Measured 2026-09-15:
+        ``print_option`` with ``nozzle_blob_detect: true`` turns the screen
+        switch back on.  Sent at most once per arming.
+        """
+        if not self._restore_nozzle_detection:
+            return False
+        self._restore_nozzle_detection = False
+        logger.info("Restoring the printer's nozzle clumping detection switch (%s)", reason)
+        try:
+            self._publish_command(
+                {
+                    "print": {
+                        "sequence_id": self._next_seq(),
+                        "command": "print_option",
+                        "nozzle_blob_detect": True,
+                    }
+                }
+            )
+        except Exception:  # noqa: BLE001 -- best effort; the note told the user how to do it by hand
+            logger.debug("nozzle clumping detection restore failed", exc_info=True)
+            return False
+        return True
+
+    def _maybe_restore_nozzle_detection(self, prev_state: str | None, new_state: str | None) -> None:
+        """On the print's terminal transition, put the switch back."""
+        if not self._restore_nozzle_detection:
+            return
+        try:
+            from kiln.auto_record_hook import is_terminal_transition
+        except ImportError:
+            return
+        if is_terminal_transition(prev_state, new_state):
+            self._restore_nozzle_detection_now("the print ended")
 
     def _send_print_command(self, command: str) -> None:
         """Send a print-category command (pause/resume/stop).
@@ -4427,7 +4520,9 @@ class BambuAdapter(PrinterAdapter):
             # Prevents HMS 0300-8014 false positives on models with
             # thin first-layer geometry.
             if not kwargs.get("nozzle_clog_detect", True):
-                self._disable_nozzle_detection()
+                note = self._skip_nozzle_detection_for_print(kwargs)
+                if note:
+                    warnings.append(note)
 
             self._publish_command(
                 {
@@ -4503,6 +4598,9 @@ class BambuAdapter(PrinterAdapter):
                 sent_at=command_sent_at,
             )
             if result_state == "failed":
+                # The switch was turned off for a print that never started:
+                # put it back now rather than leave it off for nothing.
+                self._restore_nozzle_detection_now("the print never started")
                 # Build a specific error message if we recognise the code.
                 err_detail = ""
                 if error_code is not None:

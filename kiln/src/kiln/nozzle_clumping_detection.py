@@ -37,9 +37,10 @@ CHECK_NAME = "nozzle_clumping_detection"
 #: What the printer's own screen states when the switch is turned on, and the
 #: two facts Kiln adds: its slicers emit no prime tower for a single-filament
 #: file (measured with PrusaSlicer 2.9.4 and OrcaSlicer 2.3.2 on the A1
-#: profile, 2026-09-14), and its per-print skip is not per-print: measured
-#: 2026-09-15 on the A1, the ``print_option`` command it sends turns the
-#: printer's own switch OFF and leaves it off.
+#: profile, 2026-09-14), and its per-print skip is the printer's own switch:
+#: measured 2026-09-15 on the A1, the ``print_option`` command it sends turns
+#: the switch OFF, so the adapter reads it first and turns it back on when
+#: the print ends (``BambuAdapter._skip_nozzle_detection_for_print``).
 _ON_STATEMENT = (
     "Nozzle clumping detection is on for this printer, read off its own "
     "switch. The printer's own screen warns that enabling it may leave "
@@ -49,9 +50,9 @@ _ON_STATEMENT = (
     "single-filament file, so for a single-colour print either accept the "
     "marks, slice with a prime tower in the printer maker's own slicer, or "
     "turn the switch off on the printer's screen. Kiln can ask the printer "
-    "to skip the probe with start_print(nozzle_clog_detect=False), but that "
-    "turns the printer's own switch off and leaves it off afterwards, so "
-    "switch it back on on the screen when you want the probe again. "
+    "to skip the probe with start_print(nozzle_clog_detect=False): that "
+    "turns the printer's own switch off for the print, and Kiln turns it back "
+    "on when the print ends. "
     "The detector is not a fail-safe: do not leave a print unattended on its "
     "strength."
 )

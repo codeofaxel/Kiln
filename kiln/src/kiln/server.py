@@ -6302,6 +6302,7 @@ def start_print(
     vibration_cali: bool = True,
     layer_inspect: bool = False,
     nozzle_clog_detect: bool = True,
+    restore_nozzle_detection: bool = True,
     bed_type: str = "auto",
     plate_number: int = 1,
     resume_from_paused: bool = False,
@@ -6353,8 +6354,14 @@ def start_print(
             repeat the printer's own warning that the probe leaks onto the
             model unless the slice carries a purge tower.  ``False`` is not
             a per-print override: measured 2026-09-15, it turns the printer's
-            own switch OFF and leaves it off, so the user switches it back on
-            on the screen when they want the probe again.
+            own switch OFF -- so Kiln reads the switch first and, when it
+            found it ON, turns it back on when the print ends (or at once if
+            the print never starts).  Never forced on for a printer whose
+            switch was off or could not be read.
+        restore_nozzle_detection: With ``nozzle_clog_detect=False``, put the
+            printer's own switch back on when the print ends (default
+            ``True``).  ``False`` leaves it off on purpose, for a batch that
+            wants the probe off across several prints.
         bed_type: Bed surface type (Bambu only).  Default ``"auto"``.
         plate_number: Plate index in multi-plate 3MF files (Bambu only).
             Default ``1``.
@@ -6601,6 +6608,8 @@ def start_print(
             print_kwargs["layer_inspect"] = True
         if not nozzle_clog_detect:
             print_kwargs["nozzle_clog_detect"] = False
+            if not restore_nozzle_detection:
+                print_kwargs["restore_nozzle_detection"] = False
         if bed_type != "auto":
             print_kwargs["bed_type"] = bed_type
         if plate_number != 1:
