@@ -221,6 +221,21 @@ class TestCrealityDiagnostics:
         assert ":4408" in guidance
         assert "/server/info" in guidance
 
+    def test_diagnostic_ender3_v3_plus_mentions_official_fluidd_port(self) -> None:
+        """Creality's wiki carries a page named for the Ender-3 V3 Plus with
+        the same ':4408' Fluidd instructions it gives the Ender-3 V3, so the
+        Plus is an official stock-Fluidd model, not an unknown one."""
+        with patch(
+            "kiln.printers.creality.requests.get",
+            side_effect=requests.ConnectionError("connection refused"),
+        ):
+            diag = diagnose_creality_moonraker("ender-v3-plus.local", model="Ender-3 V3 Plus")
+
+        guidance = " ".join(diag.connection_checklist + diag.next_steps).lower()
+        assert "official creality wiki" in guidance
+        assert ":4408" in guidance
+        assert "no official stock local moonraker evidence" not in guidance
+
     def test_diagnostic_legacy_model_points_to_serial_or_octoprint(self) -> None:
         with patch(
             "kiln.printers.creality.requests.get",

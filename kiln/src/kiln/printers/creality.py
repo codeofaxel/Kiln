@@ -73,12 +73,21 @@ _MODEL_ALIASES: dict[str, str] = {
 _OFFICIAL_ROOT_SERVICE_MODELS: frozenset[str] = frozenset(
     {"k1", "k1_max", "k1c", "ender3_v3_ke", "cr10_se"}
 )
-_OFFICIAL_STOCK_FLUIDD_MODELS: frozenset[str] = frozenset({"ender3_v3"})
+# Models whose maker documents a stock Fluidd interface on port 4408, each
+# on a wiki page named for that model (never inferred from a sibling):
+#   ender3_v3      wiki.creality.com/en/ender-series/ender-3-v3/quick-start-guide/
+#                  how-to-control-the-ender-3-v3-using-fluidd-over-a-local-area-network
+#   ender3_v3_plus wiki.creality.com/en/ender-series/ender-3-v3-plus/quick-start-guide/
+#                  how-to-control-the-ender-3-v3-plus-using-fluidd-over-a-local-area-network
+#                  ("Enter the IP address ... followed by the suffix ':4408' ...
+#                  You can now control your printer in the browser using
+#                  Fluidd!", read 2026-09-15)
+_OFFICIAL_STOCK_FLUIDD_MODELS: frozenset[str] = frozenset({"ender3_v3", "ender3_v3_plus"})
 _COMMUNITY_FLUIDD_MODELS: frozenset[str] = frozenset(
     {"k2", "k2_pro", "k2_plus", "creality_hi"}
 )
 _UNKNOWN_STOCK_MOONRAKER_MODELS: frozenset[str] = frozenset(
-    {"sparkx_i7", "k1_se", "k2_se", "ender3_v4", "ender3_v3_plus", "ender5_max"}
+    {"sparkx_i7", "k1_se", "k2_se", "ender3_v4", "ender5_max"}
 )
 _LEGACY_SERIAL_MODELS: frozenset[str] = frozenset(
     {"ender3", "ender3_v2", "ender3_s1", "ender3_s1_pro", "ender5", "cr10",
@@ -199,7 +208,7 @@ def _model_local_access_notes(model: str | None) -> list[str]:
     normalised = _normalise_model_hint(model)
     if normalised in _OFFICIAL_STOCK_FLUIDD_MODELS:
         return [
-            "Official Creality Wiki guidance for Ender-3 V3 documents local Fluidd at http://<printer-ip>:4408.",
+            "Official Creality Wiki guidance for this model documents local Fluidd at http://<printer-ip>:4408.",
             "Fluidd reachability is not enough for Kiln by itself; Kiln still needs a Moonraker /server/info response on a probed port.",
         ]
     if normalised in _OFFICIAL_ROOT_SERVICE_MODELS:
