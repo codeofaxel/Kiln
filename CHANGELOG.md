@@ -182,6 +182,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Idle Kiln sessions no longer hog your Bambu printer.** It only allows a
+  few connections, and background copies of Kiln used to keep them all.
+
+- **A printer with every connection taken now says so, instead of
+  "unauthorized".** A wrong access code is reported right away.
+
 - **Skipping the clumping probe for one print no longer turns it off for
   good.** Kiln puts the setting back when that print ends, as long as Kiln
   is still running.
