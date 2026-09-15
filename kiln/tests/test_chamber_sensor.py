@@ -27,8 +27,8 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 from kiln.printer_intelligence import _get_raw, chamber_sensor_for_model
-from kiln.printers.base import PrinterState, PrinterStatus
 from kiln.printers.bambu import BambuAdapter
+from kiln.printers.base import PrinterState, PrinterStatus
 
 # The reading the incident produced, verbatim.
 INCIDENT_CHAMBER_PLACEHOLDER = 5
