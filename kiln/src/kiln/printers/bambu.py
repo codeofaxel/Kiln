@@ -895,16 +895,17 @@ _CAMERA_MAX_FRAME = 10 * 1024 * 1024
 #: the relay tears down and reconnects rather than serving a frozen frame.
 _CAMERA_IDLE_SECONDS = 30.0
 
-# Which LAN video channel each Bambu family speaks, keyed on the family
-# names in ``_BAMBU_MODEL_FAMILIES`` (the CONFIG-declared model decides, as
-# for every other behaviour).  A family absent from both sets is tried on
-# port 6000 first — ``get_snapshot`` has always done so for every model —
-# and the curated per-model record of what each machine can stream, with
-# its preconditions, is kiln-pro's (https://kiln3d.com).
-_PORT_6000_FAMILIES: frozenset[str] = frozenset({"a1", "a1_mini", "p1p", "p1s"})
-_RTSPS_FAMILIES: frozenset[str] = frozenset(
-    {"x1c", "x1e", "p2s", "h2c", "h2d", "h2d_pro", "h2s"}
-)
+# Which LAN video channel a Bambu family speaks, keyed on the family names
+# in ``_BAMBU_MODEL_FAMILIES`` (the CONFIG-declared model decides, as for
+# every other behaviour).  Only the X1 series is pinned to RTSPS: Bambu's
+# own pages hand its live view to ffmpeg-based tooling, and this adapter has
+# always read it over port 322.  Every other family — including the newer
+# machines whose transport no manufacturer page read so far names — is
+# tried on port 6000 first, as ``get_snapshot`` always has, and the refusal
+# names RTSPS as a possibility when that port does not answer.  The curated
+# per-model record of what each machine streams, with its preconditions,
+# is kiln-pro's (https://kiln3d.com).
+_RTSPS_FAMILIES: frozenset[str] = frozenset({"x1c", "x1e"})
 
 
 def _camera_auth_packet(access_code: str) -> bytes:
