@@ -277,9 +277,17 @@ started at the printer's own touchscreen is the operator's to stop.  Only the
 print watchdog stops a machine.  A running Kiln server attaches one to every
 print it starts -- from any tool, the queue or a pipeline -- and retires it
 when it sees that print end, so it does not stay behind to police the next job
-on that machine.  Two rare cases keep a watchdog longer, until the next print
-Kiln starts or cancels on that printer: a print the printer accepted but never
-reported running, and an ending Kiln only saw after losing contact.  A print
+on that machine.  When there is no ending to see, the watchdog leaves without
+stopping anything in two cases: the printer takes up no job within 30 minutes
+of accepting the print, or Kiln loses sight of the print -- no readable report
+for more than two minutes, or a report that nothing is running -- and then
+finds the printer running a print it can tell is a different one, by its name,
+its job number or its start time.  When Kiln cannot tell, the watchdog stays:
+a print the printer reports under a name that does not match the file Kiln
+sent is watched until Kiln sees it end, and a reprint of the same file begun
+while Kiln could not see the printer looks like the same print.  A pass
+through idle in the middle of a print retires the watchdog and nothing
+re-attaches it; nothing Kiln has measured shows a printer doing that.  A print
 started from the `kiln` command line gets no watchdog.
 It stops a machine only for what the machine itself proves: a fault code it
 keeps printing through, or a temperature that violates physics.  A print

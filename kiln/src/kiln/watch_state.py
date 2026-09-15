@@ -6,7 +6,7 @@ input for layer 2 — what KILN adds on this machine — and it reports FACTS
 read from the watchers actually running in this process: the live
 connection itself, which surfaces a printer's own faults on every read
 whoever started the job, the print watchdog a running Kiln server attaches
-to each print it starts and retires when it sees that print end, an opt-in health session, a background watch, whether a camera
+to each print it starts and retires when it sees that print end or can tell it is gone, an opt-in health session, a background watch, whether a camera
 Kiln can read exists, and whether the kiln-pro vision detector is armed to
 read the frames.  Never what a
 watcher could do in principle: an unattached watchdog is reported
@@ -38,6 +38,7 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
     from kiln.print_health_monitor import MonitorPolicy
     from kiln.print_watchdog import (
         DEFAULT_BED_DROP_C,
+        DEFAULT_NEVER_ACTIVE_TIMEOUT_S,
         DEFAULT_POLL_INTERVAL,
         DEFAULT_TOOL_DROP_C,
         MAX_ESTOP_ATTEMPTS,
@@ -72,7 +73,11 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
             "title": "the print watchdog",
             "attached": (
                 "to every print a running Kiln server starts, from the moment "
-                "the printer accepts it until Kiln sees that print end"
+                "the printer accepts it until Kiln sees that print end -- or, "
+                "stopping nothing, until the printer has taken up no job for "
+                f"{DEFAULT_NEVER_ACTIVE_TIMEOUT_S / 60:.0f} minutes, or is running a "
+                "print Kiln can tell is a different one after Kiln lost sight of "
+                "this one; a print Kiln cannot tell apart keeps it"
             ),
             "poll_seconds": DEFAULT_POLL_INTERVAL,
             "acts": (

@@ -41,6 +41,15 @@ the user cannot clear and cannot see the reason for, which is how a gate
 stops being trusted.  Erring loose is bounded and visible; erring sticky is
 neither.
 
+That default is right only for a caller whose "release" is the safe move.
+A caller for whom letting go is the costly move — the print watchdog, which
+must not walk away from the print it guards because a name is missing —
+needs the uncertainty kept apart from the evidence.  :func:`compare` gives
+that answer in three parts: ``SAME``, ``DIFFERENT`` only when both sides
+name their print on the same axis and the names disagree, and ``UNKNOWN``
+for everything else.  :func:`same_job` is ``compare(...) == SAME``, so the
+two can never disagree about what counts as a match.
+
 Nothing here raises.  A printer that answers strangely produces ``None``,
 never an exception into a caller that was only trying to ask a question.
 """
@@ -48,6 +57,7 @@ never an exception into a caller that was only trying to ask a question.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -69,6 +79,11 @@ _SENTINEL_IDS = frozenset({"", "0", "-1", "none", "null", "nil", "n/a"})
 # two genuinely different prints of the same file.  Fifteen minutes clears
 # a long pause without spanning a reprint.
 _START_TOLERANCE_S = 900.0
+
+#: The three answers :func:`compare` gives.
+SAME = "same"
+DIFFERENT = "different"
+UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -148,12 +163,29 @@ def resolve(job: Any, *, native_id: Any = None, now: float | None = None) -> Job
             native = clean_native_id(getattr(job, "job_id", None))
         if native is not None:
             return JobIdentity(native=native)
+        # No id: the derived rung.  Prusa Link reaches this with no filename
+        # (its status payload carries progress but no name) and is rescued
+        # by its native id above; with neither there is nothing to hold an
+        # identity on.
+        return resolve_label(job, now=now)
+    except Exception:  # noqa: BLE001 — asking a question must never raise
+        logger.debug("job identity could not be resolved", exc_info=True)
+        return None
 
+
+def resolve_label(job: Any, *, now: float | None = None) -> JobIdentity | None:
+    """The derived rung on its own: label plus start estimate, ignoring any id.
+
+    :func:`resolve` stops at a native id, which is the right ladder for
+    naming one print.  A caller comparing prints ACROSS backends' changes of
+    mind needs the label axis as well — a job Kiln started over the LAN has
+    no id, while a job started from a vendor's cloud app on the same machine
+    has one, and the only axis the two share is the name.  ``None`` when the
+    job reports no name.
+    """
+    try:
         label = normalize_job_label(getattr(job, "file_name", None))
         if not label:
-            # No id and no name: nothing to hold an identity on.  Prusa Link
-            # takes this path today (its status payload carries progress but
-            # no filename) and is rescued by its native id above.
             return None
 
         elapsed = getattr(job, "print_time_seconds", None)
@@ -165,28 +197,33 @@ def resolve(job: Any, *, native_id: Any = None, now: float | None = None) -> Job
                 started_at = None
         return JobIdentity(label=label, started_at=started_at)
     except Exception:  # noqa: BLE001 — asking a question must never raise
-        logger.debug("job identity could not be resolved", exc_info=True)
+        logger.debug("job label could not be resolved", exc_info=True)
         return None
 
 
-def same_job(a: JobIdentity | None, b: JobIdentity | None) -> bool:
-    """Whether *a* and *b* are the same print.
+def compare(a: JobIdentity | None, b: JobIdentity | None) -> str:
+    """Whether *a* and *b* are the same print: ``SAME``, ``DIFFERENT`` or ``UNKNOWN``.
 
-    ``False`` whenever that cannot be established — see the module docstring
-    on why uncertainty resolves loose rather than sticky.
+    ``DIFFERENT`` is positive evidence and nothing else: both identities are
+    usable, they name their print on the same axis, and that axis disagrees
+    -- two native ids that differ, two labels that differ, or one label with
+    both start estimates known and further apart than the tolerance.  An
+    identity that is missing, unusable, or on a different axis from the other
+    (a native id against a label, which is a backend changing its mind about
+    what it can tell us), and a start estimate that is not a finite number,
+    are all ``UNKNOWN``.
     """
     try:
         if a is None or b is None or not a.is_usable or not b.is_usable:
-            return False
+            return UNKNOWN
 
         if a.native is not None or b.native is not None:
-            # One side has a real id and the other does not: the backend
-            # changed its mind about what it can tell us, which is not
-            # evidence of sameness.
-            return a.native is not None and a.native == b.native
+            if a.native is None or b.native is None:
+                return UNKNOWN
+            return SAME if a.native == b.native else DIFFERENT
 
         if a.label != b.label:
-            return False
+            return DIFFERENT
         if a.started_at is None or b.started_at is None:
             # Same file, and at least one side cannot say when it began.
             #
@@ -205,8 +242,21 @@ def same_job(a: JobIdentity | None, b: JobIdentity | None) -> bool:
             # state, which is what actually ends the hold.  The residue is
             # narrow and named -- a reprint of the SAME file, begun before
             # that terminal state was observed, reads as a continuation.
-            return True
-        return abs(a.started_at - b.started_at) <= _START_TOLERANCE_S
+            return SAME
+        gap = abs(a.started_at - b.started_at)
+        if gap <= _START_TOLERANCE_S:
+            return SAME
+        # A NaN or infinite estimate fails both tests; it is not evidence.
+        return DIFFERENT if math.isfinite(gap) else UNKNOWN
     except Exception:  # noqa: BLE001
         logger.debug("job identity comparison failed", exc_info=True)
-        return False
+        return UNKNOWN
+
+
+def same_job(a: JobIdentity | None, b: JobIdentity | None) -> bool:
+    """Whether *a* and *b* are the same print.
+
+    ``False`` whenever that cannot be established — see the module docstring
+    on why uncertainty resolves loose rather than sticky.
+    """
+    return compare(a, b) == SAME

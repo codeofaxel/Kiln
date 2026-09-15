@@ -68,6 +68,36 @@ than that) and do NOT freeze on a clog, where the firmware keeps executing
 moves.  Worse, a trip is idempotent, so a false stall trip switched off the
 thermal and fault rules for the rest of the print.  The machine's own
 faults and its temperatures stop it; a stall is told to a person.
+
+A watchdog armed for a print Kiln started belongs to that print (see
+``started_file``).  The ending edge Kiln sees on any status read retires it,
+as before.  Two ways out cover the prints that leave no ending to see, and
+both stop nothing:
+
+* The printer takes up no job within :data:`DEFAULT_NEVER_ACTIVE_TIMEOUT_S`
+  of arming, judged on a report it made: the print it accepted never began.
+* The watchdog binds to the job the printer reports under the name of the
+  file Kiln sent (or, for a printer that names no file, under its real job
+  id).  Once Kiln has lost sight of that job -- no readable report for longer
+  than ``progress_motion.WATCHED_ENDING_MAX_GAP_S``, or a report that no job
+  is running -- a job that is POSITIVELY a different one retires it, on the
+  same poll, before any red flag or retried stop.  ``job_identity.compare``
+  must answer ``DIFFERENT`` against every id and name the bound job was seen
+  under; an unnamed job, an id against a name, or a name that never matched
+  keeps the watchdog watching.
+
+Honest bounds.  A job reported under a name that does not match the file
+Kiln sent is never bound, so only its ending retires the watchdog.  A reprint
+of the same file begun while Kiln could not see the printer, with no start
+time to tell it apart, reads as the same print.  A job that replaced the
+bound one inside a single poll, with no stop in between that any read saw, is
+absorbed as the same print.  A merged status (Bambu's) can pair a fresh run
+state with a name left from before Kiln lost sight, until the full report it
+requests on reconnecting lands; a read inside that window takes the old name
+for the print.  And a brief pass through idle mid-print retires
+the watchdog on the ending edge with nothing to re-attach it; the one claim
+that a Bambu does that (``auto_record_hook._TERMINAL_STATE_DEBOUNCE_S``) is a
+comment with no measurement behind it.
 """
 
 from __future__ import annotations
@@ -77,9 +107,12 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kiln.auto_record_hook import cancel_intent_pending, note_cancel_requested
+
+if TYPE_CHECKING:
+    from kiln.printers.job_identity import JobIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +198,37 @@ MAX_ESTOP_ATTEMPTS: int = 3
 #: ``paused`` is not one -- a paused job can resume -- and neither is a reading
 #: that shows nothing (stale, offline, unknown).
 _JOB_ENDED_STATES: frozenset[str] = frozenset({"idle", "error", "cancelling"})
+
+#: How long a watchdog armed for a print waits for the printer to take up ANY
+#: job before it concludes the print it was armed for never began.
+#:
+#: A start the printer accepted and never ran leaves no ending to see, so
+#: without a bound the watchdog would stay to police whatever that machine
+#: runs next -- a print started at its own screen included.  The Bambu
+#: adapter's comment on a start it could not confirm
+#: (``BambuAdapter._start_print_impl``, the ``timeout`` branch) gives "5-8+
+#: minutes" of homing, AMS load and calibration before ``gcode_state`` even
+#: flips to ``prepare``.  That comment cites no measurement and is open at the
+#: top, so it is not a number to cut close to.
+#: The warm-up ceiling is this watchdog's existing policy for how long "still
+#: starting" may last, and it is reused rather than a second guess made: it is
+#: several times the comment's range.  Too short, and a print that took longer
+#: to begin runs without its watchdog; too long, and one that never began keeps
+#: a watchdog attached for longer.  Either way it moves only WHEN such a
+#: watchdog leaves.
+DEFAULT_NEVER_ACTIVE_TIMEOUT_S: float = DEFAULT_WARMUP_TIMEOUT_S
+
+#: The run states that show the printer took up a job.  The ending edge can
+#: follow any of them, so seeing one ends the wait for the print to begin.
+_TOOK_UP_A_JOB: frozenset[str] = frozenset({"printing", "paused", "busy", "cancelling"})
+
+#: The run states in which a job is on the machine and can say which job it
+#: is.  Binding, matching and "a different print" are judged only on these.
+_JOB_ON_THE_MACHINE: frozenset[str] = frozenset({"printing", "paused"})
+
+#: Every run state a reading can vouch for.  Anything else -- stale, offline,
+#: unknown, a refused login -- is no contact with the printer at all.
+_READABLE_RUN_STATES: frozenset[str] = _TOOK_UP_A_JOB | _JOB_ENDED_STATES
 
 
 # --------------------------------------------------------------------------
@@ -411,6 +475,17 @@ class PrintWatchdog:
             target it has never reached before the gap is judged.  Raise it
             for a large enclosed machine in a cold room, which legitimately
             takes longer than a desktop printer.
+        started_file: The file Kiln started, which arms this watchdog for that
+            print: it binds to the job the printer reports under that file's
+            name, and retires itself -- stopping nothing -- when the printer
+            takes up no job within ``never_active_timeout_s``, or is running a
+            job positively different from the bound one after Kiln lost sight
+            of it.  ``None`` arms nothing: the watchdog watches the printer
+            until it is stopped, as it always has.
+        on_retired: Called with this watchdog once it has retired itself, so
+            its owner can drop it.  Exceptions are logged and swallowed.
+        never_active_timeout_s: Override for how long a watchdog armed for a
+            print waits for the printer to take up any job.
         time_fn: Injectable clock for deterministic testing.  Defaults
             to :func:`time.monotonic`.
     """
@@ -426,6 +501,9 @@ class PrintWatchdog:
         bed_drop_c: float = DEFAULT_BED_DROP_C,
         no_rise_timeout_s: float = DEFAULT_NO_RISE_TIMEOUT_S,
         warmup_timeout_s: float = DEFAULT_WARMUP_TIMEOUT_S,
+        started_file: str | None = None,
+        on_retired: Callable[[PrintWatchdog], None] | None = None,
+        never_active_timeout_s: float = DEFAULT_NEVER_ACTIVE_TIMEOUT_S,
         time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         self._adapter = adapter
@@ -459,6 +537,28 @@ class PrintWatchdog:
         # The rule the outstanding stop was commanded for, so a follow-up that
         # finds no flag firing can still say what it is retrying.
         self._tripped_rule: str | None = None
+
+        # The print this watchdog was armed for.  Consulted only when
+        # ``started_file`` armed it.
+        from kiln.printers.progress_motion import normalize_job_label
+
+        self._armed_for_start = started_file is not None
+        self._started_label = normalize_job_label(started_file)
+        self._on_retired = on_retired
+        self._never_active_timeout_s = float(never_active_timeout_s)
+        self._retired = False
+        # The clock at the first poll; the wait for the print to begin runs
+        # from there.
+        self._armed_at: float | None = None
+        self._took_up_a_job = False
+        # Every real id and every name the bound job has been seen under while
+        # Kiln kept watching it run.  Both empty until the printer names it.
+        self._job_ids: set[str] = set()
+        self._job_names: dict[str, JobIdentity] = {}
+        # When a reading last vouched for a run state; and, once Kiln has lost
+        # sight of the bound job, how -- until that job is seen again.
+        self._last_contact_at: float | None = None
+        self._lost_sight: str | None = None
 
         # One object per heater, same rules in both — a drop only counts once
         # its heater has arrived, and a heater that never arrives is judged
@@ -545,9 +645,13 @@ class PrintWatchdog:
         Factored out of :meth:`_run_loop` so tests can drive the watchdog
         deterministically without spawning threads.
         """
-        # Once latched, do nothing — don't spam e-stop.
-        if self.anomaly_triggered:
+        # Once latched, do nothing — don't spam e-stop.  Once retired, the
+        # print this watchdog was armed for is not on the machine, and nothing
+        # here is its to act on.
+        if self.anomaly_triggered or self._retired:
             return None
+        if self._armed_for_start and self._armed_at is None:
+            self._armed_at = self._time()
 
         try:
             from kiln.printers.engagement import internal_read
@@ -568,9 +672,22 @@ class PrintWatchdog:
             # Job info is optional — a stall check just won't fire without it.
             job = None
 
+        if self._stop_event.is_set():
+            # Stopped while this poll was reading -- most often retired by the
+            # very read that saw its print end, which announces the ending
+            # inside get_state().  A stopped watchdog acts on nothing it read.
+            return None
+
         with self._lock:
             self._last_state = state
             self._last_job = job
+
+        # --- Is this still the print it was armed for? -----------------
+        # Before the red flags and before any retried stop: a watchdog that
+        # can see its print has gone must not stop the machine on a reading
+        # of another job.
+        if self._armed_for_start and self._follow_job(state, job):
+            return None
 
         # --- Red flags ------------------------------------------------
         red = self._evaluate_red_flags(state, job)
@@ -614,6 +731,150 @@ class PrintWatchdog:
                 self._poll_interval, 5.0
             )
             self._stop_event.wait(timeout=interval)
+
+    def _follow_job(self, state: Any, job: Any) -> bool:
+        """Follow the print this watchdog was armed for.  ``True`` once it has retired.
+
+        Only proof retires it, and there are two kinds:
+
+        * the printer has taken up no job within the never-active bound, as
+          told by a report it made -- a printer Kiln cannot read has told it
+          nothing, so time without a readable report does not count;
+        * the printer is running a job positively different from the bound one
+          after Kiln lost sight of that job -- a gap between readable reports
+          longer than ``WATCHED_ENDING_MAX_GAP_S``, or a report that no job is
+          running.
+
+        Anything short of that keeps it watching.  While Kiln keeps the bound
+        job in sight, a name or id that changes is still that job: a Bambu
+        status is a merge of partial frames, so one print can arrive under more
+        than one name, and every one it is seen under is remembered.
+        """
+        from kiln.printers.job_identity import DIFFERENT, SAME, clean_native_id, resolve_label
+        from kiln.printers.progress_motion import WATCHED_ENDING_MAX_GAP_S
+
+        word = _confirmed_state_word(state)
+        if word not in _READABLE_RUN_STATES:
+            return False  # no contact: nothing seen, so nothing concluded
+        now = self._time()
+        if self._last_contact_at is not None:
+            gap = now - self._last_contact_at
+            if gap > WATCHED_ENDING_MAX_GAP_S:
+                self._lost_sight = f"{gap:.0f}s without a readable report"
+        self._last_contact_at = now
+
+        if word in _TOOK_UP_A_JOB:
+            self._took_up_a_job = True
+        elif (
+            not self._took_up_a_job
+            and self._armed_at is not None
+            and now - self._armed_at >= self._never_active_timeout_s
+        ):
+            self._retire(
+                f"the printer accepted {self._started_name()} "
+                f"{(now - self._armed_at) / 60:.0f} minutes ago and has taken up no "
+                f"job since; it reads {word}"
+            )
+            return True
+
+        if word in _JOB_ENDED_STATES:
+            self._lost_sight = f"the printer reported {word}"
+            return False
+        if word not in _JOB_ON_THE_MACHINE:
+            return False
+
+        job_id = clean_native_id(getattr(job, "job_id", None))
+        named = resolve_label(job)
+        if not self._job_ids and not self._job_names:
+            if self._is_the_started_file(job_id, named):
+                self._remember(job_id, named)
+                self._lost_sight = None
+            return False
+
+        relation = self._relation(job_id, named)
+        if relation == SAME or self._lost_sight is None:
+            self._remember(job_id, named)
+            self._lost_sight = None
+            return False
+        if relation == DIFFERENT:
+            self._retire(
+                f"it was watching {self._bound_names()}; after {self._lost_sight}, the "
+                f"printer is running {self._job_name(job_id, named)}, a different print"
+            )
+            return True
+        return False
+
+    def _is_the_started_file(self, job_id: str | None, named: JobIdentity | None) -> bool:
+        """Does this job answer to the file Kiln started, as far as its report can say?
+
+        A name must match the file Kiln sent.  One that does not is not proof of
+        another print -- a printer may report a plate name -- but it is no reason
+        to adopt that job either, so the watchdog stays unbound and only the
+        ending edge retires it.  A job with no name at all (Prusa Link's status
+        names no file) is taken at its real job id.
+        """
+        if named is not None:
+            return named.label == self._started_label
+        return job_id is not None
+
+    def _relation(self, job_id: str | None, named: JobIdentity | None) -> str:
+        """``compare`` against everything the bound job has been seen as.
+
+        The strongest axis both sides carry decides: ids when both have one (a
+        reprint started from a vendor's cloud gets a new id), names otherwise.
+        ``SAME`` when anything remembered matches; ``DIFFERENT`` only when
+        everything remembered on that axis is different.
+        """
+        from kiln.printers.job_identity import DIFFERENT, SAME, UNKNOWN, JobIdentity, compare
+
+        if job_id is not None and self._job_ids:
+            current = JobIdentity(native=job_id)
+            answers = {compare(current, JobIdentity(native=known)) for known in self._job_ids}
+        elif named is not None and self._job_names:
+            answers = {compare(named, known) for known in self._job_names.values()}
+        else:
+            return UNKNOWN
+        if SAME in answers:
+            return SAME
+        return DIFFERENT if answers == {DIFFERENT} else UNKNOWN
+
+    def _remember(self, job_id: str | None, named: JobIdentity | None) -> None:
+        """Add what this report calls the bound job to what the job is known by."""
+        if job_id is not None:
+            self._job_ids.add(job_id)
+        if named is not None:
+            known = self._job_names.get(named.label)
+            # The latest start estimate for a name, so a drift Kiln watches
+            # happen -- firmware that stops counting while paused -- is followed
+            # rather than accumulated.  Never a known start traded for none.
+            if known is None or named.started_at is not None:
+                self._job_names[named.label] = named
+
+    def _retire(self, reason: str) -> None:
+        """Leave, stopping nothing: the print this was armed for is not on the machine."""
+        self._retired = True
+        logger.warning("PrintWatchdog retired, stopping nothing: %s", reason)
+        self.stop(timeout=0.0)
+        if self._on_retired is not None:
+            try:
+                self._on_retired(self)
+            except Exception:
+                logger.exception("PrintWatchdog: on_retired callback raised")
+
+    def _started_name(self) -> str:
+        return repr(self._started_label) if self._started_label else "the print Kiln started"
+
+    def _bound_names(self) -> str:
+        names = [repr(name) for name in sorted(self._job_names)]
+        names += [f"job {job_id}" for job_id in sorted(self._job_ids)]
+        return " / ".join(names)
+
+    @staticmethod
+    def _job_name(job_id: str | None, named: JobIdentity | None) -> str:
+        parts = [repr(named.label)] if named is not None else []
+        if job_id:
+            parts.append(f"job {job_id}")
+        return " / ".join(parts) or "an unnamed job"
 
     def _evaluate_red_flags(self, state: Any, job: Any) -> Flag | None:
         """Return the first red flag that fires this tick, or ``None``."""

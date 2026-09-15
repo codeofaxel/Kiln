@@ -3118,6 +3118,12 @@ def _spawn_print_watchdog(adapter: Any, file_name: str) -> None:
             adapter=adapter,
             poll_interval_sec=2.5,
             on_anomaly=_on_anomaly,
+            # Armed for THIS print: the watchdog binds to the job the printer
+            # reports under this file's name, and leaves without stopping
+            # anything when the print never starts or the printer is running
+            # a print it can tell is a different one.
+            started_file=file_name or "",
+            on_retired=lambda retired: _release_print_watchdog(printer_name, retired),
         )
         wd.start()
         _print_watchdogs[printer_name] = wd
@@ -3163,6 +3169,20 @@ def _retire_print_watchdog(printer_name: str) -> None:
         watchdog = _print_watchdogs.pop(printer_name, None)
     if watchdog is not None:
         watchdog.stop(timeout=0.0)
+
+
+def _release_print_watchdog(printer_name: str, watchdog: Any) -> None:
+    """Drop a watchdog that retired itself, if it is still the one filed there.
+
+    The ``on_retired`` callback :func:`_spawn_print_watchdog` hands each
+    watchdog; the watchdog has already stopped itself.  Checked by identity,
+    never by name alone: the next print on that machine may already have filed
+    its own watchdog under the name, and the last print's watchdog leaving must
+    not take the new one with it.
+    """
+    with _print_watchdogs_lock:
+        if _print_watchdogs.get(printer_name) is watchdog:
+            del _print_watchdogs[printer_name]
 
 
 def _is_server_printer(adapter: Any) -> bool:
