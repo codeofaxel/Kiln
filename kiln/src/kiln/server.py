@@ -7270,9 +7270,20 @@ def emergency_stop(
 ) -> dict:
     """Trigger an emergency stop on one or all printers.
 
-    Sends M112 (emergency stop), turns off heaters, and disables steppers.
-    Unlike ``cancel_print``, this does **not** allow a graceful cooldown —
-    all motion ceases instantly.
+    Sends the strongest stop each printer accepts: Moonraker's emergency-stop
+    endpoint; ``M112`` on OctoPrint, Duet and USB-serial printers; a cancel
+    plus ``M112`` on Elegoo; a job cancel on Prusa Link, which has no raw
+    G-code endpoint; and on Bambu the print-stop command, a heater cut and
+    ``M112``.  Creality printers use whichever of these their connection is.
+    Unlike ``cancel_print``, this is not meant to allow a graceful cooldown.
+
+    Only the Bambu stop is read back: its ``success`` means the printer
+    reported the job ended.  On every other printer ``success`` means the
+    stop command was delivered, not that anything was observed.  ``success``
+    is False for any printer whose stop failed or could not be confirmed;
+    when stopping all printers, ``not_confirmed_stopped`` lists each one with
+    the reason.  Tell the user to stop those at the machine; calling this tool
+    again for them is safe.
 
     Use only in genuine safety emergencies (thermal runaway, collision,
     spaghetti failure threatening the hotend, etc.).

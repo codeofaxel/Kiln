@@ -274,7 +274,13 @@ already parsed; staying quiet about it would be the same dishonesty as the
 `idle` above.  It reports and does not act -- every read shows the fault, and
 the fault's leading edge raises one `printer.error` event -- because a job
 started at the printer's own touchscreen is the operator's to stop.  Only the
-print watchdog stops a machine, and it stays attached to prints Kiln started.
+print watchdog stops a machine.  A running Kiln server attaches one to every
+print it starts -- from any tool, the queue or a pipeline -- and retires it
+when it sees that print end, so it does not stay behind to police the next job
+on that machine.  Two rare cases keep a watchdog longer, until the next print
+Kiln starts or cancels on that printer: a print the printer accepted but never
+reported running, and an ending Kiln only saw after losing contact.  A print
+started from the `kiln` command line gets no watchdog.
 It stops a machine only for what the machine itself proves: a fault code it
 keeps printing through, or a temperature that violates physics.  A print
 that has stopped moving is reported -- one `print.stalled` event, the same
@@ -288,7 +294,9 @@ for five seconds while the printer keeps printing before the watchdog stops
 it (a code on your own HMS block list still stops it at once).  The Bambu
 emergency stop is read back, and when no report shows the job ending it says
 plainly that it could not confirm the stop and that the machine must be
-stopped at its own screen or power switch.
+stopped at its own screen or power switch.  A stop aimed at every printer
+commands them all at once, so no machine waits for another to confirm, and
+the `emergency_stop` tool names each printer it could not confirm.
 
 ---
 

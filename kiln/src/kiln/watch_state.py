@@ -5,8 +5,8 @@ detectors watch, from the makers' pages (kiln-pro).  This module is the
 input for layer 2 — what KILN adds on this machine — and it reports FACTS
 read from the watchers actually running in this process: the live
 connection itself, which surfaces a printer's own faults on every read
-whoever started the job, the print watchdog Kiln attaches to a print it
-started, an opt-in health session, a background watch, whether a camera
+whoever started the job, the print watchdog a running Kiln server attaches
+to each print it starts and retires when it sees that print end, an opt-in health session, a background watch, whether a camera
 Kiln can read exists, and whether the kiln-pro vision detector is armed to
 read the frames.  Never what a
 watcher could do in principle: an unattached watchdog is reported
@@ -40,6 +40,7 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
         DEFAULT_BED_DROP_C,
         DEFAULT_POLL_INTERVAL,
         DEFAULT_TOOL_DROP_C,
+        MAX_ESTOP_ATTEMPTS,
     )
     from kiln.printers.progress_motion import stall_threshold_seconds
 
@@ -69,9 +70,16 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
         },
         "watchdog": {
             "title": "the print watchdog",
-            "attached": "to every print Kiln starts, for as long as it runs",
+            "attached": (
+                "to every print a running Kiln server starts, from the moment "
+                "the printer accepts it until Kiln sees that print end"
+            ),
             "poll_seconds": DEFAULT_POLL_INTERVAL,
-            "acts": "emergency-stops the printer on a red flag",
+            "acts": (
+                "emergency-stops the printer on a red flag, reads back whether the "
+                f"stop landed, and commands it again up to {MAX_ESTOP_ATTEMPTS} "
+                "times when it did not"
+            ),
             "red": {
                 "print_error": "an error the printer reports while it keeps printing",
                 "hms_blocklist": "a printer fault code on the block list",
