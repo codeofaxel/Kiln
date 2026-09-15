@@ -6351,8 +6351,10 @@ def start_print(
             and the printer's own screen switch governs -- ``printer_status``
             and ``preflight_check`` read that switch and, when it is on,
             repeat the printer's own warning that the probe leaks onto the
-            model unless the slice carries a purge tower.  Whether ``False``
-            overrides that switch for the print has not been verified.
+            model unless the slice carries a purge tower.  ``False`` is not
+            a per-print override: measured 2026-09-15, it turns the printer's
+            own switch OFF and leaves it off, so the user switches it back on
+            on the screen when they want the probe again.
         bed_type: Bed surface type (Bambu only).  Default ``"auto"``.
         plate_number: Plate index in multi-plate 3MF files (Bambu only).
             Default ``1``.

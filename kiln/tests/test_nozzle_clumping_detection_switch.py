@@ -241,7 +241,7 @@ class TestPreflight:
         assert check["enabled"] is True
         assert "purge" in check["message"] or "prime" in check["message"]
         assert "nozzle_clog_detect=False" in check["message"]
-        assert "not been verified" in check["message"]  # whether Kiln's flag overrides the switch
+        assert "leaves it off" in check["message"]  # measured: the skip is the switch, not a per-print override
         assert result["ready"] is True
 
     @patch("kiln.server._get_adapter")
@@ -502,3 +502,17 @@ class TestTheBridge:
 
         monkeypatch.setattr(builtins, "__import__", no_pro)
         assert bridge.consult_clumping_detection(printer_model="bambu_a1", reading=_reading(True).__dict__, file=None) is None
+
+
+class TestTheFaultTheCardThrew:
+    def test_the_microsd_code_names_the_card_not_the_ams(self):
+        from kiln.printers.bambu import describe_bambu_filament_fault
+
+        reading, _page = describe_bambu_filament_fault("0500C010", kind="print_error")
+        assert "microSD" in reading and "AMS" not in reading
+
+    def test_the_0500_family_no_longer_blames_the_ams(self):
+        from kiln.printers.bambu import describe_bambu_filament_fault
+
+        reading, _page = describe_bambu_filament_fault("0500ABCD", kind="print_error")
+        assert "AMS" not in reading

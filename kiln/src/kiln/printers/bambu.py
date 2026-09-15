@@ -608,6 +608,16 @@ _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
         "The filament may be tangled at the extruder feed -- Kiln could not "
         "confirm this reading against a primary source, so treat it as a hint"
     ),
+    # Read off an A1's own screen 2026-09-15 ("0500 C010 010800: microSD
+    # card read/write exception, please reinsert or replace the microSD
+    # card") the moment a print upload failed.  The 0500 family had been
+    # labelled an AMS filament-sensor fault below, which is wrong for this
+    # code and sent the operator looking at the wrong part of the machine.
+    "0500C010": (
+        "The printer's microSD card failed a read or write, so the file "
+        "could not be stored and the print did not start. Reinsert the card, "
+        "or replace it if this repeats; nothing heated"
+    ),
 }
 
 # Prefixes that name a module in BOTH namespaces.  Every code in the table
@@ -638,7 +648,10 @@ _BAMBU_PRINT_ERROR_FAMILIES: dict[str, str] = {
     "1200": "an AMS lite filament load / unload fault",
     "0700": "an AMS filament path fault",
     "0300": "a toolhead / extruder fault",
-    "0500": "an AMS filament sensor fault",
+    # 0500-C010 is the microSD card (confirmed on screen 2026-09-15), so the
+    # family is the printer's main board, not the AMS; the other 0500 codes
+    # are not published, so the label claims no more than that.
+    "0500": "a main-board (0500-family) fault",
 }
 
 
@@ -2664,10 +2677,15 @@ class BambuAdapter(PrinterAdapter):
         These commands must be sent **before** the ``project_file``
         command to take effect for the upcoming print.
 
-        Whether they override the printer's own screen switch (Print
-        Options > Nozzle clumping detection, readable through
-        :meth:`read_nozzle_clumping_detection`) for that print, and whether
-        they flip the switch itself, has NOT been verified on any machine.
+        MEASURED 2026-09-15 on an A1 (screen switch ON, no print running):
+        the ``print_option`` command alone flips the printer's own screen
+        switch (Print Options > Nozzle clumping detection, readable through
+        :meth:`read_nozzle_clumping_detection`) to OFF, and it STAYS off --
+        this is not a per-print override, it is the switch.  Measured the
+        same session: ``print_option`` with ``nozzle_blob_detect: true``
+        turns it back ON (the bit returned within 8 s and the screen toggle
+        was seen flipping to ON in real time).  Kiln does not yet restore
+        the switch after a print started with ``nozzle_clog_detect=False``.
         Kiln never turns the switch on: with the default
         ``nozzle_clog_detect=True`` nothing is sent and the printer's own
         switch governs.
