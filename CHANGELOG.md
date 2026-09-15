@@ -167,6 +167,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **No more phantom chamber temperature on open-frame Bambu printers.** Some
+  Bambus have no chamber sensor; Kiln now says so instead of relaying the
+  firmware's placeholder. Enclosed models with a real sensor are unchanged.
+
+- **The X1E's heated chamber is now on record.** Material advice for it no
+  longer treats it as unheated.
+
 - **Printer questions no longer answer a different question.** Asked
   something Kiln has no verified answer for, it now says so instead of
   returning a related fact with a confident label.
