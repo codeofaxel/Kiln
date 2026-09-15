@@ -639,6 +639,15 @@ def observe_state(printer_name: str, current_state: str) -> str | None:
     registered machine, idle ones included — left an intent on a printer that
     had no print to cancel, and the next touchscreen print to end on an
     ambiguous idle inherited it and was recorded cancelled after finishing.
+
+    Watching a printer LEAVE a job is announced here too, through
+    :func:`kiln.printers.base.fire_print_ended_hooks`, for the same reason:
+    this is the one function both doors pass through, under the same name.
+    The edge is read from THIS table rather than from either door's own
+    previous state, because a connected Bambu's push callback writes the
+    table as each frame lands, so the polled wrap behind it usually finds no
+    edge at all.  Announced per door, a Bambu ending would arrive on the
+    push door and never on the polled one.
     """
     prev = _HOOK_STATE.previous_state(printer_name)
     _HOOK_STATE.set_previous_state(printer_name, current_state)
@@ -650,7 +659,21 @@ def observe_state(printer_name: str, current_state: str) -> str | None:
         and (prev or "").lower().strip() not in _ACTIVE_STATES
     ):
         clear_cancel_intent(printer_name)
+    if is_terminal_transition(prev, current_state):
+        _announce_print_ended(printer_name)
     return prev
+
+
+def _announce_print_ended(printer_name: str) -> None:
+    """Tell the print-ended hooks about *printer_name*; never raise into a read."""
+    try:
+        from kiln.printers.base import fire_print_ended_hooks
+
+        fire_print_ended_hooks(printer_name)
+    except Exception:  # noqa: BLE001 — an announcement never breaks a status read
+        _logger.debug(
+            "print-ended announcement failed for %r", printer_name, exc_info=True
+        )
 
 
 def open_pending_outcome(

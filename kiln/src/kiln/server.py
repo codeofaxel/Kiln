@@ -1423,6 +1423,8 @@ def _get_adapter() -> PrinterAdapter:
     """
     global _adapter  # noqa: PLW0603
 
+    _install_print_lifecycle_hooks()
+
     if _adapter is not None:
         return _adapter
 
@@ -2402,10 +2404,10 @@ def _watched_machines(exclude: PrinterAdapter | None = None) -> set[str]:
 def _watch_capacity_error(adapter: PrinterAdapter, target_name: str) -> dict | None:
     """Refuse a NEW persistent watch beyond the tier's machine limit.
 
-    Kiln watches what Kiln runs.  The print watchdog has always worked
-    that way — it spawns inside ``start_print`` and nowhere else, so a
-    plan that runs one printer at a time has only ever had one machine
-    watched automatically.  The explicit watchers escaped that rule and
+    Kiln watches what Kiln runs.  The print watchdog works that way — it
+    attaches to the prints Kiln starts and to nothing else, so a plan that
+    runs one printer at a time has only ever had one machine watched
+    automatically.  The explicit watchers escaped that rule and
     let a plan for one machine keep continuous eyes on a whole farm.
 
     Deliberately NOT limited, at any tier: LOOKING.  ``printer_status``,
@@ -3054,11 +3056,23 @@ _print_watchdogs_lock = threading.Lock()
 def _spawn_print_watchdog(adapter: Any, file_name: str) -> None:
     """Spawn a PrintWatchdog for the printer that just started a print.
 
+    The print-started hook (see :func:`_install_print_lifecycle_hooks`):
+    ``PrinterAdapter.start_print`` calls it after every start the printer
+    accepted, whichever door started the print.  Only for a printer this
+    process resolves (:func:`_is_server_printer`) -- a watchdog nothing here
+    can name could be neither reported on nor retired.
+
     If a watchdog already exists for this printer, stop the old one
     and replace it.  On any anomaly, logs the crash envelope to
     ``~/.kiln/incidents/`` via the incident_recorder.
     """
     from kiln.print_watchdog import PrintWatchdog
+
+    if not _is_server_printer(adapter):
+        logger.debug(
+            "No print watchdog for %r: not a printer this server resolves", adapter,
+        )
+        return
 
     # Keyed the same way the teardown looks it up — off the adapter that
     # is actually printing.  Both ends called ``_resolve_effective_printer_name()``
@@ -3130,6 +3144,92 @@ def _stop_print_watchdog(printer_name: str | None = None) -> None:
             logger.debug("PrintWatchdog stop failed: %s", exc)
 
 
+def _retire_print_watchdog(printer_name: str) -> None:
+    """Retire the watchdog of the printer whose print was just seen ending.
+
+    The print-ended hook.  Keyed by the name the ending was observed under,
+    which is the name :func:`_spawn_print_watchdog` filed the watchdog under,
+    so an ending on one machine never reaches another machine's watchdog.
+
+    Two deliberate differences from :func:`_stop_print_watchdog`.  No name
+    retires nothing -- never "the default printer".  And it does not wait for
+    the thread: it runs inside a status read, usually the watchdog's own
+    poll, sometimes a push callback, and a read must not stall while a thread
+    winds down.  The thread exits after the step it is in.
+    """
+    if not printer_name:
+        return
+    with _print_watchdogs_lock:
+        watchdog = _print_watchdogs.pop(printer_name, None)
+    if watchdog is not None:
+        watchdog.stop(timeout=0.0)
+
+
+def _is_server_printer(adapter: Any) -> bool:
+    """Is *adapter* a printer this process resolves: registered, or the default?
+
+    The watchdog table is keyed by the server's printer names, and everything
+    that reaches a watchdog -- ``cancel_print``'s teardown, the watch state,
+    the ending edge -- reaches it through a printer the server can name.  An
+    adapter nobody registered is filed under its backend family instead,
+    which it shares with every other unregistered machine of that brand, so
+    one such machine's next start or ending would stop another's watchdog.
+
+    The adapters that fail this are the ones code outside the server builds
+    for itself -- the CLI's, a script's, an adapter unit test's -- none of
+    which a server-side watchdog could report on or tear down.
+    """
+    if adapter is None:
+        return False
+    if adapter is _adapter:
+        return True
+    name = getattr(adapter, "_kiln_registered_name", None)
+    if not isinstance(name, str) or not name:
+        return False
+    try:
+        return _get_registry().get(name) is adapter
+    except Exception:  # noqa: BLE001 — a name the registry does not know is not ours
+        return False
+
+
+#: Whether this process has attached the print watchdog to the adapter
+#: layer's print lifecycle.  Set on first use, never at import.
+_print_lifecycle_hooks_installed = False
+
+
+def _install_print_lifecycle_hooks() -> None:
+    """Attach the print watchdog to every print this process starts.
+
+    Called from :func:`_get_registry` and :func:`_get_adapter` -- the two
+    doors every printer tool resolves a printer through -- so a process
+    running Kiln's tools (the MCP server, kiln-pro's REST server, the
+    web->printer bridge, the agent loop, an embedding host) has it before it
+    can start a print.  Never at import: importing this module must not put
+    a polling thread behind every successful ``start_print`` in a process
+    that never asked to serve, a test suite's adapter tests above all.
+
+    The started hook is :func:`_spawn_print_watchdog`, fired from the
+    ``PrinterAdapter.start_print`` template.  Before it, one tool among the
+    many doors that start a print attached a watchdog.  The ended hook is
+    :func:`_retire_print_watchdog`.  Before it, nothing retired a watchdog
+    when a print finished -- no code in this package publishes the
+    PRINT_COMPLETED event the old teardown waited for -- so a watchdog
+    outlived its print and policed the next one on that machine, a print
+    started at the printer's own touchscreen included.
+    """
+    global _print_lifecycle_hooks_installed  # noqa: PLW0603
+    if _print_lifecycle_hooks_installed:
+        return
+    from kiln.printers.base import (
+        register_print_ended_hook,
+        register_print_started_hook,
+    )
+
+    register_print_started_hook(_spawn_print_watchdog)
+    register_print_ended_hook(_retire_print_watchdog)
+    _print_lifecycle_hooks_installed = True
+
+
 def _get_registry() -> PrinterRegistry:
     """Return the lazily-initialised printer registry.
 
@@ -3145,6 +3245,7 @@ def _get_registry() -> PrinterRegistry:
     those entries with a fresh empty registry.
     """
     global _registry  # noqa: PLW0603
+    _install_print_lifecycle_hooks()
     if _registry is None:
         try:
             from kiln.registry import get_printer_registry
@@ -6738,19 +6839,10 @@ def start_print(
         result = adapter.start_print(file_name, **print_kwargs)
         _note_print_started(adapter)
 
-        # Layer 5: spawn in-process PrintWatchdog to catch HMS codes,
-        # thermal anomalies, stuck-layer conditions.  Agent-driven
-        # polling (~60s) is too slow to catch clogs / crashes in time.
-        # The watchdog polls every 2.5s and calls adapter.emergency_stop
-        # on red flags.  Best-effort — a failure here must not abort
-        # the print start.
-        try:
-            _spawn_print_watchdog(adapter, file_name)
-        except Exception as _wd_exc:
-            logger.warning(
-                "PrintWatchdog spawn failed for %s (print continues without watchdog): %s",
-                file_name, _wd_exc,
-            )
+        # Layer 5, the print watchdog, attaches inside adapter.start_print --
+        # a started hook, see _install_print_lifecycle_hooks -- so it follows
+        # the prints every other door starts too, and only a start the
+        # printer accepted.
 
         # Stop this printer's pause keep-alive thread now that the print is
         # back under firmware control.  Safe to call when nothing's running.

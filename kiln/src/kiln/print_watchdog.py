@@ -507,11 +507,19 @@ class PrintWatchdog:
     def stop(self, timeout: float | None = None) -> None:
         """Signal the thread to exit and join it.
 
-        Safe to call even if :meth:`start` was never invoked.
+        Safe to call even if :meth:`start` was never invoked, and safe from
+        the watchdog's own thread, where it only signals: a thread cannot
+        join itself, and the loop exits once the step it is in returns.  That
+        call is ordinary rather than exotic -- the watchdog polls its printer,
+        so its own poll is usually the read that sees its print end.
         """
         self._stop_event.set()
         thread = self._thread
-        if thread is not None and thread.is_alive():
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
             thread.join(timeout=timeout if timeout is not None else self._poll_interval * 2.0)
         self._thread = None
         logger.info("PrintWatchdog stopped")

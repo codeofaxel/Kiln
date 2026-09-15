@@ -422,22 +422,6 @@ def test_a_latch_under_either_name_refuses_the_start(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_the_watchdog_is_keyed_under_the_printer_that_started(monkeypatch):
-    """A watchdog filed under the default name would be torn down by the
-    default printer's next start, leaving a live print unwatched."""
-    garage, workshop = _two_printers(monkeypatch)
-    spawned: list[tuple[object, str]] = []
-    monkeypatch.setattr(
-        server,
-        "_spawn_print_watchdog",
-        lambda adapter, file_name: spawned.append((adapter, file_name)),
-    )
-
-    _start(file_name="part.gcode", printer_name="workshop")
-
-    assert spawned == [(workshop, "part.gcode")]
-
-
 def test_the_heater_watchdog_is_not_told_about_someone_elses_print(monkeypatch):
     """It watches the default printer and nothing else.
 

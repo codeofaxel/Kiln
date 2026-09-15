@@ -18,6 +18,7 @@ import subprocess
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, ClassVar
 
@@ -2850,6 +2851,13 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "pending-outcome open failed", exc_info=True
                 )
+            # Whatever must follow EVERY print Kiln starts attaches here,
+            # through register_print_started_hook, rather than being wired
+            # into each door that starts one and missing the next door.  The
+            # print watchdog is the reason this exists.  Last, so nothing a
+            # hook does -- a watchdog waiting for the one a previous print
+            # left behind to stop -- delays the stamps and the pending row.
+            _fire_print_started_hooks(self, file_name)
         return result
 
     @abstractmethod
@@ -4194,6 +4202,94 @@ DeviceAdapter = PrinterAdapter
 # covered by __init_subclass__.  Abstract methods are skipped there, so the
 # implementing subclass is what gets wrapped.
 _install_engagement_gate(PrinterAdapter, own_methods_only=False)
+
+
+# ---------------------------------------------------------------------------
+# Print lifecycle hooks
+# ---------------------------------------------------------------------------
+#
+# A rule that must follow EVERY print Kiln starts cannot live in the doors
+# that start prints.  There are many -- the MCP tools, the scheduler, the
+# pipelines, recovery, kiln-pro's own -- and the print watchdog was wired
+# into exactly one of them while the promise it backs was made for all.  So
+# such a rule attaches here, at the two points every door already passes
+# through: :meth:`PrinterAdapter.start_print` announces a start, and the
+# previous-state table both status doors write
+# (:func:`kiln.auto_record_hook.observe_state`) announces an ending.
+#
+# A registry rather than an import, because the rules belong to the layers
+# above: the print watchdog is the server's, and an adapter must not import
+# the server to start a print.
+
+#: Guards registration only.  Firing reads whichever tuple is current, and a
+#: registration replaces the tuple rather than mutating it.
+_PRINT_HOOKS_LOCK = threading.Lock()
+_PRINT_STARTED_HOOKS: tuple[Callable[[Any, str], object], ...] = ()
+_PRINT_ENDED_HOOKS: tuple[Callable[[str], object], ...] = ()
+
+
+def register_print_started_hook(hook: Callable[[Any, str], object]) -> None:
+    """Call ``hook(adapter, file_name)`` after every print Kiln starts.
+
+    Fired by :meth:`PrinterAdapter.start_print` under exactly the conditions
+    that stamp a job start: the adapter reported success and the file is not
+    a resume 3MF continuing a print already running.  A start the pre-print
+    gate blocked, or the printer refused, calls nothing.
+
+    Registering the same callable twice registers it once.  A hook that
+    raises is logged and skipped; it never fails, or undoes, the print.
+    """
+    global _PRINT_STARTED_HOOKS  # noqa: PLW0603
+    with _PRINT_HOOKS_LOCK:
+        if hook not in _PRINT_STARTED_HOOKS:
+            _PRINT_STARTED_HOOKS = (*_PRINT_STARTED_HOOKS, hook)
+
+
+def register_print_ended_hook(hook: Callable[[str], object]) -> None:
+    """Call ``hook(printer_name)`` when a print is seen ending on that printer.
+
+    Fired on the active-to-terminal edge of the previous-state table that
+    both status doors write -- the adapter-generic ``get_state`` wrap and a
+    push adapter's own callback -- so an ending is announced once, by
+    whichever door saw it first, whether or not the job carried a name.
+    *printer_name* is :func:`outcome_printer_name`.
+
+    Not fired from :func:`_feed_outcome_lifecycle`'s own edge: a connected
+    Bambu's MQTT callback writes the same table as each frame lands, so the
+    polled wrap behind it usually finds no edge at all, and an ending
+    announced there would almost never arrive for that printer.
+
+    Same contract as :func:`register_print_started_hook`: idempotent, and a
+    raising hook never reaches the read that saw the ending.
+    """
+    global _PRINT_ENDED_HOOKS  # noqa: PLW0603
+    with _PRINT_HOOKS_LOCK:
+        if hook not in _PRINT_ENDED_HOOKS:
+            _PRINT_ENDED_HOOKS = (*_PRINT_ENDED_HOOKS, hook)
+
+
+def _fire_print_started_hooks(adapter: Any, file_name: str) -> None:
+    for hook in _PRINT_STARTED_HOOKS:
+        try:
+            hook(adapter, file_name)
+        except Exception:  # noqa: BLE001 — a hook never fails the print it follows
+            logger.warning("print-started hook %r failed", hook, exc_info=True)
+
+
+def fire_print_ended_hooks(printer_name: str) -> None:
+    """Announce that the print on *printer_name* was seen ending.
+
+    Called on the edge by :func:`kiln.auto_record_hook.observe_state`; not
+    something a door calls for itself.  An empty name announces nothing, so
+    no hook is ever left to guess which printer was meant.
+    """
+    if not printer_name:
+        return
+    for hook in _PRINT_ENDED_HOOKS:
+        try:
+            hook(printer_name)
+        except Exception:  # noqa: BLE001 — never breaks the status read that saw it
+            logger.warning("print-ended hook %r failed", hook, exc_info=True)
 
 
 def delegate_outcome_lifecycle(backend: PrinterAdapter) -> None:
