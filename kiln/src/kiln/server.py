@@ -6426,6 +6426,7 @@ def start_print(
             "vibration_cali": vibration_cali,
             "layer_inspect": layer_inspect,
             "nozzle_clog_detect": nozzle_clog_detect,
+            "restore_nozzle_detection": restore_nozzle_detection,
             "bed_type": bed_type,
             "plate_number": plate_number,
             "resume_from_paused": resume_from_paused,
