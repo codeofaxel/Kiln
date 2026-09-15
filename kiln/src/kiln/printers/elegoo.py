@@ -1585,6 +1585,42 @@ class ElegooAdapter(PrinterAdapter):
     _last_video_refusal: str | None = None
     _last_video_url: str | None = None
 
+    # The printer names its own camera address when asked (SDCP command 386),
+    # so there is one address to check: the one it gives.
+    camera_check_ids: ClassVar[tuple[str, ...]] = ("elegoo_video_url",)
+
+    def camera_probes(self) -> list[Any]:
+        """The address this printer gives for its own camera, to check.
+
+        Asks the printer through this adapter's own :meth:`get_stream_url`,
+        past the wrap that answers with a camera the user registered: the
+        check is about the printer's camera, and a user camera does not
+        change what there is to check.  ``[]`` when the printer gives no
+        address.
+        """
+        from kiln.camera_check import CameraProbe
+
+        ask = type(self).get_stream_url
+        while getattr(ask, "_kiln_camera_wrapped", False) and hasattr(ask, "__wrapped__"):
+            ask = ask.__wrapped__
+        url = ask(self)
+        if not url:
+            return []
+        return [
+            CameraProbe(
+                "elegoo_video_url",
+                url,
+                "The address this printer gave when asked to enable video: command 386 in "
+                "Elegoo's published SDCP V3.0.0 protocol returns it as VideoUrl, and Elegoo's "
+                "Centauri Carbon web interface opens the same address. Source: the maker.",
+                note=(
+                    "The printer allows a limited number of simultaneous video connections "
+                    "(the MaximumVideoStreamAllowed attribute in its protocol), so this check "
+                    "can take a connection an open viewer needs, or be refused while one is open."
+                ),
+            )
+        ]
+
     def stream_capability(self) -> StreamCapability:
         """Whether Kiln's relay can carry this printer's video, from what the
         printer has said about itself.

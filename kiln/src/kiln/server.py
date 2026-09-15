@@ -11881,9 +11881,24 @@ def webcam_stream(
     loopback, so on the hosted server it says so instead of starting.
     Snapshots (``printer_snapshot``, ``monitor_print``) are unchanged.
 
+    A refused start on a printer type that has a camera check carries
+    ``check_available: true``; ``action="check"`` then looks at what that
+    printer's likely camera addresses actually serve.
+
     Args:
         printer_name: Target printer.  Omit for the default printer.
-        action: One of ``"start"``, ``"stop"``, or ``"status"``.
+        action: One of ``"start"``, ``"stop"``, ``"status"``, or
+            ``"check"``.  ``"check"`` runs only when asked: it tries each
+            address this printer type's camera is known to answer on, on
+            the printer's own host, with one GET each (a printer that gives
+            out its camera address on request is asked for it first, as a
+            start does), and replies with
+            ``checks`` (what each served — a live stream, a still, a WebRTC
+            page, a web page, an error, or nothing — and where the address
+            comes from), a ``summary`` and a ``next_step``.  It registers
+            nothing; when it finds a live stream, ``next_step`` says how to
+            register that address as the printer's camera.  Local-only,
+            like ``"start"``.
         port: Local port for the stream server (default 8081).
     """
     try:
@@ -11893,6 +11908,34 @@ def webcam_stream(
         if action == "stop":
             info = _get_stream_proxy().stop()
             return {"success": True, "stream": info.to_dict()}
+
+        if action == "check":
+            from kiln.runtime_env import is_hosted_multitenant
+            from kiln.streaming import LOCAL_ONLY_MESSAGE, has_camera_check
+
+            # Refused before any printer is resolved: the check reads the
+            # printer's camera over the local network, which the hosted
+            # server cannot reach.
+            if is_hosted_multitenant():
+                return _error_dict(LOCAL_ONLY_MESSAGE, code="LOCAL_ONLY")
+
+            from kiln.camera_check import (
+                NO_CAMERA_CHECK_MESSAGE,
+                run_camera_checks,
+                summarize_camera_checks,
+            )
+
+            adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
+            if not has_camera_check(adapter):
+                return _error_dict(NO_CAMERA_CHECK_MESSAGE, code="NO_CAMERA_CHECK")
+            results = run_camera_checks(adapter, printer_name=printer_name)
+            summary, next_step = summarize_camera_checks(results, adapter, door="tool")
+            return {
+                "success": True,
+                "checks": [result.to_dict() for result in results],
+                "summary": summary,
+                "next_step": next_step,
+            }
 
         if action == "start":
             from kiln.runtime_env import is_hosted_multitenant
@@ -11906,12 +11949,14 @@ def webcam_stream(
             else:
                 adapter = _get_adapter()
 
-            plan = plan_relay(adapter)
+            plan = plan_relay(adapter, printer_name=printer_name)
             route = _video_route_block_for(printer_name)
             if plan.source is None:
                 extra: dict[str, Any] = {"capability": plan.capability.to_dict()}
                 if route:
                     extra["video_route"] = route
+                if getattr(plan, "check_available", False):
+                    extra["check_available"] = True
                 return _error_dict(plan.message or "", code=plan.code or "NO_STREAM", extra=extra)
 
             info = _get_stream_proxy().start(
@@ -11929,7 +11974,7 @@ def webcam_stream(
             return reply
 
         return _error_dict(
-            f"Unknown action {action!r}. Use 'start', 'stop', or 'status'.",
+            f"Unknown action {action!r}. Use 'start', 'stop', 'status', or 'check'.",
             code="BAD_REQUEST",
         )
     except PrinterNotFoundError:

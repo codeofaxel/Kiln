@@ -914,6 +914,55 @@ class CrealityAdapter(PrinterAdapter):
     def get_stream_url(self) -> str | None:
         return self._backend.get_stream_url()
 
+    # Where this printer type's camera is known to answer, for a check the
+    # user asks for (kiln.camera_check).
+    camera_check_ids: ClassVar[tuple[str, ...]] = (
+        "creality_fluidd_webcam",
+        "creality_mjpeg_8080",
+        "creality_webrtc_8000",
+    )
+
+    def camera_probes(self) -> list[Any]:
+        """The camera addresses to check, on this printer's own host.
+
+        The host is the one Moonraker was found on, without Moonraker's port:
+        each camera service listens on its own.  Built from what the adapter
+        already holds, so nothing is contacted here.
+        """
+        from kiln.camera_check import CameraProbe
+
+        host = urlparse(self.moonraker_url).hostname
+        if not host:
+            return []
+        if ":" in host:
+            host = f"[{host}]"  # an IPv6 literal is bracketed inside a URL
+        return [
+            CameraProbe(
+                "creality_fluidd_webcam",
+                f"http://{host}:4408/webcam/?action=stream",
+                "Creality's own Fluidd web interface bundle for the Ender-3 V3 KE (nginx.conf in "
+                "its CrealityOfficial Ender-3_V3_KE_Annex repository) serves the camera on port "
+                "4408 at /webcam/, passing it to the camera streamer on port 8080. Source: the "
+                "maker, for that model.",
+            ),
+            CameraProbe(
+                "creality_mjpeg_8080",
+                f"http://{host}:8080/?action=stream",
+                "A community-maintained integration for Creality K1-family printers "
+                "(ha_creality_ws) reads the camera stream on port 8080 at /?action=stream. "
+                "Source: a community project, not Creality's documentation.",
+            ),
+            CameraProbe(
+                "creality_webrtc_8000",
+                f"http://{host}:8000/call/webrtc_local",
+                "The same community integration (ha_creality_ws) and the go2rtc project reach "
+                "the WebRTC camera on Creality printers that have one on port 8000 at "
+                "/call/webrtc_local, by sending it a connection offer; this check only reads "
+                "the address and never sends one. Source: community projects, not Creality's "
+                "documentation.",
+            ),
+        ]
+
     def get_filament_status(self) -> dict[str, Any] | None:
         return self._backend.get_filament_status()
 

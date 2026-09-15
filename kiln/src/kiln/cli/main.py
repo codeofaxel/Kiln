@@ -7415,10 +7415,16 @@ def level(
 @cli.command("stream")
 @click.option("--port", default=8081, type=int, help="Local port for stream server.")
 @click.option("--stop", "do_stop", is_flag=True, help="Stop active stream.")
+@click.option(
+    "--check",
+    "do_check",
+    is_flag=True,
+    help="Check what this printer's likely camera addresses serve. Reads only; registers nothing.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def stream(ctx: click.Context, port: int, do_stop: bool, json_mode: bool) -> None:
-    """Start or stop the MJPEG webcam streaming proxy."""
+def stream(ctx: click.Context, port: int, do_stop: bool, do_check: bool, json_mode: bool) -> None:
+    """Start or stop the MJPEG webcam streaming proxy, or check the printer's camera."""
     import json as _json
 
     from kiln.streaming import MJPEGProxy
@@ -7426,6 +7432,44 @@ def stream(ctx: click.Context, port: int, do_stop: bool, json_mode: bool) -> Non
     proxy = MJPEGProxy()
 
     try:
+        if do_check:
+            if do_stop:
+                click.echo(format_error("Use --check or --stop, not both.", code="BAD_REQUEST", json_mode=json_mode))
+                sys.exit(1)
+
+            from kiln.camera_check import (
+                NO_CAMERA_CHECK_MESSAGE,
+                run_camera_checks,
+                summarize_camera_checks,
+            )
+            from kiln.runtime_env import is_hosted_multitenant
+            from kiln.streaming import LOCAL_ONLY_MESSAGE, has_camera_check
+
+            # Refused before the printer is resolved, as the tool door does.
+            if is_hosted_multitenant():
+                click.echo(format_error(LOCAL_ONLY_MESSAGE, code="LOCAL_ONLY", json_mode=json_mode))
+                sys.exit(1)
+
+            adapter = _get_adapter_from_ctx(ctx)
+            if not has_camera_check(adapter):
+                click.echo(format_error(NO_CAMERA_CHECK_MESSAGE, code="NO_CAMERA_CHECK", json_mode=json_mode))
+                sys.exit(1)
+            results = run_camera_checks(adapter, printer_name=ctx.obj.get("printer"))
+            summary, next_step = summarize_camera_checks(results, adapter, door="cli")
+            checks = [result.to_dict() for result in results]
+            if json_mode:
+                data = {"checks": checks, "summary": summary, "next_step": next_step}
+                click.echo(_json.dumps({"status": "success", "data": data}, indent=2))
+            else:
+                for check in checks:
+                    click.echo(f"{check['probe_id']}: {check['result']}  {check['url']}")
+                    click.echo(f"  {check['detail']}")
+                    click.echo(f"  Where this address comes from: {check['basis']}")
+                click.echo(summary)
+                if next_step:
+                    click.echo(f"Next step: {next_step}")
+            return
+
         if do_stop:
             info = proxy.stop()
             if json_mode:
@@ -7442,7 +7486,7 @@ def stream(ctx: click.Context, port: int, do_stop: bool, json_mode: bool) -> Non
             sys.exit(1)
 
         adapter = _get_adapter_from_ctx(ctx)
-        plan = plan_relay(adapter)
+        plan = plan_relay(adapter, printer_name=ctx.obj.get("printer"))
         if plan.source is None:
             click.echo(
                 format_error(

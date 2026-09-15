@@ -412,6 +412,18 @@ class RelayPlan:
     check_available: bool = False
 
 
+def has_camera_check(adapter: Any) -> bool:
+    """Whether *adapter*'s printer type declares a camera check a user can run.
+
+    Read from :attr:`~kiln.printers.base.PrinterAdapter.camera_check_ids`
+    without contacting the printer, so a refused start can offer the check
+    and a check door can refuse a printer type that has none.  Only a real
+    tuple of ids counts, so a mocked adapter offers no check.
+    """
+    ids = getattr(adapter, "camera_check_ids", ())
+    return isinstance(ids, tuple) and len(ids) > 0
+
+
 def plan_relay(adapter: Any, printer_name: str | None = None) -> RelayPlan:
     """Decide, for *adapter*, whether the relay can start and on what.
 
@@ -428,8 +440,7 @@ def plan_relay(adapter: Any, printer_name: str | None = None) -> RelayPlan:
     """
     capability = _capability_of(adapter)
     source_token, address_event = _video_source(adapter)
-    check_ids = getattr(adapter, "camera_check_ids", ())
-    check_available = isinstance(check_ids, tuple) and len(check_ids) > 0
+    check_available = has_camera_check(adapter)
 
     def _refuse(code: str, message: str, channel: str, event: str) -> RelayPlan:
         _record_plan_refusal(printer_name, channel, source_token, event)

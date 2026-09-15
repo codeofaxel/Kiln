@@ -3897,6 +3897,25 @@ class PrinterAdapter(ABC):
         url = self.get_stream_url()
         return HttpMjpegSource(url) if url else None
 
+    # -- camera check (optional) -----------------------------------------
+
+    #: Ids of the addresses :meth:`camera_probes` checks for this printer
+    #: type.  Declared on the class and read without contacting the printer,
+    #: so a refused start can say a check exists.  Empty means no check.
+    camera_check_ids: ClassVar[tuple[str, ...]] = ()
+
+    def camera_probes(self) -> list[Any]:
+        """The addresses this printer's own camera may answer on, to check.
+
+        Each is a :class:`kiln.camera_check.CameraProbe` on the printer's own
+        host, carrying the basis for trying it, with an id from
+        :attr:`camera_check_ids`.  Called only for a check the user asked
+        for, and it may contact the printer.  A camera the user registered
+        does not change the answer: the check is about the printer's own
+        camera.  The default is no addresses.
+        """
+        return []
+
     # -- a camera the user supplied ------------------------------------
     #
     # Class-level default so no adapter's __init__ has to know about it.

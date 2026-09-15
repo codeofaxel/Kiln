@@ -324,8 +324,8 @@ Material tracking commands. `set` records loaded material on a printer. `show` d
 #### `kiln level [--status] [--trigger] [--set-prints N] [--set-hours N] [--enable/--disable]`
 Bed leveling management. Check status, manually trigger leveling, or configure auto-leveling policy.
 
-#### `kiln stream [--port 8081] [--stop]`
-Start or stop the MJPEG webcam streaming proxy. Proxies the upstream printer webcam stream to a local HTTP endpoint.
+#### `kiln stream [--port 8081] [--stop] [--check]`
+Start or stop live video from the printer's camera, served as MJPEG at a local address on this computer. `--check` looks at what the printer's likely camera addresses serve (a live stream, a still image, a WebRTC page, a web page, an error, or nothing), one read each, and says how to save a live stream it finds; it saves nothing itself. Both run only on the machine next to the printer.
 
 #### `kiln events tail|summary`
 Read-only access to the local event log.
