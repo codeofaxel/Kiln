@@ -37,6 +37,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln reads your Bambu printer's nozzle clumping detection setting.**
+  Printer status and the pre-flight say whether it's on, off or automatic,
+  and warn that the probe can leave marks unless you slice with a purge
+  tower. Tested on the A1.
+
 - **Taking your printer apart? Ask Kiln first.** It tells you what to unplug,
   how many screws to expect and which key fits. Kiln Pro adds which screw goes
   in which hole.
@@ -176,6 +181,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refuse honestly.
 
 ### Fixed
+
+- **Skipping the clumping probe for one print no longer turns it off for
+  good.** Kiln puts the setting back when that print ends, as long as Kiln
+  is still running.
+
+- **A Bambu microSD card error is now named as one.** Kiln used to report it
+  as an AMS filament sensor fault.
 
 - **No more phantom chamber temperature on open-frame Bambu printers.** Some
   Bambus have no chamber sensor; Kiln now says so instead of relaying the
