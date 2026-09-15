@@ -854,22 +854,125 @@ class TestDiscovery:
 
 
 class TestStreamUrl:
-    """Tests for get_stream_url."""
+    """Tests for get_stream_url and stream_capability.
 
-    def test_fallback_stream_url(self, adapter_with_ws: ElegooAdapter) -> None:
-        with mock.patch.object(adapter_with_ws, "_send_command", return_value=None):
-            url = adapter_with_ws.get_stream_url()
-        assert url is not None
-        assert HOST in url
+    Elegoo's published protocol (SDCP V3.0.0, command 386) answers an
+    enable request with ``{"Ack": <code>, "VideoUrl": "..."}``; Elegoo's own
+    Centauri Carbon web interface reads the same ``VideoUrl`` and opens
+    ``"http://" + VideoUrl`` unless the printer advertises ``VIDEO_WEBRTC``
+    in its attribute capabilities, in which case it negotiates a WebRTC
+    peer connection instead.  Nothing Elegoo publishes sends ``StreamUrl``,
+    and no Elegoo page names ``:8080/?action=stream`` — that address was a
+    guess, and a guess is never an answer.
+    """
 
-    def test_stream_url_from_response(self, adapter_with_ws: ElegooAdapter) -> None:
+    @staticmethod
+    def _reply(**data):
+        return {"Cmd": 386, "Data": data, "RequestID": "r1"}
+
+    def test_a_bare_video_url_is_opened_over_http_as_elegoos_own_ui_does(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
         with mock.patch.object(
-            adapter_with_ws,
-            "_send_command",
-            return_value={"Data": {"StreamUrl": "http://192.168.1.50:8080/stream"}},
+            adapter_with_ws, "_send_command",
+            return_value=self._reply(Ack=0, VideoUrl="192.168.1.50:3031/video"),
         ):
             url = adapter_with_ws.get_stream_url()
-        assert url == "http://192.168.1.50:8080/stream"
+        assert url == "http://192.168.1.50:3031/video"
+
+    def test_a_video_url_with_its_own_scheme_is_kept(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
+        with mock.patch.object(
+            adapter_with_ws, "_send_command",
+            return_value=self._reply(Ack=0, VideoUrl="rtsp://192.168.1.50:554/video"),
+        ):
+            url = adapter_with_ws.get_stream_url()
+        assert url == "rtsp://192.168.1.50:554/video"
+
+    def test_no_reply_means_no_url_never_a_guessed_one(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
+        with mock.patch.object(adapter_with_ws, "_send_command", return_value=None):
+            assert adapter_with_ws.get_stream_url() is None
+
+    def test_the_old_key_is_not_read(self, adapter_with_ws: ElegooAdapter) -> None:
+        """Nothing Elegoo publishes sends StreamUrl; reading it would keep a
+        guess alive under a different name."""
+        with mock.patch.object(
+            adapter_with_ws, "_send_command",
+            return_value={"Data": {"StreamUrl": "http://192.168.1.50:8080/stream"}},
+        ):
+            assert adapter_with_ws.get_stream_url() is None
+
+    @pytest.mark.parametrize(
+        ("ack", "words"),
+        [(1, "simultaneous"), (2, "no camera"), (3, "unknown error")],
+    )
+    def test_a_refusal_code_is_named_in_the_printers_own_terms(
+        self, adapter_with_ws: ElegooAdapter, ack: int, words: str
+    ) -> None:
+        with mock.patch.object(
+            adapter_with_ws, "_send_command", return_value=self._reply(Ack=ack)
+        ):
+            assert adapter_with_ws.get_stream_url() is None
+        cap = adapter_with_ws.stream_capability()
+        assert cap.available is False
+        assert words in (cap.reason or "").lower()
+
+    def test_a_webrtc_printer_is_not_relayable_and_says_so(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
+        adapter_with_ws._last_status["Capabilities"] = [
+            "FILE_TRANSFER", "PRINT_CONTROL", "VIDEO_STREAM", "VIDEO_WEBRTC",
+        ]
+        cap = adapter_with_ws.stream_capability()
+        assert cap.available is False
+        assert cap.channel == "webrtc"
+        assert "webrtc" in (cap.reason or "").lower()
+        assert "web" in (cap.reason or "").lower()
+
+    def test_a_printer_without_video_stream_capability_says_so(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
+        adapter_with_ws._last_status["Capabilities"] = ["FILE_TRANSFER", "PRINT_CONTROL"]
+        cap = adapter_with_ws.stream_capability()
+        assert cap.available is False
+        assert cap.channel is None
+        assert "video" in (cap.reason or "").lower()
+
+    def test_a_video_stream_printer_is_relayable_over_http(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
+        adapter_with_ws._last_status["Capabilities"] = [
+            "FILE_TRANSFER", "PRINT_CONTROL", "VIDEO_STREAM",
+        ]
+        cap = adapter_with_ws.stream_capability()
+        assert cap.available is True
+        assert cap.channel == "http_mjpeg"
+
+    def test_an_rtsp_answer_is_reported_as_rtsp(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
+        adapter_with_ws._last_status["Capabilities"] = ["VIDEO_STREAM"]
+        with mock.patch.object(
+            adapter_with_ws, "_send_command",
+            return_value=self._reply(Ack=0, VideoUrl="rtsp://192.168.1.50:554/video"),
+        ):
+            adapter_with_ws.get_stream_url()
+        cap = adapter_with_ws.stream_capability()
+        assert cap.available is False
+        assert cap.channel == "rtsp"
+
+    def test_unknown_capabilities_are_tried_not_refused(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
+        """No attributes frame yet: the relay tries the printer rather than
+        refusing on an absence."""
+        adapter_with_ws._last_status.pop("Capabilities", None)
+        cap = adapter_with_ws.stream_capability()
+        assert cap.available is True
+        assert cap.channel == "http_mjpeg"
 
 
 # ---------------------------------------------------------------------------

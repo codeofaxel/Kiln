@@ -56,6 +56,7 @@ from kiln.printers.base import (
     PrinterState,
     PrinterStatus,
     PrintResult,
+    StreamCapability,
     TelemetryCadence,
     UploadResult,
     canonical_model_key,
@@ -1515,27 +1516,118 @@ class ElegooAdapter(PrinterAdapter):
     # Webcam (optional)
     # ------------------------------------------------------------------
 
-    def get_stream_url(self) -> str | None:
-        """Return the camera stream URL if available.
+    # The printer's own answer to "enable video" (SDCP command 386), as
+    # its published protocol defines it: ``Ack`` 0 succeeds and carries
+    # ``VideoUrl``; the other codes are the printer's own refusals.
+    _VIDEO_ACK_REASONS: ClassVar[dict[int, str]] = {
+        1: (
+            "The printer refused another video stream: it has reached its "
+            "limit of simultaneous streaming connections. Close its web "
+            "page or another viewer and try again."
+        ),
+        2: "The printer reports no camera fitted.",
+        3: "The printer reported an unknown error when asked to enable video.",
+    }
 
-        SDCP printers may expose an MJPEG or RTSP camera stream.
+    def _read_capabilities(self) -> list[str] | None:
+        """The printer's advertised sub-protocols, or ``None`` when unknown.
+
+        Read off the cached attributes frame only — never a fresh command,
+        so a capability question stays free of side effects.  Elegoo's
+        protocol lists ``VIDEO_STREAM`` here for a printer that can stream;
+        Elegoo's Centauri Carbon firmware adds ``VIDEO_WEBRTC`` for one
+        whose stream is a WebRTC peer connection.
         """
-        # Request camera stream enable.
-        try:
-            resp = self._send_command(
-                _CMD_CAMERA_STREAM,
-                {"Enable": 1},
-                timeout=5.0,
-            )
-            if resp and isinstance(resp, dict):
-                url = resp.get("Data", {}).get("StreamUrl", "")
-                if url:
-                    return str(url)
-        except PrinterError:
-            pass
+        with self._state_lock:
+            caps = self._last_status.get("Capabilities")
+        if isinstance(caps, list):
+            return [str(c) for c in caps]
+        return None
 
-        # Fallback: common Elegoo camera URL pattern.
-        return f"http://{self._host}:8080/?action=stream"
+    def get_stream_url(self) -> str | None:
+        """Ask the printer to enable its video stream and return its address.
+
+        SDCP command 386 answers ``{"Ack": code, "VideoUrl": "..."}``; the
+        address is what Elegoo's own web interface opens, so it is returned
+        as the printer gave it, with ``http://`` prefixed when it carries no
+        scheme (Elegoo's interface does exactly that).  ``None`` when the
+        printer refused, answered without an address, or did not answer —
+        the refusal is kept for :meth:`stream_capability`, and no address
+        is ever guessed.
+        """
+        self._last_video_refusal = None
+        try:
+            resp = self._send_command(_CMD_CAMERA_STREAM, {"Enable": 1}, timeout=5.0)
+        except PrinterError as exc:
+            self._last_video_refusal = f"The printer did not answer the video request: {exc}"
+            return None
+        data = resp.get("Data") if isinstance(resp, dict) else None
+        if not isinstance(data, dict):
+            self._last_video_refusal = "The printer did not answer the video request."
+            return None
+        ack = data.get("Ack")
+        if isinstance(ack, int) and ack != 0:
+            self._last_video_refusal = self._VIDEO_ACK_REASONS.get(
+                ack, f"The printer refused to enable video (code {ack})."
+            )
+            return None
+        url = str(data.get("VideoUrl") or "").strip()
+        if not url:
+            self._last_video_refusal = (
+                "The printer enabled video but reported no stream address."
+            )
+            return None
+        if "://" not in url:
+            url = f"http://{url}"
+        self._last_video_url = url
+        return url
+
+    _last_video_refusal: str | None = None
+    _last_video_url: str | None = None
+
+    def stream_capability(self) -> StreamCapability:
+        """Whether Kiln's relay can carry this printer's video, from what the
+        printer has said about itself.
+
+        A camera the user registered is answered by the base contract.
+        Otherwise: a printer advertising ``VIDEO_WEBRTC`` streams over a
+        WebRTC peer connection, which the relay does not carry; one whose
+        capabilities omit ``VIDEO_STREAM`` has no stream to offer; a
+        refusal from the last enable request is repeated in the printer's
+        own terms; an address it last gave over RTSP is not relayable
+        either.  With no attributes frame yet the relay is allowed to try —
+        an absence is never read as a refusal.
+        """
+        if self._external_camera is not None:
+            return super().stream_capability()
+        caps = self._read_capabilities()
+        if caps is not None and "VIDEO_WEBRTC" in caps:
+            return StreamCapability(
+                False,
+                "webrtc",
+                "This printer streams its camera over WebRTC, which Kiln's "
+                "local relay does not carry. Watch it on the printer's own "
+                "web page for now.",
+            )
+        if caps is not None and "VIDEO_STREAM" not in caps:
+            return StreamCapability(
+                False, None, "This printer does not advertise a video stream."
+            )
+        if self._last_video_refusal:
+            return StreamCapability(False, None, self._last_video_refusal)
+        last = self._last_video_url or ""
+        if last.lower().startswith(("rtsp://", "rtsps://")):
+            return StreamCapability(
+                False,
+                "rtsp",
+                "This printer's stream is RTSP, which Kiln's local relay does "
+                "not carry.",
+            )
+        return StreamCapability(
+            True,
+            "http_mjpeg",
+            requires=("a camera fitted to the printer",),
+        )
 
     # ------------------------------------------------------------------
     # Discovery
