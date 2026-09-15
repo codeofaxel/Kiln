@@ -213,6 +213,7 @@ def file_facts(file_path: str) -> dict[str, Any] | None:
     coordinates, so a door that knows where a probe lands can say whether
     the part sits there.  A 3MF is read through the G-code it carries.
     """
+    import contextlib
     import json
     import os
     import tempfile
@@ -231,10 +232,9 @@ def file_facts(file_path: str) -> dict[str, Any] | None:
                 seq = False
                 for n in names:
                     if n.startswith("Metadata/plate_") and n.endswith(".json"):
-                        try:
+                        # One bad plate file is not the answer.
+                        with contextlib.suppress(Exception):
                             seq = seq or bool(json.loads(zf.read(n)).get("is_seq_print"))
-                        except Exception:  # noqa: BLE001 -- one bad plate file is not the answer
-                            pass
             facts = _scan_gcode(text)
             if seq and facts["print_mode"] == "normal":
                 facts["print_mode"] = "by_object"
