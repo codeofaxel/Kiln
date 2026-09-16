@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-16T05:14:52.190812+00:00",
+  "generated": "2026-09-16T09:06:23.026057+00:00",
   "tool_count": 421,
   "categories": {
     "product_generators": {
@@ -13804,7 +13804,7 @@
     },
     {
       "name": "check_assembly_stands",
-      "description": "Judge whether an assembled kit STANDS \u2014 from geometry alone, with every assumption said out loud.",
+      "description": "Judge how an object LIVES and whether it STANDS \u2014 from geometry and the words, with every assumption said out loud.",
       "tier": "free",
       "access": "free",
       "category": "print_intelligence",
@@ -13865,6 +13865,46 @@
             ],
             "default": null,
             "title": "Materials"
+          },
+          "pose": {
+            "default": "auto",
+            "title": "Pose",
+            "type": "string"
+          },
+          "intent": {
+            "default": "",
+            "title": "Intent",
+            "type": "string"
+          },
+          "product_type": {
+            "default": "",
+            "title": "Product Type",
+            "type": "string"
+          },
+          "template_id": {
+            "default": "",
+            "title": "Template Id",
+            "type": "string"
+          },
+          "lives_as": {
+            "default": "",
+            "title": "Lives As",
+            "type": "string"
+          },
+          "part_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Names"
           }
         },
         "required": [
