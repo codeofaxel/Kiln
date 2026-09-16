@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-16T19:02:18.907520+00:00",
+  "generated": "2026-09-16T19:49:46.615970+00:00",
   "tool_count": 421,
   "categories": {
     "product_generators": {
@@ -16033,7 +16033,7 @@
     },
     {
       "name": "separate_overlapping_parts",
-      "description": "Separate parts that share material, so they print as a kit.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Separate parts that share material, so they print as a kit. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
