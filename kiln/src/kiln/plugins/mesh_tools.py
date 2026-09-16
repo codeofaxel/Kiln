@@ -437,7 +437,8 @@ class _MeshToolsPlugin:
             """
             from kiln.server import _check_auth, _error_dict
 
-            _check_auth("design:analyze")
+            if err := _check_auth("design:analyze"):
+                return err
             try:
                 from kiln.design_reasoning import cross_section_at_plane
 
@@ -1653,7 +1654,8 @@ class _MeshToolsPlugin:
             """
             from kiln.server import _check_auth, _error_dict
 
-            _check_auth("design:analyze")
+            if err := _check_auth("design:analyze"):
+                return err
             try:
                 from kiln.design_reasoning import estimate_weight
 

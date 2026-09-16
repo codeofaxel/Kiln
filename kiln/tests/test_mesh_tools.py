@@ -1403,3 +1403,86 @@ class TestAnalyzeNonManifoldEdgesAttribution:
         assert result["success"] is False
         assert result["error"]["code"] == "UNREADABLE_INPUT"
         assert result["error"]["retryable"] is False
+
+
+# ---------------------------------------------------------------------------
+# TestEstimateMeshWeight
+# ---------------------------------------------------------------------------
+
+
+class TestEstimateMeshWeight:
+    """Tests for the estimate_mesh_weight tool."""
+
+    def test_auth_failure_returns_denial_and_computes_nothing(self, mesh_tools) -> None:
+        """A denied design:analyze scope must stop the tool, not just be asked.
+
+        The check used to be called and its answer thrown away, so a denied
+        request still got a weight back.  Assert both halves: the denial is
+        what comes out, and the estimator is never reached.
+        """
+        with (
+            patch("kiln.server._check_auth", return_value=_auth_error()),
+            patch("kiln.design_reasoning.estimate_weight") as mock_estimate,
+        ):
+            result = mesh_tools["estimate_mesh_weight"](file_path="/tmp/model.stl")
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "AUTH_ERROR"
+        assert "weight_grams" not in result
+        mock_estimate.assert_not_called()
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.design_reasoning.estimate_weight")
+    def test_happy_path(self, mock_estimate, _auth, mesh_tools) -> None:
+        mock_estimate.return_value.to_dict.return_value = {"weight_grams": 42.0}
+        result = mesh_tools["estimate_mesh_weight"](file_path="/tmp/model.stl")
+
+        assert result["success"] is True
+        assert result["weight_grams"] == 42.0
+        mock_estimate.assert_called_once_with(
+            "/tmp/model.stl",
+            material="pla",
+            infill_percent=20.0,
+            wall_thickness_mm=1.2,
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestCrossSectionView
+# ---------------------------------------------------------------------------
+
+
+class TestCrossSectionView:
+    """Tests for the cross_section_view tool."""
+
+    def test_auth_failure_returns_denial_and_cuts_nothing(self, mesh_tools) -> None:
+        """Same defect as estimate_mesh_weight: the denial must be returned.
+
+        The check used to be called and its answer thrown away, so a denied
+        request still got a section back.  Assert both halves: the denial is
+        what comes out, and the slicer is never reached.
+        """
+        with (
+            patch("kiln.server._check_auth", return_value=_auth_error()),
+            patch("kiln.design_reasoning.cross_section_at_plane") as mock_section,
+        ):
+            result = mesh_tools["cross_section_view"](file_path="/tmp/model.stl")
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "AUTH_ERROR"
+        assert "cross_section_area_mm2" not in result
+        mock_section.assert_not_called()
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.design_reasoning.cross_section_at_plane")
+    def test_happy_path(self, mock_section, _auth, mesh_tools) -> None:
+        mock_section.return_value.to_dict.return_value = {
+            "cross_section_area_mm2": 120.0,
+        }
+        result = mesh_tools["cross_section_view"](file_path="/tmp/model.stl")
+
+        assert result["success"] is True
+        assert result["cross_section_area_mm2"] == 120.0
+        mock_section.assert_called_once_with(
+            "/tmp/model.stl", plane="z", offset_ratio=0.5,
+        )
