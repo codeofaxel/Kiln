@@ -325,7 +325,11 @@ class TestFleetStopCommandsEveryPrinterAtOnce:
         assert max(p.called_at for p in printers.values()) < min(
             p.returned_at for p in printers.values()
         )
-        assert took < self.CONFIRM_SECONDS * len(printers) / 2
+        # Sequential stops would cost one window EACH, so this is the floor
+        # that catches them with room to spare.  The ordering assertion above
+        # is the real proof of parallelism; a tighter stopwatch here only
+        # races the machine the test runs on.
+        assert took < self.CONFIRM_SECONDS * len(printers)
 
     def test_one_printer_whose_stop_blows_up_never_sinks_the_rest(self):
         class _RaisesEverywhere(_FakeAdapter):

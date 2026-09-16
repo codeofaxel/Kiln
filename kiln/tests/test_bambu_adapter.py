@@ -1047,6 +1047,20 @@ def _printer_answers_status_request(adapter: BambuAdapter, **frame: Any) -> None
     adapter._mqtt_client.publish.side_effect = _publish
 
 
+def _naps_taken(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Record every wait a call makes, and make each one free.
+
+    A read-back that answers on its FIRST look never waits; one that sits out
+    its window waits at least once.  Recording the waits says which happened
+    without timing the machine the test runs on -- a shared runner spent 2.7s
+    of one such call on work that has nothing to do with the window
+    (2026-09-15, Python 3.13), failing a 2.5s bar that passed on a re-run.
+    """
+    naps: list[float] = []
+    monkeypatch.setattr(time, "sleep", naps.append)
+    return naps
+
+
 class TestBambuEmergencyStop:
     """The stop the firmware obeys goes first, and success is what it reported back."""
 
@@ -1137,32 +1151,30 @@ class TestBambuEmergencyStop:
         assert f"Not sent: {refused}." in result.message
 
     def test_confirmation_returns_as_soon_as_the_printer_reports(
-        self, adapter_with_mqtt: BambuAdapter
+        self, adapter_with_mqtt: BambuAdapter, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         adapter_with_mqtt._confirm_window_s = None  # the real window, not the fixture's zero
         _printer_answers_stop(adapter_with_mqtt, gcode_state="FAILED")
+        naps = _naps_taken(monkeypatch)
 
-        started = time.monotonic()
         result = adapter_with_mqtt.emergency_stop()
-        took = time.monotonic() - started
 
         assert result.message.startswith("Emergency stop confirmed")
-        assert took < BambuAdapter._ESTOP_CONFIRM_TIMEOUT_S / 2
+        assert naps == []
 
     def test_a_stop_that_never_left_the_process_says_so_without_waiting(
-        self, adapter_with_mqtt: BambuAdapter
+        self, adapter_with_mqtt: BambuAdapter, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         adapter_with_mqtt._confirm_window_s = None  # nothing to wait for must cost nothing
         adapter_with_mqtt._mqtt_client.publish.side_effect = OSError("network unreachable")
+        naps = _naps_taken(monkeypatch)
 
-        started = time.monotonic()
         result = adapter_with_mqtt.emergency_stop()
-        took = time.monotonic() - started
 
         assert result.success is False
         assert result.message.startswith("Emergency stop NOT sent")
         assert "stop it at the machine" in result.message.lower()
-        assert took < BambuAdapter._ESTOP_CONFIRM_TIMEOUT_S / 2
+        assert naps == []
 
     def test_an_idle_printer_that_reports_only_when_asked_is_confirmed(
         self, adapter_with_mqtt: BambuAdapter
