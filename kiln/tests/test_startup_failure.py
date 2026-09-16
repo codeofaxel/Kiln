@@ -359,9 +359,19 @@ class TestKilnDoctorExplainsThisFailure:
 
         check = _database_check()
 
+        # The failure message carries the evidence, because this one has
+        # flaked in CI (2026-09-15, Python 3.13 only, green on a re-run) and a
+        # bare "True is not False" says nothing about WHY the check passed.
+        # The two candidates are a database that is not the junk file, and a
+        # junk file that stopped being junk; both are visible here.
         assert check["ok"] is False, (
             "doctor gave a clean bill of health to a database that cannot "
-            "be opened — the exact false all-clear this check exists to stop"
+            "be opened — the exact false all-clear this check exists to stop. "
+            f"detail={check.get('detail')!r} "
+            f"KILN_DB_PATH={os.environ.get('KILN_DB_PATH')!r} "
+            f"expected={str(db)!r} "
+            f"first bytes={db.read_bytes()[:16]!r} "
+            f"size={db.stat().st_size}"
         )
         assert "database" in check["detail"].lower()
 
