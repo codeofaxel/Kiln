@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-16T09:06:23.026057+00:00",
+  "generated": "2026-09-16T17:11:06.168099+00:00",
   "tool_count": 421,
   "categories": {
     "product_generators": {
@@ -13905,6 +13905,11 @@
             ],
             "default": null,
             "title": "Part Names"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
           }
         },
         "required": [
