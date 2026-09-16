@@ -203,7 +203,7 @@ def test_await_print_completion_auto_contributes_on_idle(monkeypatch):
     )
     adapter = SimpleNamespace(
         get_job=lambda: job,
-        get_state=lambda: SimpleNamespace(state=PrinterStatus.IDLE),
+        get_state=lambda: SimpleNamespace(state=PrinterStatus.IDLE, confirmed_state=PrinterStatus.IDLE),
         get_printer_info=lambda: SimpleNamespace(model="Bambu A1"),
     )
     monkeypatch.setattr(srv, "_check_auth", lambda *a, **k: None)

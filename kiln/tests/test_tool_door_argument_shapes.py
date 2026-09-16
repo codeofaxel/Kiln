@@ -166,7 +166,9 @@ def test_the_envelope_survives_convert_result():
     result = _call(
         "validate_gcode_safe", {"commands": {"not": "a string"}}, convert_result=True
     )
-    blocks = result[0] if isinstance(result, tuple) else result
+    from kiln.mcp_compat import tool_result_blocks
+
+    blocks = tool_result_blocks(result)
     payload = json.loads(blocks[0].text)
     assert payload["error"]["code"] == "INVALID_ARGS"
 
@@ -202,7 +204,7 @@ def test_a_raising_tool_is_counted_as_a_call_too(monkeypatch):
 
 def test_a_pydantic_error_from_inside_a_tool_body_is_not_rewritten(monkeypatch):
     """Only the ARGUMENT model's errors become envelopes."""
-    from mcp.server.fastmcp.exceptions import ToolError
+    from kiln.mcp_compat import ToolError
     from pydantic import BaseModel, ValidationError
 
     from kiln import server

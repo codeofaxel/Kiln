@@ -3238,7 +3238,8 @@ class TestResliceWithOverrides:
         )
         assert result["success"] is False
         assert result["error"]["code"] == "VALIDATION_ERROR"
-        assert "Invalid overrides JSON" in result["error"]["message"]
+        assert "overrides" in result["error"]["message"]
+        assert "not valid JSON" in result["error"]["message"]
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_reslice_invalid_input_path(self, mock_auth):
@@ -4041,7 +4042,8 @@ class TestMultiCopyPrint:
             model_path=stl, copies=2, overrides="not json",
         )
         assert result["success"] is False
-        assert "Invalid JSON" in result["error"]["message"]
+        assert "overrides" in result["error"]["message"]
+        assert "not valid JSON" in result["error"]["message"]
 
     def test_overrides_not_dict_rejected(self, tmp_path):
         stl = os.path.join(str(tmp_path), "model.stl")

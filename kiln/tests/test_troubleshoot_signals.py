@@ -582,7 +582,10 @@ def test_the_nudge_is_said_once_per_session():
         reset_spoken_keys()
 
 
-def test_a_paid_caller_never_spends_the_session_claim():
+def test_a_paid_caller_never_spends_the_session_claim(signal_overlay):
+    # The fixture is what makes the caller PAID: a bare public install has no
+    # kiln-pro to import, so without it this reads a free caller and measures
+    # the opposite of what it claims.
     # A caller with the depth gets no nudge and must not consume the one
     # showing a later free caller in the same process would have had.
     from kiln.server import troubleshoot_printer as tool

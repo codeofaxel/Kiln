@@ -52,6 +52,9 @@ try:  # mcp>=2.0 — speaks MCP spec 2026-07-28 (stateless core)
     from mcp.server.mcpserver import (
         MCPServer as FastMCP,
     )
+    from mcp.server.mcpserver.exceptions import (  # type: ignore[import-not-found]
+        ToolError,
+    )
     from mcp.server.mcpserver.resources import (  # type: ignore[import-not-found]
         FunctionResource,
     )
@@ -59,6 +62,7 @@ try:  # mcp>=2.0 — speaks MCP spec 2026-07-28 (stateless core)
     MCP_SDK_MAJOR = 2
 except ImportError:  # mcp 1.x — legacy FastMCP surface
     from mcp.server.fastmcp import Context, FastMCP, Image  # type: ignore
+    from mcp.server.fastmcp.exceptions import ToolError  # type: ignore
     from mcp.server.fastmcp.resources import FunctionResource  # type: ignore
 
     MCP_SDK_MAJOR = 1
@@ -69,6 +73,7 @@ __all__ = [
     "FunctionResource",
     "Image",
     "MCP_SDK_MAJOR",
+    "ToolError",
     "ask_user_to_confirm",
     "capture_request_context",
     "client_capabilities",
@@ -76,8 +81,22 @@ __all__ = [
     "host_can_ask_the_user",
     "lowlevel_server",
     "set_instructions",
+    "tool_result_blocks",
     "wrap_call_tool_result",
 ]
+
+
+def tool_result_blocks(result: Any) -> Any:
+    """The content blocks of a ``call_tool`` result, whichever SDK ran it.
+
+    SDK 1 answers with the block list itself, or a ``(blocks, structured)``
+    tuple when the caller asked it to convert; SDK 2 answers with a
+    ``CallToolResult`` that carries them on ``.content``.  Readers go
+    through here so neither shape has to be known twice.
+    """
+    if isinstance(result, tuple):
+        result = result[0]
+    return getattr(result, "content", result)
 
 
 def lowlevel_server(mcp: Any) -> Any:

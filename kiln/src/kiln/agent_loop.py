@@ -472,11 +472,14 @@ def _execute_tool(name: str, arguments: dict[str, Any]) -> str:
         else:
             result = asyncio.run(mcp_server.call_tool(name, arguments))
 
-        # Normalize across SDK majors: 1.x returns a content sequence (or a
-        # plain dict), 2.0 returns a CallToolResult model carrying .content.
-        # Without this, iterating the 2.0 model yields pydantic field tuples
-        # — corrupt text, not a crash.
-        result = getattr(result, "content", result)
+        # Normalize across SDK majors — 1.x returns a content sequence (or a
+        # plain dict), 2.0 a CallToolResult model carrying .content.  Without
+        # it, iterating the 2.0 model yields pydantic field tuples: corrupt
+        # text, not a crash.  Read through the compat layer so the two shapes
+        # are known in exactly one place.
+        from kiln.mcp_compat import tool_result_blocks
+
+        result = tool_result_blocks(result)
         if isinstance(result, dict):
             return json.dumps(result, default=str)
 

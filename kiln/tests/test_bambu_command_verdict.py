@@ -395,6 +395,33 @@ class TestResponsesAreJsonSafe:
             _json.dumps(call())
 
 
+class TestNothingToPublishThrough:
+    """A command with no live connection is refused, never reported as sent.
+
+    The class above pins the measured case: a client that KNOWS it is
+    disconnected.  This is the other half — no client at all.  On a real
+    machine ``_ensure_mqtt`` raises rather than answering with nothing, but a
+    caller may hand a client in, a test may withhold the socket, and reading
+    ``is_connected()`` off nothing raised an AttributeError that told the
+    caller nothing about their command.  Both paths owe the same answer: it
+    did not leave this process.
+    """
+
+    def test_a_client_that_knows_it_is_disconnected_refuses(self) -> None:
+        adapter = _connected()
+        adapter._mqtt_client.is_connected.return_value = False
+        with pytest.raises(PrinterError, match="NOT delivered"):
+            adapter.set_light("chamber_light", "on")
+        assert adapter._mqtt_client.publish.called is False
+
+    def test_no_client_at_all_refuses_the_same_way(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        adapter = _connected()
+        adapter._mqtt_client = None
+        monkeypatch.setattr(BambuAdapter, "_ensure_mqtt", lambda self: None)
+        with pytest.raises(PrinterError, match="NOT delivered"):
+            adapter.set_light("chamber_light", "on")
+
+
 class TestSkipObjectsIsReadBack:
     """Skipping is irreversible for the objects named, so "sent" is not enough.
 
@@ -425,7 +452,12 @@ class TestSkipObjectsIsReadBack:
         from kiln.server import skip_print_objects
 
         get_adapter.return_value = _connected()
-        result = skip_print_objects(object_ids=[3])
+        # The door carries a Pro tier gate, and a bare public install — CI,
+        # and any user without kiln-pro — is refused before the body runs.
+        # What is under test is the body's read-back contract, so this calls
+        # through the gate's own wrapper.
+        door = getattr(skip_print_objects, "__wrapped__", skip_print_objects)
+        result = door(object_ids=[3])
 
         assert result["success"] is True
         assert result["outcome"] == "accepted"

@@ -2590,7 +2590,11 @@ class BambuAdapter(PrinterAdapter):
         # is how a disconnected adapter reported every command as sent
         # (measured 2026-09-06: four hotend commands, all "accepted", none
         # delivered).  Ask first, and read the answer.
-        if client is None and not c.is_connected():
+        # A missing client answers the same question the same way: there
+        # is nothing to publish through, so the command did NOT leave this
+        # process.  Reading `is_connected()` off None crashed instead, which
+        # told the caller nothing about their command.
+        if client is None and (c is None or not c.is_connected()):
             self._mark_mqtt_dropped()
             raise PrinterError(
                 "MQTT command not sent: the client is not connected to "
