@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-09-15T02:22:15.841413+00:00",
-  "tool_count": 419,
+  "generated": "2026-09-16T04:40:59.890747+00:00",
+  "tool_count": 421,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -13803,6 +13803,60 @@
       }
     },
     {
+      "name": "check_assembly_stands",
+      "description": "Judge whether an assembled kit STANDS \u2014 from geometry alone, with every assumption said out loud.",
+      "tier": "free",
+      "access": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "part_paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Part Paths",
+            "type": "array"
+          },
+          "pin_recipes": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pin Recipes"
+          },
+          "gravity": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Gravity"
+          }
+        },
+        "required": [
+          "part_paths"
+        ],
+        "title": "check_assembly_standsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "check_nozzle_capacity_for_print",
       "description": "Pre-print check \u2014 will the nozzle survive this print's wear cost?\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -15875,6 +15929,85 @@
           }
         },
         "title": "revert_mid_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "separate_overlapping_parts",
+      "description": "Separate parts that share material, so they print as a kit.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "part_paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Part Paths",
+            "type": "array"
+          },
+          "part_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Names"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "trim_side": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Trim Side"
+          },
+          "max_loss_fraction": {
+            "default": 0.5,
+            "title": "Max Loss Fraction",
+            "type": "number"
+          },
+          "nozzle_mm": {
+            "default": 0.4,
+            "title": "Nozzle Mm",
+            "type": "number"
+          },
+          "include_fusions": {
+            "default": false,
+            "title": "Include Fusions",
+            "type": "boolean"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_paths"
+        ],
+        "title": "separate_overlapping_partsArguments",
         "type": "object"
       }
     },
