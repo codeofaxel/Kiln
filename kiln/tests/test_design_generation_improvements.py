@@ -49,7 +49,7 @@ class _MockMCP:
     def __init__(self):
         self.tools: dict[str, callable] = {}
 
-    def tool(self):
+    def tool(self, **_kwargs):
         def decorator(fn):
             self.tools[fn.__name__] = fn
             return fn

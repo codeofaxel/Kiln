@@ -654,7 +654,7 @@ class TestUserResolution:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn

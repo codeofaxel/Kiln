@@ -46,7 +46,7 @@ def _callable_surfaces_text() -> str:
     tools: dict = {}
 
     class MockMCP:
-        def tool(self):
+        def tool(self, **_kwargs):
             def deco(fn):
                 tools[fn.__name__] = fn
                 return fn
@@ -94,7 +94,7 @@ def test_the_session_maintenance_tools_are_in_both_callable_surfaces(tool):
     tools: dict = {}
 
     class MockMCP:
-        def tool(self):
+        def tool(self, **_kwargs):
             def deco(fn):
                 tools[fn.__name__] = fn
                 return fn

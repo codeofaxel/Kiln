@@ -186,7 +186,7 @@ def _register_slicer_tools() -> dict:
     tools: dict[str, Any] = {}
 
     class _FakeMcp:
-        def tool(self, name: str | None = None):
+        def tool(self, name: str | None = None, **_kwargs):
             def decorator(fn):
                 tools[name or fn.__name__] = fn
                 return fn
@@ -379,7 +379,7 @@ class TestSecondaryDoorsAcceptTheAim:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self, name: str | None = None):
+            def tool(self, name: str | None = None, **_kwargs):
                 def decorator(fn):
                     tools[name or fn.__name__] = fn
                     return fn

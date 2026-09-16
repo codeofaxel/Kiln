@@ -42,7 +42,7 @@ def _stub_signature(tmp_path, monkeypatch, properties, required=()):
     captured = {}
 
     class _FakeMCP:
-        def tool(self):
+        def tool(self, **_kwargs):
             def deco(fn):
                 captured[fn.__name__] = fn
                 return fn

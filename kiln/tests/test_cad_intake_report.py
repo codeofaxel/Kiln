@@ -713,7 +713,7 @@ def _register_mesh_tools():
     tools: dict[str, object] = {}
 
     class FakeMCP:
-        def tool(self_mcp):
+        def tool(self_mcp, **_kwargs):
             def decorate(fn):
                 tools[fn.__name__] = fn
                 return fn

@@ -236,7 +236,7 @@ class TestPipelineE2EProOutcome:
         captured_tools: dict = {}
 
         class _MockMCP:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def _decorator(fn):
                     captured_tools[fn.__name__] = fn
                     return fn

@@ -1068,7 +1068,7 @@ class TestApplyDecorationMaterialDetection:
             def __init__(self):
                 self.tools = {}
 
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     self.tools[fn.__name__] = fn
                     return fn

@@ -118,7 +118,7 @@ def _call_slice_model(**kwargs: Any) -> dict:
     tools: dict[str, Any] = {}
 
     class _FakeMcp:
-        def tool(self, name: str | None = None):
+        def tool(self, name: str | None = None, **_kwargs):
             def decorator(fn):
                 tools[name or fn.__name__] = fn
                 return fn
@@ -459,7 +459,7 @@ def _call_color_tool(name: str, **kwargs: Any) -> dict:
     tools: dict[str, Any] = {}
 
     class _FakeMcp:
-        def tool(self, name: str | None = None):
+        def tool(self, name: str | None = None, **_kwargs):
             def decorator(fn):
                 tools[name or fn.__name__] = fn
                 return fn
@@ -526,7 +526,7 @@ def _register_plugin(plugin_cls) -> dict:
     tools: dict[str, Any] = {}
 
     class _FakeMcp:
-        def tool(self, name: str | None = None):
+        def tool(self, name: str | None = None, **_kwargs):
             def decorator(fn):
                 tools[name or fn.__name__] = fn
                 return fn

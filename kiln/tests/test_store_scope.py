@@ -375,7 +375,7 @@ class _MockMcp:
     def __init__(self) -> None:
         self.tools: dict = {}
 
-    def tool(self):
+    def tool(self, **_kwargs):
         def decorator(fn):
             self.tools[fn.__name__] = fn
             return fn

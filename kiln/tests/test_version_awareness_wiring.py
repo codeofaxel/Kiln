@@ -14,7 +14,7 @@ def upgrade_kiln():
     tools: dict = {}
 
     class MockMCP:
-        def tool(self):
+        def tool(self, **_kwargs):
             def deco(fn):
                 tools[fn.__name__] = fn
                 return fn

@@ -49,7 +49,7 @@ def _capture_check_my_tier():
     captured = {}
 
     class _MockMcp:
-        def tool(self):
+        def tool(self, **_kwargs):
             def deco(fn):
                 captured[fn.__name__] = fn
                 return fn

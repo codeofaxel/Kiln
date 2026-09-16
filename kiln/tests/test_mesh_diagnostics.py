@@ -656,7 +656,7 @@ class TestMCPPlugin:
         tools_registered = []
 
         class FakeMCP:
-            def tool(self_mcp):
+            def tool(self_mcp, **_kwargs):
                 def decorator(fn):
                     tools_registered.append(fn.__name__)
                     return fn
@@ -673,7 +673,7 @@ class TestMCPPlugin:
         tool_fn = None
 
         class FakeMCP:
-            def tool(self_mcp):
+            def tool(self_mcp, **_kwargs):
                 def decorator(fn):
                     nonlocal tool_fn
                     tool_fn = fn
@@ -692,7 +692,7 @@ class TestMCPPlugin:
         tool_fn = None
 
         class FakeMCP:
-            def tool(self_mcp):
+            def tool(self_mcp, **_kwargs):
                 def decorator(fn):
                     nonlocal tool_fn
                     tool_fn = fn
@@ -712,7 +712,7 @@ class TestMCPPlugin:
         tool_fn = None
 
         class FakeMCP:
-            def tool(self_mcp):
+            def tool(self_mcp, **_kwargs):
                 def decorator(fn):
                     nonlocal tool_fn
                     tool_fn = fn

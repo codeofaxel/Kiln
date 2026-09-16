@@ -63,7 +63,7 @@ def _register_consumer_tools() -> dict:
     tools: dict = {}
 
     class FakeMCP:
-        def tool(self_mcp):
+        def tool(self_mcp, **_kwargs):
             def decorator(fn):
                 tools[fn.__name__] = fn
                 return fn

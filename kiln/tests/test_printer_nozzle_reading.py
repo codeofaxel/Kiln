@@ -395,7 +395,7 @@ class TestTheReadingTravelsWithTheRequest:
         registered = {}
 
         class _MCP:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def deco(fn):
                     registered[fn.__name__] = fn
                     return fn

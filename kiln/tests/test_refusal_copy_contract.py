@@ -59,7 +59,7 @@ def _capture_tools(plugin_module: str) -> dict:
     tools: dict = {}
 
     class FakeMCP:
-        def tool(self_mcp):
+        def tool(self_mcp, **_kwargs):
             def decorator(fn):
                 tools[fn.__name__] = fn
                 return fn
@@ -355,7 +355,7 @@ def registered_pro_stubs():
     quota = dict(server._PRO_TOOL_QUOTA)
 
     class FakeMCP:
-        def tool(self_mcp):
+        def tool(self_mcp, **_kwargs):
             return lambda fn: fn
 
     try:
@@ -501,7 +501,7 @@ def registered_stub_descriptions():
     seen: dict[str, str] = {}
 
     class CapturingMCP:
-        def tool(self_mcp):
+        def tool(self_mcp, **_kwargs):
             def _decorator(fn):
                 doc = fn.__doc__ or ""
                 seen[getattr(fn, "__name__", "?")] = doc

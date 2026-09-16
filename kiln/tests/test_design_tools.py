@@ -35,7 +35,7 @@ def mock_mcp():
     tools: dict[str, callable] = {}
 
     class MockMCP:
-        def tool(self):
+        def tool(self, **_kwargs):
             def decorator(fn):
                 tools[fn.__name__] = fn
                 return fn
@@ -1389,7 +1389,7 @@ def _printability_tools():
     tools: dict[str, callable] = {}
 
     class _MCP:
-        def tool(self):
+        def tool(self, **_kwargs):
             def decorator(fn):
                 tools[fn.__name__] = fn
                 return fn
@@ -1434,7 +1434,7 @@ def _compile(fastener=None):
     tools: dict[str, callable] = {}
 
     class _MCP:
-        def tool(self):
+        def tool(self, **_kwargs):
             def decorator(fn):
                 tools[fn.__name__] = fn
                 return fn
@@ -1556,7 +1556,7 @@ class TestFastenerAdviceOnCompiledScad:
         tools: dict[str, callable] = {}
 
         class _MCP:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn

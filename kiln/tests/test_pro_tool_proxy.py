@@ -519,7 +519,7 @@ def test_only_the_allowlisted_fields_are_read_from_the_manifest(
     monkeypatch.setattr(server, "_PRO_TOOL_QUOTA", {})
 
     class _FakeMCP:
-        def tool(self):
+        def tool(self, **_kwargs):
             return lambda fn: fn
 
     server._register_pro_tool_stubs(_FakeMCP())

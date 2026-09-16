@@ -223,7 +223,7 @@ class TestAutoColorByHeight:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -295,7 +295,7 @@ class TestAutoColorByRegion:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -363,7 +363,7 @@ class TestGracefulDegradation:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -420,7 +420,7 @@ class TestEmptyZoneFiltering:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -647,7 +647,7 @@ class TestBandHeightWarning:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -675,7 +675,7 @@ class TestBandHeightWarning:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -711,7 +711,7 @@ class TestNextStep:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -761,7 +761,7 @@ class TestAmsMapping:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -806,7 +806,7 @@ class TestNormalMethodBowlShape:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -864,7 +864,7 @@ class TestEdgeCases:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -1322,7 +1322,7 @@ class TestCrispBoundariesThroughTheTools:
         tools = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def deco(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -1795,7 +1795,7 @@ class TestCappedThroughTheTools:
         tools = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def deco(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -1860,7 +1860,7 @@ class TestPaintedFormForSurfaceMethods:
         tools = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def deco(fn):
                     tools[fn.__name__] = fn
                     return fn
@@ -1955,7 +1955,7 @@ class TestSpoolAdvisoryOnColouringDoors:
         tools: dict[str, Any] = {}
 
         class _FakeMcp:
-            def tool(self):
+            def tool(self, **_kwargs):
                 def decorator(fn):
                     tools[fn.__name__] = fn
                     return fn

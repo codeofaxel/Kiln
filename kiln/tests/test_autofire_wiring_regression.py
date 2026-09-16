@@ -27,7 +27,7 @@ def _function_body(source: str, def_signature: str) -> str:
 
     start = source.find(def_signature)
     assert start != -1, f"{def_signature!r} not found in source"
-    next_tool = source.find("@mcp.tool()", start + 1)
+    next_tool = source.find("@mcp.tool(", start + 1)
     return source[start: next_tool if next_tool != -1 else len(source)]
 
 

@@ -620,7 +620,7 @@ def utility_tools() -> dict:
     tools: dict = {}
 
     class MockMCP:
-        def tool(self):
+        def tool(self, **_kwargs):
             def deco(fn):
                 tools[fn.__name__] = fn
                 return fn

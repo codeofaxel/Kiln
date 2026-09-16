@@ -71,7 +71,7 @@ def _firmware_tools():
     tools: dict[str, callable] = {}
 
     class _MockMCP:
-        def tool(self):
+        def tool(self, **_kwargs):
             def decorator(fn):
                 tools[fn.__name__] = fn
                 return fn

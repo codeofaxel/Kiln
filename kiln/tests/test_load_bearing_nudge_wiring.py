@@ -37,7 +37,7 @@ def _capture_tools(plugin_module: str) -> dict:
     tools: dict = {}
 
     class FakeMCP:
-        def tool(self_mcp):
+        def tool(self_mcp, **_kwargs):
             def decorator(fn):
                 tools[fn.__name__] = fn
                 return fn

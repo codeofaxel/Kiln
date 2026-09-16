@@ -377,7 +377,7 @@ def _register_slicer_tools() -> dict:
     tools: dict = {}
 
     class FakeMCP:
-        def tool(self_mcp, name: str | None = None):
+        def tool(self_mcp, name: str | None = None, **_kwargs):
             def decorator(fn):
                 tools[name or fn.__name__] = fn
                 return fn
