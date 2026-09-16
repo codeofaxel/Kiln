@@ -1626,7 +1626,16 @@ def _coverage_block_for(printer_name: str | None) -> dict[str, Any] | None:
         except Exception:  # noqa: BLE001 — no adapter, or no reading, is a state and not an error
             pass
         watch = kiln_watch_state(printer_name, adapter=adapter, state_word=state_word)
-        block = pro.device_intelligence.coverage_block(model, watch=watch)
+        # What the MACHINE says about its own detector switches, read through
+        # the adapter contract.  Research describes the model; a switch the
+        # owner turned off is the one thing only the machine itself knows,
+        # and it is the difference between a card that reassures and a card
+        # that is true.
+        from kiln.detector_switches import detector_switches
+
+        block = pro.device_intelligence.coverage_block(
+            model, watch=watch, switches=detector_switches(adapter),
+        )
         if not isinstance(block, dict) or not block.get("headline"):
             return None
         return block
