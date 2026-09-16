@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from kiln.print_start_verdict import resolve_print_start
+from kiln.tool_annotations import creates
 
 _logger = logging.getLogger(__name__)
 
@@ -1061,7 +1062,7 @@ class _GenerationAIToolsPlugin:
         # smart_generate_from_template
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Smart generate from template"))
         def smart_generate_from_template(
             template_id: str,
             parameters: dict | None = None,

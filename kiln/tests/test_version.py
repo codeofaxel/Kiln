@@ -95,3 +95,31 @@ def test_claude_code_plugin_version_matches_package() -> None:
         f"drifted from pyproject {pkg_version!r}. Bump the plugin manifest version "
         "in the same commit so Claude Code serves the update."
     )
+
+
+def test_claude_code_plugin_ships_its_mcp_wiring() -> None:
+    """The Claude Code plugin must carry the ``.mcp.json`` that wires Kiln in.
+
+    The plugin's whole job is one command that connects the Kiln server to
+    Claude Code.  The root ``.gitignore`` ignores every ``.mcp.json`` (a
+    developer's own client config), and for seven weeks that rule swallowed
+    ``plugins/kiln/.mcp.json`` too — the marketplace served a manifest and a
+    README and wired nothing.  This pins that the file exists, is tracked, and
+    launches the published package the way the README promises.
+    """
+    import subprocess
+
+    root = Path(__file__).resolve().parents[2]
+    rel = "plugins/kiln/.mcp.json"
+    mcp_path = root / rel
+    assert mcp_path.is_file(), f"{rel} is missing — the plugin wires nothing without it"
+
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", rel], cwd=root, capture_output=True
+    ).returncode == 0
+    assert not ignored, f"{rel} is gitignored — it must ship with the plugin"
+
+    servers = json.loads(mcp_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert list(servers) == ["kiln"]
+    assert servers["kiln"]["command"] == "uvx"
+    assert servers["kiln"]["args"] == ["kiln3d", "serve"]

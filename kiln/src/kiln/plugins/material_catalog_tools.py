@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -39,7 +41,7 @@ class _MaterialCatalogToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register material catalog tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Search material catalog"))
         def search_material_catalog(query: str) -> dict:
             """Search the material catalog by brand, type, or keyword.
 
@@ -95,7 +97,7 @@ class _MaterialCatalogToolsPlugin:
                 _logger.exception("Unexpected error in get_material_info")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List material catalog"))
         def list_material_catalog() -> dict:
             """List all material IDs in the catalog.
 
@@ -117,7 +119,7 @@ class _MaterialCatalogToolsPlugin:
                 _logger.exception("Unexpected error in list_material_catalog")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get compatible materials"))
         def get_compatible_materials(material_family: str) -> dict:
             """Find all materials in a given family (e.g. PLA, PETG, resin).
 

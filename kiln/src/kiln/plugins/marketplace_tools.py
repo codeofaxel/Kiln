@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -47,7 +49,7 @@ class _MarketplaceToolsPlugin:
         # Multi-marketplace unified search
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Search all marketplaces"))
         def search_all_models(
             query: str,
             page: int = 1,
@@ -133,7 +135,7 @@ class _MarketplaceToolsPlugin:
         # Thingiverse-specific tools
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Search Thingiverse"))
         def search_models(
             query: str,
             page: int = 1,
@@ -177,7 +179,7 @@ class _MarketplaceToolsPlugin:
                 logger.exception("Unexpected error in search_models")
                 return _error_dict(f"Unexpected error in search_models: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get model details"))
         def model_details(thing_id: int) -> dict:
             """Get full details for a Thingiverse model.
 
@@ -442,7 +444,7 @@ class _MarketplaceToolsPlugin:
                 logger.exception("Unexpected error in download_model")
                 return _error_dict(f"Unexpected error in download_model: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Browse marketplace models"))
         def browse_models(
             browse_type: str = "popular",
             page: int = 1,
@@ -493,7 +495,7 @@ class _MarketplaceToolsPlugin:
                 logger.exception("Unexpected error in browse_models")
                 return _error_dict(f"Unexpected error in browse_models: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List model categories"))
         def list_model_categories() -> dict:
             """List available Thingiverse content categories.
 

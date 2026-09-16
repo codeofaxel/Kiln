@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import creates, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -705,7 +707,7 @@ class _DesignToolsPlugin:
                 )
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get design template info"))
         def get_design_template_info(template: str) -> dict:
             """Look up one design template by id — parametric part or pattern.
 
@@ -816,7 +818,7 @@ class _DesignToolsPlugin:
                 _logger.error("List templates failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Find design templates"))
         def find_design_templates(use_case: str) -> dict:
             """Find a ready-made parametric part for what the user is making.
 
@@ -1258,7 +1260,7 @@ class _DesignToolsPlugin:
 
         # ── Cost estimation ─────────────────────────────────────────────────
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate print cost"))
         def estimate_print_cost_from_mesh(
             file_path: str,
             material: str = "pla",
@@ -1531,7 +1533,7 @@ class _DesignToolsPlugin:
                 return {"success": False, "error": str(exc)}
 
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Compile OpenSCAD"))
         def compile_scad(
             scad_code: str = "",
             scad_path: str = "",

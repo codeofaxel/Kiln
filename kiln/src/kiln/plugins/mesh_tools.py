@@ -17,6 +17,8 @@ import logging
 import os
 from typing import Any
 
+from kiln.tool_annotations import read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -229,7 +231,7 @@ class _MeshToolsPlugin:
         # Mesh analysis
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Analyze mesh geometry"))
         def analyze_mesh_geometry(file_path: str) -> dict:
             """Deep geometric and printability analysis of a 3D mesh.
 
@@ -1630,7 +1632,7 @@ class _MeshToolsPlugin:
         # Mesh estimation (weight, print time)
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate printed weight"))
         def estimate_mesh_weight(
             file_path: str,
             material: str = "pla",
@@ -1669,7 +1671,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Weight estimation failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate print time"))
         def estimate_mesh_print_time(
             file_path: str,
             layer_height_mm: float = 0.2,

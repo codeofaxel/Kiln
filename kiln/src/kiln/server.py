@@ -364,6 +364,7 @@ from kiln.tiers_and_terms import (
     tier_required_message,
     upgrade_nudge_block,
 )
+from kiln.tool_annotations import creates, read_only
 from kiln.webhooks import WebhookManager
 
 
@@ -11617,7 +11618,7 @@ def printer_snapshot(
 # estimate_cost — moved to plugins/estimate_tools.py
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("List materials"))
 def list_materials() -> dict:
     """List built-in filament material profiles (density, cost, temps).
 
@@ -11678,7 +11679,7 @@ def set_material(
         return _error_dict(f"Unexpected error in set_material: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Get loaded material"))
 def get_material(printer_name: str | None = None) -> dict:
     """Get material loaded in a printer (from Kiln's software tracker).
 
@@ -13182,7 +13183,7 @@ def get_feedback_loop_status(model_id: str) -> dict:
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("List design templates"))
 def list_design_templates() -> dict:
     """List every parametric part Kiln can build, with full parameters.
 
@@ -13280,7 +13281,7 @@ def _fastener_advice_free(names: list[str]) -> dict[str, Any] | None:
     return advice_for_template_parameters(names)
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Generate from template"))
 def generate_from_template(
     template_id: str,
     parameters: dict | None = None,
@@ -14511,7 +14512,7 @@ def get_printer_intelligence(printer_id: str) -> dict:
         return _error_dict(f"Unexpected error in get_printer_intelligence: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Get material slicer settings"))
 def get_material_recommendation(
     printer_id: str,
     material: str,
@@ -14623,7 +14624,7 @@ def _hms_reference(code: str) -> tuple[str | None, str]:
     return page, kind
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Troubleshoot printer"))
 def troubleshoot_printer(
     printer_id: str,
     symptom: str = "",
@@ -16471,7 +16472,7 @@ def _print_startup_banner() -> None:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Find material substitute"))
 def find_material_substitute(
     material: str,
     *,

@@ -38,6 +38,8 @@ AGENTS.md
 # Local git worktrees (parallel feature-branch checkouts) — never committed
 .worktrees/
 .mcp.json
+# The Claude Code plugin's MCP wiring is the plugin — it must ship.
+!plugins/kiln/.mcp.json
 .pre-commit-config.yaml
 
 # Deployment / infrastructure (operator-private)

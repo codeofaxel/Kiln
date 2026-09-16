@@ -15,6 +15,8 @@ import logging
 import time
 from typing import Any
 
+from kiln.tool_annotations import read_only
+
 _logger = logging.getLogger(__name__)
 
 _PRICING_URL = "https://kiln3d.com/pricing"
@@ -675,7 +677,7 @@ class _IntelligenceToolsPlugin:
                 _logger.exception("Unexpected error in community_stats")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Recommend material"))
         def recommend_material(
             intent: str,
             has_enclosure: bool = False,

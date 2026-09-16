@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -35,7 +37,7 @@ class _PrintabilityToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register printability tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Analyze printability"))
         def analyze_printability(
             file_path: str,
             nozzle_diameter: float = 0.4,
