@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-16T17:11:06.168099+00:00",
+  "generated": "2026-09-16T17:21:04.410347+00:00",
   "tool_count": 421,
   "categories": {
     "product_generators": {
@@ -13910,6 +13910,26 @@
             "default": "",
             "title": "Design Id",
             "type": "string"
+          },
+          "carried_mass_g": {
+            "default": 0.0,
+            "title": "Carried Mass G",
+            "type": "number"
+          },
+          "carried_at_mm": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Carried At Mm"
           }
         },
         "required": [
