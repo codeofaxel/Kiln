@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-16T04:40:59.890747+00:00",
+  "generated": "2026-09-16T05:14:52.190812+00:00",
   "tool_count": 421,
   "categories": {
     "product_generators": {
@@ -13847,6 +13847,24 @@
             ],
             "default": null,
             "title": "Gravity"
+          },
+          "materials": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Materials"
           }
         },
         "required": [

@@ -243,6 +243,7 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
         "rollback_feature",
         "rotate_model",
         "scale_mesh_to_fit",
+        "separate_overlapping_parts",
         "simplify_mesh_model",
         "smart_decorate",
         "smart_generate_from_template",
