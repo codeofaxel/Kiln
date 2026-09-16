@@ -116,6 +116,16 @@ PUBLIC_PROFILE_FIELDS: frozenset[str] = frozenset(
         "max_hotend_temp",
         "max_bed_temp",
         "materials",
+        # Where a machine taps the bed to feel for a blob on the nozzle, and
+        # the slicing modes that skip that tap -- both as its maker publishes
+        # them.  A rectangle on a bed is a physical fact like build_volume_mm,
+        # and the warning built on it ("your part is parked where the probe
+        # taps") has to work on a laptop with no internet, so it is public at
+        # every tier.  The research behind it -- the schedule, the sensing,
+        # the provenance, the fleet view -- stays in Kiln Pro.  ``null`` for a
+        # machine whose maker states none, which is "Kiln does not know",
+        # never "this machine has no probe".
+        "nozzle_clumping_probe",
     }
 )
 

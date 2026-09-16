@@ -286,22 +286,124 @@ _NO_TOWER = (
 )
 
 
+#: How a file's print mode is spelled here, against the maker's own words for
+#: the modes that skip the probe.
+_MODE_WORDS: dict[str, str] = {"spiral_vase": "spiral vase", "by_object": "by object"}
+
+
+def probe_facts_for(printer_model: str | None) -> dict[str, Any] | None:
+    """Where this model taps the bed, and the modes that skip the probe.
+
+    Read from the public printer catalogue, where the maker's published
+    rectangle sits beside the machine's build volume: both are physical facts
+    about the machine, and a warning built on them has to work on a laptop
+    with no internet.  ``None`` for a model whose maker states none, which is
+    "Kiln does not know", never "this machine has no probe".
+    """
+    if not printer_model:
+        return None
+    try:
+        from kiln.printers.bed_fit import _load_printer_intelligence, _printer_id_candidates
+
+        data = _load_printer_intelligence() or {}
+        for candidate in _printer_id_candidates(printer_model):
+            record = data.get(candidate)
+            if isinstance(record, dict) and isinstance(record.get("nozzle_clumping_probe"), dict):
+                probe = dict(record["nozzle_clumping_probe"])
+                box = probe.get("detection_area_mm")
+                if isinstance(box, (list, tuple)) and len(box) == 4:
+                    x0, y0, x1, y1 = (float(v) for v in box)
+                    probe["detection_area_mm"] = {
+                        "x_min": min(x0, x1), "y_min": min(y0, y1),
+                        "x_max": max(x0, x1), "y_max": max(y0, y1),
+                    }
+                else:
+                    probe["detection_area_mm"] = None
+                return probe
+    except Exception:  # noqa: BLE001 -- a missing fact is a quieter warning, never an error
+        logger.debug("probe facts unavailable for %r", printer_model, exc_info=True)
+    return None
+
+
+def part_overlaps_probe_area(
+    footprint: Any, area: Any,
+) -> bool:
+    """Does the placed part reach into the area the probe taps?
+
+    One helper, so the free warning and the curated one cannot disagree about
+    the geometry.  Anything it cannot read is ``False``: a warning invented
+    from a footprint nobody could measure is worse than none.
+    """
+    try:
+        return not (
+            float(footprint["x_max"]) < float(area["x_min"])
+            or float(footprint["x_min"]) > float(area["x_max"])
+            or float(footprint["y_max"]) < float(area["y_min"])
+            or float(footprint["y_min"]) > float(area["y_max"])
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def mode_that_skips_the_probe(print_mode: Any, defeated_by: Any) -> str | None:
+    """The maker's word for this file's mode, when the probe skips it."""
+    words = set(_MODE_WORDS.get(str(print_mode or "").strip(), "").split())
+    if not words or not isinstance(defeated_by, (list, tuple)):
+        return None
+    for phrase in defeated_by:
+        if words <= set(str(phrase).casefold().split()):
+            return str(phrase)
+    return None
+
+
 def preflight_entry_for_file(
-    reading: NozzleClumpingDetection, facts: dict[str, Any] | None
+    reading: NozzleClumpingDetection,
+    facts: dict[str, Any] | None,
+    printer_model: str | None = None,
 ) -> dict[str, Any]:
-    """The pre-flight check for *reading* with what the file says beside it."""
+    """The pre-flight check for *reading* with what the file says beside it.
+
+    Carries the two warnings that need no curated knowledge: a part parked
+    where the probe taps, and a print mode the probe skips.  Both rest on the
+    maker's own published numbers in the printer catalogue, so a free install
+    with no network gets them.
+    """
     entry = preflight_entry(reading)
+    entry["warnings"] = []
     if facts is None:
         return entry
     entry["file"] = facts
-    if reading.enabled is True and facts.get("prime_tower_in_file") is False:
+    armed = reading.enabled is True
+    if armed and facts.get("prime_tower_in_file") is False:
         entry["message"] += _NO_TOWER
+    probe = probe_facts_for(printer_model) if armed else None
+    if probe:
+        area = probe.get("detection_area_mm")
+        if area and part_overlaps_probe_area(facts.get("footprint"), area):
+            entry["warnings"].append(
+                "A placed part reaches into the corner where the probe taps "
+                f"(X {area['x_min']:g}-{area['x_max']:g}, Y {area['y_min']:g}-"
+                f"{area['y_max']:g} mm). A part there stops the detection working, "
+                "and the probe can meet the part. Move it."
+            )
+        skipped = mode_that_skips_the_probe(facts.get("print_mode"), probe.get("defeated_by"))
+        if skipped:
+            entry["warnings"].append(
+                f"This file prints in {skipped} mode, and the probe will not run in "
+                "it: the setting is on, but nothing is watching for a clump on this "
+                "print."
+            )
+    if entry["warnings"]:
+        entry["message"] += " " + " ".join(entry["warnings"])
     return entry
 
 
 __all__ = [
     "CHECK_NAME",
     "file_facts",
+    "mode_that_skips_the_probe",
+    "part_overlaps_probe_area",
+    "probe_facts_for",
     "preflight_entry",
     "preflight_entry_for_file",
     "read_switch",

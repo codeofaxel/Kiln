@@ -9087,7 +9087,9 @@ def preflight_check(
                     if file_path and _switch.enabled is not False
                     else None
                 )
-                _entry = preflight_entry_for_file(_switch, _facts)
+                _entry = preflight_entry_for_file(
+                    _switch, _facts, printer_model=_pf_model,
+                )
                 if _switch.enabled is not False:
                     _judged = _pro_nozzle_bridge.consult_clumping_detection(
                         printer_model=_pf_model,
@@ -9096,9 +9098,16 @@ def preflight_check(
                     )
                     if isinstance(_judged, dict):
                         _entry["detail"] = _judged
-                        _entry["warnings"] = list(_judged.get("warnings") or [])
-                        if _entry["warnings"]:
-                            _entry["message"] += " " + " ".join(_entry["warnings"])
+                        # The curated judgement adds what it knows beyond the
+                        # catalogue's published numbers; anything it repeats is
+                        # dropped, so one fact is never said twice.
+                        _extra = [
+                            w for w in (_judged.get("warnings") or [])
+                            if w not in _entry["warnings"]
+                        ]
+                        if _extra:
+                            _entry["warnings"].extend(_extra)
+                            _entry["message"] += " " + " ".join(_extra)
                 checks.append(_entry)
         except Exception as exc:  # noqa: BLE001 -- a sentence beside the checks, never a check
             logger.debug("Nozzle clumping detection check skipped: %s", exc)

@@ -4,7 +4,8 @@
     "description": "Printer intelligence database: firmware quirks, material compatibility, calibration guidance, and known failure modes. Keyed by the same printer_id as safety_profiles.json.",
     "updated": "2025-02-11",
     "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (each printer's quirks, its calibration recipes, and the failures it is known for) is available in Kiln Pro; see https://kiln3d.com/pricing.",
-    "has_chamber_sensor_note": "has_chamber_sensor: whether the machine has a chamber temperature sensor whose reading its firmware reports. true/false only where a primary source settles it; null means unknown, never false, and every row must answer. Bambu rows come from Bambu Studio's own per-printer configuration (resources/printers/<model_id>.json): a chamber temperature is shown only where support_chamber_temp_display, or failing that support_chamber, is true. The Elegoo Centauri Carbon row comes from Elegoo's own wiki, which carries a chamber-thermistor replacement procedure for it (B0C2N1). Read by adapters whose protocol publishes a chamber field for every model regardless of hardware."
+    "has_chamber_sensor_note": "has_chamber_sensor: whether the machine has a chamber temperature sensor whose reading its firmware reports. true/false only where a primary source settles it; null means unknown, never false, and every row must answer. Bambu rows come from Bambu Studio's own per-printer configuration (resources/printers/<model_id>.json): a chamber temperature is shown only where support_chamber_temp_display, or failing that support_chamber, is true. The Elegoo Centauri Carbon row comes from Elegoo's own wiki, which carries a chamber-thermistor replacement procedure for it (B0C2N1). Read by adapters whose protocol publishes a chamber field for every model regardless of hardware.",
+    "nozzle_clumping_probe_note": "nozzle_clumping_probe: where this machine taps the bed to feel for a blob on the nozzle, as its maker publishes it -- detection_area_mm is [x_min, y_min, x_max, y_max] in bed coordinates, and defeated_by lists the slicing modes that skip the probe. A part placed in that area stops the detection working, so the rectangle is a physical fact about the machine like build_volume_mm, not a judgement. Present only for models whose maker states it; absent means Kiln does not know, never that the machine has no probe."
   },
   "default": {
     "display_name": "Generic FDM Printer",
@@ -43,7 +44,8 @@
     ],
     "max_hotend_temp": 250,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "ender3": {
     "display_name": "Creality Ender 3 / Ender 3 Pro",
@@ -77,7 +79,8 @@
     ],
     "max_hotend_temp": 250,
     "max_bed_temp": 110,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1",
@@ -116,7 +119,8 @@
     ],
     "max_hotend_temp": 260,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "k1": {
     "display_name": "Creality K1",
@@ -155,7 +159,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "ender3_v2": {
     "display_name": "Creality Ender 3 V2",
@@ -189,7 +194,8 @@
     ],
     "max_hotend_temp": 250,
     "max_bed_temp": 110,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "sparkx_i7": {
     "display_name": "Creality SPARKX i7",
@@ -228,7 +234,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "k1_max": {
     "display_name": "Creality K1 Max",
@@ -267,7 +274,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "k1c": {
     "display_name": "Creality K1C",
@@ -306,7 +314,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "k1_se": {
     "display_name": "Creality K1 SE",
@@ -340,7 +349,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "k2": {
     "display_name": "Creality K2",
@@ -374,7 +384,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "k2_pro": {
     "display_name": "Creality K2 Pro",
@@ -413,7 +424,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "k2_plus": {
     "display_name": "Creality K2 Plus",
@@ -457,7 +469,8 @@
     ],
     "max_hotend_temp": 350,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "k2_se": {
     "display_name": "Creality K2 SE",
@@ -496,7 +509,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "creality_hi": {
     "display_name": "Creality Hi",
@@ -535,7 +549,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "ender3_v4": {
     "display_name": "Creality Ender-3 V4",
@@ -579,7 +594,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "ender3_v3": {
     "display_name": "Creality Ender-3 V3",
@@ -618,7 +634,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "ender3_v3_ke": {
     "display_name": "Creality Ender-3 V3 KE",
@@ -657,7 +674,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "ender3_v3_se": {
     "display_name": "Creality Ender-3 V3 SE",
@@ -691,7 +709,8 @@
     ],
     "max_hotend_temp": 260,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "ender3_v3_plus": {
     "display_name": "Creality Ender-3 V3 Plus",
@@ -730,7 +749,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "ender5_max": {
     "display_name": "Creality Ender-5 Max",
@@ -769,7 +789,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "cr10_se": {
     "display_name": "Creality CR-10 SE",
@@ -808,7 +829,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
@@ -852,7 +874,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "prusa_mk4": {
     "display_name": "Prusa MK4 / MK4S",
@@ -891,7 +914,8 @@
     ],
     "max_hotend_temp": 290,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "prusa_mini": {
     "display_name": "Prusa Mini / Mini+",
@@ -930,7 +954,8 @@
     ],
     "max_hotend_temp": 280,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
@@ -984,7 +1009,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "bambu_x1e": {
     "display_name": "Bambu Lab X1E",
@@ -1038,7 +1064,8 @@
     ],
     "max_hotend_temp": 320,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
@@ -1072,7 +1099,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "bambu_p2s": {
     "display_name": "Bambu Lab P2S",
@@ -1126,7 +1154,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
@@ -1175,7 +1204,19 @@
       }
     },
     "max_hotend_temp": 300,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": {
+      "detection_area_mm": [
+        226,
+        224,
+        256,
+        256
+      ],
+      "defeated_by": [
+        "spiral vase",
+        "print by object"
+      ]
+    }
   },
   "bambu_a2l": {
     "display_name": "Bambu Lab A2L",
@@ -1229,7 +1270,8 @@
       }
     },
     "max_hotend_temp": 300,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "bambu_h2s": {
     "display_name": "Bambu Lab H2S",
@@ -1303,7 +1345,8 @@
       }
     },
     "max_hotend_temp": 350,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "voron_2": {
     "display_name": "Voron 2.4 / Trident",
@@ -1352,7 +1395,8 @@
     ],
     "max_hotend_temp": 270,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "elegoo_neptune4": {
     "display_name": "Elegoo Neptune 4 / 4 Pro",
@@ -1386,7 +1430,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "elegoo_centauri_carbon": {
     "display_name": "Elegoo Centauri Carbon / Carbon 2",
@@ -1430,7 +1475,8 @@
     ],
     "max_hotend_temp": 320,
     "max_bed_temp": 110,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "elegoo_orangestorm_giga": {
     "display_name": "Elegoo OrangeStorm Giga",
@@ -1459,7 +1505,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3",
@@ -1508,7 +1555,8 @@
     ],
     "max_hotend_temp": 350,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "klipper_generic": {
     "display_name": "Generic Klipper Printer (Moonraker)",
@@ -1552,7 +1600,8 @@
     ],
     "max_hotend_temp": 260,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "ender5": {
     "display_name": "Creality Ender 5 / Ender 5 Plus",
@@ -1586,7 +1635,8 @@
     ],
     "max_hotend_temp": 260,
     "max_bed_temp": 110,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "cr10": {
     "display_name": "Creality CR-10 / CR-10S",
@@ -1620,7 +1670,8 @@
     ],
     "max_hotend_temp": 260,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "voron_0": {
     "display_name": "Voron 0 / 0.2",
@@ -1659,7 +1710,8 @@
     ],
     "max_hotend_temp": 270,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "ratrig_vcore3": {
     "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
@@ -1698,7 +1750,8 @@
     ],
     "max_hotend_temp": 285,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "elegoo_neptune3": {
     "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
@@ -1732,7 +1785,8 @@
     ],
     "max_hotend_temp": 260,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "anker_m5": {
     "display_name": "AnkerMake M5 / M5C",
@@ -1766,7 +1820,8 @@
     ],
     "max_hotend_temp": 260,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Pro",
@@ -1805,7 +1860,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "artillery_sw_x3_plus": {
     "display_name": "Artillery Sidewinder X3 Plus",
@@ -1844,7 +1900,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "sovol_sv06": {
     "display_name": "Sovol SV06",
@@ -1883,7 +1940,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "sovol_sv06_plus": {
     "display_name": "Sovol SV06 Plus",
@@ -1922,7 +1980,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "sovol_sv07": {
     "display_name": "Sovol SV07",
@@ -1961,7 +2020,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "sovol_sv07_plus": {
     "display_name": "Sovol SV07 Plus",
@@ -2000,7 +2060,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "flashforge_adventurer5m": {
     "display_name": "FlashForge Adventurer 5M / 5M Pro",
@@ -2034,7 +2095,8 @@
     ],
     "max_hotend_temp": 280,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "prusa_xl": {
     "display_name": "Prusa XL",
@@ -2078,7 +2140,8 @@
     ],
     "max_hotend_temp": 290,
     "max_bed_temp": 120,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
@@ -2112,7 +2175,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
@@ -2146,7 +2210,19 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 80,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": {
+      "detection_area_mm": [
+        156,
+        152,
+        180,
+        180
+      ],
+      "defeated_by": [
+        "spiral vase",
+        "print by object"
+      ]
+    }
   },
   "aon_m2_plus": {
     "display_name": "AON3D AON-M2+",
@@ -2220,7 +2296,8 @@
       565
     ],
     "max_hotend_temp": 500,
-    "max_bed_temp": 200
+    "max_bed_temp": 200,
+    "nozzle_clumping_probe": null
   },
   "qidi_plus4": {
     "display_name": "QIDI Plus 4",
@@ -2269,7 +2346,8 @@
       280
     ],
     "max_hotend_temp": 370,
-    "max_bed_temp": 120
+    "max_bed_temp": 120,
+    "nozzle_clumping_probe": null
   },
   "qidi_q1_pro": {
     "display_name": "QIDI Q1 Pro",
@@ -2318,7 +2396,8 @@
       240
     ],
     "max_hotend_temp": 350,
-    "max_bed_temp": 120
+    "max_bed_temp": 120,
+    "nozzle_clumping_probe": null
   },
   "qidi_x_max3": {
     "display_name": "QIDI X-Max 3",
@@ -2367,7 +2446,8 @@
       315
     ],
     "max_hotend_temp": 350,
-    "max_bed_temp": 120
+    "max_bed_temp": 120,
+    "nozzle_clumping_probe": null
   },
   "qidi_q2": {
     "display_name": "QIDI Q2",
@@ -2416,7 +2496,8 @@
       256
     ],
     "max_hotend_temp": 370,
-    "max_bed_temp": 120
+    "max_bed_temp": 120,
+    "nozzle_clumping_probe": null
   },
   "qidi_plus5": {
     "display_name": "QIDI Plus 5",
@@ -2485,7 +2566,8 @@
         "bed": 110,
         "fan": 30
       }
-    }
+    },
+    "nozzle_clumping_probe": null
   },
   "qidi_q2c": {
     "display_name": "QIDI Q2C",
@@ -2554,7 +2636,8 @@
         "bed": 110,
         "fan": 30
       }
-    }
+    },
+    "nozzle_clumping_probe": null
   },
   "qidi_max4": {
     "display_name": "QIDI Max 4",
@@ -2628,7 +2711,8 @@
         "bed": 90,
         "fan": 90
       }
-    }
+    },
+    "nozzle_clumping_probe": null
   },
   "qidi_x_smart3": {
     "display_name": "QIDI X-Smart 3",
@@ -2687,7 +2771,8 @@
         "bed": 80,
         "fan": 40
       }
-    }
+    },
+    "nozzle_clumping_probe": null
   },
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",
@@ -2731,7 +2816,8 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "nozzle_clumping_probe": null
   },
   "aon_hylo": {
     "display_name": "AON3D Hylo",
@@ -2820,7 +2906,8 @@
       450
     ],
     "max_hotend_temp": 500,
-    "max_bed_temp": 250
+    "max_bed_temp": 250,
+    "nozzle_clumping_probe": null
   },
   "intamsys_610ht": {
     "display_name": "INTAMSYS FUNMAT PRO 610HT",
@@ -2914,7 +3001,8 @@
       508
     ],
     "max_hotend_temp": 500,
-    "max_bed_temp": 300
+    "max_bed_temp": 300,
+    "nozzle_clumping_probe": null
   },
   "visionminer_22idex_v4": {
     "display_name": "Vision Miner 22 IDEX v4",
@@ -2978,7 +3066,8 @@
       450
     ],
     "max_hotend_temp": 500,
-    "max_bed_temp": 200
+    "max_bed_temp": 200,
+    "nozzle_clumping_probe": null
   },
   "bambu_h2d": {
     "display_name": "Bambu Lab H2D",
@@ -3052,7 +3141,8 @@
     ],
     "max_hotend_temp": 350,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "bambu_h2d_pro": {
     "display_name": "Bambu Lab H2D Pro",
@@ -3126,7 +3216,8 @@
     ],
     "max_hotend_temp": 350,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "bambu_h2c": {
     "display_name": "Bambu Lab H2C",
@@ -3200,7 +3291,8 @@
     ],
     "max_hotend_temp": 350,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   },
   "bambu_x2d": {
     "display_name": "Bambu Lab X2D",
@@ -3269,6 +3361,7 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null
   }
 }
