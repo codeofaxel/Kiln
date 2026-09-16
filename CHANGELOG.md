@@ -53,10 +53,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **Kiln reads your Bambu printer's nozzle clumping detection setting.**
-  Printer status and the pre-flight say whether it's on, off or automatic,
-  and warn that the probe can leave marks unless you slice with a purge
-  tower. Tested on the A1.
+- **Kiln checks your printer's own nozzle clumping detection before a print.**
+  Printer status and the pre-flight say whether it's on, off or automatic, and
+  warn when the sliced file, where you placed the part, or the print mode would
+  defeat the check. Every Bambu model that has the setting; a reading Kiln
+  cannot verify is reported as unknown, never as off.
+
+- **The "what's watching this print" summary reflects switches you turned off
+  on the machine.** A detector your printer reports as off stops being listed
+  as watching.
 
 - **Taking your printer apart? Ask Kiln first.** It tells you what to unplug,
   how many screws to expect and which key fits. Kiln Pro adds which screw goes
