@@ -4542,9 +4542,12 @@ class TestBambuAdapterReadPrintFile:
             adapter_with_mqtt.read_print_file("missing.3mf")
         mock_ftp_class.quit.assert_called_once()
 
-    def test_oversized_file_is_not_held_in_memory(
+    def test_oversized_file_is_refused_not_waved_through(
         self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        # None would read as "this backend cannot read back" and soft-pass --
+        # the one door the read-back ruling closed.  Over the cap raises, so
+        # the gate refuses with the override named.
         monkeypatch.setattr(BambuAdapter, "_READ_BACK_CAP_BYTES", 8)
 
         def _retr(cmd: str, callback: Any) -> str:
@@ -4553,8 +4556,10 @@ class TestBambuAdapterReadPrintFile:
             return "226"
 
         mock_ftp_class.retrbinary = mock.MagicMock(side_effect=_retr)
-        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
-            assert adapter_with_mqtt.read_print_file("huge.3mf") is None
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="read-back cap"):
+            adapter_with_mqtt.read_print_file("huge.3mf")
+        mock_ftp_class.quit.assert_called_once()
 
 
 class TestBambuAdapterDeleteFileOnA1Storage:

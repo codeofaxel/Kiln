@@ -6556,7 +6556,9 @@ class BambuAdapter(PrinterAdapter):
         :meth:`PrinterAdapter.read_print_file`.  Reads from the same
         storage directory :meth:`list_files` lists and :meth:`upload_file`
         writes, so the bytes are the ones the ``project_file`` command
-        would run.  ``None`` past :attr:`_READ_BACK_CAP_BYTES`.
+        would run.  A file past :attr:`_READ_BACK_CAP_BYTES` raises, so
+        the gate refuses it the way it refuses any file it could not
+        inspect; ``None`` is never returned here.
 
         Raises:
             PrinterError: If the connection or the transfer fails.
@@ -6588,11 +6590,15 @@ class BambuAdapter(PrinterAdapter):
                     cause=exc,
                 ) from exc
             if too_big:
-                logger.warning(
-                    "read_print_file: %s exceeds %d bytes; not inspected",
-                    path, self._READ_BACK_CAP_BYTES,
+                # A file Kiln will not hold is a file Kiln could not inspect,
+                # and the ruling is that such a start is refused, not waved
+                # through: raise, so the gate takes its refuse-with-override
+                # path rather than reading None as "no read-back here".
+                raise PrinterError(
+                    f"{file_name} is larger than the {self._READ_BACK_CAP_BYTES // (1024 * 1024)} MB "
+                    "read-back cap, so Kiln could not inspect it; start it from the printer's "
+                    "own screen or re-slice through Kiln."
                 )
-                return None
             return b"".join(chunks)
         finally:
             try:

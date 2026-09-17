@@ -356,6 +356,19 @@ class TestFileOnPrinterIsRead:
         # consumed: the next start is refused again
         assert a.start_print("x.gcode.3mf").success is False
 
+    def test_an_oversized_printer_copy_is_refused_through_the_same_path(self):
+        class _TooBig(_ReadsBackAdapter):
+            def read_print_file(self, file_name: str) -> bytes | None:
+                from kiln.printers.base import PrinterError
+
+                raise PrinterError(f"{file_name} is larger than the 256 MB read-back cap")
+
+        _TooBig.__abstractmethods__ = frozenset()
+        a = _TooBig(None)
+        r = a.start_print("huge.gcode.3mf")
+        assert r.success is False and a.impl_calls == []
+        assert "read-back cap" in r.message and "force_print_oversize" in r.message
+
     def test_read_back_failure_verdict_shape(self):
         class _Broken(_ReadsBackAdapter):
             def read_print_file(self, file_name: str) -> bytes | None:

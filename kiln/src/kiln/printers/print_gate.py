@@ -681,9 +681,10 @@ def _read_back_refusal(
             "Upload the file again through Kiln so it is checked on the way in.",
         ],
         "override_hint": (
-            "If you know this file is safe, a human can call force_print_oversize "
-            "for this printer and re-issue the print once; an autonomous agent "
-            "cannot self-approve it."
+            "If you know this file is safe, the single-use human override, "
+            "force_print_oversize, covers this block too: a human calls it for this "
+            "printer and re-issues the print once; an autonomous agent cannot "
+            "self-approve it."
         ),
     }
 
