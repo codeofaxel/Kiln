@@ -13,6 +13,8 @@ kiln_pro.design_brief
 kiln_pro.design_brief.context
 kiln_pro.design_brief.explicit_attach
 kiln_pro.design_versions.decoration_presets
+kiln_pro.device_intelligence
+kiln_pro.device_intelligence.hms_catalog
 kiln_pro.engineering.calibration_coach
 kiln_pro.engineering.running_clearance
 kiln_pro.enterprise
@@ -22,6 +24,7 @@ kiln_pro.fasteners_intelligence
 kiln_pro.hosted_intelligence
 kiln_pro.intent_verification
 kiln_pro.intent_verification.load_intent_sidecar
+kiln_pro.motion
 kiln_pro.nozzle_intelligence
 kiln_pro.nozzle_intelligence.capacity
 kiln_pro.nozzle_intelligence.sensor_signal

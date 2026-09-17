@@ -3351,7 +3351,7 @@ def light(node: str, mode: str, json_mode: bool) -> None:
 
 @cli.group()
 def filament() -> None:
-    """Load, unload, or purge filament (purge doubles as the clog test).
+    """Load, unload, purge, or wipe (purge doubles as the clog test).
 
     Each subcommand runs the same tool the MCP server exposes, so the
     safety gate — not mid-print, the printer's temperature ceiling, the
@@ -3359,6 +3359,13 @@ def filament() -> None:
     both doors, as is the answer: what the printer could honestly report,
     not that a command was sent.
     """
+    # These commands run the server's own tool functions in a bare CLI
+    # process, so this door -- like the MCP server, the REST API and the
+    # bridge -- resolves ``~/.kiln/config.yaml`` first.  Without it every
+    # verb answered "No printer configured" on a configured machine.
+    from kiln.server import ensure_runtime_config
+
+    ensure_runtime_config()
 
 
 def _emit_filament_result(result: dict, json_mode: bool) -> None:
@@ -3368,7 +3375,8 @@ def _emit_filament_result(result: dict, json_mode: bool) -> None:
         detail = result.get("filament") or {}
         if not json_mode and detail.get("error_hint"):
             msg = f"{msg}\n  printer fault: {detail.get('error_code')} — {detail['error_hint']}"
-        click.echo(format_error(msg or "Filament operation failed.", json_mode=json_mode))
+        code = (err.get("code") if isinstance(err, dict) else None) or "ERROR"
+        click.echo(format_error(msg or "Filament operation failed.", code=code, json_mode=json_mode))
         sys.exit(1)
     click.echo(format_response("success", data=result, json_mode=json_mode))
 
@@ -3379,16 +3387,17 @@ def _emit_filament_result(result: dict, json_mode: bool) -> None:
 @click.option("--temp", "temperature", type=float, default=None, help="Hotend target (°C).")
 @click.option("--length", "length_mm", type=float, default=None, help="Feed distance for generic G-code backends (mm).")
 @click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for the AMS to confirm.")
+@click.option("--keep-hot", "keep_hot", is_flag=True, help="Leave the heater on afterwards (default: off).")
 @click.option("--printer", "printer_name", default=None, help="Target printer name.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def filament_load(slot, material, temperature, length_mm, wait_seconds, printer_name, json_mode) -> None:
+def filament_load(slot, material, temperature, length_mm, wait_seconds, keep_hot, printer_name, json_mode) -> None:
     """Feed filament to the nozzle."""
     try:
         from kiln.plugins.filament_handling_tools import load_filament as _load
 
         _emit_filament_result(
             _load(slot=slot, material=material, temperature=temperature, length_mm=length_mm,
-                  wait_seconds=wait_seconds, printer_name=printer_name),
+                  wait_seconds=wait_seconds, keep_hot=keep_hot, printer_name=printer_name),
             json_mode,
         )
     except click.ClickException:
@@ -3405,16 +3414,17 @@ def filament_load(slot, material, temperature, length_mm, wait_seconds, printer_
 @click.option("--temp", "temperature", type=float, default=None, help="Hotend target (°C).")
 @click.option("--length", "length_mm", type=float, default=None, help="Retract distance for generic G-code backends (mm).")
 @click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for the AMS to confirm.")
+@click.option("--keep-hot", "keep_hot", is_flag=True, help="Leave the heater on afterwards (default: off).")
 @click.option("--printer", "printer_name", default=None, help="Target printer name.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def filament_unload(material, temperature, length_mm, wait_seconds, printer_name, json_mode) -> None:
+def filament_unload(material, temperature, length_mm, wait_seconds, keep_hot, printer_name, json_mode) -> None:
     """Pull filament out of the hotend."""
     try:
         from kiln.plugins.filament_handling_tools import unload_filament as _unload
 
         _emit_filament_result(
             _unload(material=material, temperature=temperature, length_mm=length_mm,
-                    wait_seconds=wait_seconds, printer_name=printer_name),
+                    wait_seconds=wait_seconds, keep_hot=keep_hot, printer_name=printer_name),
             json_mode,
         )
     except click.ClickException:
@@ -3432,16 +3442,17 @@ def filament_unload(material, temperature, length_mm, wait_seconds, printer_name
 @click.option("--temp", "temperature", type=float, default=None, help="Hotend target (°C).")
 @click.option("--slot", type=int, default=None, help="AMS tray whose temperature window applies (Bambu).")
 @click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for a fault code after the purge.")
+@click.option("--keep-hot", "keep_hot", is_flag=True, help="Leave the heater on afterwards (default: off).")
 @click.option("--printer", "printer_name", default=None, help="Target printer name.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def filament_purge(length_mm, material, temperature, slot, wait_seconds, printer_name, json_mode) -> None:
+def filament_purge(length_mm, material, temperature, slot, wait_seconds, keep_hot, printer_name, json_mode) -> None:
     """Heat and extrude a short length — the clog test."""
     try:
         from kiln.plugins.filament_handling_tools import purge_filament as _purge
 
         _emit_filament_result(
             _purge(length_mm=length_mm, material=material, temperature=temperature, slot=slot,
-                   wait_seconds=wait_seconds, printer_name=printer_name),
+                   wait_seconds=wait_seconds, keep_hot=keep_hot, printer_name=printer_name),
             json_mode,
         )
     except click.ClickException:
@@ -3450,6 +3461,188 @@ def filament_purge(length_mm, material, temperature, slot, wait_seconds, printer
         raise
     except Exception as exc:
         click.echo(format_error(f"Failed to purge filament: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@filament.command("wipe")
+@click.option("--material", default=None, help="Material name, e.g. PLA — picks a temperature when none is given.")
+@click.option("--temp", "temperature", type=float, default=None, help="Hotend target (°C).")
+@click.option("--slot", type=int, default=None, help="AMS tray whose temperature window applies (Bambu).")
+@click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for a fault code after the wipe.")
+@click.option("--keep-hot", "keep_hot", is_flag=True, help="Leave the heater on afterwards (default: off).")
+@click.option("--plate-clear", "plate_clear", is_flag=True, help="You have looked: the plate is empty. Read on every call by a wipe whose plan presses the plate.")
+@click.option("--step", type=int, default=None, help="Send only this step of the wipe's plan (1-based); the answer describes the next one.")
+@click.option("--plan", "plan_only", is_flag=True, help="Describe the steps; send nothing.")
+@click.option("--printer", "printer_name", default=None, help="Target printer name.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def filament_wipe(material, temperature, slot, wait_seconds, keep_hot, plate_clear, step, plan_only, printer_name, json_mode) -> None:
+    """Clean the nozzle tip on the printer's own wipe pad (refused where Kiln has no verified position)."""
+    try:
+        from kiln.plugins.filament_handling_tools import wipe_nozzle as _wipe
+
+        _emit_filament_result(
+            _wipe(material=material, temperature=temperature, slot=slot,
+                  wait_seconds=wait_seconds, keep_hot=keep_hot, plate_clear=plate_clear,
+                  step=step, plan_only=plan_only, printer_name=printer_name),
+            json_mode,
+        )
+    except click.ClickException:
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to wipe the nozzle: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.command("home")
+@click.option("--axes", default="XYZ", show_default=True, help="Any of X, Y, Z.")
+@click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for a fault code afterwards.")
+@click.option("--step", type=int, default=None, help="Send only this step (1-based); the answer describes the next one.")
+@click.option("--plan", "plan_only", is_flag=True, help="Describe the steps; send nothing.")
+@click.option("--plate-clear", "plate_clear", is_flag=True, help="You have looked: the plate is empty. Needed where Z homes onto the plate.")
+@click.option("--printer", "printer_name", default=None, help="Target printer name.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def home_cmd(axes, wait_seconds, step, plan_only, plate_clear, printer_name, json_mode) -> None:
+    """Home the print head — what the printer's own Home button does.
+
+    Runs the same tool the MCP server exposes (home_axes): refused while a
+    print runs or is paused; a vendor-cited sequence where Kiln has one for
+    the model, the generic G28 and an honest "path unknown" elsewhere.
+    """
+    from kiln.server import ensure_runtime_config
+
+    ensure_runtime_config()
+    try:
+        from kiln.plugins.homing_tools import home_axes as _home
+
+        result = _home(axes=axes, wait_seconds=wait_seconds, step=step, plan_only=plan_only,
+                       plate_clear=plate_clear, printer_name=printer_name)
+        if not result.get("success", False):
+            err = result.get("error") or {}
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+            click.echo(format_error(msg or "Homing failed.", json_mode=json_mode))
+            sys.exit(1)
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to home: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.command("park")
+@click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for a fault code afterwards.")
+@click.option("--step", type=int, default=None, help="Send only this step (1-based); the answer describes the next one.")
+@click.option("--plan", "plan_only", is_flag=True, help="Describe the steps; send nothing.")
+@click.option("--plate-clear", "plate_clear", is_flag=True, help="You have looked: the plate is empty. Lets a park cross a plate the record says holds a part.")
+@click.option("--printer", "printer_name", default=None, help="Target printer name.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def park_cmd(wait_seconds, step, plan_only, plate_clear, printer_name, json_mode) -> None:
+    """Move the head somewhere safe, away from the plate — never a Z touch.
+
+    Runs the same tool the MCP server exposes (park_head): raise, home X,
+    travel to the model's own off-plate spot; the firmware's own X/Y home
+    where Kiln has no vendor spot (Z is left alone on every machine whose
+    Z home presses onto the plate). Needs a printer_model the catalogue
+    knows. Use --plan first, then --step 1, 2, ... with someone beside the
+    machine.
+    """
+    from kiln.server import ensure_runtime_config
+
+    ensure_runtime_config()
+    try:
+        from kiln.plugins.homing_tools import park_head as _park
+
+        result = _park(wait_seconds=wait_seconds, step=step, plan_only=plan_only,
+                       plate_clear=plate_clear, printer_name=printer_name)
+        if not result.get("success", False):
+            err = result.get("error") or {}
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+            click.echo(format_error(msg or "Park failed.", json_mode=json_mode))
+            sys.exit(1)
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to park: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.group("plate")
+def plate_group() -> None:
+    """What is on the build plate, as Kiln records it (status, clear)."""
+
+
+def _emit_plate_result(result: dict, json_mode: bool, *, failed: str) -> None:
+    if not result.get("success", False):
+        err = result.get("error") or {}
+        msg = err.get("message") if isinstance(err, dict) else str(err)
+        click.echo(format_error(msg or failed, json_mode=json_mode))
+        sys.exit(1)
+    click.echo(format_response("success", data=result, json_mode=json_mode))
+
+
+@plate_group.command("status")
+@click.option("--printer", "printer_name", default=None, help="Target printer name.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def plate_status_cmd(printer_name, json_mode) -> None:
+    """Show what Kiln knows is on the plate — the same answer the plate_status tool gives.
+
+    occupied: the file a print left there, since when, how tall (where Kiln
+    could read it); clear: a person said so; unknown: no record. No printer
+    round trip.
+    """
+    from kiln.server import ensure_runtime_config
+
+    ensure_runtime_config()
+    try:
+        from kiln.plugins.homing_tools import run_plate
+
+        _emit_plate_result(run_plate(printer_name=printer_name, action="status"), json_mode,
+                           failed="Could not read the plate record.")
+    except click.ClickException:
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to read the plate record: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@plate_group.command("clear")
+@click.option("--note", default="", help="Anything worth writing down (what was removed, who looked).")
+@click.option("--printer", "printer_name", default=None, help="Target printer name.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def plate_clear_cmd(note, printer_name, json_mode) -> None:
+    """You have looked: the plate is empty. Record it.
+
+    A person's statement, never an agent's -- there is no MCP tool for
+    this on purpose. The plate stays clear until the next print starts, so
+    home and park stop asking whether a part stands in the head's row. A Z
+    home that presses the nozzle onto the plate still asks every time
+    (kiln home --plate-clear): the record cannot see a print started from
+    the printer's own screen, and that press is the one motion it must not
+    answer for.
+    """
+    from kiln.server import ensure_runtime_config
+
+    ensure_runtime_config()
+    try:
+        from kiln.plugins.homing_tools import run_plate
+
+        _emit_plate_result(run_plate(printer_name=printer_name, action="clear", note=note), json_mode,
+                           failed="The plate could not be recorded as clear.")
+    except click.ClickException:
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to record the plate as clear: {exc}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -9823,6 +10016,173 @@ def trim(open_sessions: int | None, assume_yes: bool, force: bool, json_mode: bo
                 click.echo(f"  PID {item['pid']}: {item['error']}", err=True)
 
 
+def _station_verdicts(adapter: Any) -> tuple[dict[str, Any] | None, dict[str, tuple[bool, str]]]:
+    """The model's station record and the gate's verdict for each motion.
+
+    The same ``_station_supports`` every filament and homing door consults,
+    asked once per capability, so what ``kiln doctor`` promises is what the
+    tools do.  A record is not a capability: eight Bambu models carry one,
+    and on six of them every motion refuses by name.
+    """
+    station: dict[str, Any] | None = None
+    try:
+        station = adapter.purge_station()
+    except Exception as exc:  # noqa: BLE001 -- a lookup fault reads as "no record"
+        logger.debug("Purge station lookup failed: %s", exc)
+    verdicts: dict[str, tuple[bool, str]] = {}
+    for capability in ("purge", "wipe", "park", "home_z", "home_z_on_plate"):
+        try:
+            ok, why = adapter._station_supports(station, capability)
+        except Exception as exc:  # noqa: BLE001 -- a gate fault is a refusal, never a promise
+            ok, why = False, f"the motion gate could not be read: {exc}"
+        verdicts[capability] = (bool(ok), str(why).rstrip(". "))
+    return station, verdicts
+
+
+def _short_reason(why: str, limit: int = 200) -> str:
+    """A refusal reason cut to one doctor line; the tool's own refusal carries it whole."""
+    text = " ".join(str(why).split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0]
+    return cut.rstrip(",;:-") + "…"
+
+
+def _doctor_filament_where(adapter: Any) -> tuple[str, bool]:
+    """``(sentence, warn)`` for the filament_handling line: where a purge goes
+    and whether the wipe door works, as the gate decides, not as the presence
+    of a record suggests."""
+    station, verdicts = _station_verdicts(adapter)
+    purge_ok, why_purge = verdicts["purge"]
+    wipe_ok, why_wipe = verdicts["wipe"]
+    model = (station or {}).get("printer_id") or str(getattr(adapter, "_printer_model", "") or "this model")
+    screen = "wipe from the printer's own screen"
+    # What the wipe costs on this model, as its plan says: a person's
+    # plate_clear on every call where the plan presses the plate, and step
+    # mode only until someone has run it on a real machine.  Key names
+    # only; the reasons are the plan's own words.
+    wipe = "wipe_nozzle (kiln filament wipe) runs its wipe-pad pass"
+    plan_for = getattr(adapter, "_plan_for", None)
+    doc = plan_for("wipe", axes="XY") if wipe_ok and callable(plan_for) else None
+    doc = doc if isinstance(doc, dict) else {}
+    details = doc.get("details") if isinstance(doc.get("details"), dict) else {}
+    contact = details.get("needs_plate_clear")
+    if isinstance(contact, str) and contact.strip():
+        wipe += (
+            " -- only with plate_clear (kiln filament wipe --plate-clear), every time: "
+            f"{model} {_short_reason(contact, 160)}"
+        )
+    if isinstance(doc.get("step_mode_only"), dict):
+        wipe += (
+            " -- in step mode only (kiln filament wipe --plan, then --step N) until someone has run it "
+            "on a real machine; a full run refuses"
+        )
+    if purge_ok and wipe_ok:
+        return f"purge and load park over {model}'s own purge chute; {wipe}", False
+    if purge_ok:
+        return (
+            f"purge and load park over {model}'s own purge chute; wipe_nozzle refuses "
+            f"({_short_reason(why_wipe)}) — {screen}"
+        ), True
+    if wipe_ok:
+        return (
+            f"purge and load extrude in place on {model} and say so "
+            f"({_short_reason(why_purge, 120)}); {wipe}"
+        ), False
+    return (
+        f"no motion Kiln can drive on {model}: purge extrudes in place and says so, and "
+        f"wipe_nozzle refuses ({_short_reason(why_wipe)}) — {screen}"
+    ), True
+
+
+def _doctor_homing_how(adapter: Any) -> tuple[str, bool]:
+    """``(detail, warn)`` for the homing line -- home_axes AND park_head, each as
+    the gate decides for this model, or the firmware's own routine where the
+    backend has no vendor sequence."""
+    from kiln.printers.base import PrinterAdapter
+
+    jog = "use the screen's jog controls, Z up first (its Home button descends the nozzle)"
+    if not adapter.capabilities.can_send_gcode:
+        return f"home_axes (kiln home) and park_head (kiln park): not available on this backend — {jog}", True
+    if type(adapter)._home_axes_impl is PrinterAdapter._home_axes_impl:
+        # No vendor sequence on this backend: the firmware's own routine,
+        # gated by the catalogue's motion record for the declared model.
+        confirms = (
+            " and confirms it from the firmware's homed flags"
+            if type(adapter)._read_homed_axes is not PrinterAdapter._read_homed_axes
+            else "; reported as accepted (this firmware does not report a homed flag)"
+        )
+        motion = None
+        try:
+            motion = adapter.motion_facts()
+        except Exception as exc:  # noqa: BLE001 -- doctor reports, never crashes
+            logger.debug("Motion facts lookup failed: %s", exc)
+        if motion is None:
+            declared = str(adapter.declared_printer_model() or "").strip()
+            return (
+                (f"home_axes (kiln home) and park_head (kiln park): no motion record for printer_model "
+                 f"{declared!r}" if declared
+                 else "home_axes (kiln home) and park_head (kiln park): no printer_model is declared for this printer")
+                + " -- home Z and park refuse until one names a catalogue row (run `kiln setup`, or set "
+                "printer_model in config.yaml); home X/Y works"
+            ), True
+        read = motion.machine_read_fields
+        machine = f" (read off this machine itself: {', '.join(read)})" if read else ""
+        no_channel = ""
+        if not read and motion.needs_machine_fill() and (
+            type(adapter)._read_machine_motion_source is PrinterAdapter._read_machine_motion_source
+            and getattr(adapter, "get_printer_config", None) is None
+        ):
+            # The row has blanks a machine could fill, and Kiln has no reader
+            # for this backend's firmware (OctoPrint's REST API relays commands
+            # one way; Prusa Link and the Elegoo protocol carry no reply
+            # channel; RepRapFirmware's object model is not read yet).
+            no_channel = ("; the record's blanks stay the catalogue's -- Kiln has no reader for this "
+                          "backend's own firmware reports")
+        if motion.z_home_descends_onto_plate:
+            return (
+                f"home_axes (kiln home): hands the job to the firmware's own homing routine{confirms}; "
+                f"the catalogue record for {motion.printer_id}{machine} says Z homes by {motion.describe_z_home()}, "
+                "so home Z asks for plate_clear first (kiln home --plate-clear) and park_head (kiln park) "
+                f"homes X and Y only, Z untouched{no_channel}"
+            ), False
+        return (
+            f"home_axes (kiln home): hands the job to the firmware's own homing routine{confirms}; "
+            f"the catalogue record for {motion.printer_id}{machine} says Z homes by {motion.describe_z_home()}, "
+            f"so home Z runs unasked and park_head (kiln park) is the firmware's own full home{no_channel}"
+        ), False
+    station, verdicts = _station_verdicts(adapter)
+    park_ok, why_park = verdicts["park"]
+    z_ok, why_z = verdicts["home_z"]
+    on_plate_ok, _ = verdicts["home_z_on_plate"]
+    model = (station or {}).get("printer_id") or str(getattr(adapter, "_printer_model", "") or "this model")
+    if not park_ok:
+        return (
+            f"home_axes (kiln home) and park_head (kiln park): no verified motion sequence for "
+            f"{model} ({_short_reason(why_park)}); both refuse — {jog}"
+        ), True
+    park = (
+        f"park_head (kiln park) is the same sequence without the Z touch -- raise, home X, "
+        f"off-plate spot over {model}'s own purge chute"
+    )
+    if z_ok:
+        return (
+            f"home_axes (kiln home): runs {model}'s own start-sequence homing (raise first, X, "
+            f"then Z the machine's own way, off the plate) and parks over the chute; {park}"
+        ), False
+    if on_plate_ok:
+        return (
+            f"home_axes (kiln home): homes X and Y and parks on {model}'s own figures; its Z home "
+            "presses the nozzle onto the PLATE, so home_axes runs it only with plate_clear "
+            f"(kiln home --plate-clear) after you have looked; {park}"
+        ), True
+    return (
+        f"home_axes (kiln home): homes X and Y and parks on {model}'s own figures; home Z refuses "
+        f"({_short_reason(why_z)}) — home Z from the screen only once you have seen the plate is "
+        f"clear; {park}"
+    ), True
+
+
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.option("--deep", is_flag=True, help="Run deep network diagnostics when printer is unreachable.")
@@ -10044,13 +10404,22 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
         if verify_adapter is not None:
             try:
                 if verify_adapter.capabilities.can_handle_filament:
+                    # Where the purge goes, and whether the wipe door works,
+                    # both hang on the motion gate's verdict for the declared
+                    # model -- the same _station_supports the tools consult,
+                    # never the bare presence of a record.  Reported here so
+                    # a user learns BEFORE a purge whether it will park over
+                    # the chute or extrude in place, and whether wipe_nozzle
+                    # will run or refuse.
+                    where, warn = _doctor_filament_where(verify_adapter)
                     checks.append({
                         "name": "filament_handling",
                         "ok": True,
+                        "warn": warn,
                         "detail": (
                             "load / unload / purge available "
                             "(kiln filament …, or the load_filament / "
-                            "unload_filament / purge_filament tools)"
+                            f"unload_filament / purge_filament tools); {where}"
                         ),
                     })
                 else:
@@ -10072,6 +10441,59 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                         "detail": f"check skipped: {exc}",
                     }
                 )
+
+            # 6d. Homing — the Home button, from Kiln.  Reported so a user
+            #     learns BEFORE pressing it whether this model runs its own
+            #     vendor sequence, sends a generic G28, or refuses -- as the
+            #     motion gate decides, so doctor never promises a home or a
+            #     park the tool refuses.
+            try:
+                detail, warn = _doctor_homing_how(verify_adapter)
+                checks.append({"name": "homing", "ok": True, "warn": warn, "detail": detail})
+            except Exception as exc:
+                logger.debug("Homing check failed: %s", exc)
+
+            # 6e. The plate record -- what Kiln knows is on the build plate.
+            #     Home and park cross the head's row a vendor raise above the
+            #     plate; a recorded part taller than that makes both refuse.
+            #     Reported so the person sees the record BEFORE a refusal.
+            try:
+                from kiln.plate_state import plate_occupancy, raise_clearance_mm
+
+                plate = plate_occupancy(verify_adapter)
+                clearance = None
+                with contextlib.suppress(Exception):
+                    clearance = raise_clearance_mm(verify_adapter.purge_station())
+                if clearance is None and callable(getattr(verify_adapter, "_plan_for", None)):
+                    # No local record: the served park plan carries the raise.
+                    with contextlib.suppress(Exception):
+                        doc = verify_adapter._plan_for("park", axes="XY") or {}
+                        raw = doc.get("raise_clearance_mm")
+                        clearance = float(raw) if isinstance(raw, (int, float)) else None
+                if plate.occupied:
+                    height = plate.job.max_z_mm if plate.job else None
+                    if clearance is not None and height is not None and height >= clearance:
+                        verdict = (f"; taller than the {clearance:g} mm raise, so home and park "
+                                   "refuse until `kiln plate clear`")
+                    elif height is None:
+                        verdict = "; height unknown, so home and park say the row is crossed low"
+                    else:
+                        verdict = f"; below the {clearance:g} mm raise" if clearance is not None else ""
+                    detail = f"occupied: {plate.describe()}{verdict}"
+                    warn = True
+                elif plate.clear:
+                    detail = (f"clear: {plate.describe()}; stays clear until the next print starts, "
+                              "so home and park stop asking about the row (a Z home onto the plate "
+                              "still asks every time)")
+                    warn = False
+                else:
+                    detail = ("unknown: Kiln has no record of what is on the plate; home and park say "
+                              "the row is crossed low, `kiln plate clear` answers that once; a Z home "
+                              "that presses the nozzle onto the plate asks every time")
+                    warn = False
+                checks.append({"name": "plate", "ok": True, "warn": warn, "detail": detail})
+            except Exception as exc:
+                logger.debug("Plate record check failed: %s", exc)
 
         # Prusa-specific diagnostics for first-run clarity.
         if str(printer_cfg.get("type", "")).strip().lower() == "prusalink":

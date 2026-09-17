@@ -1835,6 +1835,12 @@ class _SlicerToolsPlugin:
                     "profile_path": effective_profile,
                     "message": outer_message,
                 }
+                # Top-level beside the message, as start_print carries it:
+                # this door composes its own message, so the reader would
+                # otherwise have to open the nested print block to learn
+                # that the coming slam is the filament cutter.
+                if verdict.what_you_will_see:
+                    resp["what_you_will_see"] = list(verdict.what_you_will_see)
                 if validation_summary is not None:
                     resp["validation"] = validation_summary
                 if adhesion_rec:

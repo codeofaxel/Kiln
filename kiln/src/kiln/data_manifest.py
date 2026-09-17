@@ -126,6 +126,16 @@ PUBLIC_PROFILE_FIELDS: frozenset[str] = frozenset(
         # machine whose maker states none, which is "Kiln does not know",
         # never "this machine has no probe".
         "nozzle_clumping_probe",
+        # The physical facts that decide whether Kiln may move the head on an
+        # idle machine that may still hold a part: which part moves in Z, how
+        # Z finds its datum and where, whether the firmware refuses an
+        # unhomed move, the commanded Z ceiling, the vendor's park verb.  A
+        # refusal built on them ("this printer finds Z by pressing the nozzle
+        # onto the plate") has to work offline, so the block is public at
+        # every tier; each field carries its provenance, and a fact that
+        # rests on a community post is stored as ``null`` with the hearsay in
+        # the note.  Schema and vocabulary: kiln.motion_facts.
+        "motion",
     }
 )
 

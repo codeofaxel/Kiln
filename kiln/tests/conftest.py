@@ -1000,6 +1000,55 @@ def _no_real_pypi_check(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _public_fault_readings_only(monkeypatch):
+    """Every test reads a Bambu fault code from public Kiln's own tables.
+
+    ``kiln.printers.bambu.read_bambu_fault`` asks kiln-pro first, through
+    ``kiln._pro_fault_bridge``, and kiln-pro answers by the machine's own
+    licence.  On a laptop with kiln-pro installed beside this checkout that
+    made a public test's answer depend on which kiln-pro was on the path and
+    whose key was in the keychain -- a licensed machine saw the private
+    reading where CI saw the public line, and the same assertion passed on
+    one and failed on the other.
+
+    So the bridge is silent by default, and a test that wants kiln-pro's
+    answer patches ``decode_fault`` itself with the row it is testing
+    (``tests/test_fault_reading_doors.py`` does).  A later ``monkeypatch``
+    in the test body overrides this one for that test.
+    """
+    import kiln._pro_fault_bridge as fault_bridge
+
+    monkeypatch.setattr(fault_bridge, "decode_fault", lambda *args, **kwargs: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_bambu_hms_text_fetch(monkeypatch):
+    """Keep the Bambu fault-sentence lookup off the network, suite-wide.
+
+    Same class as ``_no_real_pypi_check`` above.  Every Bambu status read
+    warms the vendor's fault-sentence table in a daemon thread
+    (``kiln.printers.bambu_hms_text``), keyed by the serial's first three
+    characters -- so any test that builds a Bambu state would otherwise ask
+    ``e.bambulab.com`` for the table for device type ``TES`` and, on a real
+    answer, write it under ``~/.kiln/bambu_hms/``.  The fetch is stubbed to
+    "no table", which leaves the thread spawn, the in-flight guard and the
+    cache read exercised while no bytes leave the box; the in-memory tables
+    are cleared on both sides so a test that seeds one cannot leak it into
+    the next.
+    """
+    try:
+        from kiln.printers import bambu_hms_text
+    except ImportError:  # pragma: no cover — module absent
+        yield
+        return
+
+    monkeypatch.setattr(bambu_hms_text, "_fetch_table", lambda device_type: None)
+    bambu_hms_text._reset_for_tests()
+    yield
+    bambu_hms_text._reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _restore_kiln_pro_stubs():
     """Undo ``kiln_pro`` stubs a test installs directly into ``sys.modules``.
 

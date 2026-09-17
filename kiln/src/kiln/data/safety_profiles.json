@@ -83,7 +83,7 @@
       220,
       300
     ],
-    "notes": "Standard Ender 5 dimensions (220x220x300). Ender 5 Plus users should create a custom profile with 350x350x400. PTFE hotend - same hotend caution as Ender 3; see variants.",
+    "notes": "Standard Ender 5 dimensions (220x220x300). Ender 5 Plus users should create a custom profile with 350x350x400. PTFE hotend - same hotend caution as Ender 3; see variants. Motion, from the vendor's own comparison of the Ender-5, Ender-5 Plus and Ender-5 Pro: a cube frame whose BED moves in Z ('The Z-axis is mounted in the middle of the bed'), so an idle Z home lifts the plate toward the nozzle. The Ender 5 and 5 Pro home Z on a switch; the Ender 5 Plus ships a BLTouch and homes Z on a probe pressed onto the plate -- has_abl false here describes the 5 / 5 Pro, not the Plus.",
     "variants": {
       "e3d_revo_cr_reflashed": {
         "display_name": "Creality Ender 5 / Pro / Plus + E3D Revo CR (firmware reflashed)",
@@ -302,7 +302,7 @@
       260,
       300
     ],
-    "notes": "Creality Hi dimensions (260x260x300). CoreXY, direct drive, open frame."
+    "notes": "Creality Hi dimensions (260x260x300). i3-style bed-slinger with a dual-Z gantry (the vendor's own Klipper config reads 'kinematics: cartesian' with two Z steppers and z_tilt; Z travel position_max 310). The head moves in Z; earlier rows called it CoreXY. Direct drive, open frame."
   },
   "ender3_v4": {
     "display_name": "Creality Ender-3 V4",
@@ -498,7 +498,7 @@
       256,
       256
     ],
-    "notes": "Enclosed CoreXY. Hardened nozzle. AMS multi-material. LiDAR first-layer inspection."
+    "notes": "Enclosed CoreXY. Hardened nozzle. AMS multi-material. LiDAR first-layer inspection. Build height: the vendor's 256 is 'as far as the printer's tool head can go on the XYZ three axes'; Bambu Studio's stock printable_height is 250, kept as a debris buffer 'to prevent heatbed damage caused by collisions with foreign objects', and the vendor end G-code's G1 Z250 is that stock ceiling, not the reach (the vendor's own print-volume page)."
   },
   "bambu_x1e": {
     "display_name": "Bambu Lab X1E",
@@ -513,7 +513,7 @@
       256,
       256
     ],
-    "notes": "Enclosed CoreXY, enterprise variant. Active heated chamber (40-60C). Factory hardened-steel nozzle (abrasive-ready out of the box). Full AMS multi-material. LiDAR + AI first-layer inspection. 320C hotend ceiling (vs 300C X1C) for PPS/PPA at the top of their window."
+    "notes": "Enclosed CoreXY, enterprise variant. Active heated chamber (40-60C). Factory hardened-steel nozzle (abrasive-ready out of the box). Full AMS multi-material. LiDAR + AI first-layer inspection. 320C hotend ceiling (vs 300C X1C) for PPS/PPA at the top of their window. Build height: the vendor's 256 is 'as far as the printer's tool head can go on the XYZ three axes'; Bambu Studio's stock printable_height is 250, kept as a debris buffer 'to prevent heatbed damage caused by collisions with foreign objects', and the vendor end G-code's G1 Z250 is that stock ceiling, not the reach (the vendor's own print-volume page)."
   },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
@@ -528,7 +528,7 @@
       256,
       256
     ],
-    "notes": "Enclosed CoreXY. Same hotend as X1C without LiDAR."
+    "notes": "Enclosed CoreXY. Same hotend as X1C without LiDAR. Build height: the vendor's 256 is 'as far as the printer's tool head can go on the XYZ three axes'; Bambu Studio's stock printable_height is 250, kept as a debris buffer 'to prevent heatbed damage caused by collisions with foreign objects', and the vendor end G-code's G1 Z250 is that stock ceiling, not the reach (the vendor's own print-volume page)."
   },
   "bambu_p2s": {
     "display_name": "Bambu Lab P2S",
@@ -558,7 +558,7 @@
       256,
       256
     ],
-    "notes": "Open-frame CoreXY. All-metal hotend."
+    "notes": "Open-frame CoreXY. All-metal hotend. Build height: the vendor's 256 is 'as far as the printer's tool head can go on the XYZ three axes'; Bambu Studio's stock printable_height is 250, kept as a debris buffer 'to prevent heatbed damage caused by collisions with foreign objects', and the vendor end G-code's G1 Z250 is that stock ceiling, not the reach (the vendor's own print-volume page)."
   },
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
@@ -649,7 +649,7 @@
     }
   },
   "voron_2": {
-    "display_name": "Voron 2.4 / Trident",
+    "display_name": "Voron 2.4",
     "max_hotend_temp": 270.0,
     "max_bed_temp": 120.0,
     "max_chamber_temp": 65.0,
@@ -661,10 +661,38 @@
       300,
       300
     ],
-    "notes": "Full-size enclosed CoreXY kit. 270C IS NOT A HOTEND RATING. It is the max_temp this machine's own designer ships above a sensor_type line left blank for the builder to fill in - an unconfigured default rather than a measurement of anything. No hotend ceiling is published for this machine, because it is a kit and the hotend is not the kit maker's product. Select the variant matching the hotend you fitted. NOT EVERY COMMON HOTEND HAS ONE: Dragon and Rapido builds have no variant, because those parts ship no heater and no thermistor and their maker states no operating temperature, so there is nothing to enforce and Kiln will not invent a figure to fill the space. A blocked print here means Kiln does not know your hotend, not that your hotend is unsafe. That is also why PA-CF is out of reach at this base: Kiln's suggested 275C for it sits above 270, and on an as-shipped config it is unreachable anyway, since the machine's own firmware stops first. Declare the hotend and it becomes reachable. SOME COMMON BUILDS BELONG BELOW 270 AND YOU MUST SET THAT YOURSELF: an E3D V6 with its silicone sock fitted, which is how a V6 is normally assembled, is rated 260C by its maker - under this base. No variant can express that, because a variant may only raise a ceiling and never lower one; set the lower figure as max_temp in your own printer.cfg, which is the backstop that actually stops the heater.",
+    "notes": "Voron 2.4: CoreXY with a FLYING gantry -- the gantry (and the head) moves in Z on four belts and four Z motors (QUAD_GANTRY_LEVEL); the bed is fixed. The vendor's reference configs set Z position_max 260 (Octopus) or 290 (Manta M8P) for the 300 build, never 300; Z homes on a switch at a fixed pin behind the plate; no bed_mesh section ships. The Trident, once folded into this row, has its own row. Full-size enclosed CoreXY kit. 270C IS NOT A HOTEND RATING. It is the max_temp this machine's own designer ships above a sensor_type line left blank for the builder to fill in - an unconfigured default rather than a measurement of anything. No hotend ceiling is published for this machine, because it is a kit and the hotend is not the kit maker's product. Select the variant matching the hotend you fitted. NOT EVERY COMMON HOTEND HAS ONE: Dragon and Rapido builds have no variant, because those parts ship no heater and no thermistor and their maker states no operating temperature, so there is nothing to enforce and Kiln will not invent a figure to fill the space. A blocked print here means Kiln does not know your hotend, not that your hotend is unsafe. That is also why PA-CF is out of reach at this base: Kiln's suggested 275C for it sits above 270, and on an as-shipped config it is unreachable anyway, since the machine's own firmware stops first. Declare the hotend and it becomes reachable. SOME COMMON BUILDS BELONG BELOW 270 AND YOU MUST SET THAT YOURSELF: an E3D V6 with its silicone sock fitted, which is how a V6 is normally assembled, is rated 260C by its maker - under this base. No variant can express that, because a variant may only raise a ceiling and never lower one; set the lower figure as max_temp in your own printer.cfg, which is the backstop that actually stops the heater.",
     "variants": {
       "e3d_revo_voron": {
-        "display_name": "Voron 2.4 / Trident + E3D Revo Voron",
+        "display_name": "Voron 2.4 + E3D Revo Voron",
+        "description": "An E3D Revo Voron fitted to the Stealthburner printhead. The ceiling belongs to that assembly - heater, thermistor, heat break and nozzle rated together as one part - and not to the machine.",
+        "max_hotend_temp": 300.0,
+        "requires": [
+          "An E3D Revo Voron is actually fitted. This ceiling is not transferable to another hotend, and not to another Revo either: the Revo range is several different parts with different ratings, and only this one was checked against this machine.",
+          "CHECK THE CORE VOLTAGE AGAINST YOUR PSU. Revo cores are sold in 12V and 24V and the part alone does not tell you which you have. This is a kit whose builder chooses the power supply, so there is no printer-to-voltage lookup to fall back on - read it off the machine. A 12V cartridge on a 24V rail dissipates roughly four times its rating.",
+          "printer.cfg declares the matching sensor_type AND a max_temp at or above what you intend to print. This machine ships with sensor_type commented out and max_temp 270, so until the builder fills in both, its own firmware aborts the print above 270 no matter what Kiln permits."
+        ],
+        "notes": "300C is the part maker's figure for the complete assembly. A nozzle change can impose its own LOWER limit that this field cannot express - a hardened steel nozzle in an aluminium block is not suitable above 240C - and selecting this variant does not lift that."
+      }
+    }
+  },
+  "voron_trident": {
+    "display_name": "Voron Trident",
+    "max_hotend_temp": 270.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 65.0,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 30.0,
+    "build_volume": [
+      300,
+      300,
+      250
+    ],
+    "notes": "Voron Trident: CoreXY with a FIXED gantry and a bed that moves in Z on three lead screws (Z_TILT) -- the opposite Z kinematics of the Voron 2.4's flying gantry, which is why the two are no longer one row. The vendor ships a printer.cfg per board; every one sets [stepper_z] position_max 250 at every bed size, homes Z on a switch at a fixed pin off the print surface, and carries no bed_mesh section. Sizes 250, 300 and 350 mm square; this row is the 300. Enclosed CoreXY kit. 270C IS NOT A HOTEND RATING. It is the max_temp this machine's own designer ships above a sensor_type line left blank for the builder to fill in - an unconfigured default rather than a measurement of anything. No hotend ceiling is published for this machine, because it is a kit and the hotend is not the kit maker's product. Select the variant matching the hotend you fitted. NOT EVERY COMMON HOTEND HAS ONE: Dragon and Rapido builds have no variant, because those parts ship no heater and no thermistor and their maker states no operating temperature, so there is nothing to enforce and Kiln will not invent a figure to fill the space. A blocked print here means Kiln does not know your hotend, not that your hotend is unsafe. That is also why PA-CF is out of reach at this base: Kiln's suggested 275C for it sits above 270, and on an as-shipped config it is unreachable anyway, since the machine's own firmware stops first. Declare the hotend and it becomes reachable. SOME COMMON BUILDS BELONG BELOW 270 AND YOU MUST SET THAT YOURSELF: an E3D V6 with its silicone sock fitted, which is how a V6 is normally assembled, is rated 260C by its maker - under this base. No variant can express that, because a variant may only raise a ceiling and never lower one; set the lower figure as max_temp in your own printer.cfg, which is the backstop that actually stops the heater.",
+    "variants": {
+      "e3d_revo_voron": {
+        "display_name": "Voron Trident + E3D Revo Voron",
         "description": "An E3D Revo Voron fitted to the Stealthburner printhead. The ceiling belongs to that assembly - heater, thermistor, heat break and nozzle rated together as one part - and not to the machine.",
         "max_hotend_temp": 300.0,
         "requires": [
@@ -926,7 +954,7 @@
       450,
       565
     ],
-    "notes": "Industrial high-temperature FFF. Dual independent extruders, actively heated 135 C chamber, 500 C+ extruder, 200 C+ bed. AON3D ships a Klipper-based firmware on current machines (units at or below application version v2022.07.04.21.14 run Marlin) behind AON3D's own browser interface. They document no Moonraker port or third-party control endpoint, so Kiln does not claim a control path to it — the intelligence here is advisory until a machine is tested."
+    "notes": "Industrial high-temperature FFF. Dual independent extruders, actively heated 135 C chamber, 500 C+ extruder, 200 C+ bed. AON3D ships a Klipper-based firmware on current machines (units at or below application version v2022.07.04.21.14 run Marlin) behind AON3D's own browser interface. They document no Moonraker port or third-party control endpoint, so Kiln does not claim a control path to it — the intelligence here is advisory until a machine is tested. Build volume 450 x 450 x 565 mm (X, Y, Z): the vendor's G-code reference states the M2+ axis limits as X -88 to 450, Y -42 to 450, Z 0 to 565, and its spec sheet lists 450 x 450 x 565 mm; the vendor overview writes the same three numbers as 'Build Volume (HxWxD) 450 mm x 450 mm x 565 mm', which read literally would put 565 on depth -- the catalogue follows the axis limits."
   },
   "qidi_plus4": {
     "display_name": "QIDI Plus 4",

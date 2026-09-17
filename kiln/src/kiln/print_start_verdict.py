@@ -89,6 +89,11 @@ class PrintStartVerdict:
     message: str
     job_id: str | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
+    #: What the next minutes at the machine look like, in order, for a printer
+    #: whose own start routine makes moves that read as crashes (Bambu).
+    #: ``None`` -- and absent from the envelope -- for every other printer and
+    #: for a start the printer refused.  See :mod:`kiln.start_narrative`.
+    what_you_will_see: tuple[str, ...] | None = None
 
     @property
     def ok(self) -> bool:
@@ -106,7 +111,7 @@ class PrintStartVerdict:
         ``success`` and ``print_start`` here are the same two values the
         enclosing envelope publishes, so the two halves cannot disagree.
         """
-        return {
+        out: dict[str, Any] = {
             "success": self.ok,
             "print_start": self.state,
             "confirmed_running": self.confirmed,
@@ -114,6 +119,12 @@ class PrintStartVerdict:
             "job_id": self.job_id,
             "evidence": dict(self.evidence),
         }
+        # A field beside the message, never a paragraph inside it: an agent
+        # can show the list as a list, and a printer these lines do not
+        # describe carries no field at all rather than an empty one.
+        if self.what_you_will_see is not None:
+            out["what_you_will_see"] = list(self.what_you_will_see)
+        return out
 
 
 def _status_name(state: Any) -> str:
@@ -166,12 +177,29 @@ def _reading_after_command(adapter: Any, sent_at: float) -> tuple[str | None, di
     }
 
 
+def _what_you_will_see(adapter: Any) -> tuple[str, ...] | None:
+    """The start narrative for *adapter*, or ``None`` -- never an exception.
+
+    One more thing a verdict must not fail over: the verdict is the answer
+    to "did it start", and a courtesy line that could not be composed is
+    not evidence either way.
+    """
+    try:
+        from kiln.start_narrative import start_narrative
+
+        lines = start_narrative(adapter)
+    except Exception:  # noqa: BLE001 -- the verdict stands without the courtesy line
+        return None
+    return tuple(lines) if lines else None
+
+
 def resolve_print_start(
     adapter: Any,
     result: Any,
     *,
     sent_at: float,
     file_name: str = "",
+    vendor_start_block: bool = True,
 ) -> PrintStartVerdict:
     """Turn an adapter's ``PrintResult`` into the one verdict every door publishes.
 
@@ -184,6 +212,11 @@ def resolve_print_start(
             something: it is the line between "about the previous job" and
             "about this one".
         file_name: The file being printed, for the message.
+        vendor_start_block: Whether the file will run the printer's own
+            start routine.  ``True`` for every fresh print; a door that
+            starts a resume-mode 3MF (whose preamble is heat, lift, home and
+            travel, not the vendor's load and calibration) passes ``False``
+            so the verdict does not describe moves that file will not make.
     """
     adapter_ok = bool(getattr(result, "success", False))
     adapter_message = str(getattr(result, "message", "") or "")
@@ -204,6 +237,10 @@ def resolve_print_start(
             message=adapter_message or f"Print command accepted for {name}.",
             job_id=job_id,
             evidence=evidence,
+            # The printer has the job, so its start routine is what happens
+            # next -- the moment to say what that looks like.  Nothing is
+            # attached to a refusal below: no start, nothing to watch.
+            what_you_will_see=_what_you_will_see(adapter) if vendor_start_block else None,
         )
 
     if status in _REFUTES_START:
@@ -234,4 +271,8 @@ def resolve_print_start(
         ),
         job_id=job_id,
         evidence=evidence,
+        # Accepted is accepted: if the job did go through, the start routine
+        # is running now and the reader is watching it -- exactly when the
+        # list earns its place.
+        what_you_will_see=_what_you_will_see(adapter) if vendor_start_block else None,
     )

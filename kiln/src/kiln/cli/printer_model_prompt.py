@@ -66,7 +66,7 @@ _BAMBU_PREFIX_SUGGESTIONS: dict[str, str] = {
 # Top-N common models per backend type, shown as examples in the prompt.
 _EXAMPLES_BY_TYPE: dict[str, list[str]] = {
     "prusa":     ["prusa_mk4", "prusa_mini", "prusa_mk3s", "prusa_xl"],
-    "moonraker": ["klipper_generic", "voron_2", "voron_0", "qidi_x_plus3", "k1_max"],
+    "moonraker": ["klipper_generic", "voron_2", "voron_trident", "voron_0", "qidi_x_plus3", "k1_max"],
     "creality":  ["sparkx_i7", "k1_max", "k1c", "ender3_v4", "ender3_v3_ke"],
     "octoprint": ["ender3", "ender3_v2", "ender5", "prusa_mk3s"],
     "usb":       ["ender3", "ender3_v2", "cr10", "prusa_mk3s"],
@@ -211,17 +211,17 @@ def prompt_for_printer_model(
 
 
 def _find_close_matches(value: str, n: int = 5) -> list[str]:
-    """Return up to *n* close matches from printer_intelligence.json."""
+    """Up to *n* catalogue keys to offer for a value that is not one.
+
+    The same resolver the MCP door uses: a spelling the hint table already
+    reads (``bambu_A1``, ``Voron Trident 300``) is offered as its one row;
+    anything else gets the keys within a loose edit distance.
+    """
     try:
-        import json
-        from pathlib import Path
-        data = json.loads((
-            Path(__file__).resolve().parent.parent
-            / "data" / "printer_intelligence.json"
-        ).read_text())
-        keys = list(data.keys())
-        from difflib import get_close_matches
-        return get_close_matches(value, keys, n=n, cutoff=0.5)
+        from kiln.printer_profile_ids import resolve_declared_model
+
+        resolved, close = resolve_declared_model(value)
+        return [resolved] if resolved else close[:n]
     except Exception:
         return []
 

@@ -255,6 +255,19 @@ you should do next takes the headline, and the fact it displaces is kept.
   fields, so a surface with one line of room shows the half about your
   printer.  The raw `print_error` and the screen-form `print_error_code` are
   unchanged.
+- `faults` lists every code the firmware is reporting, each spelled as the
+  printer's own screen spells it (`1200-8001`; an HMS entry as four groups,
+  `1200-8000-0002-0001`) with exactly what came over the wire beside it.
+  Where the vendor publishes a sentence for the code, it rides along as
+  `screen_text` with its `source` named -- Kiln asks Bambu's own fault-text
+  service for it, the way Bambu's client does, and never ships or invents
+  one; where there is none, the field is absent.  The six digits the screen
+  shows after the code (`[1200-8001 290420]`) are not part of the code and
+  not on the wire -- Bambu's own client stamps the wall clock there at
+  display time, and the printer's number changes with every occurrence --
+  so Kiln does not show one and does not invent one.  Set
+  `KILN_OFFLINE=1` (or `KILN_NO_BAMBU_HMS_TEXT=1`) to keep the lookup off
+  the network; it never blocks a status read either way.
 - What the machine was **doing** moves to `last_known_state`, and everything
   asking that question reads through it.  A fault raised mid-print does not
   free the bed, end the watch, unlock a filament change, or get the print

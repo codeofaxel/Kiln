@@ -134,10 +134,12 @@ class TestTheMeasuredFault:
         assert note
         # The code a person can look up...
         assert MEASURED_FAULT_RENDERED in note
-        # ...this firmware's own reading of it...
-        assert "nozzle" in note.lower()
-        # ...and the one thing that clears it.
-        assert "clear" in note.lower()
+        # ...what kind of fault this firmware's code names (the cause and
+        # the fix are kiln-pro's reading, free to a signed-in caller; see
+        # test_fault_reading_doors.py for both sides of that bridge)...
+        assert "filament feed fault" in note
+        # ...and where that reading is.
+        assert "free with a Kiln sign-in" in note
 
     def test_the_good_half_is_not_regressed(self, adapter: BambuAdapter) -> None:
         """The raw value and the rendered code both survive the promotion."""
@@ -708,7 +710,7 @@ class TestTheFaultCopyIsTwoThings:
         note = adapter.get_state().fault_note
 
         assert MEASURED_FAULT_RENDERED in note
-        assert "nozzle" in note.lower()
+        assert "filament feed fault" in note
         # No instruction, and above all no tool name.
         assert "clear_printer_error" not in note
 

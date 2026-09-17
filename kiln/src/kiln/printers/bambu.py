@@ -40,12 +40,21 @@ from typing import Any, ClassVar
 import paho.mqtt.client as mqtt
 
 from kiln.printer_intelligence import chamber_sensor_for_model
+from kiln.printers.bambu_hms_text import (
+    device_type_from_serial,
+    kick_background_refresh,
+    lookup_screen_text,
+)
 from kiln.printers.base import (
     DEFAULT_PURGE_LENGTH_MM,
+    FILAMENT_FEED_RATE_MM_MIN,
     STALE_STATE_WARN_AGE,
     CameraStreamError,
+    FilamentHandlingUnsupported,
     FilamentOpPlan,
     FilamentOpResult,
+    HomeResult,
+    HomingUnsupported,
     JobProgress,
     JobResult,
     NozzleClumpingDetection,
@@ -63,6 +72,7 @@ from kiln.printers.base import (
     UploadResult,
     _record_print_duration,
     capture_rtsp_frame,
+    describe_fault_remedy,
     describe_unacknowledged_fault,
     diagnose_read_failure,
     diagnosed_state,
@@ -637,24 +647,42 @@ _BAMBU_HMS_FAMILIES: dict[str, str] = {
 
 # print_error readings.  A DIFFERENT namespace from the HMS table above,
 # with no vendor page to cite, so each row says where its reading is from.
+#
+# These rows are the PUBLIC floor, read only after kiln-pro has been asked
+# (``read_bambu_fault``).  A row here says what kind of fault the code is;
+# the cause list and the fix for a code are know-how and live in kiln-pro's
+# catalog, which decides per row whether that reading is free -- a fix a
+# person needs in order not to break the machine is never paywalled -- or
+# paid depth.  Where know-how lives and who pays for it are separate axes.
+
+#: Where the reading is, for a code whose public line is only its kind.
+#: One string, so the three lines that carry it cannot drift apart.
+_PRIVATE_READING_POINTER = (
+    "Check the printer's own screen for its message; Kiln's reading of this "
+    "code -- what to check and what fixes it -- is free with a Kiln sign-in"
+)
+
 _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
-    # Observed on Adam's A1 (2026-09-03): raised by the printer's own Load
-    # wizard at its purge step, straight after a layer-1 failure with a
-    # clogged hotend.  Corroborated on the Bambu forum by an A1 owner who
-    # hit "1200-8007 031520" at print start on both AMS and external spool,
-    # and for whom the fix was heating the nozzle and extruding by hand --
-    # which is exactly what purge_filament does.
-    # (forum.bambulab.com/t/1200-8010-23175-error/125692)
+    # Three codes whose readings were read off a real A1 and out of owner
+    # threads.  Each line here names the fault's KIND and where the reading
+    # is; the cause list and the fix are kiln-pro rows, and FREE ones, so a
+    # signed-in caller of any tier gets them.  No cause, no fix, no source
+    # on purpose -- the know-how is the private half, whoever it is free to.
+    #
+    # 1200-8001: read off an A1's own screen 2026-09-16 ("Cutting the
+    # filament failed", print_error 302022657): the filament cutter did not
+    # cut.
+    "12008001": (
+        f"This is an AMS lite filament-cut fault. {_PRIVATE_READING_POINTER}"
+    ),
+    # 1200-8007: raised by the printer's own Load wizard on an A1 (2026-09-03)
+    # and reported by owners at print start.  1200-8010: the printer's own
+    # "tangled or stuck" attribution, seen beside 1200-8007 on the same A1.
     "12008007": (
-        "The filament did not come through the nozzle during the load's purge "
-        "step. Bambu publishes no page for this code; on the A1 it goes with a "
-        "clogged hotend, and owners clear it by heating the nozzle and "
-        "extruding by hand -- which is what purge_filament does"
+        f"This is an AMS lite filament feed fault. {_PRIVATE_READING_POINTER}"
     ),
     "12008010": (
-        "The printer reports the filament may be tangled or the spool stuck. "
-        "Seen alongside 1200-8007 on the A1 when the real cause was a clog "
-        "(forum.bambulab.com/t/1200-8010-23175-error/125692)"
+        f"This is an AMS lite filament feed fault. {_PRIVATE_READING_POINTER}"
     ),
     # Third-party lookup (printara3d.com/tools/bambu-error-codes), the only
     # list that carries these; Bambu documents none of them.
@@ -736,10 +764,75 @@ _BAMBU_PRINT_ERROR_FAMILIES: dict[str, str] = {
 }
 
 
+@dataclass(frozen=True)
+class BambuFaultReading:
+    """One fault code, read once, for every door that shows it.
+
+    ``reading`` is what happened, in plain language, and is never empty.
+    ``remedy`` is what to do about it, when Kiln has a fix for this code;
+    ``None`` means "nothing beyond clearing the fault", not "unknown".
+    ``url`` is the vendor's own page, HMS codes only.  ``decoded`` is
+    kiln-pro's row when kiln-pro supplied the reading -- the same
+    allowlisted shape the hosted boundary serves as ``hms_decoded`` -- so a
+    door that carries the structured block can carry it without a second
+    lookup.
+    """
+
+    reading: str
+    remedy: str | None = None
+    url: str | None = None
+    decoded: dict[str, Any] | None = None
+
+    @property
+    def private(self) -> bool:
+        """Did kiln-pro supply this reading?"""
+        return self.decoded is not None
+
+
+def read_bambu_fault(code: str, *, kind: str = "hms") -> BambuFaultReading:
+    """Read a Bambu fault code, once, for every door that shows it.
+
+    Asks kiln-pro first (``kiln._pro_fault_bridge``): its catalog holds the
+    cause and the fix, and decides per row whether the caller's tier
+    unlocks them -- a safety or fix floor is free at every tier, the rest
+    is paid depth.  Without kiln-pro, or for a row it does not unlock, the
+    public tables below answer: the vendor's own page title for an HMS
+    code, a family line for a print_error.
+
+    Every door goes through here -- ``printer_status``'s fault fields, the
+    filament-op results, the fault event, ``troubleshoot_printer`` -- which
+    is what keeps them saying the same thing about the same code.
+    """
+    from kiln import _pro_fault_bridge
+
+    decoded = _pro_fault_bridge.decode_fault(code, kind=kind)
+    public_reading, url = describe_bambu_filament_fault_public(code, kind=kind)
+    if decoded is None:
+        return BambuFaultReading(reading=public_reading, url=url)
+    reading = str(decoded["cause"]).strip()
+    fix = decoded.get("fix")
+    remedy = fix.strip() if isinstance(fix, str) and fix.strip() else None
+    # The vendor's page stays attached to an HMS code whoever wrote the
+    # reading; a print_error has none (``url`` is already ``None`` there).
+    return BambuFaultReading(reading=reading, remedy=remedy, url=url, decoded=decoded)
+
+
 def describe_bambu_filament_fault(
     code: str, *, kind: str = "hms"
 ) -> tuple[str, str | None]:
     """``(plain-language reading, wiki URL or None)`` for a Bambu fault.
+
+    The two-field view of :func:`read_bambu_fault`, kept for the callers
+    that only show a sentence.  kiln-pro is asked first, exactly as there.
+    """
+    fault = read_bambu_fault(code, kind=kind)
+    return fault.reading, fault.url
+
+
+def describe_bambu_filament_fault_public(
+    code: str, *, kind: str = "hms"
+) -> tuple[str, str | None]:
+    """``(reading, wiki URL or None)`` from public Kiln's own tables only.
 
     *kind* selects the namespace: ``"hms"`` for a code from the ``hms``
     array, ``"print_error"`` for the ``print_error`` field.  Getting this
@@ -747,7 +840,8 @@ def describe_bambu_filament_fault(
     points at a page that does not exist.
 
     An unknown code returns its family rather than a guess, and a
-    print_error never returns a URL, because Bambu publishes none.
+    print_error never returns a URL, because Bambu publishes none.  This
+    is the floor under :func:`read_bambu_fault`; doors call that, not this.
     """
     if kind == "print_error":
         hex_only = "".join(c for c in str(code).upper() if c in "0123456789ABCDEF")
@@ -797,6 +891,113 @@ def describe_bambu_filament_fault(
         f"The printer reported {shown}{where}, a fault Kiln has no reading for.",
         _BAMBU_HMS_INDEX_URL,
     )
+
+
+def format_bambu_hms_code(attr: int, code: int) -> str:
+    """An ``hms`` array entry in the four-group form the vendor files it under.
+
+    ``{"attr": 0x12008000, "code": 0x00020001}`` -> ``"1200-8000-0002-0001"``:
+    ``attr`` as eight hex digits then ``code`` as eight, which is how
+    BambuStudio builds the long code it looks up (``DevHMSItem::
+    get_long_error_code``), split into fours and joined with dashes as the
+    printer's screen and the Bambu Handy app spell it.  Kiln's wiki paths
+    use the same digits with underscores; this is the spelling for a
+    person's eyes, that one is for an address.
+    """
+    return _hms_group(f"{attr:08X}{code:08X}").replace("_", "-")
+
+
+def compose_bambu_faults(
+    status: dict[str, Any], *, device_type: str = ""
+) -> list[dict[str, Any]]:
+    """Every fault *status* carries, each as its own screen would show it.
+
+    The one composer behind every door that reports a Bambu fault -- the
+    status tools, the CLI, the monitor report, the fault notice on the
+    event bus and a failed filament operation -- so a fault does not read
+    differently depending on which surface asked.  One entry per code:
+
+    ``code``
+        The code in the spelling the printer's own screen uses.  A
+        ``print_error`` renders as two four-hex groups (``"1200-8001"``,
+        BambuStudio's ``get_error_code_str``: ``%08X`` with a dash after the
+        fourth digit); an ``hms`` entry as four (``"1200-8000-0002-0001"``,
+        see :func:`format_bambu_hms_code`).
+    ``kind``
+        Which of Bambu's two namespaces the code belongs to,
+        ``"print_error"`` or ``"hms"``.  They are looked up in different
+        tables and conflating them is how a code gets the wrong page.
+    ``raw``
+        Exactly what the firmware sent, under the wire's own field names:
+        ``{"print_error": 302022657}`` or ``{"attr": ..., "code": ...}``.
+    ``screen_text`` / ``source``
+        The vendor's own English sentence for the code and the source class
+        it came from, ONLY when the vendor publishes one for this device
+        type (:mod:`kiln.printers.bambu_hms_text`).  Absent otherwise --
+        never a family reading dressed as the vendor's words.
+
+    The printer's screen also shows six decimal digits after the code
+    (``[1200-8001 290420]``).  They are not here because they are not on
+    the wire: the report carries ``print_error`` as one integer and nothing
+    beside it but a snapshot id (BambuStudio ``DeviceManager.cpp``, the
+    ``print_error`` / ``err2.img_id`` parse), and the vendor's own client
+    stamps the wall clock into that position at display time
+    (``DeviceErrorDialog.cpp``: ``wxDateTime::Now().Format("%H%M%d")``).
+    Two occurrences of one code carried two different numbers on the same
+    night (290420, then 390434), which is what a clock stamp does and a
+    sub-code does not.  Kiln does not invent one.
+
+    *device_type* is the serial's first three characters
+    (:func:`~kiln.printers.bambu_hms_text.device_type_from_serial`); with
+    none, the codes are composed and no sentence is looked up.
+    """
+    faults: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    raw_error = status.get("print_error")
+    error_int: int | None = None
+    if raw_error is not None:
+        with contextlib.suppress(TypeError, ValueError):
+            error_int = int(raw_error)
+    pretty = format_error_code(error_int)
+    if pretty is not None and error_int is not None:
+        entry: dict[str, Any] = {
+            "code": pretty,
+            "kind": "print_error",
+            "raw": {"print_error": error_int},
+        }
+        found = lookup_screen_text(pretty, device_type=device_type, kind="print_error")
+        if found is not None:
+            entry["screen_text"], entry["source"] = found
+        faults.append(entry)
+        seen.add(pretty)
+
+    hms = status.get("hms")
+    if isinstance(hms, list):
+        for item in hms:
+            if not isinstance(item, dict):
+                continue
+            try:
+                attr = int(item.get("attr") or 0)
+                code = int(item.get("code") or 0)
+            except (TypeError, ValueError):
+                continue
+            if attr < 0 or code < 0 or not (attr or code):
+                continue
+            shown = format_bambu_hms_code(attr, code)
+            if shown in seen:
+                continue
+            seen.add(shown)
+            entry = {
+                "code": shown,
+                "kind": "hms",
+                "raw": {"attr": attr, "code": code},
+            }
+            found = lookup_screen_text(shown, device_type=device_type, kind="hms")
+            if found is not None:
+                entry["screen_text"], entry["source"] = found
+            faults.append(entry)
+    return faults
 
 
 # Bambu LED node names.
@@ -959,6 +1160,29 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
 _BAMBU_ACCESSORY_MODULE_HEADS: frozenset[str] = frozenset(
     {"ams_f1", "n3f", "n3s", "ams"}
 )
+
+
+def _merge_push_status(cache: dict[str, Any], delta: dict[str, Any]) -> None:
+    """Fold a ``push_status`` frame into the cache, section by section.
+
+    The printer pushes deltas: a frame carries only what changed, and a
+    section it does carry may itself be partial -- ``{"ams": {"tray_now":
+    "3", "version": 7}}`` is a whole frame on an A1.  A top-level
+    ``dict.update`` would replace the merged ``ams`` section with those two
+    keys, and the next ``ams_status`` would answer ``ams_exist_bits "0",
+    units []`` beside ``tray_now "3"``: a tray feeding the nozzle on a unit
+    that does not exist (measured 2026-09-15, right after a load, and again
+    on the next read).  So a dict inside a dict merges; every other value
+    -- a scalar, a list (``ams.ams``, ``hms``, ``lights_report``) -- is
+    taken as the printer sent it.  Absent means unchanged; present means
+    this, including a list the printer emptied to say a unit is gone.
+    """
+    for key, value in delta.items():
+        current = cache.get(key)
+        if isinstance(value, dict) and isinstance(current, dict):
+            _merge_push_status(current, value)
+        else:
+            cache[key] = value
 
 
 def _is_accessory_module(name: str) -> bool:
@@ -2266,7 +2490,7 @@ class BambuAdapter(PrinterAdapter):
                     # as a one-second-old one.  This is also exactly the
                     # quantity the polled door guards on as state_age_seconds.
                     push_gap_seconds = self._gcode_state_age_locked()
-                    self._last_status.update(print_data)
+                    _merge_push_status(self._last_status, print_data)
                     self._last_state_time = time.monotonic()
                     for key in print_data:
                         self._field_seen_at[key] = self._last_state_time
@@ -2515,9 +2739,8 @@ class BambuAdapter(PrinterAdapter):
         push path that keeps the status cache current.
         """
         pretty = format_error_code(code)
-        reading, _page = describe_bambu_filament_fault(
-            pretty or str(code), kind="print_error"
-        )
+        fault = read_bambu_fault(pretty or str(code), kind="print_error")
+        reading = fault.reading
         logger.warning(
             "Printer %s reported fault %s: %s",
             printer_name or self.name, pretty or code, reading,
@@ -2533,32 +2756,54 @@ class BambuAdapter(PrinterAdapter):
         # edge is rare.
         threading.Thread(
             target=self._publish_fault_event,
-            args=(code, pretty, reading, printer_name or self.name),
+            args=(code, pretty, reading, printer_name or self.name, fault.remedy),
             name="kiln-fault-notice",
             daemon=True,
         ).start()
 
     def _publish_fault_event(
-        self, code: int, pretty: str | None, reading: str, printer_name: str
+        self,
+        code: int,
+        pretty: str | None,
+        reading: str,
+        printer_name: str,
+        remedy: str | None = None,
     ) -> None:
         """Announce the fault on the event bus.  Never raises."""
         try:
             import kiln.server as _srv
             from kiln.events import Event, EventType
 
+            data: dict[str, Any] = {
+                "printer_name": printer_name,
+                "print_error": int(code),
+                "print_error_code": pretty,
+                "reading": reading,
+                # How Kiln came to know, so a reader can tell a fault
+                # a watchdog caught on Kiln's own print from one the
+                # open connection saw on a job Kiln never started.
+                "noticed_by": "connection",
+            }
+            # The fix rides with the reading when Kiln has one, so the
+            # event says the same thing printer_status does.
+            if remedy:
+                data["remedy"] = remedy
+            # The same entry every other door composes, so the notice
+            # carries the screen's sentence when the vendor has one.
+            # Looked up here, off the network thread, on purpose.
+            faults = compose_bambu_faults(
+                {"print_error": int(code)},
+                device_type=device_type_from_serial(self._serial),
+            )
+            if faults:
+                data["faults"] = faults
+                if "screen_text" in faults[0]:
+                    data["screen_text"] = faults[0]["screen_text"]
+                    data["source"] = faults[0]["source"]
             _srv._get_event_bus().publish(
                 Event(
                     type=EventType.PRINTER_ERROR,
-                    data={
-                        "printer_name": printer_name,
-                        "print_error": int(code),
-                        "print_error_code": pretty,
-                        "reading": reading,
-                        # How Kiln came to know, so a reader can tell a fault
-                        # a watchdog caught on Kiln's own print from one the
-                        # open connection saw on a job Kiln never started.
-                        "noticed_by": "connection",
-                    },
+                    data=data,
                     source=f"printer:{printer_name}",
                 )
             )
@@ -3253,13 +3498,34 @@ class BambuAdapter(PrinterAdapter):
         # the WORDS are, because only this adapter knows what 1200-8007 means
         # on an A1.  An adapter with no table supplies nothing and its
         # printers get the generic sentence rather than a guess.
+        #
+        # The remedy too, when the reading brings a fix with it: the fix a
+        # person needs before the fault will clear (a blade back in its
+        # slot, a hot end unclogged) belongs beside the generic "clear it on
+        # the screen" sentence, not lost behind it.  ``None`` here lets
+        # PrinterState supply that generic sentence on its own.
         fault_note: str | None = None
+        fault_remedy: str | None = None
         if print_error_int:
             pretty = format_error_code(print_error_int)
-            reading, _page = describe_bambu_filament_fault(
+            fault = read_bambu_fault(
                 pretty or str(print_error_int), kind="print_error"
             )
-            fault_note = describe_unacknowledged_fault(pretty, reading)
+            fault_note = describe_unacknowledged_fault(pretty, fault.reading)
+            if fault.remedy:
+                fault_remedy = describe_fault_remedy(fault.remedy)
+
+        # Every code the report carries, spelled as the screen spells it,
+        # with the vendor's own sentence where it publishes one.  The
+        # sentence table is warmed from here on every reading -- not only
+        # on a fault -- so it is on disk before the first fault needs it;
+        # the call returns at once and the lookup below never blocks.
+        # ``getattr`` for the same reason ``_chamber_lookup_model`` uses it:
+        # this builder runs on instances that never ran ``__init__``, and
+        # an instance with no serial has no table to ask for.
+        device_type = device_type_from_serial(getattr(self, "_serial", ""))
+        kick_background_refresh(device_type)
+        faults = compose_bambu_faults(status, device_type=device_type) or None
 
         # ``chamber_temper`` arrives in every report from every Bambu, so
         # its presence says nothing about whether the machine has a chamber
@@ -3293,6 +3559,8 @@ class BambuAdapter(PrinterAdapter):
             speed_magnitude=spd_mag_int,
             print_error=print_error_int,
             fault_note=fault_note,
+            fault_remedy=fault_remedy,
+            faults=faults,
             state_age_seconds=round(age, 1) if age is not None else None,
         )
 
@@ -3988,7 +4256,21 @@ class BambuAdapter(PrinterAdapter):
                         last_error = err_val
             if state in _PRINT_ACTIVE_STATES:
                 return state, last_error
-            if state == "failed":
+            # A "failed" that names no error code is not this job's
+            # rejection: it is the previous job's ending still on the wire.
+            # After a cancel this firmware keeps reporting gcode_state
+            # "failed" with print_error 0 until the NEXT job takes over
+            # (the same stale state get_state downgrades to IDLE).  Measured
+            # 2026-09-16 on an A1: a start sent right after a screen cancel
+            # was declared failed here while the printer went on to
+            # "prepare" and printed -- so nothing that hangs off a
+            # successful start ran (plate record, engagement, watchdog).
+            # Keep waiting; the real transition arrives within seconds, and
+            # if it never does the honest answer is "timeout", not "failed".
+            # Same rule as get_state's downgrade: only an EXPLICIT
+            # print_error 0 marks the state stale; a "failed" that carries no
+            # print_error field at all is still taken at its word.
+            if state == "failed" and (last_error or raw_err is None):
                 return "failed", last_error
             # If the printer set a non-zero error code while still IDLE,
             # the command was rejected — no point waiting further.
@@ -5908,6 +6190,171 @@ class BambuAdapter(PrinterAdapter):
     _FILAMENT_LOAD_WAIT_S: float = 120.0
     _FILAMENT_UNLOAD_WAIT_S: float = 90.0
     _FILAMENT_PURGE_WATCH_S: float = 10.0
+    #: The wipe script does more than a purge -- a Z home and the pad passes;
+    #: that takes longer than a purge, so its fault watch is longer too.
+    _FILAMENT_WIPE_WATCH_S: float = 45.0
+
+    # -- the purge station, and the doors that drive it ------------------
+    #
+    # How a Bambu model is raised, parked over its chute, wiped on its pad
+    # and homed -- in its maker's own order -- is a PLAN this install is
+    # handed one at a time: built by kiln-pro where it is installed, else
+    # served by the hosted service for a paired machine, else the on-disk
+    # copy of the last served plan (see ``kiln._pro_motion_bridge``).  The
+    # executor that sends it (``kiln.printers.motion_plan``) is public.
+    # This file keeps the doors and the floor: without a plan a model
+    # refuses to home, park or wipe by name and says what to use instead,
+    # and a purge runs in place and says so.  Never a coordinate this file
+    # inferred, never a sibling model's.
+
+    _SERVED_LINE = (
+        "The motion sequence for {model} is served one plan at a time through Kiln's "
+        "hosted service (kiln-pro) for a paired printer, free of charge, and no plan "
+        "answered on this install -- sign in to Kiln, or check the network."
+    )
+    _JOG_LINE = (
+        " Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, "
+        "with your eyes on the plate. The screen's Home button descends the nozzle to the bed "
+        "and is the wrong tool with a part on the plate."
+    )
+    #: A plan asked for twice within this window is not fetched twice (a purge
+    #: asks once for its placement and once for its scripts).
+    _PLAN_MEMO_S: float = 120.0
+
+    def _plan_for(self, verb: str, *, axes: str = "XYZ", on_plate_ok: bool = False) -> dict[str, Any] | None:
+        """The plan document for *verb* on this machine, or ``None`` -- memoised briefly."""
+        from kiln import _pro_motion_bridge as _bridge
+
+        memo = getattr(self, "_plan_memo", None)
+        if memo is None:
+            memo = self._plan_memo = {}
+        key = (verb, axes, bool(on_plate_ok), str(getattr(self, "_printer_model", "") or ""))
+        hit = memo.get(key)
+        now = time.monotonic()
+        if hit is not None:
+            # A plan is good for the memo window; "no plan" only long enough
+            # to fold one door's double ask, so a person who just signed in
+            # or came back online is answered on their next call.
+            ttl = self._PLAN_MEMO_S if hit[1] is not None else 5.0
+            if now - hit[0] < ttl:
+                return hit[1]
+        doc = _bridge.plan_for(self, verb, axes=axes, on_plate_ok=on_plate_ok)
+        memo[key] = (now, doc)
+        return doc
+
+    def _model_name(self) -> str:
+        return self._printer_model or "this printer (no printer_model declared in config.yaml)"
+
+    def _served_refusal(self, verb: str, doc: dict[str, Any] | None) -> str:
+        """The refusal for *verb* when no plan, or a plan that says no, answered."""
+        model = self._model_name()
+        refusal = (doc or {}).get("refusal") if isinstance(doc, dict) else None
+        reason = (refusal or {}).get("message") if isinstance(refusal, dict) else None
+        why = reason.rstrip(". ") + "." if reason else self._SERVED_LINE.format(model=model)
+        return f"Kiln will not {verb} {model}: {why}" + self._JOG_LINE
+
+    def _station_supports(self, station: dict[str, Any] | None, capability: str) -> tuple[bool, str]:
+        """Whether this install may drive *capability* on this model, and why not.
+
+        With kiln-pro installed the record's own gate answers.  Otherwise
+        the PLAN is the gate: a plan that arrives and says ``ok`` is a yes;
+        one that refuses quotes its reason; none at all is the served line.
+        """
+        from kiln import _pro_motion_bridge as _bridge
+
+        answer = _bridge.station_supports(self, station, capability)
+        if answer is not None:
+            return bool(answer[0]), str(answer[1])
+        model = str(getattr(self, "_printer_model", "") or "").strip().lower()
+        if not model:
+            return super()._station_supports(None, capability)
+        verb, axes, consent = {
+            "purge": ("purge", "XY", False),
+            "wipe": ("wipe", "XY", False),
+            "park": ("park", "XY", False),
+            "home_z": ("home", "XYZ", False),
+            "home_z_on_plate": ("home", "XYZ", True),
+        }.get(capability, ("home", "XYZ", False))
+        doc = self._plan_for(verb, axes=axes, on_plate_ok=consent)
+        if doc is None:
+            return False, self._SERVED_LINE.format(model=model)
+        refusal = doc.get("refusal") if isinstance(doc.get("refusal"), dict) else {}
+        if capability == "home_z_on_plate":
+            return (bool(doc.get("ok")) and bool(doc.get("z_home_on_plate"))), (
+                "" if doc.get("ok") else str(refusal.get("message") or self._SERVED_LINE.format(model=model)))
+        if doc.get("ok"):
+            return True, ""
+        if capability == "home_z" and refusal.get("code") == "PLATE_CLEAR_REQUIRED":
+            return False, (f"{model} homes Z by pressing the nozzle onto the plate; that runs only "
+                           "with plate_clear on the call, after a person has looked")
+        return False, str(refusal.get("message") or self._SERVED_LINE.format(model=model))
+
+    def _purge_placement(self, plan: FilamentOpPlan) -> dict[str, Any]:
+        """Where a purge is about to go, from the plan rather than a local record."""
+        if plan.printer_paused:
+            return super()._purge_placement(plan)
+        model = str(getattr(self, "_printer_model", "") or "").strip().lower()
+        doc = self._plan_for("purge", axes="XY")
+        base = {"status": "in_place", "printer_id": model or None, "position": self._reported_position(), "wiped": None}
+        if doc is None:
+            return {**base, "reason": (self._SERVED_LINE.format(model=model) if model else
+                                       "no printer_model is declared in config.yaml, so Kiln cannot ask for a plan").rstrip(". ")}
+        if not doc.get("ok"):
+            refusal = doc.get("refusal") if isinstance(doc.get("refusal"), dict) else {}
+            return {**base, "reason": str(refusal.get("message") or self._SERVED_LINE.format(model=model)).rstrip(". ")}
+        plate, clearance, blocked = self._plate_raise_block(doc.get("raise_clearance_mm"))
+        if blocked:
+            assert clearance is not None
+            return {**base, "plate": plate.to_dict(), "reason": (
+                f"{plate.describe()}, taller than the {clearance:g} mm raise the travel to "
+                "the chute starts with, so the head stayed where it is; clear the plate and "
+                "run `kiln plate clear` to park over the chute again")}
+        placement = dict(doc.get("placement") or {})
+        placement.setdefault("status", "parked")
+        placement.setdefault("printer_id", model)
+        return placement
+
+    def _park_for_firmware_routine(self, plan: FilamentOpPlan) -> dict[str, Any]:
+        """Park over the chute before the firmware's own change-filament routine.
+
+        The routine (``ams_change_filament``) retracts, feeds and purges
+        without moving the head, so run at home it purges at home -- measured
+        2026-09-15.  The touchscreen wizard parks first; the plan's
+        ``park_gcode`` (the park with the machine's limits restored after)
+        does the same.  A plan without one leaves the routine where the head
+        is, and the answer says so.
+        """
+        placement = self._purge_placement(plan)
+        if placement.get("status") != "parked":
+            return placement
+        doc = self._plan_for("purge", axes="XY") or {}
+        script = doc.get("park_gcode")
+        if not isinstance(script, list) or not script:
+            return {**placement, "status": "in_place", "wiped": None,
+                    "reason": "the served plan carries no park for the firmware's own routine"}
+        self.send_gcode([str(line) for line in script])
+        placement["after"] = (
+            "the firmware's own routine then ran with the head there, so its "
+            "purge fell into the chute"
+        )
+        placement["pre_gcode"] = list(script)
+        if isinstance(doc.get("finish"), dict):
+            placement["finish"] = dict(doc["finish"])  # the routine leaves the nozzle hot; cool it the machine's way
+        return placement
+
+    @staticmethod
+    def _tray_now_of(status: dict[str, Any]) -> Any:
+        """``tray_now`` as the printer reports it.
+
+        Every Bambu push carries it inside the ``ams`` section, never at
+        the top level of ``print`` -- which is where the watch below used to
+        look, so on a real machine it could only ever time out.  The
+        top-level key is read second for a cache that was assembled by hand.
+        """
+        section = status.get("ams")
+        if isinstance(section, dict) and section.get("tray_now") is not None:
+            return section["tray_now"]
+        return status.get("tray_now")
 
     def _ams_tray(self, slot: int) -> dict[str, Any] | None:
         """The tray dict ``get_ams_status`` reports for global tray *slot*."""
@@ -5936,7 +6383,7 @@ class BambuAdapter(PrinterAdapter):
         tray_slot = slot
         if tray_slot is None:
             with self._state_lock:
-                raw_now = self._last_status.get("tray_now")
+                raw_now = self._tray_now_of(self._last_status)
             with contextlib.suppress(TypeError, ValueError):
                 now = int(raw_now)
                 if now not in (self._BAMBU_EXTERNAL_SPOOL_TRAY, self._BAMBU_NO_TRAY):
@@ -6003,17 +6450,34 @@ class BambuAdapter(PrinterAdapter):
         """
         ordered = sorted(codes, key=lambda pair: (pair[1] != "hms", pair[0]))
         code, kind = ordered[0]
-        hint, _page = describe_bambu_filament_fault(code, kind=kind)
+        fault = read_bambu_fault(code, kind=kind)
+        hint = fault.reading
         details: dict[str, Any] = {
             "all_new_faults": [
                 {"code": c, "kind": k} for c, k in ordered
             ],
             "code_kind": kind,
+            # The leading code as the printer's own screen spells it, and
+            # the vendor's sentence for it when one is on record -- the same
+            # lookup every status door makes, so a person at the screen can
+            # match this result to what they are looking at.
+            "screen_code": code.replace("_", "-"),
         }
+        message = f"The printer raised {code} during the {stage}: {hint}"
+        # The fix, when the reading brings one, in the same sentence a
+        # person reads -- the same words printer_status shows for this code.
+        if fault.remedy:
+            details["remedy"] = fault.remedy
+            message = f"{message} {fault.remedy}"
+        found = lookup_screen_text(
+            code, device_type=device_type_from_serial(self._serial), kind=kind
+        )
+        if found is not None:
+            details["screen_text"], details["source"] = found
         return FilamentOpResult(
             success=False,
             action=plan.action,
-            message=f"The printer raised {code} during the {stage}: {hint}",
+            message=message,
             extrusion_verified=False,
             verification_source="bambu_fault_code",
             error_code=code,
@@ -6043,13 +6507,36 @@ class BambuAdapter(PrinterAdapter):
         """
         deadline = time.monotonic() + wait_seconds
         last_now: Any = None
+        # The hottest target the firmware set during its routine.  Measured
+        # on an A1 (2026-09-15): Kiln validated and sent 215 °C, the firmware
+        # heated to 250 for its change-filament routine — the "common flush
+        # temp" its own start sequence sets (``M109 S250``) — and dropped to
+        # 215 only when the routine finished.  The gate binds what Kiln
+        # sends; it does not bind the routine.  So the answer reports the
+        # number the machine actually used rather than the one it checked.
+        firmware_target: float | None = None
         while True:
             with self._state_lock:
                 status = dict(self._last_status)
+            with contextlib.suppress(TypeError, ValueError):
+                seen = float(status.get("nozzle_target_temper"))
+                if seen > 0 and (firmware_target is None or seen > firmware_target):
+                    firmware_target = seen
+            override = (
+                f" The firmware ran its routine at {firmware_target:g}°C — its own "
+                f"flush temperature — not the {plan.temperature:g}°C Kiln validated; "
+                "the temperature gate binds what Kiln sends, and the firmware's "
+                "change-filament routine overrides it."
+                if firmware_target is not None and firmware_target > plan.temperature
+                else ""
+            )
+            extra = {"firmware_hotend_target_c": firmware_target}
             new_faults = self._bambu_fault_codes(status) - faults_before
             if new_faults:
-                return self._fault_result(plan, new_faults, stage=stage)
-            raw_now = status.get("tray_now")
+                result = self._fault_result(plan, new_faults, stage=stage)
+                result.details.update(extra)
+                return result
+            raw_now = self._tray_now_of(status)
             with contextlib.suppress(TypeError, ValueError):
                 last_now = int(raw_now)
                 if last_now == expect_tray:
@@ -6063,16 +6550,27 @@ class BambuAdapter(PrinterAdapter):
                         action=plan.action,
                         message=(
                             f"{plan.action.capitalize()} complete: the AMS reports "
-                            f"{what} and no fault was raised."
+                            f"{what} and no fault was raised.{override}"
                         ),
                         extrusion_verified=True,
                         verification_source="ams_tray_now",
                         slot=plan.slot,
                         material=plan.material,
                         temperature=plan.temperature,
-                        details={"tray_now": last_now},
+                        details={"tray_now": last_now, **extra},
                     )
             if time.monotonic() >= deadline:
+                # The routine outlasted the watch, not the other way round:
+                # a load is a minute or two of heating, cutting, retracting
+                # and feeding, and the watch is bounded by the caller's
+                # window.  Say what finishes the answer, and say not to send
+                # the command again -- a second ams_change_filament into a
+                # routine still running is how a wizard gets confused.
+                next_read = (
+                    f"ams_status: tray_now == {expect_tray} means the "
+                    f"{plan.action} finished; printer_status: a non-zero "
+                    "print_error is the fault it raised."
+                )
                 return FilamentOpResult(
                     success=False,
                     action=plan.action,
@@ -6080,16 +6578,22 @@ class BambuAdapter(PrinterAdapter):
                         f"The {plan.action} command was sent, but within "
                         f"{wait_seconds:g}s the AMS never reported "
                         f"tray_now={expect_tray} (last seen {last_now!r}) and "
-                        "raised no fault. The printer may still be working, or "
-                        "the routine may be waiting on the screen — check it "
-                        "before assuming either."
+                        "raised no fault. The printer is most likely still "
+                        "working through its routine, or it is waiting on the "
+                        f"screen. Do not send the {plan.action} again: read "
+                        f"{next_read}{override}"
                     ),
                     extrusion_verified=None,
                     verification_source="timeout_no_signal",
                     slot=plan.slot,
                     material=plan.material,
                     temperature=plan.temperature,
-                    details={"tray_now": last_now, "waited_seconds": wait_seconds},
+                    details={
+                        "tray_now": last_now,
+                        "waited_seconds": wait_seconds,
+                        "next_read": next_read,
+                        **extra,
+                    },
                 )
             time.sleep(1.0)
 
@@ -6135,62 +6639,291 @@ class BambuAdapter(PrinterAdapter):
                     "(or pick a tray that has one) and try again."
                 )
         faults_before = self._snapshot_faults()
+        placement = self._park_for_firmware_routine(plan)
         self._ams_change_filament(target, plan)
-        wait = float(plan.options.get("wait_seconds") or self._FILAMENT_LOAD_WAIT_S)
-        return self._watch_tray_change(
+        wait = plan.wait_seconds(self._FILAMENT_LOAD_WAIT_S)
+        result = self._watch_tray_change(
             plan,
             expect_tray=target,
             faults_before=faults_before,
             wait_seconds=wait,
             stage="load (the firmware's own feed-and-purge routine)",
         )
+        return self._say_where(result, placement)
 
     def _unload_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
         faults_before = self._snapshot_faults()
+        placement = self._park_for_firmware_routine(plan)
         self._ams_change_filament(self._BAMBU_NO_TRAY, plan)
-        wait = float(plan.options.get("wait_seconds") or self._FILAMENT_UNLOAD_WAIT_S)
-        return self._watch_tray_change(
+        wait = plan.wait_seconds(self._FILAMENT_UNLOAD_WAIT_S)
+        result = self._watch_tray_change(
             plan,
             expect_tray=self._BAMBU_NO_TRAY,
             faults_before=faults_before,
             wait_seconds=wait,
             stage="unload",
         )
+        return self._say_where(result, placement)
 
-    def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Heat and extrude through ``gcode_line``, then watch for a fault.
+    def _say_where(self, result: FilamentOpResult, placement: dict[str, Any]) -> FilamentOpResult:
+        """Every answer says where the head was when the plastic moved."""
+        placement = dict(placement)
+        finish = placement.pop("finish", None)
+        if isinstance(finish, dict) and finish:
+            result.details["finish"] = finish
+        result.details["purge_station"] = placement
+        result.message = f"{result.message} {self._placement_sentence(placement)}"
+        return result
 
-        Bambu reports no extruder-flow telemetry, so a clean purge stays
-        ``extrusion_verified=None``; a fault code raised inside the watch
-        window (the same codes its own load wizard raises) turns it
-        ``False`` with the reading.
-        """
-        faults_before = self._snapshot_faults()
-        result = self._gcode_filament_move(
-            plan,
-            signed_length_mm=float(plan.length_mm or DEFAULT_PURGE_LENGTH_MM),
-            mechanism="bambu_mqtt_gcode_line",
-        )
-        if not result.success:
-            return result
-        watch = float(plan.options.get("wait_seconds") or self._FILAMENT_PURGE_WATCH_S)
+    def _watch_for_purge_fault(
+        self, plan: FilamentOpPlan, faults_before: set[tuple[str, str]], *, watch: float, stage: str
+    ) -> FilamentOpResult | None:
+        """A fault raised inside *watch* seconds, as a result, or ``None``."""
         deadline = time.monotonic() + watch
         while True:
             new_faults = self._snapshot_faults() - faults_before
             if new_faults:
-                return self._fault_result(plan, new_faults, stage="purge")
+                return self._fault_result(plan, new_faults, stage=stage)
             if time.monotonic() >= deadline:
-                break
+                return None
             time.sleep(1.0)
+
+    def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Park over the chute, heat, extrude, snap and shake; watch for a fault.
+
+        Where a plan answers for this model and the printer is idle, the head
+        is driven to the flush position the machine's own start sequence
+        uses BEFORE the heater command, so the ooze of heating and the purge
+        itself fall into the chute, and the maker's own tail snap and shake
+        follow the extrude.  Otherwise the purge happens in place and the
+        answer says so and why -- a paused print, no plan, a part in the way
+        -- never at a coordinate Kiln inferred.
+
+        Bambu reports no extruder-flow telemetry, so a clean purge stays
+        ``extrusion_verified=None``; a fault code raised inside the watch
+        window turns it ``False`` with the reading.
+        """
+        faults_before = self._snapshot_faults()
+        placement = self._purge_placement(plan)
+        pre: list[str] | None = None
+        post: list[str] | None = None
+        finish: dict[str, Any] | None = None
+        if placement.get("status") == "parked":
+            doc = self._plan_for("purge", axes="XY") or {}
+            pre = [str(x) for x in (doc.get("pre_gcode") or [])] or None
+            post = [str(x) for x in (doc.get("post_gcode") or [])] or None
+            finish = doc.get("finish") if isinstance(doc.get("finish"), dict) else None
+            if doc.get("after"):
+                placement["after"] = str(doc["after"])
+            if pre is None:
+                placement = {**placement, "status": "in_place", "wiped": None,
+                             "reason": "the served plan answered no script for the chute"}
+                post = None
+        result = self._gcode_filament_move(
+            plan,
+            signed_length_mm=float(plan.length_mm or DEFAULT_PURGE_LENGTH_MM),
+            mechanism="bambu_mqtt_gcode_line",
+            pre_gcode=pre,
+            post_gcode=post,
+            placement=placement,
+        )
+        # A purge that parked ran the plan's own lines; one in place ran
+        # none of them, so it is not the plan's outcome to count.
+        from kiln.printers.motion_plan import note_motion_outcome
+
+        ran_plan = pre is not None and placement.get("status") == "parked"
+        if not result.success:
+            if ran_plan and result.verification_source == "firmware_rejected_move":
+                note_motion_outcome(self, "purge", "fault", "rejected")
+            return result
+        if finish:
+            result.details["finish"] = dict(finish)
+        watch = plan.wait_seconds(self._FILAMENT_PURGE_WATCH_S)
+        fault = self._watch_for_purge_fault(plan, faults_before, watch=watch, stage="purge")
+        if fault is not None:
+            fault.details["purge_station"] = placement
+            if ran_plan:
+                note_motion_outcome(self, "purge", "fault", fault.error_code)
+            return fault
+        if ran_plan:
+            note_motion_outcome(self, "purge", "full_run")
         result.verification_source = "no_fault_within_window"
         result.message = (
             f"Hotend at {result.details.get('hotend_reading')}°C; the printer "
             f"accepted a {plan.length_mm:g} mm purge and raised no extrusion "
             f"fault in the {watch:g}s after it. Bambu reports no flow sensor, "
             "so 'no fault' is the strongest thing the printer can say — look "
-            "at the nozzle to confirm a clean stream."
+            f"at the nozzle to confirm a clean stream. {self._placement_sentence(placement)}"
         )
         result.details["fault_watch_seconds"] = watch
+        return result
+
+    def _wipe_nozzle_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Run the model's own wipe-pad pass from its plan, or refuse with the reason.
+
+        Refused while paused: the head is parked over the part, and Kiln
+        does not travel mid-print.
+        """
+        if plan.printer_paused:
+            return FilamentOpResult(
+                success=False,
+                action=plan.action,
+                message=(
+                    "Not wiping: the print is paused and the head is parked over "
+                    "the part. Kiln does not travel mid-print; finish or cancel "
+                    "the print first, or wipe from the printer's own screen."
+                ),
+                extrusion_verified=False,
+                verification_source="refused_paused",
+                slot=plan.slot,
+                material=plan.material,
+                temperature=plan.temperature,
+                details={"purge_station": self._purge_placement(plan)},
+            )
+        from kiln.printers import motion_plan as _exec
+
+        doc = self._plan_for("wipe", axes="XY")
+        if doc is None or not doc.get("ok"):
+            _exec.note_motion_outcome(self, "wipe", "refused", "no_plan")
+            raise FilamentHandlingUnsupported(
+                self._served_refusal("wipe", doc).replace(self._JOG_LINE, "")
+                + " Wipe from the printer's own screen, or start a print -- its start sequence wipes on the pad."
+            )
+        step = plan.options.get("step")
+        plan_only = bool(plan.options.get("plan_only"))
+        steps = _exec.wipe_steps_of(doc)
+        if (step is not None or plan_only) and not steps:
+            raise PrinterError(
+                f"The wipe plan for {self._model_name()} describes no steps, so it runs whole or not at all; "
+                "call again without step / plan_only."
+            )
+        # A plan derived from the vendor's file that no one has run on a real
+        # machine says so, and runs in step mode only: the full run refuses
+        # in the plan's own words; plan_only and step=N are how it is benched.
+        only = doc.get("step_mode_only") if isinstance(doc.get("step_mode_only"), dict) else None
+        if only and step is None and not plan_only:
+            _exec.note_motion_outcome(self, "wipe", "refused", "step_mode_only")
+            raise FilamentHandlingUnsupported(
+                f"Kiln will not run the wipe on {self._model_name()} in one go: "
+                f"{str(only.get('reason') or 'the plan runs in step mode only').rstrip('. ')}. "
+                "Until then, wipe from the printer's own screen -- its wizard parks first -- or start a print; "
+                "its start sequence wipes on the pad."
+            )
+        # The wipe travels to the chute first (raise, home X across the row);
+        # a recorded part taller than the raise refuses it -- a plan cannot
+        # stand in for a wipe, so the planner is not asked.  Where the plan
+        # presses the plate (its own words say which datum it takes and
+        # where the head has to cross), the gate asks a person on every call
+        # and runs only on plate_clear=True -- the caller's word, never Kiln's.
+        contact = (doc.get("details") or {}).get("needs_plate_clear")
+        touches = bool(doc.get("z_home_on_plate")) or any(s_.get("touches_plate") for s_ in steps)
+        self._plate_gate(
+            plan.options, clearance_mm=doc.get("raise_clearance_mm"), action="wipe", allow_plan=False,
+            touches_plate=touches, contact=contact if isinstance(contact, str) else None,
+            fallback=("Until then, wipe from the printer's own screen -- its wizard parks first -- "
+                      "or start a print; its start sequence wipes on the pad."),
+        )
+        if plan_only:
+            return _exec.wipe_plan_only(doc, plan, steps)
+        if step is not None:
+            result = _exec.run_wipe_step(self, doc, plan, steps, int(step))
+            if result.success and result.next_step is None:
+                result.details["plate_clear_given"] = touches and plan.options.get("plate_clear") is True
+            return result
+        faults_before = self._snapshot_faults()
+        placement = dict(doc.get("placement") or {"status": "parked", "printer_id": self._printer_model})
+        try:
+            retract_mm = float(doc.get("end_retract_mm") or 0.0)
+            retract_feed = float(doc.get("retract_feed_mm_min") or FILAMENT_FEED_RATE_MM_MIN)
+        except (TypeError, ValueError):
+            retract_mm, retract_feed = 0.0, FILAMENT_FEED_RATE_MM_MIN
+        pre = [str(x) for x in (doc.get("pre_gcode") or [])]
+        post = [str(x) for x in (doc.get("post_gcode") or [])]
+        if not pre or not post or retract_mm <= 0:
+            raise FilamentHandlingUnsupported(
+                f"Kiln will not wipe {self._model_name()}: the plan that answered carries no pad pass. "
+                "Wipe from the printer's own screen, or start a print -- its start sequence wipes on the pad."
+            )
+        result = self._gcode_filament_move(
+            plan,
+            signed_length_mm=-retract_mm,
+            feed_mm_min=retract_feed,
+            mechanism="bambu_mqtt_gcode_line",
+            pre_gcode=pre,
+            post_gcode=post,
+            placement=placement,
+        )
+        if not result.success:
+            if result.verification_source == "firmware_rejected_move":
+                _exec.note_motion_outcome(self, "wipe", "fault", "rejected")
+            return result
+        watch = plan.wait_seconds(float(doc.get("watch_seconds") or self._FILAMENT_WIPE_WATCH_S))
+        fault = self._watch_for_purge_fault(plan, faults_before, watch=watch, stage="wipe")
+        if fault is not None:
+            fault.details["purge_station"] = placement
+            _exec.note_motion_outcome(self, "wipe", "fault", fault.error_code)
+            return fault
+        _exec.note_motion_outcome(self, "wipe", "full_run")
+        result.verification_source = "no_fault_within_window"
+        result.details["end_retract_mm"] = retract_mm
+        for key, value in (doc.get("details") or {}).items():
+            result.details[key] = value
+        if isinstance(doc.get("finish"), dict):
+            result.details["finish"] = dict(doc["finish"])
+        if steps:
+            result.steps = steps
+        result.details["plate_clear_given"] = touches and plan.options.get("plate_clear") is True
+        summary = str(doc.get("summary") or f"Wiped the nozzle on {self._model_name()}'s pad.")
+        result.message = (
+            f"{summary} Bambu acknowledges none of this and raised no fault in {watch:g}s -- look at the tip."
+        )
+        result.details["fault_watch_seconds"] = watch
+        return result
+
+    def _home_axes_impl(self, axes: str, options: dict[str, Any]) -> HomeResult:
+        """Home the way the model's own start sequence does, from its plan; else refuse.
+
+        Every Bambu start file raises the head before it homes and never
+        sends a bare G28 from an unknown height, so this file never invents
+        one: without a plan the answer is a refusal that names the screen's
+        jog controls, Z up first.  The plan's ``z_home_on_plate`` says
+        whether the Z step presses the plate; the plate gate then asks the
+        person, every call.
+        """
+        from kiln.printers.motion_plan import note_motion_outcome, run_home_plan
+
+        action = str(options.get("_action") or "home")
+        consent = options.get("plate_clear") is True
+        doc = self._plan_for("home", axes=axes, on_plate_ok=consent)
+        if doc is None:
+            note_motion_outcome(self, "home", "refused", "no_plan")
+            raise HomingUnsupported(
+                self._served_refusal(action, None) + " On this family the vendor's own sequence raises the "
+                "head before it homes, and a bare G28 from an unknown height is exactly the move it avoids."
+            )
+        if not doc.get("ok"):
+            refusal = doc.get("refusal") if isinstance(doc.get("refusal"), dict) else {}
+            if refusal.get("code") == "PLATE_CLEAR_REQUIRED":
+                # The plan says the Z home presses the plate and no consent
+                # came with the call: the public gate words the ask.
+                self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action=action, touches_plate=True)
+            note_motion_outcome(self, "home", "refused", "no_plan")
+            raise HomingUnsupported(self._served_refusal(action, doc))
+        touches = bool(doc.get("z_home_on_plate")) and "Z" in axes
+        detour = self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action=action, touches_plate=touches)
+        return run_home_plan(self, doc, axes=axes, options=options, action=action, steps=detour)
+
+    def _park_head_impl(self, options: dict[str, Any]) -> HomeResult:
+        """Raise, home X, travel off the plate edge to the chute -- from the park plan; else refuse."""
+        from kiln.printers.motion_plan import note_motion_outcome, run_home_plan
+
+        doc = self._plan_for("park", axes="XY")
+        if doc is None or not doc.get("ok"):
+            note_motion_outcome(self, "park", "refused", "no_plan")
+            raise HomingUnsupported(self._served_refusal("park", doc))
+        detour = self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action="park")
+        result = run_home_plan(self, doc, axes="XY", options=options, action="park", steps=detour)
+        result.action = "park"
         return result
 
     # ------------------------------------------------------------------
@@ -6238,12 +6971,107 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- file deletion
     # ------------------------------------------------------------------
 
+    #: The directories a Bambu keeps print files in, one per model family
+    #: (``/model`` A1 series, ``/sdcard`` X1/P1, ``/cache`` P2S) -- the same
+    #: three :meth:`_detect_storage_path` probes.  A file path handed to
+    #: :meth:`delete_file` or :meth:`read_print_file` must sit in one of them.
+    _STORAGE_DIRS: tuple[str, ...] = ("/model", "/sdcard", f"/{_BAMBU_FTP_URL_DIR}")
+
+    #: Largest file :meth:`read_print_file` will hold in memory for the
+    #: pre-print gate.  A print file past this is not inspected (``None``);
+    #: the gate soft-passes and says nothing, as it did before read-back
+    #: existed.  256 MB is far above any real sliced job.
+    _READ_BACK_CAP_BYTES: int = 256 * 1024 * 1024
+
+    def _storage_file_path(self, ftp: ftplib.FTP_TLS, file_name: str) -> str:
+        """*file_name* as a full path on the printer's storage.
+
+        A bare name (what :meth:`start_print` takes) lands in the detected
+        storage directory; a full path is kept as given.  Either way the
+        result must sit under one of :attr:`_STORAGE_DIRS`, so a path that
+        walks out of the print-file area is refused before any FTPS verb
+        runs.  POSIX normalisation on purpose: the card's paths are POSIX
+        whatever the host is.
+        """
+        name = str(file_name or "").strip()
+        if not name.startswith("/"):
+            name = f"{self._detect_storage_path(ftp)}/{posixpath.basename(name)}"
+        safe_path = posixpath.normpath(name)
+        if not any(safe_path.startswith(d + "/") for d in self._STORAGE_DIRS):
+            raise PrinterError(
+                f"File path must be inside the printer storage ({', '.join(self._STORAGE_DIRS)}), "
+                f"got: {file_name!r}"
+            )
+        return safe_path
+
+    def read_print_file(self, file_name: str) -> bytes | None:
+        """The printer's own copy of *file_name*, read back over FTPS.
+
+        What the pre-print gate inspects when a print is started by name
+        and no local copy exists -- see
+        :meth:`PrinterAdapter.read_print_file`.  Reads from the same
+        storage directory :meth:`list_files` lists and :meth:`upload_file`
+        writes, so the bytes are the ones the ``project_file`` command
+        would run.  A file past :attr:`_READ_BACK_CAP_BYTES` raises, so
+        the gate refuses it the way it refuses any file it could not
+        inspect; ``None`` is never returned here.
+
+        Raises:
+            PrinterError: If the connection or the transfer fails.
+        """
+        ftp = self._ftp_connect()
+        try:
+            path = self._storage_file_path(ftp, file_name)
+            chunks: list[bytes] = []
+            size = 0
+            too_big = False
+
+            def _take(chunk: bytes) -> None:
+                nonlocal size, too_big
+                if too_big:
+                    return
+                size += len(chunk)
+                if size > self._READ_BACK_CAP_BYTES:
+                    too_big = True
+                    chunks.clear()
+                    return
+                chunks.append(chunk)
+
+            try:
+                ftp.retrbinary(f"RETR {path}", _take)
+            except Exception as exc:
+                raise PrinterError(
+                    f"Could not read {file_name} back from the printer over FTPS: {exc}. "
+                    "Use `list_files()` to check the file is there.",
+                    cause=exc,
+                ) from exc
+            if too_big:
+                # A file Kiln will not hold is a file Kiln could not inspect,
+                # and the ruling is that such a start is refused, not waved
+                # through: raise, so the gate takes its refuse-with-override
+                # path rather than reading None as "no read-back here".
+                raise PrinterError(
+                    f"{file_name} is larger than the {self._READ_BACK_CAP_BYTES // (1024 * 1024)} MB "
+                    "read-back cap, so Kiln could not inspect it; start it from the printer's "
+                    "own screen or re-slice through Kiln."
+                )
+            return b"".join(chunks)
+        finally:
+            try:
+                ftp.quit()
+            except Exception as exc:
+                logger.debug("Failed to quit FTP session after read-back: %s", exc)
+
     def delete_file(self, file_path: str) -> bool:
-        """Delete a file from the printer's SD card via FTPS.
+        """Delete a file from the printer's storage via FTPS.
 
         Args:
-            file_path: Path of the file on the printer (e.g.
-                ``"/sdcard/model.3mf"``).
+            file_path: Path of the file on the printer as :meth:`list_files`
+                reports it (``/model/...`` on an A1, ``/sdcard/...`` on an
+                X1/P1, ``/cache/...`` on a P2S), or its bare name, which is
+                looked up in the detected storage directory.  Until
+                2026-09-16 only ``/sdcard/`` and ``/cache/`` were accepted,
+                so no A1 file could be deleted through Kiln at all.
 
         Returns:
             ``True`` if the file was deleted.
@@ -6256,13 +7084,12 @@ class BambuAdapter(PrinterAdapter):
         except PrinterError:
             raise
 
-        # Sanitise path — only allow files under /sdcard/ or /cache/.
-        # The printer's SD card uses POSIX paths, so normalize with
-        # posixpath; os.path.normpath would mangle the separators to
-        # backslashes on a Windows host.
-        safe_path = posixpath.normpath(file_path)
-        if not safe_path.startswith("/sdcard/") and not safe_path.startswith("/cache/"):
-            raise PrinterError(f"File path must be under /sdcard/ or /cache/, got: {file_path!r}")
+        try:
+            safe_path = self._storage_file_path(ftp, file_path)
+        except PrinterError:
+            with contextlib.suppress(Exception):
+                ftp.quit()
+            raise
 
         try:
             ftp.delete(safe_path)

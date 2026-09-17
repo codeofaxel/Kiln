@@ -148,6 +148,31 @@ def note_wrapped(gcode_path: str, wrapped_path: str) -> None:
         logger.debug("monitor_twin.note_wrapped failed", exc_info=True)
 
 
+def sliced_entry_for(file_name: str) -> dict[str, Any] | None:
+    """The ledger line whose G-code or wrap IS the printer-side *file_name*.
+
+    An exact basename join against what the slicer wrote (``output``) or
+    what the wrapper wrote (``wrapped``); newest wins among exact twins.
+    The one join for everything that needs the local file behind a
+    printer-side name -- the Monitor's twin and the plate record alike.
+    ``None`` when Kiln did not slice it.  Never raises.
+    """
+    try:
+        base = os.path.basename(str(file_name or ""))
+        entries = _read_json(_SLICES_FILE, [])
+        if base and isinstance(entries, list):
+            for entry in reversed(entries):
+                if not isinstance(entry, dict):
+                    continue
+                out = os.path.basename(str(entry.get("output") or ""))
+                wrapped = os.path.basename(str(entry.get("wrapped") or ""))
+                if base in (out, wrapped) and out:
+                    return entry
+    except Exception:  # noqa: BLE001 — a ledger miss is not a failure
+        logger.debug("monitor_twin.sliced_entry_for failed", exc_info=True)
+    return None
+
+
 def note_print_started(printer_name: str, file_name: str) -> None:
     """A print just started: join the printer-side name to the sliced pair
     and retain copies of the toolpath (+ mesh) for the Monitor's twin.
@@ -160,17 +185,7 @@ def note_print_started(printer_name: str, file_name: str) -> None:
     """
     try:
         base = os.path.basename(str(file_name or ""))
-        entries = _read_json(_SLICES_FILE, [])
-        match: dict[str, Any] | None = None
-        if base and isinstance(entries, list):
-            for entry in reversed(entries):  # newest wins among exact twins
-                if not isinstance(entry, dict):
-                    continue
-                out = os.path.basename(str(entry.get("output") or ""))
-                wrapped = os.path.basename(str(entry.get("wrapped") or ""))
-                if base in (out, wrapped) and out:
-                    match = entry
-                    break
+        match = sliced_entry_for(file_name)
 
         slug = _slug(printer_name)
         record: dict[str, Any] = {

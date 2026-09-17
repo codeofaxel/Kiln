@@ -334,12 +334,25 @@ def _empty_day() -> dict[str, Any]:
         # relay (kiln.streaming) and the camera check (kiln.camera_check),
         # the only two places that know; see record_video_outcome.
         "video_outcomes": {},
+        "motion_refusals": {},
+        # What a served motion plan did on a real machine, as classes:
+        # {"<model>|<verb>|<outcome>": count} over the closed vocabularies
+        # MOTION_VERBS / MOTION_OUTCOMES below.  Written by the executor
+        # every plan runs through (kiln.printers.motion_plan) and the
+        # filament doors that run a plan whole; see record_motion_outcome.
+        # This is the only evidence that a sequence derived from a vendor's
+        # file works on the machine it was derived for: the walk happens
+        # on the owner's own printer and never touches a server.
+        "motion_outcomes": {},
         # Print-counting bookkeeping — see _PENDING_STARTS_MAX above.
         # Local only: get_daily_stats() never returns these, so nothing
         # here reaches the heartbeat.
         "pending_starts": [],
         "counted_outcomes": [],
         "counted_hours": [],
+        # Step-walk bookkeeping for motion_outcomes — see record_motion_step.
+        # Local only, like the three above: never returned, never shipped.
+        "motion_walks": {},
     }
 
 
@@ -363,6 +376,8 @@ _ROLLOVER_MAPS = (
     "surface_sessions", "surface_events",
     "multi_material_seen",
     "video_outcomes",
+    "motion_refusals",
+    "motion_outcomes",
 )
 
 
@@ -402,6 +417,11 @@ def _archive_completed_day(data: dict[str, Any]) -> dict[str, Any]:
         carried = data.get(key)
         if isinstance(carried, list):
             fresh[key] = carried
+    # A step walk spans midnight the same way: a person who sent step 3 at
+    # 23:55 and step 4 at 00:05 walked one sequence, not two.
+    walks = data.get("motion_walks")
+    if isinstance(walks, dict):
+        fresh["motion_walks"] = walks
     return fresh
 
 
@@ -1009,6 +1029,216 @@ def record_camera_check(model: object, probe_id: str, result: str) -> None:
     )
 
 
+#: One motion-refusal key: ``model|code|reason`` -- the model token as
+#: above (``unknown`` when none is declared), the tool error code, and why
+#: the gate refused.  Same privacy boundary as the video key: tokens only.
+_MOTION_REFUSAL_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9_]{0,47}\|[A-Z_]{1,32}\|[a-z_]{1,24}$")
+_MOTION_REFUSALS_MAX_DISTINCT = 100
+#: The closed vocabularies of the last two slots.  The dashboard reads them
+#: from here rather than keeping a copy, so a refusal added later is read,
+#: never dropped as junk.
+MOTION_REFUSAL_CODES: tuple[str, ...] = ("PRINTER_MODEL_REQUIRED", "PLATE_CLEAR_REQUIRED")
+MOTION_REFUSAL_REASONS: tuple[str, ...] = ("undeclared", "unknown_key", "unknown_method", "on_plate", "plate_occupied")
+
+
+def record_motion_refusal(model: object, code: str, reason: str) -> None:
+    """Count one refusal of a head move today, by model, code and cause.
+
+    Written only by the home/park gate in :mod:`kiln.printers.base`, the
+    one seam every door reaches.  ``code`` is the tool error code the
+    person saw (``PRINTER_MODEL_REQUIRED``, ``PLATE_CLEAR_REQUIRED``);
+    ``reason`` says why -- ``undeclared`` (no model set), ``unknown_key``
+    (a model the catalogue does not know), ``unknown_method`` (a blank
+    Z-home cell decided it), ``on_plate`` (the vendor's own descent) or
+    ``plate_occupied`` (a sideways move over a part the plate record
+    holds).  The first three are the only evidence that a machine people
+    own is missing from the catalogue, or that a blank cell is what
+    stopped them; the last two are the gate doing its job.  Silent by
+    contract.
+    """
+    if code not in MOTION_REFUSAL_CODES or reason not in MOTION_REFUSAL_REASONS:
+        return
+    key = f"{video_model_token(model)}|{code}|{reason}"
+    _record_name_count(
+        "motion_refusals", key,
+        pattern=_MOTION_REFUSAL_KEY_RE, max_distinct=_MOTION_REFUSALS_MAX_DISTINCT,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Motion outcomes — what a served plan did on a real machine
+# ---------------------------------------------------------------------------
+#
+# One key: ``model|verb|outcome``.  The model is the config-declared printer
+# folded by video_model_token; the verb is one of MOTION_VERBS; the outcome
+# is a MOTION_OUTCOMES kind, alone or with one detail after an underscore —
+# the step number a walk reached, the fault code that stopped it, the
+# reason a run was refused.  Counts only: the shape cannot spell a
+# coordinate, a serial or a line of G-code, so no caller mistake can put
+# one into the heartbeat.  The dashboard checks every slot against the
+# vocabulary again and reads INSTALLS, never events.
+
+#: The motions a served plan can describe.
+MOTION_VERBS = ("home", "park", "wipe", "purge")
+
+#: What one call did with it.  ``step_sent`` carries the step number
+#: (``step_sent_3``); ``completed_all_steps`` is the whole walk, in order,
+#: with no step skipped; ``full_run`` is the one-shot run; ``fault`` carries
+#: the printer's code (``fault_0300_0d00_0001_0001``); ``refused`` carries
+#: why the executor said no (``refused_step_mode_only``).
+MOTION_OUTCOMES = ("step_sent", "completed_all_steps", "full_run", "fault", "refused")
+
+_MOTION_OUTCOME_RE = re.compile(
+    r"^(?:step_sent_[1-9]\d{0,2}|completed_all_steps|full_run|fault_[a-z0-9_]{1,32}|refused(?:_[a-z_]{1,24})?)$"
+)
+_MOTION_KEY_RE = re.compile(
+    r"^[a-z0-9][a-z0-9_]{0,47}\|(?:home|park|wipe|purge)\|"
+    r"(?:step_sent_[1-9]\d{0,2}|completed_all_steps|full_run|fault_[a-z0-9_]{1,32}|refused(?:_[a-z_]{1,24})?)$"
+)
+
+#: Distinct motion keys kept per day.  A busy install meets a few models,
+#: four verbs and a handful of outcomes; a runaway writer must not grow the
+#: file or the payload.
+_MOTION_OUTCOMES_MAX_DISTINCT = 100
+
+#: A walk nobody has advanced for this long is over; the next step 1 starts
+#: a new one.  Long enough to think between steps, short enough that
+#: yesterday's abandoned step 2 does not credit today's step 3.
+_MOTION_WALK_TTL_S = 6 * 3600
+_MOTION_WALKS_MAX = 16
+
+_MOTION_DETAIL_UNSAFE = re.compile(r"[^a-z0-9]+")
+
+
+def motion_detail_token(raw: object, *, limit: int = 32) -> str:
+    """A fault code or a refusal reason as an outcome detail, or ``"unknown"``.
+
+    Lowercased, every run of other characters folded to one underscore,
+    capped.  A Bambu HMS code ``0300_0D00_0001_0001`` keeps its shape; a
+    sentence becomes a token.
+    """
+    if not isinstance(raw, str):
+        return "unknown"
+    token = _MOTION_DETAIL_UNSAFE.sub("_", raw.strip().lower()).strip("_")[:limit].rstrip("_")
+    return token or "unknown"
+
+
+def motion_outcome_token(kind: str, detail: object = None) -> str | None:
+    """The outcome slot for *kind* (a MOTION_OUTCOMES word) and its detail,
+    or ``None`` when the pair is not one the key can carry."""
+    if kind not in MOTION_OUTCOMES:
+        return None
+    if kind == "step_sent":
+        if isinstance(detail, bool) or not isinstance(detail, int) or not 1 <= detail <= 999:
+            return None
+        token = f"step_sent_{detail}"
+    elif kind == "fault":
+        token = f"fault_{motion_detail_token(detail)}"
+    elif kind == "refused":
+        token = "refused" if detail is None else f"refused_{motion_detail_token(detail, limit=24)}"
+    else:
+        token = kind
+    return token if _MOTION_OUTCOME_RE.match(token) else None
+
+
+def split_motion_outcome(token: object) -> tuple[str, str | None] | None:
+    """``(kind, detail)`` for an outcome slot, or ``None`` for one not of
+    this shape -- the dashboard's parser, kept beside the writer."""
+    if not isinstance(token, str) or not _MOTION_OUTCOME_RE.match(token):
+        return None
+    for kind in ("step_sent", "fault", "refused"):
+        if token == kind:
+            return kind, None
+        if token.startswith(kind + "_"):
+            return kind, token[len(kind) + 1:]
+    return token, None
+
+
+def record_motion_outcome(model: object, verb: str, kind: str, detail: object = None) -> None:
+    """Count one thing a served motion plan did on a printer model today.
+
+    Written by the executor every served plan runs through
+    (:mod:`kiln.printers.motion_plan`) and by the filament doors that run
+    a plan whole.  ``verb`` is a MOTION_VERBS word; ``kind`` a
+    MOTION_OUTCOMES word with its detail (the step number, the fault code,
+    the refusal reason).  A key that is not three well-formed tokens is
+    dropped.  Silent by contract -- a counter never blocks a motion.
+    """
+    outcome = motion_outcome_token(kind, detail)
+    if outcome is None or verb not in MOTION_VERBS:
+        return
+    _record_name_count(
+        "motion_outcomes", f"{video_model_token(model)}|{verb}|{outcome}",
+        pattern=_MOTION_KEY_RE, max_distinct=_MOTION_OUTCOMES_MAX_DISTINCT,
+    )
+
+
+def record_motion_step(model: object, verb: str, step: int, total: int) -> None:
+    """Count one step of a plan sent without a fault, and the whole walk
+    when this step completes it.
+
+    ``completed_all_steps`` is the evidence a derived sequence earns its
+    bench on: every step, in order, none skipped, none faulted.  So it is
+    recorded only when this install walked steps 1..total in sequence --
+    tracked in the local-only ``motion_walks`` map, keyed by model and
+    verb, never shipped.  Step 1 starts a walk; a step that is not the one
+    the walk expects ends it (the person skipped, or started over); a
+    fault ends it (see :func:`record_motion_fault`); a walk nobody
+    advanced within _MOTION_WALK_TTL_S is over.  A one-step plan completes
+    on its step 1.  Silent by contract.
+    """
+    if isinstance(step, bool) or not isinstance(step, int) or not isinstance(total, int):
+        return
+    if not 1 <= step <= total:
+        return
+    record_motion_outcome(model, verb, "step_sent", step)
+    walk_key = f"{video_model_token(model)}|{verb}"
+    completed = False
+    try:
+        with _lock:
+            data = _read()
+            walks = data.get("motion_walks")
+            if not isinstance(walks, dict):
+                walks = {}
+            now = time.time()
+            live = walks.get(walk_key) if isinstance(walks.get(walk_key), dict) else None
+            if live is not None and now - float(live.get("at") or 0.0) > _MOTION_WALK_TTL_S:
+                live = None
+            in_order = step == 1 or (live is not None and int(live.get("next") or 0) == step
+                                     and int(live.get("total") or 0) == total)
+            if step == total:
+                completed = in_order
+                walks.pop(walk_key, None)
+            elif in_order:
+                if walk_key not in walks and len(walks) >= _MOTION_WALKS_MAX:
+                    walks.pop(next(iter(walks)))
+                walks[walk_key] = {"next": step + 1, "total": total, "at": now}
+            else:
+                walks.pop(walk_key, None)
+            data["motion_walks"] = walks
+            _write(data)
+    except Exception as exc:
+        _logger.debug("motion walk bookkeeping failed: %s", exc)
+    if completed:
+        record_motion_outcome(model, verb, "completed_all_steps")
+
+
+def record_motion_fault(model: object, verb: str, code: object) -> None:
+    """Count a fault the printer raised during a served plan, and end any
+    step walk in progress on that model and verb: a walk with a fault in
+    it is not the clean walk the bench asks for.  Silent by contract."""
+    record_motion_outcome(model, verb, "fault", code)
+    try:
+        with _lock:
+            data = _read()
+            walks = data.get("motion_walks")
+            if isinstance(walks, dict) and walks.pop(f"{video_model_token(model)}|{verb}", None) is not None:
+                data["motion_walks"] = walks
+                _write(data)
+    except Exception as exc:
+        _logger.debug("motion walk reset failed: %s", exc)
+
+
 def get_daily_stats() -> dict[str, Any]:
     """Return today's counters and breakdowns."""
     data = _read()
@@ -1052,6 +1282,9 @@ def get_daily_stats() -> dict[str, Any]:
         "multi_material_seen": data.get("multi_material_seen", {}),
         # Same contract again: recorded, rolled over, returned.
         "video_outcomes": data.get("video_outcomes", {}),
+        "motion_refusals": data.get("motion_refusals", {}),
+        # Same contract again: recorded, rolled over, returned.
+        "motion_outcomes": data.get("motion_outcomes", {}),
         # The last COMPLETE day's counters (see _archive_completed_day).
         # The heartbeat reports these because the same-day counters it
         # can see at server startup are structurally near-empty.

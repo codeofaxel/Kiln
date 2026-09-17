@@ -1015,6 +1015,10 @@ class TestGetAdapter:
         monkeypatch.setattr(mod, "_PRINTER_HOST", "")
         monkeypatch.setattr(mod, "_PRINTER_API_KEY", "somekey")
         monkeypatch.setattr(mod, "_PRINTER_TYPE", "octoprint")
+        # The getter now resolves config.yaml once before giving up; this
+        # pin is about what happens when that finds nothing, so it must not
+        # read the developer's real ~/.kiln/config.yaml.
+        monkeypatch.setattr(mod, "_runtime_config_resolved", True)
 
         with pytest.raises(RuntimeError, match="KILN_PRINTER_HOST"):
             mod._get_adapter()
@@ -1064,6 +1068,7 @@ class TestGetAdapter:
         monkeypatch.setattr(mod, "_adapter", None)
         monkeypatch.setattr(mod, "_PRINTER_HOST", "")
         monkeypatch.setattr(mod, "_registry", PrinterRegistry())
+        monkeypatch.setattr(mod, "_runtime_config_resolved", True)  # see test_missing_host
 
         with pytest.raises(RuntimeError, match="KILN_PRINTER_HOST"):
             mod._get_adapter()
@@ -1709,6 +1714,32 @@ class TestRegisterPrinter:
         assert result["success"] is True
         assert result["name"] == "my-moonraker"
         assert "my-moonraker" in fresh_registry
+
+    def test_an_unknown_printer_model_is_recorded_and_said_so(self, monkeypatch):
+        """The CLI's setup asks before recording an unknown model; this door
+        records it, so it must say what the home/park gate will say later."""
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = register_printer(
+            name="mystery", printer_type="moonraker", host="http://klipper.local",
+            printer_model="Voron Trident 300",
+        )
+        assert result["success"] is True
+        assert not any("catalogue row" in w for w in result.get("warnings", []))  # the hint table resolves it
+
+        result = register_printer(
+            name="mystery2", printer_type="moonraker", host="http://klipper.local",
+            printer_model="voron_trdent",
+        )
+        assert result["success"] is True
+        warning = "\n".join(result["warnings"])
+        assert "'voron_trdent' is not a catalogue row" in warning
+        assert "home_axes / park_head will refuse" in warning
+        assert "Closest catalogue rows: voron_trident" in warning
+        assert fresh_registry.get("mystery2").declared_printer_model() == "voron_trdent"
 
     def test_moonraker_no_api_key(self, monkeypatch):
         """Moonraker does not require an api_key."""

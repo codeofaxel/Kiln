@@ -95,6 +95,14 @@ def _delete_tokens() -> bool:
     if not path.exists():
         return False
     path.unlink()
+    # Served motion plans are kept for the signed-in account; they leave
+    # with it, so the next account on this machine starts with none.
+    try:
+        from kiln.printers.motion_plan_cache import forget_all
+
+        forget_all()
+    except Exception:  # noqa: BLE001 -- a sign-out never fails over a cache
+        pass
     return True
 
 
