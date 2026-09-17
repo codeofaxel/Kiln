@@ -334,6 +334,7 @@ def _empty_day() -> dict[str, Any]:
         # relay (kiln.streaming) and the camera check (kiln.camera_check),
         # the only two places that know; see record_video_outcome.
         "video_outcomes": {},
+        "motion_refusals": {},
         # Print-counting bookkeeping — see _PENDING_STARTS_MAX above.
         # Local only: get_daily_stats() never returns these, so nothing
         # here reaches the heartbeat.
@@ -363,6 +364,7 @@ _ROLLOVER_MAPS = (
     "surface_sessions", "surface_events",
     "multi_material_seen",
     "video_outcomes",
+    "motion_refusals",
 )
 
 
@@ -1009,6 +1011,42 @@ def record_camera_check(model: object, probe_id: str, result: str) -> None:
     )
 
 
+#: One motion-refusal key: ``model|code|reason`` -- the model token as
+#: above (``unknown`` when none is declared), the tool error code, and why
+#: the gate refused.  Same privacy boundary as the video key: tokens only.
+_MOTION_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9_]{0,47}\|[A-Z_]{1,32}\|[a-z_]{1,24}$")
+_MOTION_REFUSALS_MAX_DISTINCT = 100
+#: The closed vocabularies of the last two slots.  The dashboard reads them
+#: from here rather than keeping a copy, so a refusal added later is read,
+#: never dropped as junk.
+MOTION_REFUSAL_CODES: tuple[str, ...] = ("PRINTER_MODEL_REQUIRED", "PLATE_CLEAR_REQUIRED")
+MOTION_REFUSAL_REASONS: tuple[str, ...] = ("undeclared", "unknown_key", "unknown_method", "on_plate", "plate_occupied")
+
+
+def record_motion_refusal(model: object, code: str, reason: str) -> None:
+    """Count one refusal of a head move today, by model, code and cause.
+
+    Written only by the home/park gate in :mod:`kiln.printers.base`, the
+    one seam every door reaches.  ``code`` is the tool error code the
+    person saw (``PRINTER_MODEL_REQUIRED``, ``PLATE_CLEAR_REQUIRED``);
+    ``reason`` says why -- ``undeclared`` (no model set), ``unknown_key``
+    (a model the catalogue does not know), ``unknown_method`` (a blank
+    Z-home cell decided it), ``on_plate`` (the vendor's own descent) or
+    ``plate_occupied`` (a sideways move over a part the plate record
+    holds).  The first three are the only evidence that a machine people
+    own is missing from the catalogue, or that a blank cell is what
+    stopped them; the last two are the gate doing its job.  Silent by
+    contract.
+    """
+    if code not in MOTION_REFUSAL_CODES or reason not in MOTION_REFUSAL_REASONS:
+        return
+    key = f"{video_model_token(model)}|{code}|{reason}"
+    _record_name_count(
+        "motion_refusals", key,
+        pattern=_MOTION_KEY_RE, max_distinct=_MOTION_REFUSALS_MAX_DISTINCT,
+    )
+
+
 def get_daily_stats() -> dict[str, Any]:
     """Return today's counters and breakdowns."""
     data = _read()
@@ -1052,6 +1090,7 @@ def get_daily_stats() -> dict[str, Any]:
         "multi_material_seen": data.get("multi_material_seen", {}),
         # Same contract again: recorded, rolled over, returned.
         "video_outcomes": data.get("video_outcomes", {}),
+        "motion_refusals": data.get("motion_refusals", {}),
         # The last COMPLETE day's counters (see _archive_completed_day).
         # The heartbeat reports these because the same-day counters it
         # can see at server startup are structurally near-empty.

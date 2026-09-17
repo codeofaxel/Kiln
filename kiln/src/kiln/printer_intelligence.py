@@ -40,6 +40,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.motion_facts import MotionFacts, load_motion_facts
+
 logger = logging.getLogger(__name__)
 
 _DATA_FILE = Path(__file__).resolve().parent / "data" / "printer_intelligence.json"
@@ -150,6 +152,7 @@ class PrinterIntel:
     #: without the overlay every model reads ``None`` and the doors refuse by
     #: name rather than move the head to a guessed coordinate.
     purge_station: dict[str, Any] | None = None
+    motion: MotionFacts | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +453,7 @@ def _build_profiles(raw: dict[str, Any]) -> dict[str, PrinterIntel]:
                 load_sequence=load_sequence,
                 has_chamber_sensor=_stated_bool(data.get("has_chamber_sensor")),
                 purge_station=(dict(data["purge_station"]) if isinstance(data.get("purge_station"), dict) else None),
+                motion=load_motion_facts(key, data.get("motion")),
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("Skipping malformed intel profile '%s': %s", key, exc)
@@ -721,6 +725,7 @@ def intel_to_dict(intel: PrinterIntel) -> dict[str, Any]:
         "has_enclosure": intel.has_enclosure,
         "has_abl": intel.has_abl,
         "has_chamber_sensor": intel.has_chamber_sensor,
+        "motion": intel.motion.to_dict() if intel.motion is not None else None,
         "capabilities": intel.capabilities,
         "materials": {
             name: {"hotend": mp.hotend, "bed": mp.bed, "fan": mp.fan, "notes": mp.notes}
@@ -1001,6 +1006,12 @@ _SPEED_CAPABILITIES: dict[str, dict[str, Any]] = {
     },
     # --- Voron ---
     "voron_2": {
+        "max_speed": 300,
+        "max_accel": 10000,
+        "input_shaping": True,
+        "quality_factor": 0.75,
+    },
+    "voron_trident": {
         "max_speed": 300,
         "max_accel": 10000,
         "input_shaping": True,

@@ -37,7 +37,7 @@ def run_home(*, axes: str = "XYZ", printer_name: str | None = None, action: str 
     """The one door every surface calls -- for both verbs."""
     import kiln.server as _srv
     from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING
-    from kiln.printers.base import HomingUnsupported, PlateClearRequired, PrinterError
+    from kiln.printers.base import HomingUnsupported, ModelDeclarationRequired, PlateClearRequired, PrinterError
     from kiln.registry import PrinterNotFoundError
 
     tool_name = "park_head" if action == "park" else "home_axes"
@@ -71,6 +71,11 @@ def run_home(*, axes: str = "XYZ", printer_name: str | None = None, action: str 
         return _srv._error_dict(
             str(exc), code="PLATE_CLEAR_REQUIRED",
             extra={"outcome": "failed", "snapshot_path": exc.snapshot_path, "plate_clear_required": True},
+        )
+    except ModelDeclarationRequired as exc:
+        return _srv._error_dict(
+            str(exc), code="PRINTER_MODEL_REQUIRED",
+            extra={"outcome": "failed", "printer_model_required": True},
         )
     except HomingUnsupported as exc:
         return _srv._error_dict(str(exc), code="UNSUPPORTED", extra={"outcome": "failed"})
@@ -117,9 +122,19 @@ def home_axes(
     motion at a time.  A bare ``G28`` from an unknown height is exactly the
     move that family's own sequences avoid, so a Bambu model whose sequence
     is not served here is refused rather than guessed.  Other backends send
-    the generic ``G28`` and say so (``sequence_source: "plain_g28"``): their
-    firmware decides whether Z lifts before X and Y move, and Kiln cannot
-    see that setting.
+    the firmware's own ``G28`` and say so (``sequence_source:
+    "firmware_home_routine"``) -- but only after the catalogue's motion
+    record for the declared ``printer_model`` has answered how that routine
+    finds Z: on a machine whose Z home presses a probe or the nozzle onto
+    the plate (most of them) the tool asks for ``plate_clear`` first, on
+    the few whose Z home cannot touch the plate it runs unasked, and with
+    no ``printer_model`` declared, or one the catalogue does not know, it
+    refuses and says which key to set (code ``PRINTER_MODEL_REQUIRED``).
+    Homing X and Y alone never needs the record.  The plan's first step
+    says what the person will see -- what descends and where, in the
+    vendor's words -- and whether the routine travels sideways before Z is
+    known; on a Klipper or USB Marlin machine the unit's own config or
+    reports settle the cells the maker left blank, and the plan says so.
 
     Branch on ``outcome``: ``confirmed`` (the printer was seen at home),
     ``accepted`` (sent, not refused, not read back — the honest answer on
@@ -170,6 +185,7 @@ def park_head(
     wait_seconds: float | None = None,
     step: int | None = None,
     plan_only: bool = False,
+    plate_clear: bool = False,
     printer_name: str | None = None,
 ) -> dict[str, Any]:
     """Move the print head somewhere safe, away from the plate, and leave it there.
@@ -180,10 +196,16 @@ def park_head(
     own off-plate spot -- on a Bambu, the position the machine itself
     flushes at, served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it works offline.  On
     Marlin, Klipper and RepRapFirmware the firmware's own home position IS
-    the park, chosen by whoever configured the machine, so the generic
-    home is sent and reported as that.  A Bambu model whose spot is not
-    served here refuses by name rather than guessing a coordinate, and says to use
-    the screen's jog controls, Z up first -- never its Home button over a part.
+    the park, chosen by whoever configured the machine -- and the catalogue's
+    motion record for the declared ``printer_model`` decides how much of it
+    is sent: on a machine whose Z home presses a probe or the nozzle onto
+    the plate (most of them), park homes X and Y only and leaves Z alone;
+    on the few whose Z home cannot touch the plate, the full home.  With no
+    ``printer_model`` declared, or one the catalogue does not know, park
+    refuses and says which key to set (code PRINTER_MODEL_REQUIRED).  A
+    Bambu model whose spot is not served here refuses by name rather than
+    guessing a coordinate, and says to use the screen's jog controls, Z up
+    first -- never its Home button over a part.
 
     Use this first on any machine you are nervous about: it is the safer
     of the two verbs by construction, because nothing descends.  Same
@@ -195,9 +217,14 @@ def park_head(
             backends that raise one (default 10).
         step: Send only this step of the sequence (1-based).
         plan_only: Describe the steps; send nothing.
+        plate_clear: A PERSON's statement that the plate is empty.  Lets a
+            park proceed over a plate the record says holds a part, and lets
+            the full home (Z included) stand in for the park on a machine
+            whose Z home touches the plate.
         printer_name: Which printer.  Omit for the default one.
     """
-    args = {"wait_seconds": wait_seconds, "step": step, "plan_only": plan_only, "printer_name": printer_name}
+    args = {"wait_seconds": wait_seconds, "step": step, "plan_only": plan_only,
+            "plate_clear": plate_clear, "printer_name": printer_name}
     if gate := _gated("park_head", args):
         return gate
     kwargs: dict[str, Any] = {}
@@ -207,6 +234,8 @@ def park_head(
         kwargs["step"] = int(step)
     if plan_only:
         kwargs["plan_only"] = True
+    if plate_clear:
+        kwargs["plate_clear"] = True
     return run_home(printer_name=printer_name, action="park", **kwargs)
 
 

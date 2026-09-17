@@ -119,6 +119,20 @@ class FilamentHandlingUnsupported(PrinterError):
 
 
 
+#: The per-adapter config cache's "not read yet" marker (``None`` means read and unusable).
+_UNREAD = object()
+
+
+class ModelDeclarationRequired(PrinterError):
+    """Raised when a motion needs the catalogue and no printer_model names the row.
+
+    The declaration door: most installations with a printer adapter never
+    say which printer it is, and the facts that decide whether the head may
+    move are looked up by model.  The message names the fix; Kiln never
+    guesses a model to get past it.
+    """
+
+
 class HomingUnsupported(PrinterError):
     """Raised when a backend cannot home the head the way Kiln trusts.
 
@@ -1747,8 +1761,10 @@ class HomeResult:
     #: How the homing was sent (``"gcode"``, ``"bambu_mqtt_gcode_line"``).
     mechanism: str | None = None
     #: ``"vendor_start_sequence"`` when every line is the printer maker's
-    #: own, cited in the catalogue; ``"plain_g28"`` when Kiln sent the
-    #: generic home and can say nothing about the path it takes.
+    #: own, cited in the catalogue; ``"firmware_home_routine"`` when Kiln
+    #: sent the firmware's own home, gated by the catalogue's motion record
+    #: (what descends and where, in the vendor's words), and the firmware
+    #: chose the path.
     sequence_source: str | None = None
     resting_position: dict[str, Any] = field(default_factory=dict)
     #: Set when the sequence heats the nozzle (a printer that homes Z by
@@ -3913,6 +3929,7 @@ class PrinterAdapter(ABC):
         allow_plan: bool = True,
         contact: str | None = None,
         fallback: str | None = None,
+        refusal_reason: str | None = None,
     ) -> list[HomeStep] | None:
         """Refuse a motion the plate record says would meet a part.
 
@@ -3968,7 +3985,7 @@ class PrinterAdapter(ABC):
         # the person's word for the row.
         if state.clear and not touches_plate:
             return None
-        model = str(getattr(self, "_printer_model", "") or "").strip().lower() or self.name
+        model = self.declared_printer_model().lower() or self.name
         height = state.job.max_z_mm if (state.occupied and state.job) else None
         if not touches_plate and not blocks_raise:
             return None
@@ -4018,7 +4035,208 @@ class PrinterAdapter(ABC):
                 f"only do that once a person has confirmed it is empty{look}, then call again with "
                 f"plate_clear=true on {tool} ({cli}). {fallback.replace('Until then', 'Without that', 1)}"
             )
+        # Every door's plate refusal passes here -- the Bambu emitter's home,
+        # park and wipe as much as the generic gate -- so this is where it is
+        # tallied: a Z touch on the vendor's own descent, one decided by a
+        # blank cell (the caller says which), or a sideways move over a part.
+        self._count_motion_refusal(
+            "PLATE_CLEAR_REQUIRED",
+            refusal_reason or ("on_plate" if touches_plate else "plate_occupied"),
+        )
         raise PlateClearRequired(message, snapshot_path=witness)
+
+    def declared_printer_model(self) -> str:
+        """The printer_model this adapter was built with, as the person wrote it.
+
+        Every door that builds an adapter -- the env variables, a
+        config.yaml entry, the register tool -- hands the declared model to
+        :meth:`set_safety_profile`; the Bambu adapter also keeps it as
+        ``_printer_model`` for its own emitter.  This is the ONE accessor
+        the motion facts, the plate gate and the refusals read, so a generic
+        backend built from config.yaml is looked up by the same string a
+        Bambu one is.  Empty when nobody declared a model.  Never the global
+        resolver: with two machines registered that answers for the default
+        printer, and a fact borrowed from the default printer is how the
+        second machine gets the first one's homing.
+        """
+        own = str(getattr(self, "_printer_model", "") or "").strip()
+        if own:
+            return own
+        return str(getattr(self, "_safety_profile_id", "") or "").strip()
+
+    def motion_facts(self) -> Any:
+        """The catalogue's motion block for the declared model, or ``None``.
+
+        The declared string is resolved the way every other door resolves a
+        printer hint: the catalogue key itself (a vendor prefix tolerated),
+        then the shared hint table (``creality_k1`` → ``k1``, ``Voron
+        Trident 300`` → ``voron_trident``).  ``None`` means "Kiln does not
+        know this machine", and every caller treats that as a reason to
+        ask, never to guess.
+        """
+        declared = self.declared_printer_model()
+        if not declared:
+            return None
+        from kiln.motion_facts import motion_facts_for
+
+        facts = motion_facts_for(declared)
+        if facts is None:
+            from kiln.printer_profile_ids import map_printer_hint_to_profile_id
+
+            mapped = map_printer_hint_to_profile_id(declared)
+            facts = motion_facts_for(mapped) if mapped else None
+        if facts is None:
+            return None
+        return self._fill_motion_from_machine(facts)
+
+    def _fill_motion_from_machine(self, facts: Any) -> Any:
+        """Let the connected machine's own config settle what the vendor left per unit.
+
+        Only a backend that can read something about its own motion takes
+        part -- the Klipper family through Moonraker's ``configfile`` object,
+        a Marlin machine on USB through its M115 / M211 / M119 reports --
+        and only when the catalogue row has a null in a cell such a read can
+        fix: a home spot that is a placeholder in the reference config, a Z
+        ceiling that differs by build, whether a bare G28 lifts first.  The
+        machine is read once per adapter and nothing is written anywhere; a
+        machine that cannot be asked leaves the catalogue's answer as it
+        was, so a transport fault can only keep a refusal, never lift one.
+        """
+        if not facts.needs_machine_fill():
+            return facts
+        cache_key = "_motion_machine_source"
+        source = getattr(self, cache_key, _UNREAD)
+        if source is _UNREAD:
+            try:
+                source = self._read_machine_motion_source()
+            except Exception as exc:  # noqa: BLE001 -- a fact Kiln cannot read is a fact it does not have
+                logger.debug("motion: %s could not read itself: %s", self.name, exc)
+                source = None
+            if source is not None:
+                # Only an answer is kept.  A machine that could not be asked
+                # (offline, mid-print) is asked again on the next call.
+                setattr(self, cache_key, source)
+        if source is None:
+            return facts
+        from kiln.machine_motion import fill_from_machine
+
+        kind, payload = source
+        return fill_from_machine(facts, kind, payload)
+
+    def _read_machine_motion_source(self) -> tuple[str, Any] | None:
+        """What this machine can say about its own motion, and in which dialect.
+
+        ``("klipper_config", <configfile.config mapping>)`` from a backend
+        that exposes Moonraker's ``configfile`` object; a Marlin backend
+        overrides this to hand over its firmware reports as
+        ``("marlin_report", MarlinMotionReport)``.  ``None`` from a machine
+        that publishes nothing about itself (Bambu, Elegoo, Prusa Link), or
+        one that could not be asked just now.  An answer is cached for the
+        adapter's life; ``None`` is asked again next time.
+        """
+        reader = getattr(self, "get_printer_config", None)
+        if reader is None:
+            return None
+        config = reader()
+        return None if config is None else ("klipper_config", config)
+
+    def _count_motion_refusal(self, code: str, reason: str) -> None:
+        """One tally per refusal, keyed by model, code and why -- the only trace it leaves.
+
+        Every door (the tool, the CLI, the doctor's probe) and every backend
+        (the generic gate, the Bambu emitter's home, park and wipe) reaches
+        a refusal through this class, so the count is taken here rather
+        than where each door words its error.  It is the only evidence that a model
+        people own is missing from the catalogue, or that a blank cell is
+        what refused them, without anyone filing a report.
+        """
+        try:
+            from kiln.daily_stats import record_motion_refusal
+
+            record_motion_refusal(self.declared_printer_model() or None, code, reason)
+        except Exception as exc:  # noqa: BLE001 -- a counter never blocks a refusal
+            logger.debug("motion refusal count skipped: %s", exc)
+
+    def _declare_model_text(self) -> str:
+        """The door for an install that never said which printer this is.
+
+        Most installations with a printer adapter never declare a
+        ``printer_model`` (27 of 66 in the 2026-09-16 usage count), and no
+        catalogue fact reaches them.  The refusal says so once, in the
+        tool's own reply, and names the fix -- never a guess at the model.
+        """
+        model = self.declared_printer_model()
+        if model:
+            return (
+                f"Kiln has no motion record for {model!r} -- not a catalogue key it knows. "
+                "Run `kiln setup` (it asks which printer this is and writes the answer), or set "
+                "printer_model for this printer in config.yaml (KILN_PRINTER_MODEL for the env door) to a "
+                "catalogue key from printer_intelligence.json."
+            )
+        return (
+            "Kiln does not know which printer this is: no printer_model is declared for it. "
+            "The facts that decide whether the head may move -- which part moves in Z, how Z is found "
+            "and where, whether the firmware refuses an unhomed move -- are looked up by model. Run "
+            "`kiln setup` (it asks which printer this is and writes the answer), or set printer_model "
+            "for this printer in config.yaml (KILN_PRINTER_MODEL for the env door) to a catalogue key "
+            "such as bambu_a1, bambu_p1s, prusa_mk4, k1 or ender3_v3_ke, and call again."
+        )
+
+    def _motion_gate(self, options: dict[str, Any], *, axes: str, action: str) -> Any:
+        """The generic backend's answer to "may the head move?", before any G-code.
+
+        Reads the catalogue's motion block for the declared model and the
+        plate record, and decides:
+
+        * ``plate_clear=True`` in *options*: a person's word, given now.
+          Proceed with whatever the person asked for.
+        * no motion record (no ``printer_model``, or a key the catalogue
+          does not know): refuse with the declaration door -- Kiln will not
+          home Z or park a machine it cannot describe.  Homing X and Y only
+          is allowed, with the blind-travel caveat.
+        * a Z home whose method lands on the plate (every method but a top
+          switch, a switch off the print surface, or a dedicated strip --
+          and an unknown method counts as landing): the plate gate, with
+          the vendor's own description of the descent in the refusal.
+        * a park while the plate record says a part is there: refuse --
+          a generic backend cannot say how high the head is before it
+          travels sideways.
+
+        Returns the motion facts (or ``None``) for the caller's plan text.
+        """
+        motion = self.motion_facts()
+        if options.get("plate_clear") is True:
+            return motion
+        wants_z = "Z" in axes.upper()
+        if motion is None:
+            if wants_z or action == "park":
+                self._count_motion_refusal(
+                    "PRINTER_MODEL_REQUIRED",
+                    "unknown_key" if self.declared_printer_model() else "undeclared",
+                )
+                raise ModelDeclarationRequired(self._declare_model_text())
+            return None
+        if wants_z and motion.z_home_descends_onto_plate:
+            self._plate_gate(options, station=None, action=action, touches_plate=True,
+                             allow_plan=False, contact="homes Z by " + motion.describe_z_home(),
+                             refusal_reason="on_plate" if motion.z_home_known else "unknown_method")
+        if action == "park":
+            from kiln.plate_state import plate_occupancy
+
+            state = plate_occupancy(self)
+            if state.occupied:
+                witness = None if options.get("plan_only") else self._plate_witness()
+                look = (f" -- look at {witness} first" if witness else
+                        " -- this printer has no camera Kiln can read, so look at the plate yourself")
+                self._count_motion_refusal("PLATE_CLEAR_REQUIRED", "plate_occupied")
+                raise PlateClearRequired(
+                    f"Refusing to park {motion.printer_id}: {state.describe()}, and on this backend the "
+                    f"park is the firmware's own X/Y home, which travels sideways at whatever height the head "
+                    f"has now -- Kiln cannot read that height here. Clear the plate{look}, then say so: "
+                    "`kiln plate clear`, or plate_clear=true on park_head.",
+                    snapshot_path=witness,
+                )
+        return motion
 
     def home_axes(self, *, axes: str = "XYZ", **options: Any) -> HomeResult:
         """Home the head -- what the Home button on the printer's screen does.
@@ -4033,9 +4251,12 @@ class PrinterAdapter(ABC):
         addressed, and where the head was left -- every time.  A backend
         with a vendor-cited sequence for the connected model runs that
         (``sequence_source: "vendor_start_sequence"``); one without sends
-        the generic home and says so (``"plain_g28"``); one that cannot
-        home the way Kiln trusts raises :class:`HomingUnsupported` naming
-        what to use instead.
+        the firmware's own home and says so (``"firmware_home_routine"``),
+        after the catalogue's motion record has answered how that home
+        finds Z (:meth:`_motion_gate`); one that cannot home the way Kiln
+        trusts raises :class:`HomingUnsupported` naming what to use
+        instead, and one with no declared model raises
+        :class:`ModelDeclarationRequired`.
 
         Args:
             axes: Any of ``X``, ``Y``, ``Z`` (default all three).  A backend
@@ -4131,11 +4352,11 @@ class PrinterAdapter(ABC):
                 f"{self.name} cannot home through Kiln: this backend does not "
                 "accept G-code. Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, with your eyes on the plate. The screen's Home button descends the nozzle to the bed and is the wrong tool with a part on the plate."
             )
+        motion = self._motion_gate(options, axes=axes, action="home")
         command = "G28" if axes == "XYZ" else "G28 " + " ".join(axes)
         plan = [HomeStep(
             number=1, label="home " + " ".join(axes),
-            you_will_see=("the firmware runs its own homing routine: each axis travels to its endstop; "
-                          "whether Z lifts first is the printer's own setting"),
+            you_will_see=self._describe_home_routine(axes, motion),
             stops_when="each axis reaches its endstop or probe; the firmware decides",
             gcode=[command],
         )]
@@ -4143,10 +4364,12 @@ class PrinterAdapter(ABC):
         if options.get("plan_only"):
             return HomeResult(
                 success=True, outcome="accepted", axes=axes, homed_axes=[],
-                message=f"Plan only -- nothing sent. One step: {command}, the firmware's own routine.",
+                message=(f"Plan only -- nothing sent. One step: {command}, the firmware's own routine. "
+                         + self._describe_home_routine(axes, motion)),
                 mechanism="gcode", sequence_source="firmware_home_routine",
                 steps=[p.to_dict() for p in plan], step_sent=None, next_step=plan[0].to_dict(),
-                details={"gcode": [command], "sent": False},
+                details={"gcode": [command], "sent": False,
+                         "motion": motion.to_dict() if motion is not None else None},
             )
         if step is not None and step != 1:
             raise PrinterError(f"This backend homes in one step; step {step} does not exist.")
@@ -4202,8 +4425,38 @@ class PrinterAdapter(ABC):
             sequence_source="firmware_home_routine",
             resting_position=resting,
             steps=[p.to_dict() for p in plan], step_sent=1 if step else None, next_step=None,
-            details={**details, "verification_source": source},
+            details={**details, "verification_source": source,
+                     "motion": motion.to_dict() if motion is not None else None},
         )
+
+    def _describe_home_routine(self, axes: str, motion: Any) -> str:
+        """What the person will see when the firmware's own routine runs.
+
+        Built from the catalogue's motion block: what the Z home does and
+        where (the vendor's words), whether the routine travels sideways
+        before Z is known, and what the firmware does with an unhomed move.
+        Without a record the text says so and assumes the worst.
+        """
+        parts = ["the firmware runs its own homing routine: each axis travels to its endstop"]
+        if motion is None:
+            parts.append("Kiln has no motion record for this model, so it assumes the Z home descends onto the plate and that the head may travel sideways before Z is known")
+            return "; ".join(parts)
+        # Name the record, so a declared model that resolved to the wrong
+        # machine is visible in the plan, not only in the catalogue.
+        parts.append(f"the catalogue record for {motion.printer_id} says")
+        read = motion.machine_read_fields
+        if read:
+            parts.append("read off this machine itself: " + ", ".join(read))
+        if "Z" in axes.upper():
+            parts.append("Z homes by " + motion.describe_z_home())
+            if motion.z_carrier_inferred and motion.xy_layout:
+                parts.append(f"the vendor calls this a {motion.xy_layout} layout; Kiln infers the {motion.z_carrier} carries Z")
+        caveat = motion.blind_travel_caveat()
+        if caveat:
+            parts.append(caveat)
+        if motion.unhomed_move_policy == "refused":
+            parts.append("this firmware refuses any move until the axes are homed")
+        return "; ".join(parts)
 
     def park_head(self, **options: Any) -> HomeResult:
         """Move the head somewhere safe, away from the plate -- and stay there.
@@ -4251,6 +4504,24 @@ class PrinterAdapter(ABC):
         vendor spot overrides this; one that cannot send G-code raises
         :class:`HomingUnsupported`.
         """
+        if not self.capabilities.can_send_gcode:
+            raise HomingUnsupported(
+                f"{self.name} cannot park through Kiln: this backend does not accept G-code. "
+                "Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, with your "
+                "eyes on the plate."
+            )
+        motion = self._motion_gate(options, axes="XY", action="park")
+        if motion is not None and motion.z_home_descends_onto_plate and options.get("plate_clear") is not True:
+            # The vendor's Z home would press onto a plate nobody has vouched
+            # for: park is the firmware's X/Y home only, Z untouched.
+            result = self._home_axes_impl("XY", options)
+            result.action = "park"
+            if result.success and not options.get("plan_only"):
+                result.message = (
+                    "Parked at the firmware's own X/Y home position, Z untouched -- on this machine "
+                    f"Z homes by {motion.describe_z_home()}, so Kiln did not send it. " + result.message
+                )
+            return result
         result = self._home_axes_impl("XYZ", options)
         result.action = "park"
         if result.success and not options.get("plan_only"):

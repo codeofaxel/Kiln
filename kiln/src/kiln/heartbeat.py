@@ -538,6 +538,14 @@ def _send_heartbeat() -> None:
                 # Tokens only — the key's shape cannot spell a host, a
                 # path or a URL (daily_stats._VIDEO_KEY_RE).
                 "video_outcomes": _top_n(stats.get("video_outcomes", {}), 200),
+                # Why a home or park was refused today --
+                # {"<model>|<code>|<reason>": count_today}.  The only
+                # evidence that a machine people own is missing from the
+                # catalogue (reason undeclared / unknown_key) or that a
+                # blank motion cell is what stopped them (unknown_method);
+                # on_plate and plate_occupied are the gate working.  Tokens only
+                # (daily_stats._MOTION_KEY_RE): no host, path or URL fits.
+                "motion_refusals": _top_n(stats.get("motion_refusals", {}), 100),
                 # Upgrade-nudge funnel — {stage: count_today}.  A closed
                 # five-value vocabulary, not tool names.  This is the
                 # only way the funnel is ever seen: the offer, the

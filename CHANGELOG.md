@@ -201,6 +201,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   print, letter counters and enclosed islands intact. Photo reliefs still
   refuse honestly.
 
+- **Printer names people actually type now resolve.** Voron, RatRig, QIDI,
+  Elegoo, Sovol, FlashForge, AnkerMake and Artillery, plus Creality's own
+  model codes.
+
 ### Fixed
 
 - **The Claude Code plugin now connects Kiln.** Installing it since 1.3.2
@@ -471,6 +475,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Saving a model again updates what you told Kiln about it.** Re-saving a
   file already in your library kept the original notes and quietly ignored
   new tags or a better prompt; it now takes the new ones.
+
+- **The Voron Trident is its own printer, and the Creality Hi is a
+  bed-slinger, not a CoreXY.**
 
 ## [1.4.1.1] - 2026-08-19
 

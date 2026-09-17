@@ -305,6 +305,17 @@ home presses the nozzle onto the plate (the A1 mini) runs it only with
 `--plate-clear`, on every call — a person's word, never inferred. Both refuse
 while a print runs or is paused.
 
+Where the firmware's own routine runs, a per-model record in the printer
+catalogue decides what it does: which part moves in Z, how Z finds its datum
+and where, whether the routine travels sideways before Z is known, and what
+the firmware does with an unhomed move. A cell the maker never published is
+blank, and a blank is treated as the unsafe case. On a Klipper machine
+(Moonraker) and on a Marlin machine over USB, the printer's own configuration
+or its report-only commands fill those blanks for the session — the plan and
+`kiln doctor` say which cells came from the machine — and the maker's
+published fact always outranks the unit's own. Kiln has no such reader for
+OctoPrint, Prusa Link, Bambu, Elegoo or RepRapFirmware; `kiln doctor` says so.
+
 #### `kiln plate status` / `kiln plate clear [--note TEXT]`
 What Kiln records is on the build plate: the print that left a part there, when,
 and how tall where Kiln could read the file; or a person's word that it is

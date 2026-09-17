@@ -1160,6 +1160,33 @@ class SerialPrinterAdapter(PrinterAdapter):
         return {"m115_machine_type": info.model} if info and info.model else {}
 
     # ------------------------------------------------------------------
+    # PrinterAdapter -- what the machine says about its own motion
+    # ------------------------------------------------------------------
+
+    def _read_machine_motion_source(self) -> tuple[str, Any] | None:
+        """The firmware's own M115 / M211 / M119 reports, for the motion gate.
+
+        Report commands on the same serial line, asked once per adapter
+        when the catalogue row for the declared model has a cell they can
+        settle -- the Z ceiling, the firmware family, and the Z-home method
+        where the reports leave one reading.  ``M115`` and ``M211`` (no
+        parameter) only report; ``M119`` moves a BLTouch pin on builds that
+        have one, so the reader asks it only after ``M115`` has said the
+        build carries no probe.  Skipped while a print runs or is paused:
+        the doctor can ask at any time, and a report queued behind moves is
+        no answer worth having -- the next idle call asks again.
+        """
+        from kiln.printers.marlin_report import read_marlin_motion_report
+
+        state = self.get_state()
+        if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+            return None
+        report = read_marlin_motion_report(
+            lambda cmd: self._send_command(cmd, timeout=min(self._timeout, 3.0)),
+        )
+        return None if report is None else ("marlin_report", report)
+
+    # ------------------------------------------------------------------
     # PrinterAdapter -- firmware info (optional)
     # ------------------------------------------------------------------
 

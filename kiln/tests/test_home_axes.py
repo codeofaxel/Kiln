@@ -99,7 +99,7 @@ class TestGenericBackend:
             adapter, "send_gcode",
             lambda cmds: sent.append(cmds) or CommandVerdict.accepted_only("queued", corroboration="http_2xx"),
         )
-        result = adapter.home_axes()
+        result = adapter.home_axes(plate_clear=True)
         assert isinstance(result, HomeResult)
         assert sent == [["G28"]]
         assert result.outcome == "accepted" and result.success is True
@@ -117,7 +117,7 @@ class TestGenericBackend:
             adapter, "send_gcode",
             lambda cmds: sent.append(cmds) or CommandVerdict.accepted_only("queued"),
         )
-        result = adapter.home_axes(axes="zx")
+        result = adapter.home_axes(axes="zx", plate_clear=True)
         assert sent == [["G28 X Z"]]
         assert result.homed_axes == ["X", "Z"]
 
@@ -125,7 +125,7 @@ class TestGenericBackend:
         adapter = _build("octoprint")
         _idle(adapter, monkeypatch)
         monkeypatch.setattr(adapter, "send_gcode", lambda cmds: CommandVerdict.refused("printer not operational"))
-        result = adapter.home_axes()
+        result = adapter.home_axes(plate_clear=True)
         assert result.success is False and result.outcome == "failed"
         assert adapter.homing_commanded == frozenset()
 
@@ -258,7 +258,7 @@ class TestFirmwareThatReportsHomed:
             return {}
 
         monkeypatch.setattr(adapter, "_get_json", fake_get)
-        result = adapter.home_axes()
+        result = adapter.home_axes(plate_clear=True)
         assert result.outcome == "confirmed" and result.success
         assert result.details["firmware_homed_axes"] == ["X", "Y", "Z"]
         assert result.details["z_lifts_before_home"] is True
@@ -272,7 +272,7 @@ class TestFirmwareThatReportsHomed:
         monkeypatch.setattr(adapter, "_get_json", lambda path, params=None, **kw: (
             {"result": {"status": {"toolhead": {"homed_axes": "xy"}}}} if "toolhead" in (params or {})
             else {"result": {"status": {"configfile": {"settings": {}}}}}))
-        result = adapter.home_axes()
+        result = adapter.home_axes(plate_clear=True)
         assert result.outcome == "accepted"
         assert result.details["verification_source"] == "firmware_homed_flag_partial"
         assert "not Z" in result.message
@@ -285,7 +285,7 @@ class TestFirmwareThatReportsHomed:
         monkeypatch.setattr(adapter._backend, "send_gcode", lambda cmds: CommandVerdict.accepted_only("ok"))
         monkeypatch.setattr(adapter._backend, "_get_json", lambda path, params=None, **kw: (
             {"result": {"status": {"toolhead": {"homed_axes": "xyz"}}}} if "toolhead" in (params or {}) else {}))
-        assert adapter.home_axes().outcome == "confirmed"
+        assert adapter.home_axes(plate_clear=True).outcome == "confirmed"
 
     def test_reprapfirmware_3_confirms_from_the_object_model(self, monkeypatch):
         adapter = _build("duet")
@@ -295,7 +295,7 @@ class TestFirmwareThatReportsHomed:
         monkeypatch.setattr(adapter, "_model", lambda key: [
             {"letter": "X", "homed": True}, {"letter": "Y", "homed": True}, {"letter": "Z", "homed": True},
         ] if key == "move.axes" else None)
-        result = adapter.home_axes()
+        result = adapter.home_axes(plate_clear=True)
         assert result.outcome == "confirmed" and result.details["firmware_homed_axes"] == ["X", "Y", "Z"]
 
     def test_reprapfirmware_2_reads_the_legacy_flags(self, monkeypatch):
@@ -347,6 +347,7 @@ class TestStepMode:
 
     def test_plan_only_is_allowed_while_printing(self, monkeypatch):
         adapter = _build("octoprint")
+        adapter.set_safety_profile("voron_2")   # a declared model whose Z home is off the plate
         _idle(adapter, monkeypatch, PrinterStatus.PRINTING)
         sent: list = []
         monkeypatch.setattr(adapter, "send_gcode", lambda cmds: sent.append(cmds) or CommandVerdict.accepted_only("ok"))
@@ -360,10 +361,10 @@ class TestStepMode:
         _idle(adapter, monkeypatch)
         sent: list = []
         monkeypatch.setattr(adapter, "send_gcode", lambda cmds: sent.append(cmds) or CommandVerdict.accepted_only("ok"))
-        plan = adapter.home_axes(plan_only=True)
+        plan = adapter.home_axes(plan_only=True, plate_clear=True)
         assert sent == [] and len(plan.steps) == 1 and plan.steps[0]["gcode"] == ["G28"]
         with pytest.raises(PrinterError, match="one step"):
-            adapter.home_axes(step=2)
+            adapter.home_axes(step=2, plate_clear=True)
 
     def test_the_doors_pass_step_and_plan_through(self, monkeypatch):
         from click.testing import CliRunner
@@ -382,7 +383,7 @@ class TestStepMode:
         confirmations: list = []
         monkeypatch.setattr(srv, "_check_confirmation", lambda *a, **k: confirmations.append(a) or None)
 
-        home_axes(step=3)
+        home_axes(step=3, plate_clear=True)
         assert adapter.home_axes.call_args.kwargs["step"] == 3
         home_axes(plan_only=True)
         assert adapter.home_axes.call_args.kwargs["plan_only"] is True
@@ -431,7 +432,7 @@ class TestParkHead:
         _idle(adapter, monkeypatch)
         sent: list = []
         monkeypatch.setattr(adapter, "send_gcode", lambda cmds: sent.append(cmds) or CommandVerdict.accepted_only("ok"))
-        result = adapter.park_head()
+        result = adapter.park_head(plate_clear=True)
         assert sent == [["G28"]]
         assert result.action == "park" and result.outcome == "accepted"
         assert result.message.startswith("Parked at the firmware's own home position")
@@ -444,7 +445,7 @@ class TestParkHead:
         monkeypatch.setattr(adapter, "_get_json", lambda path, params=None, **kw: (
             {"result": {"status": {"toolhead": {"homed_axes": "xyz"}}}} if "toolhead" in (params or {})
             else {"result": {"status": {"configfile": {"settings": {"safe_z_home": {}}}}}}))
-        result = adapter.park_head()
+        result = adapter.park_head(plate_clear=True)
         assert result.action == "park" and result.outcome == "confirmed"
 
     def test_prusalink_refuses_park_by_name(self, monkeypatch):
@@ -780,11 +781,25 @@ class TestDoctorWithoutAPlan:
         detail, warn = _doctor_homing_how(bambu)
         assert warn is False and "own start-sequence homing" in detail
 
-    def test_a_generic_backend_reads_as_the_firmware_routine(self, no_kiln_pro, monkeypatch):
+    def test_a_generic_backend_reports_the_firmware_routine_for_both_verbs(self, no_kiln_pro, monkeypatch):
+        """A generic backend's homing line reads the catalogue's motion record for
+        the declared model: with none declared it is the declaration door, with a
+        model whose Z home lands on the plate it says so and that park leaves Z
+        alone, with a model whose Z home cannot touch the plate the full home."""
         from kiln.cli.main import _doctor_filament_where, _doctor_homing_how
 
         adapter = _build("octoprint")
         detail, warn = _doctor_homing_how(adapter)
-        assert warn is False and "firmware's own homing routine" in detail and "park_head (kiln park) parks at the firmware's own home" in detail
+        assert "no printer_model is declared" in detail and "home X/Y works" in detail
+        assert warn is True
+        adapter.set_safety_profile("ender3_v3_se")   # a Marlin bed-slinger: CR Touch onto the plate
+        detail, warn = _doctor_homing_how(adapter)
+        assert "firmware's own homing routine" in detail and "record for ender3_v3_se says" in detail
+        assert "asks for plate_clear first" in detail and "homes X and Y only, Z untouched" in detail
+        assert warn is False
+        adapter.set_safety_profile("voron_2")   # Z homes on a pin behind the plate
+        monkeypatch.setattr(adapter, "get_printer_config", lambda: None, raising=False)  # no printer on the wire
+        detail, warn = _doctor_homing_how(adapter)
+        assert "home Z runs unasked" in detail and "full home" in detail and warn is False
         where, warn = _doctor_filament_where(adapter)
         assert warn is True and "in place" in where and "wipe_nozzle refuses" in where

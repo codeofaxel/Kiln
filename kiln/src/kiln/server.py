@@ -10355,6 +10355,20 @@ def register_printer(
 
         if printer_model:
             adapter.set_safety_profile(printer_model)
+            from kiln.printer_profile_ids import resolve_declared_model
+
+            resolved, close = resolve_declared_model(printer_model)
+            if resolved is None:
+                # The CLI's setup asks before recording an unknown model; this
+                # door records it, so it says here what home_axes and
+                # park_head will say later, and offers the rows that are close.
+                hint = f" Closest catalogue rows: {', '.join(close)}." if close else ""
+                url_warnings = [
+                    *url_warnings,
+                    f"printer_model {printer_model!r} is not a catalogue row Kiln knows, so the "
+                    "per-model safety checks stay off and home_axes / park_head will refuse to home Z "
+                    f"or park until printer_model names one.{hint}",
+                ]
 
         # A camera the user supplies.  Judged before anything is written,
         # so a bad URL refuses the registration rather than saving half.

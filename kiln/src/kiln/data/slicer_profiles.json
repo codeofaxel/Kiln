@@ -588,7 +588,7 @@
   "creality_hi": {
     "display_name": "Creality Hi",
     "slicer": "orcaslicer",
-    "notes": "CoreXY direct-drive open-frame printer. Uses Klipper G-code flavor when Moonraker is reachable.",
+    "notes": "i3-style dual-Z bed-slinger (vendor Klipper config: kinematics cartesian), direct drive, open frame. Uses Klipper G-code flavor when Moonraker is reachable.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -1333,7 +1333,7 @@
     "tool_change": {
       "tool_change_seconds": 94,
       "tool_changer": "ams_lite",
-      "tool_change_notes": "A2L Combo ships the AMS Lite (29s unload + 25s load = 54s mechanical + ~40s purge), mirrored from the A1. The A2L also supports box-style AMS / AMS 2 Pro via the AMS Hub (up to 19 colours) - see the kiln-pro AMS intelligence overlay. NOT A2L-measured."
+      "tool_change_notes": "A2L Combo ships the AMS Lite (29s unload + 25s load = 54s mechanical + ~40s purge), mirrored from the A1. The A2L also supports box-style AMS / AMS 2 Pro via the AMS Hub (up to 19 colours) - Kiln Pro carries the AMS intelligence. NOT A2L-measured."
     }
   },
   "bambu_h2s": {
@@ -1380,9 +1380,9 @@
     }
   },
   "voron_2": {
-    "display_name": "Voron 2.4 / Trident",
+    "display_name": "Voron 2.4",
     "slicer": "orcaslicer",
-    "notes": "Enclosed CoreXY kit. Limits depend heavily on hotend/extruder combo. Klipper firmware.",
+    "notes": "Enclosed CoreXY kit; flying gantry (head moves in Z). Limits depend heavily on hotend/extruder combo. Klipper firmware.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -1411,6 +1411,46 @@
       "retract_lift": "0.3",
       "bed_shape": "0x0,300x0,300x300,0x300",
       "max_print_height": "300",
+      "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 45,
+      "tool_changer": "ercf",
+      "tool_change_notes": "ERCF V2 + Happy Hare: all-time avg 63s, single-job avg 36-42s. Using 45s as middle estimate. Source: Happy Hare mmu.py statistics + wiki examples."
+    }
+  },
+  "voron_trident": {
+    "display_name": "Voron Trident",
+    "slicer": "orcaslicer",
+    "notes": "Enclosed CoreXY kit; bed moves in Z on three lead screws. Limits depend heavily on hotend/extruder combo. Klipper firmware.",
+    "settings": {
+      "layer_height": "0.2",
+      "first_layer_height": "0.2",
+      "perimeters": "3",
+      "top_solid_layers": "4",
+      "bottom_solid_layers": "4",
+      "fill_density": "20%",
+      "fill_pattern": "gyroid",
+      "infill_speed": "200",
+      "perimeter_speed": "150",
+      "external_perimeter_speed": "100",
+      "first_layer_speed": "30",
+      "travel_speed": "300",
+      "nozzle_diameter": "0.4",
+      "filament_diameter": "1.75",
+      "temperature": "215",
+      "first_layer_temperature": "215",
+      "bed_temperature": "60",
+      "first_layer_bed_temperature": "65",
+      "fan_always_on": "1",
+      "min_fan_speed": "40",
+      "max_fan_speed": "100",
+      "disable_fan_first_layers": "1",
+      "retract_length": "0.4",
+      "retract_speed": "30",
+      "retract_lift": "0.3",
+      "bed_shape": "0x0,300x0,300x300,0x300",
+      "max_print_height": "250",
       "gcode_flavor": "klipper"
     },
     "tool_change": {

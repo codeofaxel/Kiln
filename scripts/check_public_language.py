@@ -275,6 +275,53 @@ def _tracked_content(*, staged: bool) -> list[tuple[str, str]]:
     return content
 
 
+_DATA_PREFIX = "kiln/src/kiln/data/"
+
+
+def _load_module(name: str, path: Path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(str(path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def data_note_findings(source: str, text: str) -> list[Finding]:
+    """The bundled-data half of the audit: a catalogue string that carries
+    research provenance (a link, a hash, a download id, a research step, a
+    community account, a repository path, a fetch date, a private path).
+
+    One definition, ``kiln.data_note_contract``, shared with the data test
+    -- imported from THIS tree, so the rule the commit is judged by is the
+    rule the commit ships.  A JSON that does not parse is left to the test
+    suite; this door judges content, not syntax.
+    """
+    if not source.startswith(_DATA_PREFIX) or not source.endswith(".json"):
+        return []
+    # Loaded by FILE PATH from this tree, never through ``import kiln``: an
+    # editable install resolves that name to whichever checkout it was made
+    # from, and a hook judging one tree by another tree's rule is no gate.
+    package = _ROOT / "kiln" / "src" / "kiln"
+    try:
+        manifest = _load_module("kiln_data_manifest_for_hook", package / "data_manifest.py")
+        contract = _load_module("kiln_data_note_contract_for_hook", package / "data_note_contract.py")
+    except Exception:  # noqa: BLE001 -- a tree without the contract has nothing to judge by
+        return []
+    try:
+        broken = contract.data_file_findings(
+            source[len(_DATA_PREFIX):], text, vendored_dirs=manifest.VENDORED_DATA_DIRS
+        )
+    except ValueError:
+        return []
+    return [
+        Finding(source=source, line=0, rule=f"bundled-data provenance ({why[0]})", text=where)
+        for where, why in broken.items()
+    ]
+
+
 def _staged_leak_gate() -> tuple[int, str]:
     """Run the private-tier leak gate over the staged index.
 
@@ -327,6 +374,7 @@ def main(argv: list[str] | None = None) -> int:
     findings: list[Finding] = []
     for source, text in _tracked_content(staged=args.staged):
         findings.extend(find_violations(text, source=source))
+        findings.extend(data_note_findings(source, text))
 
     if args.message_file is not None:
         message = args.message_file.read_text(encoding="utf-8", errors="replace")

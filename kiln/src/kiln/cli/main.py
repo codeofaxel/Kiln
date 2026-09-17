@@ -3537,15 +3537,18 @@ def home_cmd(axes, wait_seconds, step, plan_only, plate_clear, printer_name, jso
 @click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for a fault code afterwards.")
 @click.option("--step", type=int, default=None, help="Send only this step (1-based); the answer describes the next one.")
 @click.option("--plan", "plan_only", is_flag=True, help="Describe the steps; send nothing.")
+@click.option("--plate-clear", "plate_clear", is_flag=True, help="You have looked: the plate is empty. Lets a park cross a plate the record says holds a part.")
 @click.option("--printer", "printer_name", default=None, help="Target printer name.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def park_cmd(wait_seconds, step, plan_only, printer_name, json_mode) -> None:
+def park_cmd(wait_seconds, step, plan_only, plate_clear, printer_name, json_mode) -> None:
     """Move the head somewhere safe, away from the plate — never a Z touch.
 
     Runs the same tool the MCP server exposes (park_head): raise, home X,
-    travel to the model's own off-plate spot; the firmware's own home where
-    Kiln has no vendor spot. Use --plan first, then --step 1, 2, ... with
-    someone beside the machine.
+    travel to the model's own off-plate spot; the firmware's own X/Y home
+    where Kiln has no vendor spot (Z is left alone on every machine whose
+    Z home presses onto the plate). Needs a printer_model the catalogue
+    knows. Use --plan first, then --step 1, 2, ... with someone beside the
+    machine.
     """
     from kiln.server import ensure_runtime_config
 
@@ -3553,7 +3556,8 @@ def park_cmd(wait_seconds, step, plan_only, printer_name, json_mode) -> None:
     try:
         from kiln.plugins.homing_tools import park_head as _park
 
-        result = _park(wait_seconds=wait_seconds, step=step, plan_only=plan_only, printer_name=printer_name)
+        result = _park(wait_seconds=wait_seconds, step=step, plan_only=plan_only,
+                       plate_clear=plate_clear, printer_name=printer_name)
         if not result.get("success", False):
             err = result.get("error") or {}
             msg = err.get("message") if isinstance(err, dict) else str(err)
@@ -10101,20 +10105,51 @@ def _doctor_homing_how(adapter: Any) -> tuple[str, bool]:
     if not adapter.capabilities.can_send_gcode:
         return f"home_axes (kiln home) and park_head (kiln park): not available on this backend — {jog}", True
     if type(adapter)._home_axes_impl is PrinterAdapter._home_axes_impl:
-        # No vendor sequence on this backend: the firmware's own routine.
-        if type(adapter)._read_homed_axes is not PrinterAdapter._read_homed_axes:
-            how = (
-                "hands the job to the firmware's own homing routine and confirms it "
-                "from the firmware's homed flags"
-            )
-        else:
-            how = (
-                "hands the job to the firmware's own homing routine; reported as "
-                "accepted (this firmware does not report a homed flag)"
-            )
+        # No vendor sequence on this backend: the firmware's own routine,
+        # gated by the catalogue's motion record for the declared model.
+        confirms = (
+            " and confirms it from the firmware's homed flags"
+            if type(adapter)._read_homed_axes is not PrinterAdapter._read_homed_axes
+            else "; reported as accepted (this firmware does not report a homed flag)"
+        )
+        motion = None
+        try:
+            motion = adapter.motion_facts()
+        except Exception as exc:  # noqa: BLE001 -- doctor reports, never crashes
+            logger.debug("Motion facts lookup failed: %s", exc)
+        if motion is None:
+            declared = str(adapter.declared_printer_model() or "").strip()
+            return (
+                (f"home_axes (kiln home) and park_head (kiln park): no motion record for printer_model "
+                 f"{declared!r}" if declared
+                 else "home_axes (kiln home) and park_head (kiln park): no printer_model is declared for this printer")
+                + " -- home Z and park refuse until one names a catalogue row (run `kiln setup`, or set "
+                "printer_model in config.yaml); home X/Y works"
+            ), True
+        read = motion.machine_read_fields
+        machine = f" (read off this machine itself: {', '.join(read)})" if read else ""
+        no_channel = ""
+        if not read and motion.needs_machine_fill() and (
+            type(adapter)._read_machine_motion_source is PrinterAdapter._read_machine_motion_source
+            and getattr(adapter, "get_printer_config", None) is None
+        ):
+            # The row has blanks a machine could fill, and Kiln has no reader
+            # for this backend's firmware (OctoPrint's REST API relays commands
+            # one way; Prusa Link and the Elegoo protocol carry no reply
+            # channel; RepRapFirmware's object model is not read yet).
+            no_channel = ("; the record's blanks stay the catalogue's -- Kiln has no reader for this "
+                          "backend's own firmware reports")
+        if motion.z_home_descends_onto_plate:
+            return (
+                f"home_axes (kiln home): hands the job to the firmware's own homing routine{confirms}; "
+                f"the catalogue record for {motion.printer_id}{machine} says Z homes by {motion.describe_z_home()}, "
+                "so home Z asks for plate_clear first (kiln home --plate-clear) and park_head (kiln park) "
+                f"homes X and Y only, Z untouched{no_channel}"
+            ), False
         return (
-            f"home_axes (kiln home): {how}; park_head (kiln park) parks at the firmware's "
-            "own home position and says so"
+            f"home_axes (kiln home): hands the job to the firmware's own homing routine{confirms}; "
+            f"the catalogue record for {motion.printer_id}{machine} says Z homes by {motion.describe_z_home()}, "
+            f"so home Z runs unasked and park_head (kiln park) is the firmware's own full home{no_channel}"
         ), False
     station, verdicts = _station_verdicts(adapter)
     park_ok, why_park = verdicts["park"]
