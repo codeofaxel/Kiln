@@ -1788,6 +1788,7 @@ class TestBambuRunsAFilamentPlan:
         assert result.details["purge_station"]["status"] == "parked"
         assert _scripts(bambu)[0].endswith("M999")  # the park with the limits restored, then the firmware routine
         assert "fell into the chute" in result.message
+        assert result.details["cooled_below_c"] == 140 and "finish" not in result.details["purge_station"]
 
     def test_a_recorded_part_taller_than_the_raise_keeps_the_purge_in_place(self, bambu, monkeypatch):
         from kiln.plate_state import PlateJob, mark_occupied

@@ -5976,8 +5976,13 @@ class BambuAdapter(PrinterAdapter):
         key = (verb, axes, bool(on_plate_ok), str(getattr(self, "_printer_model", "") or ""))
         hit = memo.get(key)
         now = time.monotonic()
-        if hit is not None and now - hit[0] < self._PLAN_MEMO_S:
-            return hit[1]
+        if hit is not None:
+            # A plan is good for the memo window; "no plan" only long enough
+            # to fold one door's double ask, so a person who just signed in
+            # or came back online is answered on their next call.
+            ttl = self._PLAN_MEMO_S if hit[1] is not None else 5.0
+            if now - hit[0] < ttl:
+                return hit[1]
         doc = _bridge.plan_for(self, verb, axes=axes, on_plate_ok=on_plate_ok)
         memo[key] = (now, doc)
         return doc
@@ -6078,6 +6083,8 @@ class BambuAdapter(PrinterAdapter):
             "purge fell into the chute"
         )
         placement["pre_gcode"] = list(script)
+        if isinstance(doc.get("finish"), dict):
+            placement["finish"] = dict(doc["finish"])  # the routine leaves the nozzle hot; cool it the machine's way
         return placement
 
     @staticmethod
@@ -6388,6 +6395,10 @@ class BambuAdapter(PrinterAdapter):
 
     def _say_where(self, result: FilamentOpResult, placement: dict[str, Any]) -> FilamentOpResult:
         """Every answer says where the head was when the plastic moved."""
+        placement = dict(placement)
+        finish = placement.pop("finish", None)
+        if isinstance(finish, dict) and finish:
+            result.details["finish"] = finish
         result.details["purge_station"] = placement
         result.message = f"{result.message} {self._placement_sentence(placement)}"
         return result
