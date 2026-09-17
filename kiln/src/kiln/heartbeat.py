@@ -538,6 +538,17 @@ def _send_heartbeat() -> None:
                 # Tokens only — the key's shape cannot spell a host, a
                 # path or a URL (daily_stats._VIDEO_KEY_RE).
                 "video_outcomes": _top_n(stats.get("video_outcomes", {}), 200),
+                # What a served motion plan did on a real machine —
+                # {"<model>|<verb>|<outcome>": count_today} over the closed
+                # vocabularies in kiln.daily_stats (MOTION_VERBS,
+                # MOTION_OUTCOMES).  How far a step walk got, whether the
+                # whole walk ran clean, which fault code stopped it, why a
+                # run was refused: the only evidence that a sequence derived
+                # from a vendor's file works on the machine it was derived
+                # for, because the walk happens on the owner's own printer.
+                # Tokens only — no coordinate, serial or G-code line can be
+                # spelled in the key (daily_stats._MOTION_KEY_RE).
+                "motion_outcomes": _top_n(stats.get("motion_outcomes", {}), 100),
                 # Upgrade-nudge funnel — {stage: count_today}.  A closed
                 # five-value vocabulary, not tool names.  This is the
                 # only way the funnel is ever seen: the offer, the
