@@ -1022,6 +1022,33 @@ def _public_fault_readings_only(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_bambu_hms_text_fetch(monkeypatch):
+    """Keep the Bambu fault-sentence lookup off the network, suite-wide.
+
+    Same class as ``_no_real_pypi_check`` above.  Every Bambu status read
+    warms the vendor's fault-sentence table in a daemon thread
+    (``kiln.printers.bambu_hms_text``), keyed by the serial's first three
+    characters -- so any test that builds a Bambu state would otherwise ask
+    ``e.bambulab.com`` for the table for device type ``TES`` and, on a real
+    answer, write it under ``~/.kiln/bambu_hms/``.  The fetch is stubbed to
+    "no table", which leaves the thread spawn, the in-flight guard and the
+    cache read exercised while no bytes leave the box; the in-memory tables
+    are cleared on both sides so a test that seeds one cannot leak it into
+    the next.
+    """
+    try:
+        from kiln.printers import bambu_hms_text
+    except ImportError:  # pragma: no cover — module absent
+        yield
+        return
+
+    monkeypatch.setattr(bambu_hms_text, "_fetch_table", lambda device_type: None)
+    bambu_hms_text._reset_for_tests()
+    yield
+    bambu_hms_text._reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _restore_kiln_pro_stubs():
     """Undo ``kiln_pro`` stubs a test installs directly into ``sys.modules``.
 
