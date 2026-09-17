@@ -230,3 +230,26 @@ class TestTheServedRequest:
 
         monkeypatch.setattr("kiln.device.get_device_fingerprint", _boom)
         assert srv._heartbeat_device_header() == {}
+
+
+class TestARefusalIsARevocation:
+    def test_a_refusal_drops_the_cached_plan_instead_of_serving_it(self, monkeypatch):
+        import kiln.server as srv
+
+        _signed_in(monkeypatch)
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: {"plan": _doc()})
+        assert bridge.plan_for(_Machine(), "home")["summary"] == "ran"
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: {"status": "error", "code": "MACHINE_NOT_PAIRED", "error": "no"})
+        assert bridge.plan_for(_Machine(), "home") is None  # not the cached copy
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: {"status": "error", "code": "SERVER_UNREACHABLE", "error": "dns"})
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+        assert bridge.plan_for(_Machine(), "home") is None  # and it is gone for good, not merely skipped once
+
+    def test_no_sign_in_is_not_a_ruling_and_keeps_the_cache(self, monkeypatch):
+        import kiln.server as srv
+
+        _signed_in(monkeypatch)
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: {"plan": _doc()})
+        bridge.plan_for(_Machine(), "home")
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "sign in"})
+        assert bridge.plan_for(_Machine(), "home")["from_cache"] is True

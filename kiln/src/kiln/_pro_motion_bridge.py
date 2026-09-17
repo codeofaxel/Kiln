@@ -24,7 +24,11 @@ A plan reaches the executor from one of three places, tried in order:
 3. **cached**: the last served plan for that machine, kept on disk
    encrypted with a key derived from the sign-in, so a printer already
    paired keeps homing when the network is down.  The cache holds plans
-   for machines this install has been served for -- never anyone else's.
+   for machines this install has been served for -- never anyone else's
+   -- and it stands in only when the service did not ANSWER: a refusal
+   from the service (an unpaired machine, the per-device cap) is a
+   revocation, so the cached copy for that request is dropped, not
+   served.
 
 None of the three found → ``None``, and the public floor answers: a
 Bambu model refuses to home, park or wipe by name and says what to use
@@ -40,7 +44,7 @@ Plan document (``schema: "motion_plan/1"``), the contract both sides pin:
   leaves, touches_plate}`` -- the whole sequence; step mode is local.
 * ``homed_axes``, ``heats_nozzle_to_c``, ``sequence_source``, ``summary``
   (the full-run sentence), ``resting_position``, ``homed_flag_bits``
-  (``{"X": 0, "Y": 1, "Z": 2}`` or ``None``), ``raise_clearance_mm``,
+  (axis → bit index, or ``None``), ``raise_clearance_mm``,
   ``z_home_on_plate`` (the Z step presses the plate: consent applies).
 * purge / wipe: ``pre_gcode`` (sent before the heater), ``post_gcode``
   (rides after the extrude, before ``M82``), ``after`` (the sentence),
@@ -75,6 +79,10 @@ VERBS = ("home", "park", "wipe", "purge")
 SERVICE_BACKOFF_S: float = 60.0
 _service_down_until: float = 0.0
 _UNREACHABLE_CODES = frozenset({"SERVER_UNREACHABLE", "KILN_API_HTTP_ERROR"})
+#: Answers that are not a ruling on this machine -- nothing to revoke.
+_NOT_ANSWERED_CODES = frozenset({"KILN_ACCOUNT_NOT_PAIRED", "KILN_SIGNIN_REQUIRED", "NOT_SERVED_HERE"})
+#: The service answered, and the answer was no: the cache must not stand in.
+_REFUSED = object()
 
 
 def _local_pro() -> Any | None:
@@ -137,6 +145,9 @@ def plan_for(adapter: Any, verb: str, *, axes: str = "XYZ", on_plate_ok: bool = 
     if _is_plan(doc):
         _cache.store(request, doc)
         return doc
+    if doc is _REFUSED:
+        _cache.forget(request)
+        return None
     doc = _cache.load(request)
     if _is_plan(doc):
         doc = dict(doc)
@@ -145,8 +156,9 @@ def plan_for(adapter: Any, verb: str, *, axes: str = "XYZ", on_plate_ok: bool = 
     return None
 
 
-def _served_plan(request: dict[str, Any]) -> dict[str, Any] | None:
-    """Ask the hosted service for the plan; ``None`` when it does not answer.
+def _served_plan(request: dict[str, Any]) -> dict[str, Any] | object | None:
+    """Ask the hosted service for the plan; ``None`` when it does not answer,
+    :data:`_REFUSED` when it answered no.
 
     Goes through the same door every served tool uses
     (``kiln.server._pro_api_call``): the user's sign-in, the device
@@ -174,9 +186,14 @@ def _served_plan(request: dict[str, Any]) -> dict[str, Any] | None:
     if _is_plan(doc):
         return doc
     if answer.get("error") or answer.get("status") == "error":
-        if str(answer.get("code") or "") in _UNREACHABLE_CODES:
-            _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        code = str(answer.get("code") or "")
         logger.info("motion_plan not served: %s", answer.get("error") or answer.get("message"))
+        if code in _UNREACHABLE_CODES:
+            _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+            return None
+        if not code or code in _NOT_ANSWERED_CODES:
+            return None  # no ruling on this machine: no sign-in, no route, or an answer with no code
+        return _REFUSED
     return None
 
 

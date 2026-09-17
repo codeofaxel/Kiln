@@ -512,7 +512,7 @@ def _fake_home_doc(printer_id: str = "bambu_a1", *, verb: str = "home", z_on_pla
         "schema": "motion_plan/1", "printer_id": printer_id, "verb": verb, "ok": True, "steps": steps,
         "homed_axes": ["X", "Y", "Z"] if verb == "home" else ["X", "Y"], "heats_nozzle_to_c": 170.0 if verb == "home" else None,
         "sequence_source": "vendor_start_sequence", "summary": f"Ran the {verb} the machine's own way.",
-        "resting_position": {"x_mm": -9, "over": "the chute"}, "homed_flag_bits": {"X": 0, "Y": 1, "Z": 2},
+        "resting_position": {"x_mm": -9, "over": "the chute"}, "homed_flag_bits": {"X": 4, "Y": 5, "Z": 6},
         "raise_clearance_mm": 7.0, "z_home_on_plate": z_on_plate, "finish": None,
     }
 
@@ -632,7 +632,7 @@ class TestBambuRunsAPlan:
         _serve(monkeypatch, {"home": _fake_home_doc()})
         bambu._printer_model = "bambu_a1"
         _idle(bambu, monkeypatch)
-        bambu._last_status["home_flag"] = 0b111
+        bambu._last_status["home_flag"] = 0b111 << 4
         result = bambu.home_axes()
         assert _scripts(bambu) == ["G91\nG1 Z7 F100\nG90\nG28 X\nG28 Z\nG1 X-9 F100\nG1 Y0 F100"]
         assert result.outcome == "confirmed" and result.homed_axes == ["X", "Y", "Z"]
@@ -644,7 +644,7 @@ class TestBambuRunsAPlan:
         _serve(monkeypatch, {"home": _fake_home_doc()})
         bambu._printer_model = "bambu_a1"
         _idle(bambu, monkeypatch)
-        bambu._last_status["home_flag"] = 0b011
+        bambu._last_status["home_flag"] = 0b011 << 4
         result = bambu.home_axes()
         assert result.outcome == "accepted" and "not Z" in result.message
 
@@ -665,6 +665,20 @@ class TestBambuRunsAPlan:
         monkeypatch.setattr(bambu, "_snapshot_faults", lambda: next(faults, {("0300_1A00_0002_0001", "hms")}))
         result = bambu.home_axes()
         assert result.success is False and result.outcome == "failed" and result.error_code == "0300_1A00_0002_0001"
+
+    def test_an_empty_step_is_refused_before_anything_is_sent(self, bambu, monkeypatch):
+        doc = _fake_home_doc()
+        doc["steps"][1]["gcode"] = []
+        _serve(monkeypatch, {"home": doc})
+        bambu._printer_model = "bambu_a1"
+        _idle(bambu, monkeypatch)
+        with pytest.raises(PrinterError, match="no G-code lines"):
+            bambu.home_axes()
+        assert _scripts(bambu) == []
+        doc["steps"][1]["gcode"] = ["   "]
+        with pytest.raises(PrinterError, match="no G-code lines"):
+            bambu.home_axes(step=1)
+        assert _scripts(bambu) == []
 
     def test_a_cached_plan_says_so(self, bambu, monkeypatch):
         _serve(monkeypatch, {"home": {**_fake_home_doc(), "from_cache": True}})

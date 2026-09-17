@@ -5935,7 +5935,7 @@ class BambuAdapter(PrinterAdapter):
     _FILAMENT_LOAD_WAIT_S: float = 120.0
     _FILAMENT_UNLOAD_WAIT_S: float = 90.0
     _FILAMENT_PURGE_WATCH_S: float = 10.0
-    #: The wipe script homes Z on the steel strip and runs two brush passes;
+    #: The wipe script does more than a purge -- a Z home and the pad passes;
     #: that takes longer than a purge, so its fault watch is longer too.
     _FILAMENT_WIPE_WATCH_S: float = 45.0
 

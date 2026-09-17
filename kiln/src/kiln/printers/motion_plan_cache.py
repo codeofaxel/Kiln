@@ -12,10 +12,12 @@ it answered is written here.
 
 A plan is served fresh whenever the network allows (:func:`store` runs on
 every successful serve); the cache is read only when the service does not
-answer, and a cached plan older than :data:`MAX_AGE_S` is not used -- a
-record the service has since corrected must not outlive the correction
-by more than that.  Every failure here reads as "no cached plan", never
-as a plan.
+ANSWER -- a refusal from the service drops the cached copy for that
+request (:func:`forget`), because a machine the service no longer serves
+must not keep homing from a stale copy -- and a cached plan older than
+:data:`MAX_AGE_S` is not used either, so a record the service has since
+corrected cannot outlive the correction by more than that.  Every failure
+here reads as "no cached plan", never as a plan.
 """
 
 from __future__ import annotations
@@ -124,6 +126,18 @@ def load(request: dict[str, Any]) -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001 -- a torn or foreign file is not a plan
         logger.debug("motion plan cache read failed", exc_info=True)
         return None
+
+
+def forget(request: dict[str, Any]) -> bool:
+    """Drop the cached plan for *request* (the service refused it).  Never raises."""
+    try:
+        path = _path(request)
+        if path.is_file():
+            path.unlink()
+            return True
+    except Exception:  # noqa: BLE001
+        logger.debug("motion plan cache forget failed", exc_info=True)
+    return False
 
 
 def forget_all() -> int:

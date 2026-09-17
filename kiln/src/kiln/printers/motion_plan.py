@@ -40,7 +40,7 @@ def steps_of(doc: dict[str, Any]) -> list[HomeStep]:
         if not isinstance(raw, dict):
             raise PrinterError("The motion plan carried a malformed step; nothing was sent.")
         gcode = raw.get("gcode")
-        if not isinstance(gcode, list) or not all(isinstance(line, str) for line in gcode):
+        if not isinstance(gcode, list) or not gcode or not all(isinstance(line, str) and line.strip() for line in gcode):
             raise PrinterError("The motion plan carried a step with no G-code lines; nothing was sent.")
         out.append(HomeStep(
             number=int(raw.get("number") or len(out) + 1),
@@ -59,9 +59,9 @@ def _homes_up_to(doc: dict[str, Any], steps: list[HomeStep], upto: int) -> list[
     """Axes homed by steps 1..*upto*.
 
     A step may say what it homes (``homes``); otherwise it is read off its
-    own G-code: ``G28 X`` homes X and Y on the family this plan format was
-    written for (the bed rolls to its endstop with the head), ``G28 Z``
-    homes Z, a bare ``G28`` homes everything the plan says it homes.
+    own G-code: ``G28 X`` counts as X and Y (the plan's own step text says
+    when a bed moves with it), ``G28 Z`` as Z, a bare ``G28`` as everything
+    the plan says it homes.
     """
     raw_steps = doc.get("steps") or []
     homed: list[str] = []
@@ -92,8 +92,8 @@ def _homes_up_to(doc: dict[str, Any], steps: list[HomeStep], upto: int) -> list[
 def read_homed_axes(adapter: Any, bits: Any) -> set[str] | None:
     """Which axes the printer's own status says are homed, or ``None``.
 
-    *bits* is the plan's ``homed_flag_bits`` (``{"X": 0, "Y": 1, "Z": 2}``):
-    the bit layout of the status field the maker's own tooling reads.
+    *bits* is the plan's ``homed_flag_bits`` (axis → bit index): the bit
+    layout of the status field the maker's own tooling reads.
     Zero means unknown, as that tooling reads it.  ``None`` without a
     layout, without the field, or on a backend that keeps no status cache.
     """
