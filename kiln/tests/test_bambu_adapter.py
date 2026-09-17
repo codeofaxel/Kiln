@@ -116,6 +116,39 @@ def _pin_store_env(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KILN_BAMBU_TLS_PIN_FILE", str(tmp_path / "bambu_tls_pins.json"))
 
 
+#: The one class whose subject IS the read-back, so it keeps the real method.
+_READ_BACK_CLASS = "TestBambuAdapterReadPrintFile"
+
+
+@pytest.fixture(autouse=True)
+def _no_read_back(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Make the pre-print gate's read-back a non-event for every other test.
+
+    ``start_print`` asks the adapter for the printer's own copy of the file
+    (``kiln.printers.print_gate._fetch_printer_copy``) before starting it by
+    name.  These tests mock MQTT but not FTPS, so the real
+    ``read_print_file`` dials 192.168.1.100 for real, times out through
+    ``_ftp_connect``'s retries, and the gate then refuses the start — which
+    turns every start_print unit test (they are about the MQTT command, not
+    the file gate) red and costs minutes.
+
+    Returning ``None`` is the BASE adapter's semantics, which the gate
+    already handles: "this backend cannot read this one back" -> soft-pass,
+    exactly what these tests saw before the gate existed.  It weakens
+    nothing: the refuse/soft-pass rules are pinned by
+    ``kiln/tests/test_print_gate.py::TestFileOnPrinterIsRead``, and Bambu's
+    real FTPS read-back is pinned by :data:`_READ_BACK_CLASS`, which opts
+    out of this fixture.
+    """
+    if getattr(request.cls, "__name__", None) == _READ_BACK_CLASS:
+        return
+    monkeypatch.setattr(
+        BambuAdapter, "read_print_file", lambda self, file_name: None,
+    )
+
+
 @pytest.fixture
 def mock_ftp_class() -> mock.MagicMock:
     """Create a mock _ImplicitFTP_TLS class that returns a configured mock instance."""
@@ -3058,6 +3091,49 @@ class TestStartPrintGcodePath:
 class TestWaitForPrintStartErrorDetection:
     """Tests for print_error detection during _wait_for_print_start polling."""
 
+    def test_stale_failed_from_a_cancelled_job_is_not_this_jobs_failure(
+        self, adapter_with_mqtt: BambuAdapter,
+    ) -> None:
+        """2026-09-16, A1: right after a screen cancel the firmware keeps
+        reporting gcode_state "failed" with print_error 0 until the next job
+        takes over.  A start sent in that window was declared failed here
+        while the printer went on to "prepare" and printed, so nothing that
+        hangs off a successful start ran.  A "failed" naming no error is the
+        previous job's ending, not this job's rejection: keep waiting."""
+        adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": 0}
+        reports = iter([
+            {"gcode_state": "failed", "print_error": 0},
+            {"gcode_state": "failed", "print_error": 0},
+            {"gcode_state": "prepare", "print_error": 0},
+        ])
+
+        def _next_report(_seconds: float) -> None:
+            adapter_with_mqtt._last_status = next(reports)
+
+        with mock.patch("kiln.printers.bambu.time.sleep", side_effect=_next_report):
+            state, err = adapter_with_mqtt._wait_for_print_start(timeout=5.0)
+        assert state == "prepare"
+        assert err is None
+
+    def test_stale_failed_that_never_clears_times_out_rather_than_failing(
+        self, adapter_with_mqtt: BambuAdapter,
+    ) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": 0}
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=_clock_past_deadline()), \
+                mock.patch("kiln.printers.bambu.time.sleep"):
+            state, err = adapter_with_mqtt._wait_for_print_start(timeout=2.0)
+        assert state == "timeout"
+        assert err is None
+
+    def test_failed_with_a_real_error_code_is_still_a_failure(
+        self, adapter_with_mqtt: BambuAdapter,
+    ) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": 302022657}
+        with mock.patch("kiln.printers.bambu.time.sleep"):
+            state, err = adapter_with_mqtt._wait_for_print_start(timeout=2.0)
+        assert state == "failed"
+        assert err == 302022657
+
     def test_returns_error_code_on_known_error(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 84033543}
         with mock.patch("kiln.printers.bambu.time.sleep"):
@@ -4332,3 +4408,181 @@ class TestTelemetryVintage:
         assert state.state_age_seconds is not None
         assert state.state_age_seconds < 5.0
         assert state.staleness_note() is None
+
+
+# ---------------------------------------------------------------------------
+# Push-status deltas merge INTO the cache; they never replace a section
+# ---------------------------------------------------------------------------
+
+_FULL_AMS_REPORT: dict[str, Any] = {
+    "ams_exist_bits": "1",
+    "tray_exist_bits": "f",
+    "tray_now": "255",
+    "tray_tar": "255",
+    "version": 6,
+    "ams": [
+        {
+            "id": "0",
+            "humidity": "5",
+            "tray": [
+                {"id": "0", "tray_type": "PLA", "tray_color": "FFFFFFFF"},
+                {"id": "1", "tray_type": "PLA", "tray_color": "000000FF"},
+                {"id": "2", "tray_type": "PLA", "tray_color": "0000FFFF"},
+                {"id": "3", "tray_type": "PLA", "tray_color": "FF0000FF"},
+            ],
+        }
+    ],
+}
+
+
+class TestPushStatusDeltaMerge:
+    """A partial push updates only the fields it carries.
+
+    Measured 2026-09-15 on an A1: right after ``load_filament`` finished,
+    ``ams_status`` answered ``ams_exist_bits "0", units [], tray_now "3"`` --
+    a report that contradicts itself (a tray feeding the nozzle on a unit
+    that does not exist) -- and kept answering it on the next read.  The
+    previous read (version 6) had the whole four-tray unit.  The A1 pushes
+    deltas; the one carrying ``tray_now`` came as ``{"ams": {"tray_now":
+    "3", "version": 7}}`` and a shallow ``dict.update`` replaced the merged
+    ``ams`` section with it.
+    """
+
+    def test_a_tray_now_only_delta_keeps_the_ams_units(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        _push(adapter_with_mqtt, gcode_state="IDLE", ams=json.loads(json.dumps(_FULL_AMS_REPORT)))
+        _push(adapter_with_mqtt, ams={"tray_now": "3", "version": 7})
+
+        cached = adapter_with_mqtt._last_status["ams"]
+        assert cached["tray_now"] == "3"
+        assert cached["version"] == 7
+        assert cached["ams_exist_bits"] == "1"
+        assert cached["tray_exist_bits"] == "f"
+        assert len(cached["ams"]) == 1
+        assert len(cached["ams"][0]["tray"]) == 4
+
+    def test_the_reading_door_agrees_after_the_delta(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        adapter_with_mqtt._fw_modules_requested = True
+        _push(adapter_with_mqtt, gcode_state="IDLE", ams=json.loads(json.dumps(_FULL_AMS_REPORT)))
+        _push(adapter_with_mqtt, ams={"tray_now": "3", "version": 7})
+
+        report = adapter_with_mqtt.get_ams_status()
+        assert report["tray_now"] == "3"
+        assert report["ams_exist_bits"] == "1"
+        assert [int(t["slot"]) for t in report["units"][0]["trays"]] == [0, 1, 2, 3]
+
+    def test_a_delta_that_removes_the_unit_is_honoured(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """Merging is not hoarding: a push that SAYS the unit is gone wins."""
+        _push(adapter_with_mqtt, gcode_state="IDLE", ams=json.loads(json.dumps(_FULL_AMS_REPORT)))
+        _push(adapter_with_mqtt, ams={"ams_exist_bits": "0", "tray_exist_bits": "0", "ams": [], "version": 8})
+
+        cached = adapter_with_mqtt._last_status["ams"]
+        assert cached["ams_exist_bits"] == "0"
+        assert cached["ams"] == []
+        assert cached["tray_now"] == "255"  # not carried, so kept
+
+    def test_the_run_state_survives_a_delta_that_lacks_it(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """Same code path, checked the same way: ``gcode_state`` is a
+        top-level scalar, so a temperature-only delta leaves it alone."""
+        _push(adapter_with_mqtt, gcode_state="RUNNING", nozzle_temper=200)
+        _push(adapter_with_mqtt, nozzle_temper=205)
+
+        assert adapter_with_mqtt._last_status["gcode_state"] == "RUNNING"
+        assert adapter_with_mqtt._last_status["nozzle_temper"] == 205
+        assert adapter_with_mqtt.get_state().state is PrinterStatus.PRINTING
+
+
+# ---------------------------------------------------------------------------
+# read_print_file: the printer's own copy, for the pre-print gate
+# ---------------------------------------------------------------------------
+
+class TestBambuAdapterReadPrintFile:
+    """The gate reads a file back before starting it by name (2026-09-16)."""
+
+    def _serve(self, mock_ftp_class: mock.MagicMock, payload: bytes) -> None:
+        def _retr(cmd: str, callback: Any) -> str:
+            callback(payload)
+            return "226 Transfer complete"
+
+        mock_ftp_class.retrbinary = mock.MagicMock(side_effect=_retr)
+
+    def test_bare_name_is_read_from_the_detected_storage_dir(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        self._serve(mock_ftp_class, b"G28\n")
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            data = adapter_with_mqtt.read_print_file("disc.gcode.3mf")
+        assert data == b"G28\n"
+        cmd = mock_ftp_class.retrbinary.call_args.args[0]
+        # the shared FTP mock refuses /model (550), so detection lands on /sdcard
+        assert cmd == "RETR /sdcard/disc.gcode.3mf"
+        mock_ftp_class.quit.assert_called_once()
+
+    def test_full_path_is_read_as_given(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        self._serve(mock_ftp_class, b"x")
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            assert adapter_with_mqtt.read_print_file("/sdcard/a.3mf") == b"x"
+        assert mock_ftp_class.retrbinary.call_args.args[0] == "RETR /sdcard/a.3mf"
+
+    def test_read_failure_raises_printer_error(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        mock_ftp_class.retrbinary = mock.MagicMock(side_effect=Exception("550 no such file"))
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="back from the printer"):
+            adapter_with_mqtt.read_print_file("missing.3mf")
+        mock_ftp_class.quit.assert_called_once()
+
+    def test_oversized_file_is_refused_not_waved_through(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # None would read as "this backend cannot read back" and soft-pass --
+        # the one door the read-back ruling closed.  Over the cap raises, so
+        # the gate refuses with the override named.
+        monkeypatch.setattr(BambuAdapter, "_READ_BACK_CAP_BYTES", 8)
+
+        def _retr(cmd: str, callback: Any) -> str:
+            for _ in range(4):
+                callback(b"abcd")
+            return "226"
+
+        mock_ftp_class.retrbinary = mock.MagicMock(side_effect=_retr)
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="read-back cap"):
+            adapter_with_mqtt.read_print_file("huge.3mf")
+        mock_ftp_class.quit.assert_called_once()
+
+
+class TestBambuAdapterDeleteFileOnA1Storage:
+    """A1-series files live under /model/; delete_file refused that path."""
+
+    def test_model_dir_is_deletable(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            assert adapter_with_mqtt.delete_file("/model/old.gcode.3mf") is True
+        mock_ftp_class.delete.assert_called_once_with("/model/old.gcode.3mf")
+
+    def test_bare_name_resolves_to_the_detected_storage_dir(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            assert adapter_with_mqtt.delete_file("old.gcode.3mf") is True
+        mock_ftp_class.delete.assert_called_once_with("/sdcard/old.gcode.3mf")
+
+    def test_paths_outside_printer_storage_are_refused(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="printer storage"):
+            adapter_with_mqtt.delete_file("/etc/passwd")
+        mock_ftp_class.delete.assert_not_called()

@@ -255,12 +255,21 @@ Pause or resume the active print.
 Get current temperatures, or set targets. Without flags, returns current
 temps. Targets are held to the named machine's own limits.
 
-#### `kiln filament load|unload|purge [--slot N] [--material MAT] [--temp N] [--length MM]`
+#### `kiln filament load|unload|purge|wipe [--slot N] [--material MAT] [--temp N] [--length MM] [--keep-hot]` / `kiln filament wipe [--plan] [--step N] [--plate-clear]`
 Move filament. `load` feeds a spool to the nozzle — on a Bambu it drives the
 AMS through the printer's own change-filament routine and reads the result
 back from the AMS; elsewhere it heats and feeds. `unload` pulls filament out
 of the hotend. `purge` extrudes a short length and reports whether the printer
-raised an extrusion fault, which makes it the clog test.
+raised an extrusion fault, which makes it the clog test. `wipe` cleans the tip
+on the printer's own wipe pad, running the pass its start sequence runs, and
+refuses by name on any model Kiln has no verified pad position for.
+
+Every op says where the plastic went — parked over the machine's own purge
+chute where the model's start-sequence position is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline,
+or in place with the reason — and ends the way a person would leave the
+machine: the end-of-print retract, heater off, and (where served) the part
+fan on until the nozzle reads its hand-off temperature, with the reading it
+answered at. `--keep-hot` opts out for a caller about to do something else hot.
 
 Temperature is held to the machine's own safety profile, to the loaded spool's
 temperature window where the printer reports one, and to a 170 °C
@@ -269,6 +278,53 @@ which is the mid-print recovery case. On a Klipper machine whose filament path
 belongs to a Happy Hare or AFC unit, load and unload refuse and name the unit's
 own commands. Backends that cannot drive the extruder honestly — Prusa Link,
 Elegoo — say so instead of pretending.
+
+`wipe` runs in steps too, the first time on a machine: `--plan` describes
+every motion of the pad pass and sends nothing; `--step N` sends one motion,
+reports what it left armed, and holds the finish (heater off, the cool-down)
+until the last step. A wipe whose plan presses the plate — its Z datum is
+taken on the plate, or the head has to cross the plate to reach the pad —
+runs only with `--plate-clear`, on every call, whatever the plate record says.
+A pass derived from a model's start file that no one has yet run on a real
+machine says so, refuses a full run, and runs in steps only; `kiln doctor`
+reads both conditions on the filament line.
+
+#### `kiln home [--axes XYZ] [--plan] [--step N] [--plate-clear]` / `kiln park [--plan] [--step N]`
+The Home button, from Kiln, and the retreat. `home` runs the model's own
+start-sequence homing where it is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline
+— on a Bambu: raise first, home X, Z by nozzle contact off the plate, park over
+the purge chute — hands the job to the firmware's own routine on Marlin, Klipper
+and RepRapFirmware, and refuses — naming the screen's jog controls, Z up first —
+where neither is safe. `park` is the same sequence without the Z
+touch and without heat: raise, home X, the model's own off-plate spot.
+
+Run either in steps the first time on a machine with a person beside it:
+`--plan` describes every motion and sends nothing; `--step N` sends one
+motion, reports what it left armed, and describes the next. A model whose Z
+home presses the nozzle onto the plate (the A1 mini) runs it only with
+`--plate-clear`, on every call — a person's word, never inferred. Both refuse
+while a print runs or is paused.
+
+Where the firmware's own routine runs, a per-model record in the printer
+catalogue decides what it does: which part moves in Z, how Z finds its datum
+and where, whether the routine travels sideways before Z is known, and what
+the firmware does with an unhomed move. A cell the maker never published is
+blank, and a blank is treated as the unsafe case. On a Klipper machine
+(Moonraker) and on a Marlin machine over USB, the printer's own configuration
+or its report-only commands fill those blanks for the session — the plan and
+`kiln doctor` say which cells came from the machine — and the maker's
+published fact always outranks the unit's own. Kiln has no such reader for
+OctoPrint, Prusa Link, Bambu, Elegoo or RepRapFirmware; `kiln doctor` says so.
+
+#### `kiln plate status` / `kiln plate clear [--note TEXT]`
+What Kiln records is on the build plate: the print that left a part there, when,
+and how tall where Kiln could read the file; or a person's word that it is
+clear. `home` and `park` refuse to cross a recorded part taller than the
+machine's own raise; `plate clear` is the person's door and stays clear until
+the next print starts. The record lives on your machine. A Z home that presses
+the nozzle onto the plate asks every time regardless -- the record cannot see a
+print started from the printer's own screen. There is deliberately no MCP tool
+that marks the plate clear.
 
 #### `kiln gcode <commands>...`
 Send raw G-code commands to the printer. Commands are validated for safety before sending.
@@ -374,7 +430,11 @@ Paid-tier tools are discoverable too: agents without a license receive a structu
 | `set_temperature` | `tool_temp`, `bed_temp` | Confirmation |
 | `load_filament` | `slot`, `material`, `temperature` | Feeds filament to the nozzle; on Bambu drives the AMS |
 | `unload_filament` | `material`, `temperature` | Retracts filament out of the hotend |
-| `purge_filament` | `length_mm`, `material`, `temperature` | Extrudes a short length — the clog test |
+| `purge_filament` | `length_mm`, `material`, `temperature` | Extrudes a short length — the clog test; parks over the model's own purge chute first where Kiln has a verified position, and always says where the purge went |
+| `wipe_nozzle` | `material`, `temperature`, `slot`, `step`, `plan_only`, `plate_clear` | Cleans the tip on the printer's own wipe pad; refuses where Kiln has no verified pad position; step mode describes each motion before it runs, a wipe that presses the plate asks for `plate_clear` on every call, and a pass no one has run on a real machine runs in steps only |
+| `home_axes` | `axes`, `step`, `plan_only`, `plate_clear` | Homes the head: the model's own start-sequence homing where served, the firmware's routine, or a refusal naming the screen's jog controls; step mode describes each motion before it runs |
+| `park_head` | `step`, `plan_only` | Moves the head to the model's own off-plate spot — raise, home X, travel; never a Z touch, never heat |
+| `plate_status` | — | What Kiln records is on the build plate (read-only; `kiln plate clear` is the person's door) |
 | `send_gcode` | `commands` | Response lines |
 | `validate_gcode` | `commands` | Validation result |
 | `preflight_check` | `filename`, `material` | Pass/fail with details |

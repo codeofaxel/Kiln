@@ -350,7 +350,7 @@ def _get_klipper_printer_ids(profiles: dict[str, Any]) -> set[str]:
             klipper_ids.add(pid)
     # Hardcoded known Klipper printers not always tagged in profiles
     _KNOWN_KLIPPER = {
-        "voron_2", "voron_0", "sparkx_i7", "k1", "k1_max", "k1c", "k1_se",
+        "voron_2", "voron_trident", "voron_0", "sparkx_i7", "k1", "k1_max", "k1c", "k1_se",
         "k2", "k2_pro", "k2_plus", "k2_se", "creality_hi",
         "ender3_v4", "ender3_v3", "ender3_v3_ke", "ender3_v3_plus",
         "ender5_max", "cr10_se", "elegoo_neptune4",

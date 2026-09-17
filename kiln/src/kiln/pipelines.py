@@ -840,6 +840,12 @@ def quick_print(
                 "print_start": verdict.state,
                 "print": verdict.to_dict(),
             }
+            # Beside the AMS selection, at the step's top level, so the
+            # one-shot doors can hoist it the same way: what the machine
+            # is about to do is as much part of "it started" as which
+            # tray it is feeding from.
+            if verdict.what_you_will_see:
+                step_data["what_you_will_see"] = list(verdict.what_you_will_see)
             if ams_selection is not None:
                 step_data["ams_selection"] = ams_selection
             if ams_warnings:
@@ -1323,6 +1329,12 @@ def reslice_and_print(
                 "print_start": verdict.state,
                 "print": verdict.to_dict(),
             }
+            # Beside the AMS selection, at the step's top level, so the
+            # one-shot doors can hoist it the same way: what the machine
+            # is about to do is as much part of "it started" as which
+            # tray it is feeding from.
+            if verdict.what_you_will_see:
+                step_data["what_you_will_see"] = list(verdict.what_you_will_see)
             if ams_selection is not None:
                 step_data["ams_selection"] = ams_selection
             if ams_warnings:

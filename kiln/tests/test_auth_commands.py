@@ -280,6 +280,21 @@ class TestLogoutAndWhoami:
         assert r.exit_code == 0
         assert not token_path.exists()
 
+    def test_logout_forgets_the_served_motion_plans(self, auth_home, monkeypatch):
+        """Plans served to the signed-in account leave with it."""
+        import click
+        from click.testing import CliRunner
+        from kiln.cli.auth_commands import register_auth_cli
+
+        (auth_home / ".kiln").mkdir(mode=0o700)
+        (auth_home / ".kiln" / "auth_tokens.json").write_text(json.dumps({"access_token": "x"}))
+        forgotten = []
+        monkeypatch.setattr("kiln.printers.motion_plan_cache.forget_all", lambda: forgotten.append(True) or 1)
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        assert CliRunner().invoke(g, ["logout"]).exit_code == 0
+        assert forgotten == [True]
+
     def test_whoami_without_token_fails(self, auth_home):
         import click
         from click.testing import CliRunner

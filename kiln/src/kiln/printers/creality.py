@@ -899,6 +899,12 @@ class CrealityAdapter(PrinterAdapter):
     def send_gcode(self, commands: list[str]) -> CommandVerdict:
         return self._backend.send_gcode(commands)
 
+    def _read_homed_axes(self) -> set[str] | None:
+        return self._backend._read_homed_axes()
+
+    def _z_lifts_before_home(self) -> bool | None:
+        return self._backend._z_lifts_before_home()
+
     def set_fan(self, node: str, percent: int) -> CommandVerdict:
         """Set the part-cooling fan speed via the Moonraker/Klipper backend.
 

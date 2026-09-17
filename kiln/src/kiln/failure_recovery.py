@@ -315,7 +315,12 @@ def _build_recovery(failure_type: FailureType, *, printer_capabilities: dict[str
                 "If clog persists, remove and clean or replace the nozzle",
                 "Reload filament (load_filament) and test extrusion with "
                 "purge_filament — it reports whether the printer raised an "
-                "extrusion fault, not just that the command was sent",
+                "extrusion fault, not just that the command was sent, and "
+                "says where the purge went (parked over the machine's own "
+                "purge chute, or in place)",
+                "Clean the tip with wipe_nozzle, which runs the machine's own "
+                "wipe-pad pass where Kiln has a verified pad position and "
+                "says so when it does not",
                 "Restart the print",
             ],
             automated=False,

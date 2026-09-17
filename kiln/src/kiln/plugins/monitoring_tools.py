@@ -1520,6 +1520,11 @@ class _MonitoringToolsPlugin:
                     "print_start": verdict.state,
                     "print_result": verdict.to_dict(),
                 }
+                # Top-level beside the message, as every start door carries
+                # it: the person who asked for a watched start is the one
+                # about to watch the start routine's moves.
+                if verdict.what_you_will_see:
+                    response["what_you_will_see"] = list(verdict.what_you_will_see)
                 try:
                     response.update(
                         _launch_first_layer_monitor(

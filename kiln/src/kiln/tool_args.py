@@ -215,3 +215,40 @@ def invalid_arguments_envelope(
         "invalid_arguments": problems,
         "accepted_arguments": list(accepted or []),
     }
+
+
+def published_input_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """The inputSchema a tool publishes: the registry's, minus ``default``.
+
+    A parameter's default belongs to the server — pydantic applies it when
+    the argument is omitted — and the ``default`` keyword is annotation-only
+    in JSON Schema, so dropping it from the wire changes nothing about what
+    the tool accepts.  It is dropped because a current MCP host reads it as
+    "must be present": its validator refused ``printer_status(detail="full")``
+    with ``expected nonoptional, received undefined`` for the omitted
+    ``printer_name``, and did the same for every ``Optional`` on
+    ``load_filament`` mid-load on a real printer (2026-09-15), while a
+    property with no ``default`` keyword and no ``required`` entry was
+    accepted omitted.  The same host also strips ``anyOf`` and ``title``
+    but keeps ``description``, so a non-null default is restated there —
+    the agent still learns it, from a field every host preserves.
+
+    Returns a new dict; the registry's schema — the one Kiln validates and
+    exports from — is never touched.
+    """
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        return schema
+    published: dict[str, Any] = {}
+    for name, prop in props.items():
+        if not isinstance(prop, dict) or "default" not in prop:
+            published[name] = prop
+            continue
+        kept = {k: v for k, v in prop.items() if k != "default"}
+        default = prop["default"]
+        if default is not None:
+            note = f"Default: {json.dumps(default)}."
+            description = str(kept.get("description") or "").rstrip()
+            kept["description"] = f"{description} {note}".strip()
+        published[name] = kept
+    return {**schema, "properties": published}

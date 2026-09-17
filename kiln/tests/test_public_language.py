@@ -121,3 +121,30 @@ def test_allows_neutral_implementation_language() -> None:
         source="module.py",
     )
     assert findings == []
+
+
+class TestBundledDataProvenanceDoor:
+    """The commit-time half of kiln.data_note_contract: a catalogue string that
+    carries research provenance is refused at the commit, not at the PR."""
+
+    def test_a_leaky_data_string_is_a_finding_and_a_clean_one_is_not(self):
+        gate = _load_gate()
+        leaky = '{"ender3": {"notes": "per the vendor wiki (wiki.example.com/x, read 2026-09-16)"}}'
+        found = gate.data_note_findings("kiln/src/kiln/data/safety_profiles.json", leaky)
+        assert [f.text for f in found] == ["safety_profiles.json:ender3.notes"]
+        assert "a link" in found[0].rule
+        clean = '{"ender3": {"notes": "the vendor states the bed moves in Z"}}'
+        assert gate.data_note_findings("kiln/src/kiln/data/safety_profiles.json", clean) == []
+
+    def test_only_bundled_data_json_is_judged_and_a_material_may_link_its_maker(self):
+        gate = _load_gate()
+        assert gate.data_note_findings("kiln/src/kiln/server.py", "https://example.com") == []
+        assert gate.data_note_findings("kiln/src/kiln/data/scad_libraries/x.json", '{"a": "https://x.com"}') == []
+        bought = '{"pla": {"sources": {"manufacturer": "https://www.example.com"}}}'
+        assert gate.data_note_findings("kiln/src/kiln/data/material_catalog.json", bought) == []
+
+    def test_a_motion_note_is_also_held_to_its_length(self):
+        gate = _load_gate()
+        long_note = '{"k1": {"motion": {"_sources": {"z_carrier": {"class": "vendor_config", "note": "%s"}}}}}' % ("x" * 421)
+        found = gate.data_note_findings("kiln/src/kiln/data/printer_intelligence.json", long_note)
+        assert found and "421 chars" in found[0].rule
