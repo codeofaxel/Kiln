@@ -517,6 +517,9 @@ class _SmartPrintToolsPlugin:
                 "print": verdict.to_dict(),
                 "message": message,
             }
+            # Top-level beside the message, as start_print carries it.
+            if verdict.what_you_will_see:
+                result["what_you_will_see"] = list(verdict.what_you_will_see)
             if validation_summary is not None:
                 result["validation"] = validation_summary
             if effective_pid:

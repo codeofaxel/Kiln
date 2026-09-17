@@ -5266,6 +5266,27 @@ def monitor_print(
         )
         if _stale_warning:
             comment = f"{_stale_warning} {comment}"
+        # While a Bambu is still in its own start block (layer 0), one line
+        # saying which stage the nozzle target suggests -- 250 C on an A1 is
+        # the AMS load and flush -- so a move that looks wrong is read as the
+        # routine it is.  One line, in the comment, never a paragraph; absent
+        # off Bambu and once the first layer is down.  See
+        # kiln.start_narrative.
+        if state_str in ("printing", "preparing") and not print_error:
+            try:
+                from kiln.start_narrative import start_stage_line
+
+                _stage_line = start_stage_line(
+                    adapter,
+                    nozzle_target_c=tool_target,
+                    layer=current_layer,
+                    completion=completion,
+                )
+            except Exception as _stage_exc:  # noqa: BLE001 -- never break a monitor read
+                logger.debug("start-stage line skipped: %s", _stage_exc)
+                _stage_line = None
+            if _stage_line:
+                comment = f"{comment} {_stage_line}"
 
         # --- Assemble report ---
         lines = [
@@ -6916,8 +6937,13 @@ def start_print(
                 **print_kwargs,
             },
         )
+        # A resume-mode 3MF carries its own preamble (heat, lift, home,
+        # travel), not the vendor's start block, so the "what you will see"
+        # list is withheld for it: those moves are not the ones this file
+        # will make.
         out = resolve_print_start(
             adapter, result, sent_at=sent_at, file_name=file_name,
+            vendor_start_block=not is_resume_3mf,
         ).to_dict()
         # Say which machine took the job.  With more than one printer on the
         # bench, "started" on its own does not tell the caller where to look.
@@ -7143,6 +7169,20 @@ def _cancel_print_on(
     # Say which machine stopped.  An agent driving two printers has no
     # other way to tell from the reply that it stopped the right one.
     out["printer_name"] = target_name
+    # Say what the machine does NEXT, on a printer whose own cancel routine
+    # makes a move that reads as a crash (a Bambu cuts the filament first:
+    # a hard move and a clack, then lifts and parks).  Absent off Bambu.
+    # Same field and shape as the start doors, so a reader meets one field
+    # with one meaning; see kiln.start_narrative.
+    try:
+        from kiln.start_narrative import cancel_narrative
+
+        _cancel_lines = cancel_narrative(adapter)
+    except Exception as exc:  # noqa: BLE001 -- a cancel must never fail over a courtesy line
+        logger.debug("cancel narrative unavailable for %r: %s", target_name, exc)
+        _cancel_lines = None
+    if _cancel_lines:
+        out["what_you_will_see"] = list(_cancel_lines)
     if in_calibration:
         # Measured on an A1 across six cancels in this window: every one
         # tripped a Z-homing fault, and four of the six cleared themselves
@@ -14871,12 +14911,17 @@ def run_quick_print(
         resp = {"success": result.success, **result.to_dict()}
         # Hoist the AMS selection from the start_print step to the top
         # level so callers can say "AMS slot 1 — black PLA".  Never silent.
+        # What the printer is about to do rides up the same way: a reader
+        # of this tool's answer should not have to dig through the steps
+        # to learn that the coming slam is the filament cutter.
         for _step in result.steps:
             if _step.name == "start_print" and _step.data:
                 if "ams_selection" in _step.data:
                     resp["ams_selection"] = _step.data["ams_selection"]
                 if "ams_warnings" in _step.data:
                     resp["ams_warnings"] = _step.data["ams_warnings"]
+                if "what_you_will_see" in _step.data:
+                    resp["what_you_will_see"] = _step.data["what_you_will_see"]
                 break
         return resp
     except Exception as exc:
@@ -14987,13 +15032,16 @@ def run_reslice_and_print(
             skip_validation=skip_validation,
         )
         resp = {"success": result.success, **result.to_dict()}
-        # Surface the AMS tray selection (parity with run_quick_print).
+        # Surface the AMS tray selection and the start narrative (parity
+        # with run_quick_print).
         for _step in result.steps:
             if _step.name == "start_print" and _step.data:
                 if "ams_selection" in _step.data:
                     resp["ams_selection"] = _step.data["ams_selection"]
                 if "ams_warnings" in _step.data:
                     resp["ams_warnings"] = _step.data["ams_warnings"]
+                if "what_you_will_see" in _step.data:
+                    resp["what_you_will_see"] = _step.data["what_you_will_see"]
                 break
         return resp
     except Exception as exc:
