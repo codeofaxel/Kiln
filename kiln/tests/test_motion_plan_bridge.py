@@ -49,7 +49,7 @@ def _install_local_pro(monkeypatch, build_plan):
     pkg = types.ModuleType("kiln_pro")
     motion = types.ModuleType("kiln_pro.motion")
     motion.build_plan = build_plan
-    motion.station_supports = lambda adapter, station, capability: (True, "")
+    motion.station_supports = lambda station, capability: (True, "")
     pkg.motion = motion
     monkeypatch.setitem(sys.modules, "kiln_pro", pkg)
     monkeypatch.setitem(sys.modules, "kiln_pro.motion", motion)
@@ -214,3 +214,19 @@ class TestTheBackoff:
         bridge.plan_for(_Machine(), "home")
         bridge.plan_for(_Machine(), "park")
         assert len(calls) == 2
+
+
+class TestTheServedRequest:
+    def test_the_heartbeat_device_rides_on_the_served_call(self, monkeypatch):
+        import kiln.server as srv
+
+        monkeypatch.setattr("kiln.device.get_device_fingerprint", lambda: "f" * 32)
+        assert srv._heartbeat_device_header() == {"X-Kiln-Heartbeat-Device": "f" * 32}
+        monkeypatch.setattr("kiln.device.get_device_fingerprint", lambda: "")
+        assert srv._heartbeat_device_header() == {}
+
+        def _boom():
+            raise RuntimeError("no telemetry")
+
+        monkeypatch.setattr("kiln.device.get_device_fingerprint", _boom)
+        assert srv._heartbeat_device_header() == {}

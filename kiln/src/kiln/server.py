@@ -15532,6 +15532,22 @@ def _anonymous_api_call(tool_name: str, **kwargs) -> dict:
         }
 
 
+def _heartbeat_device_header() -> dict[str, str]:
+    """``X-Kiln-Heartbeat-Device``: the same device id this install's heartbeat
+    reports, so a served tool that binds an answer to a machine this install
+    has reported (``motion_plan``) can find the heartbeat row.  Distinct from
+    ``X-Kiln-Device-Fingerprint``, a random per-install id with no row behind
+    it.  Empty when the install reports no heartbeat.
+    """
+    try:
+        from kiln.device import get_device_fingerprint
+
+        value = str(get_device_fingerprint() or "").strip()
+    except Exception:  # noqa: BLE001 -- a header is never worth failing a request over
+        return {}
+    return {"X-Kiln-Heartbeat-Device": value} if value else {}
+
+
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
@@ -15668,6 +15684,10 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         # the server rejects a card-less license-bearer call once the cap
         # is enforced.  Harmless on the paired-OAuth (JWT) path.
         headers.update(device_fingerprint_headers())
+        # Name the device the way this install's heartbeat names it, so a
+        # served answer bound to a machine this install has reported (a
+        # motion plan for a paired printer) can find the heartbeat row.
+        headers.update(_heartbeat_device_header())
         # Announce our version so the hosted server can apply a minimum-version
         # floor (e.g. force an upgrade for a release with new terms / fixes).
         # A client that never sends this is treated as below the floor.

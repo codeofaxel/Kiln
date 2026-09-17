@@ -191,7 +191,7 @@ def station_supports(adapter: Any, station: dict[str, Any] | None, capability: s
     if pro is None or not hasattr(pro, "station_supports"):
         return None
     try:
-        answer = pro.station_supports(adapter, station, capability)
+        answer = pro.station_supports(station, capability)
     except Exception:  # noqa: BLE001
         logger.debug("kiln_pro.motion.station_supports raised", exc_info=True)
         return None
