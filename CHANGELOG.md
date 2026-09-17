@@ -203,6 +203,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **The Claude Code plugin now connects Kiln.** Installing it since 1.3.2
+  added a plugin that wired nothing; the same two commands now bring every
+  Kiln tool into your session.
 - **Idle Kiln sessions no longer hog your Bambu printer.** It only allows a
   few connections, and background copies of Kiln used to keep them all.
 
