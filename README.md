@@ -116,6 +116,7 @@ kiln snapshot --save photo.jpg    # Webcam snapshot
 kiln history --status completed   # Print history
 kiln park --plan                  # Describe the safe park, send nothing; then --step 1, 2, 3
 kiln home --plan                  # Same for the Home button; --plate-clear where Z homes onto the plate
+kiln filament wipe --plan         # Same for the wipe-pad pass; --plate-clear where its plan presses the plate
 
 # Every command supports --json for agent consumption
 kiln status --json
@@ -426,6 +427,7 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 91
   - Always says where the purge went: parked over the machine's own purge chute first where the model's own start-sequence position is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline, or in place with the reason — never a guessed coordinate
 - **wipe_nozzle**
   - Clean the nozzle tip on the printer's own wipe pad, running the pass its start sequence runs (served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline); refuses, and says what to use instead, on any model without a served pad position
+  - Run it in steps where the pass is new to a machine: `plan_only` describes every motion and sends nothing; `step=N` sends one motion, says what it left armed, and holds the heater-off finish until the last step. A wipe whose plan presses the plate — its Z datum is taken on the plate, or the head crosses the plate to reach the pad — asks for `plate_clear` on every call: a person's word, never inferred. A pass derived from a model's start file that no one has yet run on a real machine says so and runs in steps only
 - **home_axes**
   - The Home button, from Kiln: the model's own start-sequence homing where it is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline, the firmware's own routine elsewhere, a refusal that names the screen's jog controls where neither is safe
   - Run it in steps the first time: `plan_only` describes every motion before anything moves; `step=N` sends one motion and says what it left armed

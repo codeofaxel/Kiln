@@ -3375,7 +3375,8 @@ def _emit_filament_result(result: dict, json_mode: bool) -> None:
         detail = result.get("filament") or {}
         if not json_mode and detail.get("error_hint"):
             msg = f"{msg}\n  printer fault: {detail.get('error_code')} — {detail['error_hint']}"
-        click.echo(format_error(msg or "Filament operation failed.", json_mode=json_mode))
+        code = (err.get("code") if isinstance(err, dict) else None) or "ERROR"
+        click.echo(format_error(msg or "Filament operation failed.", code=code, json_mode=json_mode))
         sys.exit(1)
     click.echo(format_response("success", data=result, json_mode=json_mode))
 
@@ -3469,16 +3470,20 @@ def filament_purge(length_mm, material, temperature, slot, wait_seconds, keep_ho
 @click.option("--slot", type=int, default=None, help="AMS tray whose temperature window applies (Bambu).")
 @click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for a fault code after the wipe.")
 @click.option("--keep-hot", "keep_hot", is_flag=True, help="Leave the heater on afterwards (default: off).")
+@click.option("--plate-clear", "plate_clear", is_flag=True, help="You have looked: the plate is empty. Read on every call by a wipe whose plan presses the plate.")
+@click.option("--step", type=int, default=None, help="Send only this step of the wipe's plan (1-based); the answer describes the next one.")
+@click.option("--plan", "plan_only", is_flag=True, help="Describe the steps; send nothing.")
 @click.option("--printer", "printer_name", default=None, help="Target printer name.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def filament_wipe(material, temperature, slot, wait_seconds, keep_hot, printer_name, json_mode) -> None:
+def filament_wipe(material, temperature, slot, wait_seconds, keep_hot, plate_clear, step, plan_only, printer_name, json_mode) -> None:
     """Clean the nozzle tip on the printer's own wipe pad (refused where Kiln has no verified position)."""
     try:
         from kiln.plugins.filament_handling_tools import wipe_nozzle as _wipe
 
         _emit_filament_result(
             _wipe(material=material, temperature=temperature, slot=slot,
-                  wait_seconds=wait_seconds, keep_hot=keep_hot, printer_name=printer_name),
+                  wait_seconds=wait_seconds, keep_hot=keep_hot, plate_clear=plate_clear,
+                  step=step, plan_only=plan_only, printer_name=printer_name),
             json_mode,
         )
     except click.ClickException:
@@ -10048,19 +10053,41 @@ def _doctor_filament_where(adapter: Any) -> tuple[str, bool]:
     wipe_ok, why_wipe = verdicts["wipe"]
     model = (station or {}).get("printer_id") or str(getattr(adapter, "_printer_model", "") or "this model")
     screen = "wipe from the printer's own screen"
+    # What the wipe costs on this model, as its plan says: a person's
+    # plate_clear on every call where the plan presses the plate, and step
+    # mode only until someone has run it on a real machine.  Key names
+    # only; the reasons are the plan's own words.
+    wipe = "wipe_nozzle (kiln filament wipe) runs its wipe-pad pass"
+    plan_for = getattr(adapter, "_plan_for", None)
+    doc = plan_for("wipe", axes="XY") if wipe_ok and callable(plan_for) else None
+    doc = doc if isinstance(doc, dict) else {}
+    details = doc.get("details") if isinstance(doc.get("details"), dict) else {}
+    contact = details.get("needs_plate_clear")
+    if isinstance(contact, str) and contact.strip():
+        wipe += (
+            " -- only with plate_clear (kiln filament wipe --plate-clear), every time: "
+            f"{model} {_short_reason(contact, 160)}"
+        )
+    if isinstance(doc.get("step_mode_only"), dict):
+        wipe += (
+            " -- in step mode only (kiln filament wipe --plan, then --step N) until someone has run it "
+            "on a real machine; a full run refuses"
+        )
     if purge_ok and wipe_ok:
-        return (
-            f"purge and load park over {model}'s own purge chute; wipe_nozzle "
-            "(kiln filament wipe) runs its wipe-pad pass"
-        ), False
+        return f"purge and load park over {model}'s own purge chute; {wipe}", False
     if purge_ok:
         return (
             f"purge and load park over {model}'s own purge chute; wipe_nozzle refuses "
             f"({_short_reason(why_wipe)}) — {screen}"
         ), True
+    if wipe_ok:
+        return (
+            f"purge and load extrude in place on {model} and say so "
+            f"({_short_reason(why_purge, 120)}); {wipe}"
+        ), False
     return (
         f"no motion Kiln can drive on {model}: purge extrudes in place and says so, and "
-        f"wipe_nozzle refuses ({_short_reason(why_purge)}) — {screen}"
+        f"wipe_nozzle refuses ({_short_reason(why_wipe)}) — {screen}"
     ), True
 
 

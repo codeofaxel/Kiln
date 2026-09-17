@@ -21,10 +21,11 @@ call in with a plan the gate has already passed.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
-from kiln.printers.base import HomeResult, HomeStep, PrinterError
+from kiln.printers.base import FilamentOpPlan, FilamentOpResult, HomeResult, HomeStep, PrinterError
 from kiln.printers.command_verdict import CommandVerdict
 
 logger = logging.getLogger(__name__)
@@ -317,4 +318,168 @@ def run_finish(adapter: Any, result: Any, finish: dict[str, Any]) -> str | None:
         f"Part fan {'on full' if fan_on else 'command refused'}; the nozzle still read {shown} after "
         f"{timeout:g}s, above the {threshold:g} °C hand-off. It keeps cooling on its own; "
         f"the fan is left on.{where}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# A wipe, one step at a time
+# ---------------------------------------------------------------------------
+
+#: How long one wipe step is watched for a fault after it is sent.
+WIPE_STEP_WATCH_S: float = 10.0
+#: A G-code word that moves the extruder (``G1 E-1 F500``).
+_E_WORD = re.compile(r"\bE-?\d")
+
+
+def wipe_steps_of(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """The wipe plan's steps as dicts, in order -- or ``[]`` for a plan that
+    describes none (a full run only).  A step that ``heats`` carries no
+    lines: the executor heats to the op's gated temperature and waits on
+    the thermistor, as the full run does.  Every other step is checked the
+    way :func:`steps_of` checks a home's."""
+    raw_steps = doc.get("steps") or []
+    if not raw_steps:
+        return []
+    out: list[dict[str, Any]] = []
+    for raw in raw_steps:
+        if not isinstance(raw, dict):
+            raise PrinterError("The wipe plan carried a malformed step; nothing was sent.")
+        gcode = raw.get("gcode")
+        if not isinstance(gcode, list) or not all(isinstance(line, str) and line.strip() for line in gcode):
+            raise PrinterError("The wipe plan carried a step with no G-code list; nothing was sent.")
+        if not gcode and not raw.get("heats"):
+            raise PrinterError("The wipe plan carried an empty step that does not heat; nothing was sent.")
+        out.append({
+            "number": int(raw.get("number") or len(out) + 1),
+            "label": str(raw.get("label") or f"step {len(out) + 1}"),
+            "you_will_see": str(raw.get("you_will_see") or ""),
+            "stops_when": str(raw.get("stops_when") or ""),
+            "gcode": list(gcode),
+            "leaves": [str(x) for x in (raw.get("leaves") or [])],
+            "touches_plate": bool(raw.get("touches_plate")),
+            "heats": bool(raw.get("heats")),
+        })
+    return out
+
+
+def wipe_plan_only(doc: dict[str, Any], plan: FilamentOpPlan, steps: list[dict[str, Any]]) -> FilamentOpResult:
+    """Describe the wipe's steps and send nothing."""
+    printer_id = str(doc.get("printer_id") or "this printer")
+    only = doc.get("step_mode_only") if isinstance(doc.get("step_mode_only"), dict) else None
+    return FilamentOpResult(
+        success=True, action=plan.action,
+        message=(f"Plan only -- nothing sent. {len(steps)} steps for {printer_id}; send them one at a time "
+                 f"with step=1 … step={len(steps)}"
+                 + (". This wipe has not been run on a real machine, so it runs in step mode only."
+                    if only else ", or all at once with no step named.")),
+        extrusion_verified=None, verification_source="plan_only",
+        slot=plan.slot, material=plan.material, temperature=plan.temperature,
+        steps=steps, step_sent=None, next_step=steps[0],
+        details={"sent": False, "purge_station": dict(doc.get("placement") or {}),
+                 **{k: v for k, v in (doc.get("details") or {}).items() if k != "resting_position"}},
+    )
+
+
+def run_wipe_step(
+    adapter: Any, doc: dict[str, Any], plan: FilamentOpPlan, steps: list[dict[str, Any]], step: int,
+) -> FilamentOpResult:
+    """Send step *step* of the wipe plan and describe the next one.
+
+    A step that ``heats`` is the op's own heat: the gated material
+    temperature set on the adapter and waited for on the thermistor -- the
+    same wait the full run makes in :meth:`_gcode_filament_move`.  Every
+    other step is its lines, sent, then watched for a fault.  The last
+    step's answer carries what the finish needs (the plan's own retract is
+    not doubled; the resting place names where the head was left).
+    """
+    if step > len(steps):
+        raise PrinterError(f"The sequence has {len(steps)} steps; step {step} does not exist.")
+    chosen = steps[step - 1]
+    nxt = steps[step] if step < len(steps) else None
+    common: dict[str, Any] = dict(
+        action=plan.action, extrusion_verified=None, slot=plan.slot, material=plan.material,
+        temperature=plan.temperature, steps=steps, step_sent=step, next_step=nxt,
+        leaves=list(chosen["leaves"]),
+    )
+    details: dict[str, Any] = {
+        "gcode": list(chosen["gcode"]), "purge_station": dict(doc.get("placement") or {}),
+        **{k: v for k, v in (doc.get("details") or {}).items() if k != "resting_position"},
+    }
+    watch = plan.wait_seconds(WIPE_STEP_WATCH_S)
+    if chosen["heats"]:
+        target = float(plan.temperature)
+        try:
+            adapter.set_tool_temp(target)
+        except PrinterError as exc:
+            return FilamentOpResult(
+                success=False, message=f"Could not set the hotend to {target:g}°C: {exc}",
+                verification_source="heater_command_rejected", error_hint=str(exc), details=details, **common,
+            )
+        reached, reading = adapter._wait_for_hotend(target)
+        if not reached:
+            return FilamentOpResult(
+                success=False,
+                message=(f"The hotend did not reach {target:g}°C (last reading "
+                         f"{'unknown' if reading is None else f'{reading:g}°C'}). Nothing was sent."),
+                verification_source="thermistor", details={**details, "last_hotend_reading": reading}, **common,
+            )
+        details["hotend_reading"] = reading
+        fault = None
+    else:
+        # A step that moves the extruder (the snap) needs the nozzle at the
+        # op's temperature, read now on the thermistor -- the check every
+        # extrude here makes, kept when a person walks the steps out of
+        # order or skips the heat.  One reading, no wait: the heat step is
+        # where the waiting happens.
+        if any(_E_WORD.search(line) for line in chosen["gcode"]):
+            target = float(plan.temperature)
+            hot, reading = adapter._wait_for_hotend(target, timeout=0.0)
+            if not hot:
+                heat = next((s for s in steps if s["heats"]), None)
+                first = f"run step {heat['number']} ({heat['label']}) first" if heat else "heat it first"
+                return FilamentOpResult(
+                    success=False,
+                    message=(f"Step {step} ({chosen['label']}) moves the extruder and the nozzle reads "
+                             f"{'nothing' if reading is None else f'{reading:g}°C'}, not the {target:g}°C the "
+                             f"sequence heats to: {first}. Nothing was sent."),
+                    verification_source="thermistor", details={**details, "last_hotend_reading": reading}, **common,
+                )
+        snapshot = getattr(adapter, "_snapshot_faults", None)
+        faults_before = set(snapshot()) if callable(snapshot) else None
+        verdict = CommandVerdict.coerce(adapter.send_gcode(list(chosen["gcode"])), what="wipe")
+        if not verdict.ok:
+            return FilamentOpResult(
+                success=False, message=f"The printer refused step {step} ({chosen['label']}): {verdict.message}",
+                verification_source="firmware_rejected_move", error_hint=verdict.message,
+                details={**details, "verdict": verdict.to_dict()}, **common,
+            )
+        fault = _watch_for_fault(adapter, faults_before, watch)
+        if fault is not None:
+            code, kind = fault
+            hint = _describe_fault(adapter, code, kind)
+            return FilamentOpResult(
+                success=False, message=f"The printer raised {code} during step {step} ({chosen['label']}): {hint}",
+                extrusion_verified=False, verification_source="bambu_fault_code",
+                error_code=code, error_hint=hint, details={**details, "fault": {"code": code, "kind": kind}},
+                **{k: v for k, v in common.items() if k != "extrusion_verified"},
+            )
+    after = (f" Next: step {nxt['number']} -- {nxt['label']}: {nxt['you_will_see']}." if nxt
+             else " That was the last step; the sequence is complete.")
+    details["fault_watch_seconds"] = watch
+    if nxt is None:
+        # The last step: the door's finish (heater off, the plan's cool-down)
+        # runs after this answer and must not pull back again -- the snap
+        # step already sent the plan's own retract.
+        details["end_retract_mm"] = float(doc.get("end_retract_mm") or 0.0)
+        resting = (doc.get("details") or {}).get("resting_position")
+        if isinstance(resting, dict):
+            details["resting_position"] = dict(resting)
+        if isinstance(doc.get("finish"), dict):
+            details["finish"] = dict(doc["finish"])
+    return FilamentOpResult(
+        success=True,
+        message=(f"Step {step} of {len(steps)} sent ({chosen['label']}): {chosen['you_will_see']}. "
+                 f"Stops when {chosen['stops_when']}. Raised no fault in {watch:g}s.{after}"
+                 + (" Left armed: " + "; ".join(chosen["leaves"]) + "." if chosen["leaves"] else "")),
+        verification_source="no_fault_within_window", details=details, **common,
     )
