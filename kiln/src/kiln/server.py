@@ -14735,8 +14735,8 @@ def _normalize_hms_code(raw: str) -> str:
     return "_".join(hex_only[i : i + 4] for i in range(0, len(hex_only), 4))
 
 
-def _hms_reference(code: str) -> tuple[str | None, str]:
-    """``(best wiki link or None, namespace)`` for a normalized Bambu code.
+def _hms_reference(code: str) -> tuple[str | None, str, Any]:
+    """``(best wiki link or None, namespace, reading)`` for a normalized Bambu code.
 
     Bambu keeps two code namespaces and publishes pages for only one of
     them, so a single template produced links that 404 (measured
@@ -14751,17 +14751,19 @@ def _hms_reference(code: str) -> tuple[str | None, str]:
       HMS index and ``/hmscode/1200_8007`` is a 404.
 
     Returns ``None`` for the link rather than offering a page that does not
-    exist.
+    exist.  The third element is the ``BambuFaultReading`` itself -- the
+    same read every other fault door makes -- so the tool can carry
+    kiln-pro's decoded block when kiln-pro answered in-process.
 
     The page address is not rebuilt here.  ``kiln.printers.bambu`` is the
     one place that knows which model path serves which code, and a second
     copy of that mapping is how the two drift apart.
     """
-    from kiln.printers.bambu import describe_bambu_filament_fault
+    from kiln.printers.bambu import read_bambu_fault
 
     kind = "hms" if len(code.replace("_", "")) >= 16 else "print_error"
-    _reading, page = describe_bambu_filament_fault(code, kind=kind)
-    return page, kind
+    fault = read_bambu_fault(code, kind=kind)
+    return fault.url, kind, fault
 
 
 @mcp.tool(annotations=read_only("Troubleshoot printer"))
@@ -14885,14 +14887,19 @@ def troubleshoot_printer(
         }
         # Bambu HMS code lookup: the normalized raw code + a wiki pointer are
         # the free floor.  kiln-pro adds a decoded ``hms_decoded`` block (cause /
-        # fix / severity, cited) for Pro+ callers at the REST boundary.
+        # fix / severity, cited): at the REST boundary for hosted callers, and
+        # here, through the same reading every fault door makes, when kiln-pro
+        # is installed beside this server and its catalog answers for this
+        # caller's tier.  One field, one shape, whichever door attached it.
         code = _normalize_hms_code(hms_code)
         if code:
             result["hms_code"] = code
-            link, kind = _hms_reference(code)
+            link, kind, fault = _hms_reference(code)
             result["hms_code_kind"] = kind
             if link:
                 result["hms_wiki_url"] = link
+            if fault.decoded:
+                result["hms_decoded"] = dict(fault.decoded)
         # Which wizard step failed is the strongest thing a user can tell us
         # about a load failure, and until now Kiln had no way to hear it. The
         # reading is free-tier: it is arithmetic over the printer's own load

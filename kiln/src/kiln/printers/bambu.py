@@ -67,6 +67,7 @@ from kiln.printers.base import (
     UploadResult,
     _record_print_duration,
     capture_rtsp_frame,
+    describe_fault_remedy,
     describe_unacknowledged_fault,
     diagnose_read_failure,
     diagnosed_state,
@@ -641,7 +642,31 @@ _BAMBU_HMS_FAMILIES: dict[str, str] = {
 
 # print_error readings.  A DIFFERENT namespace from the HMS table above,
 # with no vendor page to cite, so each row says where its reading is from.
+#
+# These rows are the PUBLIC floor, read only after kiln-pro has been asked
+# (``read_bambu_fault``).  A row here says what kind of fault the code is;
+# the cause list and the fix for a code are know-how and live in kiln-pro's
+# catalog, which decides per row whether that reading is free -- a fix a
+# person needs in order not to break the machine is never paywalled -- or
+# paid depth.  Where know-how lives and who pays for it are separate axes.
+
+#: Where the reading is, for a code whose public line is only its kind.
+#: One string, so the three lines that carry it cannot drift apart.
+_PRIVATE_READING_POINTER = (
+    "Check the printer's own screen for its message; Kiln's reading of this "
+    "code -- what to check and what fixes it -- is free with a Kiln sign-in"
+)
+
 _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
+    # 1200-8001: read off an A1's own screen 2026-09-16 ("Cutting the
+    # filament failed", print_error 302022657): the filament cutter did not
+    # cut.  The line names the fault's KIND and where the reading is; the
+    # cause list and the fix are a kiln-pro row, and a FREE one, so a
+    # signed-in caller of any tier gets them.  No cause, no fix, no source
+    # on purpose -- the know-how is the private half, whoever it is free to.
+    "12008001": (
+        f"This is an AMS lite filament-cut fault. {_PRIVATE_READING_POINTER}"
+    ),
     # Observed on Adam's A1 (2026-09-03): raised by the printer's own Load
     # wizard at its purge step, straight after a layer-1 failure with a
     # clogged hotend.  Corroborated on the Bambu forum by an A1 owner who
@@ -740,10 +765,75 @@ _BAMBU_PRINT_ERROR_FAMILIES: dict[str, str] = {
 }
 
 
+@dataclass(frozen=True)
+class BambuFaultReading:
+    """One fault code, read once, for every door that shows it.
+
+    ``reading`` is what happened, in plain language, and is never empty.
+    ``remedy`` is what to do about it, when Kiln has a fix for this code;
+    ``None`` means "nothing beyond clearing the fault", not "unknown".
+    ``url`` is the vendor's own page, HMS codes only.  ``decoded`` is
+    kiln-pro's row when kiln-pro supplied the reading -- the same
+    allowlisted shape the hosted boundary serves as ``hms_decoded`` -- so a
+    door that carries the structured block can carry it without a second
+    lookup.
+    """
+
+    reading: str
+    remedy: str | None = None
+    url: str | None = None
+    decoded: dict[str, Any] | None = None
+
+    @property
+    def private(self) -> bool:
+        """Did kiln-pro supply this reading?"""
+        return self.decoded is not None
+
+
+def read_bambu_fault(code: str, *, kind: str = "hms") -> BambuFaultReading:
+    """Read a Bambu fault code, once, for every door that shows it.
+
+    Asks kiln-pro first (``kiln._pro_fault_bridge``): its catalog holds the
+    cause and the fix, and decides per row whether the caller's tier
+    unlocks them -- a safety or fix floor is free at every tier, the rest
+    is paid depth.  Without kiln-pro, or for a row it does not unlock, the
+    public tables below answer: the vendor's own page title for an HMS
+    code, a family line for a print_error.
+
+    Every door goes through here -- ``printer_status``'s fault fields, the
+    filament-op results, the fault event, ``troubleshoot_printer`` -- which
+    is what keeps them saying the same thing about the same code.
+    """
+    from kiln import _pro_fault_bridge
+
+    decoded = _pro_fault_bridge.decode_fault(code, kind=kind)
+    public_reading, url = describe_bambu_filament_fault_public(code, kind=kind)
+    if decoded is None:
+        return BambuFaultReading(reading=public_reading, url=url)
+    reading = str(decoded["cause"]).strip()
+    fix = decoded.get("fix")
+    remedy = fix.strip() if isinstance(fix, str) and fix.strip() else None
+    # The vendor's page stays attached to an HMS code whoever wrote the
+    # reading; a print_error has none (``url`` is already ``None`` there).
+    return BambuFaultReading(reading=reading, remedy=remedy, url=url, decoded=decoded)
+
+
 def describe_bambu_filament_fault(
     code: str, *, kind: str = "hms"
 ) -> tuple[str, str | None]:
     """``(plain-language reading, wiki URL or None)`` for a Bambu fault.
+
+    The two-field view of :func:`read_bambu_fault`, kept for the callers
+    that only show a sentence.  kiln-pro is asked first, exactly as there.
+    """
+    fault = read_bambu_fault(code, kind=kind)
+    return fault.reading, fault.url
+
+
+def describe_bambu_filament_fault_public(
+    code: str, *, kind: str = "hms"
+) -> tuple[str, str | None]:
+    """``(reading, wiki URL or None)`` from public Kiln's own tables only.
 
     *kind* selects the namespace: ``"hms"`` for a code from the ``hms``
     array, ``"print_error"`` for the ``print_error`` field.  Getting this
@@ -751,7 +841,8 @@ def describe_bambu_filament_fault(
     points at a page that does not exist.
 
     An unknown code returns its family rather than a guess, and a
-    print_error never returns a URL, because Bambu publishes none.
+    print_error never returns a URL, because Bambu publishes none.  This
+    is the floor under :func:`read_bambu_fault`; doors call that, not this.
     """
     if kind == "print_error":
         hex_only = "".join(c for c in str(code).upper() if c in "0123456789ABCDEF")
@@ -2542,9 +2633,8 @@ class BambuAdapter(PrinterAdapter):
         push path that keeps the status cache current.
         """
         pretty = format_error_code(code)
-        reading, _page = describe_bambu_filament_fault(
-            pretty or str(code), kind="print_error"
-        )
+        fault = read_bambu_fault(pretty or str(code), kind="print_error")
+        reading = fault.reading
         logger.warning(
             "Printer %s reported fault %s: %s",
             printer_name or self.name, pretty or code, reading,
@@ -2560,32 +2650,42 @@ class BambuAdapter(PrinterAdapter):
         # edge is rare.
         threading.Thread(
             target=self._publish_fault_event,
-            args=(code, pretty, reading, printer_name or self.name),
+            args=(code, pretty, reading, printer_name or self.name, fault.remedy),
             name="kiln-fault-notice",
             daemon=True,
         ).start()
 
     def _publish_fault_event(
-        self, code: int, pretty: str | None, reading: str, printer_name: str
+        self,
+        code: int,
+        pretty: str | None,
+        reading: str,
+        printer_name: str,
+        remedy: str | None = None,
     ) -> None:
         """Announce the fault on the event bus.  Never raises."""
         try:
             import kiln.server as _srv
             from kiln.events import Event, EventType
 
+            data: dict[str, Any] = {
+                "printer_name": printer_name,
+                "print_error": int(code),
+                "print_error_code": pretty,
+                "reading": reading,
+                # How Kiln came to know, so a reader can tell a fault
+                # a watchdog caught on Kiln's own print from one the
+                # open connection saw on a job Kiln never started.
+                "noticed_by": "connection",
+            }
+            # The fix rides with the reading when Kiln has one, so the
+            # event says the same thing printer_status does.
+            if remedy:
+                data["remedy"] = remedy
             _srv._get_event_bus().publish(
                 Event(
                     type=EventType.PRINTER_ERROR,
-                    data={
-                        "printer_name": printer_name,
-                        "print_error": int(code),
-                        "print_error_code": pretty,
-                        "reading": reading,
-                        # How Kiln came to know, so a reader can tell a fault
-                        # a watchdog caught on Kiln's own print from one the
-                        # open connection saw on a job Kiln never started.
-                        "noticed_by": "connection",
-                    },
+                    data=data,
                     source=f"printer:{printer_name}",
                 )
             )
@@ -3280,13 +3380,22 @@ class BambuAdapter(PrinterAdapter):
         # the WORDS are, because only this adapter knows what 1200-8007 means
         # on an A1.  An adapter with no table supplies nothing and its
         # printers get the generic sentence rather than a guess.
+        #
+        # The remedy too, when the reading brings a fix with it: the fix a
+        # person needs before the fault will clear (a blade back in its
+        # slot, a hot end unclogged) belongs beside the generic "clear it on
+        # the screen" sentence, not lost behind it.  ``None`` here lets
+        # PrinterState supply that generic sentence on its own.
         fault_note: str | None = None
+        fault_remedy: str | None = None
         if print_error_int:
             pretty = format_error_code(print_error_int)
-            reading, _page = describe_bambu_filament_fault(
+            fault = read_bambu_fault(
                 pretty or str(print_error_int), kind="print_error"
             )
-            fault_note = describe_unacknowledged_fault(pretty, reading)
+            fault_note = describe_unacknowledged_fault(pretty, fault.reading)
+            if fault.remedy:
+                fault_remedy = describe_fault_remedy(fault.remedy)
 
         # ``chamber_temper`` arrives in every report from every Bambu, so
         # its presence says nothing about whether the machine has a chamber
@@ -3320,6 +3429,7 @@ class BambuAdapter(PrinterAdapter):
             speed_magnitude=spd_mag_int,
             print_error=print_error_int,
             fault_note=fault_note,
+            fault_remedy=fault_remedy,
             state_age_seconds=round(age, 1) if age is not None else None,
         )
 
@@ -6209,17 +6319,24 @@ class BambuAdapter(PrinterAdapter):
         """
         ordered = sorted(codes, key=lambda pair: (pair[1] != "hms", pair[0]))
         code, kind = ordered[0]
-        hint, _page = describe_bambu_filament_fault(code, kind=kind)
+        fault = read_bambu_fault(code, kind=kind)
+        hint = fault.reading
         details: dict[str, Any] = {
             "all_new_faults": [
                 {"code": c, "kind": k} for c, k in ordered
             ],
             "code_kind": kind,
         }
+        message = f"The printer raised {code} during the {stage}: {hint}"
+        # The fix, when the reading brings one, in the same sentence a
+        # person reads -- the same words printer_status shows for this code.
+        if fault.remedy:
+            details["remedy"] = fault.remedy
+            message = f"{message} {fault.remedy}"
         return FilamentOpResult(
             success=False,
             action=plan.action,
-            message=f"The printer raised {code} during the {stage}: {hint}",
+            message=message,
             extrusion_verified=False,
             verification_source="bambu_fault_code",
             error_code=code,

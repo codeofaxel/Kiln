@@ -1000,6 +1000,28 @@ def _no_real_pypi_check(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _public_fault_readings_only(monkeypatch):
+    """Every test reads a Bambu fault code from public Kiln's own tables.
+
+    ``kiln.printers.bambu.read_bambu_fault`` asks kiln-pro first, through
+    ``kiln._pro_fault_bridge``, and kiln-pro answers by the machine's own
+    licence.  On a laptop with kiln-pro installed beside this checkout that
+    made a public test's answer depend on which kiln-pro was on the path and
+    whose key was in the keychain -- a licensed machine saw the private
+    reading where CI saw the public line, and the same assertion passed on
+    one and failed on the other.
+
+    So the bridge is silent by default, and a test that wants kiln-pro's
+    answer patches ``decode_fault`` itself with the row it is testing
+    (``tests/test_fault_reading_doors.py`` does).  A later ``monkeypatch``
+    in the test body overrides this one for that test.
+    """
+    import kiln._pro_fault_bridge as fault_bridge
+
+    monkeypatch.setattr(fault_bridge, "decode_fault", lambda *args, **kwargs: None)
+
+
+@pytest.fixture(autouse=True)
 def _restore_kiln_pro_stubs():
     """Undo ``kiln_pro`` stubs a test installs directly into ``sys.modules``.
 

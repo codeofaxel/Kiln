@@ -628,8 +628,8 @@ def describe_unacknowledged_fault(
     )
 
 
-def describe_fault_remedy() -> str:
-    """What CLEARS a latched fault, in one sentence.
+def describe_fault_remedy(fix: str | None = None) -> str:
+    """What CLEARS a latched fault, in one sentence -- after the fix, if any.
 
     Split from :func:`describe_unacknowledged_fault` for the reason
     :attr:`PrinterState.cause` and :attr:`PrinterState.remedy` are two fields
@@ -638,11 +638,24 @@ def describe_fault_remedy() -> str:
     should be able to choose.  Joined, they were a single 380-character
     string that ended by telling a person reading a web page to call a tool
     they do not have.
+
+    *fix* is the adapter's own remedy for this code when it has one -- the
+    thing a person must do BEFORE clearing the fault means anything (a
+    cutter blade back in its slot, a hot end unclogged).  It leads, and the
+    clearing sentence follows it; without one the clearing sentence stands
+    alone, as it always has.
     """
-    return (
+    clear = (
         "Clear it on the printer's own screen, or with clear_printer_error. "
         "Until it is cleared Kiln reports this machine as faulted rather "
         "than ready."
+    )
+    if not fix or not fix.strip():
+        return clear
+    return (
+        f"{fix.strip()} Once that is done, clear the fault on the printer's "
+        "own screen, or with clear_printer_error. Until it is cleared Kiln "
+        "reports this machine as faulted rather than ready."
     )
 
 
