@@ -4503,6 +4503,12 @@ _LITE_PRINTER_KEYS = (
     # ...and what clears it, as its own key.  A poller with one line of room
     # renders what happened; a surface with more renders both.
     "fault_remedy",
+    # Every code the firmware is reporting, spelled as the printer's own
+    # screen spells it, with the vendor's sentence where one is published.
+    # `print_error_code` above is only the latched one; a Bambu publishes
+    # an `hms` array beside it, and a poller that sees one code of three is
+    # a poller that will send someone to look at the wrong thing.
+    "faults",
     # Whether this machine can measure its chamber at all, and the sentence
     # beside the blank chamber fields when it cannot.  On the lite path for
     # the same reason `temperature_note` is: it is the polled shape, and a
@@ -5096,6 +5102,15 @@ def monitor_print(
         _fault_note = sd.get("fault_note")
         if _fault_note:
             error_str = f"{error_str} — {_fault_note}"
+        # What the printer's own screen is showing for it, in the vendor's
+        # words where the vendor has any, and every further code the report
+        # carries.  The person reading this report is often standing at
+        # that screen; the line should match what they see.
+        from kiln.printers.base import describe_screen_faults as _screen_faults
+
+        _screen_lines = _screen_faults(sd.get("faults"))
+        if _screen_lines:
+            error_str = f"{error_str} — Screen: " + "; ".join(_screen_lines)
 
         # --- Snapshot ---
         snapshot_line = "No camera available"

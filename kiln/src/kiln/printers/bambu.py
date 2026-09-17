@@ -40,6 +40,11 @@ from typing import Any, ClassVar
 import paho.mqtt.client as mqtt
 
 from kiln.printer_intelligence import chamber_sensor_for_model
+from kiln.printers.bambu_hms_text import (
+    device_type_from_serial,
+    kick_background_refresh,
+    lookup_screen_text,
+)
 from kiln.printers.base import (
     DEFAULT_PURGE_LENGTH_MM,
     FILAMENT_FEED_RATE_MM_MIN,
@@ -886,6 +891,113 @@ def describe_bambu_filament_fault_public(
         f"The printer reported {shown}{where}, a fault Kiln has no reading for.",
         _BAMBU_HMS_INDEX_URL,
     )
+
+
+def format_bambu_hms_code(attr: int, code: int) -> str:
+    """An ``hms`` array entry in the four-group form the vendor files it under.
+
+    ``{"attr": 0x12008000, "code": 0x00020001}`` -> ``"1200-8000-0002-0001"``:
+    ``attr`` as eight hex digits then ``code`` as eight, which is how
+    BambuStudio builds the long code it looks up (``DevHMSItem::
+    get_long_error_code``), split into fours and joined with dashes as the
+    printer's screen and the Bambu Handy app spell it.  Kiln's wiki paths
+    use the same digits with underscores; this is the spelling for a
+    person's eyes, that one is for an address.
+    """
+    return _hms_group(f"{attr:08X}{code:08X}").replace("_", "-")
+
+
+def compose_bambu_faults(
+    status: dict[str, Any], *, device_type: str = ""
+) -> list[dict[str, Any]]:
+    """Every fault *status* carries, each as its own screen would show it.
+
+    The one composer behind every door that reports a Bambu fault -- the
+    status tools, the CLI, the monitor report, the fault notice on the
+    event bus and a failed filament operation -- so a fault does not read
+    differently depending on which surface asked.  One entry per code:
+
+    ``code``
+        The code in the spelling the printer's own screen uses.  A
+        ``print_error`` renders as two four-hex groups (``"1200-8001"``,
+        BambuStudio's ``get_error_code_str``: ``%08X`` with a dash after the
+        fourth digit); an ``hms`` entry as four (``"1200-8000-0002-0001"``,
+        see :func:`format_bambu_hms_code`).
+    ``kind``
+        Which of Bambu's two namespaces the code belongs to,
+        ``"print_error"`` or ``"hms"``.  They are looked up in different
+        tables and conflating them is how a code gets the wrong page.
+    ``raw``
+        Exactly what the firmware sent, under the wire's own field names:
+        ``{"print_error": 302022657}`` or ``{"attr": ..., "code": ...}``.
+    ``screen_text`` / ``source``
+        The vendor's own English sentence for the code and the source class
+        it came from, ONLY when the vendor publishes one for this device
+        type (:mod:`kiln.printers.bambu_hms_text`).  Absent otherwise --
+        never a family reading dressed as the vendor's words.
+
+    The printer's screen also shows six decimal digits after the code
+    (``[1200-8001 290420]``).  They are not here because they are not on
+    the wire: the report carries ``print_error`` as one integer and nothing
+    beside it but a snapshot id (BambuStudio ``DeviceManager.cpp``, the
+    ``print_error`` / ``err2.img_id`` parse), and the vendor's own client
+    stamps the wall clock into that position at display time
+    (``DeviceErrorDialog.cpp``: ``wxDateTime::Now().Format("%H%M%d")``).
+    Two occurrences of one code carried two different numbers on the same
+    night (290420, then 390434), which is what a clock stamp does and a
+    sub-code does not.  Kiln does not invent one.
+
+    *device_type* is the serial's first three characters
+    (:func:`~kiln.printers.bambu_hms_text.device_type_from_serial`); with
+    none, the codes are composed and no sentence is looked up.
+    """
+    faults: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    raw_error = status.get("print_error")
+    error_int: int | None = None
+    if raw_error is not None:
+        with contextlib.suppress(TypeError, ValueError):
+            error_int = int(raw_error)
+    pretty = format_error_code(error_int)
+    if pretty is not None and error_int is not None:
+        entry: dict[str, Any] = {
+            "code": pretty,
+            "kind": "print_error",
+            "raw": {"print_error": error_int},
+        }
+        found = lookup_screen_text(pretty, device_type=device_type, kind="print_error")
+        if found is not None:
+            entry["screen_text"], entry["source"] = found
+        faults.append(entry)
+        seen.add(pretty)
+
+    hms = status.get("hms")
+    if isinstance(hms, list):
+        for item in hms:
+            if not isinstance(item, dict):
+                continue
+            try:
+                attr = int(item.get("attr") or 0)
+                code = int(item.get("code") or 0)
+            except (TypeError, ValueError):
+                continue
+            if attr < 0 or code < 0 or not (attr or code):
+                continue
+            shown = format_bambu_hms_code(attr, code)
+            if shown in seen:
+                continue
+            seen.add(shown)
+            entry = {
+                "code": shown,
+                "kind": "hms",
+                "raw": {"attr": attr, "code": code},
+            }
+            found = lookup_screen_text(shown, device_type=device_type, kind="hms")
+            if found is not None:
+                entry["screen_text"], entry["source"] = found
+            faults.append(entry)
+    return faults
 
 
 # Bambu LED node names.
@@ -2676,6 +2788,18 @@ class BambuAdapter(PrinterAdapter):
             # event says the same thing printer_status does.
             if remedy:
                 data["remedy"] = remedy
+            # The same entry every other door composes, so the notice
+            # carries the screen's sentence when the vendor has one.
+            # Looked up here, off the network thread, on purpose.
+            faults = compose_bambu_faults(
+                {"print_error": int(code)},
+                device_type=device_type_from_serial(self._serial),
+            )
+            if faults:
+                data["faults"] = faults
+                if "screen_text" in faults[0]:
+                    data["screen_text"] = faults[0]["screen_text"]
+                    data["source"] = faults[0]["source"]
             _srv._get_event_bus().publish(
                 Event(
                     type=EventType.PRINTER_ERROR,
@@ -3391,6 +3515,18 @@ class BambuAdapter(PrinterAdapter):
             if fault.remedy:
                 fault_remedy = describe_fault_remedy(fault.remedy)
 
+        # Every code the report carries, spelled as the screen spells it,
+        # with the vendor's own sentence where it publishes one.  The
+        # sentence table is warmed from here on every reading -- not only
+        # on a fault -- so it is on disk before the first fault needs it;
+        # the call returns at once and the lookup below never blocks.
+        # ``getattr`` for the same reason ``_chamber_lookup_model`` uses it:
+        # this builder runs on instances that never ran ``__init__``, and
+        # an instance with no serial has no table to ask for.
+        device_type = device_type_from_serial(getattr(self, "_serial", ""))
+        kick_background_refresh(device_type)
+        faults = compose_bambu_faults(status, device_type=device_type) or None
+
         # ``chamber_temper`` arrives in every report from every Bambu, so
         # its presence says nothing about whether the machine has a chamber
         # thermistor -- an A1 publishes ``5`` at room temperature.  The
@@ -3424,6 +3560,7 @@ class BambuAdapter(PrinterAdapter):
             print_error=print_error_int,
             fault_note=fault_note,
             fault_remedy=fault_remedy,
+            faults=faults,
             state_age_seconds=round(age, 1) if age is not None else None,
         )
 
@@ -6320,6 +6457,11 @@ class BambuAdapter(PrinterAdapter):
                 {"code": c, "kind": k} for c, k in ordered
             ],
             "code_kind": kind,
+            # The leading code as the printer's own screen spells it, and
+            # the vendor's sentence for it when one is on record -- the same
+            # lookup every status door makes, so a person at the screen can
+            # match this result to what they are looking at.
+            "screen_code": code.replace("_", "-"),
         }
         message = f"The printer raised {code} during the {stage}: {hint}"
         # The fix, when the reading brings one, in the same sentence a
@@ -6327,6 +6469,11 @@ class BambuAdapter(PrinterAdapter):
         if fault.remedy:
             details["remedy"] = fault.remedy
             message = f"{message} {fault.remedy}"
+        found = lookup_screen_text(
+            code, device_type=device_type_from_serial(self._serial), kind=kind
+        )
+        if found is not None:
+            details["screen_text"], details["source"] = found
         return FilamentOpResult(
             success=False,
             action=plan.action,

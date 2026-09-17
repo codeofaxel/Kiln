@@ -211,6 +211,11 @@ def format_status(
     # Present only when the printer is reporting a fault nobody has cleared.
     fault_note = state.get("fault_note")
     fault_remedy = state.get("fault_remedy")
+    # What the printer's own screen shows for it: every code in the
+    # screen's spelling, with the vendor's sentence where one is on record.
+    from kiln.printers.base import describe_screen_faults
+
+    screen_lines = describe_screen_faults(state.get("faults"))
 
     file_name = job.get("file_name")
     completion = job.get("completion")
@@ -237,6 +242,8 @@ def format_status(
             table.add_row("Fault", f"[red]{fault_note}[/red]")
         if fault_remedy:
             table.add_row("", fault_remedy)
+        for i, line in enumerate(screen_lines):
+            table.add_row("Screen" if i == 0 else "", line)
 
         if file_name:
             table.add_row("File", file_name)
@@ -264,6 +271,8 @@ def format_status(
         lines.append(f"Fault:     {fault_note}")
     if fault_remedy:
         lines.append(f"           {fault_remedy}")
+    for i, line in enumerate(screen_lines):
+        lines.append(f"{'Screen:' if i == 0 else '':<11}{line}")
     if file_name:
         lines.append(f"File:      {file_name}")
     if completion is not None:

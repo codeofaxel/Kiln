@@ -659,6 +659,36 @@ def describe_fault_remedy(fix: str | None = None) -> str:
     )
 
 
+def describe_screen_faults(faults: Any) -> list[str]:
+    """One line per fault, as the printer's own screen would put it.
+
+    Reads :attr:`PrinterState.faults` and hands back the lines a text
+    surface (the CLI, the monitor report) prints under the fault headline,
+    so the two cannot spell the same fault two ways.  A code with the
+    vendor's sentence on record reads ``"1200-8001: Cutting the filament
+    failed. ..."``; an ``hms`` code with none reads as the bare code,
+    because nothing else on the surface names it; a ``print_error`` with
+    none yields no line at all, because ``fault_note`` already names that
+    code and a second line saying only the number would say nothing new.
+    Empty for ``None`` and for anything that is not a list of entries.
+    """
+    lines: list[str] = []
+    if not isinstance(faults, list):
+        return lines
+    for entry in faults:
+        if not isinstance(entry, dict):
+            continue
+        code = entry.get("code")
+        if not isinstance(code, str) or not code:
+            continue
+        text = entry.get("screen_text")
+        if isinstance(text, str) and text:
+            lines.append(f"{code}: {text}")
+        elif entry.get("kind") == "hms":
+            lines.append(code)
+    return lines
+
+
 #: The fields a person might act on with their hands.  Blanked together, by
 #: one rule, in :meth:`PrinterState.__post_init__`.
 TEMPERATURE_FIELDS: tuple[str, ...] = (
@@ -847,6 +877,20 @@ class PrinterState:
     # rather than an instruction naming a tool its reader has no access to.
     # Same split, and the same reason, as ``cause`` beside ``remedy``.
     fault_remedy: str | None = None
+    # Every fault code the firmware is reporting, each in the spelling the
+    # printer's OWN SCREEN uses, with the vendor's sentence for it where the
+    # vendor publishes one.  One entry per code: ``code`` (the screen's
+    # spelling), ``kind`` (the firmware's namespace for it), ``raw`` (exactly
+    # what came over the wire, under the wire's own field names), and --
+    # only when on record -- ``screen_text`` with its ``source`` class.
+    # A list because a printer can report several at once (Bambu latches
+    # one ``print_error`` and publishes an ``hms`` array beside it), and
+    # ``print_error_code`` above renders only the first of those.  ``None``
+    # whenever no fault is being reported, and on every adapter that has
+    # not composed one -- an empty list would claim "nothing reported" on
+    # a firmware Kiln never asked.  Composed by the adapter, which is the
+    # only place that knows its firmware's spelling; never invented here.
+    faults: list[dict[str, Any]] | None = None
     # Whether this MACHINE has a chamber temperature sensor, as far as the
     # adapter can tell.  ``True``: a sensor produced the chamber fields.
     # ``False``: the model has none, so any number in them is not a
@@ -1128,7 +1172,7 @@ class PrinterState:
             "nozzle_type", "speed_profile", "speed_magnitude", "print_error",
             "state_age_seconds", "last_job_result", "last_known_state",
             "state_stale_after_seconds", "cause", "remedy",
-            "temperature_note", "fault_note", "fault_remedy",
+            "temperature_note", "fault_note", "fault_remedy", "faults",
             "chamber_sensor", "chamber_note",
         )
         for key in _EXTENDED:
