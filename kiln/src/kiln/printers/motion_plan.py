@@ -144,6 +144,32 @@ def _describe_fault(adapter: Any, code: str, kind: str) -> str:
         return f"the printer raised {code}"
 
 
+def note_motion_outcome(adapter: Any, verb: str, kind: str, detail: Any = None) -> None:
+    """Count what a served plan did on this machine, for the bench evidence.
+
+    The walk of a derived sequence happens on the owner's own printer and
+    never touches a server, so this counter (``motion_outcomes`` in
+    :mod:`kiln.daily_stats`) is the only way anyone learns that a sequence
+    derived from a vendor's file runs clean on the machine it was derived
+    for.  Classes only -- the model token, the verb, how far a walk got,
+    which code stopped it, why a run was refused.  Never raises: a
+    counter never blocks a motion.
+    """
+    try:
+        from kiln import daily_stats
+
+        model = getattr(adapter, "_printer_model", None)
+        if kind == "step_sent":
+            step, total = detail
+            daily_stats.record_motion_step(model, verb, int(step), int(total))
+        elif kind == "fault":
+            daily_stats.record_motion_fault(model, verb, detail)
+        else:
+            daily_stats.record_motion_outcome(model, verb, kind, detail)
+    except Exception as exc:  # noqa: BLE001 -- the motion already happened; the count is best effort
+        logger.debug("motion outcome not recorded: %s", exc)
+
+
 def run_home_plan(
     adapter: Any,
     doc: dict[str, Any],
@@ -196,7 +222,10 @@ def run_home_plan(
     faults_before = set(snapshot()) if callable(snapshot) else None
     verdict = CommandVerdict.coerce(adapter.send_gcode(lines), what=action)
     details_base = dict(common.pop("details", {}))
+    verb = action if action in ("home", "park") else "home"
     if not verdict.ok:
+        if not detour:
+            note_motion_outcome(adapter, verb, "fault", "rejected")
         return HomeResult(
             success=False, outcome="failed", homed_axes=[],
             message=f"The printer refused the {action} script: {verdict.message}",
@@ -211,6 +240,8 @@ def run_home_plan(
     if fault is not None:
         code, kind = fault
         hint = _describe_fault(adapter, code, kind)
+        if not detour:
+            note_motion_outcome(adapter, verb, "fault", code)
         return HomeResult(
             success=False, outcome="failed", homed_axes=homed,
             message=f"The printer raised {code} during the {action}: {hint}",
@@ -222,6 +253,8 @@ def run_home_plan(
         done_axes = _homes_up_to(doc, plan_steps, step) if not detour else []
         after = (f" Next: step {nxt['number']} -- {nxt['label']}: {nxt['you_will_see']}." if nxt
                  else " That was the last step; the sequence is complete.")
+        if not detour:
+            note_motion_outcome(adapter, verb, "step_sent", (step, len(plan_steps)))
         return HomeResult(
             success=True, outcome="accepted", homed_axes=done_axes,
             message=(f"Step {step} of {len(plan_steps)} sent ({chosen.label}): {chosen.you_will_see}. "
@@ -245,6 +278,7 @@ def run_home_plan(
                      **({"firmware_homed_axes": sorted(flags)} if flags is not None else {})},
             **common,
         )
+    note_motion_outcome(adapter, verb, "full_run")
     wanted = set(homed)
     if flags is not None and wanted <= flags:
         outcome, source = "confirmed", "homed_flag_bits"
@@ -437,6 +471,7 @@ def run_wipe_step(
             if not hot:
                 heat = next((s for s in steps if s["heats"]), None)
                 first = f"run step {heat['number']} ({heat['label']}) first" if heat else "heat it first"
+                note_motion_outcome(adapter, "wipe", "refused", "cold_extruder")
                 return FilamentOpResult(
                     success=False,
                     message=(f"Step {step} ({chosen['label']}) moves the extruder and the nozzle reads "
@@ -448,6 +483,7 @@ def run_wipe_step(
         faults_before = set(snapshot()) if callable(snapshot) else None
         verdict = CommandVerdict.coerce(adapter.send_gcode(list(chosen["gcode"])), what="wipe")
         if not verdict.ok:
+            note_motion_outcome(adapter, "wipe", "fault", "rejected")
             return FilamentOpResult(
                 success=False, message=f"The printer refused step {step} ({chosen['label']}): {verdict.message}",
                 verification_source="firmware_rejected_move", error_hint=verdict.message,
@@ -457,6 +493,7 @@ def run_wipe_step(
         if fault is not None:
             code, kind = fault
             hint = _describe_fault(adapter, code, kind)
+            note_motion_outcome(adapter, "wipe", "fault", code)
             return FilamentOpResult(
                 success=False, message=f"The printer raised {code} during step {step} ({chosen['label']}): {hint}",
                 extrusion_verified=False, verification_source="bambu_fault_code",
@@ -466,6 +503,7 @@ def run_wipe_step(
     after = (f" Next: step {nxt['number']} -- {nxt['label']}: {nxt['you_will_see']}." if nxt
              else " That was the last step; the sequence is complete.")
     details["fault_watch_seconds"] = watch
+    note_motion_outcome(adapter, "wipe", "step_sent", (step, len(steps)))
     if nxt is None:
         # The last step: the door's finish (heater off, the plan's cool-down)
         # runs after this answer and must not pull back again -- the snap

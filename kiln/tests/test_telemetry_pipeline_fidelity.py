@@ -201,6 +201,33 @@ def test_a_video_outcome_reaches_the_dashboard_complete(pipeline):
     assert sent[1]["p_details"]["previous_day"]["video_outcomes"] == expected
 
 
+def test_a_motion_outcome_reaches_the_dashboard_complete(pipeline):
+    """What a served plan did on a machine has to survive the whole chain.
+
+    The walk of a derived sequence happens on the owner's own printer and
+    no server is in the loop, so this map is the only evidence that the
+    sequence runs clean where it was derived for.  Same day, and across
+    midnight in the complete-day block; the walk bookkeeping never ships.
+    """
+    sent = pipeline
+
+    daily_stats.record_motion_step("bambu_a1_mini", "wipe", 1, 1)
+    daily_stats.record_motion_fault("bambu_a1_mini", "wipe", "0300_1A00_0002_0001")
+    expected = {
+        "bambu_a1_mini|wipe|step_sent_1": 1,
+        "bambu_a1_mini|wipe|completed_all_steps": 1,
+        "bambu_a1_mini|wipe|fault_0300_1a00_0002_0001": 1,
+    }
+
+    heartbeat._send_heartbeat()
+    assert sent[0]["p_details"]["motion_outcomes"] == expected
+    assert "motion_walks" not in json.dumps(sent[0])
+
+    _FakeDate._today = real_date(2026, 7, 26)
+    heartbeat._send_heartbeat()
+    assert sent[1]["p_details"]["previous_day"]["motion_outcomes"] == expected
+
+
 def test_bridge_running_ships_in_the_payload(pipeline):
     """The field that says whether print hours can recover on their own.
 

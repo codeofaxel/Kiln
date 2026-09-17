@@ -6469,7 +6469,14 @@ class BambuAdapter(PrinterAdapter):
             post_gcode=post,
             placement=placement,
         )
+        # A purge that parked ran the plan's own lines; one in place ran
+        # none of them, so it is not the plan's outcome to count.
+        from kiln.printers.motion_plan import note_motion_outcome
+
+        ran_plan = pre is not None and placement.get("status") == "parked"
         if not result.success:
+            if ran_plan and result.verification_source == "firmware_rejected_move":
+                note_motion_outcome(self, "purge", "fault", "rejected")
             return result
         if finish:
             result.details["finish"] = dict(finish)
@@ -6477,7 +6484,11 @@ class BambuAdapter(PrinterAdapter):
         fault = self._watch_for_purge_fault(plan, faults_before, watch=watch, stage="purge")
         if fault is not None:
             fault.details["purge_station"] = placement
+            if ran_plan:
+                note_motion_outcome(self, "purge", "fault", fault.error_code)
             return fault
+        if ran_plan:
+            note_motion_outcome(self, "purge", "full_run")
         result.verification_source = "no_fault_within_window"
         result.message = (
             f"Hotend at {result.details.get('hotend_reading')}°C; the printer "
@@ -6515,6 +6526,7 @@ class BambuAdapter(PrinterAdapter):
 
         doc = self._plan_for("wipe", axes="XY")
         if doc is None or not doc.get("ok"):
+            _exec.note_motion_outcome(self, "wipe", "refused", "no_plan")
             raise FilamentHandlingUnsupported(
                 self._served_refusal("wipe", doc).replace(self._JOG_LINE, "")
                 + " Wipe from the printer's own screen, or start a print -- its start sequence wipes on the pad."
@@ -6532,6 +6544,7 @@ class BambuAdapter(PrinterAdapter):
         # in the plan's own words; plan_only and step=N are how it is benched.
         only = doc.get("step_mode_only") if isinstance(doc.get("step_mode_only"), dict) else None
         if only and step is None and not plan_only:
+            _exec.note_motion_outcome(self, "wipe", "refused", "step_mode_only")
             raise FilamentHandlingUnsupported(
                 f"Kiln will not run the wipe on {self._model_name()} in one go: "
                 f"{str(only.get('reason') or 'the plan runs in step mode only').rstrip('. ')}. "
@@ -6583,12 +6596,16 @@ class BambuAdapter(PrinterAdapter):
             placement=placement,
         )
         if not result.success:
+            if result.verification_source == "firmware_rejected_move":
+                _exec.note_motion_outcome(self, "wipe", "fault", "rejected")
             return result
         watch = plan.wait_seconds(float(doc.get("watch_seconds") or self._FILAMENT_WIPE_WATCH_S))
         fault = self._watch_for_purge_fault(plan, faults_before, watch=watch, stage="wipe")
         if fault is not None:
             fault.details["purge_station"] = placement
+            _exec.note_motion_outcome(self, "wipe", "fault", fault.error_code)
             return fault
+        _exec.note_motion_outcome(self, "wipe", "full_run")
         result.verification_source = "no_fault_within_window"
         result.details["end_retract_mm"] = retract_mm
         for key, value in (doc.get("details") or {}).items():
@@ -6615,12 +6632,13 @@ class BambuAdapter(PrinterAdapter):
         whether the Z step presses the plate; the plate gate then asks the
         person, every call.
         """
-        from kiln.printers.motion_plan import run_home_plan
+        from kiln.printers.motion_plan import note_motion_outcome, run_home_plan
 
         action = str(options.get("_action") or "home")
         consent = options.get("plate_clear") is True
         doc = self._plan_for("home", axes=axes, on_plate_ok=consent)
         if doc is None:
+            note_motion_outcome(self, "home", "refused", "no_plan")
             raise HomingUnsupported(
                 self._served_refusal(action, None) + " On this family the vendor's own sequence raises the "
                 "head before it homes, and a bare G28 from an unknown height is exactly the move it avoids."
@@ -6631,6 +6649,7 @@ class BambuAdapter(PrinterAdapter):
                 # The plan says the Z home presses the plate and no consent
                 # came with the call: the public gate words the ask.
                 self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action=action, touches_plate=True)
+            note_motion_outcome(self, "home", "refused", "no_plan")
             raise HomingUnsupported(self._served_refusal(action, doc))
         touches = bool(doc.get("z_home_on_plate")) and "Z" in axes
         detour = self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action=action, touches_plate=touches)
@@ -6638,10 +6657,11 @@ class BambuAdapter(PrinterAdapter):
 
     def _park_head_impl(self, options: dict[str, Any]) -> HomeResult:
         """Raise, home X, travel off the plate edge to the chute -- from the park plan; else refuse."""
-        from kiln.printers.motion_plan import run_home_plan
+        from kiln.printers.motion_plan import note_motion_outcome, run_home_plan
 
         doc = self._plan_for("park", axes="XY")
         if doc is None or not doc.get("ok"):
+            note_motion_outcome(self, "park", "refused", "no_plan")
             raise HomingUnsupported(self._served_refusal("park", doc))
         detour = self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action="park")
         result = run_home_plan(self, doc, axes="XY", options=options, action="park", steps=detour)
