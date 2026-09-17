@@ -116,6 +116,39 @@ def _pin_store_env(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KILN_BAMBU_TLS_PIN_FILE", str(tmp_path / "bambu_tls_pins.json"))
 
 
+#: The one class whose subject IS the read-back, so it keeps the real method.
+_READ_BACK_CLASS = "TestBambuAdapterReadPrintFile"
+
+
+@pytest.fixture(autouse=True)
+def _no_read_back(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Make the pre-print gate's read-back a non-event for every other test.
+
+    ``start_print`` asks the adapter for the printer's own copy of the file
+    (``kiln.printers.print_gate._fetch_printer_copy``) before starting it by
+    name.  These tests mock MQTT but not FTPS, so the real
+    ``read_print_file`` dials 192.168.1.100 for real, times out through
+    ``_ftp_connect``'s retries, and the gate then refuses the start — which
+    turns every start_print unit test (they are about the MQTT command, not
+    the file gate) red and costs minutes.
+
+    Returning ``None`` is the BASE adapter's semantics, which the gate
+    already handles: "this backend cannot read this one back" -> soft-pass,
+    exactly what these tests saw before the gate existed.  It weakens
+    nothing: the refuse/soft-pass rules are pinned by
+    ``kiln/tests/test_print_gate.py::TestFileOnPrinterIsRead``, and Bambu's
+    real FTPS read-back is pinned by :data:`_READ_BACK_CLASS`, which opts
+    out of this fixture.
+    """
+    if getattr(request.cls, "__name__", None) == _READ_BACK_CLASS:
+        return
+    monkeypatch.setattr(
+        BambuAdapter, "read_print_file", lambda self, file_name: None,
+    )
+
+
 @pytest.fixture
 def mock_ftp_class() -> mock.MagicMock:
     """Create a mock _ImplicitFTP_TLS class that returns a configured mock instance."""
@@ -3057,6 +3090,49 @@ class TestStartPrintGcodePath:
 
 class TestWaitForPrintStartErrorDetection:
     """Tests for print_error detection during _wait_for_print_start polling."""
+
+    def test_stale_failed_from_a_cancelled_job_is_not_this_jobs_failure(
+        self, adapter_with_mqtt: BambuAdapter,
+    ) -> None:
+        """2026-09-16, A1: right after a screen cancel the firmware keeps
+        reporting gcode_state "failed" with print_error 0 until the next job
+        takes over.  A start sent in that window was declared failed here
+        while the printer went on to "prepare" and printed, so nothing that
+        hangs off a successful start ran.  A "failed" naming no error is the
+        previous job's ending, not this job's rejection: keep waiting."""
+        adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": 0}
+        reports = iter([
+            {"gcode_state": "failed", "print_error": 0},
+            {"gcode_state": "failed", "print_error": 0},
+            {"gcode_state": "prepare", "print_error": 0},
+        ])
+
+        def _next_report(_seconds: float) -> None:
+            adapter_with_mqtt._last_status = next(reports)
+
+        with mock.patch("kiln.printers.bambu.time.sleep", side_effect=_next_report):
+            state, err = adapter_with_mqtt._wait_for_print_start(timeout=5.0)
+        assert state == "prepare"
+        assert err is None
+
+    def test_stale_failed_that_never_clears_times_out_rather_than_failing(
+        self, adapter_with_mqtt: BambuAdapter,
+    ) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": 0}
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=_clock_past_deadline()), \
+                mock.patch("kiln.printers.bambu.time.sleep"):
+            state, err = adapter_with_mqtt._wait_for_print_start(timeout=2.0)
+        assert state == "timeout"
+        assert err is None
+
+    def test_failed_with_a_real_error_code_is_still_a_failure(
+        self, adapter_with_mqtt: BambuAdapter,
+    ) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": 302022657}
+        with mock.patch("kiln.printers.bambu.time.sleep"):
+            state, err = adapter_with_mqtt._wait_for_print_start(timeout=2.0)
+        assert state == "failed"
+        assert err == 302022657
 
     def test_returns_error_code_on_known_error(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 84033543}
