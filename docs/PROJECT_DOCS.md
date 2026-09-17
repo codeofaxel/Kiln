@@ -255,7 +255,7 @@ Pause or resume the active print.
 Get current temperatures, or set targets. Without flags, returns current
 temps. Targets are held to the named machine's own limits.
 
-#### `kiln filament load|unload|purge|wipe [--slot N] [--material MAT] [--temp N] [--length MM] [--keep-hot]`
+#### `kiln filament load|unload|purge|wipe [--slot N] [--material MAT] [--temp N] [--length MM] [--keep-hot]` / `kiln filament wipe [--plan] [--step N] [--plate-clear]`
 Move filament. `load` feeds a spool to the nozzle — on a Bambu it drives the
 AMS through the printer's own change-filament routine and reads the result
 back from the AMS; elsewhere it heats and feeds. `unload` pulls filament out
@@ -278,6 +278,16 @@ which is the mid-print recovery case. On a Klipper machine whose filament path
 belongs to a Happy Hare or AFC unit, load and unload refuse and name the unit's
 own commands. Backends that cannot drive the extruder honestly — Prusa Link,
 Elegoo — say so instead of pretending.
+
+`wipe` runs in steps too, the first time on a machine: `--plan` describes
+every motion of the pad pass and sends nothing; `--step N` sends one motion,
+reports what it left armed, and holds the finish (heater off, the cool-down)
+until the last step. A wipe whose plan presses the plate — its Z datum is
+taken on the plate, or the head has to cross the plate to reach the pad —
+runs only with `--plate-clear`, on every call, whatever the plate record says.
+A pass derived from a model's start file that no one has yet run on a real
+machine says so, refuses a full run, and runs in steps only; `kiln doctor`
+reads both conditions on the filament line.
 
 #### `kiln home [--axes XYZ] [--plan] [--step N] [--plate-clear]` / `kiln park [--plan] [--step N]`
 The Home button, from Kiln, and the retreat. `home` runs the model's own
@@ -410,7 +420,7 @@ Paid-tier tools are discoverable too: agents without a license receive a structu
 | `load_filament` | `slot`, `material`, `temperature` | Feeds filament to the nozzle; on Bambu drives the AMS |
 | `unload_filament` | `material`, `temperature` | Retracts filament out of the hotend |
 | `purge_filament` | `length_mm`, `material`, `temperature` | Extrudes a short length — the clog test; parks over the model's own purge chute first where Kiln has a verified position, and always says where the purge went |
-| `wipe_nozzle` | `material`, `temperature`, `slot` | Cleans the tip on the printer's own wipe pad; refuses where Kiln has no verified pad position |
+| `wipe_nozzle` | `material`, `temperature`, `slot`, `step`, `plan_only`, `plate_clear` | Cleans the tip on the printer's own wipe pad; refuses where Kiln has no verified pad position; step mode describes each motion before it runs, a wipe that presses the plate asks for `plate_clear` on every call, and a pass no one has run on a real machine runs in steps only |
 | `home_axes` | `axes`, `step`, `plan_only`, `plate_clear` | Homes the head: the model's own start-sequence homing where served, the firmware's routine, or a refusal naming the screen's jog controls; step mode describes each motion before it runs |
 | `park_head` | `step`, `plan_only` | Moves the head to the model's own off-plate spot — raise, home X, travel; never a Z touch, never heat |
 | `plate_status` | — | What Kiln records is on the build plate (read-only; `kiln plate clear` is the person's door) |

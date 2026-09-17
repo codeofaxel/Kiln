@@ -6511,16 +6511,54 @@ class BambuAdapter(PrinterAdapter):
                 temperature=plan.temperature,
                 details={"purge_station": self._purge_placement(plan)},
             )
+        from kiln.printers import motion_plan as _exec
+
         doc = self._plan_for("wipe", axes="XY")
         if doc is None or not doc.get("ok"):
             raise FilamentHandlingUnsupported(
                 self._served_refusal("wipe", doc).replace(self._JOG_LINE, "")
                 + " Wipe from the printer's own screen, or start a print -- its start sequence wipes on the pad."
             )
+        step = plan.options.get("step")
+        plan_only = bool(plan.options.get("plan_only"))
+        steps = _exec.wipe_steps_of(doc)
+        if (step is not None or plan_only) and not steps:
+            raise PrinterError(
+                f"The wipe plan for {self._model_name()} describes no steps, so it runs whole or not at all; "
+                "call again without step / plan_only."
+            )
+        # A plan derived from the vendor's file that no one has run on a real
+        # machine says so, and runs in step mode only: the full run refuses
+        # in the plan's own words; plan_only and step=N are how it is benched.
+        only = doc.get("step_mode_only") if isinstance(doc.get("step_mode_only"), dict) else None
+        if only and step is None and not plan_only:
+            raise FilamentHandlingUnsupported(
+                f"Kiln will not run the wipe on {self._model_name()} in one go: "
+                f"{str(only.get('reason') or 'the plan runs in step mode only').rstrip('. ')}. "
+                "Until then, wipe from the printer's own screen -- its wizard parks first -- or start a print; "
+                "its start sequence wipes on the pad."
+            )
         # The wipe travels to the chute first (raise, home X across the row);
         # a recorded part taller than the raise refuses it -- a plan cannot
-        # stand in for a wipe, so the planner is not asked.
-        self._plate_gate({}, clearance_mm=doc.get("raise_clearance_mm"), action="wipe", allow_plan=False)
+        # stand in for a wipe, so the planner is not asked.  Where the plan
+        # presses the plate (its own words say which datum it takes and
+        # where the head has to cross), the gate asks a person on every call
+        # and runs only on plate_clear=True -- the caller's word, never Kiln's.
+        contact = (doc.get("details") or {}).get("needs_plate_clear")
+        touches = bool(doc.get("z_home_on_plate")) or any(s_.get("touches_plate") for s_ in steps)
+        self._plate_gate(
+            plan.options, clearance_mm=doc.get("raise_clearance_mm"), action="wipe", allow_plan=False,
+            touches_plate=touches, contact=contact if isinstance(contact, str) else None,
+            fallback=("Until then, wipe from the printer's own screen -- its wizard parks first -- "
+                      "or start a print; its start sequence wipes on the pad."),
+        )
+        if plan_only:
+            return _exec.wipe_plan_only(doc, plan, steps)
+        if step is not None:
+            result = _exec.run_wipe_step(self, doc, plan, steps, int(step))
+            if result.success and result.next_step is None:
+                result.details["plate_clear_given"] = touches and plan.options.get("plate_clear") is True
+            return result
         faults_before = self._snapshot_faults()
         placement = dict(doc.get("placement") or {"status": "parked", "printer_id": self._printer_model})
         try:
@@ -6557,6 +6595,9 @@ class BambuAdapter(PrinterAdapter):
             result.details[key] = value
         if isinstance(doc.get("finish"), dict):
             result.details["finish"] = dict(doc["finish"])
+        if steps:
+            result.steps = steps
+        result.details["plate_clear_given"] = touches and plan.options.get("plate_clear") is True
         summary = str(doc.get("summary") or f"Wiped the nozzle on {self._model_name()}'s pad.")
         result.message = (
             f"{summary} Bambu acknowledges none of this and raised no fault in {watch:g}s -- look at the tip."

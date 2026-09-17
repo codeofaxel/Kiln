@@ -1682,6 +1682,15 @@ class FilamentOpResult:
     slot: int | None = None
     material: str | None = None
     temperature: float | None = None
+    #: The op as steps, whenever its plan describes it (today: a served
+    #: wipe).  In step mode only ``steps[step-1]`` was sent; ``next_step``
+    #: describes the one to send next, ``None`` once the sequence is
+    #: complete -- and only then does the finish (heater off, the cool-down)
+    #: run.  ``leaves`` names what the step left armed.
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    step_sent: int | None = None
+    next_step: dict[str, Any] | None = None
+    leaves: list[str] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -3501,6 +3510,15 @@ class PrinterAdapter(ABC):
             )
             result.details["heater"] = f"left at {plan.temperature:g} °C: the print is paused and will need it"
             return result
+        # A plan sent nothing; a step that is not the last one is the middle
+        # of a sequence a person is walking through -- the heater stays as
+        # the step's ``leaves`` says, and the finish runs after the last step.
+        if plan.options.get("plan_only"):
+            result.details["heater"] = "untouched: nothing was sent"
+            return result
+        if result.next_step is not None:
+            result.details["heater"] = "as the step left it -- see leaves; the finish runs after the last step"
+            return result
         # Leave the machine the way a person would: heater off, and say so.
         # Measured 2026-09-16 on an A1: a purge parked over the chute, pushed
         # its 30 mm, reported success -- and left the nozzle at 215 °C with
@@ -3792,8 +3810,18 @@ class PrinterAdapter(ABC):
         printer's own screen, or a print's start sequence, which wipes on
         the pad — rather than moving the head to a guessed coordinate.
 
-        Args mirror :meth:`purge_filament`; there is no length.
+        Args mirror :meth:`purge_filament`; there is no length.  Two more
+        are read where the wipe's plan describes its steps:
+        ``plan_only=True`` returns the steps and sends NOTHING; ``step=N``
+        sends only step N and describes step N+1, and the finish (heater
+        off, the cool-down) runs only after the last step.  ``plate_clear``
+        is a PERSON's statement that the plate is empty, read on every
+        call by a wipe whose plan presses the plate
+        (:class:`PlateClearRequired` without it).
         """
+        step = options.get("step")
+        if step is not None and (not isinstance(step, int) or isinstance(step, bool) or step < 1):
+            raise PrinterError(f"step must be a whole number from 1, got {step!r}.")
         plan = self._prepare_filament_op(
             "wipe",
             slot=slot,
@@ -3883,6 +3911,8 @@ class PrinterAdapter(ABC):
         action: str,
         touches_plate: bool = False,
         allow_plan: bool = True,
+        contact: str | None = None,
+        fallback: str | None = None,
     ) -> list[HomeStep] | None:
         """Refuse a motion the plate record says would meet a part.
 
@@ -3949,12 +3979,22 @@ class PrinterAdapter(ABC):
         witness = None if options.get("plan_only") else self._plate_witness()
         look = (f" -- look at {witness} first" if witness else
                 " -- this printer has no camera Kiln can read, so look at the plate yourself")
+        # What the motion does to the plate, and what still works without a
+        # person's word: the plan's own words for a wipe (its record names
+        # the datum it takes and where the head has to cross), the homing
+        # sentence otherwise.  A wipe's refusal names the wipe's tool and
+        # command, never home_axes.
+        contact = contact or (
+            "homes Z by pressing the nozzle onto the PLATE (its own sequence: 'find a soft place to home')"
+        )
+        fallback = fallback or 'Until then, home X and park still work: axes="XY", or park_head.'
+        tool, cli = (("wipe_nozzle", "kiln filament wipe --plate-clear") if action == "wipe"
+                     else ("home_axes", "kiln home --plate-clear"))
         say_so = (
-            "then say so on the call: plate_clear=true on home_axes (kiln home --plate-clear) -- "
-            "the press asks every time; `kiln plate clear` records it for the row checks only. "
-            'Until then, home X and park still work: axes="XY", or park_head.'
+            f"then say so on the call: plate_clear=true on {tool} ({cli}) -- "
+            f"the press asks every time; `kiln plate clear` records it for the row checks only. {fallback}"
             if touches_plate and not blocks_raise
-            else "then say so: `kiln plate clear`, or plate_clear=true on home_axes."
+            else f"then say so: `kiln plate clear`, or plate_clear=true on {tool}."
         )
         if blocks_raise:
             assert clearance is not None and height is not None
@@ -3964,25 +4004,19 @@ class PrinterAdapter(ABC):
                 f"and on this family a travel collision raises no fault. Clear the plate{look}, {say_so}"
             )
         elif state.occupied:
-            message = (
-                f"{model} homes Z by pressing the nozzle onto the PLATE (its own sequence: "
-                f"'find a soft place to home'), and {state.describe()}. Clear the plate{look}, {say_so}"
-            )
+            message = f"{model} {contact}, and {state.describe()}. Clear the plate{look}, {say_so}"
         elif state.clear:
             message = (
-                f"{model} homes Z by pressing the nozzle onto the PLATE (its own sequence: "
-                f"'find a soft place to home'). {state.describe()[0].upper()}{state.describe()[1:]}, "
+                f"{model} {contact}. {state.describe()[0].upper()}{state.describe()[1:]}, "
                 "but that record cannot see a print started from the printer's own screen, so the "
-                f"press asks every time: look{look}, then call again with plate_clear=true. "
-                'Home X and park still work without asking: axes="XY", or park_head.'
+                f"press asks every time: look{look}, then call again with plate_clear=true on {tool} "
+                f"({cli}). {fallback.replace('Until then', 'Without asking', 1)}"
             )
         else:
             message = (
-                f"{model} homes Z by pressing the nozzle onto the PLATE (its own sequence: "
-                "'find a soft place to home'). Kiln has no record of what is on the plate and will "
+                f"{model} {contact}. Kiln has no record of what is on the plate and will "
                 f"only do that once a person has confirmed it is empty{look}, then call again with "
-                "plate_clear=true. Without that, home X and park "
-                'still work: axes="XY", or park_head.'
+                f"plate_clear=true on {tool} ({cli}). {fallback.replace('Until then', 'Without that', 1)}"
             )
         raise PlateClearRequired(message, snapshot_path=witness)
 

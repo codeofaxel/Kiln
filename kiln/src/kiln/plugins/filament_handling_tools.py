@@ -99,7 +99,7 @@ def run_filament_op(
     """
     import kiln.server as _srv
     from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING
-    from kiln.printers.base import FilamentHandlingUnsupported, PrinterError
+    from kiln.printers.base import FilamentHandlingUnsupported, PlateClearRequired, PrinterError
     from kiln.registry import PrinterNotFoundError
 
     verb = {
@@ -170,7 +170,7 @@ def run_filament_op(
         # troubleshoot_printer names this tool as the next step in the very
         # branch that fires its own warning — so without this, the warning
         # stopped one call short of the moment it describes.
-        warn = action in ("purge", "wipe") or not result.success
+        warn = (action in ("purge", "wipe") or not result.success) and not kwargs.get("plan_only")
         outcome = _outcome(result)
         if not result.success:
             extra: dict[str, Any] = {
@@ -204,6 +204,15 @@ def run_filament_op(
         return payload
     except FilamentHandlingUnsupported as exc:
         return _srv._error_dict(str(exc), code="UNSUPPORTED", extra={"outcome": "failed"})
+    except PlateClearRequired as exc:
+        # The plate record (or the plan's own "this presses the plate")
+        # stopped the motion before anything moved: the same envelope the
+        # homing door returns, so a caller reads one code, looks at one
+        # camera frame, and answers with plate_clear=true on either.
+        return _srv._error_dict(
+            str(exc), code="PLATE_CLEAR_REQUIRED",
+            extra={"outcome": "failed", "snapshot_path": exc.snapshot_path, "plate_clear_required": True},
+        )
     except (PrinterError, RuntimeError) as exc:
         # The gate refused (or the transport did) before anything moved.
         return _srv._error_dict(
@@ -215,9 +224,16 @@ def run_filament_op(
 
 
 def _gated(tool_name: str, args: dict[str, Any]) -> dict[str, Any] | None:
-    """Auth → rate limit → confirmation, in server.py's order."""
+    """Auth → rate limit → confirmation, in server.py's order.
+
+    ``plan_only`` sends nothing, so it skips the rate limit and the
+    confirmation -- but not auth: it still reads the printer's state and
+    hands back the sequence, which is a read and is gated as one.
+    """
     import kiln.server as _srv
 
+    if args.get("plan_only"):
+        return _srv._check_auth("read")
     if err := _srv._check_auth("temperature"):
         return err
     if err := _srv._check_rate_limit(tool_name):
@@ -430,6 +446,9 @@ def wipe_nozzle(
     slot: int | None = None,
     wait_seconds: float | None = None,
     keep_hot: bool = False,
+    plate_clear: bool = False,
+    step: int | None = None,
+    plan_only: bool = False,
     printer_name: str | None = None,
 ) -> dict:
     """Clean the nozzle tip on the printer's own wipe pad.
@@ -464,6 +483,21 @@ def wipe_nozzle(
             something else hot.  Off by default: every op ends with the
             heater off and says so; where the machine's own cool-down is
             served, the fan runs until the nozzle has cooled before the answer.
+        plate_clear: A PERSON's statement that the plate is empty, given on
+            THIS call.  Read on every call by a wipe whose plan presses the
+            plate (its Z datum is taken on the plate, or the head has to
+            cross the plate to reach the pad), whatever the plate record
+            says -- the record cannot see a print started from the printer's
+            own screen; without it the tool refuses with
+            ``PLATE_CLEAR_REQUIRED`` and, where the printer has a camera,
+            ``snapshot_path`` -- look, then call again with it set.  Never
+            set it on a person's behalf.
+        step: Send only this step of the wipe's plan (1-based); the answer
+            describes the next one, and the finish (heater off, the
+            cool-down) runs after the last step.  Step mode is how a wipe
+            no one has yet run on a real machine is benched -- one motion,
+            one report, one go -- and the only way such a wipe runs.
+        plan_only: Describe the steps; send nothing.
         printer_name: Which printer.  Omit for the default one.
     """
     args = {
@@ -471,6 +505,9 @@ def wipe_nozzle(
         "temperature": temperature,
         "slot": slot,
         "wait_seconds": wait_seconds,
+        "plate_clear": plate_clear,
+        "step": step,
+        "plan_only": plan_only,
         "printer_name": printer_name,
     }
     if gate := _gated("wipe_nozzle", args):
@@ -480,6 +517,12 @@ def wipe_nozzle(
         kwargs["wait_seconds"] = wait_seconds
     if keep_hot:
         kwargs["keep_hot"] = True
+    if plate_clear:
+        kwargs["plate_clear"] = True
+    if step is not None:
+        kwargs["step"] = step  # the adapter refuses anything but a whole number from 1, by name
+    if plan_only:
+        kwargs["plan_only"] = True
     return run_filament_op("wipe", printer_name=printer_name, **kwargs)
 
 
