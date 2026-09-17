@@ -100,17 +100,136 @@ def test_a_failing_bridge_call_never_breaks_the_panel() -> None:
 # --- the monitor report ----------------------------------------------------
 
 
-def test_the_report_line_is_the_headline_and_only_with_kiln_pro() -> None:
+def test_the_report_line_is_one_short_line_and_only_with_kiln_pro() -> None:
+    """The report gets the buckets compressed to a glance, never the wire's
+    headline paragraph — that is the panel's, and even there it is being
+    replaced by badges."""
     from kiln import server
 
     with mock.patch.object(server, "_pro_bridge", return_value=_fake_pro()), mock.patch.object(
         server, "_resolve_printer_model_live", return_value="bambu_x1c"
-    ):
+    ), mock.patch.object(server, "_resolve_adapter", side_effect=RuntimeError("no printer")):
         line = server._coverage_line_for(None)
-    assert line == "What is watching this print — watched: spaghetti. not watched: the first layer."
+    assert line == (
+        "Watching this print — printer: 1 watched; "
+        "Kiln: not watching (it did not start this print); "
+        "unwatched: the first layer."
+    )
+    assert "\n" not in line
 
     with mock.patch.object(server, "_pro_bridge", return_value=_fake_pro(available=False)):
         assert server._coverage_line_for(None) is None
+
+
+# The A1's real buckets, read from kiln-pro offline on 2026-09-16 for a
+# print Kiln did not start.  The headline for these ran 392 characters.
+_A1_BY_STATUS = {
+    "watched": [
+        "running out of filament", "a filament tangle",
+        "the wrong or a missing build plate", "lost steps and layer shifts",
+        "a power cut mid-print",
+    ],
+    "conditional": ["nozzle clumping", "air printing (extruding nothing)"],
+    "not_watched": ["spaghetti", "the first layer"],
+    "unknown": ["something left on the bed", "purge pile-up", "a part coming loose", "an open door", "fire"],
+    "kiln_watching": [],
+    "kiln_can_watch": ["spaghetti", "the first layer", "a filament tangle", "a dead camera feed", "a lost connection"],
+}
+_A1_HEADLINE = (
+    "What is watching this print — watched: running out of filament, a filament tangle, "
+    "the wrong or a missing build plate, lost steps and layer shifts, a power cut mid-print. "
+    "watched, with conditions: nozzle clumping, air printing (extruding nothing). "
+    "not watched: spaghetti, the first layer. Kiln is not watching this print "
+    "(its watchdog attaches to prints Kiln starts, and this one it did not)."
+)
+
+
+def _a1_block(**by_status_overrides) -> dict:
+    by_status = {**_A1_BY_STATUS, **by_status_overrides}
+    return {"headline": _A1_HEADLINE, "by_status": by_status, "known": True}
+
+
+def _watch(printing=True, attached=False, running=False) -> dict:
+    return {
+        "kind": "kiln.watch.v1",
+        "printing": printing,
+        "watchdog": {"attached": attached, "running": running},
+    }
+
+
+def test_the_short_line_counts_the_printer_names_the_gaps_and_says_why_kiln_is_off() -> None:
+    from kiln import server
+
+    line = server._coverage_short_line(_a1_block(), _watch(printing=True, attached=False))
+    assert line == (
+        "Watching this print — printer: 5 watched, 2 with conditions; "
+        "Kiln: not watching (it did not start this print); "
+        "unwatched: spaghetti, the first layer."
+    )
+    assert len(line) < len(_A1_HEADLINE) / 2
+
+
+def test_a_stopped_watchdog_is_said_differently_from_one_never_attached() -> None:
+    from kiln import server
+
+    line = server._coverage_short_line(_a1_block(), _watch(printing=True, attached=True, running=False))
+    assert "Kiln: not watching (its watchdog stopped)" in line
+
+
+def test_kiln_watching_is_a_count_and_its_classes_leave_the_gaps() -> None:
+    from kiln import server
+
+    block = _a1_block(kiln_watching=["a heater fault", "a stalled print", "a fault the printer reports"])
+    line = server._coverage_short_line(block, _watch(printing=True, attached=True, running=True))
+    assert "Kiln: watching 3 classes" in line
+    assert "unwatched: spaghetti, the first layer." in line
+    # A class Kiln covers is not a gap, however the printer bucketed it.
+    block = _a1_block(kiln_watching=["spaghetti"])
+    assert "unwatched: the first layer." in server._coverage_short_line(block, _watch())
+
+
+def test_no_print_running_promises_the_watchdog_for_the_next_one() -> None:
+    from kiln import server
+
+    line = server._coverage_short_line(_a1_block(), _watch(printing=False))
+    assert "Kiln: attaches its watchdog to the prints it starts" in line
+
+
+def test_a_detector_switched_off_is_counted_and_named_as_a_gap() -> None:
+    from kiln import server
+
+    block = _a1_block(conditional=["air printing (extruding nothing)"], off_for_this_print=["nozzle clumping"])
+    line = server._coverage_short_line(block, _watch())
+    assert "printer: 5 watched, 1 with conditions, 1 off for this print;" in line
+    assert line.endswith("unwatched: spaghetti, the first layer, nozzle clumping.")
+
+
+def test_an_unknown_machine_keeps_kiln_pros_first_sentence() -> None:
+    from kiln import server
+
+    block = {
+        "headline": (
+            "Kiln has no detector research for this model yet. Beyond its spec sheet, "
+            "assume nothing is watching: watch it yourself, or point a camera at the bed "
+            "that Kiln can watch. Kiln is not watching this print (its watchdog attaches "
+            "to prints Kiln starts, and this one it did not)."
+        ),
+        "by_status": {"unknown": ["spaghetti", "fire"], "kiln_watching": [], "kiln_can_watch": ["spaghetti"]},
+        "known": False,
+    }
+    assert server._coverage_short_line(block, _watch()) == (
+        "Kiln has no detector research for this model yet; "
+        "Kiln: not watching (it did not start this print)."
+    )
+
+
+def test_a_block_from_an_older_kiln_pro_without_kiln_buckets_still_reads() -> None:
+    """No ``kiln_watching`` bucket and no watch state: say what the printer
+    covers and the gaps, and claim nothing about Kiln."""
+    from kiln import server
+
+    line = server._coverage_short_line(_BLOCK, None)
+    assert line == "Watching this print — printer: 1 watched; unwatched: the first layer."
 
 
 def test_the_report_line_reaches_monitor_print_output() -> None:
@@ -139,8 +258,10 @@ def test_the_report_line_reaches_monitor_print_output() -> None:
     ), mock.patch.object(server, "_resolve_printer_model_live", return_value="bambu_x1c"):
         report = server.monitor_print(include_snapshot=False)
     assert isinstance(report, str), report
-    assert "What is watching this print — watched: spaghetti." in report
-    assert report.index("What is watching") < report.index("Camera:")
+    assert "- Watching this print — printer: 1 watched;" in report
+    assert "unwatched: the first layer." in report
+    assert "What is watching this print" not in report, "the essay is the panel's, not the report's"
+    assert report.index("Watching this print") < report.index("Camera:")
 
 
 def test_no_kiln_pro_installed_means_no_block_and_no_line() -> None:

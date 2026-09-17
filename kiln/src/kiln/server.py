@@ -1602,13 +1602,23 @@ def _coverage_block_for(printer_name: str | None) -> dict[str, Any] | None:
     on any failure.  Never raises: a report must not fail because a courtesy
     line could not be composed.
     """
+    return _coverage_for(printer_name)[0]
+
+
+def _coverage_for(
+    printer_name: str | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """``(coverage block, kiln watch state)`` for *printer_name* — one read
+    serves both the wire (the block) and the report's line (which also
+    needs the watch state, to say WHY Kiln is or is not watching).  Both
+    ``None`` whenever the block is."""
     try:
         pro = _pro_bridge()
         if pro is None or not pro.is_available("device_intelligence"):
-            return None
+            return None, None
         model = _resolve_printer_model_live(printer_name)
         if not model:
-            return None
+            return None, None
         # What Kiln itself is watching on this machine, read live, so the
         # card and the report say "Kiln is watching" only when it is.
         from kiln.watch_state import kiln_watch_state
@@ -1638,17 +1648,90 @@ def _coverage_block_for(printer_name: str | None) -> dict[str, Any] | None:
             model, watch=watch, switches=detector_switches(adapter),
         )
         if not isinstance(block, dict) or not block.get("headline"):
-            return None
-        return block
+            return None, None
+        return block, watch
     except Exception as exc:  # noqa: BLE001 — a missing courtesy line is not a failure
         logger.debug("coverage unavailable for %r: %s", printer_name, exc)
-        return None
+        return None, None
 
 
 def _coverage_line_for(printer_name: str | None) -> str | None:
-    """The one-line coverage headline for *printer_name*'s model, or ``None``."""
-    block = _coverage_block_for(printer_name)
-    return block["headline"] if block else None
+    """The report's one short coverage line for *printer_name*, or ``None``."""
+    block, watch = _coverage_for(printer_name)
+    return _coverage_short_line(block, watch) if block else None
+
+
+def _coverage_short_line(
+    block: dict[str, Any], watch: dict[str, Any] | None
+) -> str | None:
+    """One short line for the text report, from kiln-pro's coverage buckets.
+
+    The wire's ``headline`` is the statement's whole first paragraph — on
+    an A1 it runs about 390 characters and names every class it knows —
+    and in a status report it read as an essay dropped where a reading
+    belongs (Adam, 2026-09-16).  A report line is read at a glance, so
+    this one counts what the printer covers, states Kiln's own verdict,
+    and NAMES only the gaps: the classes nobody is watching are the ones
+    a person about to walk away needs to hear.  Every fact is a kiln-pro
+    bucket or Kiln's own watch state; nothing is inferred, and the full
+    statement stays one question away
+    (``answer_printer_question(<model>, "what is watching my print")``).
+
+    A machine kiln-pro has no research for gets the headline's first
+    sentence — already the short form — with Kiln's verdict beside it.
+    """
+    by_status = block.get("by_status") or {}
+
+    def _labels(key: str) -> list[str]:
+        return [str(label) for label in (by_status.get(key) or [])]
+
+    watched = _labels("watched")
+    conditional = _labels("conditional")
+    off = _labels("off_for_this_print")
+    not_watched = _labels("not_watched")
+    kiln_watching = _labels("kiln_watching")
+
+    # Kiln's own verdict — the count of what its live watchers cover, or
+    # the one reason they cover nothing, read from the watch state.
+    kiln_clause: str | None = None
+    if kiln_watching:
+        n = len(kiln_watching)
+        kiln_clause = f"Kiln: watching {n} {'class' if n == 1 else 'classes'}"
+    elif watch is not None:
+        if watch.get("printing") is False:
+            kiln_clause = "Kiln: attaches its watchdog to the prints it starts"
+        else:
+            attached = bool((watch.get("watchdog") or {}).get("attached"))
+            why = "its watchdog stopped" if attached else "it did not start this print"
+            kiln_clause = f"Kiln: not watching ({why})"
+    elif "kiln_watching" in by_status:
+        kiln_clause = "Kiln: not watching"
+
+    if not (watched or conditional or off or not_watched):
+        # Unknown machine, or a maker that publishes nothing: kiln-pro's
+        # first sentence is the whole finding.
+        first = str(block.get("headline") or "").strip().split(". ", 1)[0].rstrip(".")
+        if not first:
+            return None
+        return f"{first}; {kiln_clause}." if kiln_clause else f"{first}."
+
+    printer_bits: list[str] = []
+    if watched:
+        printer_bits.append(f"{len(watched)} watched")
+    if conditional:
+        printer_bits.append(f"{len(conditional)} with conditions")
+    if off:
+        printer_bits.append(f"{len(off)} off for this print")
+    parts = ["printer: " + (", ".join(printer_bits) or "nothing watched")]
+    if kiln_clause:
+        parts.append(kiln_clause)
+    # The gaps, kiln-pro's own rule: not watched or switched off, and not
+    # picked up by a Kiln watcher either.
+    covered = set(kiln_watching)
+    gaps = [label for label in not_watched + off if label not in covered]
+    if gaps:
+        parts.append("unwatched: " + ", ".join(gaps))
+    return "Watching this print — " + "; ".join(parts) + "."
 
 
 def _resolve_printer_model_live(printer_name: str | None = None) -> str:
@@ -5387,11 +5470,12 @@ def monitor_print(
         # OR the printed file's intent sidecar resolves to one (via the
         # upload manifest).  Best-effort — absent / unresolvable brief
         # silently omits the line so the report stays clean.
-        # What is actually watching this print — kiln-pro's per-class
-        # coverage statement, in one line, so the report says what the
-        # printer's own detectors cover before anyone walks away.  Absent
-        # without kiln-pro, the way the camera line is absent without a
-        # camera; the full statement is one question away
+        # What is actually watching this print — one SHORT line from
+        # kiln-pro's coverage buckets (counts, Kiln's verdict, the gaps by
+        # name), so the report says what covers the print before anyone
+        # walks away without becoming an essay.  Absent without kiln-pro,
+        # the way the camera line is absent without a camera; the full
+        # statement is one question away
         # (``answer_printer_question(<model>, "what is watching my print")``).
         _coverage_line = _coverage_line_for(printer_name)
         if _coverage_line:
