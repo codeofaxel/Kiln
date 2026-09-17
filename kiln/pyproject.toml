@@ -42,7 +42,7 @@ dependencies = [
     # exactly that reason, so a `<2` here would declare kiln3d incompatible
     # with the SDK its own hosted deploy requires.  `kiln.mcp_compat` is how
     # both majors are supported instead.
-    "mcp>=2.1.1",
+    "mcp>=2.2.0",
     "requests>=2.25",
     "pyyaml>=5.4",
     "pydantic>=2.13.5",
@@ -104,8 +104,8 @@ postgres = ["psycopg2-binary>=2.9.12"]
 # private package and the extra would fail on every public `pip install`.
 # The REST API ships in kiln-pro itself; install it directly from the
 # private repo (see kiln3d.com/docs) — don't promise it here.
-stripe = ["stripe>=15.6.0"]
-payments = ["stripe>=15.6.0", "cryptography>=50.0.1"]
+stripe = ["stripe>=15.6.1"]
+payments = ["stripe>=15.6.1", "cryptography>=50.0.1"]
 # The backend is named `usb`; `serial` stays as an alias so the install
 # line in older docs keeps working.
 usb = ["pyserial>=3.5"]
@@ -142,14 +142,14 @@ dev = [
     # does not, which is how the stage broke for users while every test
     # passed (2026-09-01).
     "networkx>=3.4",
-    "lxml>=5.0",
+    "lxml>=6.1.3",
     # manifold3d is trimesh's boolean backend.  Only test fixtures cut one
     # mesh out of another (the renderer suite builds a tray as
     # outer.difference(cavity) so the near rim is an interior edge);
     # production never runs a boolean.  Undeclared, it passed on any
     # machine that happened to have it and failed in CI, which reads as a
     # renderer bug rather than a missing package.
-    "manifold3d>=3.5.2",
+    "manifold3d>=3.5.3",
 ]
 
 [project.scripts]
