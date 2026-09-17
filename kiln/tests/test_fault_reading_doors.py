@@ -56,6 +56,10 @@ from kiln.printers.base import PrinterState, PrinterStatus
 CUTTER_FAULT_DECIMAL = 302022657
 CUTTER_FAULT_RENDERED = "1200-8001"
 
+#: The three codes whose readings moved out of public Kiln (2026-09-17):
+#: the cutter fault and the two forum-derived feed readings.
+MOVED_CODES = ("12008001", "12008007", "12008010")
+
 #: What kiln-pro answers with, in the shape its catalog serves.  A stand-in,
 #: not the real row: the real one is pinned in kiln-pro against this
 #: checkout, and a public test must not depend on which kiln-pro is on the
@@ -154,13 +158,27 @@ class TestPublicOnly:
         # No fix to lead with, so the remedy is the clearing sentence alone.
         assert state.fault_remedy.startswith("Clear it on the printer's own screen")
 
-    def test_the_cutter_line_carries_no_cause_fix_or_source(self) -> None:
-        """The know-how is kiln-pro's; the line names the kind and points at it."""
-        line = _BAMBU_PRINT_ERROR_FAULTS["12008001"].lower()
+    @pytest.mark.parametrize("prefix", MOVED_CODES)
+    def test_the_moved_readings_carry_no_cause_fix_or_source(self, prefix: str) -> None:
+        """The know-how left; the line names the kind and points at the reading."""
+        line = _BAMBU_PRINT_ERROR_FAULTS[prefix].lower()
 
         assert "free with a kiln sign-in" in line
-        for know_how in ("slot", "blade", "lever", "magnet", "hall", "http", "forum", "wiki"):
-            assert know_how not in line, f"12008001 still carries {know_how!r}"
+        for know_how in (
+            "slot", "blade", "lever", "magnet", "hall",   # the cutter reading
+            "nozzle", "clog", "extruding", "purge_filament",  # 1200-8007's
+            "tangled", "spool",                             # 1200-8010's
+            "http", "forum", "wiki",                        # any source
+        ):
+            assert know_how not in line, f"{prefix} still carries {know_how!r}"
+
+    def test_the_public_adapter_source_carries_no_forum_url(self) -> None:
+        """The 1200-8010 row used to cite a forum thread inside its reading."""
+        import inspect
+
+        from kiln.printers import bambu
+
+        assert "forum.bambulab.com" not in inspect.getsource(bambu)
 
     def test_a_reading_with_no_bridge_is_public_and_carries_no_remedy(self) -> None:
         fault = read_bambu_fault(CUTTER_FAULT_RENDERED, kind="print_error")

@@ -658,32 +658,26 @@ _PRIVATE_READING_POINTER = (
 )
 
 _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
-    # 1200-8001: read off an A1's own screen 2026-09-16 ("Cutting the
-    # filament failed", print_error 302022657): the filament cutter did not
-    # cut.  The line names the fault's KIND and where the reading is; the
-    # cause list and the fix are a kiln-pro row, and a FREE one, so a
+    # Three codes whose readings were read off a real A1 and out of owner
+    # threads.  Each line here names the fault's KIND and where the reading
+    # is; the cause list and the fix are kiln-pro rows, and FREE ones, so a
     # signed-in caller of any tier gets them.  No cause, no fix, no source
     # on purpose -- the know-how is the private half, whoever it is free to.
+    #
+    # 1200-8001: read off an A1's own screen 2026-09-16 ("Cutting the
+    # filament failed", print_error 302022657): the filament cutter did not
+    # cut.
     "12008001": (
         f"This is an AMS lite filament-cut fault. {_PRIVATE_READING_POINTER}"
     ),
-    # Observed on Adam's A1 (2026-09-03): raised by the printer's own Load
-    # wizard at its purge step, straight after a layer-1 failure with a
-    # clogged hotend.  Corroborated on the Bambu forum by an A1 owner who
-    # hit "1200-8007 031520" at print start on both AMS and external spool,
-    # and for whom the fix was heating the nozzle and extruding by hand --
-    # which is exactly what purge_filament does.
-    # (forum.bambulab.com/t/1200-8010-23175-error/125692)
+    # 1200-8007: raised by the printer's own Load wizard on an A1 (2026-09-03)
+    # and reported by owners at print start.  1200-8010: the printer's own
+    # "tangled or stuck" attribution, seen beside 1200-8007 on the same A1.
     "12008007": (
-        "The filament did not come through the nozzle during the load's purge "
-        "step. Bambu publishes no page for this code; on the A1 it goes with a "
-        "clogged hotend, and owners clear it by heating the nozzle and "
-        "extruding by hand -- which is what purge_filament does"
+        f"This is an AMS lite filament feed fault. {_PRIVATE_READING_POINTER}"
     ),
     "12008010": (
-        "The printer reports the filament may be tangled or the spool stuck. "
-        "Seen alongside 1200-8007 on the A1 when the real cause was a clog "
-        "(forum.bambulab.com/t/1200-8010-23175-error/125692)"
+        f"This is an AMS lite filament feed fault. {_PRIVATE_READING_POINTER}"
     ),
     # Third-party lookup (printara3d.com/tools/bambu-error-codes), the only
     # list that carries these; Bambu documents none of them.

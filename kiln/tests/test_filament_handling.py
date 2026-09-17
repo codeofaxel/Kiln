@@ -713,7 +713,11 @@ class TestBambuLoad:
         assert result.extrusion_verified is False
         assert result.verification_source == "bambu_fault_code"
         assert result.error_code == "1200_8007"
-        assert "did not come through the nozzle" in result.error_hint
+        # Public Kiln's own line: the kind of fault, and where the reading
+        # is.  The cause and the fix are kiln-pro's row, free to a signed-in
+        # caller -- test_fault_reading_doors.py covers that side.
+        assert "filament feed fault" in result.error_hint
+        assert "free with a Kiln sign-in" in result.error_hint
         assert result.details["code_kind"] == "print_error"
 
     def test_hms_list_entries_count_as_faults_too(self, bambu, monkeypatch):
@@ -842,7 +846,7 @@ class TestBambuFaultReadings:
 
         text, url = describe_bambu_filament_fault("1200-8007", kind="print_error")
         assert url is None
-        assert "purge_filament" in text
+        assert "free with a Kiln sign-in" in text
 
     def test_the_same_digits_read_differently_per_namespace(self):
         from kiln.printers.bambu import describe_bambu_filament_fault
