@@ -18,15 +18,37 @@ process's own printer registry.  This process holds the printer connection
 (for Bambu, the one MQTT session), which is exactly why the panel must be
 served from HERE and never from a sibling process.
 
-WHY THE PAYLOAD RIDES THE RESULT
---------------------------------
-Measured on a local stdio server (recorded in ``local_stage.py``): a
-rendered view does NOT get permission to call tools back through the host.
-So the snapshot rides each monitor result, and the agent's own watch loop —
-the repeated ``monitor_print`` calls it was already making — is the
-heartbeat that keeps the panel current.  Re-measuring that constraint is
-what the diagnostics verb below exists for: if a current host grants the
-callback, the panel live-polls and the ride-along becomes the fallback.
+WHAT RIDES THE RESULT, AND WHAT DOES NOT
+----------------------------------------
+The snapshot rides each monitor result: state, progress, temperatures,
+the account and coverage axes — a few kilobytes of short strings.  It is
+what the panel paints the instant the result lands, and the agent's own
+watch loop (the repeated ``monitor_print`` calls it was already making)
+keeps a panel current on a host that grants the view no callback.
+
+The camera frame does NOT ride.  Measured 2026-09-16 in Claude Code
+desktop against a live A1 print: ``monitor_print`` returned a
+203,140-character result, 196,592 of them one base64 frame under
+``kiln_monitor.camera.image_base64``.  The hosts that render this panel
+also hand ``structuredContent`` to the model as text, so the client
+refused the whole result ("exceeds maximum allowed tokens"), wrote it to
+a file, and rendered no panel — the frame cost the text report AND the
+panel it was meant to feed.  The stage retired the same mistake for
+geometry on 2026-08-30 (``local_stage.py``, WHY THE GEOMETRY DOES NOT
+RIDE THE RESULT); this is that rule on the monitor door.
+
+The panel fetches the frame itself: it polls ``kiln_monitor_snapshot``
+with ``include_camera`` through the host's ``tools/call`` proxy, exactly
+as the stage's view fetches geometry through ``kiln_viewer_payload`` — a
+route measured working on the Claude desktop host on 2026-09-02, once the
+verb stood on the tool list from install (a host caches that list at
+initialize and ignores ``list_changed``, so a verb registered at the
+first resource read is one the host never learns).  The text report's
+``Camera:`` line still names the snapshot file it saved, so the agent's
+picture is never in question.  ``KILN_MONITOR_INLINE_CAMERA=1`` restores
+the inline frame for a host that renders panels, cannot proxy tools back,
+and whose operator has decided the context is worth it — an opt-in to a
+measured cost, not a tuning knob.
 
 THE ONE PROCESS THAT OWNS THE PRINTER
 -------------------------------------
@@ -82,21 +104,22 @@ logger = logging.getLogger(__name__)
 #: Opt out of the inline monitor (matches ``KILN_NO_LOCAL_STAGE`` next door).
 _OPT_OUT_ENV = "KILN_NO_LOCAL_MONITOR"
 
-#: Registers the panel's poll verb on the standing tool surface — the
-#: ``KILN_LOCAL_STAGE_DIAGNOSTICS`` precedent.  Off by default: the verb is
-#: not useful to a person or an agent.  Its measurement purpose: with this
-#: on, a rendered panel that CAN call tools back through the host will show
-#: ``kiln_monitor_snapshot`` calls in the server log with no agent
-#: involvement — the stdio-callback re-measure the spec's smoke checklist
-#: asks for.
-_DIAGNOSTICS_ENV = "KILN_LOCAL_MONITOR_DIAGNOSTICS"
-
-#: Opt out of the camera frame riding the result payload.  A frame is the
-#: biggest rider (~100 KB of base64), and on hosts that serialize
-#: structuredContent into model context it costs tokens the way the stage's
-#: inline geometry does — this is that lever's monitor twin
-#: (``KILN_STAGE_INLINE_GEOMETRY`` precedent).
+#: Opt IN to the camera frame riding the result payload — the
+#: ``KILN_STAGE_INLINE_GEOMETRY`` lever's monitor twin.  Off by default,
+#: and not as a preference: the module docstring records the 203,140-
+#: character result that inlining produced and the panel it failed to
+#: open.  The panel fetches the frame through its own poll verb instead.
 _INLINE_CAMERA_ENV = "KILN_MONITOR_INLINE_CAMERA"
+
+#: What the lean result says in the frame's place.  The agent reads
+#: ``structuredContent``, and a payload with no ``camera`` key would read
+#: as a printer with no camera — this says the frame was withheld on
+#: purpose, where the panel gets it, and where the agent's own copy is.
+CAMERA_FETCHED_BY_PANEL_NOTE = (
+    "camera frame not inlined: the panel fetches it through "
+    "kiln_monitor_snapshot, and the report's Camera line names the saved "
+    "snapshot file"
+)
 
 #: The ui:// URI monitor tool declarations point at via _meta.ui.resourceUri.
 PRINT_MONITOR_RESOURCE_URI = "ui://kiln/print-monitor"
@@ -155,19 +178,19 @@ def enabled() -> bool:
     }
 
 
-def diagnostics_enabled() -> bool:
-    return (os.environ.get(_DIAGNOSTICS_ENV) or "").strip().lower() in {
+def inline_camera_enabled() -> bool:
+    """Whether the camera frame rides the RESULT, or only the panel's poll.
+
+    Default OFF — see the module docstring for the measured result that
+    decided it.  ``KILN_MONITOR_INLINE_CAMERA=1`` opts a host back in.
+    Anything else reads as off, the bare-value spellings included, so the
+    old ``=0`` that used to mean "lean" still means lean.
+    """
+    return (os.environ.get(_INLINE_CAMERA_ENV) or "").strip().lower() in {
         "1",
         "true",
         "yes",
-    }
-
-
-def inline_camera_enabled() -> bool:
-    return (os.environ.get(_INLINE_CAMERA_ENV) or "").strip().lower() not in {
-        "0",
-        "false",
-        "no",
+        "on",
     }
 
 
@@ -435,11 +458,9 @@ def _register_resource(mcp: Any) -> bool:
             )
         # Only a host about to render the panel asks for this.
         _host_read_the_monitor = True
-        # Door parity, the stage's rule: the read is the earliest proof a
-        # rendered View will exist, and it precedes the View's first
-        # tools/call — so the poll verb is registered here, off the
-        # standing surface for hosts that never render panels, while a
-        # host that does render can never call into a missing verb.
+        # Belt and braces: install() already registered the poll verb; a
+        # server whose install was partial still gets it before the View's
+        # first tools/call.  Idempotent, so this costs nothing when it holds.
         _register_snapshot_verb(mcp)
         return doc
 
@@ -465,10 +486,14 @@ def _register_resource(mcp: Any) -> bool:
 def _register_snapshot_verb(mcp: Any) -> bool:
     """Register ``kiln_monitor_snapshot`` — the panel's own poll verb.
 
-    Idempotent and never raises.  App-only (``visibility: ["app"]``): hosts
-    hide it from the model.  Whether a locally rendered view can reach it AT
-    ALL is the measured question this door is built around — see the module
-    docstring — and registering it costs nothing when the answer stays no.
+    Idempotent and never raises.  Registered at ``install``, so it is on the
+    tool list a host caches at initialize: with the lean result this verb is
+    the panel's ONLY route to a camera frame, and the stage measured
+    (2026-09-01, Claude desktop host) that a verb registered later, at the
+    first resource read, is one the host never learns — it ignores
+    ``list_changed``, and every fetch failed into "unavailable".  App-only
+    (``visibility: ["app"]``): hosts that honour the hint hide it from the
+    model, so the cost of standing is one row on the wire.
     """
     try:
         registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
@@ -544,6 +569,12 @@ def _install_result_hook(mcp: Any) -> bool:
     call on the server would poll the machine as a side effect of
     unrelated work.  An unreadable request shape skips the attach and
     costs one stale panel paint; the next monitor call refreshes it.
+
+    The payload is LEAN: the readings ride, the camera frame does not
+    unless ``KILN_MONITOR_INLINE_CAMERA`` opts in — see the module
+    docstring for the result that decided it.  A withheld frame is said
+    in the payload's own words, so the agent never mistakes it for a
+    printer without a camera.
     """
 
     def _attach(inner: Any, ctx: Any, name: str | None, args: dict | None) -> None:
@@ -565,6 +596,11 @@ def _install_result_hook(mcp: Any) -> bool:
                 printer_name=printer_name,
                 include_camera=inline_camera_enabled(),
             )
+            if "camera" not in payload:
+                # An opted-in frame that could not be read already carries
+                # its own note ("no camera available"); the lean default
+                # says where the picture went instead.
+                payload.setdefault("camera_note", CAMERA_FETCHED_BY_PANEL_NOTE)
             sc = getattr(inner, "structuredContent", None)
             sc = dict(sc) if isinstance(sc, dict) else {}
             sc[MONITOR_STRUCTURED_CONTENT_KEY] = payload
@@ -580,10 +616,16 @@ def _log_signal_once(attaching: bool) -> None:
     if _signal_logged:
         return
     _signal_logged = True
+    if not attaching:
+        route = "withheld (text report only)"
+    elif inline_camera_enabled():
+        route = "attached, frame inlined (KILN_MONITOR_INLINE_CAMERA opt-in)"
+    else:
+        route = "attached, panel fetches the frame via kiln_monitor_snapshot"
     logger.info(
         "inline monitor: read_monitor=%s -> payload %s",
         _host_read_the_monitor,
-        "attached" if attaching else "withheld (text report only)",
+        route,
     )
 
 
@@ -593,7 +635,12 @@ def install(mcp: Any) -> dict[str, Any]:
     Returns a small summary for the log.  Never raises: a live panel that
     breaks the server is worse than no live panel.
     """
-    out: dict[str, Any] = {"enabled": enabled(), "resource": False, "stamped": 0}
+    out: dict[str, Any] = {
+        "enabled": enabled(),
+        "resource": False,
+        "snapshot_tool": False,
+        "stamped": 0,
+    }
     if not enabled():
         return out
 
@@ -603,8 +650,10 @@ def install(mcp: Any) -> dict[str, Any]:
         logger.warning("local monitor: resource registration failed", exc_info=True)
         return out
 
-    if diagnostics_enabled():
-        out["snapshot_tool"] = _register_snapshot_verb(mcp)
+    # The panel's poll verb stands from install — the only route to a
+    # camera frame now that the result is lean, and a host caches its tool
+    # list at initialize (see _register_snapshot_verb).
+    out["snapshot_tool"] = _register_snapshot_verb(mcp)
 
     try:
         out["stamped"] = _stamp_tools(mcp)
@@ -617,8 +666,8 @@ def install(mcp: Any) -> dict[str, Any]:
         logger.warning("local monitor: result hook failed", exc_info=True)
 
     logger.debug(
-        "inline monitor ready: resource=%s stamped=%d hook=%s diagnostics=%s",
-        out["resource"], out["stamped"], out.get("hook"), diagnostics_enabled(),
+        "inline monitor ready: resource=%s snapshot_tool=%s stamped=%d hook=%s",
+        out["resource"], out["snapshot_tool"], out["stamped"], out.get("hook"),
     )
     return out
 

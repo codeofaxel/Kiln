@@ -7,6 +7,9 @@ The properties worth defending mirror the stage's, plus this door's own:
 * the payload rides the result ONLY for a host that renders panels, and
   ONLY on roster tools — this hook does printer I/O, so an unknown tool
   must skip, the OPPOSITE of the stage's fail-open rule;
+* the payload is LEAN: the readings ride, the camera frame never does —
+  the panel fetches it through ``kiln_monitor_snapshot``, which stands on
+  the tool list from install for exactly that reason;
 * the wire it speaks is ``kiln.monitor.v1`` from its one home,
   ``kiln.monitor_payload``;
 * the account axis reports the truth and gates nothing but the rendering —
@@ -59,7 +62,6 @@ def _reset(monkeypatch, tmp_path):
 
     monkeypatch.setenv("KILN_HOME", str(tmp_path / "kiln_home"))
     monkeypatch.delenv(local_monitor._OPT_OUT_ENV, raising=False)
-    monkeypatch.delenv(local_monitor._DIAGNOSTICS_ENV, raising=False)
     monkeypatch.delenv(local_monitor._INLINE_CAMERA_ENV, raising=False)
     local_monitor._reset_for_tests()
     local_stage._reset_for_tests()
@@ -138,28 +140,9 @@ class TestOnByDefault:
     def test_opt_out_turns_everything_off(self, monkeypatch):
         monkeypatch.setenv(local_monitor._OPT_OUT_ENV, "1")
         assert local_monitor.enabled() is False
-        assert local_monitor.install(object()) == {
-            "enabled": False, "resource": False, "stamped": 0
+        assert local_monitor.install(object()) == {  # would explode if it did anything
+            "enabled": False, "resource": False, "snapshot_tool": False, "stamped": 0
         }
-
-    def test_the_poll_verb_stays_off_the_standing_tool_surface(self):
-        _cache_the_monitor()
-        mcp = _fastmcp()
-        local_monitor.install(mcp)
-        assert "kiln_monitor_snapshot" not in mcp._tool_manager._tools
-
-    def test_diagnostics_flag_brings_it_back(self, monkeypatch):
-        """The stdio-callback re-measure switch: with the verb on the
-        surface, a panel that CAN call back will show up in the RPC log."""
-        _cache_the_monitor()
-        monkeypatch.setenv(local_monitor._DIAGNOSTICS_ENV, "1")
-        mcp = _fastmcp()
-        local_monitor.install(mcp)
-        tool = mcp._tool_manager._tools.get("kiln_monitor_snapshot")
-        assert tool is not None
-        ui = (tool.meta or {}).get("ui") or {}
-        assert ui.get("visibility") == ["app"]
-        assert ui.get("resourceUri") == local_monitor.PRINT_MONITOR_RESOURCE_URI
 
 
 class TestInstallOnARealFastMCP:
@@ -209,22 +192,24 @@ class TestTheMonitorDocumentComesFromTheCache:
         text = getattr(got[0], "content", got[0]) if isinstance(got, list) else got
         assert _DOC in str(text)
 
-    def test_the_read_registers_the_poll_verb_for_door_parity(self):
-        """A host that renders the panel may try to poll; the verb must
-        exist before the View's first tools/call can miss it."""
+    def test_the_read_keeps_the_poll_verb_it_already_has(self):
+        """The verb stood from install; the read's belt-and-braces call
+        must not register a second one under the panel."""
         _cache_the_monitor()
         mcp = _fastmcp()
         local_monitor.install(mcp)
-        assert "kiln_monitor_snapshot" not in mcp._tool_manager._tools
+        before = mcp._tool_manager._tools["kiln_monitor_snapshot"]
         anyio.run(mcp.read_resource, local_monitor.PRINT_MONITOR_RESOURCE_URI)
-        assert "kiln_monitor_snapshot" in mcp._tool_manager._tools
+        assert mcp._tool_manager._tools["kiln_monitor_snapshot"] is before
 
-    def test_a_cold_cache_read_raises_and_registers_nothing(self):
+    def test_a_cold_cache_read_raises_and_the_verb_still_stands(self):
         mcp = _fastmcp()
         local_monitor.install(mcp)
-        with pytest.raises(Exception):
+        # The SDK wraps the door's ValueError in its own resource error; the
+        # sentence is the stable part across majors.
+        with pytest.raises(Exception, match="not been downloaded"):
             anyio.run(mcp.read_resource, local_monitor.PRINT_MONITOR_RESOURCE_URI)
-        assert "kiln_monitor_snapshot" not in mcp._tool_manager._tools
+        assert "kiln_monitor_snapshot" in mcp._tool_manager._tools
 
 
 class TestComposeLocalPayload:
@@ -518,6 +503,138 @@ class TestThePayloadRidesTheResult:
         )
         payload = (sc or {}).get(monitor_payload.MONITOR_STRUCTURED_CONTENT_KEY)
         assert payload["printer_name_arg"] == "workshop-a1"
+
+
+#: A frame the size of the real one: 147,000 JPEG bytes encode to 196,000
+#: base64 characters, which is what one A1 frame measured on the wire.
+_FRAME = __import__("base64").b64encode(b"\xff" * 147_000).decode("ascii")
+
+
+def _walk_strings(node, path="result"):
+    """Every string in a nested result, with the path that reaches it —
+    blind to key names, because a buffer is no cheaper for being renamed."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _walk_strings(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            yield from _walk_strings(value, f"{path}[{i}]")
+    elif isinstance(node, str):
+        yield path, node
+
+
+class TestTheResultIsLean:
+    """A monitor result never carries the camera frame.  The panel fetches it.
+
+    THE INCIDENT.  2026-09-16, Claude Code desktop, a live A1 print:
+    ``monitor_print`` returned a 203,140-character result, 196,592 of them
+    one base64 frame under ``kiln_monitor.camera.image_base64``.  The client
+    refused the whole result ("exceeds maximum allowed tokens"), wrote it to
+    a file, and no panel rendered — the frame cost the text report AND the
+    panel it was meant to feed.  The stage retired the same mistake for
+    geometry on 2026-08-30 (``TestTheResultIsLean`` next door); this is the
+    monitor's copy of that decision, recorded as a test so it cannot be
+    reversed by accident.
+    """
+
+    #: Nothing in a lean result should be anywhere near this.  The status
+    #: dict is a few kilobytes of short strings; the frame is ~200k in one.
+    MAX_VALUE_BYTES = 8192
+
+    @pytest.fixture(autouse=True)
+    def _a_printing_machine_with_a_camera(self, monkeypatch):
+        monkeypatch.setattr(
+            local_monitor, "_camera_frame", lambda pn, status: (_FRAME, None)
+        )
+
+    def _payload(self):
+        sc = _run_hook(_apps_host(), "monitor_print")
+        return sc[monitor_payload.MONITOR_STRUCTURED_CONTENT_KEY]
+
+    def test_the_default_is_lean(self, monkeypatch):
+        monkeypatch.delenv(local_monitor._INLINE_CAMERA_ENV, raising=False)
+        payload = self._payload()
+        assert payload["status"]["printer"]["state"] == "printing", (
+            "lean still carries the readings — they are what the panel paints first"
+        )
+        assert "camera" not in payload, (
+            "a frame rode a result again; the panel fetches it itself"
+        )
+
+    def test_the_lean_result_says_where_the_frame_is(self, monkeypatch):
+        """The agent reads structuredContent: a withheld frame must say it
+        was withheld, and where the picture is, rather than look like a
+        printer with no camera."""
+        monkeypatch.delenv(local_monitor._INLINE_CAMERA_ENV, raising=False)
+        note = self._payload().get("camera_note") or ""
+        assert "kiln_monitor_snapshot" in note
+        assert "Camera" in note
+
+    def test_no_value_in_the_result_is_a_frame_buffer(self, monkeypatch):
+        """THE REGRESSION GATE — anchored on SIZE, not on a key name."""
+        monkeypatch.delenv(local_monitor._INLINE_CAMERA_ENV, raising=False)
+        sc = _run_hook(_apps_host(), "monitor_print")
+        for path, value in _walk_strings(sc):
+            assert len(value) <= self.MAX_VALUE_BYTES, (
+                f"{path} carries {len(value)} bytes into the model's context — "
+                f"a tool result is not a camera transport"
+            )
+
+    def test_the_opt_in_restores_the_inline_frame(self, monkeypatch):
+        """The escape hatch is real, and it proves the gate above can fail."""
+        monkeypatch.setenv(local_monitor._INLINE_CAMERA_ENV, "1")
+        payload = self._payload()
+        assert payload["camera"] == {"image_base64": _FRAME}
+        assert any(len(v) > self.MAX_VALUE_BYTES for _, v in _walk_strings(payload))
+
+    @pytest.mark.parametrize("value", ["0", "false", "no", "", "  "])
+    def test_the_old_off_spellings_still_read_as_lean(self, value, monkeypatch):
+        """An install carrying the old ``=0`` must not be surprised into the
+        inline path by the inversion."""
+        monkeypatch.setenv(local_monitor._INLINE_CAMERA_ENV, value)
+        assert "camera" not in self._payload()
+
+
+class TestThePollVerbStandsFromInstall:
+    """With the lean result, ``kiln_monitor_snapshot`` is the panel's ONLY
+    route to a frame — and a host that caches its tool list at initialize
+    and ignores ``list_changed`` (measured: the Claude desktop host,
+    2026-09-01, on the stage's fetch verb) can only call what stood at the
+    start.  Registering it at the first resource read, as this door did,
+    left the panel polling a verb the host had never heard of."""
+
+    def test_the_verb_stands_from_install(self):
+        _cache_the_monitor()
+        mcp = _fastmcp()
+        out = local_monitor.install(mcp)
+        assert out["snapshot_tool"] is True
+        assert "kiln_monitor_snapshot" in mcp._tool_manager._tools
+
+    def test_it_stands_even_with_a_cold_cache(self):
+        """A server that boots before the panel document is cached still
+        answers the panel's first poll once the document lands."""
+        mcp = _fastmcp()
+        local_monitor.install(mcp)
+        assert "kiln_monitor_snapshot" in mcp._tool_manager._tools
+
+    def test_the_verb_is_marked_app_only(self):
+        """Standing, but not for the model: hosts that honour the MCP Apps
+        visibility hint hide it, so the cost is one row on the wire."""
+        _cache_the_monitor()
+        mcp = _fastmcp()
+        local_monitor.install(mcp)
+        tool = mcp._tool_manager._tools["kiln_monitor_snapshot"]
+        ui = (getattr(tool, "meta", None) or {}).get("ui") or {}
+        assert ui.get("visibility") == ["app"]
+        assert ui.get("resourceUri") == local_monitor.PRINT_MONITOR_RESOURCE_URI
+
+    def test_a_second_install_does_not_register_it_twice(self):
+        _cache_the_monitor()
+        mcp = _fastmcp()
+        local_monitor.install(mcp)
+        first = mcp._tool_manager._tools["kiln_monitor_snapshot"]
+        local_monitor.install(mcp)
+        assert mcp._tool_manager._tools["kiln_monitor_snapshot"] is first
 
 
 class TestMonitorDocumentCache:
