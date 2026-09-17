@@ -4332,3 +4332,92 @@ class TestTelemetryVintage:
         assert state.state_age_seconds is not None
         assert state.state_age_seconds < 5.0
         assert state.staleness_note() is None
+
+
+# ---------------------------------------------------------------------------
+# Push-status deltas merge INTO the cache; they never replace a section
+# ---------------------------------------------------------------------------
+
+_FULL_AMS_REPORT: dict[str, Any] = {
+    "ams_exist_bits": "1",
+    "tray_exist_bits": "f",
+    "tray_now": "255",
+    "tray_tar": "255",
+    "version": 6,
+    "ams": [
+        {
+            "id": "0",
+            "humidity": "5",
+            "tray": [
+                {"id": "0", "tray_type": "PLA", "tray_color": "FFFFFFFF"},
+                {"id": "1", "tray_type": "PLA", "tray_color": "000000FF"},
+                {"id": "2", "tray_type": "PLA", "tray_color": "0000FFFF"},
+                {"id": "3", "tray_type": "PLA", "tray_color": "FF0000FF"},
+            ],
+        }
+    ],
+}
+
+
+class TestPushStatusDeltaMerge:
+    """A partial push updates only the fields it carries.
+
+    Measured 2026-09-15 on an A1: right after ``load_filament`` finished,
+    ``ams_status`` answered ``ams_exist_bits "0", units [], tray_now "3"`` --
+    a report that contradicts itself (a tray feeding the nozzle on a unit
+    that does not exist) -- and kept answering it on the next read.  The
+    previous read (version 6) had the whole four-tray unit.  The A1 pushes
+    deltas; the one carrying ``tray_now`` came as ``{"ams": {"tray_now":
+    "3", "version": 7}}`` and a shallow ``dict.update`` replaced the merged
+    ``ams`` section with it.
+    """
+
+    def test_a_tray_now_only_delta_keeps_the_ams_units(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        _push(adapter_with_mqtt, gcode_state="IDLE", ams=json.loads(json.dumps(_FULL_AMS_REPORT)))
+        _push(adapter_with_mqtt, ams={"tray_now": "3", "version": 7})
+
+        cached = adapter_with_mqtt._last_status["ams"]
+        assert cached["tray_now"] == "3"
+        assert cached["version"] == 7
+        assert cached["ams_exist_bits"] == "1"
+        assert cached["tray_exist_bits"] == "f"
+        assert len(cached["ams"]) == 1
+        assert len(cached["ams"][0]["tray"]) == 4
+
+    def test_the_reading_door_agrees_after_the_delta(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        adapter_with_mqtt._fw_modules_requested = True
+        _push(adapter_with_mqtt, gcode_state="IDLE", ams=json.loads(json.dumps(_FULL_AMS_REPORT)))
+        _push(adapter_with_mqtt, ams={"tray_now": "3", "version": 7})
+
+        report = adapter_with_mqtt.get_ams_status()
+        assert report["tray_now"] == "3"
+        assert report["ams_exist_bits"] == "1"
+        assert [int(t["slot"]) for t in report["units"][0]["trays"]] == [0, 1, 2, 3]
+
+    def test_a_delta_that_removes_the_unit_is_honoured(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """Merging is not hoarding: a push that SAYS the unit is gone wins."""
+        _push(adapter_with_mqtt, gcode_state="IDLE", ams=json.loads(json.dumps(_FULL_AMS_REPORT)))
+        _push(adapter_with_mqtt, ams={"ams_exist_bits": "0", "tray_exist_bits": "0", "ams": [], "version": 8})
+
+        cached = adapter_with_mqtt._last_status["ams"]
+        assert cached["ams_exist_bits"] == "0"
+        assert cached["ams"] == []
+        assert cached["tray_now"] == "255"  # not carried, so kept
+
+    def test_the_run_state_survives_a_delta_that_lacks_it(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """Same code path, checked the same way: ``gcode_state`` is a
+        top-level scalar, so a temperature-only delta leaves it alone."""
+        _push(adapter_with_mqtt, gcode_state="RUNNING", nozzle_temper=200)
+        _push(adapter_with_mqtt, nozzle_temper=205)
+
+        assert adapter_with_mqtt._last_status["gcode_state"] == "RUNNING"
+        assert adapter_with_mqtt._last_status["nozzle_temper"] == 205
+        assert adapter_with_mqtt.get_state().state is PrinterStatus.PRINTING

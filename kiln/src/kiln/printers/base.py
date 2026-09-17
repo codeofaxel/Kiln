@@ -20,6 +20,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
+from pathlib import Path
 from typing import Any, ClassVar
 
 from kiln.printers.command_verdict import CommandVerdict
@@ -116,6 +117,28 @@ class FilamentHandlingUnsupported(PrinterError):
 # Enums
 # ---------------------------------------------------------------------------
 
+
+
+class HomingUnsupported(PrinterError):
+    """Raised when a backend cannot home the head the way Kiln trusts.
+
+    Not a stub that returns success: the message names what the user does
+    instead (the printer's own screen, a print's start sequence).
+    """
+
+
+class PlateClearRequired(PrinterError):
+    """Raised when a motion would press the nozzle onto the plate and no
+    person has said the plate is empty.
+
+    Carries ``snapshot_path`` when the printer's camera could be read, so
+    the person looks at the plate before answering.  The answer is
+    ``plate_clear=True`` on the next call -- a human's word, never a model's.
+    """
+
+    def __init__(self, message: str, *, snapshot_path: str | None = None) -> None:
+        super().__init__(message)
+        self.snapshot_path = snapshot_path
 
 class PrinterStatus(enum.Enum):
     """High-level operational state of a printer.
@@ -1587,7 +1610,7 @@ class FilamentOpPlan:
     the safety profile, the material window, and the cold-extrusion floor.
     """
 
-    action: str  # "load" | "unload" | "purge"
+    action: str  # "load" | "unload" | "purge" | "wipe"
     temperature: float
     temperature_source: str
     slot: int | None = None
@@ -1608,6 +1631,27 @@ class FilamentOpPlan:
         if self.material_window is not None:
             data["material_window"] = list(self.material_window)
         return data
+
+    def wait_seconds(self, default: float) -> float:
+        """How long the backend may watch the printer for its answer.
+
+        ``options["wait_seconds"]`` is what the caller asked for, *default*
+        the backend's own figure when nothing was asked.  Either is bounded
+        by ``options["wait_ceiling_seconds"]`` when the door that built this
+        plan declared one: an MCP tool call lives inside the host's request
+        window, and a watch that outlasts it finishes on the server after
+        the client has given up, so the answer is lost (measured 2026-09-15:
+        a 180 s load watch on an A1 returned "Request timed out" while the
+        load itself completed).  The backend assumes no window -- the CLI
+        has none -- so the ceiling is the door's to set, and this is the one
+        place every backend reads it.
+        """
+        asked = self.options.get("wait_seconds")
+        wait = float(default) if asked is None else float(asked)
+        ceiling = self.options.get("wait_ceiling_seconds")
+        if ceiling is not None and float(ceiling) > 0:
+            wait = min(wait, float(ceiling))
+        return wait
 
 
 @dataclass
@@ -1642,6 +1686,82 @@ class FilamentOpResult:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
+        return asdict(self)
+
+
+@dataclass
+class HomeStep:
+    """One motion of a homing sequence, described before it runs.
+
+    ``you_will_see`` is written for the person standing at the machine;
+    ``stops_when`` answers the question that makes people reach for the
+    power switch: does it know where to stop?  ``leaves`` names anything
+    the step leaves armed (a heater on, soft endstops off) so an abandoned
+    step-mode run is never a silent hazard.
+    """
+
+    number: int
+    label: str
+    you_will_see: str
+    stops_when: str
+    gcode: list[str] = field(default_factory=list)
+    leaves: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class HomeResult:
+    """Outcome of :meth:`PrinterAdapter.home_axes`.
+
+    ``outcome`` is the field to branch on, the same three words
+    ``set_temperature`` and ``start_print`` use: ``confirmed`` (the printer
+    was seen at home), ``accepted`` (the homing was sent and not refused
+    -- the honest answer on every backend Kiln cannot read a homed flag
+    from), ``failed`` (the gate or the printer refused, or a fault was
+    raised).  ``homed_axes`` names the axes the sequence's own homing
+    commands addressed, which is not always every axis asked for: a
+    vendor sequence may home X and Z and only *send the bed* to Y=0.
+    ``resting_position`` says where the head was left, every time.
+    """
+
+    success: bool
+    outcome: str
+    message: str
+    axes: str
+    #: ``"home"`` (find zero: endstops, and on some machines a nozzle touch)
+    #: or ``"park"`` (get out of the way: raise, home X, travel to a known
+    #: off-plate spot -- never a Z touch).  Same result shape, different verb.
+    action: str = "home"
+    homed_axes: list[str] = field(default_factory=list)
+    #: How the homing was sent (``"gcode"``, ``"bambu_mqtt_gcode_line"``).
+    mechanism: str | None = None
+    #: ``"vendor_start_sequence"`` when every line is the printer maker's
+    #: own, cited in the catalogue; ``"plain_g28"`` when Kiln sent the
+    #: generic home and can say nothing about the path it takes.
+    sequence_source: str | None = None
+    resting_position: dict[str, Any] = field(default_factory=dict)
+    #: Set when the sequence heats the nozzle (a printer that homes Z by
+    #: nozzle contact heats first, as its own sequence does).
+    heats_nozzle_to_c: float | None = None
+    error_code: str | None = None
+    error_hint: str | None = None
+    #: The sequence as steps, whenever the backend can describe it.  In
+    #: step mode only ``steps[step-1]`` was sent; ``next_step`` describes
+    #: the one to send next, ``None`` once the sequence is complete.
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    step_sent: int | None = None
+    next_step: dict[str, Any] | None = None
+    #: What is armed on the machine after this call (heater target,
+    #: soft endstops) -- said every time, so an abandoned run is visible.
+    leaves: list[str] = field(default_factory=list)
+    #: Path of the camera frame taken before a plate-touching motion, when
+    #: the printer has a camera -- the witness for the person's ``plate_clear``.
+    plate_witness: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -2791,6 +2911,22 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "monitor-twin print-start note failed", exc_info=True
                 )
+            # The plate now holds a part.  Recorded here, at the one door
+            # every print passes through, with the file's height when Kiln
+            # can read it, so home_axes and park_head can refuse a travel
+            # that would cross the part -- see kiln.plate_state.
+            try:
+                from kiln.plate_state import mark_occupied_by_start
+
+                mark_occupied_by_start(
+                    self, file_name, plate_number=kwargs.get("plate_number")
+                )
+            except Exception:  # noqa: BLE001 — the plate record never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "plate-state start note failed", exc_info=True
+                )
             # Nozzle wear counts at START — every print wears the nozzle,
             # success or failure, and an end-hook only sees the prints
             # something watched to completion.  No-op without kiln-pro.
@@ -3363,7 +3499,94 @@ class PrinterAdapter(ABC):
                 "parked over the part: check for extruded filament on the "
                 "model and wipe the nozzle before resuming."
             )
+            result.details["heater"] = f"left at {plan.temperature:g} °C: the print is paused and will need it"
+            return result
+        # Leave the machine the way a person would: heater off, and say so.
+        # Measured 2026-09-16 on an A1: a purge parked over the chute, pushed
+        # its 30 mm, reported success -- and left the nozzle at 215 °C with
+        # nothing in the answer about it.  A hot idle nozzle oozes, cooks the
+        # filament in the melt zone, and is the burn hazard the person was
+        # told to keep their hands away from.  ``keep_hot=True`` is for a
+        # caller about to print; it has to be asked for.
+        if plan.options.get("keep_hot"):
+            result.details["heater"] = f"left ON at {plan.temperature:g} °C (keep_hot was asked for)"
+            result.message = f"{result.message} Heater left ON at {plan.temperature:g} °C, as asked."
+            return result
+        # First the retract that stops the drool.  A nozzle at print
+        # temperature with the melt zone still pressurised oozes for the
+        # whole minute it takes to cool, and the vendor never leaves one that
+        # way: Bambu's end-of-print sequence pulls back 0.8 mm at 1800 mm/min
+        # before anything cools (bambu_a1_end_gcode.gcode line 15,
+        # 'G1 E-0.8 F1800 ; retract'; the same line in the P1/X1 end files).
+        # Measured 2026-09-16 on an A1: purge and wipe both ended with the
+        # heater off and the nozzle still dripping into the chute.  Not
+        # after an unload -- there is nothing left to pull back.
+        retracted = False
+        # Only after a SUCCESSFUL op: a purge the firmware refused, or a heat
+        # that never arrived, has nothing pressurised to pull back, and a
+        # retract on a cold extruder is the cold-extrusion move every gate
+        # here exists to prevent.  The heater still goes off either way.
+        # A backend whose own sequence already pulled back (the wipe snaps
+        # its tail with the vendor's retract and ends cold) reports that in
+        # ``end_retract_mm`` and is not retracted twice.
+        own_retract = result.details.get("end_retract_mm")
+        cools = result.success and plan.action != "unload" and self.capabilities.can_send_gcode
+        if cools and own_retract is None:
+            try:
+                verdict = self.send_gcode(["M83", "G1 E-0.8 F1800", "M82"])
+                retracted = bool(getattr(verdict, "ok", verdict))
+            except Exception:  # noqa: BLE001 -- the op already happened; report honestly below
+                retracted = False
+            result.details["end_retract_mm"] = 0.8 if retracted else None
+        elif own_retract is not None:
+            retracted = True
+        try:
+            verdict = self.set_tool_temp(0)
+            off = bool(getattr(verdict, "ok", verdict))
+        except Exception:  # noqa: BLE001 -- the op already happened; report the heater honestly
+            off = False
+        if off:
+            result.details["heater"] = "off"
+            result.message = (
+                f"{result.message} "
+                + (f"Retracted {float(result.details['end_retract_mm']):g} mm and heater off"
+                   if retracted else "Heater off")
+                + "."
+            )
+            if cools:
+                result.message = f"{result.message} {self._after_heater_off(result)}"
+        else:
+            result.details["heater"] = f"could not be switched off -- target may still be {plan.temperature:g} °C; set_temperature(0)"
+            result.message = (
+                f"{result.message} WARNING: the heater-off command was refused; the nozzle may still be "
+                f"at {plan.temperature:g} °C. Send set_temperature(0)."
+            )
         return result
+
+    def _after_heater_off(self, result: FilamentOpResult) -> str:
+        """What happens between "heater off" and the answer, and the sentence for it.
+
+        A heater switched off is not a nozzle that has stopped: the melt
+        zone keeps draining for the minute it takes to cool.  Where kiln-pro
+        is installed it runs the cool-down the machine's own start sequence
+        uses -- fan on, wait for the hand-off temperature, fan off -- and
+        reports the reading it answered at; the public floor is the honest
+        alternative: say the nozzle is still hot and keep hands away, never
+        claim a cool-down that did not run.  ``M106`` is the standard part-fan
+        G-code on every backend here, so the served version needs nothing a
+        backend does not already have.
+        """
+        from kiln import _pro_motion_bridge as _bridge
+
+        sentence = _bridge.cool_under_fan(self, result)
+        if isinstance(sentence, str) and sentence:
+            return sentence
+        result.details["fan"] = "not driven"
+        result.details["cooled_below_c"] = None
+        return (
+            "The nozzle is still at working temperature and cools on its own from here -- "
+            "keep hands clear of it, and expect a small drip below it as it does."
+        )
 
     def _prepare_filament_op(
         self,
@@ -3380,9 +3603,10 @@ class PrinterAdapter(ABC):
         Refuses (``PrinterError``) rather than adjusting: a caller who asked
         for 300 °C on a PLA tray is told why, not quietly given 220.
         """
+        what = "the nozzle" if action == "wipe" else "filament"
         if not self.capabilities.can_handle_filament:
             raise FilamentHandlingUnsupported(
-                f"{self.name} cannot {action} filament through Kiln — this "
+                f"{self.name} cannot {action} {what} through Kiln — this "
                 "backend declares no filament handling. Use the printer's "
                 "own screen or web UI for that step."
             )
@@ -3417,7 +3641,7 @@ class PrinterAdapter(ABC):
             state = self.get_state()
         except PrinterError as exc:
             raise PrinterError(
-                f"Cannot {action} filament: the printer did not answer a status "
+                f"Cannot {action} {what}: the printer did not answer a status "
                 f"request ({exc})."
             ) from exc
         # ``effective_state``: a fault takes the headline while the machine
@@ -3428,7 +3652,7 @@ class PrinterAdapter(ABC):
         # deliberate: an expired reading cannot show a print has stopped.
         if state.effective_state == PrinterStatus.PRINTING:
             raise PrinterError(
-                f"Refusing to {action} filament while a print is running. "
+                f"Refusing to {action} {what} while a print is running. "
                 "Pause the print first, or wait for it to finish."
             )
         # Allowed, and the whole point of the paused case -- but the extruder
@@ -3444,7 +3668,7 @@ class PrinterAdapter(ABC):
                 temperature_source = f"midpoint of {window[2]}"
             else:
                 raise PrinterError(
-                    f"Cannot {action} filament: no temperature. Pass "
+                    f"Cannot {action} {what}: no temperature. Pass "
                     "temperature=, or name the material (or the spool slot on "
                     "a multi-material unit) so Kiln can look one up."
                 )
@@ -3534,7 +3758,646 @@ class PrinterAdapter(ABC):
         leave it ``None`` when it produced none.
         """
 
+    # -- nozzle wipe, and where a purge goes -------------------------------
+    #
+    # Measured on an A1 (2026-09-15): purge_filament sent ``M83 / G1 E30 /
+    # M82`` with the head sitting at home, 30 mm of molten PLA hung off the
+    # nozzle over the machine, and the answer said only that no fault was
+    # raised.  The printer's own wizard parks over the purge chute and wipes
+    # on the pad.  The fix is one shared position record per model
+    # (``purge_station`` in the printer catalogue, copied from the vendor's
+    # own start G-code and cited line by line), read by ONE helper below,
+    # used by every door -- purge, load, unload, and the wipe -- and an
+    # answer that always says where the plastic went.  A model with no
+    # verified record gets a refusal (wipe) or an in-place purge that says
+    # so; never a coordinate Kiln inferred, and never a sibling's.
+
+    def wipe_nozzle(
+        self,
+        *,
+        material: str | None = None,
+        temperature: float | None = None,
+        slot: int | None = None,
+        **options: Any,
+    ) -> FilamentOpResult:
+        """Clean the nozzle tip on the machine's own wipe pad.
+
+        Runs the same gate as the other filament doors (not mid-print, the
+        safety ceiling, the material's own window, the 170 °C floor) so the
+        tip is soft when it meets the pad, then hands the plan to
+        :meth:`_wipe_nozzle_impl`.  A backend with no verified pad position
+        for the connected model refuses and names what to use instead — the
+        printer's own screen, or a print's start sequence, which wipes on
+        the pad — rather than moving the head to a guessed coordinate.
+
+        Args mirror :meth:`purge_filament`; there is no length.
+        """
+        plan = self._prepare_filament_op(
+            "wipe",
+            slot=slot,
+            material=material,
+            temperature=temperature,
+            length_mm=None,
+            options=options,
+        )
+        return self._finish_filament_op(plan, self._wipe_nozzle_impl(plan))
+
+    def _wipe_nozzle_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Backend wipe, called AFTER the filament gate passed.
+
+        Deliberately not abstract: the honest default is a refusal, and it
+        stays the answer on every backend until one reads a verified pad
+        position for the model out of the catalogue (see
+        :meth:`purge_station`).  Never a stub that returns success.
+        """
+        raise FilamentHandlingUnsupported(
+            f"{self.name} has no nozzle-wipe routine in Kiln. Use the printer's "
+            "own screen, or start a print — its start sequence wipes on the pad."
+        )
+
+    # ------------------------------------------------------------------
+    # Homing -- the one verb every printer screen has
+    # ------------------------------------------------------------------
+
+    #: Axes a successful :meth:`home_axes` COMMANDED, in this process.  Not a
+    #: claim the printer confirmed them; a later reader that needs the
+    #: machine's own word must ask the machine.
+    _homing_commanded_axes: frozenset[str] = frozenset()
+
+    @property
+    def homing_commanded(self) -> frozenset[str]:
+        """Axes this adapter has sent a homing for since it was built."""
+        return self._homing_commanded_axes
+
+    def _plate_witness(self) -> str | None:
+        """A camera frame of the plate, saved to disk, or ``None`` without a camera.
+
+        Taken before any motion that presses the nozzle onto the plate and
+        handed back with the refusal, so the person answering ``plate_clear``
+        has looked.  Never a gate on its own: the camera cannot prove a plate
+        empty (angle, shadow, a plate-coloured part), and Kiln does not
+        pretend it can.  Failures return ``None`` -- a missing witness is
+        reported, never invented.
+        """
+        try:
+            if not getattr(self.capabilities, "can_snapshot", False):
+                return None
+            data = self.get_snapshot()
+            if not data:
+                return None
+            import tempfile
+            import time as _time
+
+            path = Path(tempfile.gettempdir()) / f"kiln_plate_{int(_time.time())}.jpg"
+            path.write_bytes(data)
+            return str(path)
+        except Exception:  # noqa: BLE001 -- a witness is a courtesy; its absence is reported
+            return None
+
+    def _plate_raise_block(self, station: dict[str, Any] | None) -> tuple[Any, float | None, bool]:
+        """``(plate_state, raise_clearance_mm, blocked)`` for a raise-and-travel.
+
+        *blocked* is True when the record names a part at least as tall as
+        the vendor's raise (``raise_before_travel``): the head would cross
+        its row lower than the part.  One reading, shared by the homing
+        gate and the purge placement, so the two never disagree.
+        """
+        from kiln.plate_state import plate_occupancy, raise_clearance_mm
+
+        state = plate_occupancy(self)
+        clearance = raise_clearance_mm(station)
+        height = state.job.max_z_mm if (state.occupied and state.job) else None
+        blocked = clearance is not None and height is not None and height >= clearance
+        return state, clearance, blocked
+
+    def _plate_gate(
+        self,
+        options: dict[str, Any],
+        *,
+        station: dict[str, Any] | None,
+        action: str,
+        touches_plate: bool = False,
+        allow_plan: bool = True,
+    ) -> list[HomeStep] | None:
+        """Refuse a motion the plate record says would meet a part.
+
+        The one gate every backend consults before a raise-and-travel, and
+        before a Z home that presses the nozzle onto the plate.  It reads
+        :func:`kiln.plate_state.plate_occupancy` -- the record written when
+        Kiln starts a print, re-asserted when one is seen ending, and
+        cleared only by a person -- and decides:
+
+        * ``plate_clear=True`` in *options*: a person's word, given now.
+          Proceed.  (The template has already written it down.)
+        * record ``clear`` before a raise-and-travel: proceed without
+          asking -- the person said so once and Kiln has seen no print
+          since.
+        * record ``occupied`` with a known height at or above the vendor
+          raise (:func:`~kiln.plate_state.raise_clearance_mm`): the head
+          would cross its row lower than the part is tall.  Refuse, for a
+          park and a home alike, naming the file, the time and the height.
+        * *touches_plate* (a Z home ON the plate) without ``plate_clear``
+          on this call: refuse, whatever the record says -- ``occupied``
+          names the part, ``clear`` says why the record is not enough,
+          ``unknown`` asks the person to look.  The record cannot see a
+          print started from the printer's own screen, and the press is
+          the one motion a stale "clear" must never answer for.
+        * anything else (unknown plate, or a part of unknown height, before
+          a raise-and-travel): proceed as before this record existed; the
+          step text carries the row caveat.
+
+        Before refusing an occupied plate, kiln-pro's planner is asked once
+        (:func:`~kiln.plate_state.plan_motion_around_plate`); a plan comes
+        back as steps the backend runs instead of its own sequence.  A
+        caller whose motion a plan cannot stand in for (a wipe needs the
+        pad) passes ``allow_plan=False`` and gets the refusal.  The
+        refusal is :class:`PlateClearRequired`, carrying a camera frame
+        where one exists, so the person looks before answering.
+        """
+        from kiln.plate_state import plan_motion_around_plate
+
+        if options.get("plate_clear") is True:
+            return None
+        state, clearance, blocks_raise = self._plate_raise_block(station)
+        # A recorded "clear" answers the ROW question -- home X and park stop
+        # asking -- and nothing more.  It may not stand in for a Z home that
+        # presses the nozzle onto the plate: nothing marks the plate occupied
+        # when a print is seen STARTING, so a print run from the printer's
+        # own screen while no Kiln process watched its end leaves "clear" on
+        # file with a part on the plate.  A stale "clear" before a travel
+        # restores the behaviour every idle move had before this record
+        # existed; a stale "clear" before the press drives a nozzle into a
+        # part.  So the press asks every time, and the record is only ever
+        # the person's word for the row.
+        if state.clear and not touches_plate:
+            return None
+        model = str(getattr(self, "_printer_model", "") or "").strip().lower() or self.name
+        height = state.job.max_z_mm if (state.occupied and state.job) else None
+        if not touches_plate and not blocks_raise:
+            return None
+        if state.occupied and allow_plan:
+            plan = plan_motion_around_plate(state, station, action=action, clearance_mm=clearance)
+            if plan:
+                return [HomeStep(number=i + 1, **step) for i, step in enumerate(plan)]
+        witness = None if options.get("plan_only") else self._plate_witness()
+        look = (f" -- look at {witness} first" if witness else
+                " -- this printer has no camera Kiln can read, so look at the plate yourself")
+        say_so = (
+            "then say so on the call: plate_clear=true on home_axes (kiln home --plate-clear) -- "
+            "the press asks every time; `kiln plate clear` records it for the row checks only. "
+            'Until then, home X and park still work: axes="XY", or park_head.'
+            if touches_plate and not blocks_raise
+            else "then say so: `kiln plate clear`, or plate_clear=true on home_axes."
+        )
+        if blocks_raise:
+            assert clearance is not None and height is not None
+            message = (
+                f"Refusing to {action} {model}: {state.describe()}, and the first motion lifts the "
+                f"head only {clearance:g} mm before it crosses the row -- the part is taller than that, "
+                f"and on this family a travel collision raises no fault. Clear the plate{look}, {say_so}"
+            )
+        elif state.occupied:
+            message = (
+                f"{model} homes Z by pressing the nozzle onto the PLATE (its own sequence: "
+                f"'find a soft place to home'), and {state.describe()}. Clear the plate{look}, {say_so}"
+            )
+        elif state.clear:
+            message = (
+                f"{model} homes Z by pressing the nozzle onto the PLATE (its own sequence: "
+                f"'find a soft place to home'). {state.describe()[0].upper()}{state.describe()[1:]}, "
+                "but that record cannot see a print started from the printer's own screen, so the "
+                f"press asks every time: look{look}, then call again with plate_clear=true. "
+                'Home X and park still work without asking: axes="XY", or park_head.'
+            )
+        else:
+            message = (
+                f"{model} homes Z by pressing the nozzle onto the PLATE (its own sequence: "
+                "'find a soft place to home'). Kiln has no record of what is on the plate and will "
+                f"only do that once a person has confirmed it is empty{look}, then call again with "
+                "plate_clear=true. Without that, home X and park "
+                'still work: axes="XY", or park_head.'
+            )
+        raise PlateClearRequired(message, snapshot_path=witness)
+
+    def home_axes(self, *, axes: str = "XYZ", **options: Any) -> HomeResult:
+        """Home the head -- what the Home button on the printer's screen does.
+
+        The template every backend shares.  It refuses while a print is
+        running or paused (the head is over the part, and homing travels),
+        then hands the request to :meth:`_home_axes_impl`.  Backends do not
+        override this method; the contract test forbids it, because the
+        refusal here is the one safety check homing carries.
+
+        The answer says how the homing was sent, which axes its commands
+        addressed, and where the head was left -- every time.  A backend
+        with a vendor-cited sequence for the connected model runs that
+        (``sequence_source: "vendor_start_sequence"``); one without sends
+        the generic home and says so (``"plain_g28"``); one that cannot
+        home the way Kiln trusts raises :class:`HomingUnsupported` naming
+        what to use instead.
+
+        Args:
+            axes: Any of ``X``, ``Y``, ``Z`` (default all three).  A backend
+                whose sequence cannot address one of them says so in
+                ``homed_axes`` rather than pretending.
+            options: Adapter-specific extras (``wait_seconds``,
+                ``wait_ceiling_seconds``), forwarded verbatim.  Two are
+                read by every backend that can describe its sequence:
+                ``plan_only=True`` returns the steps and sends NOTHING;
+                ``step=N`` sends only step N and describes step N+1.
+                Step mode is how a sequence is run the first time on a
+                machine with a person beside it: one motion, one report,
+                then the next ``go`` -- a single script cannot be paused
+                between motions, however well it was announced.
+                ``plate_clear=True`` is a PERSON's statement that the plate
+                is empty.  A backend whose Z home presses the nozzle onto
+                the plate refuses without it (:class:`PlateClearRequired`,
+                carrying a camera frame where one exists) -- the vendor's own
+                sequence assumes an empty plate at print start, and an idle
+                printer may hold a part.
+        """
+        wanted = "".join(sorted({c for c in axes.upper() if c in "XYZ"}, key="XYZ".index))
+        step = options.get("step")
+        if step is not None and (not isinstance(step, int) or isinstance(step, bool) or step < 1):
+            raise PrinterError(f"step must be a whole number from 1, got {step!r}.")
+        if not wanted:
+            raise PrinterError(f"Nothing to home: axes {axes!r} names none of X, Y, Z.")
+        state = self.get_state()
+        if state.effective_state == PrinterStatus.PRINTING and not options.get("plan_only"):
+            raise PrinterError(
+                "Refusing to home while a print is running. Pause or cancel it "
+                "first, or wait for it to finish."
+            )
+        if state.effective_state == PrinterStatus.PAUSED and not options.get("plan_only"):
+            raise PrinterError(
+                "Refusing to home while a print is paused: the head is parked "
+                "over the part and homing travels. Resume or cancel the print "
+                "first."
+            )
+        if options.get("plate_clear") is True and not options.get("plan_only"):
+            # A person's word, written down: the plate stays clear until the
+            # next print starts, so home X and park stop asking about the
+            # row.  (A Z home onto the plate still asks on every call; see
+            # _plate_gate.)  Recorded on every backend, whether or not this
+            # one needed to ask.
+            try:
+                from kiln.plate_state import mark_clear
+
+                mark_clear(self, "human")
+            except Exception:  # noqa: BLE001 -- the record never blocks the motion
+                logger.debug("plate_clear could not be recorded", exc_info=True)
+        result = self._home_axes_impl(wanted, dict(options))
+        if result.success:
+            self._homing_commanded_axes = self._homing_commanded_axes | frozenset(result.homed_axes)
+        return result
+
+    def _read_homed_axes(self) -> set[str] | None:
+        """Which axes the FIRMWARE says are homed, or ``None`` when it cannot say.
+
+        The signal that turns a homing from ``accepted`` into ``confirmed``.
+        Klipper reports it (``toolhead.homed_axes``), RepRapFirmware reports
+        it (``move.axes[].homed``); Marlin over OctoPrint does not.  The
+        default knows nothing and says so -- never a guess.
+        """
+        return None
+
+    def _z_lifts_before_home(self) -> bool | None:
+        """Whether the firmware's own homing routine lifts Z before X/Y move.
+
+        ``True`` / ``False`` only from the machine's own configuration
+        (Klipper's ``safe_z_home`` section, read off the printer); ``None``
+        when Kiln cannot see the setting.
+        """
+        return None
+
+    def _home_axes_impl(self, axes: str, options: dict[str, Any]) -> HomeResult:
+        """Backend homing, called AFTER the gate passed.
+
+        Deliberately not abstract.  The default hands the job to the
+        FIRMWARE'S OWN homing routine -- ``G28`` on Marlin, Klipper, and
+        RepRapFirmware runs the routine the printer maker or the owner
+        configured, safe-Z lift included where they set one -- and then
+        reports what the machine can honestly say back: ``confirmed`` when
+        the firmware reports the axes homed (:meth:`_read_homed_axes`),
+        ``accepted`` when it reports nothing.  Where the firmware exposes
+        its own position afterwards (:meth:`get_tool_position`) that is
+        the resting position, in numbers.  A backend that cannot send
+        G-code raises :class:`HomingUnsupported`.  A backend with a cited
+        vendor sequence overrides this and runs it.
+        """
+        if not self.capabilities.can_send_gcode:
+            raise HomingUnsupported(
+                f"{self.name} cannot home through Kiln: this backend does not "
+                "accept G-code. Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, with your eyes on the plate. The screen's Home button descends the nozzle to the bed and is the wrong tool with a part on the plate."
+            )
+        command = "G28" if axes == "XYZ" else "G28 " + " ".join(axes)
+        plan = [HomeStep(
+            number=1, label="home " + " ".join(axes),
+            you_will_see=("the firmware runs its own homing routine: each axis travels to its endstop; "
+                          "whether Z lifts first is the printer's own setting"),
+            stops_when="each axis reaches its endstop or probe; the firmware decides",
+            gcode=[command],
+        )]
+        step = options.get("step")
+        if options.get("plan_only"):
+            return HomeResult(
+                success=True, outcome="accepted", axes=axes, homed_axes=[],
+                message=f"Plan only -- nothing sent. One step: {command}, the firmware's own routine.",
+                mechanism="gcode", sequence_source="firmware_home_routine",
+                steps=[p.to_dict() for p in plan], step_sent=None, next_step=plan[0].to_dict(),
+                details={"gcode": [command], "sent": False},
+            )
+        if step is not None and step != 1:
+            raise PrinterError(f"This backend homes in one step; step {step} does not exist.")
+        verdict = CommandVerdict.coerce(self.send_gcode([command]), what="homing")
+        if not verdict.ok:
+            return HomeResult(
+                success=False, outcome="failed", axes=axes,
+                message=f"The printer refused {command}: {verdict.message}",
+                mechanism="gcode", sequence_source="firmware_home_routine",
+                details={"gcode": [command], "verdict": verdict.to_dict()},
+            )
+        homed = self._read_homed_axes()
+        lifts = self._z_lifts_before_home()
+        position = self.get_tool_position()
+        details: dict[str, Any] = {"gcode": [command], "verdict": verdict.to_dict()}
+        if homed is not None:
+            details["firmware_homed_axes"] = sorted(homed)
+        if lifts is not None:
+            details["z_lifts_before_home"] = lifts
+        wanted = set(axes)
+        if homed is not None and wanted <= homed:
+            outcome, source = "confirmed", "firmware_homed_flag"
+            verified = f"The firmware reports {', '.join(sorted(homed))} homed."
+        elif homed is not None:
+            outcome, source = "accepted", "firmware_homed_flag_partial"
+            missing = ", ".join(sorted(wanted - homed))
+            verified = (
+                f"The firmware reports {', '.join(sorted(homed)) or 'no axis'} homed and "
+                f"not {missing} -- read printer_status again; the routine may still be running."
+            )
+        else:
+            outcome, source = "accepted", "not_read_back"
+            verified = f"{verdict.message}"
+        lift_note = {
+            True: " Its configuration lifts Z before X and Y move.",
+            False: " Its configuration does NOT lift Z before X and Y move.",
+            None: " Kiln cannot see whether that routine lifts Z before X and Y move; the printer's own configuration decides.",
+        }[lifts]
+        if position:
+            resting: dict[str, Any] = {**{k: v for k, v in position.items() if k in ("x", "y", "z")}, "source": "the firmware's own position report"}
+        else:
+            resting = {"described": "the firmware's home position for the axes sent"}
+        return HomeResult(
+            success=True,
+            outcome=outcome,
+            message=(
+                f"Sent {command} -- the firmware's own homing routine on {self.name}, not a path "
+                f"Kiln chose.{lift_note} {verified}"
+            ),
+            axes=axes,
+            homed_axes=list(axes),
+            mechanism="gcode",
+            sequence_source="firmware_home_routine",
+            resting_position=resting,
+            steps=[p.to_dict() for p in plan], step_sent=1 if step else None, next_step=None,
+            details={**details, "verification_source": source},
+        )
+
+    def park_head(self, **options: Any) -> HomeResult:
+        """Move the head somewhere safe, away from the plate -- and stay there.
+
+        The retreat, as distinct from :meth:`home_axes`, the measurement.
+        A park never homes Z: on the machines where Z is found by pressing
+        the nozzle onto a plate Kiln cannot see is clear, that is the one
+        step a nervous person is right to distrust, and a park does not
+        need it.  It raises the head the vendor's way, homes X (an endstop,
+        no plate involved), and travels to the model's own off-plate spot.
+        A backend with no vendor spot hands the job to the firmware's own
+        home, whose position is the park, and says so.
+
+        Same gate as homing (not while printing or paused), same
+        ``plan_only`` / ``step`` options, same described steps.
+        """
+        step = options.get("step")
+        if step is not None and (not isinstance(step, int) or isinstance(step, bool) or step < 1):
+            raise PrinterError(f"step must be a whole number from 1, got {step!r}.")
+        state = self.get_state()
+        if state.effective_state == PrinterStatus.PRINTING and not options.get("plan_only"):
+            raise PrinterError(
+                "Refusing to park while a print is running. Pause or cancel it "
+                "first, or wait for it to finish."
+            )
+        if state.effective_state == PrinterStatus.PAUSED and not options.get("plan_only"):
+            raise PrinterError(
+                "Refusing to park while a print is paused: the firmware has "
+                "already parked the head for the pause, and Kiln does not travel "
+                "over a part mid-print. Resume or cancel the print first."
+            )
+        result = self._park_head_impl(dict(options))
+        result.action = "park"
+        if result.success and not options.get("plan_only"):
+            self._homing_commanded_axes = self._homing_commanded_axes | frozenset(result.homed_axes)
+        return result
+
+    def _park_head_impl(self, options: dict[str, Any]) -> HomeResult:
+        """Backend park, called AFTER the gate passed.
+
+        The default is the firmware's own home: on Marlin, Klipper and
+        RepRapFirmware the home position IS the machine's safe park, chosen
+        by whoever configured it, so ``G28`` is the honest park -- reported
+        as such, never as a position Kiln chose.  A backend with a cited
+        vendor spot overrides this; one that cannot send G-code raises
+        :class:`HomingUnsupported`.
+        """
+        result = self._home_axes_impl("XYZ", options)
+        result.action = "park"
+        if result.success and not options.get("plan_only"):
+            result.message = (
+                "Parked at the firmware's own home position -- on this backend the home "
+                "IS the park, chosen by whoever configured the machine. " + result.message
+            )
+        return result
+
+    def purge_station(self) -> dict[str, Any] | None:
+        """This machine's verified purge and wipe positions, or ``None``.
+
+        Read from the printer catalogue at the depth this caller is served
+        (``kiln.printer_intelligence``, where kiln-pro's overlay supplies the
+        ``purge_station`` block; the public file carries none), keyed by the
+        CONFIG-DECLARED model only -- the adapter's own ``_printer_model``.
+        Never the global resolver, which answers for the default printer:
+        with two machines registered that is how the second would be driven
+        to the first one's chute.  Never a self-report either (see
+        :meth:`get_printer_info`): a wrong guess here is a head driven into a
+        frame.  ``None`` means "Kiln has no verified position for this
+        model", and every caller treats it as a reason to say so, not to
+        infer one.
+        """
+        printer_id = str(getattr(self, "_printer_model", "") or "").strip().lower()
+        if not printer_id:
+            return None
+        try:
+            from kiln.printer_intelligence import _profiles_for_caller
+            from kiln.printers.bed_fit import _printer_id_candidates
+
+            profiles = _profiles_for_caller()
+            for candidate in _printer_id_candidates(printer_id):
+                profile = profiles.get(candidate)
+                if profile is not None and isinstance(profile.purge_station, dict):
+                    station = dict(profile.purge_station)
+                    station["printer_id"] = candidate
+                    return station
+        except Exception:  # noqa: BLE001 -- a missing fact is a refusal downstream, never a crash here
+            logger.debug("purge station unavailable for %r", printer_id, exc_info=True)
+        return None
+
+    def _station_supports(self, station: dict[str, Any] | None, capability: str) -> tuple[bool, str]:
+        """Whether this backend may drive *capability* from *station*, and why not.
+
+        The base knows two things: no record, no motion; and no emitter, no
+        motion either.  A record is a set of figures, not a sequence -- the
+        base class has nothing that reads one, so a backend that inherits
+        this refuses even when the catalogue carries a record for the
+        declared model (a Klipper machine declared as ``bambu_a1`` is not
+        parked over a chute by a base class that never sends the park).  A
+        backend with a real emitter overrides this to check the record's
+        geometry and the figures the capability needs, and to quote the
+        record's own reason.
+        """
+        model = str(getattr(self, "_printer_model", "") or "").strip().lower()
+        if station is None:
+            return False, (
+                f"Kiln has no verified position record for {model}" if model
+                else "no printer_model is declared in config.yaml, so Kiln cannot look up a position record"
+            )
+        return False, (
+            f"the {self.name} backend has no motion sequence that reads {model}'s position record; "
+            "the figures are on file, the sequence is not written for this backend"
+        )
+
+    def _reported_position(self) -> dict[str, float] | None:
+        """The head's coordinates as the backend reports them, or ``None``."""
+        try:
+            pos = self.get_tool_position()
+        except Exception:  # noqa: BLE001 -- a position is a courtesy in a purge report, never a blocker
+            return None
+        return dict(pos) if isinstance(pos, dict) and pos else None
+
+    def _purge_placement(self, plan: FilamentOpPlan) -> dict[str, Any]:
+        """Where a purge is about to go, as the caller must be told.
+
+        ``status`` is ``"parked"`` when a verified station exists and the
+        printer is idle, else ``"in_place"``, with ``reason`` saying why and
+        ``position`` the head's reported coordinates where the backend has
+        any (most do not).  A paused print stays in place on purpose: the
+        head is parked over the part and Kiln does not travel mid-print.
+        """
+        model = str(getattr(self, "_printer_model", "") or "").strip().lower()
+        station = self.purge_station()
+        if plan.printer_paused:
+            return {
+                "status": "in_place",
+                "printer_id": model or None,
+                "position": self._reported_position(),
+                "wiped": None,
+                "reason": (
+                    "the print is paused and the head is parked over the part; "
+                    "Kiln does not travel mid-print"
+                ),
+            }
+        ok, why = self._station_supports(station, "purge")
+        if not ok:
+            return {
+                "status": "in_place",
+                "printer_id": (station or {}).get("printer_id") or model or None,
+                "position": self._reported_position(),
+                "wiped": None,
+                "reason": why.rstrip(". "),
+            }
+        # The travel to the chute starts with the vendor's raise and crosses
+        # the head's row; a recorded part taller than that raise is in its
+        # path.  The head stays where it is -- an in-place purge moves
+        # nothing -- and the answer says why.
+        plate, clearance, blocked = self._plate_raise_block(station)
+        if blocked:
+            assert clearance is not None
+            return {
+                "status": "in_place",
+                "printer_id": (station or {}).get("printer_id") or model or None,
+                "position": self._reported_position(),
+                "wiped": None,
+                "plate": plate.to_dict(),
+                "reason": (
+                    f"{plate.describe()}, taller than the {clearance:g} mm raise the travel to "
+                    "the chute starts with, so the head stayed where it is; clear the plate and "
+                    "run `kiln plate clear` to park over the chute again"
+                ),
+            }
+        chute = station.get("chute") or {}
+        return {
+            "status": "parked",
+            "printer_id": station["printer_id"],
+            "position": {"x_mm": chute.get("x_park_mm")},
+            "wiped": "chute wiper",
+            "reason": (
+                f"the position {station['printer_id']}'s own start sequence "
+                "flushes at, off the bed edge"
+            ),
+        }
+
+    @staticmethod
+    def _placement_sentence(placement: dict[str, Any]) -> str:
+        """The one sentence every purge answer carries: where it went."""
+        if placement.get("status") == "parked":
+            pos = placement.get("position") or {}
+            x = pos.get("x_mm")
+            where = f"X{x:g} mm" if isinstance(x, (int, float)) else "the purge chute"
+            after = placement.get("after") or "the head is still parked there"
+            return (
+                f"Parked over the purge chute first ({where} — "
+                f"{placement.get('reason')}); {after}. No pad wipe — "
+                "wipe_nozzle does that."
+            )
+        pos = placement.get("position")
+        if pos:
+            coords = " ".join(
+                f"{k.removesuffix('_mm').upper()}{v:g}"
+                for k, v in pos.items()
+                if isinstance(v, (int, float))
+            )
+            at = f"at the head's current position ({coords})"
+        else:
+            at = "at the head's current position, which this printer does not report"
+        return (
+            f"Extruded in place {at} — no travel to a purge position and no "
+            f"wipe, because {placement.get('reason')}. Expect a tail hanging "
+            "from the nozzle; clear it before printing."
+        )
+
     # -- shared G-code sequence -------------------------------------------
+
+    def _wait_for_hotend_below(
+        self, threshold: float, *, timeout: float, poll: float = 2.0
+    ) -> tuple[bool, float | None]:
+        """Poll ``get_state`` until the hotend reads at or below *threshold*.
+
+        The cooling twin of :meth:`_wait_for_hotend`; ``(reached,
+        last_reading)``.  A reading the backend cannot produce counts as
+        not reached, never as reached.
+        """
+        deadline = time.monotonic() + timeout
+        last: float | None = None
+        while True:
+            try:
+                last = self.get_state().tool_temp_actual
+            except PrinterError:
+                last = None
+            if last is not None and last <= threshold:
+                return True, last
+            if time.monotonic() >= deadline:
+                return False, last
+            time.sleep(poll)
 
     def _wait_for_hotend(
         self,
@@ -3571,6 +4434,10 @@ class PrinterAdapter(ABC):
         mechanism: str,
         heat_timeout: float = HOTEND_HEAT_TIMEOUT_S,
         pre_move_check: Any | None = None,
+        feed_mm_min: float = FILAMENT_FEED_RATE_MM_MIN,
+        pre_gcode: list[str] | None = None,
+        post_gcode: list[str] | None = None,
+        placement: dict[str, Any] | None = None,
     ) -> FilamentOpResult:
         """Heat, wait for the thermistor, then one relative E move.
 
@@ -3578,6 +4445,15 @@ class PrinterAdapter(ABC):
         temperature and before the move; it returns ``(refusal_reason,
         source)`` to stop the sequence on a genuine printer signal (Klipper's
         ``extruder.can_extrude``) or ``None`` to proceed.
+
+        *pre_gcode* is sent BEFORE the heater command — a backend that knows
+        a purge position parks there first, so the melt that oozes while
+        heating goes where the flush goes.  *post_gcode* rides in the same
+        script as the E move, after it and before ``M82`` (a tail snap and a
+        shake, still in relative E).  *placement* is the
+        :meth:`_purge_placement` record for the answer; when the move
+        extrudes and none is given, the in-place one is built here, so no
+        backend can extrude without saying where.
 
         The generic feed/retract/purge every G-code backend shares: the
         ``M104`` / ``M83`` / ``G1 E`` / ``M82`` sequence is the same on
@@ -3589,19 +4465,47 @@ class PrinterAdapter(ABC):
         unverified — unless the adapter layers a real signal on top.
         """
         target = plan.temperature
+        if placement is None and signed_length_mm > 0:
+            placement = self._purge_placement(plan)
+        parked = bool(placement and placement.get("status") == "parked")
+        base_details: dict[str, Any] = {"mechanism": mechanism}
+        if placement is not None:
+            base_details["purge_station"] = placement
+        if pre_gcode:
+            base_details["pre_gcode"] = list(pre_gcode)
+            try:
+                self.send_gcode(list(pre_gcode))
+            except PrinterError as exc:
+                return FilamentOpResult(
+                    success=False,
+                    action=plan.action,
+                    message=(
+                        f"The printer rejected the move to the purge station: "
+                        f"{exc}. Nothing was heated or extruded."
+                    ),
+                    extrusion_verified=False,
+                    verification_source="firmware_rejected_move",
+                    error_hint=str(exc),
+                    slot=plan.slot,
+                    material=plan.material,
+                    temperature=target,
+                    details=base_details,
+                )
+        still_parked = " The head was parked over the purge chute first and is still there." if parked else ""
         try:
             self.set_tool_temp(target)
         except PrinterError as exc:
             return FilamentOpResult(
                 success=False,
                 action=plan.action,
-                message=f"Could not set the hotend to {target:g}°C: {exc}",
+                message=f"Could not set the hotend to {target:g}°C: {exc}{still_parked}",
                 extrusion_verified=False,
                 verification_source="heater_command_rejected",
                 error_hint=str(exc),
                 slot=plan.slot,
                 material=plan.material,
                 temperature=target,
+                details=base_details,
             )
         reached, reading = self._wait_for_hotend(target, timeout=heat_timeout)
         if not reached:
@@ -3612,14 +4516,14 @@ class PrinterAdapter(ABC):
                     f"The hotend did not reach {target:g}°C within "
                     f"{heat_timeout:g}s (last reading "
                     f"{'unknown' if reading is None else f'{reading:g}°C'}). "
-                    "Nothing was extruded."
+                    f"Nothing was extruded.{still_parked}"
                 ),
                 extrusion_verified=False,
                 verification_source="thermistor",
                 slot=plan.slot,
                 material=plan.material,
                 temperature=target,
-                details={"last_hotend_reading": reading},
+                details={**base_details, "last_hotend_reading": reading},
             )
         if pre_move_check is not None:
             refusal = pre_move_check()
@@ -3628,18 +4532,19 @@ class PrinterAdapter(ABC):
                 return FilamentOpResult(
                     success=False,
                     action=plan.action,
-                    message=f"Not extruding: {reason}",
+                    message=f"Not extruding: {reason}{still_parked}",
                     extrusion_verified=False,
                     verification_source=source,
                     error_hint=reason,
                     slot=plan.slot,
                     material=plan.material,
                     temperature=target,
-                    details={"hotend_reading": reading, "mechanism": mechanism},
+                    details={**base_details, "hotend_reading": reading},
                 )
         commands = [
             "M83",
-            f"G1 E{signed_length_mm:g} F{FILAMENT_FEED_RATE_MM_MIN}",
+            f"G1 E{signed_length_mm:g} F{feed_mm_min:g}",
+            *(post_gcode or []),
             "M82",
         ]
         try:
@@ -3648,37 +4553,40 @@ class PrinterAdapter(ABC):
             return FilamentOpResult(
                 success=False,
                 action=plan.action,
-                message=f"The printer rejected the {plan.action} move: {exc}",
+                message=f"The printer rejected the {plan.action} move: {exc}{still_parked}",
                 extrusion_verified=False,
                 verification_source="firmware_rejected_move",
                 error_hint=str(exc),
                 slot=plan.slot,
                 material=plan.material,
                 temperature=target,
-                details={"gcode": commands, "mechanism": mechanism},
+                details={**base_details, "gcode": commands},
             )
-        verb = {"load": "fed", "unload": "retracted", "purge": "extruded"}.get(
+        verb = {"load": "fed", "unload": "retracted", "purge": "extruded", "wipe": "retracted"}.get(
             plan.action, "moved"
         )
+        message = (
+            f"Hotend at {reading:g}°C; the printer accepted a "
+            f"{abs(signed_length_mm):g} mm {plan.action} ({verb} at "
+            f"{feed_mm_min / 60:g} mm/s). This backend "
+            "reports no extruder-flow signal, so whether plastic actually "
+            "left the nozzle is not something Kiln can confirm — look at "
+            "the nozzle."
+        )
+        if placement is not None:
+            message = f"{message} {self._placement_sentence(placement)}"
         return FilamentOpResult(
             success=True,
             action=plan.action,
-            message=(
-                f"Hotend at {reading:g}°C; the printer accepted a "
-                f"{abs(signed_length_mm):g} mm {plan.action} ({verb} at "
-                f"{FILAMENT_FEED_RATE_MM_MIN / 60:g} mm/s). This backend "
-                "reports no extruder-flow signal, so whether plastic actually "
-                "left the nozzle is not something Kiln can confirm — look at "
-                "the nozzle."
-            ),
+            message=message,
             extrusion_verified=None,
             verification_source="command_accepted_only",
             slot=plan.slot,
             material=plan.material,
             temperature=target,
             details={
+                **base_details,
                 "gcode": commands,
-                "mechanism": mechanism,
                 "hotend_reading": reading,
             },
         )

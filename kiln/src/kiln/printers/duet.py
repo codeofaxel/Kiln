@@ -1314,6 +1314,29 @@ class DuetAdapter(PrinterAdapter):
             ),
         )
 
+    def _read_homed_axes(self) -> set[str] | None:
+        """RepRapFirmware's own word: ``move.axes[].homed`` (RRF 3), or the
+        legacy ``coords.axesHomed`` flags (RRF 2).  ``None`` when neither
+        answers.
+        """
+        try:
+            if self._generation() == 3:
+                axes = self._model("move.axes")
+                if not isinstance(axes, list):
+                    return None
+                return {
+                    str(a.get("letter", "")).upper()
+                    for a in axes
+                    if isinstance(a, dict) and a.get("homed") is True and str(a.get("letter", "")).upper() in "XYZ"
+                }
+            payload = self._get_json("/rr_status", params={"type": 1})
+            flags = payload.get("coords", {}).get("axesHomed")
+            if not isinstance(flags, list):
+                return None
+            return {axis for axis, flag in zip("XYZ", flags, strict=False) if flag}
+        except PrinterError:
+            return None
+
     def send_gcode(self, commands: list[str]) -> CommandVerdict:
         """Send one or more G-code commands to the printer.
 

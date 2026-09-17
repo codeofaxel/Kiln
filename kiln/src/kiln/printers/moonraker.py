@@ -1352,6 +1352,28 @@ class MoonrakerAdapter(PrinterAdapter):
             ),
         )
 
+    def _read_homed_axes(self) -> set[str] | None:
+        """Klipper's own word: ``toolhead.homed_axes`` (``"xyz"``, or fewer)."""
+        try:
+            payload = self._get_json("/printer/objects/query", params={"toolhead": "homed_axes"})
+        except PrinterError:
+            return None
+        raw = payload.get("result", {}).get("status", {}).get("toolhead", {}).get("homed_axes")
+        if not isinstance(raw, str):
+            return None
+        return {c.upper() for c in raw if c.upper() in "XYZ"}
+
+    def _z_lifts_before_home(self) -> bool | None:
+        """Whether the owner configured ``[safe_z_home]`` -- read off the printer."""
+        try:
+            payload = self._get_json("/printer/objects/query", params={"configfile": "settings"})
+        except PrinterError:
+            return None
+        settings = payload.get("result", {}).get("status", {}).get("configfile", {}).get("settings")
+        if not isinstance(settings, dict):
+            return None
+        return "safe_z_home" in settings
+
     def send_gcode(self, commands: list[str]) -> CommandVerdict:
         """Send G-code commands to Klipper via Moonraker.
 

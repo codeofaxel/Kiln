@@ -667,6 +667,12 @@ def _reload_env_config() -> None:
     _HEATER_TIMEOUT_MIN = parse_float_env("KILN_HEATER_TIMEOUT", 30.0)
 
 
+# Set once ``ensure_runtime_config`` has run in this process.  ``_get_adapter``
+# reads it so a door that forgot the startup step still resolves the user's
+# printer -- once -- instead of answering "No printer configured".
+_runtime_config_resolved = False
+
+
 def ensure_runtime_config() -> None:
     """Load ``.env`` files, then resolve the printer + env-backed globals.
 
@@ -699,6 +705,8 @@ def ensure_runtime_config() -> None:
     except ImportError:
         pass
     _reload_env_config()
+    global _runtime_config_resolved  # noqa: PLW0603
+    _runtime_config_resolved = True
 
 
 # ---------------------------------------------------------------------------
@@ -1393,7 +1401,31 @@ def _install_mcp_request_context_capture() -> None:
     tool_mgr._kiln_request_context_capture_installed = True
 
 
+def _publish_schemas_without_defaults(tools: list[Any]) -> None:
+    """``tools/list`` mutator: every published inputSchema loses ``default``.
+
+    The registry keeps the full schema — argument validation, the
+    unknown-argument gate and the OpenAI export all read it there — so each
+    ``Tool`` on the wire is given a NEW dict rather than edited in place.
+    See ``kiln.tool_args.published_input_schema`` for why the keyword goes.
+    """
+    from kiln.tool_args import published_input_schema
+
+    for tool in tools:
+        schema = getattr(tool, "inputSchema", None)
+        if isinstance(schema, dict):
+            tool.inputSchema = published_input_schema(schema)
+
+
+def _install_published_schema() -> None:
+    """Attach the published-schema mutator to the one ``tools/list`` door."""
+    from kiln.mcp_compat import wrap_list_tools_result
+
+    wrap_list_tools_result(mcp, _publish_schemas_without_defaults)
+
+
 _install_mcp_request_context_capture()
+_install_published_schema()
 
 
 # ---------------------------------------------------------------------------
@@ -1448,6 +1480,20 @@ def _get_adapter() -> PrinterAdapter:
         # later, properly configured env/YAML default.
         with contextlib.suppress(Exception):
             return _get_registry().get(_resolve_effective_printer_name(None))
+        # Still nothing: this process may simply never have run the startup
+        # step.  ``kiln filament`` did exactly that (2026-09-15, live on an
+        # A1): it imported this module and called a tool function, so the
+        # env/YAML globals were never filled and a correctly configured
+        # machine answered "No printer configured" -- with and without
+        # ``--printer default``.  Every door is supposed to call
+        # ``ensure_runtime_config()``; resolving here, once, means the next
+        # door that forgets still finds the user's printer.  Only when the
+        # registry is empty too, so an embedding host that filled the
+        # registry directly is never re-configured behind its back.
+        if not _runtime_config_resolved:
+            ensure_runtime_config()
+            if _PRINTER_HOST:
+                return _get_adapter()
         raise RuntimeError(
             "No printer configured. Set KILN_PRINTER_HOST environment variable "
             "to the printer URL (e.g. http://octopi.local). Also set "
@@ -2354,11 +2400,50 @@ def _on_print_ended_event(event: Any) -> None:
     except Exception as exc:  # noqa: BLE001 — unknown machine: say nothing
         logger.debug("Print-ended event named an unknown printer (%s): %s", name, exc)
         return
+    _note_plate_after_print_ended(adapter)
     try:
         if _is_heater_watchdog_machine(adapter):
             _get_heater_watchdog().notify_print_ended()
     except Exception as exc:  # noqa: BLE001
         logger.debug("Heater-watchdog end notification skipped: %s", exc)
+
+
+def _note_plate_after_print_ended(adapter: PrinterAdapter) -> None:
+    """A print ended, so the part is STILL on the plate.  Re-assert it.
+
+    Finished, failed or cancelled, the plate holds whatever was printed
+    until a person takes it off; nothing here marks it clear.  The record
+    (``kiln.plate_state``) keeps the job it already holds -- the file and
+    its height from the start -- and only the moment changes, so a home or
+    park after the print refuses with the same concrete reason.  Reached
+    from both doors an ending arrives through: the event bus (PRINT_FAILED /
+    PRINT_CANCELLED from the recovery engine) and the status-edge hook that
+    sees a completion.  Never raises.
+    """
+    try:
+        from kiln.plate_state import mark_occupied
+
+        mark_occupied(adapter, None, source="print_ended")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Plate record not re-asserted after print end: %s", exc)
+
+
+def _note_plate_after_print_ended_by_name(printer_name: str) -> None:
+    """The status-edge door to :func:`_note_plate_after_print_ended`.
+
+    The ended hook carries a name (``outcome_printer_name``), not an
+    adapter; an empty or unknown name records nothing -- never "the
+    default printer", for the same reason the watchdog retire refuses to
+    guess.
+    """
+    if not printer_name:
+        return
+    try:
+        adapter = _get_registry().get(printer_name)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Print-ended hook named an unknown printer (%s): %s", printer_name, exc)
+        return
+    _note_plate_after_print_ended(adapter)
 
 
 def _watched_machines(exclude: PrinterAdapter | None = None) -> set[str]:
@@ -3257,6 +3342,7 @@ def _install_print_lifecycle_hooks() -> None:
 
     register_print_started_hook(_spawn_print_watchdog)
     register_print_ended_hook(_retire_print_watchdog)
+    register_print_ended_hook(_note_plate_after_print_ended_by_name)
     _print_lifecycle_hooks_installed = True
 
 
@@ -14769,8 +14855,10 @@ def troubleshoot_printer(
             result["filament_next_step"] = (
                 "Kiln can test the melt zone directly: purge_filament heats the "
                 "nozzle and extrudes a short length, reporting the printer's own "
-                "fault code in plain language if one is raised. load_filament / "
-                "unload_filament drive a spool change the same way."
+                "fault code in plain language if one is raised, and saying where "
+                "the purge went. load_filament / unload_filament drive a spool "
+                "change the same way, and wipe_nozzle cleans the tip on the "
+                "machine's own wipe pad where Kiln has a verified position for it."
             )
             # Same trigger as the next step above, because the next step is
             # the hazard: anyone who reaches this branch is about to put a

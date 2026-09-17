@@ -341,6 +341,9 @@ class TestTheAdapterChokepoint:
                 "load_filament",
                 "unload_filament",
                 "purge_filament",
+                "wipe_nozzle",
+                "home_axes",
+                "park_head",
             }
         )
 

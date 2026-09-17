@@ -1015,6 +1015,10 @@ class TestGetAdapter:
         monkeypatch.setattr(mod, "_PRINTER_HOST", "")
         monkeypatch.setattr(mod, "_PRINTER_API_KEY", "somekey")
         monkeypatch.setattr(mod, "_PRINTER_TYPE", "octoprint")
+        # The getter now resolves config.yaml once before giving up; this
+        # pin is about what happens when that finds nothing, so it must not
+        # read the developer's real ~/.kiln/config.yaml.
+        monkeypatch.setattr(mod, "_runtime_config_resolved", True)
 
         with pytest.raises(RuntimeError, match="KILN_PRINTER_HOST"):
             mod._get_adapter()
@@ -1064,6 +1068,7 @@ class TestGetAdapter:
         monkeypatch.setattr(mod, "_adapter", None)
         monkeypatch.setattr(mod, "_PRINTER_HOST", "")
         monkeypatch.setattr(mod, "_registry", PrinterRegistry())
+        monkeypatch.setattr(mod, "_runtime_config_resolved", True)  # see test_missing_host
 
         with pytest.raises(RuntimeError, match="KILN_PRINTER_HOST"):
             mod._get_adapter()

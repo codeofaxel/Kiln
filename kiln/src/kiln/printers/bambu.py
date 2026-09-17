@@ -44,8 +44,11 @@ from kiln.printers.base import (
     DEFAULT_PURGE_LENGTH_MM,
     STALE_STATE_WARN_AGE,
     CameraStreamError,
+    FilamentHandlingUnsupported,
     FilamentOpPlan,
     FilamentOpResult,
+    HomeResult,
+    HomingUnsupported,
     JobProgress,
     JobResult,
     NozzleClumpingDetection,
@@ -959,6 +962,29 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
 _BAMBU_ACCESSORY_MODULE_HEADS: frozenset[str] = frozenset(
     {"ams_f1", "n3f", "n3s", "ams"}
 )
+
+
+def _merge_push_status(cache: dict[str, Any], delta: dict[str, Any]) -> None:
+    """Fold a ``push_status`` frame into the cache, section by section.
+
+    The printer pushes deltas: a frame carries only what changed, and a
+    section it does carry may itself be partial -- ``{"ams": {"tray_now":
+    "3", "version": 7}}`` is a whole frame on an A1.  A top-level
+    ``dict.update`` would replace the merged ``ams`` section with those two
+    keys, and the next ``ams_status`` would answer ``ams_exist_bits "0",
+    units []`` beside ``tray_now "3"``: a tray feeding the nozzle on a unit
+    that does not exist (measured 2026-09-15, right after a load, and again
+    on the next read).  So a dict inside a dict merges; every other value
+    -- a scalar, a list (``ams.ams``, ``hms``, ``lights_report``) -- is
+    taken as the printer sent it.  Absent means unchanged; present means
+    this, including a list the printer emptied to say a unit is gone.
+    """
+    for key, value in delta.items():
+        current = cache.get(key)
+        if isinstance(value, dict) and isinstance(current, dict):
+            _merge_push_status(current, value)
+        else:
+            cache[key] = value
 
 
 def _is_accessory_module(name: str) -> bool:
@@ -2266,7 +2292,7 @@ class BambuAdapter(PrinterAdapter):
                     # as a one-second-old one.  This is also exactly the
                     # quantity the polled door guards on as state_age_seconds.
                     push_gap_seconds = self._gcode_state_age_locked()
-                    self._last_status.update(print_data)
+                    _merge_push_status(self._last_status, print_data)
                     self._last_state_time = time.monotonic()
                     for key in print_data:
                         self._field_seen_at[key] = self._last_state_time
@@ -5908,6 +5934,85 @@ class BambuAdapter(PrinterAdapter):
     _FILAMENT_LOAD_WAIT_S: float = 120.0
     _FILAMENT_UNLOAD_WAIT_S: float = 90.0
     _FILAMENT_PURGE_WATCH_S: float = 10.0
+    #: The wipe script homes Z on the steel strip and runs two brush passes;
+    #: that takes longer than a purge, so its fault watch is longer too.
+    _FILAMENT_WIPE_WATCH_S: float = 45.0
+
+    # -- the purge station, and the three doors that drive it --------------
+    #
+    # How a Bambu model is raised, parked over its chute, wiped on its pad
+    # and homed -- in its maker's own order -- is served by kiln-pro, at no
+    # charge to the free tier, through ``kiln._pro_motion_bridge``.  This
+    # file keeps the doors and the floor: without the served sequence a
+    # model refuses to home, park or wipe by name and says what to use
+    # instead, and a purge runs in place and says so.  Never a coordinate
+    # this file inferred, never a sibling model's.
+
+    _SERVED_LINE = (
+        "The vendor-cited motion sequence for {model} is served through Kiln's "
+        "hosted service (kiln-pro), free of charge, and no served sequence answered "
+        "on this install."
+    )
+
+    def _served_refusal(self, verb: str) -> str:
+        model = self._printer_model or "this printer (no printer_model declared in config.yaml)"
+        return (
+            f"Kiln will not {verb} {model} from this install: "
+            + self._SERVED_LINE.format(model=model)
+            + " Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, "
+            "with your eyes on the plate. The screen's Home button descends the nozzle to the bed "
+            "and is the wrong tool with a part on the plate."
+        )
+
+    def _station_supports(self, station: dict[str, Any] | None, capability: str) -> tuple[bool, str]:
+        """Whether this install may drive *capability* on this model, and why not.
+
+        The served side answers from the record's geometry and figures and
+        quotes the record's own reason when it refuses.  Without it: no
+        record is the base's answer; a record with no sequence to drive it
+        is refused with the served line.
+        """
+        from kiln import _pro_motion_bridge as _bridge
+
+        answer = _bridge.station_supports(self, station, capability)
+        if answer is not None:
+            return bool(answer[0]), str(answer[1])
+        model = (station or {}).get("printer_id") or str(getattr(self, "_printer_model", "") or "").strip().lower()
+        if not model:
+            return super()._station_supports(station, capability)  # no model declared: the base names that
+        # No served answer -- the record, the sequence, or both are not here.
+        # One sentence for all three, so a refusal never blames the wrong half.
+        return False, self._SERVED_LINE.format(model=model)
+
+    def _park_for_firmware_routine(self, plan: FilamentOpPlan) -> dict[str, Any]:
+        """Park over the chute before the firmware's own change-filament routine.
+
+        The routine (``ams_change_filament``) retracts, feeds and purges
+        without moving the head, so run at home it purges at home -- measured
+        2026-09-15.  The touchscreen wizard parks first; the served sequence
+        does the same and returns the placement record for the answer.
+        Without it the routine runs where the head is, and the answer says so.
+        """
+        from kiln import _pro_motion_bridge as _bridge
+
+        placement = _bridge.park_for_firmware_routine(self, plan)
+        if isinstance(placement, dict):
+            return placement
+        return self._purge_placement(plan)
+
+    @staticmethod
+    def _tray_now_of(status: dict[str, Any]) -> Any:
+        """``tray_now`` as the printer reports it.
+
+        Every Bambu push carries it inside the ``ams`` section, never at
+        the top level of ``print`` -- which is where the watch below used to
+        look, so on a real machine it could only ever time out.  The
+        top-level key is read second for a cache that was assembled by hand.
+        """
+        section = status.get("ams")
+        if isinstance(section, dict) and section.get("tray_now") is not None:
+            return section["tray_now"]
+        return status.get("tray_now")
 
     def _ams_tray(self, slot: int) -> dict[str, Any] | None:
         """The tray dict ``get_ams_status`` reports for global tray *slot*."""
@@ -5936,7 +6041,7 @@ class BambuAdapter(PrinterAdapter):
         tray_slot = slot
         if tray_slot is None:
             with self._state_lock:
-                raw_now = self._last_status.get("tray_now")
+                raw_now = self._tray_now_of(self._last_status)
             with contextlib.suppress(TypeError, ValueError):
                 now = int(raw_now)
                 if now not in (self._BAMBU_EXTERNAL_SPOOL_TRAY, self._BAMBU_NO_TRAY):
@@ -6043,13 +6148,36 @@ class BambuAdapter(PrinterAdapter):
         """
         deadline = time.monotonic() + wait_seconds
         last_now: Any = None
+        # The hottest target the firmware set during its routine.  Measured
+        # on an A1 (2026-09-15): Kiln validated and sent 215 °C, the firmware
+        # heated to 250 for its change-filament routine — the "common flush
+        # temp" its own start sequence sets (``M109 S250``) — and dropped to
+        # 215 only when the routine finished.  The gate binds what Kiln
+        # sends; it does not bind the routine.  So the answer reports the
+        # number the machine actually used rather than the one it checked.
+        firmware_target: float | None = None
         while True:
             with self._state_lock:
                 status = dict(self._last_status)
+            with contextlib.suppress(TypeError, ValueError):
+                seen = float(status.get("nozzle_target_temper"))
+                if seen > 0 and (firmware_target is None or seen > firmware_target):
+                    firmware_target = seen
+            override = (
+                f" The firmware ran its routine at {firmware_target:g}°C — its own "
+                f"flush temperature — not the {plan.temperature:g}°C Kiln validated; "
+                "the temperature gate binds what Kiln sends, and the firmware's "
+                "change-filament routine overrides it."
+                if firmware_target is not None and firmware_target > plan.temperature
+                else ""
+            )
+            extra = {"firmware_hotend_target_c": firmware_target}
             new_faults = self._bambu_fault_codes(status) - faults_before
             if new_faults:
-                return self._fault_result(plan, new_faults, stage=stage)
-            raw_now = status.get("tray_now")
+                result = self._fault_result(plan, new_faults, stage=stage)
+                result.details.update(extra)
+                return result
+            raw_now = self._tray_now_of(status)
             with contextlib.suppress(TypeError, ValueError):
                 last_now = int(raw_now)
                 if last_now == expect_tray:
@@ -6063,16 +6191,27 @@ class BambuAdapter(PrinterAdapter):
                         action=plan.action,
                         message=(
                             f"{plan.action.capitalize()} complete: the AMS reports "
-                            f"{what} and no fault was raised."
+                            f"{what} and no fault was raised.{override}"
                         ),
                         extrusion_verified=True,
                         verification_source="ams_tray_now",
                         slot=plan.slot,
                         material=plan.material,
                         temperature=plan.temperature,
-                        details={"tray_now": last_now},
+                        details={"tray_now": last_now, **extra},
                     )
             if time.monotonic() >= deadline:
+                # The routine outlasted the watch, not the other way round:
+                # a load is a minute or two of heating, cutting, retracting
+                # and feeding, and the watch is bounded by the caller's
+                # window.  Say what finishes the answer, and say not to send
+                # the command again -- a second ams_change_filament into a
+                # routine still running is how a wizard gets confused.
+                next_read = (
+                    f"ams_status: tray_now == {expect_tray} means the "
+                    f"{plan.action} finished; printer_status: a non-zero "
+                    "print_error is the fault it raised."
+                )
                 return FilamentOpResult(
                     success=False,
                     action=plan.action,
@@ -6080,16 +6219,22 @@ class BambuAdapter(PrinterAdapter):
                         f"The {plan.action} command was sent, but within "
                         f"{wait_seconds:g}s the AMS never reported "
                         f"tray_now={expect_tray} (last seen {last_now!r}) and "
-                        "raised no fault. The printer may still be working, or "
-                        "the routine may be waiting on the screen — check it "
-                        "before assuming either."
+                        "raised no fault. The printer is most likely still "
+                        "working through its routine, or it is waiting on the "
+                        f"screen. Do not send the {plan.action} again: read "
+                        f"{next_read}{override}"
                     ),
                     extrusion_verified=None,
                     verification_source="timeout_no_signal",
                     slot=plan.slot,
                     material=plan.material,
                     temperature=plan.temperature,
-                    details={"tray_now": last_now, "waited_seconds": wait_seconds},
+                    details={
+                        "tray_now": last_now,
+                        "waited_seconds": wait_seconds,
+                        "next_read": next_read,
+                        **extra,
+                    },
                 )
             time.sleep(1.0)
 
@@ -6135,63 +6280,181 @@ class BambuAdapter(PrinterAdapter):
                     "(or pick a tray that has one) and try again."
                 )
         faults_before = self._snapshot_faults()
+        placement = self._park_for_firmware_routine(plan)
         self._ams_change_filament(target, plan)
-        wait = float(plan.options.get("wait_seconds") or self._FILAMENT_LOAD_WAIT_S)
-        return self._watch_tray_change(
+        wait = plan.wait_seconds(self._FILAMENT_LOAD_WAIT_S)
+        result = self._watch_tray_change(
             plan,
             expect_tray=target,
             faults_before=faults_before,
             wait_seconds=wait,
             stage="load (the firmware's own feed-and-purge routine)",
         )
+        return self._say_where(result, placement)
 
     def _unload_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
         faults_before = self._snapshot_faults()
+        placement = self._park_for_firmware_routine(plan)
         self._ams_change_filament(self._BAMBU_NO_TRAY, plan)
-        wait = float(plan.options.get("wait_seconds") or self._FILAMENT_UNLOAD_WAIT_S)
-        return self._watch_tray_change(
+        wait = plan.wait_seconds(self._FILAMENT_UNLOAD_WAIT_S)
+        result = self._watch_tray_change(
             plan,
             expect_tray=self._BAMBU_NO_TRAY,
             faults_before=faults_before,
             wait_seconds=wait,
             stage="unload",
         )
+        return self._say_where(result, placement)
+
+    def _say_where(self, result: FilamentOpResult, placement: dict[str, Any]) -> FilamentOpResult:
+        """Every answer says where the head was when the plastic moved."""
+        result.details["purge_station"] = placement
+        result.message = f"{result.message} {self._placement_sentence(placement)}"
+        return result
+
+    def _watch_for_purge_fault(
+        self, plan: FilamentOpPlan, faults_before: set[tuple[str, str]], *, watch: float, stage: str
+    ) -> FilamentOpResult | None:
+        """A fault raised inside *watch* seconds, as a result, or ``None``."""
+        deadline = time.monotonic() + watch
+        while True:
+            new_faults = self._snapshot_faults() - faults_before
+            if new_faults:
+                return self._fault_result(plan, new_faults, stage=stage)
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(1.0)
 
     def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Heat and extrude through ``gcode_line``, then watch for a fault.
+        """Park over the chute, heat, extrude, snap and shake; watch for a fault.
+
+        Where the catalogue carries a verified ``purge_station`` for the
+        declared model and the printer is idle, the head is driven to the
+        flush position its own start sequence uses BEFORE the heater
+        command, so the ooze of heating and the purge itself fall into the
+        chute, and the vendor's own tail snap and "wipe and shake" follow
+        the extrude.  Otherwise the purge happens in place and the answer
+        says so and why — a paused print (the head is over the part), or no
+        verified position for the model — never at a coordinate Kiln
+        inferred.
 
         Bambu reports no extruder-flow telemetry, so a clean purge stays
         ``extrusion_verified=None``; a fault code raised inside the watch
         window (the same codes its own load wizard raises) turns it
         ``False`` with the reading.
         """
+        from kiln import _pro_motion_bridge as _bridge
+
         faults_before = self._snapshot_faults()
+        placement = self._purge_placement(plan)
+        pre: list[str] | None = None
+        post: list[str] | None = None
+        if placement.get("status") == "parked":
+            # The park-over-chute lines before the heater and the snap-and-
+            # shake after the extrude are the served sequence's; a parked
+            # placement without them cannot happen, because "parked" was
+            # the served gate's own answer -- but if it did, the purge runs
+            # in place and says so rather than claim a park it never sent.
+            scripts = _bridge.purge_scripts(self, plan, placement)
+            if scripts is None:
+                placement = {**placement, "status": "in_place", "wiped": None,
+                             "reason": "the served motion sequence answered no script for the chute"}
+            else:
+                pre, post, after = scripts
+                if after:
+                    placement["after"] = after
         result = self._gcode_filament_move(
             plan,
             signed_length_mm=float(plan.length_mm or DEFAULT_PURGE_LENGTH_MM),
             mechanism="bambu_mqtt_gcode_line",
+            pre_gcode=pre,
+            post_gcode=post,
+            placement=placement,
         )
         if not result.success:
             return result
-        watch = float(plan.options.get("wait_seconds") or self._FILAMENT_PURGE_WATCH_S)
-        deadline = time.monotonic() + watch
-        while True:
-            new_faults = self._snapshot_faults() - faults_before
-            if new_faults:
-                return self._fault_result(plan, new_faults, stage="purge")
-            if time.monotonic() >= deadline:
-                break
-            time.sleep(1.0)
+        watch = plan.wait_seconds(self._FILAMENT_PURGE_WATCH_S)
+        fault = self._watch_for_purge_fault(plan, faults_before, watch=watch, stage="purge")
+        if fault is not None:
+            fault.details["purge_station"] = placement
+            return fault
         result.verification_source = "no_fault_within_window"
         result.message = (
             f"Hotend at {result.details.get('hotend_reading')}°C; the printer "
             f"accepted a {plan.length_mm:g} mm purge and raised no extrusion "
             f"fault in the {watch:g}s after it. Bambu reports no flow sensor, "
             "so 'no fault' is the strongest thing the printer can say — look "
-            "at the nozzle to confirm a clean stream."
+            f"at the nozzle to confirm a clean stream. {self._placement_sentence(placement)}"
         )
         result.details["fault_watch_seconds"] = watch
         return result
+
+    def _wipe_nozzle_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
+        """Run the model's own wipe-pad pass where it is served, or refuse with the reason.
+
+        Refused while paused: the head is parked over the part, and Kiln
+        does not travel mid-print.
+        """
+        from kiln import _pro_motion_bridge as _bridge
+
+        if plan.printer_paused:
+            return FilamentOpResult(
+                success=False,
+                action=plan.action,
+                message=(
+                    "Not wiping: the print is paused and the head is parked over "
+                    "the part. Kiln does not travel mid-print; finish or cancel "
+                    "the print first, or wipe from the printer's own screen."
+                ),
+                extrusion_verified=False,
+                verification_source="refused_paused",
+                slot=plan.slot,
+                material=plan.material,
+                temperature=plan.temperature,
+                details={"purge_station": self._purge_placement(plan)},
+            )
+        result = _bridge.wipe_nozzle_impl(self, plan)
+        if result is not None:
+            return result
+        model = self._printer_model or "this printer (no printer_model declared in config.yaml)"
+        raise FilamentHandlingUnsupported(
+            f"Kiln will not wipe {model} from this install: {self._SERVED_LINE.format(model=model)} "
+            "Wipe from the printer's own screen, or start a print -- its start sequence wipes on the pad."
+        )
+
+    def _home_axes_impl(self, axes: str, options: dict[str, Any]) -> HomeResult:
+        """Home the way the model's own start sequence does, where it is served; else refuse.
+
+        Every Bambu start file raises the head before it homes and never
+        sends a bare G28 from an unknown height, so this file never invents
+        one: without the served sequence the answer is a refusal that names
+        the screen's jog controls, Z up first.
+        """
+        from kiln import _pro_motion_bridge as _bridge
+
+        result = _bridge.home_axes_impl(self, axes, options)
+        if result is not None:
+            return result
+        raise HomingUnsupported(
+            self._served_refusal("home") + " On this family the vendor's own sequence raises the "
+            "head before it homes, and a bare G28 from an unknown height is exactly the move it avoids."
+        )
+
+    def _park_head_impl(self, options: dict[str, Any]) -> HomeResult:
+        """Raise, home X, travel off the plate edge to the chute -- where it is served; else refuse."""
+        from kiln import _pro_motion_bridge as _bridge
+
+        result = _bridge.park_head_impl(self, options)
+        if result is not None:
+            result.action = "park"
+            return result
+        raise HomingUnsupported(self._served_refusal("park"))
+
+    def _read_homed_axes(self) -> set[str] | None:
+        """Which axes the printer reports homed, where the served side can read them."""
+        from kiln import _pro_motion_bridge as _bridge
+
+        return _bridge.read_homed_axes(self)
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code

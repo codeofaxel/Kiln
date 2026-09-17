@@ -1,17 +1,20 @@
-"""Filament handling tools plugin — load, unload, purge.
+"""Filament handling tools plugin — load, unload, purge, wipe.
 
-The three doors a user meets when a spool has to move: feed a slot to
-the nozzle, pull it back out, or push a short length through to learn
-whether the melt zone is clear.  Each is one call into the adapter's
-gated template (:meth:`~kiln.printers.base.PrinterAdapter.load_filament`
-and siblings), so the safety gate — not mid-print, safety-profile
-ceiling, the spool's own temperature window, the cold-extrusion floor —
-runs the same way here, from the CLI, and from a recovery flow.
+The four doors a user meets when a spool has to move or a tip has to be
+cleaned: feed a slot to the nozzle, pull it back out, push a short length
+through to learn whether the melt zone is clear, or wipe the tip on the
+machine's own pad.  Each is one call into the adapter's gated template
+(:meth:`~kiln.printers.base.PrinterAdapter.load_filament` and siblings),
+so the safety gate — not mid-print, safety-profile ceiling, the spool's
+own temperature window, the cold-extrusion floor — runs the same way
+here, from the CLI, and from a recovery flow.
 
 Purge doubles as the clog test.  ``extrusion_verified`` in the answer is
 ``True`` / ``False`` only from a signal the printer genuinely produced
 and ``None`` when it produced none; ``error_hint`` carries the printer's
-own fault code in plain language.
+own fault code in plain language.  Every answer says where the plastic
+went — parked over the model's own purge chute, or in place and why —
+and ``purge_station`` in the answer carries that as data.
 
 Auto-discovered by :func:`~kiln.plugin_loader.register_all_plugins` —
 no manual imports needed.  The tool bodies are module-level functions so
@@ -21,9 +24,42 @@ no manual imports needed.  The tool bodies are module-level functions so
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 _logger = logging.getLogger(__name__)
+
+#: Wall-clock ceiling on how long a filament tool WATCHES the printer for
+#: its answer.  Hosts bound the MCP tool CALL (~60 s observed 2026-08-19;
+#: the same window ``model_visualizer._CALL_BUDGET_S`` fits inside), and a
+#: watch longer than that finishes on the server after the client has
+#: given up, so the answer is lost.  Measured 2026-09-15: ``load_filament
+#: (wait_seconds=180)`` on an A1 came back "Request timed out" while the
+#: load itself ran to completion -- the caller got no step, no fault
+#: code, no extrusion_verified.  The adapters assume no window (their own
+#: load / unload defaults are longer than it), so this door is where the
+#: window is declared, through the plan every backend reads.  A watch
+#: that runs out answers ``outcome: "accepted"`` and names the read that
+#: finishes it.  Env-tunable; 0 disables.  The default leaves room inside
+#: the ~60 s for the AMS and state reads around the watch.
+_WAIT_BUDGET_S = float(os.environ.get("KILN_FILAMENT_WAIT_BUDGET_S", "40") or 0)
+
+
+def _outcome(result: Any) -> str:
+    """``confirmed`` / ``accepted`` / ``failed`` -- the one field the
+    other control verbs (``set_temperature``, ``start_print``) branch on.
+
+    ``confirmed``: the printer showed the effect (``extrusion_verified``
+    True).  ``failed``: the gate or the printer refused, or a fault was
+    raised.  ``accepted``: the command was sent and not refused and the
+    printer has not shown the effect -- a purge on a machine with no flow
+    sensor, or a watch that ran out before the AMS answered.
+    """
+    if result.extrusion_verified is True:
+        return "confirmed"
+    if result.success or result.verification_source == "timeout_no_signal":
+        return "accepted"
+    return "failed"
 
 #: Rate limits in server.py's ``(min_interval_ms, max_per_minute)`` form —
 #: these move heaters and steppers, so they get the pause/resume cadence.
@@ -31,6 +67,15 @@ _RATE_LIMITS: dict[str, tuple[int, int]] = {
     "load_filament": (5000, 6),
     "unload_filament": (5000, 6),
     "purge_filament": (5000, 6),
+    "wipe_nozzle": (5000, 6),
+}
+
+#: The adapter method (and MCP tool name) behind each action word.
+_TOOL_NAMES: dict[str, str] = {
+    "load": "load_filament",
+    "unload": "unload_filament",
+    "purge": "purge_filament",
+    "wipe": "wipe_nozzle",
 }
 
 
@@ -57,8 +102,14 @@ def run_filament_op(
     from kiln.printers.base import FilamentHandlingUnsupported, PrinterError
     from kiln.registry import PrinterNotFoundError
 
-    verb = {"load": "load filament on", "unload": "unload filament from", "purge": "purge filament on"}[action]
-    tool_name = f"{action}_filament"
+    verb = {
+        "load": "load filament on",
+        "unload": "unload filament from",
+        "purge": "purge filament on",
+        "wipe": "wipe the nozzle on",
+    }[action]
+    what = "the nozzle" if action == "wipe" else "filament"
+    tool_name = _TOOL_NAMES[action]
     if block := _srv._emergency_latch_error(
         tool_name, _srv._resolve_effective_printer_name(printer_name)
     ):
@@ -76,6 +127,27 @@ def run_filament_op(
                 "Use the printer's own screen or web UI for this step.",
                 code="UNSUPPORTED",
             )
+        # Declare the host's window on the plan, once, for all three verbs.
+        # The adapter bounds its watch by it; a caller who asked for more
+        # is told what was applied instead of being answered by a timeout
+        # with nothing in it.
+        asked = kwargs.get("wait_seconds")
+        clamp_note: dict[str, Any] = {}
+        if _WAIT_BUDGET_S > 0:
+            kwargs["wait_ceiling_seconds"] = _WAIT_BUDGET_S
+            if asked is not None and float(asked) > _WAIT_BUDGET_S:
+                clamp_note = {
+                    "wait_seconds_requested": asked,
+                    "wait_seconds_applied": _WAIT_BUDGET_S,
+                    "wait_note": (
+                        f"wait_seconds={asked:g} is longer than the "
+                        f"{_WAIT_BUDGET_S:g}s a tool call can wait inside the "
+                        "client's request window, so the watch was bounded "
+                        f"to {_WAIT_BUDGET_S:g}s. If the printer has not answered "
+                        "by then the result says what to read next. "
+                        "KILN_FILAMENT_WAIT_BUDGET_S sets the ceiling; 0 removes it."
+                    ),
+                }
         method = getattr(adapter, tool_name)
         result = method(**kwargs)
         if _srv._is_heater_watchdog_machine(adapter):
@@ -98,24 +170,45 @@ def run_filament_op(
         # troubleshoot_printer names this tool as the next step in the very
         # branch that fires its own warning — so without this, the warning
         # stopped one call short of the moment it describes.
-        warn = action == "purge" or not result.success
+        warn = action in ("purge", "wipe") or not result.success
+        outcome = _outcome(result)
         if not result.success:
-            extra = {"printer_name": target_name, "filament": result.to_dict()}
+            extra: dict[str, Any] = {
+                "printer_name": target_name,
+                "outcome": outcome,
+                "filament": result.to_dict(),
+                **clamp_note,
+            }
+            # A watch that ran out is not a refusal: the routine is most
+            # likely still running.  Lift the pointer to the top so the
+            # caller reads the printer next instead of sending the command
+            # again.
+            if result.verification_source == "timeout_no_signal":
+                code = "FILAMENT_UNCONFIRMED"
+                if result.details.get("next_read"):
+                    extra["next_read"] = result.details["next_read"]
+            else:
+                code = "FILAMENT_FAULT" if result.error_code else "FILAMENT_OP_FAILED"
             if warn:
                 extra["safety"] = MOLTEN_FILAMENT_WARNING
-            return _srv._error_dict(
-                result.message,
-                code="FILAMENT_FAULT" if result.error_code else "FILAMENT_OP_FAILED",
-                extra=extra,
-            )
-        payload = {"success": True, "printer_name": target_name, **result.to_dict()}
+            return _srv._error_dict(result.message, code=code, extra=extra)
+        payload = {
+            "success": True,
+            "printer_name": target_name,
+            "outcome": outcome,
+            **result.to_dict(),
+            **clamp_note,
+        }
         if warn:
             payload["safety"] = MOLTEN_FILAMENT_WARNING
         return payload
     except FilamentHandlingUnsupported as exc:
-        return _srv._error_dict(str(exc), code="UNSUPPORTED")
+        return _srv._error_dict(str(exc), code="UNSUPPORTED", extra={"outcome": "failed"})
     except (PrinterError, RuntimeError) as exc:
-        return _srv._error_dict(f"Failed to {action} filament: {exc}")
+        # The gate refused (or the transport did) before anything moved.
+        return _srv._error_dict(
+            f"Failed to {action} {what}: {exc}", extra={"outcome": "failed"}
+        )
     except Exception as exc:
         _logger.exception("Unexpected error in %s", tool_name)
         return _srv._error_dict(f"Unexpected error in {tool_name}: {exc}", code="INTERNAL_ERROR")
@@ -138,6 +231,7 @@ def load_filament(
     temperature: float | None = None,
     length_mm: float | None = None,
     wait_seconds: float | None = None,
+    keep_hot: bool = False,
     printer_name: str | None = None,
 ) -> dict:
     """Feed filament to the nozzle — an AMS tray on Bambu, a manual feed elsewhere.
@@ -158,6 +252,33 @@ def load_filament(
     and the 170 °C cold-extrusion floor; refused outside any of them.
     Refused while a print is running (paused is fine).
 
+    Branch on ``outcome`` — one field, three values, the same shape
+    ``set_temperature`` and ``start_print`` use:
+
+    - ``"confirmed"``: the printer showed the effect (the AMS reports the
+      tray feeding the nozzle).
+    - ``"accepted"``: the command was sent and not refused, and the printer
+      has not shown the effect yet.  A Bambu load takes a minute or two
+      and a tool call cannot wait that long, so this is the normal answer
+      when the watch runs out: the routine is still running.  Do NOT send
+      the load again — read ``next_read`` (``ams_status`` for ``tray_now``,
+      ``printer_status`` for ``print_error``) to finish the answer.
+    - ``"failed"``: the gate or the printer refused, or a fault was raised
+      (``error_code`` / ``error_hint``).
+
+    On Bambu Lab that check binds what Kiln sends, not what the routine
+    does: the firmware heats to its own flush temperature for a filament
+    change (250 °C observed on an A1 asked for 215, the ``M109 S250`` its
+    own start sequence sets) and drops to the requested target only when
+    the routine finishes.  The answer reports the temperature the firmware
+    actually used (``firmware_hotend_target_c``) beside the one Kiln
+    validated; the gate is not widened to match it.
+
+    Where the declared model's own purge position is served through Kiln's hosted service (kiln-pro), free of charge, the head is parked over the purge chute
+    before the routine runs, so its purge falls into the chute instead of
+    hanging off the nozzle at home; the answer says where the head was
+    either way.
+
     Args:
         slot: AMS tray id as ``ams_status`` numbers them (0–3 on the first
             unit, 4–7 on the second).  Omit for the external / single spool.
@@ -168,7 +289,14 @@ def load_filament(
         length_mm: Feed distance for the generic G-code path (default 60;
             bowden machines need more).  Ignored where the firmware's own
             routine decides.
-        wait_seconds: How long to watch for the AMS to confirm (default 120).
+        wait_seconds: How long to watch for the AMS to confirm.  Bounded to
+            what a tool call can wait inside the client's request window
+            (40 s unless ``KILN_FILAMENT_WAIT_BUDGET_S`` says otherwise); a
+            longer ask is applied at the bound and the response says so.
+        keep_hot: Leave the heater ON afterwards, for a caller about to do
+            something else hot.  Off by default: every op ends with the
+            heater off and says so; where the machine's own cool-down is
+            served, the fan runs until the nozzle has cooled before the answer.
         printer_name: Which printer.  Omit for the default one.
     """
     args = {
@@ -184,6 +312,8 @@ def load_filament(
     kwargs: dict[str, Any] = {"slot": slot, "material": material, "temperature": temperature, "length_mm": length_mm}
     if wait_seconds is not None:
         kwargs["wait_seconds"] = wait_seconds
+    if keep_hot:
+        kwargs["keep_hot"] = True
     return run_filament_op("load", printer_name=printer_name, **kwargs)
 
 
@@ -192,19 +322,23 @@ def unload_filament(
     temperature: float | None = None,
     length_mm: float | None = None,
     wait_seconds: float | None = None,
+    keep_hot: bool = False,
     printer_name: str | None = None,
 ) -> dict:
     """Pull filament out of the hotend — back into the AMS on Bambu, a heated retract elsewhere.
 
-    Same temperature gate and verification as ``load_filament``: on Bambu
-    ``extrusion_verified`` is ``True`` once the AMS reports no tray feeding
-    the nozzle (``tray_now`` 255); on Klipper an ``UNLOAD_FILAMENT`` /
-    ``M702`` macro is used when the config has one; otherwise the hotend is
-    heated and ``length_mm`` is retracted (default 80).
+    Same temperature gate, verification, ``outcome`` vocabulary and wait
+    bound as ``load_filament``: on Bambu ``extrusion_verified`` is ``True``
+    once the AMS reports no tray feeding the nozzle (``tray_now`` 255); on
+    Klipper an ``UNLOAD_FILAMENT`` / ``M702`` macro is used when the config
+    has one; otherwise the hotend is heated and ``length_mm`` is retracted
+    (default 80).
 
     Args:
-        material / temperature / length_mm / wait_seconds / printer_name: as
-            ``load_filament``.
+        material / temperature / length_mm / wait_seconds / keep_hot /
+            printer_name: as ``load_filament``.  Unload never retracts at
+            the end (the filament is already out) but still turns the
+            heater off unless ``keep_hot`` asks otherwise.
     """
     args = {
         "material": material,
@@ -218,6 +352,8 @@ def unload_filament(
     kwargs: dict[str, Any] = {"material": material, "temperature": temperature, "length_mm": length_mm}
     if wait_seconds is not None:
         kwargs["wait_seconds"] = wait_seconds
+    if keep_hot:
+        kwargs["keep_hot"] = True
     return run_filament_op("unload", printer_name=printer_name, **kwargs)
 
 
@@ -227,6 +363,7 @@ def purge_filament(
     temperature: float | None = None,
     slot: int | None = None,
     wait_seconds: float | None = None,
+    keep_hot: bool = False,
     printer_name: str | None = None,
 ) -> dict:
     """Heat the nozzle and extrude a short length — the clog test.
@@ -244,6 +381,15 @@ def purge_filament(
     printer's safety ceiling, outside the loaded spool's own temperature
     window, and beyond 150 mm.
 
+    The answer always says where the purge went.  Where the declared
+    model's own purge position is served through Kiln's hosted service (kiln-pro), free of charge — the head is parked over the purge chute before the
+    heater is touched, the machine's own tail snap and shake follow the
+    extrude, and ``purge_station.status`` is ``"parked"``.  Otherwise it is
+    ``"in_place"`` with the reason (a paused print, or no served position
+    for the model) and the head's coordinates where the printer reports
+    any; no coordinate is ever inferred, and no model borrows a sibling's.
+    A pad wipe is a separate door: ``wipe_nozzle``.
+
     Args:
         length_mm: Extrusion length, 1–150 mm (default 30).
         material: e.g. ``"PLA"`` — picks a temperature when none is given.
@@ -252,7 +398,12 @@ def purge_filament(
         slot: AMS tray whose temperature window applies (Bambu).  Omit to
             use the tray currently feeding the nozzle.
         wait_seconds: How long after the purge to watch for a fault code
-            on Bambu (default 10).
+            on Bambu (default 10).  Bounded the same way as
+            ``load_filament``'s.
+        keep_hot: Leave the heater ON afterwards, for a caller about to do
+            something else hot.  Off by default: every op ends with the
+            heater off and says so; where the machine's own cool-down is
+            served, the fan runs until the nozzle has cooled before the answer.
         printer_name: Which printer.  Omit for the default one.
     """
     args = {
@@ -268,16 +419,78 @@ def purge_filament(
     kwargs: dict[str, Any] = {"length_mm": length_mm, "material": material, "temperature": temperature, "slot": slot}
     if wait_seconds is not None:
         kwargs["wait_seconds"] = wait_seconds
+    if keep_hot:
+        kwargs["keep_hot"] = True
     return run_filament_op("purge", printer_name=printer_name, **kwargs)
 
 
+def wipe_nozzle(
+    material: str | None = None,
+    temperature: float | None = None,
+    slot: int | None = None,
+    wait_seconds: float | None = None,
+    keep_hot: bool = False,
+    printer_name: str | None = None,
+) -> dict:
+    """Clean the nozzle tip on the printer's own wipe pad.
+
+    Heats to the loaded material's window (or the temperature given), parks
+    over the purge chute while heating, snaps the tail with the vendor's
+    own retract, then runs the wipe-pad pass the machine's start sequence
+    runs and reports where the head ended up.  Only where the declared
+    model's pad pass is served through Kiln's hosted service (kiln-pro), free of charge
+    (``printer_model`` in config.yaml names the model).  Any other model is
+    refused with the reason rather than moved to a guessed coordinate: use
+    the printer's own screen, or start a print — its start sequence wipes
+    on the pad.  No model ever borrows a sibling's position.
+
+    Same gate as ``purge_filament``: refused while printing, below 170 °C,
+    above the safety ceiling, outside the loaded spool's own window.  Also
+    refused while paused — the head is parked over the part and Kiln does
+    not travel mid-print.  The pad is touched the machine's own way, on the
+    way down in temperature.  ``extrusion_verified`` stays ``None``: Bambu
+    acknowledges no G-code, so "no fault raised" is the strongest thing the
+    printer can say — look at the tip.
+
+    Args:
+        material: e.g. ``"PLA"`` — picks a temperature when none is given.
+        temperature: Hotend target in °C.  Omit to use the middle of the
+            spool's (AMS) or material's window.
+        slot: AMS tray whose temperature window applies (Bambu).  Omit to
+            use the tray currently feeding the nozzle.
+        wait_seconds: How long after the wipe to watch for a fault code
+            (default 45).
+        keep_hot: Leave the heater ON afterwards, for a caller about to do
+            something else hot.  Off by default: every op ends with the
+            heater off and says so; where the machine's own cool-down is
+            served, the fan runs until the nozzle has cooled before the answer.
+        printer_name: Which printer.  Omit for the default one.
+    """
+    args = {
+        "material": material,
+        "temperature": temperature,
+        "slot": slot,
+        "wait_seconds": wait_seconds,
+        "printer_name": printer_name,
+    }
+    if gate := _gated("wipe_nozzle", args):
+        return gate
+    kwargs: dict[str, Any] = {"material": material, "temperature": temperature, "slot": slot}
+    if wait_seconds is not None:
+        kwargs["wait_seconds"] = wait_seconds
+    if keep_hot:
+        kwargs["keep_hot"] = True
+    return run_filament_op("wipe", printer_name=printer_name, **kwargs)
+
+
 class _FilamentHandlingToolsPlugin:
-    """Load, unload, and purge filament — with purge as the clog test.
+    """Load, unload, purge, and wipe — with purge as the clog test.
 
     Tools:
         - load_filament
         - unload_filament
         - purge_filament
+        - wipe_nozzle
     """
 
     @property
@@ -286,10 +499,10 @@ class _FilamentHandlingToolsPlugin:
 
     @property
     def description(self) -> str:
-        return "Load, unload, and purge filament; purge doubles as the clog test"
+        return "Load, unload, purge, and wipe the nozzle; purge doubles as the clog test"
 
     def register(self, mcp: Any) -> None:
-        """Register the three tools and their rate limits."""
+        """Register the four tools and their rate limits."""
         import kiln.server as _srv
 
         for tool_name, limits in _RATE_LIMITS.items():
@@ -297,6 +510,7 @@ class _FilamentHandlingToolsPlugin:
         mcp.tool()(load_filament)
         mcp.tool()(unload_filament)
         mcp.tool()(purge_filament)
+        mcp.tool()(wipe_nozzle)
 
 
 plugin = _FilamentHandlingToolsPlugin()

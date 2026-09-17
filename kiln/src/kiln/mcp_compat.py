@@ -83,6 +83,7 @@ __all__ = [
     "set_instructions",
     "tool_result_blocks",
     "wrap_call_tool_result",
+    "wrap_list_tools_result",
 ]
 
 
@@ -515,4 +516,86 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     setattr(_wrapped_v1, _WRAPPED, True)
     setattr(_wrapped_v1, _MUTATORS, chain)
     handlers[CallToolRequest] = _wrapped_v1
+    return True
+
+
+_LIST_MUTATORS = "_kiln_list_tools_mutators"
+
+
+def wrap_list_tools_result(mcp: Any, mutate: Any) -> bool:
+    """Wrap the lowlevel ``tools/list`` handler so ``mutate`` sees each answer.
+
+    ``mutate(tools)`` is called with the list of ``Tool`` objects AFTER the
+    real handler built it, and works on them in place — it must not raise
+    (callers wrap their own body); its return value is ignored.  This is the
+    one door every client's view of a tool's schema passes through, on every
+    transport, for every plugin that registered into this server, so a
+    change to what Kiln PUBLISHES about a tool belongs here and nowhere else.
+
+    The SDK majors disagree about the handler exactly as they do for
+    ``tools/call`` (see ``wrap_call_tool_result``): keyed by request type and
+    called ``handler(req)`` with the result on ``.root`` on 1.x; keyed by the
+    method string, called ``handler(ctx, params)``, and answering the
+    ``ListToolsResult`` itself on 2.x.  Same composition rule too — different
+    callers chain in install order, the same caller (by ``module.qualname``)
+    attaches once.
+
+    Returns True when this mutator is newly registered, False when there is
+    no handler to wrap or this exact mutator is already in the chain.
+    """
+    server = lowlevel_server(mcp)
+    identity = f"{getattr(mutate, '__module__', '?')}."\
+               f"{getattr(mutate, '__qualname__', repr(mutate))}"
+
+    def _run_all(tools: Any, chain: list) -> None:
+        for _identity, fn in list(chain):
+            try:
+                fn(tools)
+            except Exception:  # noqa: BLE001 -- one bad mutator, not all
+                _logger.debug("list-tools mutator failed", exc_info=True)
+
+    if MCP_SDK_MAJOR >= 2:
+        entry = server.get_request_handler("tools/list")
+        if entry is None:
+            return False
+        existing = getattr(entry.handler, _LIST_MUTATORS, None)
+        if existing is not None:
+            if identity in {k for k, _ in existing}:
+                return False
+            existing.append((identity, mutate))
+            return True
+        previous, params_type = entry.handler, entry.params_type
+        chain: list = [(identity, mutate)]
+
+        async def _wrapped_v2(ctx: Any, params: Any) -> Any:
+            resp = await previous(ctx, params)
+            _run_all(getattr(resp, "tools", None) or [], chain)
+            return resp
+
+        setattr(_wrapped_v2, _LIST_MUTATORS, chain)
+        server.add_request_handler("tools/list", params_type, _wrapped_v2)
+        return True
+
+    from mcp.types import ListToolsRequest  # 1.x keys the dict by request type
+
+    handlers = getattr(server, "request_handlers", None) or {}
+    previous = handlers.get(ListToolsRequest)
+    if previous is None:
+        return False
+    existing = getattr(previous, _LIST_MUTATORS, None)
+    if existing is not None:
+        if identity in {k for k, _ in existing}:
+            return False
+        existing.append((identity, mutate))
+        return True
+    chain = [(identity, mutate)]
+
+    async def _wrapped_v1(req: Any) -> Any:
+        resp = await previous(req)
+        result = getattr(resp, "root", resp)
+        _run_all(getattr(result, "tools", None) or [], chain)
+        return resp
+
+    setattr(_wrapped_v1, _LIST_MUTATORS, chain)
+    handlers[ListToolsRequest] = _wrapped_v1
     return True

@@ -144,6 +144,12 @@ class PrinterIntel:
     failure_modes: list[FailureMode]
     load_sequence: list[LoadStep] = field(default_factory=list)
     has_chamber_sensor: bool | None = None
+    #: Where this machine's own start sequence parks to flush and where it
+    #: wipes -- the record the filament and homing doors drive.  Served by
+    #: kiln-pro's overlay only; the public file carries no such block, so
+    #: without the overlay every model reads ``None`` and the doors refuse by
+    #: name rather than move the head to a guessed coordinate.
+    purge_station: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +449,7 @@ def _build_profiles(raw: dict[str, Any]) -> dict[str, PrinterIntel]:
                 failure_modes=failure_modes,
                 load_sequence=load_sequence,
                 has_chamber_sensor=_stated_bool(data.get("has_chamber_sensor")),
+                purge_station=(dict(data["purge_station"]) if isinstance(data.get("purge_station"), dict) else None),
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("Skipping malformed intel profile '%s': %s", key, exc)
