@@ -309,11 +309,12 @@ class TestFirmwareThatReportsHomed:
 
     def test_marlin_over_usb_reports_its_position_after_homing(self, monkeypatch):
         adapter = _build("serial")
+        adapter._printer_model = "ender3"  # an undeclared generic home Z is refused by design
         _idle(adapter, monkeypatch)
         sent: list[str] = []
         monkeypatch.setattr(adapter, "_send_command", lambda cmd, **kw: sent.append(cmd) or (
             "X:0.00 Y:0.00 Z:10.00 E:0.00 Count X:0 Y:0 Z:8000" if cmd == "M114" else "ok"))
-        result = adapter.home_axes()
+        result = adapter.home_axes(plate_clear=True)  # a switch-homed Z descends to plate height: a person's word
         assert result.outcome == "accepted"  # Marlin reports no homed flag
         assert result.resting_position["z"] == 10.0 and "position report" in result.resting_position["source"]
         assert "M114" in sent
