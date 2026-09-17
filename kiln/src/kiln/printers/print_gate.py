@@ -49,6 +49,12 @@ from kiln.tiers_and_terms import upgrade_nudge_block
 
 _logger = logging.getLogger(__name__)
 
+
+def _base_read_print_file() -> Any:
+    from kiln.printers.base import PrinterAdapter
+
+    return PrinterAdapter.read_print_file
+
 # bed_fit error codes that mean "we couldn't be sure" — these SOFT-PASS.
 _SOFT_FIT_CODES = frozenset({"BBOX_UNKNOWN", "VOLUME_UNKNOWN", "UNKNOWN_FILE"})
 
@@ -385,8 +391,25 @@ def _resolve_local_job(file_name: str, kwargs: dict[str, Any]) -> str | None:
     return None
 
 
+class _ReadBackFailed(Exception):
+    """A backend that CAN read a file back could not, this time.
+
+    Carries the cause in plain words.  Distinct from a backend that has no
+    read-back at all (``read_print_file`` returns ``None`` by design), which
+    is not a failure and soft-passes.
+    """
+
+
+#: How many times the printer's copy is asked for before the read counts as
+#: failed.  One retry: a Bambu FTPS server answers 550 to a first LIST often
+#: enough that a single attempt would refuse honest starts for nothing, and
+#: a second attempt a moment later is cheap.  More than that is the gate
+#: hiding a printer that is really unreachable.
+_READ_BACK_ATTEMPTS = 2
+
+
 def _fetch_printer_copy(adapter: Any, file_name: str) -> str | None:
-    """Read *file_name* back from the printer into a temp file, or ``None``.
+    """Read *file_name* back from the printer into a temp file.
 
     The start-by-name door.  2026-09-16, Bambu A1: a ``.gcode.3mf`` that had
     sat on the SD card since April -- raw PrusaSlicer output wrapped with no
@@ -398,20 +421,45 @@ def _fetch_printer_copy(adapter: Any, file_name: str) -> str | None:
     (:func:`evaluate_pre_print_gate`), so the two doors judge one file the
     same way.
 
-    ``None`` when the backend cannot read back, the read fails, or the
-    file comes back empty -- the gate then soft-passes as before.  The
-    caller owns the temp file and removes it.
+    Three outcomes, and they are not the same:
+
+    * ``None`` -- this backend has no read-back (``read_print_file`` is the
+      base default).  Not a failure; the gate soft-passes as it always did.
+    * a temp path -- the printer's bytes, for the caller to judge and delete.
+    * :class:`_ReadBackFailed` -- the backend CAN read back and could not,
+      after :data:`_READ_BACK_ATTEMPTS` tries (transfer error, no such file,
+      empty file, over the size cap, or nowhere to stage it).  A file Kiln
+      could not look at is a file Kiln cannot vouch for, so the caller
+      refuses -- with the human override named, because the person may know
+      more than the gate (ruled 2026-09-16: refuse beats a quiet pass; a
+      refusal costs one retry, a pass costs incident #0).
     """
     reader = getattr(adapter, "read_print_file", None)
     if not callable(reader):
         return None
-    try:
-        data = reader(file_name)
-    except Exception:  # noqa: BLE001 -- a transfer fault is not a verdict
-        _logger.debug("print_gate: could not read %s back from the printer", file_name, exc_info=True)
-        return None
+    if getattr(reader, "__func__", None) is _base_read_print_file():
+        return None  # the base default: this backend has no read-back at all
+    last: str = ""
+    data: bytes | None = None
+    for attempt in range(_READ_BACK_ATTEMPTS):
+        try:
+            data = reader(file_name)
+        except Exception as exc:  # noqa: BLE001 -- the cause goes in the refusal
+            last = str(exc)
+            _logger.debug(
+                "print_gate: read-back of %s failed (attempt %d/%d): %s",
+                file_name, attempt + 1, _READ_BACK_ATTEMPTS, exc,
+            )
+            continue
+        if data is None:
+            return None  # the backend says it cannot read this one back
+        if data:
+            break
+        last = "the printer returned an empty file"
+    else:
+        raise _ReadBackFailed(last or "the printer returned an empty file")
     if not data:
-        return None
+        raise _ReadBackFailed(last or "the printer returned an empty file")
     import tempfile
 
     low = str(file_name).lower()
@@ -420,9 +468,8 @@ def _fetch_printer_copy(adapter: Any, file_name: str) -> str | None:
         with tempfile.NamedTemporaryFile(prefix="kiln-printer-copy-", suffix=suffix, delete=False) as fh:
             fh.write(data)
             return fh.name
-    except OSError:
-        _logger.debug("print_gate: could not stage the printer's copy of %s", file_name, exc_info=True)
-        return None
+    except OSError as exc:
+        raise _ReadBackFailed(f"could not stage the printer's copy locally: {exc}") from exc
 
 
 def _resolve_material(kwargs: dict[str, Any]) -> str | None:
@@ -605,6 +652,42 @@ def _peer_states(registry: Any, this_machine: str) -> dict[str, Any]:
     return out
 
 
+def _read_back_refusal(
+    file_name: str, printer_id: str | None, cause: str, override: bool,
+) -> dict[str, Any] | None:
+    """The verdict for a file Kiln could not read back: refuse, or honour the
+    single-use human override the way every other block does."""
+    name = os.path.basename(str(file_name))
+    reason = (
+        f"Could not verify {name} before starting it: Kiln reads a file back from "
+        f"the printer to check it has a homing sequence, and the read failed "
+        f"({cause}). A file Kiln cannot look at is one it cannot vouch for, so it "
+        "is not starting it. Retry in a moment, or start the file from the "
+        "printer's own screen."
+    )
+    if override:
+        _logger.warning("print_gate: OVERRIDE engaged for %s (READ_BACK_FAILED)", printer_id)
+        _oversize_grants.pop((printer_id or "").lower(), None)
+        return None
+    return {
+        "ok": False,
+        "blocked": True,
+        "code": "READ_BACK_FAILED",
+        "reason": reason,
+        "inspected": "none",
+        "suggestions": [
+            "Retry the print in a moment (the printer's file server may have been busy).",
+            "Start the file from the printer's own screen if you know it is a complete Kiln-sliced job.",
+            "Upload the file again through Kiln so it is checked on the way in.",
+        ],
+        "override_hint": (
+            "If you know this file is safe, a human can call force_print_oversize "
+            "for this printer and re-issue the print once; an autonomous agent "
+            "cannot self-approve it."
+        ),
+    }
+
+
 def run_adapter_gate(
     adapter: Any, file_name: str, kwargs: dict[str, Any],
 ) -> dict[str, Any] | None:
@@ -626,10 +709,15 @@ def run_adapter_gate(
 
     printer_id = _resolve_printer_model(adapter)
     job = _resolve_local_job(file_name, kwargs)
+    override = _override_active(printer_id)
     # No local copy: the file is being started by name off the printer's own
     # storage.  Read it back and inspect THAT -- see _fetch_printer_copy.
-    fetched = _fetch_printer_copy(adapter, file_name) if job is None else None
-    override = _override_active(printer_id)
+    fetched: str | None = None
+    if job is None:
+        try:
+            fetched = _fetch_printer_copy(adapter, file_name)
+        except _ReadBackFailed as exc:
+            return _read_back_refusal(file_name, printer_id, str(exc), override)
     try:
         verdict = evaluate_pre_print_gate(
             job if job is not None else fetched,

@@ -297,7 +297,7 @@ class TestFileOnPrinterIsRead:
         r = a.start_print("raw.gcode")
         assert r.success is False and a.impl_calls == []
 
-    def test_backend_that_cannot_read_back_soft_passes(self):
+    def test_backend_that_answers_none_for_this_file_soft_passes(self):
         a = _ReadsBackAdapter(None)
         r = a.start_print("unknown.gcode.3mf")
         assert r.success is True and a.impl_calls == ["unknown.gcode.3mf"]
@@ -307,14 +307,64 @@ class TestFileOnPrinterIsRead:
         assert a.read_print_file("x.gcode.3mf") is None
         assert a.start_print("x.gcode.3mf").success is True
 
-    def test_a_reader_that_raises_never_blocks(self):
+    def test_a_reader_that_fails_refuses_and_names_the_cause(self):
+        # Ruled 2026-09-16: a capable backend that could not read the file
+        # back refuses.  A file Kiln cannot look at is one it cannot vouch for.
+        class _Broken(_ReadsBackAdapter):
+            def read_print_file(self, file_name: str) -> bytes | None:
+                self.read_calls.append(file_name)
+                raise RuntimeError("ftp down")
+
+        _Broken.__abstractmethods__ = frozenset()
+        a = _Broken(None)
+        r = a.start_print("x.gcode.3mf")
+        assert r.success is False and a.impl_calls == []
+        assert "ftp down" in r.message and "x.gcode.3mf" in r.message
+        assert "printer's own screen" in r.message
+        assert "force_print_oversize" in r.message
+        assert a.read_calls == ["x.gcode.3mf", "x.gcode.3mf"]  # one retry, then refuse
+
+    def test_a_reader_that_recovers_on_the_retry_is_judged_normally(self):
+        class _Flaky(_ReadsBackAdapter):
+            def read_print_file(self, file_name: str) -> bytes | None:
+                self.read_calls.append(file_name)
+                if len(self.read_calls) == 1:
+                    raise RuntimeError("550 busy")
+                return self._data
+
+        _Flaky.__abstractmethods__ = frozenset()
+        good = _Flaky(_threemf_bytes(_HOMED))
+        assert good.start_print("ok.gcode.3mf").success is True
+        bad = _Flaky(_threemf_bytes(_NO_HOMING))
+        r = bad.start_print("bad.gcode.3mf")
+        assert r.success is False and "G28" in r.message
+
+    def test_an_empty_read_back_refuses(self):
+        a = _ReadsBackAdapter(b"")
+        r = a.start_print("empty.gcode.3mf")
+        assert r.success is False and "empty" in r.message
+
+    def test_read_back_failure_is_rescued_by_the_single_use_override(self):
         class _Broken(_ReadsBackAdapter):
             def read_print_file(self, file_name: str) -> bytes | None:
                 raise RuntimeError("ftp down")
 
         _Broken.__abstractmethods__ = frozenset()
         a = _Broken(None)
-        assert a.start_print("x.gcode.3mf").success is True
+        pg.grant_oversize_override("bambu_a1", ttl_seconds=300)
+        assert a.start_print("x.gcode.3mf").success is True and a.impl_calls == ["x.gcode.3mf"]
+        # consumed: the next start is refused again
+        assert a.start_print("x.gcode.3mf").success is False
+
+    def test_read_back_failure_verdict_shape(self):
+        class _Broken(_ReadsBackAdapter):
+            def read_print_file(self, file_name: str) -> bytes | None:
+                raise RuntimeError("ftp down")
+
+        _Broken.__abstractmethods__ = frozenset()
+        blocked = pg.run_adapter_gate(_Broken(None), "x.gcode.3mf", {})
+        assert blocked["code"] == "READ_BACK_FAILED" and blocked["inspected"] == "none"
+        assert blocked["blocked"] is True and blocked["suggestions"]
 
     def test_local_copy_wins_over_the_printer_copy(self, tmp_path):
         local = tmp_path / "bad.gcode.3mf"
