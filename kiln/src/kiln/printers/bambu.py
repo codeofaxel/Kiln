@@ -4014,7 +4014,21 @@ class BambuAdapter(PrinterAdapter):
                         last_error = err_val
             if state in _PRINT_ACTIVE_STATES:
                 return state, last_error
-            if state == "failed":
+            # A "failed" that names no error code is not this job's
+            # rejection: it is the previous job's ending still on the wire.
+            # After a cancel this firmware keeps reporting gcode_state
+            # "failed" with print_error 0 until the NEXT job takes over
+            # (the same stale state get_state downgrades to IDLE).  Measured
+            # 2026-09-16 on an A1: a start sent right after a screen cancel
+            # was declared failed here while the printer went on to
+            # "prepare" and printed -- so nothing that hangs off a
+            # successful start ran (plate record, engagement, watchdog).
+            # Keep waiting; the real transition arrives within seconds, and
+            # if it never does the honest answer is "timeout", not "failed".
+            # Same rule as get_state's downgrade: only an EXPLICIT
+            # print_error 0 marks the state stale; a "failed" that carries no
+            # print_error field at all is still taken at its word.
+            if state == "failed" and (last_error or raw_err is None):
                 return "failed", last_error
             # If the printer set a non-zero error code while still IDLE,
             # the command was rejected — no point waiting further.
