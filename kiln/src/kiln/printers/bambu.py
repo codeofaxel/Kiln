@@ -4015,7 +4015,21 @@ class BambuAdapter(PrinterAdapter):
                         last_error = err_val
             if state in _PRINT_ACTIVE_STATES:
                 return state, last_error
-            if state == "failed":
+            # A "failed" that names no error code is not this job's
+            # rejection: it is the previous job's ending still on the wire.
+            # After a cancel this firmware keeps reporting gcode_state
+            # "failed" with print_error 0 until the NEXT job takes over
+            # (the same stale state get_state downgrades to IDLE).  Measured
+            # 2026-09-16 on an A1: a start sent right after a screen cancel
+            # was declared failed here while the printer went on to
+            # "prepare" and printed -- so nothing that hangs off a
+            # successful start ran (plate record, engagement, watchdog).
+            # Keep waiting; the real transition arrives within seconds, and
+            # if it never does the honest answer is "timeout", not "failed".
+            # Same rule as get_state's downgrade: only an EXPLICIT
+            # print_error 0 marks the state stale; a "failed" that carries no
+            # print_error field at all is still taken at its word.
+            if state == "failed" and (last_error or raw_err is None):
                 return "failed", last_error
             # If the printer set a non-zero error code while still IDLE,
             # the command was rejected — no point waiting further.
@@ -6638,12 +6652,107 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- file deletion
     # ------------------------------------------------------------------
 
+    #: The directories a Bambu keeps print files in, one per model family
+    #: (``/model`` A1 series, ``/sdcard`` X1/P1, ``/cache`` P2S) -- the same
+    #: three :meth:`_detect_storage_path` probes.  A file path handed to
+    #: :meth:`delete_file` or :meth:`read_print_file` must sit in one of them.
+    _STORAGE_DIRS: tuple[str, ...] = ("/model", "/sdcard", f"/{_BAMBU_FTP_URL_DIR}")
+
+    #: Largest file :meth:`read_print_file` will hold in memory for the
+    #: pre-print gate.  A print file past this is not inspected (``None``);
+    #: the gate soft-passes and says nothing, as it did before read-back
+    #: existed.  256 MB is far above any real sliced job.
+    _READ_BACK_CAP_BYTES: int = 256 * 1024 * 1024
+
+    def _storage_file_path(self, ftp: ftplib.FTP_TLS, file_name: str) -> str:
+        """*file_name* as a full path on the printer's storage.
+
+        A bare name (what :meth:`start_print` takes) lands in the detected
+        storage directory; a full path is kept as given.  Either way the
+        result must sit under one of :attr:`_STORAGE_DIRS`, so a path that
+        walks out of the print-file area is refused before any FTPS verb
+        runs.  POSIX normalisation on purpose: the card's paths are POSIX
+        whatever the host is.
+        """
+        name = str(file_name or "").strip()
+        if not name.startswith("/"):
+            name = f"{self._detect_storage_path(ftp)}/{posixpath.basename(name)}"
+        safe_path = posixpath.normpath(name)
+        if not any(safe_path.startswith(d + "/") for d in self._STORAGE_DIRS):
+            raise PrinterError(
+                f"File path must be inside the printer storage ({', '.join(self._STORAGE_DIRS)}), "
+                f"got: {file_name!r}"
+            )
+        return safe_path
+
+    def read_print_file(self, file_name: str) -> bytes | None:
+        """The printer's own copy of *file_name*, read back over FTPS.
+
+        What the pre-print gate inspects when a print is started by name
+        and no local copy exists -- see
+        :meth:`PrinterAdapter.read_print_file`.  Reads from the same
+        storage directory :meth:`list_files` lists and :meth:`upload_file`
+        writes, so the bytes are the ones the ``project_file`` command
+        would run.  A file past :attr:`_READ_BACK_CAP_BYTES` raises, so
+        the gate refuses it the way it refuses any file it could not
+        inspect; ``None`` is never returned here.
+
+        Raises:
+            PrinterError: If the connection or the transfer fails.
+        """
+        ftp = self._ftp_connect()
+        try:
+            path = self._storage_file_path(ftp, file_name)
+            chunks: list[bytes] = []
+            size = 0
+            too_big = False
+
+            def _take(chunk: bytes) -> None:
+                nonlocal size, too_big
+                if too_big:
+                    return
+                size += len(chunk)
+                if size > self._READ_BACK_CAP_BYTES:
+                    too_big = True
+                    chunks.clear()
+                    return
+                chunks.append(chunk)
+
+            try:
+                ftp.retrbinary(f"RETR {path}", _take)
+            except Exception as exc:
+                raise PrinterError(
+                    f"Could not read {file_name} back from the printer over FTPS: {exc}. "
+                    "Use `list_files()` to check the file is there.",
+                    cause=exc,
+                ) from exc
+            if too_big:
+                # A file Kiln will not hold is a file Kiln could not inspect,
+                # and the ruling is that such a start is refused, not waved
+                # through: raise, so the gate takes its refuse-with-override
+                # path rather than reading None as "no read-back here".
+                raise PrinterError(
+                    f"{file_name} is larger than the {self._READ_BACK_CAP_BYTES // (1024 * 1024)} MB "
+                    "read-back cap, so Kiln could not inspect it; start it from the printer's "
+                    "own screen or re-slice through Kiln."
+                )
+            return b"".join(chunks)
+        finally:
+            try:
+                ftp.quit()
+            except Exception as exc:
+                logger.debug("Failed to quit FTP session after read-back: %s", exc)
+
     def delete_file(self, file_path: str) -> bool:
-        """Delete a file from the printer's SD card via FTPS.
+        """Delete a file from the printer's storage via FTPS.
 
         Args:
-            file_path: Path of the file on the printer (e.g.
-                ``"/sdcard/model.3mf"``).
+            file_path: Path of the file on the printer as :meth:`list_files`
+                reports it (``/model/...`` on an A1, ``/sdcard/...`` on an
+                X1/P1, ``/cache/...`` on a P2S), or its bare name, which is
+                looked up in the detected storage directory.  Until
+                2026-09-16 only ``/sdcard/`` and ``/cache/`` were accepted,
+                so no A1 file could be deleted through Kiln at all.
 
         Returns:
             ``True`` if the file was deleted.
@@ -6656,13 +6765,12 @@ class BambuAdapter(PrinterAdapter):
         except PrinterError:
             raise
 
-        # Sanitise path — only allow files under /sdcard/ or /cache/.
-        # The printer's SD card uses POSIX paths, so normalize with
-        # posixpath; os.path.normpath would mangle the separators to
-        # backslashes on a Windows host.
-        safe_path = posixpath.normpath(file_path)
-        if not safe_path.startswith("/sdcard/") and not safe_path.startswith("/cache/"):
-            raise PrinterError(f"File path must be under /sdcard/ or /cache/, got: {file_path!r}")
+        try:
+            safe_path = self._storage_file_path(ftp, file_path)
+        except PrinterError:
+            with contextlib.suppress(Exception):
+                ftp.quit()
+            raise
 
         try:
             ftp.delete(safe_path)
