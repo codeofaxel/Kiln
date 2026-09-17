@@ -310,6 +310,13 @@ def fast_clock(monkeypatch):
     return counter
 
 
+@pytest.fixture(autouse=True)
+def _no_served_network(monkeypatch):
+    """No test asks the hosted service for a plan: the served door is a stub
+    that answers nothing unless a test replaces it on purpose."""
+    monkeypatch.setattr("kiln._pro_motion_bridge._served_plan", lambda request: None)
+
+
 @pytest.fixture
 def no_kiln_pro(monkeypatch):
     """Run as a public-only install: every ``kiln_pro`` import fails.

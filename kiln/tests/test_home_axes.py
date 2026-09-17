@@ -47,6 +47,12 @@ from .test_filament_handling import (  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
+def _no_served_network(monkeypatch):
+    """No test asks the hosted service for a plan."""
+    monkeypatch.setattr("kiln._pro_motion_bridge._served_plan", lambda request: None)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_plate_record(tmp_path, monkeypatch):
     """Every test starts with no plate record.
 
