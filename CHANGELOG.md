@@ -53,6 +53,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Home or park the print head, safely.** Kiln uses the printer's own moves
+  and won't drive through a part it knows is on the plate.
+
+- **Purge into the chute, wipe on the pad, heater off after.** Bambu A1 today;
+  other models refuse until proven on a real machine.
+
+- **Printer names people actually type now resolve.**
+
 - **Kiln checks your printer's own nozzle clumping detection before a print.**
   Printer status and the pre-flight say whether it's on, off or automatic, and
   warn when the sliced file, where you placed the part, or the print mode would
@@ -201,11 +209,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   print, letter counters and enclosed islands intact. Photo reliefs still
   refuse honestly.
 
-- **Printer names people actually type now resolve.** Voron, RatRig, QIDI,
-  Elegoo, Sovol, FlashForge, AnkerMake and Artillery, plus Creality's own
-  model codes.
-
 ### Fixed
+
+- **Two printers were misfiled: the Voron Trident and the Creality Hi.** Each
+  now gets its own correct profile.
+
+- **A print started by name is checked before it starts.** Kiln reads the file
+  back from the printer and refuses one it can't vouch for.
+
+- **Command-line filament commands find your configured printer.**
+
+- **A Bambu AMS no longer reads empty right after a load.**
 
 - **The Claude Code plugin now connects Kiln.** Installing it since 1.3.2
   added a plugin that wired nothing; the same two commands now bring every
@@ -403,7 +417,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   friends) were silently dropped from the final slice — even though the
   response said they were applied. They now survive every adjustment.
 
-
 - **An SVG logo no longer vanishes from the print.** On a keychain front or a
   pen cup's inside floor, an SVG was quietly skipped and the piece printed
   plain. It now carves as crisp outlines, sized to the face.
@@ -476,8 +489,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   file already in your library kept the original notes and quietly ignored
   new tags or a better prompt; it now takes the new ones.
 
-- **The Voron Trident is its own printer, and the Creality Hi is a
-  bed-slinger, not a CoreXY.**
 
 ## [1.4.1.1] - 2026-08-19
 
