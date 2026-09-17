@@ -5080,6 +5080,29 @@ class PrinterAdapter(ABC):
             PrinterError: If deletion fails.
         """
 
+    def read_print_file(self, file_name: str) -> bytes | None:
+        """The bytes of *file_name* as the printer holds them, or ``None``.
+
+        The pre-print gate (:func:`kiln.printers.print_gate.run_adapter_gate`)
+        calls this when a print is started BY NAME and no local copy of the
+        file exists to inspect -- a file uploaded in an earlier session, or
+        by another client.  The upload door already refuses a file with no
+        homing before its first print move (incident #0); this is how the
+        start-by-name door gets the same look at the same bytes, so the two
+        doors cannot disagree about one file.
+
+        ``None`` means this backend cannot read a file back, and the gate
+        soft-passes as it always did.  A backend that CAN read back returns
+        the whole file (a ``.gcode`` body or a ``.3mf`` archive) and raises
+        :class:`PrinterError` when the read fails; the gate logs that and
+        soft-passes rather than blocking a print on a transfer fault.
+
+        Args:
+            file_name: Name (or path) of the file as known by the printer --
+                exactly what :meth:`start_print` was given.
+        """
+        return None
+
     # -- async wrappers (hot-path methods) --------------------------------
 
     async def async_get_state(self) -> PrinterState:

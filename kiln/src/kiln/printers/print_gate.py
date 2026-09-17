@@ -40,6 +40,7 @@ Consumed by:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from typing import Any
@@ -375,13 +376,53 @@ def _resolve_printer_model(adapter: Any) -> str | None:
 
 def _resolve_local_job(file_name: str, kwargs: dict[str, Any]) -> str | None:
     """Find a LOCAL gcode/3mf/mesh to inspect, or None (then we soft-pass)."""
-    for k in ("source_path", "local_path", "gcode_path", "file_path", "threemf_path"):
+    for k in ("source_path", "local_path", "local_file_path", "gcode_path", "file_path", "threemf_path"):
         v = kwargs.get(k)
         if isinstance(v, str) and os.path.isfile(v):
             return v
     if isinstance(file_name, str) and os.path.isfile(file_name):
         return file_name
     return None
+
+
+def _fetch_printer_copy(adapter: Any, file_name: str) -> str | None:
+    """Read *file_name* back from the printer into a temp file, or ``None``.
+
+    The start-by-name door.  2026-09-16, Bambu A1: a ``.gcode.3mf`` that had
+    sat on the SD card since April -- raw PrusaSlicer output wrapped with no
+    start block -- was started by name.  The upload door refuses that file
+    class (incident #0); this door had nothing local to inspect and
+    soft-passed.  The printer heated, never homed, never purged, and rolled
+    its first extrusion into a log under the nozzle.  Now the gate asks the
+    adapter for the printer's own copy and runs the SAME validators on it
+    (:func:`evaluate_pre_print_gate`), so the two doors judge one file the
+    same way.
+
+    ``None`` when the backend cannot read back, the read fails, or the
+    file comes back empty -- the gate then soft-passes as before.  The
+    caller owns the temp file and removes it.
+    """
+    reader = getattr(adapter, "read_print_file", None)
+    if not callable(reader):
+        return None
+    try:
+        data = reader(file_name)
+    except Exception:  # noqa: BLE001 -- a transfer fault is not a verdict
+        _logger.debug("print_gate: could not read %s back from the printer", file_name, exc_info=True)
+        return None
+    if not data:
+        return None
+    import tempfile
+
+    low = str(file_name).lower()
+    suffix = ".gcode.3mf" if low.endswith(".gcode.3mf") else os.path.splitext(low)[1] or ".gcode"
+    try:
+        with tempfile.NamedTemporaryFile(prefix="kiln-printer-copy-", suffix=suffix, delete=False) as fh:
+            fh.write(data)
+            return fh.name
+    except OSError:
+        _logger.debug("print_gate: could not stage the printer's copy of %s", file_name, exc_info=True)
+        return None
 
 
 def _resolve_material(kwargs: dict[str, Any]) -> str | None:
@@ -585,13 +626,30 @@ def run_adapter_gate(
 
     printer_id = _resolve_printer_model(adapter)
     job = _resolve_local_job(file_name, kwargs)
+    # No local copy: the file is being started by name off the printer's own
+    # storage.  Read it back and inspect THAT -- see _fetch_printer_copy.
+    fetched = _fetch_printer_copy(adapter, file_name) if job is None else None
     override = _override_active(printer_id)
-    verdict = evaluate_pre_print_gate(
-        job,
-        printer_id,
-        material_id=_resolve_material(kwargs),
-        allow_oversize=override,
-    )
+    try:
+        verdict = evaluate_pre_print_gate(
+            job if job is not None else fetched,
+            printer_id,
+            material_id=_resolve_material(kwargs),
+            allow_oversize=override,
+        )
+    finally:
+        if fetched:
+            with contextlib.suppress(OSError):
+                os.unlink(fetched)
+    if fetched:
+        verdict["inspected"] = "printer_copy"
+        if verdict.get("blocked"):
+            verdict["reason"] = (
+                f"{verdict.get('reason', '')} This is the printer's own copy of "
+                f"{os.path.basename(str(file_name))}, read back from its storage: the file "
+                "was not made by a current Kiln and is not safe to start. Delete it from "
+                "the printer (delete_file) and re-slice through Kiln."
+            ).strip()
     # Single-use override: a human confirmation authorises ONE otherwise-blocked
     # print, not a time window of them.  Consume the grant the instant it's used
     # (verdict.overridden is set only when the override actually rescued a block).

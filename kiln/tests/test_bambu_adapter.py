@@ -4421,3 +4421,87 @@ class TestPushStatusDeltaMerge:
         assert adapter_with_mqtt._last_status["gcode_state"] == "RUNNING"
         assert adapter_with_mqtt._last_status["nozzle_temper"] == 205
         assert adapter_with_mqtt.get_state().state is PrinterStatus.PRINTING
+
+
+# ---------------------------------------------------------------------------
+# read_print_file: the printer's own copy, for the pre-print gate
+# ---------------------------------------------------------------------------
+
+class TestBambuAdapterReadPrintFile:
+    """The gate reads a file back before starting it by name (2026-09-16)."""
+
+    def _serve(self, mock_ftp_class: mock.MagicMock, payload: bytes) -> None:
+        def _retr(cmd: str, callback: Any) -> str:
+            callback(payload)
+            return "226 Transfer complete"
+
+        mock_ftp_class.retrbinary = mock.MagicMock(side_effect=_retr)
+
+    def test_bare_name_is_read_from_the_detected_storage_dir(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        self._serve(mock_ftp_class, b"G28\n")
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            data = adapter_with_mqtt.read_print_file("disc.gcode.3mf")
+        assert data == b"G28\n"
+        cmd = mock_ftp_class.retrbinary.call_args.args[0]
+        # the shared FTP mock refuses /model (550), so detection lands on /sdcard
+        assert cmd == "RETR /sdcard/disc.gcode.3mf"
+        mock_ftp_class.quit.assert_called_once()
+
+    def test_full_path_is_read_as_given(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        self._serve(mock_ftp_class, b"x")
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            assert adapter_with_mqtt.read_print_file("/sdcard/a.3mf") == b"x"
+        assert mock_ftp_class.retrbinary.call_args.args[0] == "RETR /sdcard/a.3mf"
+
+    def test_read_failure_raises_printer_error(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        mock_ftp_class.retrbinary = mock.MagicMock(side_effect=Exception("550 no such file"))
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="back from the printer"):
+            adapter_with_mqtt.read_print_file("missing.3mf")
+        mock_ftp_class.quit.assert_called_once()
+
+    def test_oversized_file_is_not_held_in_memory(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(BambuAdapter, "_READ_BACK_CAP_BYTES", 8)
+
+        def _retr(cmd: str, callback: Any) -> str:
+            for _ in range(4):
+                callback(b"abcd")
+            return "226"
+
+        mock_ftp_class.retrbinary = mock.MagicMock(side_effect=_retr)
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            assert adapter_with_mqtt.read_print_file("huge.3mf") is None
+
+
+class TestBambuAdapterDeleteFileOnA1Storage:
+    """A1-series files live under /model/; delete_file refused that path."""
+
+    def test_model_dir_is_deletable(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            assert adapter_with_mqtt.delete_file("/model/old.gcode.3mf") is True
+        mock_ftp_class.delete.assert_called_once_with("/model/old.gcode.3mf")
+
+    def test_bare_name_resolves_to_the_detected_storage_dir(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            assert adapter_with_mqtt.delete_file("old.gcode.3mf") is True
+        mock_ftp_class.delete.assert_called_once_with("/sdcard/old.gcode.3mf")
+
+    def test_paths_outside_printer_storage_are_refused(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="printer storage"):
+            adapter_with_mqtt.delete_file("/etc/passwd")
+        mock_ftp_class.delete.assert_not_called()
