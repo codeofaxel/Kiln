@@ -38,6 +38,7 @@ def _isolated(tmp_path, monkeypatch):
         if name == "kiln_pro" or name.startswith("kiln_pro."):
             monkeypatch.delitem(sys.modules, name, raising=False)
     monkeypatch.setitem(sys.modules, "kiln_pro", None)
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)  # no backoff leaks between tests
     # the served door is never the real network in a test
     import kiln.server as srv
 
@@ -188,3 +189,28 @@ class TestTheCache:
         cache.store(request, _doc())
         cache.store({**request, "verb": "park"}, _doc("park"))
         assert cache.forget_all() == 2 and cache.load(request) is None
+
+
+class TestTheBackoff:
+    def test_an_unreachable_service_is_not_asked_again_for_a_while(self, monkeypatch):
+        import kiln.server as srv
+
+        calls = []
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: calls.append(tool) or {"status": "error", "code": "SERVER_UNREACHABLE", "error": "dns"})
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+        for _ in range(5):
+            assert bridge.plan_for(_Machine(), "home") is None
+        assert len(calls) == 1  # doctor's five asks cost one timeout, not five
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+        bridge.plan_for(_Machine(), "park")
+        assert len(calls) == 2
+
+    def test_a_refusal_is_not_a_backoff(self, monkeypatch):
+        import kiln.server as srv
+
+        calls = []
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: calls.append(tool) or {"status": "error", "code": "MACHINE_NOT_PAIRED", "error": "no"})
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+        bridge.plan_for(_Machine(), "home")
+        bridge.plan_for(_Machine(), "park")
+        assert len(calls) == 2

@@ -10106,7 +10106,7 @@ def _doctor_homing_how(adapter: Any) -> tuple[str, bool]:
     if z_ok:
         return (
             f"home_axes (kiln home): runs {model}'s own start-sequence homing (raise first, X, "
-            f"then Z on the strip) and parks over the chute; {park}"
+            f"then Z the machine's own way, off the plate) and parks over the chute; {park}"
         ), False
     if on_plate_ok:
         return (

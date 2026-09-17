@@ -60,12 +60,21 @@ never on an import.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 SCHEMA = "motion_plan/1"
 VERBS = ("home", "park", "wipe", "purge")
+
+#: After the service could not be reached, it is not asked again for this
+#: long: one door (``kiln doctor``) asks for five plans in a row, and five
+#: thirty-second timeouts on a machine that is simply offline would make
+#: the offline case -- the one the cache exists for -- the slowest of all.
+SERVICE_BACKOFF_S: float = 60.0
+_service_down_until: float = 0.0
+_UNREACHABLE_CODES = frozenset({"SERVER_UNREACHABLE", "KILN_API_HTTP_ERROR"})
 
 
 def _local_pro() -> Any | None:
@@ -146,6 +155,9 @@ def _served_plan(request: dict[str, Any]) -> dict[str, Any] | None:
     plan" here; the service's own message is logged, and the public floor
     words the refusal the user sees.
     """
+    global _service_down_until
+    if time.monotonic() < _service_down_until:
+        return None
     try:
         from kiln.server import _pro_api_call
     except Exception:  # noqa: BLE001
@@ -154,6 +166,7 @@ def _served_plan(request: dict[str, Any]) -> dict[str, Any] | None:
         answer = _pro_api_call("motion_plan", **request)
     except Exception:  # noqa: BLE001 -- the network is a degrade, never a motion
         logger.debug("motion_plan request failed", exc_info=True)
+        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
         return None
     if not isinstance(answer, dict):
         return None
@@ -161,6 +174,8 @@ def _served_plan(request: dict[str, Any]) -> dict[str, Any] | None:
     if _is_plan(doc):
         return doc
     if answer.get("error") or answer.get("status") == "error":
+        if str(answer.get("code") or "") in _UNREACHABLE_CODES:
+            _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
         logger.info("motion_plan not served: %s", answer.get("error") or answer.get("message"))
     return None
 
