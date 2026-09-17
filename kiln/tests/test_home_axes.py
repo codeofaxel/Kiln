@@ -489,172 +489,276 @@ class TestParkHead:
 
 
 
-class TestBambuWithoutTheServedSequence:
-    """The public floor on a Bambu: no served sequence, no motion, an honest refusal.
+def _fake_home_doc(printer_id: str = "bambu_a1", *, verb: str = "home", z_on_plate: bool = False) -> dict:
+    """A plan document with made-up figures -- the shape, never a real sequence."""
+    steps = [
+        {"number": 1, "label": "raise", "you_will_see": "the head lifts a little", "stops_when": "the probe move ends",
+         "gcode": ["G91", "G1 Z7 F100", "G90"], "leaves": ["limits pushed"]},
+        {"number": 2, "label": "home X and Y", "you_will_see": "the head goes left and the bed rolls back",
+         "stops_when": "the endstops", "gcode": ["G28 X"], "leaves": []},
+    ]
+    if verb == "home":
+        steps.append({"number": 3, "label": "home Z", "you_will_see": "the nozzle descends", "stops_when": "the sensor",
+                      "gcode": ["G28 Z"], "leaves": ["heater ON"], "touches_plate": z_on_plate})
+    steps.append({"number": len(steps) + 1, "label": "park", "you_will_see": "the head parks off the plate",
+                  "stops_when": "the move ends", "gcode": ["G1 X-9 F100", "G1 Y0 F100"], "leaves": []})
+    return {
+        "schema": "motion_plan/1", "printer_id": printer_id, "verb": verb, "ok": True, "steps": steps,
+        "homed_axes": ["X", "Y", "Z"] if verb == "home" else ["X", "Y"], "heats_nozzle_to_c": 170.0 if verb == "home" else None,
+        "sequence_source": "vendor_start_sequence", "summary": f"Ran the {verb} the machine's own way.",
+        "resting_position": {"x_mm": -9, "over": "the chute"}, "homed_flag_bits": {"X": 0, "Y": 1, "Z": 2},
+        "raise_clearance_mm": 7.0, "z_home_on_plate": z_on_plate, "finish": None,
+    }
+
+
+def _serve(monkeypatch, docs):
+    """Make the bridge answer from *docs* (keyed by verb) and record every ask.
+
+    Also runs the executor's fault watch on a fast clock: the watch sleeps
+    a second at a time for ten seconds by default, which is right at a
+    machine and wrong in a test.
+    """
+    import itertools
+    import time as _time
+
+    from kiln import _pro_motion_bridge as bridge
+
+    counter = itertools.count(0.0, 0.5)
+    monkeypatch.setattr(_time, "monotonic", lambda: next(counter))
+    monkeypatch.setattr(_time, "sleep", lambda s: None)
+    asks: list[dict] = []
+
+    def _plan_for(adapter, verb, *, axes="XYZ", on_plate_ok=False):
+        asks.append({"verb": verb, "axes": axes, "on_plate_ok": on_plate_ok})
+        doc = docs.get(verb) if isinstance(docs, dict) else docs
+        return doc(on_plate_ok, axes) if callable(doc) else doc
+
+    monkeypatch.setattr(bridge, "plan_for", _plan_for)
+    monkeypatch.setattr(bridge, "station_supports", lambda *a: None)
+    return asks
+
+
+class TestBambuWithoutAPlan:
+    """The public floor on a Bambu: no plan, no motion, an honest refusal.
 
     Every Bambu start file raises the head before it homes and never sends
     a bare G28 from an unknown height, so this install never invents one:
-    home and park refuse by name, say the sequence is served through
-    kiln-pro, and point at the screen's jog controls -- Z up first, never
-    the Home button over a possible part.
+    home and park refuse by name, say the plan is served, and point at the
+    screen's jog controls -- Z up first, never the Home button over a
+    possible part.
     """
 
     @pytest.mark.parametrize("verb", ["home", "park"])
     def test_home_and_park_refuse_by_name_with_the_served_line(self, no_kiln_pro, bambu, monkeypatch, verb):
+        _serve(monkeypatch, None)
         bambu._printer_model = "bambu_a1"
         _idle(bambu, monkeypatch)
         with pytest.raises(HomingUnsupported) as info:
             bambu.home_axes() if verb == "home" else bambu.park_head()
         text = str(info.value)
-        assert f"Kiln will not {verb} bambu_a1" in text
-        assert "served through Kiln's hosted service" in text
+        assert f"Kiln will not {verb} bambu_a1" in text and "served one plan at a time" in text
         assert "jog controls" in text and "Z UP first" in text and "Home button descends" in text
         assert _scripts(bambu) == []
 
-    def test_plan_only_refuses_too_because_there_is_no_sequence_to_describe(self, no_kiln_pro, bambu, monkeypatch):
+    def test_plan_only_refuses_too_because_there_is_nothing_to_describe(self, no_kiln_pro, bambu, monkeypatch):
+        _serve(monkeypatch, None)
         bambu._printer_model = "bambu_a1"
         _idle(bambu, monkeypatch)
         with pytest.raises(HomingUnsupported):
             bambu.home_axes(plan_only=True)
         assert _scripts(bambu) == []
 
+    def test_a_plan_that_says_no_is_refused_in_its_own_words(self, no_kiln_pro, bambu, monkeypatch):
+        doc = {**_fake_home_doc("bambu_x1c"), "ok": False, "steps": [],
+               "refusal": {"code": "UNSUPPORTED", "message": "NOT DRIVEN YET. On this model the bed moves in Z."}}
+        _serve(monkeypatch, {"home": doc, "park": doc})
+        bambu._printer_model = "bambu_x1c"
+        _idle(bambu, monkeypatch)
+        with pytest.raises(HomingUnsupported, match="bed moves in Z"):
+            bambu.park_head()
+        ok, why = bambu._station_supports(None, "park")
+        assert ok is False and "bed moves in Z" in why
+
     def test_the_door_surfaces_the_refusal_as_unsupported(self, no_kiln_pro, bambu, monkeypatch):
         import kiln.server as srv
         from kiln.plugins.homing_tools import home_axes, park_head
 
+        _serve(monkeypatch, None)
         bambu._printer_model = "bambu_a1"
         _idle(bambu, monkeypatch)
         monkeypatch.setattr(srv, "_resolve_control_target", lambda name: (bambu, "default"))
         monkeypatch.setattr(srv, "_emergency_latch_error", lambda *a, **k: None)
+        monkeypatch.setattr(srv, "_check_auth", lambda *a, **k: None)
+        monkeypatch.setattr(srv, "_check_rate_limit", lambda *a, **k: None)
+        monkeypatch.setattr(srv, "_check_confirmation", lambda *a, **k: None)
         for fn in (home_axes, park_head):
-            monkeypatch.setattr(srv, "_check_auth", lambda *a, **k: None)
-            monkeypatch.setattr(srv, "_check_rate_limit", lambda *a, **k: None)
-            monkeypatch.setattr(srv, "_check_confirmation", lambda *a, **k: None)
             out = fn()
             assert out["success"] is False and out["error"]["code"] == "UNSUPPORTED"
-            assert "served through Kiln's hosted service" in out["error"]["message"]
+            assert "served one plan at a time" in out["error"]["message"]
 
-    def test_a_served_sequence_comes_back_through_the_bridge_untouched(self, bambu, monkeypatch):
-        from kiln import _pro_motion_bridge as bridge
 
+class TestBambuRunsAPlan:
+    """A plan that answers is run by the public executor: all of it, one step,
+    or none -- and the answer is composed from the plan's own words."""
+
+    def test_plan_only_sends_nothing_and_describes_every_step(self, bambu, monkeypatch):
+        _serve(monkeypatch, {"home": _fake_home_doc()})
         bambu._printer_model = "bambu_a1"
         _idle(bambu, monkeypatch)
-        served = HomeResult(success=True, outcome="accepted", message="served", axes="XYZ", homed_axes=["X", "Y", "Z"])
-        calls: list = []
-        monkeypatch.setattr(bridge, "home_axes_impl", lambda adapter, axes, options: calls.append((adapter, axes, dict(options))) or served)
-        result = bambu.home_axes(step=2, wait_seconds=3)
-        assert result is served and bambu.homing_commanded == {"X", "Y", "Z"}
-        assert calls[0][0] is bambu and calls[0][1] == "XYZ" and calls[0][2]["step"] == 2
-        parked = HomeResult(success=True, outcome="accepted", message="served park", axes="XY", homed_axes=["X", "Y"])
-        monkeypatch.setattr(bridge, "park_head_impl", lambda adapter, options: parked)
-        result = bambu.park_head()
-        assert result is parked and result.action == "park"
+        result = bambu.home_axes(plan_only=True)
+        assert result.success and result.details["sent"] is False and _scripts(bambu) == []
+        assert [s["label"] for s in result.steps] == ["raise", "home X and Y", "home Z", "park"]
+        assert result.next_step["number"] == 1 and result.heats_nozzle_to_c == 170.0
 
-    def test_homed_flags_are_read_only_where_served(self, no_kiln_pro, bambu):
+    def test_step_n_sends_only_step_n_and_describes_n_plus_one(self, bambu, monkeypatch):
+        _serve(monkeypatch, {"home": _fake_home_doc()})
+        bambu._printer_model = "bambu_a1"
+        _idle(bambu, monkeypatch)
+        result = bambu.home_axes(step=2)
+        assert _scripts(bambu) == ["G28 X"]
+        assert result.step_sent == 2 and result.next_step["label"] == "home Z"
+        assert result.homed_axes == ["X", "Y"]  # G28 X homes both on this family
+        assert "Step 2 of 4 sent (home X and Y)" in result.message and "Next: step 3" in result.message
+        with pytest.raises(PrinterError, match="4 steps; step 9"):
+            bambu.home_axes(step=9)
+
+    def test_a_full_run_sends_the_concatenation_and_confirms_from_the_flag_bits(self, bambu, monkeypatch):
+        _serve(monkeypatch, {"home": _fake_home_doc()})
+        bambu._printer_model = "bambu_a1"
+        _idle(bambu, monkeypatch)
         bambu._last_status["home_flag"] = 0b111
-        assert bambu._read_homed_axes() is None
+        result = bambu.home_axes()
+        assert _scripts(bambu) == ["G91\nG1 Z7 F100\nG90\nG28 X\nG28 Z\nG1 X-9 F100\nG1 Y0 F100"]
+        assert result.outcome == "confirmed" and result.homed_axes == ["X", "Y", "Z"]
+        assert result.message.startswith("Ran the home the machine's own way.")
+        assert result.details["verification_source"] == "homed_flag_bits" and result.resting_position["x_mm"] == -9
+        assert bambu.homing_commanded == {"X", "Y", "Z"}
+
+    def test_a_partial_flag_reads_accepted_not_confirmed(self, bambu, monkeypatch):
+        _serve(monkeypatch, {"home": _fake_home_doc()})
+        bambu._printer_model = "bambu_a1"
+        _idle(bambu, monkeypatch)
+        bambu._last_status["home_flag"] = 0b011
+        result = bambu.home_axes()
+        assert result.outcome == "accepted" and "not Z" in result.message
+
+    def test_park_runs_the_park_plan_and_never_asks_for_z(self, bambu, monkeypatch):
+        asks = _serve(monkeypatch, {"park": _fake_home_doc(verb="park")})
+        bambu._printer_model = "bambu_a1"
+        _idle(bambu, monkeypatch)
+        result = bambu.park_head()
+        assert result.success and result.action == "park" and result.homed_axes == ["X", "Y"]
+        assert asks == [{"verb": "park", "axes": "XY", "on_plate_ok": False}]
+        assert not any("G28 Z" in s for s in _scripts(bambu))
+
+    def test_a_fault_during_the_run_is_reported_in_the_printers_words(self, bambu, monkeypatch):
+        _serve(monkeypatch, {"home": _fake_home_doc()})
+        bambu._printer_model = "bambu_a1"
+        _idle(bambu, monkeypatch)
+        faults = iter([set(), {("0300_1A00_0002_0001", "hms")}])
+        monkeypatch.setattr(bambu, "_snapshot_faults", lambda: next(faults, {("0300_1A00_0002_0001", "hms")}))
+        result = bambu.home_axes()
+        assert result.success is False and result.outcome == "failed" and result.error_code == "0300_1A00_0002_0001"
+
+    def test_a_cached_plan_says_so(self, bambu, monkeypatch):
+        _serve(monkeypatch, {"home": {**_fake_home_doc(), "from_cache": True}})
+        bambu._printer_model = "bambu_a1"
+        _idle(bambu, monkeypatch)
+        assert bambu.home_axes(plan_only=True).details["plan_source"] == "cache"
 
 
 class TestConsentFloor:
     """A Z home that presses the nozzle onto the plate asks the person on
     EVERY call; a recorded "clear" answers the row question and nothing
-    more.  Pinned on the template gate with a served record faked in, so
-    the floor holds whether or not the record is served.
+    more.  The plan says whether the Z step presses the plate; the public
+    gate does the asking.
     """
 
-    _STATION = {"printer_id": "bambu_a1_mini", "raise_before_travel": {"probe_up_mm": 25, "back_down_mm": 15}}
+    def _mini(self, bambu, monkeypatch):
+        def doc(on_plate_ok, axes):
+            if "Z" not in axes:
+                return _fake_home_doc("bambu_a1_mini", verb="park")
+            if not on_plate_ok:
+                return {**_fake_home_doc("bambu_a1_mini", z_on_plate=True), "ok": False, "steps": [],
+                        "refusal": {"code": "PLATE_CLEAR_REQUIRED", "message": "homes Z onto the plate"}}
+            return _fake_home_doc("bambu_a1_mini", z_on_plate=True)
 
-    def _gate(self, monkeypatch, state=None):
-        from kiln import _pro_motion_bridge as bridge
-        from kiln.plate_state import PlateState
+        asks = _serve(monkeypatch, {"home": doc, "park": _fake_home_doc("bambu_a1_mini", verb="park")})
+        bambu._printer_model = "bambu_a1_mini"
+        _idle(bambu, monkeypatch)
+        return asks
 
-        adapter = _Stub()
-        adapter._printer_model = "bambu_a1_mini"
-        monkeypatch.setattr("kiln.plate_state.machine_id", lambda a: "stub-machine")  # the stub has no serial or address
-        monkeypatch.setattr(bridge, "plate_occupancy", lambda a: state)
-        monkeypatch.setattr(bridge, "plan_motion_around_plate", lambda *a: None)
-        return adapter, PlateState
-
-    def test_an_unknown_plate_asks_before_the_press_and_never_before_a_travel(self, no_kiln_pro, monkeypatch):
-        adapter, _ = self._gate(monkeypatch)
-        with pytest.raises(PlateClearRequired, match="onto the PLATE"):
-            adapter._plate_gate({}, station=self._STATION, action="home", touches_plate=True)
-        assert adapter._plate_gate({}, station=self._STATION, action="park") is None
-        assert adapter._plate_gate({"plate_clear": True}, station=self._STATION, action="home", touches_plate=True) is None
-
-    def test_a_served_clear_record_answers_the_row_but_not_the_press(self, monkeypatch):
-        adapter, PlateState = self._gate(monkeypatch)
-        clear = PlateState(machine="m", status="clear", source="human", since="2026-09-16T18:12:00")
-        monkeypatch.setattr("kiln._pro_motion_bridge.plate_occupancy", lambda a: clear)
-        assert adapter._plate_gate({}, station=self._STATION, action="park") is None
+    def test_the_press_asks_and_a_persons_word_on_the_call_runs_it(self, bambu, monkeypatch):
+        asks = self._mini(bambu, monkeypatch)
         with pytest.raises(PlateClearRequired) as info:
-            adapter._plate_gate({}, station=self._STATION, action="home", touches_plate=True)
+            bambu.home_axes()
+        assert "onto the PLATE" in str(info.value) and "plate_clear=true" in str(info.value)
+        assert _scripts(bambu) == []
+        result = bambu.home_axes(plate_clear=True)
+        assert result.success and "G28 Z" in _scripts(bambu)[-1]
+        assert asks[-1]["on_plate_ok"] is True
+        ok, why = bambu._station_supports(None, "home_z")
+        assert ok is False and "plate_clear" in why
+        assert bambu._station_supports(None, "home_z_on_plate")[0] is True
+
+    def test_a_recorded_clear_plate_answers_the_row_but_not_the_press(self, bambu, monkeypatch):
+        from kiln.plate_state import mark_clear
+
+        self._mini(bambu, monkeypatch)
+        mark_clear(bambu, "human")
+        with pytest.raises(PlateClearRequired) as info:
+            bambu.home_axes()
         assert "a person said so" in str(info.value) and "every time" in str(info.value)
+        assert bambu.park_head().success and bambu.home_axes(axes="XY").success
 
-    def test_a_served_part_taller_than_the_raise_refuses_the_travel(self, monkeypatch):
-        from kiln.plate_state import PlateJob
+    def test_a_recorded_part_taller_than_the_raise_refuses_the_travel(self, bambu, monkeypatch):
+        from kiln.plate_state import PlateJob, mark_occupied
 
-        adapter, PlateState = self._gate(monkeypatch)
-        tall = PlateState(machine="m", status="occupied", source="kiln_started_print", since="2026-09-16T18:12:00",
-                          job=PlateJob(file="vase.gcode", max_z_mm=60.0))
-        monkeypatch.setattr("kiln._pro_motion_bridge.plate_occupancy", lambda a: tall)
-        with pytest.raises(PlateClearRequired, match="vase.gcode.*60 mm tall.*10 mm"):
-            adapter._plate_gate({}, station=self._STATION, action="park")
-        short = PlateState(machine="m", status="occupied", source="kiln_started_print", since="2026-09-16T18:12:00",
-                           job=PlateJob(file="coin.gcode", max_z_mm=3.0))
-        monkeypatch.setattr("kiln._pro_motion_bridge.plate_occupancy", lambda a: short)
-        assert adapter._plate_gate({}, station=self._STATION, action="park") is None
+        self._mini(bambu, monkeypatch)
+        mark_occupied(bambu, PlateJob(file="vase.gcode", max_z_mm=60.0))
+        with pytest.raises(PlateClearRequired, match="vase.gcode.*60 mm tall.*7 mm"):
+            bambu.park_head()
+        mark_occupied(bambu, PlateJob(file="coin.gcode", max_z_mm=3.0))
+        assert bambu.park_head().success
 
 
-class TestPlateRecordPublicFace:
-    """Without the served record every plate reads as unknown, nothing is
-    written, and every door says so instead of pretending."""
-
-    def test_reads_unknown_and_records_nothing(self, no_kiln_pro, bambu):
-        from kiln.plate_state import mark_clear, mark_occupied, mark_occupied_by_start, plate_occupancy
-
-        state = plate_occupancy(bambu)
-        assert state.status == "unknown" and "served through Kiln's hosted service" in state.note
-        assert mark_clear(bambu, "human") is False
-        assert mark_occupied(bambu, None, source="print_ended") is False
-        assert mark_occupied_by_start(bambu, "part.3mf") is False
-
-    def test_kiln_plate_clear_says_it_could_not_record(self, no_kiln_pro, bambu, monkeypatch):
+class TestPlateRecordDoors:
+    def test_kiln_plate_clear_records_a_persons_word(self, bambu, monkeypatch):
         import kiln.server as srv
         from kiln.plugins.homing_tools import plate_status, run_plate
 
         monkeypatch.setattr(srv, "_resolve_control_target", lambda name: (bambu, "default"))
         monkeypatch.setattr(srv, "_check_auth", lambda *a, **k: None)
-        out = run_plate(action="clear")
-        assert out["success"] is False and out["error"]["code"] == "PLATE_RECORD_FAILED"
-        assert "served through Kiln's hosted service" in out["error"]["message"]
         assert plate_status()["plate"]["status"] == "unknown"
-
-    def test_a_served_record_passes_through_the_public_face(self, bambu, monkeypatch):
-        from kiln import _pro_motion_bridge as bridge
-        from kiln.plate_state import PlateJob, PlateState, plate_occupancy
-
-        served = PlateState(machine="m", status="occupied", source="kiln_started_print", since="2026-09-16T18:12:00",
-                            job=PlateJob(file="vase.gcode", max_z_mm=60.0))
-        monkeypatch.setattr(bridge, "plate_occupancy", lambda a: served)
-        assert plate_occupancy(bambu) is served
-        assert "vase.gcode" in served.describe() and "60 mm tall" in served.describe()
+        out = run_plate(action="clear", note="looked")
+        assert out["success"] is True and out["plate"]["status"] == "clear" and out["plate"]["source"] == "human"
+        assert plate_status()["plate"]["status"] == "clear"
 
 
-class TestDoctorWithoutTheServedSequence:
-    """``kiln doctor`` asks the same gate the tools ask, so on this install a
+class TestDoctorWithoutAPlan:
+    """``kiln doctor`` asks the same gate the tools ask, so with no plan a
     Bambu reads as refused-by-name with the served line, and a generic
     backend reads as the firmware's own routine."""
 
     def test_a_bambu_reads_as_refused_with_the_served_line(self, no_kiln_pro, bambu, monkeypatch):
         from kiln.cli.main import _doctor_filament_where, _doctor_homing_how
 
+        _serve(monkeypatch, None)
         bambu._printer_model = "bambu_a1"
         _idle(bambu, monkeypatch)
         where, warn = _doctor_filament_where(bambu)
         assert warn is True and "in place" in where and "wipe_nozzle refuses" in where and "bambu_a1" in where
         detail, warn = _doctor_homing_how(bambu)
         assert warn is True and "both refuse" in detail and "jog controls" in detail and "bambu_a1" in detail
+
+    def test_a_bambu_with_a_plan_reads_as_the_machines_own_sequence(self, bambu, monkeypatch):
+        from kiln.cli.main import _doctor_homing_how
+
+        _serve(monkeypatch, {"home": _fake_home_doc(), "park": _fake_home_doc(verb="park")})
+        bambu._printer_model = "bambu_a1"
+        _idle(bambu, monkeypatch)
+        detail, warn = _doctor_homing_how(bambu)
+        assert warn is False and "own start-sequence homing" in detail
 
     def test_a_generic_backend_reads_as_the_firmware_routine(self, no_kiln_pro, monkeypatch):
         from kiln.cli.main import _doctor_filament_where, _doctor_homing_how

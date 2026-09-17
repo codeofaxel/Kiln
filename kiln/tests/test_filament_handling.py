@@ -1566,21 +1566,23 @@ class TestEveryFilamentOpEndsHeaterOff:
         assert "waited until" not in result.message and "over the chute" not in result.message
         assert not any("M106" in line for script in stub.gcode for line in script)
 
-    def test_the_served_cool_down_sentence_is_used_when_it_answers(self, fast_clock, monkeypatch):
-        from kiln import _pro_motion_bridge as bridge
-
+    def test_a_plans_finish_block_runs_the_cool_down_and_says_so(self, fast_clock, monkeypatch):
         stub = _GcodeStub()
-        seen = {}
+        monkeypatch.setattr(stub, "_wait_for_hotend_below", lambda threshold, timeout: (True, 138.0))
+        original = stub._purge_filament_impl
 
-        def _cool(adapter, result):
-            seen["adapter"] = adapter
-            result.details["fan"] = "off"
-            return "Part fan on full while it cooled; this answer waited until the nozzle read 138 °C."
+        def _impl(plan):
+            result = original(plan)
+            result.details["finish"] = {"fan_on": "M106 S255", "handoff_c": 140, "timeout_s": 150, "fan_off": "M106 S0", "over_chute": True}
+            return result
 
-        monkeypatch.setattr(bridge, "cool_under_fan", _cool)
+        monkeypatch.setattr(stub, "_purge_filament_impl", _impl)
         result = stub.purge_filament(temperature=205, length_mm=25)
-        assert seen["adapter"] is stub
-        assert "waited until the nozzle read 138 °C" in result.message and result.details["fan"] == "off"
+        assert result.details["fan"] == "off" and result.details["cooled_below_c"] == 140
+        assert "waited until the nozzle read 138 °C" in result.message
+        assert stub.gcode[-2:] == [["M106 S255"], ["M106 S0"]]
+        # in place, so the drip is under the nozzle, not in a chute the op never went to
+        assert "under the nozzle" in result.message and "over the chute" not in result.message
 
     def test_unload_does_not_retract_what_is_already_out(self, no_kiln_pro, fast_clock):
         stub = _GcodeStub()
@@ -1630,14 +1632,50 @@ class TestEveryFilamentOpEndsHeaterOff:
         assert "left ON" in result.output
 
 
-class TestBambuWithoutTheServedSequence:
-    """The public floor on a Bambu: no served sequence, no motion, an honest answer.
+def _fake_purge_doc(printer_id: str = "bambu_a1") -> dict:
+    return {
+        "schema": "motion_plan/1", "printer_id": printer_id, "verb": "purge", "ok": True, "steps": [],
+        "pre_gcode": ["G91", "G1 Z7 F100", "G90", "G28 X", "G1 X-9 F100"],
+        "post_gcode": ["M400", "G1 E-0.5 F100", "M400"],
+        "park_gcode": ["G91", "G1 Z7 F100", "G90", "G28 X", "G1 X-9 F100", "M999"],
+        "after": "then snapped the tail and shook it off on the chute wiper",
+        "placement": {"status": "parked", "printer_id": printer_id, "position": {"x_mm": -9}, "wiped": "chute wiper",
+                      "reason": "the position the machine's own start sequence flushes at"},
+        "watch_seconds": 10, "raise_clearance_mm": 7.0,
+        "finish": {"fan_on": "M106 S255", "handoff_c": 140, "timeout_s": 150, "fan_off": "M106 S0", "over_chute": True},
+    }
 
-    The head is raised, parked over the chute, wiped and homed by a
-    sequence kiln-pro serves; without it this install never invents a
+
+def _fake_wipe_doc(printer_id: str = "bambu_a1") -> dict:
+    return {
+        "schema": "motion_plan/1", "printer_id": printer_id, "verb": "wipe", "ok": True, "steps": [],
+        "pre_gcode": ["G91", "G1 Z7 F100", "G90", "G28 X", "G1 X-9 F100"],
+        "post_gcode": ["G90", "M106 S255", "M104 S150", "M109 S150", "G1 Y99 F100", "G28 Z", "G1 Z3 F100", "M109 S120", "G28 X", "G1 X-9 F100", "M106 S0"],
+        "placement": {"status": "parked", "printer_id": printer_id, "position": {"x_mm": -9}, "wiped": "brush pad",
+                      "reason": "the position the machine's own start sequence flushes at",
+                      "after": "snapped the tail and ran the brush passes"},
+        "watch_seconds": 45, "end_retract_mm": 1.0, "retract_feed_mm_min": 500, "raise_clearance_mm": 7.0,
+        "details": {"wipe_c": 150, "done_below_c": 120, "resting_position": {"over": "the chute"}},
+        "summary": "Wiped the nozzle on the pad, the machine's own way.",
+        "finish": {"fan_on": "M106 S255", "handoff_c": 120, "timeout_s": 150, "fan_off": "M106 S0", "over_chute": True},
+    }
+
+
+def _serve_plans(monkeypatch, docs):
+    from kiln import _pro_motion_bridge as bridge
+
+    monkeypatch.setattr(bridge, "plan_for", lambda adapter, verb, *, axes="XYZ", on_plate_ok=False: (docs or {}).get(verb))
+    monkeypatch.setattr(bridge, "station_supports", lambda *a: None)
+
+
+class TestBambuWithoutAPlan:
+    """The public floor on a Bambu: no plan, no motion, an honest answer.
+
+    The head is raised, parked over its chute, wiped and homed by a plan
+    this install is handed one at a time; without one it never invents a
     coordinate.  A purge runs where the head is and says so; the wipe
-    refuses by name and says what to use instead; the station lookup reads
-    nothing from the public catalogue, which carries no station block.
+    refuses by name and says what to use instead; the public catalogue
+    carries no station block to read.
     """
 
     def test_the_public_catalogue_carries_no_station_block(self, no_kiln_pro):
@@ -1652,33 +1690,42 @@ class TestBambuWithoutTheServedSequence:
         assert "purge_station_note" not in data.get("_meta", {})
 
     def test_a_declared_bambu_has_no_station_and_purges_in_place(self, no_kiln_pro, bambu, monkeypatch):
+        _serve_plans(monkeypatch, None)
         bambu._printer_model = "bambu_a1"
         assert bambu.purge_station() is None
         bambu._last_status["ams"]["tray_now"] = "0"
         _hot(bambu, monkeypatch)
         result = bambu.purge_filament(length_mm=25)
         assert result.success and result.details["purge_station"]["status"] == "in_place"
-        assert "served through Kiln's hosted service" in result.message and "bambu_a1" in result.message
-        assert not any("G28 X" in s or "X-48.2" in s for s in _scripts(bambu))
+        assert "served one plan at a time" in result.message and "bambu_a1" in result.message
+        assert not any("G28 X" in s for s in _scripts(bambu))
 
-    def test_a_served_record_without_a_sequence_is_refused_with_the_served_line(self, no_kiln_pro, bambu):
-        bambu._printer_model = "bambu_a1"
-        station = {"printer_id": "bambu_a1", "kinematics": "bed_slinger", "chute": {"x_park_mm": -48.2}}
-        ok, why = bambu._station_supports(station, "purge")
-        assert ok is False and "served through Kiln's hosted service" in why and "bambu_a1" in why
+    def test_a_plan_that_says_no_purges_in_place_in_its_own_words(self, no_kiln_pro, bambu, monkeypatch):
+        doc = {**_fake_purge_doc("bambu_x1c"), "ok": False, "refusal": {"code": "UNSUPPORTED", "message": "the chute is a firmware macro"}}
+        _serve_plans(monkeypatch, {"purge": doc})
+        bambu._printer_model = "bambu_x1c"
+        bambu._last_status["ams"]["tray_now"] = "0"
+        _hot(bambu, monkeypatch)
+        result = bambu.purge_filament(length_mm=10)
+        assert result.details["purge_station"]["status"] == "in_place" and "firmware macro" in result.message
+        ok, why = bambu._station_supports(None, "purge")
+        assert ok is False and "firmware macro" in why
 
     def test_the_wipe_refuses_by_name_and_says_what_to_use(self, no_kiln_pro, bambu, monkeypatch):
+        _serve_plans(monkeypatch, None)
         bambu._printer_model = "bambu_a1"
         bambu._last_status["ams"]["tray_now"] = "0"
         _hot(bambu, monkeypatch)
         with pytest.raises(FilamentHandlingUnsupported) as info:
             bambu.wipe_nozzle()
         text = str(info.value)
-        assert "bambu_a1" in text and "served through Kiln's hosted service" in text
+        assert "bambu_a1" in text and "served one plan at a time" in text
         assert "printer's own screen" in text and "start sequence wipes on the pad" in text
+        assert "Home button" not in text  # the wipe refusal points at the wizard, not at homing
         assert _scripts(bambu) == []
 
     def test_a_paused_wipe_is_refused_before_anything_is_asked(self, no_kiln_pro, bambu, monkeypatch):
+        _serve_plans(monkeypatch, None)
         bambu._printer_model = "bambu_a1"
         bambu._last_status["ams"]["tray_now"] = "0"
         _hot(bambu, monkeypatch)
@@ -1687,35 +1734,62 @@ class TestBambuWithoutTheServedSequence:
         assert result.success is False and result.verification_source == "refused_paused"
 
     def test_a_load_runs_the_firmware_routine_where_the_head_is_and_says_so(self, no_kiln_pro, bambu, monkeypatch):
+        _serve_plans(monkeypatch, None)
         bambu._printer_model = "bambu_a1"
         _status_after_sleep(bambu, monkeypatch, tray_now="1")
         result = bambu.load_filament(slot=1, material="PLA")
         assert result.success and result.details["purge_station"]["status"] == "in_place"
-        assert "Extruded in place" in result.message or "in place" in result.message
 
-    def test_the_served_sequence_is_reached_through_the_bridge(self, bambu, monkeypatch):
-        """The public door hands a served answer back untouched -- pinned from
-        the public side so the contract cannot drift silently."""
-        from kiln import _pro_motion_bridge as bridge
 
+class TestBambuRunsAFilamentPlan:
+    """A purge or wipe plan that answers is run through the shared move: the
+    plan's park lines before the heater, its tail after the extrude, its
+    finish after the heater goes off -- and the answer says where it went."""
+
+    def test_a_purge_plan_parks_snaps_and_cools(self, bambu, monkeypatch):
+        _serve_plans(monkeypatch, {"purge": _fake_purge_doc()})
         bambu._printer_model = "bambu_a1"
         bambu._last_status["ams"]["tray_now"] = "0"
         _hot(bambu, monkeypatch)
-        served = FilamentOpResult(success=True, action="wipe", message="served wipe", extrusion_verified=None)
-        monkeypatch.setattr(bridge, "wipe_nozzle_impl", lambda adapter, plan: served)
-        result = bambu.wipe_nozzle()
-        assert result is served and result.details["heater"] == "off"
-
-    def test_a_served_purge_park_rides_the_shared_move(self, bambu, monkeypatch):
-        from kiln import _pro_motion_bridge as bridge
-
-        bambu._printer_model = "bambu_a1"
-        bambu._last_status["ams"]["tray_now"] = "0"
-        _hot(bambu, monkeypatch)
-        monkeypatch.setattr(bridge, "station_supports", lambda adapter, station, cap: (True, ""))
-        monkeypatch.setattr(bridge, "purge_scripts", lambda adapter, plan, placement: (["G28 X"], ["M400"], "then shook it"))
-        monkeypatch.setattr(bambu, "purge_station", lambda: {"printer_id": "bambu_a1", "chute": {"x_park_mm": -48.2}})
-        result = bambu.purge_filament(length_mm=10)
-        assert result.details["purge_station"]["status"] == "parked" and "then shook it" in result.message
+        result = bambu.purge_filament(length_mm=25)
+        assert result.success and result.details["purge_station"]["status"] == "parked"
         scripts = _scripts(bambu)
-        assert any("G28 X" in s for s in scripts) and any("M400" in s for s in scripts)
+        assert scripts[0].startswith("G91\nG1 Z7 F100\nG90\nG28 X\nG1 X-9 F100")  # the park, before the heater
+        assert any("G1 E25 F180\nM400\nG1 E-0.5 F100\nM400" in s for s in scripts)  # the tail rides after the extrude
+        assert "snapped the tail" in result.message and "landed there" in result.message
+        assert result.details["cooled_below_c"] == 140 and result.details["fan"] == "off"
+
+    def test_a_wipe_plan_runs_the_pad_pass_and_reports_its_figures(self, bambu, monkeypatch):
+        _serve_plans(monkeypatch, {"wipe": _fake_wipe_doc()})
+        bambu._printer_model = "bambu_a1"
+        bambu._last_status["ams"]["tray_now"] = "0"
+        _hot(bambu, monkeypatch, cold=110.0)  # the plan's hand-off is 120; the nozzle must get there
+        result = bambu.wipe_nozzle()
+        assert result.success and result.action == "wipe"
+        scripts = _scripts(bambu)
+        assert any("G1 E-1 F500\nG90\nM106 S255\nM104 S150" in s for s in scripts)  # the vendor's retract, then the pad pass
+        assert result.details["end_retract_mm"] == 1.0 and result.details["wipe_c"] == 150 and result.details["done_below_c"] == 120
+        assert result.message.startswith("Wiped the nozzle on the pad") and "look at the tip" in result.message
+        assert not any("G1 E-0.8 F1800" in s for s in scripts)  # the plan's own retract is not doubled
+        assert result.details["cooled_below_c"] == 120  # the plan's hand-off, not a public constant
+
+    def test_a_load_parks_first_when_the_plan_carries_a_park(self, bambu, monkeypatch):
+        _serve_plans(monkeypatch, {"purge": _fake_purge_doc()})
+        bambu._printer_model = "bambu_a1"
+        _status_after_sleep(bambu, monkeypatch, tray_now="1")
+        result = bambu.load_filament(slot=1, material="PLA")
+        assert result.details["purge_station"]["status"] == "parked"
+        assert _scripts(bambu)[0].endswith("M999")  # the park with the limits restored, then the firmware routine
+        assert "fell into the chute" in result.message
+
+    def test_a_recorded_part_taller_than_the_raise_keeps_the_purge_in_place(self, bambu, monkeypatch):
+        from kiln.plate_state import PlateJob, mark_occupied
+
+        _serve_plans(monkeypatch, {"purge": _fake_purge_doc()})
+        bambu._printer_model = "bambu_a1"
+        bambu._last_status["ams"]["tray_now"] = "0"
+        _hot(bambu, monkeypatch)
+        mark_occupied(bambu, PlateJob(file="vase.gcode", max_z_mm=60.0))
+        result = bambu.purge_filament(length_mm=10)
+        assert result.details["purge_station"]["status"] == "in_place" and "vase.gcode" in result.message
+        assert not any("G28 X" in s for s in _scripts(bambu))

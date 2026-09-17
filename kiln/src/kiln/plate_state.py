@@ -1,49 +1,146 @@
 """What is on the build plate, as far as Kiln can honestly say.
 
 Every motion Kiln sends an idle printer starts the same way: raise the
-head a few millimetres, then travel.  A travel collision on some families
-is SILENT -- no fault code, no read-back -- and some models home Z by
-pressing the nozzle onto the plate.  Whether either is safe depends on one
-fact the printer cannot report: **is there a part on the plate, and how
-tall is it?**
+head a few millimetres, then travel.
+A travel collision on that family is SILENT -- no fault code, no
+read-back -- and the vendor's own Z home on the mini presses the nozzle
+onto the plate.  Whether either is safe depends on one fact the printer
+cannot report: **is there a part on the plate, and how tall is it?**
 
-This module is the public face of the record that answers it.  The record
-itself -- written when Kiln starts a print, re-asserted when one is seen
-ending, cleared only by a person, with the part's height read from the file
-where Kiln can -- is kept by kiln-pro and served to the free tier through
-:mod:`kiln._pro_motion_bridge`.  Without it every plate reads as
-``unknown``, and unknown is the floor: a Z home that presses the nozzle
-onto the plate asks the person on every call, and nothing else changes.
+This module is the record that answers it.  Written at the two moments
+Kiln can be sure of -- a print Kiln started (the plate now holds a part),
+and a print seen ending (the part is still there) -- and by a person who
+says the plate is empty (``plate_clear=True`` on ``home_axes``, or
+``kiln plate clear``).  Read by every door that moves the head:
+:meth:`~kiln.printers.base.PrinterAdapter.home_axes`,
+:meth:`~kiln.printers.base.PrinterAdapter.park_head`, the ``plate_status``
+tool, ``kiln plate`` and ``kiln doctor``.
 
-**The default is "unknown", and unknown asks.**  A missing record, a
-missing kiln-pro, and a machine with no durable identity all read the same
-way, because the two failure directions are not symmetric: a record that
-read "clear" by mistake would send the head across a part a few
-millimetres up, silently; "unknown" costs the person one look at the plate.
+**The default is "unknown", and unknown refuses.**  This is the opposite of
+the engagement record next door (``printers/engagement.py``), whose torn or
+missing file reads as "no engagement" so a bookkeeping fault never locks a
+user out of their printer.  Here the failure directions are not symmetric:
+a torn file that read as "clear" would send the head across a part a
+few millimetres up, silently.  A torn file that reads as "unknown" costs the person one
+look at the plate.  So a missing file, a malformed one, a future schema,
+and a machine with no record all read as ``unknown`` -- and the gates treat
+``unknown`` exactly as they did before this record existed: ask.
 
-What stays here is the contract every reader shares -- the two dataclasses,
-the machine key, and the raise arithmetic -- so ``home_axes``, ``park_head``,
-``plate_status``, ``kiln plate`` and ``kiln doctor`` speak one shape whether
-or not the record is served.
+The record is per machine, keyed by :func:`kiln.registry.machine_fingerprint`
+(serial, else address), so it survives a process restart and a DHCP lease
+change, and so two printers never share a plate.  Same store shape and
+atomic write as the engagement record.  Nothing here raises into a caller.
 """
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
+import os
+import re
+import tempfile
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_STORE_NAME = "plate_state.json"
+_SCHEMA_VERSION = 1
 
 #: The three things the record can say.  ``unknown`` is what every reader
 #: gets when nothing trustworthy is on file.
 STATUSES = ("unknown", "occupied", "clear")
 
-_NOT_SERVED = (
-    "the plate record is served through Kiln's hosted service (kiln-pro) and no "
-    "served record answered on this install, so the plate reads as unknown"
-)
+#: A G-code body longer than this is not scanned for its height: a scan
+#: cut short would report a height that is too LOW, which is the dangerous
+#: direction, so a file over the cap reports no height at all.
+_MAX_SCAN_BYTES = 256 * 1024 * 1024
+_SCAN_CHUNK = 4 * 1024 * 1024
+
+#: PrusaSlicer writes ``;Z:<height>`` at every layer change; Kiln's own
+#: slicer output and Kiln-wrapped 3MFs carry these in the body.  The largest
+#: one is the part's top.
+_Z_COMMENT_RE = re.compile(rb";Z:(\d+(?:\.\d+)?)")
+#: Bambu Studio / OrcaSlicer write the height once, in the header block.
+_MAX_Z_HEADER_RE = re.compile(r"^;\s*max_z_height:\s*(\d+(?:\.\d+)?)", re.MULTILINE)
+
+
+# ---------------------------------------------------------------------------
+# Store
+# ---------------------------------------------------------------------------
+
+
+def _kiln_dir() -> Path:
+    """``~/.kiln`` (override with ``KILN_HOME``), created on demand."""
+    d = Path(os.environ.get("KILN_HOME", "").strip() or (Path.home() / ".kiln"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _store_path() -> Path:
+    return _kiln_dir() / _STORE_NAME
+
+
+def _read_store() -> dict[str, Any]:
+    """The record file, or an empty one.  Never raises.
+
+    Empty is what makes every machine read as ``unknown``: a truncated,
+    hand-edited or future-version file must not read as "clear" (see the
+    module docstring), and an empty store is the reading that asks.
+    """
+    try:
+        raw = _store_path().read_text()
+    except (OSError, ValueError):
+        return {}
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.debug("plate-state store unreadable; every plate reads as unknown", exc_info=True)
+        return {}
+    if not isinstance(data, dict) or data.get("version") != _SCHEMA_VERSION:
+        return {}
+    if not isinstance(data.get("machines"), dict):
+        return {}
+    return data
+
+
+def _write_store(data: dict[str, Any]) -> None:
+    """Replace the record atomically.  Never raises into a caller.
+
+    Each write gets a temp file of its own, exactly as the engagement store
+    does: two writers at once must not move a half-written file into place,
+    and a torn record here would read as ``unknown`` -- safe, but a person
+    asked again for no reason.
+    """
+    data["version"] = _SCHEMA_VERSION
+    data.setdefault("machines", {})
+    tmp: str | None = None
+    try:
+        path = _store_path()
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+        with os.fdopen(fd, "w") as handle:
+            handle.write(json.dumps(data, indent=2, sort_keys=True))
+        os.replace(tmp, path)
+        tmp = None
+    except (OSError, ValueError, TypeError):
+        logger.debug("plate-state store could not be written", exc_info=True)
+    finally:
+        if tmp is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+
+
+def _now_iso() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+# ---------------------------------------------------------------------------
+# The record
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -177,74 +274,256 @@ def machine_id(adapter: Any) -> str:
 
 def read(adapter: Any) -> PlateState:
     """The record for *adapter*'s machine; ``unknown`` when there is none."""
-    from kiln import _pro_motion_bridge as _bridge
-
     machine = machine_id(adapter)
     if not machine:
         return PlateState(machine="", note="this printer reports neither a serial nor an address, so nothing can be recorded for it")
     try:
-        served = _bridge.plate_occupancy(adapter)
-    except Exception:  # noqa: BLE001 -- a served fault reads as unknown, never as clear
+        return PlateState.from_dict(machine, _read_store().get("machines", {}).get(machine))
+    except Exception:  # noqa: BLE001
         logger.debug("plate-state read failed", exc_info=True)
-        served = None
-    if isinstance(served, PlateState):
-        return served
-    return PlateState(machine=machine, note=_NOT_SERVED)
+        return PlateState(machine=machine)
 
 
 def plate_occupancy(adapter: Any) -> PlateState:
     """The one door every motion gate calls.
 
-    Kept as its own name so the gates in ``home_axes`` / ``park_head`` /
-    the doors never grow a second way of asking, and so anything that later
-    enriches the answer lands here once.
+    Today it is the record and nothing else.  Kept as its own name so the
+    gates in ``home_axes`` / ``park_head`` / the doors never grow a second
+    way of asking, and so anything that later enriches the answer (a
+    device record learned from the printer's own prints) lands here once.
     """
     return read(adapter)
 
 
-def mark_occupied(adapter: Any, job: PlateJob | dict[str, Any] | None, *, source: str = "kiln_started_print", note: str = "") -> bool:
-    """The plate holds a part.  ``True`` when recorded, ``False`` when nothing keeps the record."""
-    from kiln import _pro_motion_bridge as _bridge
+def _write_state(adapter: Any, *, status: str, source: str, job: PlateJob | None, note: str) -> None:
+    machine = machine_id(adapter)
+    if not machine:
+        return
+    try:
+        store = _read_store() or {"machines": {}}
+        store.setdefault("machines", {})[machine] = {
+            "status": status,
+            "source": source,
+            "since": _now_iso(),
+            "job": job.to_dict() if job else None,
+            "note": note,
+        }
+        _write_store(store)
+    except Exception:  # noqa: BLE001 -- bookkeeping never breaks the motion it describes
+        logger.debug("plate-state write failed", exc_info=True)
 
+
+def mark_occupied(adapter: Any, job: PlateJob | dict[str, Any] | None, *, source: str = "kiln_started_print", note: str = "") -> None:
+    """The plate holds a part.
+
+    *job* may be ``None`` when the caller knows only that something is there
+    (a print seen ending that Kiln did not start); then the job already on
+    record, if any, is kept -- the part has not changed, only the moment.
+    """
     try:
         if isinstance(job, dict):
             job = PlateJob.from_dict(job)
-        return _bridge.mark_occupied(adapter, job, source)
+        if job is None:
+            previous = read(adapter)
+            job = previous.job if previous.occupied else None
+        _write_state(adapter, status="occupied", source=source, job=job, note=note)
     except Exception:  # noqa: BLE001
         logger.debug("mark_occupied failed", exc_info=True)
-        return False
 
 
-def mark_clear(adapter: Any, source: str, *, note: str = "") -> bool:
-    """A person says the plate is empty.  ``True`` when recorded.
+def mark_clear(adapter: Any, source: str, *, note: str = "") -> None:
+    """A person says the plate is empty.  It stays clear until the next print starts.
 
     The record answers the row question for home X and park.  It never
     answers for a Z home that presses the nozzle onto the plate: that
     motion reads ``plate_clear`` on its own call, every time (see
     :meth:`~kiln.printers.base.PrinterAdapter._plate_gate`).
     """
-    from kiln import _pro_motion_bridge as _bridge
-
-    return _bridge.mark_clear(adapter, source, note)
+    _write_state(adapter, status="clear", source=source, job=None, note=note)
 
 
-def mark_occupied_by_start(adapter: Any, file_name: str, *, plate_number: int | None = None) -> bool:
-    """A print Kiln started: the plate now holds *file_name*.  Never raises."""
-    from kiln import _pro_motion_bridge as _bridge
+def mark_unknown(adapter: Any, why: str) -> None:
+    """Forget what was known; the next motion asks again."""
+    _write_state(adapter, status="unknown", source="reset", job=None, note=why)
 
+
+# ---------------------------------------------------------------------------
+# Geometry of the file a print was started from
+# ---------------------------------------------------------------------------
+
+
+def _scan_max_z(stream: Any, size_hint: int | None) -> float | None:
+    """The largest ``;Z:`` comment in a G-code body, or ``None``.
+
+    Chunked on bytes so a big file costs a fraction of a second, with an
+    overlap so a comment split across chunks is still seen.  Over the cap
+    the answer is ``None``, never a partial maximum.
+    """
+    if size_hint is not None and size_hint > _MAX_SCAN_BYTES:
+        return None
+    best: float | None = None
+    seen = 0
+    tail = b""
+    while True:
+        chunk = stream.read(_SCAN_CHUNK)
+        if not chunk:
+            break
+        seen += len(chunk)
+        if seen > _MAX_SCAN_BYTES:
+            return None
+        buf = tail + chunk
+        for match in _Z_COMMENT_RE.finditer(buf):
+            z = float(match.group(1))
+            if best is None or z > best:
+                best = z
+        tail = buf[-32:]
+    return best
+
+
+def _header_max_z(head: str) -> float | None:
+    m = _MAX_Z_HEADER_RE.search(head)
+    return float(m.group(1)) if m else None
+
+
+def _union_bbox(objects: Any) -> list[float] | None:
+    boxes: list[list[float]] = []
+    for obj in objects if isinstance(objects, list) else []:
+        bbox = obj.get("bbox") if isinstance(obj, dict) else None
+        if isinstance(bbox, list) and len(bbox) == 4:
+            try:
+                boxes.append([float(v) for v in bbox])
+            except (TypeError, ValueError):
+                continue
+    if not boxes:
+        return None
+    return [
+        min(b[0] for b in boxes), min(b[1] for b in boxes),
+        max(b[2] for b in boxes), max(b[3] for b in boxes),
+    ]
+
+
+def geometry_of(path: str, *, plate_number: int = 1) -> tuple[list[float] | None, float | None]:
+    """``(footprint_mm, max_z_mm)`` for a local G-code or 3MF, each ``None`` when not derivable.
+
+    Height: the largest PrusaSlicer ``;Z:`` layer comment in the body wins.
+    Kiln slices with PrusaSlicer and its Bambu wrapper keeps the body, so
+    that covers every file Kiln made.  The header's ``max_z_height`` is
+    trusted only where it is provably a slicer's own: a standalone G-code
+    (Kiln never writes a header into one), or a 3MF whose plate JSON lists
+    objects -- Kiln's wrapper writes an EMPTY ``bbox_objects`` and a
+    ``max_z_height`` that falls back to 10.0 when the body has no layer
+    comments, and a fallback read as a real height is exactly the wrong
+    direction for a clearance check.
+
+    Footprint: the union of the plate JSON's object boxes, so only a real
+    Bambu Studio / OrcaSlicer export has one.  A file that yields nothing is
+    still a part on the plate; the caller records it with no size.
+    """
     try:
-        return _bridge.mark_occupied_by_start(adapter, file_name, plate_number)
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as zf:
+                names = set(zf.namelist())
+                footprint: list[float] | None = None
+                objects_listed = False
+                for candidate in (f"Metadata/plate_{plate_number}.json", f"metadata/plate_{plate_number}.json"):
+                    if candidate in names:
+                        plate = json.loads(zf.read(candidate).decode("utf-8", errors="replace"))
+                        objects = plate.get("bbox_objects") if isinstance(plate, dict) else None
+                        objects_listed = bool(objects)
+                        footprint = _union_bbox(objects)
+                        break
+                max_z: float | None = None
+                for candidate in (f"Metadata/plate_{plate_number}.gcode", f"metadata/plate_{plate_number}.gcode"):
+                    if candidate in names:
+                        info = zf.getinfo(candidate)
+                        with zf.open(candidate) as member:
+                            max_z = _scan_max_z(member, info.file_size)
+                        if max_z is None and objects_listed:
+                            with zf.open(candidate) as member:
+                                max_z = _header_max_z(member.read(8192).decode("utf-8", errors="replace"))
+                        break
+                return footprint, max_z
+        with open(path, "rb") as handle:
+            max_z = _scan_max_z(handle, os.path.getsize(path))
+        if max_z is None:
+            with open(path, "rb") as handle:
+                max_z = _header_max_z(handle.read(8192).decode("utf-8", errors="replace"))
+        return None, max_z
+    except Exception:  # noqa: BLE001 -- geometry is a courtesy; its absence is recorded, never invented
+        logger.debug("plate geometry of %s not derivable", path, exc_info=True)
+        return None, None
+
+
+def _local_files_for(file_name: str) -> list[str]:
+    """Local files that ARE the printer-side *file_name*, most useful first.
+
+    A path that exists is itself.  Otherwise the slice ledger
+    (``kiln.monitor_twin``) joins the printer-side name to the G-code Kiln
+    sliced and the 3MF it wrapped -- the same join the Monitor's twin uses.
+    """
+    found: list[str] = []
+    if file_name and os.path.isfile(file_name):
+        found.append(file_name)
+    try:
+        from kiln.monitor_twin import sliced_entry_for
+
+        entry = sliced_entry_for(file_name)
+    except Exception:  # noqa: BLE001
+        entry = None
+    if entry:
+        for key in ("output", "wrapped"):
+            candidate = entry.get(key)
+            if isinstance(candidate, str) and os.path.isfile(candidate) and candidate not in found:
+                found.append(candidate)
+    return found
+
+
+def job_for_start(adapter: Any, file_name: str, *, plate_number: int | None = None) -> PlateJob:
+    """The :class:`PlateJob` a print of *file_name* puts on the plate.
+
+    Geometry from the first local file that yields it; ``None`` fields when
+    none does.  Never raises.
+    """
+    footprint: list[float] | None = None
+    max_z: float | None = None
+    try:
+        for path in _local_files_for(file_name):
+            fp, mz = geometry_of(path, plate_number=int(plate_number or 1))
+            footprint = footprint if footprint is not None else fp
+            max_z = max_z if max_z is not None else mz
+            if footprint is not None and max_z is not None:
+                break
+    except Exception:  # noqa: BLE001
+        logger.debug("plate job geometry lookup failed", exc_info=True)
+    printer_id = str(getattr(adapter, "_printer_model", "") or "").strip().lower() or None
+    return PlateJob(
+        file=os.path.basename(str(file_name or "")) or str(file_name),
+        footprint_mm=footprint,
+        max_z_mm=max_z,
+        printer_id=printer_id,
+    )
+
+
+def mark_occupied_by_start(adapter: Any, file_name: str, *, plate_number: int | None = None) -> None:
+    """A print Kiln started: the plate now holds *file_name*.  Never raises."""
+    try:
+        mark_occupied(adapter, job_for_start(adapter, file_name, plate_number=plate_number), source="kiln_started_print")
     except Exception:  # noqa: BLE001
         logger.debug("plate-state start note failed", exc_info=True)
-        return False
+
+
+# ---------------------------------------------------------------------------
+# Clearance and the kiln-pro planner's door
+# ---------------------------------------------------------------------------
 
 
 def raise_clearance_mm(station: dict[str, Any] | None) -> float | None:
     """How high the vendor's own first raise lifts the head before it travels.
 
     ``raise_before_travel.probe_up_mm - back_down_mm`` from the station
-    record; ``None`` without a record.  A part on the plate at least this
-    tall stands in the path of the very next move.
+    record; ``None`` without a record.
+    A part on the plate at least this tall stands in the path of the very
+    next move (home X crosses the head's current row at this height).
     """
     try:
         r = (station or {}).get("raise_before_travel")
@@ -258,18 +537,33 @@ def raise_clearance_mm(station: dict[str, Any] | None) -> float | None:
 def plan_motion_around_plate(
     state: PlateState, station: dict[str, Any] | None, *, action: str, clearance_mm: float | None
 ) -> list[dict[str, Any]] | None:
-    """A served plan for moving around a recorded part, or ``None``.
+    """kiln-pro's motion planner, when it is installed; otherwise ``None``.
 
     The hook, not the planner.  Public Kiln refuses to move a head across a
-    recorded part; a served plan is a list of steps, each a dict with
-    ``label``, ``you_will_see``, ``stops_when`` and ``gcode`` (a list of
-    lines; ``leaves`` optional), run INSTEAD of Kiln's own sequence and
-    reported as ``sequence_source: "kiln_pro_motion_plan"``.  ``None`` means
-    no plan, and the refusal stands.  Anything malformed reads as ``None``.
-    """
-    from kiln import _pro_motion_bridge as _bridge
+    recorded part; kiln-pro (https://kiln3d.com) may know a path around it.
+    Contract of ``kiln_pro.bridge.plan_motion_around_plate``:
 
-    plan = _bridge.plan_motion_around_plate(state, station, action, clearance_mm)
+    * inputs: ``record`` (this :class:`PlateState` as a dict -- status, the
+      job's file / footprint / height), ``station`` (the model's verified
+      position record, or ``None``), ``action`` (``"home"`` or ``"park"``),
+      ``clearance_mm`` (the vendor raise the part would have to clear);
+    * output: a list of steps, each a dict with ``label``, ``you_will_see``,
+      ``stops_when`` and ``gcode`` (a list of lines; ``leaves`` optional),
+      run INSTEAD of Kiln's own sequence and reported as
+      ``sequence_source: "kiln_pro_motion_plan"`` -- or ``None``, meaning
+      no plan, and public Kiln refuses and asks the person as it would have.
+
+    Anything malformed, and anything raised, reads as ``None``.
+    """
+    try:
+        from kiln_pro.bridge import plan_motion_around_plate as _pro_plan
+    except ImportError:
+        return None
+    try:
+        plan = _pro_plan(record=state.to_dict(), station=station, action=action, clearance_mm=clearance_mm)
+    except Exception:  # noqa: BLE001 -- a planner fault is "no plan", never a motion
+        logger.debug("kiln-pro motion planner raised; refusing as without it", exc_info=True)
+        return None
     if not isinstance(plan, list) or not plan:
         return None
     steps: list[dict[str, Any]] = []

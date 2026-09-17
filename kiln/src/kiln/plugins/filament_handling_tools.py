@@ -274,7 +274,7 @@ def load_filament(
     actually used (``firmware_hotend_target_c``) beside the one Kiln
     validated; the gate is not widened to match it.
 
-    Where the declared model's own purge position is served through Kiln's hosted service (kiln-pro), free of charge, the head is parked over the purge chute
+    Where the declared model's own purge position is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it works offline, the head is parked over the purge chute
     before the routine runs, so its purge falls into the chute instead of
     hanging off the nozzle at home; the answer says where the head was
     either way.
@@ -382,7 +382,7 @@ def purge_filament(
     window, and beyond 150 mm.
 
     The answer always says where the purge went.  Where the declared
-    model's own purge position is served through Kiln's hosted service (kiln-pro), free of charge — the head is parked over the purge chute before the
+    model's own purge position is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it works offline — the head is parked over the purge chute before the
     heater is touched, the machine's own tail snap and shake follow the
     extrude, and ``purge_station.status`` is ``"parked"``.  Otherwise it is
     ``"in_place"`` with the reason (a paused print, or no served position
@@ -438,7 +438,7 @@ def wipe_nozzle(
     over the purge chute while heating, snaps the tail with the vendor's
     own retract, then runs the wipe-pad pass the machine's start sequence
     runs and reports where the head ended up.  Only where the declared
-    model's pad pass is served through Kiln's hosted service (kiln-pro), free of charge
+    model's pad pass is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it works offline
     (``printer_model`` in config.yaml names the model).  Any other model is
     refused with the reason rather than moved to a guessed coordinate: use
     the printer's own screen, or start a print — its start sequence wipes

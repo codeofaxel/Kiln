@@ -423,11 +423,11 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 91
 - **purge_filament**
   - Heat the nozzle and push a short length through — the clog test, with `load_filament` and `unload_filament` beside it for a spool change
   - Reports what the printer could actually tell: on a Bambu it reads the AMS and translates the printer's own fault code, and where a machine reports no flow signal it says so rather than claiming success
-  - Always says where the purge went: parked over the machine's own purge chute first where the model's own start-sequence position is served through Kiln's hosted service (kiln-pro), free of charge, or in place with the reason — never a guessed coordinate
+  - Always says where the purge went: parked over the machine's own purge chute first where the model's own start-sequence position is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline, or in place with the reason — never a guessed coordinate
 - **wipe_nozzle**
-  - Clean the nozzle tip on the printer's own wipe pad, running the pass its start sequence runs (served through Kiln's hosted service (kiln-pro), free of charge); refuses, and says what to use instead, on any model without a served pad position
+  - Clean the nozzle tip on the printer's own wipe pad, running the pass its start sequence runs (served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline); refuses, and says what to use instead, on any model without a served pad position
 - **home_axes**
-  - The Home button, from Kiln: the model's own start-sequence homing where it is served through Kiln's hosted service (kiln-pro), free of charge, the firmware's own routine elsewhere, a refusal that names the screen's jog controls where neither is safe
+  - The Home button, from Kiln: the model's own start-sequence homing where it is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline, the firmware's own routine elsewhere, a refusal that names the screen's jog controls where neither is safe
   - Run it in steps the first time: `plan_only` describes every motion before anything moves; `step=N` sends one motion and says what it left armed
 - **park_head**
   - Move the head somewhere safe, away from the plate, and leave it there — raise, home X, off-plate spot; never a Z touch, never heat

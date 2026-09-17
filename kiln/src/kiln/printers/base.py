@@ -3567,20 +3567,22 @@ class PrinterAdapter(ABC):
         """What happens between "heater off" and the answer, and the sentence for it.
 
         A heater switched off is not a nozzle that has stopped: the melt
-        zone keeps draining for the minute it takes to cool.  Where kiln-pro
-        is installed it runs the cool-down the machine's own start sequence
-        uses -- fan on, wait for the hand-off temperature, fan off -- and
-        reports the reading it answered at; the public floor is the honest
-        alternative: say the nozzle is still hot and keep hands away, never
-        claim a cool-down that did not run.  ``M106`` is the standard part-fan
-        G-code on every backend here, so the served version needs nothing a
-        backend does not already have.
+        zone keeps draining for the minute it takes to cool.  An op that ran
+        from a served plan carries the plan's ``finish`` block -- the
+        cool-down the machine's own start sequence uses: fan on, wait for the
+        hand-off temperature, fan off -- and :func:`kiln.printers.motion_plan.run_finish`
+        runs it and reports the reading it answered at.  The public floor is
+        the honest alternative: say the nozzle is still hot and keep hands
+        away, never claim a cool-down that did not run.  ``M106`` is the
+        standard part-fan G-code on every backend here.
         """
-        from kiln import _pro_motion_bridge as _bridge
+        from kiln.printers.motion_plan import run_finish
 
-        sentence = _bridge.cool_under_fan(self, result)
-        if isinstance(sentence, str) and sentence:
-            return sentence
+        finish = result.details.get("finish")
+        if isinstance(finish, dict) and finish:
+            sentence = run_finish(self, result, finish)
+            if sentence:
+                return sentence
         result.details["fan"] = "not driven"
         result.details["cooled_below_c"] = None
         return (
@@ -3854,18 +3856,20 @@ class PrinterAdapter(ABC):
         except Exception:  # noqa: BLE001 -- a witness is a courtesy; its absence is reported
             return None
 
-    def _plate_raise_block(self, station: dict[str, Any] | None) -> tuple[Any, float | None, bool]:
+    def _plate_raise_block(self, clearance: float | None) -> tuple[Any, float | None, bool]:
         """``(plate_state, raise_clearance_mm, blocked)`` for a raise-and-travel.
 
-        *blocked* is True when the record names a part at least as tall as
-        the vendor's raise (``raise_before_travel``): the head would cross
-        its row lower than the part.  One reading, shared by the homing
-        gate and the purge placement, so the two never disagree.
+        *clearance* is how high the machine's own first raise lifts the head
+        before it travels -- from the served plan, or
+        :func:`kiln.plate_state.raise_clearance_mm` of a record.  *blocked*
+        is True when the record names a part at least as tall as that: the
+        head would cross its row lower than the part.  One reading, shared
+        by the homing gate and the purge placement, so the two never
+        disagree.
         """
-        from kiln.plate_state import plate_occupancy, raise_clearance_mm
+        from kiln.plate_state import plate_occupancy
 
         state = plate_occupancy(self)
-        clearance = raise_clearance_mm(station)
         height = state.job.max_z_mm if (state.occupied and state.job) else None
         blocked = clearance is not None and height is not None and height >= clearance
         return state, clearance, blocked
@@ -3874,7 +3878,8 @@ class PrinterAdapter(ABC):
         self,
         options: dict[str, Any],
         *,
-        station: dict[str, Any] | None,
+        station: dict[str, Any] | None = None,
+        clearance_mm: float | None = None,
         action: str,
         touches_plate: bool = False,
         allow_plan: bool = True,
@@ -3914,11 +3919,13 @@ class PrinterAdapter(ABC):
         refusal is :class:`PlateClearRequired`, carrying a camera frame
         where one exists, so the person looks before answering.
         """
-        from kiln.plate_state import plan_motion_around_plate
+        from kiln.plate_state import plan_motion_around_plate, raise_clearance_mm
 
         if options.get("plate_clear") is True:
             return None
-        state, clearance, blocks_raise = self._plate_raise_block(station)
+        if clearance_mm is None:
+            clearance_mm = raise_clearance_mm(station)
+        state, clearance, blocks_raise = self._plate_raise_block(clearance_mm)
         # A recorded "clear" answers the ROW question -- home X and park stop
         # asking -- and nothing more.  It may not stand in for a Z home that
         # presses the nozzle onto the plate: nothing marks the plate occupied
@@ -4319,7 +4326,9 @@ class PrinterAdapter(ABC):
         # the head's row; a recorded part taller than that raise is in its
         # path.  The head stays where it is -- an in-place purge moves
         # nothing -- and the answer says why.
-        plate, clearance, blocked = self._plate_raise_block(station)
+        from kiln.plate_state import raise_clearance_mm
+
+        plate, clearance, blocked = self._plate_raise_block(raise_clearance_mm(station))
         if blocked:
             assert clearance is not None
             return {

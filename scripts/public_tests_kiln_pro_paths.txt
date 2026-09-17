@@ -22,6 +22,7 @@ kiln_pro.fasteners_intelligence
 kiln_pro.hosted_intelligence
 kiln_pro.intent_verification
 kiln_pro.intent_verification.load_intent_sidecar
+kiln_pro.motion
 kiln_pro.nozzle_intelligence
 kiln_pro.nozzle_intelligence.capacity
 kiln_pro.nozzle_intelligence.sensor_signal

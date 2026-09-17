@@ -1,55 +1,60 @@
-"""Public-Kiln → kiln-pro motion bridge: vendor-cited head motion, the plate
-record, and the cool-down choreography.
+"""Public-Kiln → kiln-pro motion bridge: where a head-motion PLAN comes from.
 
-Public Kiln owns the doors and the floor: the ``home_axes`` / ``park_head``
-/ ``wipe_nozzle`` / ``purge_filament`` templates, step mode's contract, the
-consent rule for a Z home that presses the nozzle onto the plate, the
-heater-off-and-retract finish after every filament op, and every refusal's
-wording.  What a week at the machine taught -- how a given model is raised,
-parked, wiped and homed in its maker's own order, the per-model station
-records, what is on the plate and how tall, and the cool-down the maker's
-own start sequence runs -- is served by kiln-pro, at no charge to the free
-tier, and reached only through this file.
+Public Kiln owns the doors, the floor, and the hands: the ``home_axes`` /
+``park_head`` / ``wipe_nozzle`` / ``purge_filament`` templates, step mode,
+the consent rule for a Z home that presses the nozzle onto the plate, the
+plate record, the heater-off finish, every refusal's wording -- and the
+executor that sends a plan's lines to the printer and reports what
+happened (:mod:`kiln.printers.motion_plan`).  What it does not own is the
+plan for a given model: how that machine is raised, parked over its chute,
+wiped on its pad and homed in its maker's own order.  That is a per-model
+record and a reading of the maker's files, kept by kiln-pro and handed
+over one plan at a time, for one verb on one machine.
 
-Every helper here returns ``None`` (or ``False``) when kiln-pro is absent,
-so a caller branches on one value and never on an import.  Nothing here
-gates a tier: entitlement is decided inside kiln-pro's overlay projection.
-The public behaviour without kiln-pro is the honest floor, never a stub
-that claims success: a Bambu model refuses to home, park or wipe by name;
-a purge runs in place and says so; the plate reads as unknown, so a Z home
-onto the plate asks the person every time.
+A plan reaches the executor from one of three places, tried in order:
 
-Contract (mirrored by ``kiln_pro.motion``; pinned on both sides):
+1. **kiln-pro importable** (a source-tree install with the overlay on disk):
+   ``kiln_pro.motion.build_plan`` builds it from the local overlay.
+2. **served**: the signed-in user's Kiln asks the hosted service for the
+   plan (``POST /api/tools/motion_plan``), sending the printer's model and
+   serial.  The service answers only for a machine that install has
+   reported (its heartbeat names the model), caps how many distinct
+   models one device may be served, and logs every serve.  Free accounts
+   are served; a fleet of machines is the paid axis, as it already is.
+3. **cached**: the last served plan for that machine, kept on disk
+   encrypted with a key derived from the sign-in, so a printer already
+   paired keeps homing when the network is down.  The cache holds plans
+   for machines this install has been served for -- never anyone else's.
 
-* ``station_supports(adapter, station, capability)`` -> ``(ok, why)`` or
-  ``None``.  *capability* is one of ``purge`` / ``wipe`` / ``park`` /
-  ``home_z`` / ``home_z_on_plate``.  A refusal quotes the record's own
-  reason.
-* ``home_axes_impl(adapter, axes, options)`` -> ``HomeResult`` or ``None``;
-  may raise ``HomingUnsupported`` / ``PlateClearRequired`` / ``PrinterError``
-  exactly as the public template documents.
-* ``park_head_impl(adapter, options)`` -> ``HomeResult`` or ``None``.
-* ``wipe_nozzle_impl(adapter, plan)`` -> ``FilamentOpResult`` or ``None``;
-  may raise ``FilamentHandlingUnsupported``.
-* ``purge_scripts(adapter, plan, placement)`` -> ``(pre_gcode, post_gcode,
-  after_sentence)`` or ``None`` -- the park-over-chute lines sent before the
-  heater and the snap-and-shake lines that ride after the extrude.
-* ``park_for_firmware_routine(adapter, plan)`` -> placement dict or ``None``
-  -- parks before the firmware's own change-filament routine and says so.
-* ``read_homed_axes(adapter)`` -> ``set[str]`` or ``None``.
-* ``cool_under_fan(adapter, result)`` -> the answer's sentence, or ``None``
-  (the public finish then reports the plain heater-off).
-* ``plate_occupancy(adapter)`` -> ``PlateState`` or ``None`` (unknown).
-* ``mark_occupied_by_start(adapter, file_name, plate_number)``,
-  ``mark_occupied(adapter, job, source)``, ``mark_clear(adapter, source,
-  note)`` -> ``True`` when recorded, ``False`` without kiln-pro.
-* ``plan_motion_around_plate(state, station, action, clearance_mm)`` ->
-  list of step dicts or ``None``.
+None of the three found → ``None``, and the public floor answers: a
+Bambu model refuses to home, park or wipe by name and says what to use
+instead; a purge runs in place and says so.  Never a stub that claims
+success.  Nothing here gates a tier; entitlement is the service's.
 
-Used by ``kiln.printers.base`` (the templates and the finish),
-``kiln.printers.bambu`` (the three Bambu doors), ``kiln.plate_state`` (the
-record's public face), ``kiln.server`` (the print-ended note) and
-``kiln.plugins.homing_tools`` (``plate_status`` / ``kiln plate``).
+Plan document (``schema: "motion_plan/1"``), the contract both sides pin:
+
+* ``printer_id``, ``verb`` (``home`` / ``park`` / ``wipe`` / ``purge``),
+  ``ok``; when ``ok`` is false, ``refusal: {"code", "message"}`` carries the
+  record's own reason and the executor wraps it in the public wording.
+* ``steps``: list of ``{number, label, you_will_see, stops_when, gcode,
+  leaves, touches_plate}`` -- the whole sequence; step mode is local.
+* ``homed_axes``, ``heats_nozzle_to_c``, ``sequence_source``, ``summary``
+  (the full-run sentence), ``resting_position``, ``homed_flag_bits``
+  (``{"X": 0, "Y": 1, "Z": 2}`` or ``None``), ``raise_clearance_mm``,
+  ``z_home_on_plate`` (the Z step presses the plate: consent applies).
+* purge / wipe: ``pre_gcode`` (sent before the heater), ``post_gcode``
+  (rides after the extrude, before ``M82``), ``after`` (the sentence),
+  ``placement`` (the ``purge_station`` dict), ``watch_seconds``,
+  ``end_retract_mm``, ``details`` (``wipe_c``, ``done_below_c``, ...).
+* ``finish``: ``{fan_on, handoff_c, timeout_s, fan_off, over_chute}`` --
+  the cool-down the maker's own start sequence runs after a hot op; the
+  executor runs it after the heater goes off.
+
+Requests name the machine: ``printer_id`` (catalogue model), ``serial``,
+``verb``, ``axes``, ``on_plate_ok`` (the person's consent was given, so a
+Z home onto the plate may be planned).  Every function here returns
+``None`` when nothing answers, so a caller branches on one value and
+never on an import.
 """
 
 from __future__ import annotations
@@ -59,8 +64,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+SCHEMA = "motion_plan/1"
+VERBS = ("home", "park", "wipe", "purge")
 
-def _motion() -> Any | None:
+
+def _local_pro() -> Any | None:
     """``kiln_pro.motion`` when it is installed, else ``None``.
 
     Imported on every call rather than cached at import time: the public
@@ -79,82 +87,99 @@ def _motion() -> Any | None:
 
 
 def available() -> bool:
-    return _motion() is not None
+    """True when kiln-pro is importable here.  Not "a plan is obtainable":
+    a served or cached plan needs no kiln-pro; ask :func:`plan_for`."""
+    return _local_pro() is not None
 
 
-def _call(name: str, *args: Any, **kwargs: Any) -> Any | None:
-    """Call ``kiln_pro.motion.<name>``; ``None`` when there is no such door.
+def _is_plan(doc: Any) -> bool:
+    return isinstance(doc, dict) and doc.get("schema") == SCHEMA and doc.get("verb") in VERBS
 
-    Exceptions the contract documents (``HomingUnsupported``,
-    ``PlateClearRequired``, ``PrinterError``, ``FilamentHandlingUnsupported``)
-    are the pro side's honest refusals and pass through untouched; anything
-    else is logged and read as "not served", so a fault in the overlay is
-    a degrade to the floor, never a motion.
+
+def _machine_request(adapter: Any, verb: str, axes: str, on_plate_ok: bool) -> dict[str, Any]:
+    model = str(getattr(adapter, "_printer_model", "") or "").strip().lower()
+    serial = str(getattr(adapter, "serial", "") or getattr(adapter, "_serial", "") or "").strip()
+    return {"printer_id": model, "serial": serial, "verb": verb, "axes": axes, "on_plate_ok": bool(on_plate_ok)}
+
+
+def plan_for(adapter: Any, verb: str, *, axes: str = "XYZ", on_plate_ok: bool = False) -> dict[str, Any] | None:
+    """The plan document for *verb* on *adapter*'s machine, or ``None``.
+
+    Local kiln-pro first, then the service, then the cache -- see the
+    module docstring.  A served plan is written to the cache on the way
+    back; a cached plan is served only for the same machine.  A plan that
+    says ``ok: false`` is still a plan: the record's own refusal reason,
+    handed back for the door to word.
     """
-    motion = _motion()
-    if motion is None:
+    request = _machine_request(adapter, verb, axes, on_plate_ok)
+    if not request["printer_id"]:
         return None
-    fn = getattr(motion, name, None)
-    if fn is None:
-        return None
-    from kiln.printers.base import PrinterError
+    pro = _local_pro()
+    if pro is not None and hasattr(pro, "build_plan"):
+        try:
+            doc = pro.build_plan(**request)
+            if _is_plan(doc):
+                return doc
+        except Exception:  # noqa: BLE001 -- a local builder fault falls through to the service
+            logger.debug("kiln_pro.motion.build_plan raised; asking the service", exc_info=True)
+    from kiln.printers import motion_plan_cache as _cache
 
+    doc = _served_plan(request)
+    if _is_plan(doc):
+        _cache.store(request, doc)
+        return doc
+    doc = _cache.load(request)
+    if _is_plan(doc):
+        doc = dict(doc)
+        doc["from_cache"] = True
+        return doc
+    return None
+
+
+def _served_plan(request: dict[str, Any]) -> dict[str, Any] | None:
+    """Ask the hosted service for the plan; ``None`` when it does not answer.
+
+    Goes through the same door every served tool uses
+    (``kiln.server._pro_api_call``): the user's sign-in, the device
+    fingerprint header, the client version.  A refusal from the service
+    (no sign-in, an unpaired machine, the per-device cap) reads as "no
+    plan" here; the service's own message is logged, and the public floor
+    words the refusal the user sees.
+    """
     try:
-        return fn(*args, **kwargs)
-    except PrinterError:
-        raise
+        from kiln.server import _pro_api_call
     except Exception:  # noqa: BLE001
-        logger.debug("kiln_pro.motion.%s raised; serving the public floor", name, exc_info=True)
         return None
+    try:
+        answer = _pro_api_call("motion_plan", **request)
+    except Exception:  # noqa: BLE001 -- the network is a degrade, never a motion
+        logger.debug("motion_plan request failed", exc_info=True)
+        return None
+    if not isinstance(answer, dict):
+        return None
+    doc = answer.get("plan") if "plan" in answer else answer
+    if _is_plan(doc):
+        return doc
+    if answer.get("error") or answer.get("status") == "error":
+        logger.info("motion_plan not served: %s", answer.get("error") or answer.get("message"))
+    return None
 
 
 def station_supports(adapter: Any, station: dict[str, Any] | None, capability: str) -> tuple[bool, str] | None:
-    return _call("station_supports", adapter, station, capability)
+    """``(ok, why)`` from local kiln-pro's gate, or ``None`` when it is not here.
 
-
-def home_axes_impl(adapter: Any, axes: str, options: dict[str, Any]) -> Any | None:
-    return _call("home_axes_impl", adapter, axes, options)
-
-
-def park_head_impl(adapter: Any, options: dict[str, Any]) -> Any | None:
-    return _call("park_head_impl", adapter, options)
-
-
-def wipe_nozzle_impl(adapter: Any, plan: Any) -> Any | None:
-    return _call("wipe_nozzle_impl", adapter, plan)
-
-
-def purge_scripts(adapter: Any, plan: Any, placement: dict[str, Any]) -> tuple[list[str] | None, list[str] | None, str | None] | None:
-    return _call("purge_scripts", adapter, plan, placement)
-
-
-def park_for_firmware_routine(adapter: Any, plan: Any) -> dict[str, Any] | None:
-    return _call("park_for_firmware_routine", adapter, plan)
-
-
-def read_homed_axes(adapter: Any) -> set[str] | None:
-    return _call("read_homed_axes", adapter)
-
-
-def cool_under_fan(adapter: Any, result: Any) -> str | None:
-    return _call("cool_under_fan", adapter, result)
-
-
-def plate_occupancy(adapter: Any) -> Any | None:
-    return _call("plate_occupancy", adapter)
-
-
-def mark_occupied_by_start(adapter: Any, file_name: str, plate_number: int | None = None) -> bool:
-    return bool(_call("mark_occupied_by_start", adapter, file_name, plate_number))
-
-
-def mark_occupied(adapter: Any, job: Any, source: str) -> bool:
-    return bool(_call("mark_occupied", adapter, job, source))
-
-
-def mark_clear(adapter: Any, source: str, note: str = "") -> bool:
-    return bool(_call("mark_clear", adapter, source, note))
-
-
-def plan_motion_around_plate(state: Any, station: dict[str, Any] | None, action: str, clearance_mm: float | None) -> list[dict[str, Any]] | None:
-    return _call("plan_motion_around_plate", state, station, action, clearance_mm)
+    Used by the doors and ``kiln doctor`` to say in one sentence what this
+    model can do; without local kiln-pro the answer comes from the plan
+    document's ``ok`` / ``refusal`` instead (see :func:`plan_for`).
+    """
+    pro = _local_pro()
+    if pro is None or not hasattr(pro, "station_supports"):
+        return None
+    try:
+        answer = pro.station_supports(adapter, station, capability)
+    except Exception:  # noqa: BLE001
+        logger.debug("kiln_pro.motion.station_supports raised", exc_info=True)
+        return None
+    if answer is None:
+        return None
+    return bool(answer[0]), str(answer[1])

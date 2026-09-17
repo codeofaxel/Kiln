@@ -112,7 +112,7 @@ def home_axes(
     Refused while a print is running, and while one is paused (the head is
     over the part and homing travels).
 
-    Where the connected model's own start-sequence homing is served through Kiln's hosted service (kiln-pro), free of charge — raise first, home X, Z found the way
+    Where the connected model's own start-sequence homing is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it works offline — raise first, home X, Z found the way
     the maker finds it, park off the plate — it runs that, one described
     motion at a time.  A bare ``G28`` from an unknown height is exactly the
     move that family's own sequences avoid, so a Bambu model whose sequence
@@ -178,7 +178,7 @@ def park_head(
     NEVER homes Z and never heats: it raises the head the vendor's way,
     homes X (an endstop -- nothing is touched), and travels to the model's
     own off-plate spot -- on a Bambu, the position the machine itself
-    flushes at, served through Kiln's hosted service (kiln-pro), free of charge.  On
+    flushes at, served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it works offline.  On
     Marlin, Klipper and RepRapFirmware the firmware's own home position IS
     the park, chosen by whoever configured the machine, so the generic
     home is sent and reported as that.  A Bambu model whose spot is not

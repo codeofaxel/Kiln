@@ -265,7 +265,7 @@ on the printer's own wipe pad, running the pass its start sequence runs, and
 refuses by name on any model Kiln has no verified pad position for.
 
 Every op says where the plastic went — parked over the machine's own purge
-chute where the model's start-sequence position is served through Kiln's hosted service (kiln-pro), free of charge,
+chute where the model's start-sequence position is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline,
 or in place with the reason — and ends the way a person would leave the
 machine: the end-of-print retract, heater off, and (where served) the part
 fan on until the nozzle reads its hand-off temperature, with the reading it
@@ -281,7 +281,7 @@ Elegoo — say so instead of pretending.
 
 #### `kiln home [--axes XYZ] [--plan] [--step N] [--plate-clear]` / `kiln park [--plan] [--step N]`
 The Home button, from Kiln, and the retreat. `home` runs the model's own
-start-sequence homing where it is served through Kiln's hosted service (kiln-pro), free of charge
+start-sequence homing where it is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline
 — on a Bambu: raise first, home X, Z by nozzle contact off the plate, park over
 the purge chute — hands the job to the firmware's own routine on Marlin, Klipper
 and RepRapFirmware, and refuses — naming the screen's jog controls, Z up first —
@@ -300,9 +300,10 @@ What Kiln records is on the build plate: the print that left a part there, when,
 and how tall where Kiln could read the file; or a person's word that it is
 clear. `home` and `park` refuse to cross a recorded part taller than the
 machine's own raise; `plate clear` is the person's door and stays clear until
-the next print starts. The record is served through Kiln's hosted service (kiln-pro), free of charge; without it every plate
-reads as unknown and a Z home onto the plate asks every time. There is
-deliberately no MCP tool that marks the plate clear.
+the next print starts. The record lives on your machine. A Z home that presses
+the nozzle onto the plate asks every time regardless -- the record cannot see a
+print started from the printer's own screen. There is deliberately no MCP tool
+that marks the plate clear.
 
 #### `kiln gcode <commands>...`
 Send raw G-code commands to the printer. Commands are validated for safety before sending.

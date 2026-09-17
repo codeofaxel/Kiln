@@ -42,6 +42,7 @@ import paho.mqtt.client as mqtt
 from kiln.printer_intelligence import chamber_sensor_for_model
 from kiln.printers.base import (
     DEFAULT_PURGE_LENGTH_MM,
+    FILAMENT_FEED_RATE_MM_MIN,
     STALE_STATE_WARN_AGE,
     CameraStreamError,
     FilamentHandlingUnsupported,
@@ -5938,67 +5939,146 @@ class BambuAdapter(PrinterAdapter):
     #: that takes longer than a purge, so its fault watch is longer too.
     _FILAMENT_WIPE_WATCH_S: float = 45.0
 
-    # -- the purge station, and the three doors that drive it --------------
+    # -- the purge station, and the doors that drive it ------------------
     #
     # How a Bambu model is raised, parked over its chute, wiped on its pad
-    # and homed -- in its maker's own order -- is served by kiln-pro, at no
-    # charge to the free tier, through ``kiln._pro_motion_bridge``.  This
-    # file keeps the doors and the floor: without the served sequence a
-    # model refuses to home, park or wipe by name and says what to use
-    # instead, and a purge runs in place and says so.  Never a coordinate
-    # this file inferred, never a sibling model's.
+    # and homed -- in its maker's own order -- is a PLAN this install is
+    # handed one at a time: built by kiln-pro where it is installed, else
+    # served by the hosted service for a paired machine, else the on-disk
+    # copy of the last served plan (see ``kiln._pro_motion_bridge``).  The
+    # executor that sends it (``kiln.printers.motion_plan``) is public.
+    # This file keeps the doors and the floor: without a plan a model
+    # refuses to home, park or wipe by name and says what to use instead,
+    # and a purge runs in place and says so.  Never a coordinate this file
+    # inferred, never a sibling model's.
 
     _SERVED_LINE = (
-        "The vendor-cited motion sequence for {model} is served through Kiln's "
-        "hosted service (kiln-pro), free of charge, and no served sequence answered "
-        "on this install."
+        "The motion sequence for {model} is served one plan at a time through Kiln's "
+        "hosted service (kiln-pro) for a paired printer, free of charge, and no plan "
+        "answered on this install -- sign in to Kiln, or check the network."
     )
+    _JOG_LINE = (
+        " Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, "
+        "with your eyes on the plate. The screen's Home button descends the nozzle to the bed "
+        "and is the wrong tool with a part on the plate."
+    )
+    #: A plan asked for twice within this window is not fetched twice (a purge
+    #: asks once for its placement and once for its scripts).
+    _PLAN_MEMO_S: float = 120.0
 
-    def _served_refusal(self, verb: str) -> str:
-        model = self._printer_model or "this printer (no printer_model declared in config.yaml)"
-        return (
-            f"Kiln will not {verb} {model} from this install: "
-            + self._SERVED_LINE.format(model=model)
-            + " Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, "
-            "with your eyes on the plate. The screen's Home button descends the nozzle to the bed "
-            "and is the wrong tool with a part on the plate."
-        )
+    def _plan_for(self, verb: str, *, axes: str = "XYZ", on_plate_ok: bool = False) -> dict[str, Any] | None:
+        """The plan document for *verb* on this machine, or ``None`` -- memoised briefly."""
+        from kiln import _pro_motion_bridge as _bridge
+
+        memo = getattr(self, "_plan_memo", None)
+        if memo is None:
+            memo = self._plan_memo = {}
+        key = (verb, axes, bool(on_plate_ok), str(getattr(self, "_printer_model", "") or ""))
+        hit = memo.get(key)
+        now = time.monotonic()
+        if hit is not None and now - hit[0] < self._PLAN_MEMO_S:
+            return hit[1]
+        doc = _bridge.plan_for(self, verb, axes=axes, on_plate_ok=on_plate_ok)
+        memo[key] = (now, doc)
+        return doc
+
+    def _model_name(self) -> str:
+        return self._printer_model or "this printer (no printer_model declared in config.yaml)"
+
+    def _served_refusal(self, verb: str, doc: dict[str, Any] | None) -> str:
+        """The refusal for *verb* when no plan, or a plan that says no, answered."""
+        model = self._model_name()
+        refusal = (doc or {}).get("refusal") if isinstance(doc, dict) else None
+        reason = (refusal or {}).get("message") if isinstance(refusal, dict) else None
+        why = reason.rstrip(". ") + "." if reason else self._SERVED_LINE.format(model=model)
+        return f"Kiln will not {verb} {model}: {why}" + self._JOG_LINE
 
     def _station_supports(self, station: dict[str, Any] | None, capability: str) -> tuple[bool, str]:
         """Whether this install may drive *capability* on this model, and why not.
 
-        The served side answers from the record's geometry and figures and
-        quotes the record's own reason when it refuses.  Without it: no
-        record is the base's answer; a record with no sequence to drive it
-        is refused with the served line.
+        With kiln-pro installed the record's own gate answers.  Otherwise
+        the PLAN is the gate: a plan that arrives and says ``ok`` is a yes;
+        one that refuses quotes its reason; none at all is the served line.
         """
         from kiln import _pro_motion_bridge as _bridge
 
         answer = _bridge.station_supports(self, station, capability)
         if answer is not None:
             return bool(answer[0]), str(answer[1])
-        model = (station or {}).get("printer_id") or str(getattr(self, "_printer_model", "") or "").strip().lower()
+        model = str(getattr(self, "_printer_model", "") or "").strip().lower()
         if not model:
-            return super()._station_supports(station, capability)  # no model declared: the base names that
-        # No served answer -- the record, the sequence, or both are not here.
-        # One sentence for all three, so a refusal never blames the wrong half.
-        return False, self._SERVED_LINE.format(model=model)
+            return super()._station_supports(None, capability)
+        verb, axes, consent = {
+            "purge": ("purge", "XY", False),
+            "wipe": ("wipe", "XY", False),
+            "park": ("park", "XY", False),
+            "home_z": ("home", "XYZ", False),
+            "home_z_on_plate": ("home", "XYZ", True),
+        }.get(capability, ("home", "XYZ", False))
+        doc = self._plan_for(verb, axes=axes, on_plate_ok=consent)
+        if doc is None:
+            return False, self._SERVED_LINE.format(model=model)
+        refusal = doc.get("refusal") if isinstance(doc.get("refusal"), dict) else {}
+        if capability == "home_z_on_plate":
+            return (bool(doc.get("ok")) and bool(doc.get("z_home_on_plate"))), (
+                "" if doc.get("ok") else str(refusal.get("message") or self._SERVED_LINE.format(model=model)))
+        if doc.get("ok"):
+            return True, ""
+        if capability == "home_z" and refusal.get("code") == "PLATE_CLEAR_REQUIRED":
+            return False, (f"{model} homes Z by pressing the nozzle onto the plate; that runs only "
+                           "with plate_clear on the call, after a person has looked")
+        return False, str(refusal.get("message") or self._SERVED_LINE.format(model=model))
+
+    def _purge_placement(self, plan: FilamentOpPlan) -> dict[str, Any]:
+        """Where a purge is about to go, from the plan rather than a local record."""
+        if plan.printer_paused:
+            return super()._purge_placement(plan)
+        model = str(getattr(self, "_printer_model", "") or "").strip().lower()
+        doc = self._plan_for("purge", axes="XY")
+        base = {"status": "in_place", "printer_id": model or None, "position": self._reported_position(), "wiped": None}
+        if doc is None:
+            return {**base, "reason": (self._SERVED_LINE.format(model=model) if model else
+                                       "no printer_model is declared in config.yaml, so Kiln cannot ask for a plan").rstrip(". ")}
+        if not doc.get("ok"):
+            refusal = doc.get("refusal") if isinstance(doc.get("refusal"), dict) else {}
+            return {**base, "reason": str(refusal.get("message") or self._SERVED_LINE.format(model=model)).rstrip(". ")}
+        plate, clearance, blocked = self._plate_raise_block(doc.get("raise_clearance_mm"))
+        if blocked:
+            assert clearance is not None
+            return {**base, "plate": plate.to_dict(), "reason": (
+                f"{plate.describe()}, taller than the {clearance:g} mm raise the travel to "
+                "the chute starts with, so the head stayed where it is; clear the plate and "
+                "run `kiln plate clear` to park over the chute again")}
+        placement = dict(doc.get("placement") or {})
+        placement.setdefault("status", "parked")
+        placement.setdefault("printer_id", model)
+        return placement
 
     def _park_for_firmware_routine(self, plan: FilamentOpPlan) -> dict[str, Any]:
         """Park over the chute before the firmware's own change-filament routine.
 
         The routine (``ams_change_filament``) retracts, feeds and purges
         without moving the head, so run at home it purges at home -- measured
-        2026-09-15.  The touchscreen wizard parks first; the served sequence
-        does the same and returns the placement record for the answer.
-        Without it the routine runs where the head is, and the answer says so.
+        2026-09-15.  The touchscreen wizard parks first; the plan's
+        ``park_gcode`` (the park with the machine's limits restored after)
+        does the same.  A plan without one leaves the routine where the head
+        is, and the answer says so.
         """
-        from kiln import _pro_motion_bridge as _bridge
-
-        placement = _bridge.park_for_firmware_routine(self, plan)
-        if isinstance(placement, dict):
+        placement = self._purge_placement(plan)
+        if placement.get("status") != "parked":
             return placement
-        return self._purge_placement(plan)
+        doc = self._plan_for("purge", axes="XY") or {}
+        script = doc.get("park_gcode")
+        if not isinstance(script, list) or not script:
+            return {**placement, "status": "in_place", "wiped": None,
+                    "reason": "the served plan carries no park for the firmware's own routine"}
+        self.send_gcode([str(line) for line in script])
+        placement["after"] = (
+            "the firmware's own routine then ran with the head there, so its "
+            "purge fell into the chute"
+        )
+        placement["pre_gcode"] = list(script)
+        return placement
 
     @staticmethod
     def _tray_now_of(status: dict[str, Any]) -> Any:
@@ -6328,41 +6408,34 @@ class BambuAdapter(PrinterAdapter):
     def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
         """Park over the chute, heat, extrude, snap and shake; watch for a fault.
 
-        Where the catalogue carries a verified ``purge_station`` for the
-        declared model and the printer is idle, the head is driven to the
-        flush position its own start sequence uses BEFORE the heater
-        command, so the ooze of heating and the purge itself fall into the
-        chute, and the vendor's own tail snap and "wipe and shake" follow
-        the extrude.  Otherwise the purge happens in place and the answer
-        says so and why — a paused print (the head is over the part), or no
-        verified position for the model — never at a coordinate Kiln
-        inferred.
+        Where a plan answers for this model and the printer is idle, the head
+        is driven to the flush position the machine's own start sequence
+        uses BEFORE the heater command, so the ooze of heating and the purge
+        itself fall into the chute, and the maker's own tail snap and shake
+        follow the extrude.  Otherwise the purge happens in place and the
+        answer says so and why -- a paused print, no plan, a part in the way
+        -- never at a coordinate Kiln inferred.
 
         Bambu reports no extruder-flow telemetry, so a clean purge stays
         ``extrusion_verified=None``; a fault code raised inside the watch
-        window (the same codes its own load wizard raises) turns it
-        ``False`` with the reading.
+        window turns it ``False`` with the reading.
         """
-        from kiln import _pro_motion_bridge as _bridge
-
         faults_before = self._snapshot_faults()
         placement = self._purge_placement(plan)
         pre: list[str] | None = None
         post: list[str] | None = None
+        finish: dict[str, Any] | None = None
         if placement.get("status") == "parked":
-            # The park-over-chute lines before the heater and the snap-and-
-            # shake after the extrude are the served sequence's; a parked
-            # placement without them cannot happen, because "parked" was
-            # the served gate's own answer -- but if it did, the purge runs
-            # in place and says so rather than claim a park it never sent.
-            scripts = _bridge.purge_scripts(self, plan, placement)
-            if scripts is None:
+            doc = self._plan_for("purge", axes="XY") or {}
+            pre = [str(x) for x in (doc.get("pre_gcode") or [])] or None
+            post = [str(x) for x in (doc.get("post_gcode") or [])] or None
+            finish = doc.get("finish") if isinstance(doc.get("finish"), dict) else None
+            if doc.get("after"):
+                placement["after"] = str(doc["after"])
+            if pre is None:
                 placement = {**placement, "status": "in_place", "wiped": None,
-                             "reason": "the served motion sequence answered no script for the chute"}
-            else:
-                pre, post, after = scripts
-                if after:
-                    placement["after"] = after
+                             "reason": "the served plan answered no script for the chute"}
+                post = None
         result = self._gcode_filament_move(
             plan,
             signed_length_mm=float(plan.length_mm or DEFAULT_PURGE_LENGTH_MM),
@@ -6373,6 +6446,8 @@ class BambuAdapter(PrinterAdapter):
         )
         if not result.success:
             return result
+        if finish:
+            result.details["finish"] = dict(finish)
         watch = plan.wait_seconds(self._FILAMENT_PURGE_WATCH_S)
         fault = self._watch_for_purge_fault(plan, faults_before, watch=watch, stage="purge")
         if fault is not None:
@@ -6390,13 +6465,11 @@ class BambuAdapter(PrinterAdapter):
         return result
 
     def _wipe_nozzle_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Run the model's own wipe-pad pass where it is served, or refuse with the reason.
+        """Run the model's own wipe-pad pass from its plan, or refuse with the reason.
 
         Refused while paused: the head is parked over the part, and Kiln
         does not travel mid-print.
         """
-        from kiln import _pro_motion_bridge as _bridge
-
         if plan.printer_paused:
             return FilamentOpResult(
                 success=False,
@@ -6413,48 +6486,101 @@ class BambuAdapter(PrinterAdapter):
                 temperature=plan.temperature,
                 details={"purge_station": self._purge_placement(plan)},
             )
-        result = _bridge.wipe_nozzle_impl(self, plan)
-        if result is not None:
-            return result
-        model = self._printer_model or "this printer (no printer_model declared in config.yaml)"
-        raise FilamentHandlingUnsupported(
-            f"Kiln will not wipe {model} from this install: {self._SERVED_LINE.format(model=model)} "
-            "Wipe from the printer's own screen, or start a print -- its start sequence wipes on the pad."
+        doc = self._plan_for("wipe", axes="XY")
+        if doc is None or not doc.get("ok"):
+            raise FilamentHandlingUnsupported(
+                self._served_refusal("wipe", doc).replace(self._JOG_LINE, "")
+                + " Wipe from the printer's own screen, or start a print -- its start sequence wipes on the pad."
+            )
+        # The wipe travels to the chute first (raise, home X across the row);
+        # a recorded part taller than the raise refuses it -- a plan cannot
+        # stand in for a wipe, so the planner is not asked.
+        self._plate_gate({}, clearance_mm=doc.get("raise_clearance_mm"), action="wipe", allow_plan=False)
+        faults_before = self._snapshot_faults()
+        placement = dict(doc.get("placement") or {"status": "parked", "printer_id": self._printer_model})
+        try:
+            retract_mm = float(doc.get("end_retract_mm") or 0.0)
+            retract_feed = float(doc.get("retract_feed_mm_min") or FILAMENT_FEED_RATE_MM_MIN)
+        except (TypeError, ValueError):
+            retract_mm, retract_feed = 0.0, FILAMENT_FEED_RATE_MM_MIN
+        pre = [str(x) for x in (doc.get("pre_gcode") or [])]
+        post = [str(x) for x in (doc.get("post_gcode") or [])]
+        if not pre or not post or retract_mm <= 0:
+            raise FilamentHandlingUnsupported(
+                f"Kiln will not wipe {self._model_name()}: the plan that answered carries no pad pass. "
+                "Wipe from the printer's own screen, or start a print -- its start sequence wipes on the pad."
+            )
+        result = self._gcode_filament_move(
+            plan,
+            signed_length_mm=-retract_mm,
+            feed_mm_min=retract_feed,
+            mechanism="bambu_mqtt_gcode_line",
+            pre_gcode=pre,
+            post_gcode=post,
+            placement=placement,
         )
+        if not result.success:
+            return result
+        watch = plan.wait_seconds(float(doc.get("watch_seconds") or self._FILAMENT_WIPE_WATCH_S))
+        fault = self._watch_for_purge_fault(plan, faults_before, watch=watch, stage="wipe")
+        if fault is not None:
+            fault.details["purge_station"] = placement
+            return fault
+        result.verification_source = "no_fault_within_window"
+        result.details["end_retract_mm"] = retract_mm
+        for key, value in (doc.get("details") or {}).items():
+            result.details[key] = value
+        if isinstance(doc.get("finish"), dict):
+            result.details["finish"] = dict(doc["finish"])
+        summary = str(doc.get("summary") or f"Wiped the nozzle on {self._model_name()}'s pad.")
+        result.message = (
+            f"{summary} Bambu acknowledges none of this and raised no fault in {watch:g}s -- look at the tip."
+        )
+        result.details["fault_watch_seconds"] = watch
+        return result
 
     def _home_axes_impl(self, axes: str, options: dict[str, Any]) -> HomeResult:
-        """Home the way the model's own start sequence does, where it is served; else refuse.
+        """Home the way the model's own start sequence does, from its plan; else refuse.
 
         Every Bambu start file raises the head before it homes and never
         sends a bare G28 from an unknown height, so this file never invents
-        one: without the served sequence the answer is a refusal that names
-        the screen's jog controls, Z up first.
+        one: without a plan the answer is a refusal that names the screen's
+        jog controls, Z up first.  The plan's ``z_home_on_plate`` says
+        whether the Z step presses the plate; the plate gate then asks the
+        person, every call.
         """
-        from kiln import _pro_motion_bridge as _bridge
+        from kiln.printers.motion_plan import run_home_plan
 
-        result = _bridge.home_axes_impl(self, axes, options)
-        if result is not None:
-            return result
-        raise HomingUnsupported(
-            self._served_refusal("home") + " On this family the vendor's own sequence raises the "
-            "head before it homes, and a bare G28 from an unknown height is exactly the move it avoids."
-        )
+        action = str(options.get("_action") or "home")
+        consent = options.get("plate_clear") is True
+        doc = self._plan_for("home", axes=axes, on_plate_ok=consent)
+        if doc is None:
+            raise HomingUnsupported(
+                self._served_refusal(action, None) + " On this family the vendor's own sequence raises the "
+                "head before it homes, and a bare G28 from an unknown height is exactly the move it avoids."
+            )
+        if not doc.get("ok"):
+            refusal = doc.get("refusal") if isinstance(doc.get("refusal"), dict) else {}
+            if refusal.get("code") == "PLATE_CLEAR_REQUIRED":
+                # The plan says the Z home presses the plate and no consent
+                # came with the call: the public gate words the ask.
+                self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action=action, touches_plate=True)
+            raise HomingUnsupported(self._served_refusal(action, doc))
+        touches = bool(doc.get("z_home_on_plate")) and "Z" in axes
+        detour = self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action=action, touches_plate=touches)
+        return run_home_plan(self, doc, axes=axes, options=options, action=action, steps=detour)
 
     def _park_head_impl(self, options: dict[str, Any]) -> HomeResult:
-        """Raise, home X, travel off the plate edge to the chute -- where it is served; else refuse."""
-        from kiln import _pro_motion_bridge as _bridge
+        """Raise, home X, travel off the plate edge to the chute -- from the park plan; else refuse."""
+        from kiln.printers.motion_plan import run_home_plan
 
-        result = _bridge.park_head_impl(self, options)
-        if result is not None:
-            result.action = "park"
-            return result
-        raise HomingUnsupported(self._served_refusal("park"))
-
-    def _read_homed_axes(self) -> set[str] | None:
-        """Which axes the printer reports homed, where the served side can read them."""
-        from kiln import _pro_motion_bridge as _bridge
-
-        return _bridge.read_homed_axes(self)
+        doc = self._plan_for("park", axes="XY")
+        if doc is None or not doc.get("ok"):
+            raise HomingUnsupported(self._served_refusal("park", doc))
+        detour = self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action="park")
+        result = run_home_plan(self, doc, axes="XY", options=options, action="park", steps=detour)
+        result.action = "park"
+        return result
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code

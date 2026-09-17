@@ -10402,6 +10402,12 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                 clearance = None
                 with contextlib.suppress(Exception):
                     clearance = raise_clearance_mm(verify_adapter.purge_station())
+                if clearance is None and callable(getattr(verify_adapter, "_plan_for", None)):
+                    # No local record: the served park plan carries the raise.
+                    with contextlib.suppress(Exception):
+                        doc = verify_adapter._plan_for("park", axes="XY") or {}
+                        raw = doc.get("raise_clearance_mm")
+                        clearance = float(raw) if isinstance(raw, (int, float)) else None
                 if plate.occupied:
                     height = plate.job.max_z_mm if plate.job else None
                     if clearance is not None and height is not None and height >= clearance:
