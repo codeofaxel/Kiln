@@ -187,13 +187,47 @@ def _issued(path: Path, url: str, expires_at: float) -> None:
 
 def _refused(path: Path, reason: str) -> None:
     """No link, and this door says why — the record a PNG-only sign-off
-    needs, written by the door and never by the caller."""
+    needs, written by the door and never by the caller.
+
+    The one place a refusal is said: every early return in
+    :func:`stage_link_for` comes through here, so the log names every
+    reason exactly once and :func:`last_refusal` reads the same record.
+    A ``None`` with no trace anywhere is how a whole day of missing links
+    went unexplained (2026-09-19).
+    """
+    logger.debug("stage link refused (%s): %s", reason, path.name)
     try:
         from kiln.preview_evidence import record_url_refusal
 
         record_url_refusal(path, reason)
     except Exception:  # noqa: BLE001
         logger.debug("stage link refusal not recorded", exc_info=True)
+
+
+def last_refusal(mesh_path: str | os.PathLike[str]) -> str | None:
+    """Why :func:`stage_link_for` last returned ``None`` for *mesh_path*, in
+    the door's own word (``opted_out``, ``signed_out``, ``too_large``,
+    ``transport``, ``http_503``, ...) — or ``None`` when no refusal is on
+    record, or a link was issued for these bytes since.
+
+    A read of the evidence record, so a caller that got ``None`` can say
+    why without the ``None`` contract changing.  Never raises.
+    """
+    try:
+        from kiln.preview_evidence import evidence_for
+
+        ev = evidence_for(mesh_path)
+        refusal = ev.get("url_refusal")
+        if not isinstance(refusal, dict):
+            return None
+        link = ev.get("url")
+        if isinstance(link, dict) and link.get("at", 0) >= refusal.get("at", 0):
+            return None  # the newer fact is a link
+        reason = refusal.get("reason")
+        return reason if isinstance(reason, str) and reason else None
+    except Exception:  # noqa: BLE001
+        logger.debug("stage link refusal not readable", exc_info=True)
+        return None
 
 
 
@@ -464,7 +498,9 @@ def attach_stage_link(result: Any, mesh_path: str | os.PathLike[str] | None = No
     return result
 
 
-async def attach_stage_link_async(result: Any) -> Any:
+async def attach_stage_link_async(
+    result: Any, mesh_path: str | os.PathLike[str] | None = None
+) -> Any:
     """``attach_stage_link`` for a caller that is already on an event loop.
 
     The upload is a blocking socket call.  Run straight from a coroutine it
@@ -472,6 +508,10 @@ async def attach_stage_link_async(result: Any) -> Any:
     stdio server that is the WHOLE server: no other tool call, no
     heartbeat, nothing, while a mesh uploads.  So the work goes to a
     thread and the loop keeps serving.
+
+    ``mesh_path`` names the mesh when the caller already knows it (the
+    stage's result hook does — it just minted a token for it); otherwise
+    the result is searched, as ``attach_stage_link`` searches it.
 
     Never raises.  Returns ``result`` for chaining.
     """
@@ -482,9 +522,10 @@ async def attach_stage_link_async(result: Any) -> Any:
             return result
         if result.get("success") is False:
             return result
-        if not find_mesh_path(result):
+        target = mesh_path or find_mesh_path(result)
+        if not target:
             return result
-        await asyncio.to_thread(attach_stage_link, result)
+        await asyncio.to_thread(attach_stage_link, result, target)
     except Exception as exc:  # noqa: BLE001
         logger.debug("stage link not attached: %s", exc)
     return result

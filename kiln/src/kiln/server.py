@@ -11057,6 +11057,23 @@ def _restart_exec_target(env: dict) -> tuple[list[str], str, str]:
     )
 
 
+#: What a restart costs every session that is ALREADY open.  A host keeps
+#: the tool list it cached at initialize and does not re-list on
+#: ``notifications/tools/list_changed`` (measured on Claude Desktop
+#: 2026-09-01); after a restart that cached list no longer carries the
+#: panel's fetch verb (``kiln_viewer_payload``), so the inline 3D stage
+#: cannot fetch geometry in those sessions until the client reconnects.
+#: Measured 2026-09-19: a whole day of makes with a loaded panel and zero
+#: fetches, and nothing had said this would happen.  Said here, once, by
+#: the tool that causes it.
+_RESTART_OPEN_SESSIONS_NOTE = (
+    "Every chat that was already open loses Kiln's inline 3D stage until its "
+    "client reconnects — that host keeps the tool list it cached before this "
+    "restart, so the panel can no longer fetch geometry; reconnect the Kiln "
+    "MCP server in the host, or open a new chat, to get the panel back."
+)
+
+
 @mcp.tool()
 def restart_server(clean_env: bool = True) -> dict:
     """Restart the Kiln MCP server process.
@@ -11149,6 +11166,9 @@ def restart_server(clean_env: bool = True) -> dict:
         # ``clean_env`` entirely.
         os.execve(argv[0], argv, new_env)
 
+    # In the calling thread, before the exec races the log: the server's
+    # own record of what this restart costs the sessions it cannot see.
+    logger.warning("restart_server: %s", _RESTART_OPEN_SESSIONS_NOTE)
     threading.Thread(target=_do_restart, daemon=True).start()
     msg = f"Kiln server restarting in ~0.3s — {relaunch_note}."
     if stripped:
@@ -11157,6 +11177,7 @@ def restart_server(clean_env: bool = True) -> dict:
             f"~/.kiln/config.yaml wins."
         )
     msg += " MCP connection will drop and the client should auto-reconnect."
+    msg += f" {_RESTART_OPEN_SESSIONS_NOTE}"
     return {
         "success": True,
         # "wrapper" or "in-place" — a caller deciding whether this restart
@@ -11165,6 +11186,9 @@ def restart_server(clean_env: bool = True) -> dict:
         # near-miss).
         "relaunch": relaunch,
         "stripped_env_vars": sorted(stripped),
+        # Structured twin of the sentence in ``message``: a caller that
+        # branches on it should not have to parse prose.
+        "open_sessions_lose_stage": True,
         "message": msg,
     }
 
