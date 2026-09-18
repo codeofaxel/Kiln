@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **You see the print before it starts, from every door.**
+
 - **A long print is never mistaken for a stuck one.** Kiln used to give up
   after two hours and could send the same file again. It now leaves a running
   print alone and tells you when one stops moving. Thanks to @qjkme.
