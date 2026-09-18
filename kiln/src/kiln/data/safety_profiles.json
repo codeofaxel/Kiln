@@ -774,7 +774,7 @@
       256,
       256
     ],
-    "notes": "High-speed CoreXY with SDCP protocol. Enclosed, active chamber heating. All-metal hotend with a brass-hardened steel nozzle rated to 320C by the manufacturer. The ceiling here read 300C until 2026-07-20, which capped the machine 20C below its rated hotend and blocked its top of range for no stated reason; corrected to the manufacturer's figure, which the printer registry already carried."
+    "notes": "High-speed CoreXY with SDCP protocol. Enclosed; the enclosure is passive (no chamber heater; it holds the bed's heat, and the maker publishes no chamber temperature). All-metal hotend with a brass-hardened steel nozzle rated to 320C by the manufacturer. The ceiling here read 300C until 2026-07-20, which capped the machine 20C below its rated hotend and blocked its top of range for no stated reason; corrected to the manufacturer's figure, which the printer registry already carried."
   },
   "elegoo_centauri_carbon_2": {
     "display_name": "Elegoo Centauri Carbon 2 / Carbon 2 Combo",

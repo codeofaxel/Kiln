@@ -1503,7 +1503,7 @@
   "elegoo_centauri_carbon": {
     "display_name": "Elegoo Centauri Carbon",
     "slicer": "orcaslicer",
-    "notes": "High-speed CoreXY. Enclosed. SDCP protocol. All-metal hotend. Active chamber heating.",
+    "notes": "High-speed CoreXY. Enclosed, passive (no chamber heater). SDCP protocol. All-metal hotend.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
