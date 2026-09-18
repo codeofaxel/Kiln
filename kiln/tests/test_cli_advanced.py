@@ -313,6 +313,13 @@ class TestCompareCost:
 
 
 class TestSlice:
+    @pytest.fixture(autouse=True)
+    def _preview_gate_is_not_under_test(self, monkeypatch):
+        """These tests are about slicing options; the CLI start doors now gate on a
+        preview like the tools (test_cli_print_gate.py has the gate's own
+        tests).  Switched off the way CI does, explicitly."""
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
     def test_slice_json(self, runner, tmp_path):
         stl = tmp_path / "cube.stl"
         stl.write_text("solid cube\nendsolid cube\n")

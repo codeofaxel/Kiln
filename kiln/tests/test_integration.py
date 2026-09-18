@@ -138,6 +138,14 @@ def _make_patches(mock_adapter, config_file):
 class TestFullPipeline:
     """Simulate the agent workflow: discover → auth → preflight → upload → print → wait."""
 
+    @pytest.fixture(autouse=True)
+    def _preview_gate_is_not_under_test(self, monkeypatch):
+        """These tests are about the upload-then-print sequence; the CLI start doors now gate on a
+        preview like the tools (test_cli_print_gate.py has the gate's own
+        tests).  Switched off the way CI does, explicitly."""
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
+
     def test_discover_then_auth(self, runner, tmp_path):
         """Step 1-2: Discover a printer, then authenticate with it."""
         from kiln.cli.discovery import DiscoveredPrinter

@@ -316,6 +316,14 @@ class TestPreflightMaterial:
 class TestBatchPrint:
     """Tests for kiln print with multiple files."""
 
+    @pytest.fixture(autouse=True)
+    def _preview_gate_is_not_under_test(self, monkeypatch):
+        """These tests are about batch ordering and the queue; the CLI start doors now gate on a
+        preview like the tools (test_cli_print_gate.py has the gate's own
+        tests).  Switched off the way CI does, explicitly."""
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
+
     def test_single_file_print(self):
         adapter = _mock_adapter()
         result = _run_cli(["print", "test.gcode", "--json"], adapter=adapter)
@@ -360,6 +368,14 @@ class TestBatchPrint:
 
 class TestSliceCommand:
     """Tests for kiln slice."""
+
+    @pytest.fixture(autouse=True)
+    def _preview_gate_is_not_under_test(self, monkeypatch):
+        """These tests are about the slice command's options; the CLI start doors now gate on a
+        preview like the tools (test_cli_print_gate.py has the gate's own
+        tests).  Switched off the way CI does, explicitly."""
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
 
     def test_slice_success(self, tmp_path):
         stl = tmp_path / "model.stl"

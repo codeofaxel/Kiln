@@ -133,8 +133,20 @@ _BED_TEMP_COMMANDS: set[str] = {"M140", "M190"}
 # Chamber temperature command.
 _CHAMBER_TEMP_COMMANDS: set[str] = {"M141"}
 
+# Raw G-code that starts a print from a file on the printer.  Every start
+# door in Kiln shows the person the print first; these words would reach
+# the motors around that rule, so they are refused everywhere and the
+# reader is sent to the door that asks.  The adapters' own start and resume
+# paths write these words themselves, not through this validator.
+_PRINT_START_COMMANDS: dict[str, str] = {
+    "M23": "Selecting a file to print (M23) is blocked -- use the start_print tool, which shows the print first",
+    "M24": "Starting an SD print (M24) is blocked -- use start_print (shown and signed off first) or resume_print",
+    "M32": "Starting a print from a file (M32) is blocked -- use the start_print tool, which shows the print first",
+}
+
 # Commands that are unconditionally blocked.
 _BLOCKED_COMMANDS: dict[str, str] = {
+    **_PRINT_START_COMMANDS,
     "M112": "Emergency stop (M112) is blocked -- use the cancel_print tool instead",
     "M502": "Reset to factory defaults (M502) is blocked -- this can overwrite critical calibration",
     "M500": "Save settings to EEPROM (M500) is blocked -- agents must not persist firmware changes",
@@ -143,16 +155,6 @@ _BLOCKED_COMMANDS: dict[str, str] = {
     "M553": "Network configuration (M553) is blocked -- agents must not modify network settings",
     "M554": "Network configuration (M554) is blocked -- agents must not modify network settings",
     "M997": "Firmware update (M997) is blocked -- agents must not trigger firmware updates",
-    # Print starts.  Every start goes through start_print, where the person
-    # sees the file first; these are the host commands that would start one
-    # from the raw door with no preview and no sign-off (Marlin, OctoPrint,
-    # Moonraker: M23 selects, M24 starts; Duet: M32 selects and starts).
-    # Klipper's SDCARD_PRINT_FILE is refused by the parser as unrecognised.
-    # Read by kiln doctor (print_doors.raw_starts_refused) so a row removed
-    # here shows up as an open door there.
-    "M23": "Selecting an SD file to print (M23) is blocked -- use the start_print tool, which shows the print first",
-    "M24": "Starting an SD print (M24) is blocked -- use start_print to begin a print or resume_print to continue one",
-    "M32": "Selecting and starting an SD file (M32) is blocked -- use the start_print tool, which shows the print first",
 }
 
 # Commands that generate warnings but are allowed.
