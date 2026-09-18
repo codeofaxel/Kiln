@@ -702,6 +702,24 @@ TEMPERATURE_FIELDS: tuple[str, ...] = (
 
 
 @dataclass(frozen=True)
+class ActiveSlotReading:
+    """Which spool a multi-material unit is feeding, as the machine reports it.
+
+    :param slot: The unit's own id for the feeding slot (``"1"``, ``"A2"``),
+        or ``None`` when the machine reports that nothing is feeding.
+    :param source: Where it was read (``"mqtt"``, ``"moonraker_cfs"``, ...).
+    :param verified: Whether that field's meaning has been confirmed on
+        hardware for this backend.  A discovered field is ``False``: its
+        changes are observed and reported as unverified, and only a
+        machine whose own prints reconcile against them earns a count.
+    """
+
+    slot: str | None
+    source: str
+    verified: bool = False
+
+
+@dataclass(frozen=True)
 class NozzleSetting:
     """The nozzle a printer HOLDS ON RECORD for itself, read off the machine.
 
@@ -2566,6 +2584,14 @@ class PrinterAdapter(ABC):
                     _logging.getLogger(__name__).debug(
                         "outcome lifecycle feed failed", exc_info=True
                     )
+                try:
+                    _feed_slot_observer(self, state)
+                except Exception:  # noqa: BLE001 — bookkeeping never breaks status
+                    import logging as _logging
+
+                    _logging.getLogger(__name__).debug(
+                        "slot observer feed failed", exc_info=True
+                    )
                 return state
 
             _observed_get_state._kiln_outcome_wrapped = True  # type: ignore[attr-defined]
@@ -3045,6 +3071,26 @@ class PrinterAdapter(ABC):
 
                 _logging.getLogger(__name__).debug(
                     "nozzle odometer recording failed", exc_info=True
+                )
+            # The filament cutter counts at START too: the sliced file says
+            # how many filament changes it plans, and each is a cut on a
+            # machine that has a cutter.  Same chokepoint, same over-count
+            # rule as the nozzle odometer.  No-op without kiln-pro or an
+            # account; never blocks a print.
+            try:
+                from kiln._pro_cutter_bridge import record_print_cuts
+
+                planned = record_print_cuts(
+                    self.name, file_name, printer_model=self.declared_printer_model() or None
+                )
+                # Held for the print's end: a backend that can watch the
+                # wire reconciles what was charged against what it saw.
+                self._cutter_print = {"file": file_name, "planned": planned, "observed": 0}
+            except Exception:  # noqa: BLE001 — cut bookkeeping never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "cutter count recording failed", exc_info=True
                 )
             # Open the outcome row NOW, while we can still see the print.
             # The start is the one event Kiln is guaranteed to witness (it
@@ -3618,6 +3664,23 @@ class PrinterAdapter(ABC):
         if result.next_step is not None:
             result.details["heater"] = "as the step left it -- see leaves; the finish runs after the last step"
             return result
+        # The routine ran to its end on this machine.  On a machine with a
+        # filament cutter a load or an unload is a cut; which machines those
+        # are, and which of the two cut on each, is kiln-pro's table, read
+        # when the count is asked for.  Reported here, the one door every
+        # backend's load and unload pass through.  A purge or a wipe cuts
+        # nothing.
+        if plan.action in ("load", "unload"):
+            try:
+                from kiln._pro_cutter_bridge import record_command_cut
+
+                record_command_cut(
+                    self.name, plan.action, printer_model=self.declared_printer_model() or None
+                )
+            except Exception:  # noqa: BLE001 -- cut bookkeeping never changes a result
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug("cutter count recording failed", exc_info=True)
         # Leave the machine the way a person would: heater off, and say so.
         # Measured 2026-09-16 on an A1: a purge parked over the chute, pushed
         # its 30 mm, reported success -- and left the nozzle at 215 °C with
@@ -5438,6 +5501,67 @@ class PrinterAdapter(ABC):
         """
         return None
 
+    def read_active_slot(self) -> ActiveSlotReading | None:
+        """Which slot the machine's multi-material unit is feeding, or ``None``.
+
+        Optional.  A backend whose protocol shows the feeding slot returns an
+        :class:`ActiveSlotReading`; the default knows nothing and says so.
+        ``None`` means "this backend cannot say" -- never "nothing changed".
+        A change between two readings is a filament switch the machine made
+        on its own; the base class watches for it (:func:`_feed_slot_observer`)
+        and reports it, so a backend only ever reads.  Sends no command and
+        changes nothing on the printer.  Must be cheap: it is asked at most
+        once per :data:`SLOT_OBSERVE_MIN_INTERVAL_S` from the status path.
+        """
+        return None
+
+    #: Backends with their own push stream observe slot changes natively on
+    #: that stream and set this so the polled observer stays out of the way.
+    _slot_observer_native: bool = False
+
+    def _kiln_is_driving(self) -> bool:
+        """Is a slot change on this machine something Kiln itself caused?
+
+        True for the settle window after Kiln's own load / unload / cancel,
+        and while a print Kiln started is engaged (its planned changes were
+        charged at the start; changes during it are counted against that
+        charge, not reported again).
+        """
+        now = time.monotonic()
+        for stamp_name in ("_filament_command_sent_at", "_stop_sent_at"):
+            stamp = getattr(self, stamp_name, 0.0) or 0.0
+            if stamp and (now - stamp) < OWN_COMMAND_SETTLE_SECONDS:
+                return True
+        try:
+            from kiln.printers.engagement import current, machine_id
+
+            engaged = current()
+            return engaged is not None and engaged.machine == machine_id(self)
+        except Exception:  # noqa: BLE001 -- no engagement record is "not driving"
+            return False
+
+    def _reconcile_cutter_print(self, job: str) -> None:
+        """A print Kiln started has ended: hand what it was charged, and what the
+        machine showed, to the cutter bridge.  Never raises; never blocks."""
+        held = getattr(self, "_cutter_print", None)
+        self._cutter_print = None
+        if not isinstance(held, dict) or held.get("planned") is None:
+            return
+        try:
+            from kiln._pro_cutter_bridge import record_print_reconciliation
+
+            record_print_reconciliation(
+                self.name,
+                job=str(held.get("file") or job),
+                planned=int(held.get("planned") or 0),
+                observed=int(held.get("observed") or 0),
+                printer_model=self.declared_printer_model() or None,
+            )
+        except Exception:  # noqa: BLE001
+            import logging as _logging
+
+            _logging.getLogger(__name__).debug("cutter reconciliation not reported", exc_info=True)
+
     def read_nozzle_setting(self) -> NozzleSetting | None:
         """The nozzle this printer holds on record for itself, or ``None``.
 
@@ -5981,6 +6105,66 @@ def _record_print_duration(
     record_print_hours_for_job(job_label, hours, reported=not watched)
 
 
+#: How long after Kiln's own load / unload / cancel a slot change still
+#: belongs to that command rather than to a person at the screen.  A
+#: firmware load-and-purge takes a couple of minutes.
+OWN_COMMAND_SETTLE_SECONDS: float = 180.0
+
+#: The polled slot observer asks a backend's :meth:`read_active_slot` at most
+#: this often.  A status poll can be every few seconds; a slot reading is
+#: usually its own request, and a filament change takes longer than this.
+SLOT_OBSERVE_MIN_INTERVAL_S: float = 20.0
+
+
+def _feed_slot_observer(adapter: PrinterAdapter, state: PrinterState) -> None:
+    """Watch a polled backend's feeding slot and report the changes.
+
+    The same three moves the MQTT push path makes natively, for every
+    backend that can only be polled: read the slot (rate-limited), compare
+    with the last reading, and on a change either count it against the
+    print Kiln started (when Kiln is driving) or report it to the cutter
+    bridge as a switch the machine made on its own -- flagged unverified
+    when the backend's field has not been proven on hardware, so nothing
+    is counted from it until this machine's own prints have agreed with
+    it.  The first reading is a baseline, never a change.
+    """
+    if getattr(adapter, "_slot_observer_native", False):
+        return
+    if not getattr(state, "connected", False):
+        return
+    now = time.monotonic()
+    last_asked = getattr(adapter, "_slot_observed_at", 0.0) or 0.0
+    if last_asked and (now - last_asked) < SLOT_OBSERVE_MIN_INTERVAL_S:
+        return
+    adapter._slot_observed_at = now  # type: ignore[attr-defined]
+    reading = adapter.read_active_slot()
+    if reading is None:
+        return
+    previous = getattr(adapter, "_slot_last_seen", None)
+    adapter._slot_last_seen = reading  # type: ignore[attr-defined]
+    if previous is None or previous.slot == reading.slot:
+        return
+    if adapter._kiln_is_driving():
+        held = getattr(adapter, "_cutter_print", None)
+        if isinstance(held, dict):
+            held["observed"] = int(held.get("observed") or 0) + 1
+        return
+    try:
+        from kiln._pro_cutter_bridge import record_observed_switch
+
+        record_observed_switch(
+            adapter.name,
+            printer_model=adapter.declared_printer_model() or None,
+            from_tray=previous.slot,
+            to_tray=reading.slot,
+            verified=bool(reading.verified),
+        )
+    except Exception:  # noqa: BLE001
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug("observed slot change not reported", exc_info=True)
+
+
 def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> None:
     """Feed one ``get_state()`` result into the print-outcome lifecycle.
 
@@ -6093,6 +6277,7 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
     if is_terminal_transition(prev, value):
         job = _current_job(adapter)
         label = _job_label(job)
+        adapter._reconcile_cutter_print(label or "")
         if label:
             fire_terminal_state_hook(
                 prev_state=prev,

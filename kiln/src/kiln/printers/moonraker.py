@@ -28,6 +28,7 @@ from kiln.printers.base import (
     DEFAULT_LOAD_LENGTH_MM,
     DEFAULT_PURGE_LENGTH_MM,
     DEFAULT_UNLOAD_LENGTH_MM,
+    ActiveSlotReading,
     FilamentHandlingUnsupported,
     FilamentOpPlan,
     FilamentOpResult,
@@ -255,6 +256,158 @@ def _classify_flow_anomaly(
     for substring in _FLOW_ANOMALY_UNDER_EXTRUSION_SUBSTRINGS:
         if substring in msg_lower:
             return "under_extrusion", "medium"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Feeding slot: which slot a multi-material unit reports it is on
+# ---------------------------------------------------------------------------
+
+#: Words that name a multi-material unit in a Klipper object's TYPE (the part
+#: before the first space).  Matched case-insensitively against the whole
+#: type and its ``_``-separated tokens, so ``box_extras`` and
+#: ``AFC_stepper lane1`` match while ``temperature_sensor heater_box1`` (a
+#: sensor someone named after a box) does not.
+_ACTIVE_SLOT_UNIT_KEYWORDS: frozenset[str] = frozenset(
+    {"mmu", "ercf", "afc", "box", "ams", "ace", "cfs", "filament_box"}
+)
+
+#: Klipper types with filament in their name that are sensors, never a unit.
+#: Excluded on purpose even though no keyword above matches them.
+_ACTIVE_SLOT_NOT_A_UNIT: frozenset[str] = frozenset(
+    {"filament_switch_sensor", "filament_motion_sensor"}
+)
+
+#: Fields a unit Kiln has no documented shape for might report its slot
+#: under, in the order they are tried.  A keyword guess, which is why every
+#: reading built from them is ``verified=False``.
+_ACTIVE_SLOT_GENERIC_FIELDS: tuple[str, ...] = (
+    "gate",
+    "lane",
+    "slot",
+    "active_slot",
+    "current_slot",
+    "current_lane",
+    "tool",
+)
+
+
+def _looks_like_unit_object(name: str) -> bool:
+    """Whether a Klipper object name's type reads as a multi-material unit."""
+    kind = name.split(" ", 1)[0].casefold()
+    if not kind or kind in _ACTIVE_SLOT_NOT_A_UNIT:
+        return False
+    tokens = set(kind.split("_")) | {kind}
+    return not tokens.isdisjoint(_ACTIVE_SLOT_UNIT_KEYWORDS)
+
+
+def _active_slot_unit_objects(names: list[str]) -> list[str]:
+    """The Klipper objects worth querying for a feeding slot, from the object list.
+
+    A unit whose shape is documented is queried alone: Happy Hare's ``mmu``
+    object (``printer.mmu.gate`` / ``printer.mmu.tool`` on its Printer
+    Variables wiki page) or the AFC-Klipper-Add-On's ``AFC`` object
+    (``current_load`` in its ``get_status``).  Otherwise every unit-shaped
+    object is kept, bare names before instanced ones (``box_extras`` before
+    ``box_stepper slot0``), so a reading prefers the object that stands for
+    the unit over one of its parts.
+    """
+    if "mmu" in names:
+        return ["mmu"]
+    if "AFC" in names:
+        return ["AFC"]
+    matched = [name for name in names if _looks_like_unit_object(name)]
+    bare = [name for name in matched if " " not in name]
+    instanced = [name for name in matched if " " in name]
+    return bare + instanced
+
+
+def _slot_id(value: Any) -> tuple[bool, str | None]:
+    """``(is_an_id, slot)`` for a unit's slot value.
+
+    An integer ``0..n`` or a name is the slot; a negative number or an empty
+    string is "no slot" (``None``).  A flag, a fraction or a container is
+    not an id at all and the first element says so.
+    """
+    if isinstance(value, bool):
+        return False, None
+    if isinstance(value, float):
+        if not value.is_integer():
+            return False, None
+        value = int(value)
+    if isinstance(value, int):
+        return True, (None if value < 0 else str(value))
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return True, None
+        try:
+            number = int(text)
+        except ValueError:
+            return True, text
+        return True, (None if number < 0 else str(number))
+    return False, None
+
+
+def _happy_hare_reading(mmu: dict[str, Any]) -> ActiveSlotReading | None:
+    """Happy Hare's ``mmu`` object: ``gate`` is the selected gate ``0..n``,
+    ``-1`` (TOOL_GATE_UNKNOWN) reads as no slot; ``tool`` stands in when
+    ``gate`` is absent, and its ``-2`` (bypass) is no slot too."""
+    raw = mmu.get("gate")
+    if raw is None:
+        raw = mmu.get("tool")
+    if raw is None:
+        return None
+    is_id, slot = _slot_id(raw)
+    if not is_id:
+        return None
+    return ActiveSlotReading(slot=slot, source="moonraker:mmu", verified=False)
+
+
+def _afc_reading(afc: dict[str, Any]) -> ActiveSlotReading | None:
+    """AFC's ``AFC`` object: ``current_load`` is the lane name loaded to the
+    toolhead and ``None`` when nothing is.  Its ``current_lane`` is the lane
+    MID-load, which is why AFC is not left to the generic field order."""
+    if "current_load" not in afc:
+        return None
+    raw = afc.get("current_load")
+    if raw is None:
+        return ActiveSlotReading(slot=None, source="moonraker:AFC", verified=False)
+    is_id, slot = _slot_id(raw)
+    if not is_id:
+        return None
+    return ActiveSlotReading(slot=slot, source="moonraker:AFC", verified=False)
+
+
+def _active_slot_from_klipper_objects(
+    status: dict[str, Any], names: list[str]
+) -> ActiveSlotReading | None:
+    """One :class:`ActiveSlotReading` from a ``printer.objects.query`` status.
+
+    Documented shapes first (:func:`_happy_hare_reading`,
+    :func:`_afc_reading`); any other unit answers with the first generic
+    field that is present and not ``None`` on the first object carrying
+    one, its source naming that object.  ``None`` when no object says.
+    Nothing here is bench-verified, and every reading says so.
+    """
+    mmu = status.get("mmu")
+    if isinstance(mmu, dict):
+        return _happy_hare_reading(mmu)
+    afc = status.get("AFC")
+    if isinstance(afc, dict):
+        return _afc_reading(afc)
+    for name in names:
+        unit = status.get(name)
+        if not isinstance(unit, dict):
+            continue
+        for field in _ACTIVE_SLOT_GENERIC_FIELDS:
+            raw = unit.get(field)
+            if raw is None:
+                continue
+            is_id, slot = _slot_id(raw)
+            if not is_id:
+                continue
+            return ActiveSlotReading(slot=slot, source=f"moonraker:{name}", verified=False)
     return None
 
 
@@ -645,6 +798,9 @@ class MoonrakerAdapter(PrinterAdapter):
         # first time a request confirms the server is actually there.
         self._history_backfilled: bool = False
         self._history_backfill_thread: threading.Thread | None = None
+
+        # Unit-shaped Klipper objects, found once by read_active_slot.
+        self._active_slot_objects: list[str] | None = None
 
         # Push monitoring (WebSocket) -- disabled by default.
         self._ws_monitor: MoonrakerWebSocketMonitor | None = None
@@ -2002,6 +2158,56 @@ class MoonrakerAdapter(PrinterAdapter):
             return from_afc(afc)
 
         return none_status("moonraker:no_mmu_object")
+
+    def _active_slot_object_names_cached(self) -> list[str]:
+        """Unit objects worth querying for a feeding slot, found once per adapter.
+
+        One ``GET /printer/objects/list`` on the first call; the answer is
+        kept (an empty one too) so the status path never pays for discovery
+        again.  A failed or misshapen list is not kept, so the next call
+        asks again.
+        """
+        cached = getattr(self, "_active_slot_objects", None)
+        if cached is not None:
+            return cached
+        listing = self._get_json("/printer/objects/list")
+        objects = _safe_get(listing, "result", "objects", default=None)
+        if not isinstance(objects, list):
+            raise PrinterError("Klipper's object list came back in an unexpected shape")
+        names = _active_slot_unit_objects([o for o in objects if isinstance(o, str)])
+        self._active_slot_objects = names
+        return names
+
+    def read_active_slot(self) -> ActiveSlotReading | None:
+        """Which slot this Klipper machine's multi-material unit reports, or ``None``.
+
+        The polled door the base observer asks between status polls, so it
+        stays cheap: unit-shaped objects are found once per adapter
+        (:meth:`_active_slot_object_names_cached`) and every later call is
+        one ``GET /printer/objects/query`` for them.  What is read per unit
+        is in :func:`_active_slot_from_klipper_objects`, and the source
+        names the object it came from (``"moonraker:mmu"``).
+
+        Every reading is ``verified=False``: Happy Hare documents its
+        fields and AFC's are in its source, but no reading here has been
+        checked against a unit on a bench.  QIDI's Box modules
+        (``box_extras``, ``box_stepper``) report endstop, button and RFID
+        states only -- no slot -- so a Box reads as ``None``, as does a
+        printer with no unit object, a failed query, or an object carrying
+        none of the known fields.  Read-only: sends no command and never
+        raises.
+        """
+        try:
+            names = self._active_slot_object_names_cached()
+            if not names:
+                return None
+            payload = self._get_json("/printer/objects/query", params=dict.fromkeys(names, ""))
+            status = _safe_get(payload, "result", "status", default=None)
+            if not isinstance(status, dict):
+                return None
+            return _active_slot_from_klipper_objects(status, names)
+        except Exception:  # noqa: BLE001 - PrinterError included; a reading never raises
+            return None
 
     # ------------------------------------------------------------------
     # Klipper configuration
