@@ -30,8 +30,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kiln import preview_evidence, print_signoff, server
+from kiln import consent_windows, preview_evidence, print_consent, print_signoff, server
 from kiln.preview_gate import PreviewGate, get_preview_gate
+from kiln.print_consent import PrintConsent, reset_consent, set_consent
 from kiln.printers.base import (
     JobProgress,
     PrinterAdapter,
@@ -395,6 +396,9 @@ class TestIssuePreviewToken:
         assert tok.door == "stage"
 
     def test_the_gate_says_which_door_it_used(self, tmp_path, monkeypatch):
+        """The token is the SAW half; the gate also needs a person's yes
+        (here, an elicited one) — and then records the door the token
+        carried, not the yes's word for it."""
         path = _stl(tmp_path / "jar.stl")
         preview_evidence.record("stage", path, via="panel_fetch")
         monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
@@ -403,7 +407,11 @@ class TestIssuePreviewToken:
         monkeypatch.setattr(
             server, "_audit", lambda tool, action, details=None: audits.append((action, details)),
         )
-        assert server._preview_gate_error("start_print", path, token, printer_name="garage") is None
+        reset = set_consent(PrintConsent(tool="start_print", file_name=path, printer_name="garage"))
+        try:
+            assert server._preview_gate_error("start_print", path, token, printer_name="garage") is None
+        finally:
+            reset_consent(reset)
         assert any(a == "preview_gate_satisfied" and d.get("door") == "stage" for a, d in audits), audits
         clearance = print_signoff.current()
         assert clearance is not None and clearance.door == "stage"
@@ -569,14 +577,21 @@ class TestQueueDoors:
         assert queue_env.pending_count() == 0
 
     def test_a_queued_job_carries_its_sign_off(self, queue_env, tmp_path, monkeypatch):
+        """Token (saw) plus an elicited yes (said go): the job carries the
+        door, the source and the scope the yes was given for."""
         from kiln.plugins.queue_tools import submit_job
 
         path = _stl(tmp_path / "part.gcode")
         token = _token_for(path, monkeypatch)
-        out = submit_job("part.gcode", preview_token=token)
+        reset = set_consent(PrintConsent(tool="submit_job", file_name="part.gcode", printer_name=None))
+        try:
+            out = submit_job("part.gcode", preview_token=token)
+        finally:
+            reset_consent(reset)
         assert out["success"] is True, out
         job = queue_env.get_job(out["job_id"])
         assert job.metadata["preview_signoff"]["door"] == "stage"
+        assert job.metadata["preview_signoff"]["source"] == print_consent.SOURCE_ELICITED
 
     def test_the_scheduler_clears_the_queued_job_it_dispatches(self, queue_env, monkeypatch):
         from kiln.events import EventBus
@@ -621,7 +636,10 @@ class TestCliDoors:
         assert "PREVIEW_NOT_CONFIRMED" in result.output
         assert printer.started == []
 
-    def test_kiln_print_starts_with_a_token(self, cli_env, tmp_path, monkeypatch):
+    def test_kiln_print_starts_with_a_token_inside_a_window(self, cli_env, tmp_path, monkeypatch):
+        """A token on the command line is the SAW half.  From a shell with
+        nobody at it, the GO half can only be a standing window a person
+        opened; without one the same command is refused."""
         from kiln.cli.main import cli
 
         runner, printer = cli_env
@@ -631,7 +649,15 @@ class TestCliDoors:
         preview_evidence.record_url_refusal(str(gcode), "signed_out")
         monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
         monkeypatch.setattr("kiln.local_stage.host_renders_apps", lambda *a, **k: False)
+        monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: False)
         token = server.issue_preview_token(str(gcode), door="png")["token"]
+        result = runner.invoke(cli, ["print", str(gcode), "--json", "--preview-token", token])
+        assert result.exit_code != 0, result.output
+        assert printer.started == []
+
+        monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: True)
+        consent_windows.open_window(seconds=3600, scope=consent_windows.SCOPE_FLEET)
+        monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: False)
         result = runner.invoke(cli, ["print", str(gcode), "--json", "--preview-token", token])
         assert result.exit_code == 0, result.output
         assert printer.started == ["part.gcode"]

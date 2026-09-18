@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kiln.print_consent import (
+    SCOPE_FLEET,
     SOURCE_CI_BYPASS,
     SOURCE_ELICITED,
     SOURCE_PREVIEW_TOKEN,
@@ -49,6 +50,7 @@ from kiln.print_consent import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "SCOPE_FLEET",
     "SOURCE_CI_BYPASS",
     "SOURCE_ELICITED",
     "SOURCE_PREVIEW_TOKEN",
@@ -61,6 +63,7 @@ __all__ = [
     "grant",
     "grant_from_record",
     "record_for",
+    "record_refusal",
     "current",
     "clear",
     "take",
@@ -120,14 +123,45 @@ class Clearance:
     source: str
     door: str = ""
     granted_at: float = field(default_factory=time.time)
+    #: ``None`` — the printer it was aimed at; a tuple of names; or
+    #: ``"fleet"``.  The scope the person gave, carried to the machine.
+    scope: tuple[str, ...] | str | None = None
+    #: The standing window the yes rests on, if any — audited by id.
+    window_id: str = ""
+    #: Who said yes, as the consent recorded it (``os_user:…``, an account, or "").
+    identity: str = ""
+
+    def covers_printer(self, printer_name: str | None) -> bool:
+        return _scope_covers(self.scope, self.printer_name, printer_name)
 
     def covers(self, *, file_name: str, printer_name: str | None) -> bool:
-        if self.printer_name and printer_name and _norm(printer_name) != _norm(self.printer_name):
+        if printer_name and not self.covers_printer(printer_name):
             return False
         mine, theirs = _norm(self.file_name), _norm(file_name)
         if mine == theirs:
             return True
         return _norm(_sliced_from(file_name)) == mine
+
+
+def _scope_covers(scope: Any, aimed: str | None, printer_name: str | None) -> bool:
+    """The one rule for "does this clearance reach that printer": the
+    fleet reaches every printer, a list reaches the ones it names, and no
+    scope reaches the printer the clearance was aimed at (or any, when it
+    was aimed at none)."""
+    if scope == SCOPE_FLEET:
+        return True
+    if isinstance(scope, (tuple, list)) and scope:
+        return _norm(printer_name) in {_norm(s) for s in scope}
+    return not (aimed and printer_name and _norm(printer_name) != _norm(aimed))
+
+
+def _scope_from_record(value: Any) -> tuple[str, ...] | str | None:
+    if value == SCOPE_FLEET:
+        return SCOPE_FLEET
+    if isinstance(value, (list, tuple)):
+        names = tuple(str(s) for s in value if str(s).strip())
+        return names or None
+    return None
 
 
 def _sliced_from(file_name: str) -> str | None:
@@ -145,11 +179,20 @@ _current: ContextVar[Clearance | None] = ContextVar("kiln_print_clearance", defa
 
 
 def grant(
-    tool: str, file_name: str, printer_name: str | None, *, source: str, door: str = "",
+    tool: str,
+    file_name: str,
+    printer_name: str | None,
+    *,
+    source: str,
+    door: str = "",
+    scope: tuple[str, ...] | str | None = None,
+    window_id: str = "",
+    identity: str = "",
 ) -> Clearance:
     """Record that this call may start *file_name* on *printer_name*."""
     clearance = Clearance(
         tool=tool, file_name=str(file_name or ""), printer_name=printer_name, source=source, door=door,
+        scope=scope, window_id=window_id or "", identity=identity or "",
     )
     _current.set(clearance)
     return clearance
@@ -183,7 +226,54 @@ def record_for(clearance: Clearance | None) -> dict[str, Any] | None:
         "source": clearance.source,
         "door": clearance.door,
         "at": clearance.granted_at,
+        "scope": list(clearance.scope) if isinstance(clearance.scope, tuple) else clearance.scope,
+        "window_id": clearance.window_id,
+        "identity": clearance.identity,
     }
+
+
+def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> str | None:
+    """Why a stored clearance may NOT start on *printer_name* now — or
+    ``None`` when it may.
+
+    Read by the scheduler before it dispatches a queued job: the yes the
+    job carries was for a scope, and a printer outside it gets a reason,
+    not a print.  A yes that rested on a standing window is re-checked
+    against the window at dispatch, so a revoked or run-out window stops
+    the jobs queued under it.  A job with no record at all is not judged
+    here — the queue's doors are its gate.
+    """
+    if not isinstance(record, dict) or not record:
+        return None
+    scope = _scope_from_record(record.get("scope"))
+    aimed = record.get("printer_name") or None
+    if not _scope_covers(scope, aimed, printer_name):
+        if scope == SCOPE_FLEET:
+            covered = "the fleet"
+        elif isinstance(scope, tuple):
+            covered = ", ".join(scope)
+        else:
+            covered = str(aimed)
+        return (
+            f"not started on {printer_name}: the yes this job carries covers {covered}, "
+            f"not {printer_name}. Queue it again aimed at a printer the person named, or "
+            "have them name a wider scope."
+        )
+    window_id = str(record.get("window_id") or "")
+    if window_id:
+        try:
+            from kiln.consent_windows import is_live
+
+            live = is_live(window_id)
+        except Exception:  # noqa: BLE001 — an unreadable store is no window
+            live = False
+        if not live:
+            return (
+                f"not started on {printer_name}: standing window {window_id} that this job "
+                "was queued under has been revoked or has run out. A person can open a new "
+                "one with `kiln consent window`."
+            )
+    return None
 
 
 def grant_from_record(
@@ -199,6 +289,9 @@ def grant_from_record(
         tool, file_name, printer_name,
         source=str(record.get("source") or SOURCE_QUEUED),
         door=str(record.get("door") or ""),
+        scope=_scope_from_record(record.get("scope")),
+        window_id=str(record.get("window_id") or ""),
+        identity=str(record.get("identity") or ""),
     )
 
 
@@ -234,21 +327,27 @@ class Verdict:
     audit: str = ""
 
 
-def token_verdict(
-    tool: str,
-    file_name: str,
-    preview_token: str | None,
-    *,
-    printer_name: str | None = None,
-    printer_id: str | None = None,
-    is_resume: bool = False,
-) -> Verdict:
-    """Decide a start on its preview token, and grant the clearance on a yes.
+def not_confirmed_message(tool: str) -> str:
+    """The refusal for a start with no preview on record: what to show,
+    through which door, and how to hand the token in."""
+    return (
+        f"{tool} refuses to proceed without a preview confirmation. Show the user the "
+        "print first — the inline 3D stage if this host draws one, else a viewer link "
+        "(visualize_model(file_path, share_link=True) gives a viewer_url), else the PNG "
+        "renders — then call issue_preview_token(file_path, door=<stage|url|png>) and "
+        "pass the token as preview_token=<token>. To bypass (advanced / CI only), set "
+        "KILN_SKIP_PREVIEW_GATE=1."
+    )
 
-    The order is the one ``_preview_gate_error`` has always had: the CI
-    bypass, then a resume continuation, then the token.  A caller with an
-    elicited consent answers before reaching here.
-    """
+
+def exemption_verdict(
+    tool: str, file_name: str, printer_name: str | None, *, is_resume: bool = False,
+) -> Verdict | None:
+    """The two starts that need neither fact — the audited CI bypass and a
+    resume continuation of a print that already had its yes — granted
+    here, or ``None`` when this start is not one of them.  Decided before
+    anything touches the token, so a refusal for want of a yes does not
+    spend a token that is still good for the call that carries one."""
     if _bypassed():
         if not is_resume:
             logger.warning(
@@ -261,19 +360,29 @@ def token_verdict(
     if is_resume:
         grant(tool, file_name, printer_name, source=SOURCE_RESUME)
         return Verdict(ok=True, source=SOURCE_RESUME)
+    return None
+
+
+def token_verdict(
+    tool: str,
+    file_name: str,
+    preview_token: str | None,
+    *,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+    is_resume: bool = False,
+) -> Verdict:
+    """Decide a start on its preview token, and grant the clearance on a yes.
+
+    The order is the one ``_preview_gate_error`` has always had: the CI
+    bypass, then a resume continuation, then the token.  This is the SAW
+    half only; the gate in ``kiln.server`` pairs it with a person's yes.
+    """
+    exempt = exemption_verdict(tool, file_name, printer_name, is_resume=is_resume)
+    if exempt is not None:
+        return exempt
     if not preview_token:
-        return Verdict(
-            ok=False,
-            code=CODE_NOT_CONFIRMED,
-            message=(
-                f"{tool} refuses to proceed without a preview confirmation. Show the user the "
-                "print first — the inline 3D stage if this host draws one, else a viewer link "
-                "(visualize_model(file_path, share_link=True) gives a viewer_url), else the PNG "
-                "renders — then call issue_preview_token(file_path, door=<stage|url|png>) and "
-                "pass the token as preview_token=<token>. To bypass (advanced / CI only), set "
-                "KILN_SKIP_PREVIEW_GATE=1."
-            ),
-        )
+        return Verdict(ok=False, code=CODE_NOT_CONFIRMED, message=not_confirmed_message(tool))
     door = ""
     try:
         from kiln.preview_gate import get_preview_gate

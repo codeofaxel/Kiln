@@ -2266,13 +2266,29 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     )
     action, detail = await ask_user_to_confirm(ctx, message)
     if action == "accept":
-        _audit(tool_name, "consent_granted", details={"file": file_value, "by": "user"})
+        # Who: the host does not tell us, so locally it is the OS user this
+        # server runs as, labelled as such; on the hosted box that label
+        # would be a lie, and nothing is recorded there.
+        identity = ""
+        try:
+            from kiln.consent_windows import local_identity
+            from kiln.runtime_env import is_hosted_multitenant
+
+            if not is_hosted_multitenant():
+                identity = local_identity()
+        except Exception:  # noqa: BLE001
+            identity = ""
+        _audit(
+            tool_name, "consent_granted",
+            details={"file": file_value, "by": "user", "identity": identity, "scope": printer_name or "aimed"},
+        )
         return set_consent(
             PrintConsent(
                 tool=tool_name,
                 file_name=file_value,
                 printer_name=printer_name,
                 source=SOURCE_ELICITED,
+                identity=identity,
             )
         )
     if action in ("decline", "cancel"):
@@ -2306,16 +2322,47 @@ def _covered_by_approval(
     exist until the call built it, so the inner gate would refuse it.  This
     is the record that the two are one print: a consent for the derived
     file, sourced ``derived``, alive only for the inner call.
+
+    The outer gate established both facts for the input — the door it was
+    shown through and the person's yes — so the derived consent carries
+    that door (or ``derived`` when the outer clearance is already spent),
+    which the inner gate reads as the SAW half the way it reads a
+    terminal's judged door.
     """
+    from kiln import print_signoff
+
+    outer = print_signoff.current()
     token = set_consent(
         PrintConsent(
-            tool=tool_name, file_name=derived_file, printer_name=printer_name, source=SOURCE_DERIVED,
+            tool=tool_name,
+            file_name=derived_file,
+            printer_name=printer_name,
+            source=SOURCE_DERIVED,
+            door=(outer.door if outer and outer.door else "derived"),
+            scope=outer.scope if outer else None,
+            identity=outer.identity if outer else "",
+            window_id=outer.window_id if outer else "",
         )
     )
     try:
         yield
     finally:
         reset_consent(token)
+
+
+def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
+    """One sentence: the preview is on record, nobody said go, and the
+    three places a yes can come from.  None of them is a string an agent
+    can type."""
+    name = os.path.basename(str(file_name or "")) or "this file"
+    return (
+        f"{tool_name} refuses to proceed: {name} was shown, but nobody said go — a yes "
+        "comes from the host's approval dialog (a host that asks shows one; the person "
+        f"approves it), from a person at a terminal (`kiln print {name}` or `kiln queue "
+        f"submit {name}` asks them), or from a standing window a person opened at a "
+        f"terminal (`kiln consent window --for 2h --printer {aimed}`); an agent cannot "
+        "supply any of the three."
+    )
 
 
 def _preview_gate_error(
@@ -2335,67 +2382,122 @@ def _preview_gate_error(
     ``generate_and_print``, and the rest went straight to the machine.  A
     consent rule with five ways around it is not a rule.
 
-    What it can and cannot promise is worth being honest about: the token
-    proves a preview was RENDERED for this file, not that a human ever saw
-    it.  The agent is still the one asserting consent.  Closing that half
-    needs the client to do the asking (MCP elicitation), not another server
-    check.
+    Two facts, both required.  The token proves a door RECORDED a preview
+    of this file — the stage served it, a link was issued, a render
+    happened.  It cannot prove anyone said go: the agent mints it, and on
+    2026-09-16 an agent minted one and started the owner's printer with
+    nobody having said a word.  The consent proves a person said go —
+    through the host's dialog, at a terminal, through a standing window
+    they opened, or (hosted) through their account.  A token alone is
+    refused with the three ways to get a yes; a yes alone is refused with
+    the way to show the print.
 
-    ``KILN_SKIP_PREVIEW_GATE=1`` still bypasses it for CI, and a resume-mode
-    print is still exempt: the print is already running and already had its
-    approval.
+    ``KILN_SKIP_PREVIEW_GATE=1`` still bypasses it for CI (audited), and a
+    resume-mode print is still exempt: the print is already running and
+    already had its approval.  On the hosted multi-tenant server a
+    terminal yes or a terminal window is nobody's, and is not accepted.
     """
-    # A person was actually asked about THIS file on THIS machine and said
-    # yes.  That is the thing the token has only ever stood in for, so it
-    # ends the question rather than being checked alongside one.
     from kiln import print_signoff
+    from kiln.print_consent import GRADE_B, grade_of
+    from kiln.runtime_env import is_hosted_multitenant
 
-    if granted := consent_for(file_name=file_name, printer_name=printer_name):
+    # Neither fact is needed for the audited CI bypass or for a resume
+    # continuation; decided first, before anything touches the token.
+    exempt = print_signoff.exemption_verdict(tool_name, file_name, printer_name, is_resume=is_resume)
+    if exempt is not None:
+        if exempt.audit == "preview_gate_skipped":
+            _audit(
+                tool_name,
+                "preview_gate_skipped",
+                details={"file": file_name, "consent": SOURCE_CI_BYPASS},
+            )
+        return None
+
+    # SAID GO.  The one reader of the consent record.  An unnamed call is
+    # aimed at the default printer; a window is matched on that name.
+    try:
+        aimed = printer_name or _resolve_effective_printer_name(None)
+    except Exception:  # noqa: BLE001
+        aimed = printer_name or "default"
+    granted = consent_for(file_name=file_name, printer_name=printer_name, aimed_at=aimed)
+    if granted is None:
+        print_signoff.clear()
+        if preview_token:
+            # The token is left unspent: it is still good for the call
+            # that carries the yes.
+            return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
+        return _error_dict(print_signoff.not_confirmed_message(tool_name), code="PREVIEW_NOT_CONFIRMED")
+
+    # SAW.  The token half lives in kiln.print_signoff so every door asks
+    # the same question of the same code.  We can't hash a file on the
+    # printer, so the token is matched against the name it was issued for.
+    saw = ""
+    if preview_token:
+        verdict = print_signoff.token_verdict(
+            tool_name,
+            file_name,
+            preview_token,
+            printer_name=printer_name,
+            printer_id=(
+                _resolve_printer_model_live(printer_name)
+                if printer_name
+                else _PRINTER_MODEL
+            ),
+        )
+        if not verdict.ok:
+            print_signoff.clear()
+            code = "PREVIEW_TOKEN_INVALID" if verdict.code == print_signoff.CODE_TOKEN_INVALID else "PREVIEW_NOT_CONFIRMED"
+            return _error_dict(verdict.message, code=code)
+        saw = verdict.door or "token"
+    elif granted.door:
+        # The door that took the yes also judged the preview (the terminal
+        # path issues its token through the same judge, or records
+        # ``described`` when nothing could be drawn and said so; a derived
+        # plate rides its input's door).  That is the saw half, on record.
+        saw = granted.door
+
+    if not saw:
+        print_signoff.clear()
+        name = os.path.basename(str(file_name or "")) or "this file"
+        return _error_dict(
+            f"{tool_name} refuses to proceed: a yes was given for {name}, but no preview of it "
+            "is on record — the dialog describes a job, it cannot show one. Show the print "
+            "first (the inline 3D stage, else a viewer link, else the PNG renders), then call "
+            "issue_preview_token(file_path, door=<stage|url|png>) and pass preview_token=<token>.",
+            code="PREVIEW_NOT_CONFIRMED",
+        )
+    if is_hosted_multitenant() and grade_of(granted.source) == GRADE_B:
+        print_signoff.clear()
         _audit(
             tool_name,
-            "preview_gate_satisfied",
-            details={"file": file_name, "consent": granted.source},
+            "preview_gate_refused",
+            details={"file": file_name, "consent": granted.source, "reason": "grade_b_on_hosted"},
         )
-        print_signoff.grant(tool_name, file_name, printer_name, source=granted.source)
-        return None
-    # The token half lives in kiln.print_signoff so the CLI, which has no
-    # consent to read, asks the same question of the same code.  Every
-    # yes it returns has already granted the clearance the adapter
-    # template checks; every no is worded here, once, in the envelope
-    # every caller reads.  We can't hash a file on the printer, so the
-    # token is matched against the name it was issued for.
-    verdict = print_signoff.token_verdict(
-        tool_name,
-        file_name,
-        preview_token,
-        printer_name=printer_name,
-        printer_id=(
-            _resolve_printer_model_live(printer_name)
-            if printer_name
-            else _PRINTER_MODEL
-        ),
-        is_resume=is_resume,
+        return _error_dict(
+            f"{tool_name} refuses to proceed: on the hosted server a terminal's yes or a "
+            "terminal's standing window belongs to nobody, so it is not accepted; the "
+            "approval has to come from the signed-in account.",
+            code="PREVIEW_NOT_CONFIRMED",
+        )
+
+    print_signoff.grant(
+        tool_name, file_name, printer_name,
+        source=granted.source, door=saw,
+        scope=granted.scope, window_id=granted.window_id, identity=granted.identity,
     )
-    if verdict.audit == "preview_gate_skipped":
-        _audit(
-            tool_name,
-            "preview_gate_skipped",
-            details={"file": file_name, "consent": SOURCE_CI_BYPASS},
-        )
-    elif verdict.audit:
-        # The door the person saw the print through rides the audit line:
-        # a PNG-only sign-off is distinguishable from a stage sign-off
-        # after the fact, which is the whole reason the token carries it.
-        _audit(
-            tool_name,
-            verdict.audit,
-            details={"file": file_name, "consent": verdict.source, "door": verdict.door or "unrecorded"},
-        )
-    if verdict.ok:
-        return None
-    if verdict.code == print_signoff.CODE_TOKEN_INVALID:
-        return _error_dict(verdict.message, code="PREVIEW_TOKEN_INVALID")
-    return _error_dict(verdict.message, code="PREVIEW_NOT_CONFIRMED")
+    # The door the person saw the print through rides the audit line — a
+    # PNG-only sign-off is distinguishable from a stage sign-off after
+    # the fact — and so does the yes: who, and the window it rests on.
+    details: dict[str, Any] = {"file": file_name, "consent": granted.source, "door": saw}
+    if granted.identity:
+        details["identity"] = granted.identity
+    if granted.scope is not None:
+        details["scope"] = list(granted.scope) if isinstance(granted.scope, tuple) else granted.scope
+    if granted.window_id:
+        details["window_id"] = granted.window_id
+        details["window_until"] = granted.expires_at
+    _audit(tool_name, "preview_gate_satisfied", details=details)
+    return None
 
 
 # Slicer settings that change how the object is MADE but not what it is.
