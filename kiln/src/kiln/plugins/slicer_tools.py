@@ -355,6 +355,19 @@ def _steer_to_wrapped_upload(
     unprintable one, because the message and ``upload_file``'s docstring
     both pointed at it.
     """
+    # The recommended file is one the printer's screen can draw.  A slicer
+    # that wrote its own plate (Orca, Studio) may have left the tile slots
+    # out or drawn them grey; completion renders them from the plate's own
+    # model in its declared colours and never touches the G-code.
+    try:
+        from kiln.printers.bambu_3mf import bambu_archive_problems, complete_bambu_archive
+
+        if bambu_archive_problems(threemf_path):
+            complete_bambu_archive(threemf_path)
+            response["preview_completed"] = True
+    except Exception as exc:  # noqa: BLE001 — the upload door still refuses an incomplete file
+        _logger.warning("Bambu preview completion failed for %s: %s", threemf_path, exc)
+        response.setdefault("warnings", []).append(f"Preview completion failed: {exc}")
     response["recommended_upload_path"] = threemf_path
     response["recommended_upload_reason"] = (
         f"{effective_printer_id or 'This printer'} starts prints "

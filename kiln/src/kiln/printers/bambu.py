@@ -4062,6 +4062,16 @@ class BambuAdapter(PrinterAdapter):
 
         filename = os.path.basename(abs_path)
 
+        # The one door every upload passes: a plate leaves for the printer
+        # with the preview its screen draws, or not at all.  Refused here
+        # rather than at each tool, so the CLI, the slicer, and every
+        # one-shot pipeline meet the same rule.  See bambu_3mf.
+        from kiln.printers.bambu_3mf import bambu_archive_problems
+
+        problems = bambu_archive_problems(abs_path)
+        if problems:
+            raise PrinterError(f"Refused to upload {filename}: " + "; ".join(problems) + ".")
+
         try:
             ftp = self._ftp_connect()
         except PrinterError:
