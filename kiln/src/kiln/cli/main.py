@@ -69,6 +69,7 @@ from kiln.cli.config import (
 from kiln.cli.config import (
     list_printers as _list_printers,
 )
+from kiln.cli.consent_commands import register_consent_cli
 from kiln.cli.install_mcp import register_install_mcp_cli
 from kiln.cli.install_openscad import register_install_openscad_cli
 from kiln.cli.install_step_backend import register_install_step_backend_cli
@@ -568,33 +569,42 @@ def cli_gate(
     printer_name: str | None,
     json_mode: bool,
 ) -> None:
-    """The CLI's half of the preview gate — the same verdict the MCP doors
-    get, worded for a terminal, exiting on a no.
+    """The CLI's door to the one preview gate — the same verdict the MCP
+    doors get, worded for a terminal, exiting on a no.
 
     ``kiln print`` and three sibling start paths called the adapter
     directly with no gate at all, which is how a print was started unseen
-    on 2026-09-16.  A yes here grants the clearance the adapter template
-    checks; there is no other way through it.
+    on 2026-09-16.  The gate wants two facts: a preview on record (the
+    token) and a person's yes.  A token typed on the command line is the
+    first fact only — the person at the terminal is still asked for the
+    second, and a shell with nobody at it gets the refusal, unless a
+    standing window a person opened covers this printer.
     """
-    from kiln.print_signoff import CODE_NOT_CONFIRMED, token_verdict
+    from kiln.print_signoff import CODE_NOT_CONFIRMED
+    from kiln.server import _preview_gate_error
 
-    verdict = token_verdict(tool, file_path, preview_token, printer_name=printer_name)
-    if verdict.ok:
+    block = _preview_gate_error(tool, file_path, preview_token, printer_name=printer_name)
+    if block is None:
         return
-    if verdict.code == CODE_NOT_CONFIRMED and not preview_token:
-        # No token and no agent: a person typing at their own terminal can
-        # be shown the print and asked.  Nobody at the terminal gets the
-        # refusal below.  See kiln.cli.print_gate.
+    refusal = block.get("error") if isinstance(block.get("error"), dict) else {}
+    code = str(refusal.get("code") or CODE_NOT_CONFIRMED)
+    message = str(refusal.get("message") or block)
+    if code == CODE_NOT_CONFIRMED:
+        # A person typing at their own terminal can be shown the print
+        # (or, with a token, reminded what is on record) and asked.
+        # Nobody at the terminal gets the refusal below.  See
+        # kiln.cli.print_gate.
         from kiln.cli.print_gate import confirm_print_at_terminal
 
         if confirm_print_at_terminal(
             tool=tool, file_path=file_path, printer_name=printer_name, json_mode=json_mode,
+            preview_token=preview_token,
         ):
             return
-    message = verdict.message.replace(
+    message = message.replace(
         "pass the token as preview_token=<token>", "pass it as --preview-token <token>"
     )
-    click.echo(format_error(message, code=verdict.code, json_mode=json_mode))
+    click.echo(format_error(message, code=code, json_mode=json_mode))
     sys.exit(1)
 
 
@@ -12863,6 +12873,10 @@ register_spend_caps_cli(cli)
 # `kiln bridge {status,start,stop,enable,disable}` — run the web->printer bridge
 # as an opt-in background service.  Public surface; no kiln-pro dependency.
 register_bridge_cli(cli)
+
+# `kiln consent {window,status,extend,revoke}` — a person's standing yes for
+# unattended starts, opened only at a terminal.  See kiln.consent_windows.
+register_consent_cli(cli)
 
 
 def main() -> None:

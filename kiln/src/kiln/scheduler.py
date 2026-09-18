@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from kiln.events import EventBus, EventType
-from kiln.print_signoff import grant_from_record
+from kiln.print_signoff import grant_from_record, record_refusal
 from kiln.print_start_verdict import resolve_print_start
 from kiln.printers.base import PrinterError, PrinterStatus, status_is_unreachable
 from kiln.printers.progress_motion import (
@@ -917,8 +917,21 @@ class JobScheduler:
                 # it.  A job with no record still dispatches as "queued" —
                 # the queue's doors are the gate, pinned by test — but says
                 # so, rather than borrowing a door it never passed.
+                # The yes the job carries was for a scope — one printer,
+                # a list, the fleet — and may rest on a standing window.
+                # A printer outside the scope, or a window since revoked
+                # or run out, gets a reason and no print: this is not a
+                # dispatch error to retry, it is a no.
+                signoff_record = (next_job.metadata or {}).get("preview_signoff") or {}
+                refusal = record_refusal(signoff_record, printer_name)
+                if refusal:
+                    # No printer name on purpose: nothing reached a machine,
+                    # so there is no print outcome to record — only a job
+                    # that was not allowed to start, and says why.
+                    self._fail_permanently(next_job.id, refusal, failed, printer_name=None)
+                    continue
                 grant_from_record(
-                    (next_job.metadata or {}).get("preview_signoff") or {},
+                    signoff_record,
                     tool="scheduler", file_name=next_job.file_name, printer_name=printer_name,
                 )
                 sent_at = time.monotonic()

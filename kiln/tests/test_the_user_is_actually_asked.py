@@ -93,22 +93,43 @@ def test_consent_does_not_outlive_its_call():
 
 
 # ---------------------------------------------------------------------------
-# The gate takes a human answer in place of a token
+# The gate takes a human answer alongside the token — never one for the other
 # ---------------------------------------------------------------------------
 
 
-def test_a_person_saying_yes_replaces_the_token(monkeypatch):
+def test_a_person_saying_yes_is_the_half_the_token_never_was(monkeypatch, tmp_path):
+    """Two facts.  The token says a door showed the file; the yes says a
+    person agreed.  The gate wants both — a yes alone is a yes to a
+    description, a token alone is the 2026-09-16 incident.  (The A/B for
+    this rewrite lives in test_a_person_says_go.py.)"""
     monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
-    # No token at all — this is refused today.
-    assert server._preview_gate_error(
-        "start_print", "benchy.3mf", None, printer_name="garage",
-    ) is not None
+    monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+    from kiln import preview_evidence
 
-    token = set_consent(_granted())
+    mesh = tmp_path / "benchy.3mf"
+    mesh.write_bytes(b"PK\x03\x04 not really a 3mf")
+    preview_evidence.record("stage", str(mesh), via="panel_fetch")
+
+    def _token():
+        return server.issue_preview_token(str(mesh), door="stage")["token"]
+
+    # Nothing at all — refused.
+    assert server._preview_gate_error("start_print", str(mesh), None, printer_name="garage") is not None
+    # A yes alone — refused: no preview on record.
+    token = set_consent(_granted(file_name=str(mesh)))
     try:
-        assert server._preview_gate_error(
-            "start_print", "benchy.3mf", None, printer_name="garage",
-        ) is None
+        blocked = server._preview_gate_error("start_print", str(mesh), None, printer_name="garage")
+        assert blocked is not None and "no preview" in blocked["error"]["message"]
+    finally:
+        reset_consent(token)
+    # A token alone — refused: nobody said go.
+    blocked = server._preview_gate_error("start_print", str(mesh), _token(), printer_name="garage")
+    assert blocked is not None and "nobody said go" in blocked["error"]["message"]
+    # Both — the print may start.
+    token = set_consent(_granted(file_name=str(mesh)))
+    try:
+        assert server._preview_gate_error("start_print", str(mesh), _token(), printer_name="garage") is None
     finally:
         reset_consent(token)
 
