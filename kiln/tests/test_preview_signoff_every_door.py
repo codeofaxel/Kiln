@@ -531,14 +531,17 @@ class TestOneShotPipelines:
         print_signoff.clear()
         # Steps: validate, profile, stability, slice, safety, upload,
         # preflight, start_print — pause after preflight (index 6).
+        before = set(pipelines._executions)
         result = pipelines.quick_print(
             model_path=mesh, printer_name="garage", skip_validation=True,
             pause_after_step=6, signoff=record,
         )
         assert printer.started == [], result.to_dict()
-        # The paused execution is the newest one registered; resume it as
-        # the pipeline_resume tool would, in a fresh context.
-        ex = max(pipelines._executions.values(), key=lambda e: e.started_at if hasattr(e, "started_at") else 0)
+        # The execution THIS call registered — not the newest in a
+        # process-wide registry another test file may have added to —
+        # resumed as the pipeline_resume tool would, in a fresh context.
+        (new_id,) = set(pipelines._executions) - before
+        ex = pipelines._executions[new_id]
         assert ex.state.value == "paused", ex.state
         resumed = ex.resume()
         assert printer.started == ["jar.gcode"], resumed.to_dict()
