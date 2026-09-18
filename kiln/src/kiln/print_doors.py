@@ -77,6 +77,20 @@ EXEMPT: dict[tuple[str, str], str] = {
 }
 
 
+#: Host commands that start a print from the raw G-code door.  Not a call
+#: the walker can see -- a table row in ``kiln.gcode`` -- so the doctor
+#: reads the table instead and reports a missing row as an open door.
+RAW_START_COMMANDS: tuple[str, ...] = ("M23", "M24", "M32")
+
+
+def raw_starts_refused() -> list[str]:
+    """The raw print-start commands ``send_gcode`` would let through — empty
+    when the block table has every one of them."""
+    from kiln.gcode import _BLOCKED_COMMANDS
+
+    return [cmd for cmd in RAW_START_COMMANDS if cmd not in _BLOCKED_COMMANDS]
+
+
 @dataclass(frozen=True)
 class PrintDoor:
     """One place in the source a print can be started from."""
@@ -232,15 +246,19 @@ def summarize(doors: list[PrintDoor] | None = None) -> tuple[bool, str]:
     bypassing = sorted({d.label for d in doors if d.bypasses})
     exempt = sorted({d.label for d in doors if d.exempt})
     stale = stale_exemptions(doors)
+    raw_open = raw_starts_refused()
     total = len({(d.module, d.function, d.line) for d in doors})
-    if bypassing or stale:
+    if bypassing or stale or raw_open:
         parts = []
         if bypassing:
             parts.append("DOORS BYPASSING: " + ", ".join(bypassing))
         if stale:
             parts.append("stale exemptions: " + ", ".join(stale))
+        if raw_open:
+            parts.append("RAW G-CODE STARTS OPEN: " + ", ".join(raw_open))
         return False, f"{total} start doors; " + "; ".join(parts)
     line = f"{total} start doors, all gated"
     if exempt:
         line += f" ({len(exempt)} named exemption{'s' if len(exempt) != 1 else ''}: {', '.join(exempt)})"
+    line += "; raw G-code starts refused (" + "/".join(RAW_START_COMMANDS) + ")"
     return True, line
