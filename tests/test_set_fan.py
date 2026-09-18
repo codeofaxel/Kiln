@@ -94,7 +94,7 @@ def _call_tool(monkeypatch, adapter, node, percent):
     monkeypatch.setattr(server, "_check_auth", lambda *a, **k: None)
     monkeypatch.setattr(server, "_check_rate_limit", lambda *a, **k: None)
     monkeypatch.setattr(server, "_get_adapter", lambda: adapter)
-    return server.set_fan(node, percent)
+    return server.set_fan(node=node, percent=percent)
 
 
 def test_tool_success(monkeypatch):

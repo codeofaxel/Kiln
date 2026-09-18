@@ -312,7 +312,9 @@ def load_filament(
         keep_hot: Leave the heater ON afterwards, for a caller about to do
             something else hot.  Off by default: every op ends with the
             heater off and says so; where the machine's own cool-down is
-            served, the fan runs until the nozzle has cooled before the answer.
+            served, the part fan goes on and Kiln turns it off on its own
+            once the nozzle reads the hand-off temperature -- the answer
+            does not wait for that, and ``printer_status`` shows it.
         printer_name: Which printer.  Omit for the default one.
     """
     args = {
@@ -419,7 +421,9 @@ def purge_filament(
         keep_hot: Leave the heater ON afterwards, for a caller about to do
             something else hot.  Off by default: every op ends with the
             heater off and says so; where the machine's own cool-down is
-            served, the fan runs until the nozzle has cooled before the answer.
+            served, the part fan goes on and Kiln turns it off on its own
+            once the nozzle reads the hand-off temperature -- the answer
+            does not wait for that, and ``printer_status`` shows it.
         printer_name: Which printer.  Omit for the default one.
     """
     args = {
@@ -482,7 +486,9 @@ def wipe_nozzle(
         keep_hot: Leave the heater ON afterwards, for a caller about to do
             something else hot.  Off by default: every op ends with the
             heater off and says so; where the machine's own cool-down is
-            served, the fan runs until the nozzle has cooled before the answer.
+            served, the part fan goes on and Kiln turns it off on its own
+            once the nozzle reads the hand-off temperature -- the answer
+            does not wait for that, and ``printer_status`` shows it.
         plate_clear: A PERSON's statement that the plate is empty, given on
             THIS call.  Read on every call by a wipe whose plan presses the
             plate (its Z datum is taken on the plate, or the head has to

@@ -142,11 +142,15 @@ class TestStepMode:
         result = bambu.wipe_nozzle(step=6)
         assert result.success and result.next_step is None and result.step_sent == 6
         scripts = _scripts(bambu)
-        assert scripts[-3:] == ["M104 S0", "M106 S255", "M106 S0"]  # heater off, then the plan's cool-down
+        assert scripts[-2:] == ["M104 S0", "M106 S255"]  # heater off, then the plan's cool-down begins
         assert "\n".join(doc["post_gcode"][8:]) in scripts
         assert not any("G1 E-0.8 F1800" in s for s in scripts)  # the snap step already pulled back
         assert result.details["end_retract_mm"] == 1.0 and result.details["heater"] == "off"
-        assert result.details["cooled_below_c"] == 120 and result.details["resting_position"] == {"over": "the chute"}
+        assert result.details["cooldown"]["handoff_c"] == 120 and result.details["resting_position"] == {"over": "the chute"}
+        # ... and finishes from a thread the request cannot take with it
+        from kiln.printers import routine_ledger
+
+        assert routine_ledger.wait_settled(5.0) and _scripts(bambu)[-1] == "M106 S0"
         assert result.details["plate_clear_given"] is False  # the plan never asked
         assert "That was the last step" in result.message
 

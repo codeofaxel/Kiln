@@ -128,6 +128,55 @@ class TestGracefulShutdown:
         exits, _ = _run_shutdown({}, deadline_s=5.0)
         assert exits == [0]
 
+    def test_a_cool_down_still_waiting_gets_its_fan_off_before_the_process_ends(self, monkeypatch, tmp_path):
+        """Measured 2026-09-18 on an A1: SIGTERM arrived while the purge's
+        served cool-down was waiting for the hand-off temperature with the
+        part fan on full, and the fan-off died with the process.  The
+        shutdown now settles what a routine had switched on -- FIRST, with
+        the printer connection still up -- and a cool-down that has not
+        reached the hand-off is exactly such a thing."""
+        from kiln.printers.motion_plan import run_finish
+
+        monkeypatch.setenv("KILN_HOME", str(tmp_path))
+        order: list[str] = []
+
+        class _Ordered(_Recorder):
+            def stop(self) -> None:
+                order.append("scheduler stopped")
+                super().stop()
+
+        class _Adapter:
+            name = "stub"
+            _host = "10.0.0.9"
+
+            def __init__(self) -> None:
+                self.gcode: list[list[str]] = []
+                self.woken = threading.Event()
+
+            def send_gcode(self, lines):
+                self.gcode.append(list(lines))
+                order.append(lines[0])
+                return True
+
+            def _wait_for_hotend_below(self, threshold, *, timeout, poll=0.0):
+                if timeout:  # the real wait: the nozzle stays above the hand-off until the process is gone
+                    self.woken.wait(5.0)
+                return False, 200.0
+
+        adapter = _Adapter()
+        result = type("R", (), {"details": {}})()
+        finish = {"fan_on": "M106 S255", "handoff_c": 140, "timeout_s": 150, "fan_off": "M106 S0"}
+        run_finish(adapter, result, finish)
+        exits, _ = _run_shutdown({"scheduler": _Ordered()}, deadline_s=5.0)
+        adapter.woken.set()
+        assert exits == [0]
+        assert ["M106 S0"] in adapter.gcode, f"the fan-off never went out: {adapter.gcode}"
+        assert order.index("M106 S0") < order.index("scheduler stopped"), "settle FIRST, then stop services"
+        from kiln.printers import routine_ledger
+
+        assert routine_ledger.wait_settled(5.0) and routine_ledger.open_holds() == []
+        assert adapter.gcode.count(["M106 S0"]) == 1
+
     def test_production_exit_is_os_exit_never_sys_exit(self) -> None:
         """The default must be ``os._exit`` — ``sys.exit`` is exactly
         the bug (SystemExit into the interrupted event-loop frame, an

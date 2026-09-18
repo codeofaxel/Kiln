@@ -1589,8 +1589,10 @@ class TestEveryFilamentOpEndsHeaterOff:
 
         monkeypatch.setattr(stub, "_purge_filament_impl", _impl)
         result = stub.purge_filament(temperature=205, length_mm=25)
+        # The thermistor already read 138 when the heater went off, so the
+        # fan-off is sent in the answer itself, with no wait to detach.
         assert result.details["fan"] == "off" and result.details["cooled_below_c"] == 140
-        assert "waited until the nozzle read 138 °C" in result.message
+        assert "already read 138 °C" in result.message
         assert stub.gcode[-2:] == [["M106 S255"], ["M106 S0"]]
         # in place, so the drip is under the nozzle, not in a chute the op never went to
         assert "under the nozzle" in result.message and "over the chute" not in result.message
@@ -1768,7 +1770,14 @@ class TestBambuRunsAFilamentPlan:
         assert scripts[0].startswith("G91\nG1 Z7 F100\nG90\nG28 X\nG1 X-9 F100")  # the park, before the heater
         assert any("G1 E25 F180\nM400\nG1 E-0.5 F100\nM400" in s for s in scripts)  # the tail rides after the extrude
         assert "snapped the tail" in result.message and "landed there" in result.message
-        assert result.details["cooled_below_c"] == 140 and result.details["fan"] == "off"
+        # The nozzle was still hot when the answer left: the fan is on and the
+        # cool-down runs on from a thread the request cannot take with it.
+        from kiln.printers import routine_ledger
+
+        assert result.details["cooled_below_c"] is None and result.details["fan"].startswith("on full (cooling")
+        assert result.details["cooldown"] == {"status": "running", "handoff_c": 140, "timeout_s": 150, "fan_off": "M106 S0"}
+        assert "turns the fan off on its own" in result.message
+        assert routine_ledger.wait_settled(5.0) and _scripts(bambu)[-2:] == ["M106 S255", "M106 S0"]
 
     def test_a_wipe_plan_runs_the_pad_pass_and_reports_its_figures(self, bambu, monkeypatch):
         _serve_plans(monkeypatch, {"wipe": _fake_wipe_doc()})
@@ -1782,7 +1791,10 @@ class TestBambuRunsAFilamentPlan:
         assert result.details["end_retract_mm"] == 1.0 and result.details["wipe_c"] == 150 and result.details["done_below_c"] == 120
         assert result.message.startswith("Wiped the nozzle on the pad") and "look at the tip" in result.message
         assert not any("G1 E-0.8 F1800" in s for s in scripts)  # the plan's own retract is not doubled
-        assert result.details["cooled_below_c"] == 120  # the plan's hand-off, not a public constant
+        from kiln.printers import routine_ledger
+
+        assert result.details["cooldown"]["handoff_c"] == 120  # the plan's hand-off, not a public constant
+        assert routine_ledger.wait_settled(5.0) and _scripts(bambu)[-1] == "M106 S0"
 
     def test_a_load_parks_first_when_the_plan_carries_a_park(self, bambu, monkeypatch):
         _serve_plans(monkeypatch, {"purge": _fake_purge_doc()})

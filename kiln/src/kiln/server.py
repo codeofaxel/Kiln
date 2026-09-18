@@ -4667,6 +4667,19 @@ def printer_status(
             "printer": printer_block,
             "job": job.to_dict(),
         }
+        # A cool-down a Kiln server left running (killed with the part fan
+        # on) is finished from this read, the one every filament answer
+        # names as its follow-up: fan off once the nozzle is at or below
+        # the hand-off, and the block says so.  Nothing on file: no key.
+        from kiln.printers.routine_ledger import complete_stranded_cooldown
+
+        try:
+            cooldown = complete_stranded_cooldown(adapter, state)
+        except Exception:  # noqa: BLE001 -- a backstop must never fail the read
+            logger.debug("stranded cool-down check failed", exc_info=True)
+            cooldown = None
+        if cooldown:
+            response["cooldown"] = cooldown
         if detail == "full":
             response["capabilities"] = adapter.capabilities.to_dict()
             # The printer's own nozzle-clumping-detection switch, as a plain
@@ -8693,7 +8706,7 @@ def get_speed_profile() -> dict:
 
 
 @mcp.tool()
-def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
+def set_printer_light(mode: str, node: str = "chamber_light") -> dict:
     """Control the printer's LED lights (Bambu Lab printers only).
 
     Args:
@@ -8701,7 +8714,8 @@ def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
             illumination) or ``"work_light"`` (nozzle area).
             Defaults to ``"chamber_light"``.
         mode: Light mode — ``"on"``, ``"off"``, or ``"flashing"``.
-            Defaults to ``"on"``.
+            Required: a call that arrives without it is refused rather
+            than turned on (the same rule as ``set_fan``'s ``percent``).
 
     Use this to improve camera visibility, signal print completion
     (flashing), or turn lights off for overnight prints.
@@ -8747,8 +8761,15 @@ def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
 
 
 @mcp.tool()
-def set_fan(node: str = "part", percent: int = 100) -> dict:
+def set_fan(percent: int, node: str = "part") -> dict:
     """Set the speed of a printer fan.
+
+    ``percent`` has no default on purpose.  Measured 2026-09-18 on an A1:
+    a call meant to turn the fan OFF reached Kiln with no ``percent`` at
+    all (the caller's own argument name had been dropped before the
+    request arrived), the old default of 100 ran the fan flat out, and
+    the answer confirmed it.  A setpoint the caller did not send is
+    refused, never guessed.
 
     Supported on Bambu Lab, OctoPrint, Moonraker/Klipper printers, and
     Elegoo's Centauri Carbon (FDM). Prusa Link has no raw G-code endpoint, so
@@ -8764,7 +8785,7 @@ def set_fan(node: str = "part", percent: int = 100) -> dict:
             no standard auxiliary or chamber fan Kiln can address without
             knowing that machine's own G-code macros. Defaults to ``"part"``.
         percent: Fan speed 0-100. ``0`` turns the fan off, ``100`` is full
-            speed. Defaults to ``100``.
+            speed. Required.
 
     Use this to add cooling for bridges and overhangs (part fan), or — on
     Bambu — pull heat with the auxiliary fan or run the chamber/exhaust fan
@@ -16236,7 +16257,14 @@ def _graceful_shutdown(
     killer = threading.Timer(deadline_s, lambda: hard_exit(0))
     killer.daemon = True
     killer.start()
+    from kiln.printers.routine_ledger import drain as _drain_routines
+
     stops = (
+        # FIRST, while the printer connections are still up: a heater or fan
+        # a routine of Kiln's switched on and had not yet switched off.
+        # Measured 2026-09-18 -- a SIGTERM mid cool-down left the A1's part
+        # fan on full with nobody left to send the fan-off.
+        lambda: _drain_routines("shutdown"),
         lambda: _get_scheduler().stop(),
         lambda: _get_webhook_mgr().stop(),
         lambda: _get_heater_watchdog().stop(),
@@ -16515,6 +16543,8 @@ def _start() -> None:
     signal.signal(signal.SIGINT, _shutdown_handler)
 
     # Atexit as fallback
+    from kiln.printers.routine_ledger import drain_at_exit
+
     atexit.register(_get_scheduler().stop)
     atexit.register(_get_webhook_mgr().stop)
     atexit.register(_get_heater_watchdog().stop)
@@ -16531,6 +16561,9 @@ def _start() -> None:
 
     atexit.register(_stop_all_watchers)
     atexit.register(_release_printer_connections)
+    # Registered LAST so it runs FIRST (atexit is LIFO): what a routine of
+    # Kiln's switched on settles while the printer connections are still up.
+    atexit.register(drain_at_exit)
 
     # One-line identity banner on stderr.  MCP owns stdout (JSON-RPC);
     # stderr is free.  Silent startup is a bug: a paid user whose CLI

@@ -388,8 +388,8 @@ class TestResponsesAreJsonSafe:
         for call in (
             lambda: set_temperature(tool_temp=200, bed_temp=60),
             lambda: set_speed_profile("silent"),
-            lambda: set_printer_light("chamber_light", "on"),
-            lambda: set_fan("part", 100),
+            lambda: set_printer_light(mode="on", node="chamber_light"),
+            lambda: set_fan(percent=100, node="part"),
             lambda: send_gcode("G28"),
         ):
             _json.dumps(call())

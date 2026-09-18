@@ -309,6 +309,15 @@ def run_finish(adapter: Any, result: Any, finish: dict[str, Any]) -> str | None:
 
     ``None`` when the block is unusable, so the caller falls back to the
     plain "still hot" floor rather than claim a cool-down.
+
+    The wait does not happen inside the request.  Measured 2026-09-18 on
+    an A1: the purge's frame was still waiting for the hand-off when the
+    host restarted the server, and the fan-off died with it.  The fan-on
+    is sent here; the watch and the fan-off run in a thread the request
+    cannot take with it (:func:`kiln.printers.routine_ledger.start_cooldown`),
+    registered so a shutdown settles it and marked on disk so the next
+    ``printer_status`` finishes it if this process is killed outright.
+    A nozzle already at or below the hand-off gets its fan-off right here.
     """
     try:
         fan_on_line = str(finish["fan_on"])
@@ -324,8 +333,7 @@ def run_finish(adapter: Any, result: Any, finish: dict[str, Any]) -> str | None:
         fan_on = bool(getattr(adapter.send_gcode([fan_on_line]), "ok", True))
     except Exception:  # noqa: BLE001 -- report it, do not hide it
         fan_on = False
-    reached, reading = waiter(threshold, timeout=timeout)
-    result.details["cooled_below_c"] = threshold if reached else None
+    reached, reading = waiter(threshold, timeout=0.0)
     result.details["hotend_at_answer"] = reading
     placement = result.details.get("purge_station")
     parked = isinstance(placement, dict) and placement.get("status") == "parked"
@@ -341,17 +349,30 @@ def run_finish(adapter: Any, result: Any, finish: dict[str, Any]) -> str | None:
             fan_off = bool(getattr(adapter.send_gcode([fan_off_line]), "ok", True))
         except Exception:  # noqa: BLE001
             fan_off = False
+        result.details["cooled_below_c"] = threshold
         result.details["fan"] = "off" if fan_off else "ON -- the fan-off command was refused"
         return (
-            f"{'Part fan on full while it cooled' if fan_on else 'Fan command refused'}; this answer "
-            f"waited until the nozzle read {shown}, at or below the {threshold:g} °C hand-off the machine's "
-            f"own start sequence waits for, then fan {'off' if fan_off else 'NOT off'}.{where}"
+            f"{'Part fan on full' if fan_on else 'Fan command refused'}; the nozzle already read {shown}, "
+            f"at or below the {threshold:g} °C hand-off the machine's own start sequence waits for, "
+            f"so fan {'off' if fan_off else 'NOT off'}.{where}"
         )
-    result.details["fan"] = "ON (left running: the nozzle had not cooled when this answer left)"
+    from kiln.printers.routine_ledger import start_cooldown
+
+    start_cooldown(adapter, fan_off=fan_off_line, handoff_c=threshold, timeout_s=timeout)
+    result.details["cooled_below_c"] = None
+    result.details["fan"] = f"on full (cooling; Kiln turns it off at or below {threshold:g} °C)"
+    result.details["cooldown"] = {
+        "status": "running",
+        "handoff_c": threshold,
+        "timeout_s": timeout,
+        "fan_off": fan_off_line,
+    }
     return (
-        f"Part fan {'on full' if fan_on else 'command refused'}; the nozzle still read {shown} after "
-        f"{timeout:g}s, above the {threshold:g} °C hand-off. It keeps cooling on its own; "
-        f"the fan is left on.{where}"
+        f"Part fan {'on full' if fan_on else 'command refused'} while it cools; the nozzle read {shown} "
+        f"when this answer left. Kiln keeps watching from the server and turns the fan off on its own once "
+        f"the nozzle reads at or below the {threshold:g} °C hand-off the machine's own start sequence waits "
+        f"for; printer_status shows the fan, and finishes the cool-down itself if this server was stopped "
+        f"first.{where}"
     )
 
 
@@ -444,6 +465,10 @@ def run_wipe_step(
         target = float(plan.temperature)
         try:
             adapter.set_tool_temp(target)
+            # Hot between steps, across requests: a shutdown settles it.
+            hold_heater = getattr(adapter, "_hold_heater", None)
+            if callable(hold_heater):
+                hold_heater(target)
         except PrinterError as exc:
             return FilamentOpResult(
                 success=False, message=f"Could not set the hotend to {target:g}°C: {exc}",
