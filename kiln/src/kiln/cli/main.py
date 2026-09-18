@@ -576,11 +576,21 @@ def cli_gate(
     on 2026-09-16.  A yes here grants the clearance the adapter template
     checks; there is no other way through it.
     """
-    from kiln.print_signoff import token_verdict
+    from kiln.print_signoff import CODE_NOT_CONFIRMED, token_verdict
 
     verdict = token_verdict(tool, file_path, preview_token, printer_name=printer_name)
     if verdict.ok:
         return
+    if verdict.code == CODE_NOT_CONFIRMED and not preview_token:
+        # No token and no agent: a person typing at their own terminal can
+        # be shown the print and asked.  Nobody at the terminal gets the
+        # refusal below.  See kiln.cli.print_gate.
+        from kiln.cli.print_gate import confirm_print_at_terminal
+
+        if confirm_print_at_terminal(
+            tool=tool, file_path=file_path, printer_name=printer_name, json_mode=json_mode,
+        ):
+            return
     message = verdict.message.replace(
         "pass the token as preview_token=<token>", "pass it as --preview-token <token>"
     )
@@ -5668,12 +5678,17 @@ def queue() -> None:
         "same job)."
     ),
 )
+@click.option(
+    "--preview-token", "preview_token", default=None,
+    help="Preview sign-off token from issue_preview_token for FILE. A queued print starts later with nobody to ask, so it is asked about now.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def queue_submit_cmd(
     file: str,
     printer: str | None,
     priority: int,
     idempotency_key: str | None,
+    preview_token: str | None,
     json_mode: bool,
 ) -> None:
     """Submit a print job to the queue.
@@ -5684,11 +5699,22 @@ def queue_submit_cmd(
     try:
         from kiln.plugins.queue_tools import submit_job as _submit_job
 
+        if not preview_token:
+            # The file is on the printer, so there is nothing to draw; a
+            # person at the terminal is told so and asked.  The yes is
+            # recorded where submit_job's own gate reads it.  Nobody at the
+            # terminal: submit_job refuses, naming the token it wants.
+            from kiln.cli.print_gate import confirm_print_at_terminal
+
+            confirm_print_at_terminal(
+                tool="kiln queue submit", file_path=file, printer_name=printer, json_mode=json_mode,
+            )
         result = _submit_job(
             file_name=file,
             printer_name=printer,
             priority=priority,
             idempotency_key=idempotency_key,
+            preview_token=preview_token,
         )
         if not result.get("success"):
             click.echo(
@@ -10394,6 +10420,18 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
             )
     except Exception as exc:
         checks.append({"name": "serve_processes", "ok": True, "detail": f"check skipped: {exc}"})
+
+    # 4a. Print preview gate — every door that can start a print, read out
+    # of the source (kiln.print_doors), and whether each one reaches a
+    # clearing helper.  Not a hand list: a start path added anywhere in the
+    # tools, the pipelines or this CLI shows up here on its own.
+    try:
+        from kiln.print_doors import summarize as _summarize_print_doors
+
+        _doors_ok, _doors_line = _summarize_print_doors()
+        checks.append({"name": "print_preview_gate", "ok": _doors_ok, "detail": _doors_line})
+    except Exception as exc:
+        checks.append({"name": "print_preview_gate", "ok": False, "detail": f"walk failed: {exc}"})
 
     # 4b. Printer connection slots — who on this machine is actually holding
     # one.  Separate from the process count above because they answer

@@ -1,0 +1,276 @@
+"""A person at a terminal is shown the print and asked; nobody else is.
+
+``cli_gate`` takes a token.  With no token, ``kiln print`` used to be a
+dead end for the person typing it — no agent to fetch a token, no way to
+say yes.  Now a person at a terminal (stdin AND stdout are TTYs) is shown
+the preview and asked; a yes grants the clearance the adapter template
+checks, through the same door judge a token faces.  Not a flag: ``yes |``
+and an agent's subprocess still get the refusal.
+
+A/B: on the tree before this fallback, the "yes in person" tests fail with
+``PREVIEW_NOT_CONFIRMED`` (the adapter never hears the start).
+"""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+from click.testing import CliRunner
+
+from kiln import preview_evidence, print_signoff, server
+from kiln.cli import print_gate
+from kiln.cli.main import cli
+from kiln.preview_gate import PreviewGate
+from kiln.print_consent import SOURCE_TERMINAL, consent_for
+from kiln.printers.base import (
+    JobProgress,
+    PrinterAdapter,
+    PrinterCapabilities,
+    PrinterFile,
+    PrinterState,
+    PrinterStatus,
+    PrintResult,
+    UploadResult,
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolated(monkeypatch, tmp_path):
+    monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+    monkeypatch.setenv("KILN_EMERGENCY_PERSIST", "0")
+    preview_evidence._reset_for_tests()
+    print_signoff._reset_for_tests()
+    import kiln.preview_gate as pg
+
+    monkeypatch.setattr(pg, "_gate", PreviewGate())
+    monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+    monkeypatch.setattr(server, "_audit", lambda *a, **k: None)
+    monkeypatch.setattr("kiln.local_stage.host_renders_apps", lambda *a, **k: False)
+    yield
+    preview_evidence._reset_for_tests()
+    print_signoff._reset_for_tests()
+
+
+@pytest.fixture
+def audits(monkeypatch):
+    seen: list[tuple[str, str, dict]] = []
+    monkeypatch.setattr(print_gate, "_audit", lambda t, a, d: seen.append((t, a, d)))
+    return seen
+
+
+class _Printer(PrinterAdapter):
+    """A real adapter subclass, so ``start_print`` runs the sign-off template."""
+
+    def __init__(self) -> None:
+        self.started: list[str] = []
+        self._kiln_registered_name = "garage"
+
+    @property
+    def name(self) -> str:
+        return "fake"
+
+    @property
+    def capabilities(self) -> PrinterCapabilities:
+        return PrinterCapabilities()
+
+    def get_state(self) -> PrinterState:
+        return PrinterState(state=PrinterStatus.IDLE, connected=True)
+
+    def get_job(self) -> JobProgress:
+        return JobProgress()
+
+    def list_files(self) -> list[PrinterFile]:
+        return [PrinterFile(name="part.gcode", path="part.gcode", size_bytes=1)]
+
+    def upload_file(self, file_path: str) -> UploadResult:
+        return UploadResult(success=True, file_name=os.path.basename(file_path), message="ok")
+
+    def _start_print_impl(self, file_name: str, **kwargs) -> PrintResult:
+        self.started.append(file_name)
+        return PrintResult(success=True, message="started")
+
+    def cancel_print(self) -> PrintResult:
+        return PrintResult(success=True, message="")
+
+    def pause_print(self) -> PrintResult:
+        return PrintResult(success=True, message="")
+
+    def _resume_print_impl(self) -> PrintResult:
+        return PrintResult(success=True, message="")
+
+    def emergency_stop(self) -> PrintResult:
+        return PrintResult(success=True, message="")
+
+    def _load_filament_impl(self, plan):
+        raise NotImplementedError
+
+    def _unload_filament_impl(self, plan):
+        raise NotImplementedError
+
+    def _purge_filament_impl(self, plan):
+        raise NotImplementedError
+
+    def set_tool_temp(self, target: float) -> bool:
+        return True
+
+    def set_bed_temp(self, target: float) -> bool:
+        return True
+
+    def send_gcode(self, commands: list[str]) -> bool:
+        return True
+
+    def delete_file(self, file_path: str) -> bool:
+        return True
+
+
+@pytest.fixture
+def cli_env(monkeypatch):
+    printer = _Printer()
+    monkeypatch.setattr("kiln.cli.main._make_adapter", lambda cfg: printer)
+    monkeypatch.setattr(
+        "kiln.cli.main.load_printer_config",
+        lambda *_a, **_k: {"type": "moonraker", "host": "http://t.local", "timeout": 1, "retries": 0},
+    )
+    monkeypatch.setattr("kiln.cli.main.validate_printer_config", lambda cfg: (True, None))
+    return CliRunner(), printer
+
+
+def _mesh_with_png_on_record(tmp_path, monkeypatch):
+    """A local model the terminal 'rendered': the renderer's own record of a
+    PNG, the link door's record that it could not, and no OpenSCAD."""
+    mesh = tmp_path / "plate.3mf"
+    mesh.write_bytes(b"PK\x03\x04 not really a 3mf")
+    image = tmp_path / "plate_iso.png"
+    preview_evidence.record("png", str(mesh), renderer="openscad")
+    preview_evidence.record_url_refusal(str(mesh), "signed_out")
+    monkeypatch.setattr(print_gate, "render_for_terminal", lambda path: ([str(image)], None))
+    monkeypatch.setattr(print_gate.click, "launch", lambda target: None)
+    return mesh, image
+
+
+# ---------------------------------------------------------------------------
+# Who counts as a person
+# ---------------------------------------------------------------------------
+
+
+def test_a_shell_with_nobody_at_it_gets_the_token_refusal(cli_env, tmp_path):
+    runner, printer = cli_env
+    gcode = tmp_path / "part.gcode"
+    gcode.write_text("G28\n")
+    result = runner.invoke(cli, ["print", str(gcode), "--json"])
+    assert result.exit_code != 0
+    assert "PREVIEW_NOT_CONFIRMED" in result.output
+    assert printer.started == []
+
+
+def test_yes_piped_into_stdin_is_not_a_person(cli_env, tmp_path):
+    runner, printer = cli_env
+    gcode = tmp_path / "part.gcode"
+    gcode.write_text("G28\n")
+    result = runner.invoke(cli, ["print", str(gcode)], input="y\n")
+    assert result.exit_code != 0
+    assert printer.started == []
+
+
+def test_nobody_is_present_when_a_stream_is_not_a_terminal(monkeypatch):
+    class _Stream:
+        @staticmethod
+        def isatty():
+            return False
+
+    monkeypatch.setattr(print_gate.sys, "stdin", _Stream())
+    monkeypatch.setattr(print_gate.sys, "stdout", _Stream())
+    assert print_gate._person_is_present() is False
+    assert print_gate.confirm_print_at_terminal(tool="t", file_path="x.gcode") is False
+
+
+# ---------------------------------------------------------------------------
+# A person, asked
+# ---------------------------------------------------------------------------
+
+
+def test_a_person_who_says_no_leaves_the_printer_idle(cli_env, audits, monkeypatch, tmp_path):
+    runner, printer = cli_env
+    mesh, _ = _mesh_with_png_on_record(tmp_path, monkeypatch)
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: True)
+    result = runner.invoke(cli, ["print", str(mesh)], input="n\n")
+    assert result.exit_code != 0
+    assert "Nothing was sent to the printer" in result.output
+    assert printer.started == []
+    assert any(a == "consent_refused" for _, a, _ in audits)
+
+
+def test_a_person_who_says_yes_starts_the_print_through_the_judged_door(cli_env, audits, monkeypatch, tmp_path):
+    """The yes is the person's; the door is still judged.  A PNG shown from
+    a terminal is accepted because the link door said why it could not,
+    and the clearance says 'png', not 'trust me'."""
+    runner, printer = cli_env
+    mesh, image = _mesh_with_png_on_record(tmp_path, monkeypatch)
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: True)
+
+    result = runner.invoke(cli, ["print", str(mesh)], input="y\n")
+
+    assert result.exit_code == 0, result.output
+    assert printer.started == ["plate.3mf"]
+    assert str(image) in result.output
+    assert "You have seen the preview" in result.output
+    rec = next(d for _, a, d in audits if a == "consent_granted")
+    assert rec["consent"] == SOURCE_TERMINAL
+    assert rec["door"] == "png"
+
+
+def test_a_file_only_on_the_printer_is_described_not_shown(cli_env, audits, monkeypatch, tmp_path):
+    runner, printer = cli_env
+    gcode = tmp_path / "part.gcode"
+    gcode.write_text("G28\n")
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: True)
+
+    result = runner.invoke(cli, ["print", str(gcode)], input="y\n")
+
+    assert result.exit_code == 0, result.output
+    assert "describing this job, not showing it" in result.output
+    assert printer.started == ["part.gcode"]
+    rec = next(d for _, a, d in audits if a == "consent_granted")
+    assert rec["door"] == "described"
+
+
+def test_a_token_on_the_command_line_is_never_second_guessed(cli_env, monkeypatch, tmp_path):
+    """With a token the person is not asked again: the token IS the yes."""
+    runner, printer = cli_env
+    mesh, _ = _mesh_with_png_on_record(tmp_path, monkeypatch)
+    token = server.issue_preview_token(str(mesh), door="png")["token"]
+    asked: list[str] = []
+    monkeypatch.setattr(print_gate, "confirm_print_at_terminal", lambda **kw: asked.append("asked") or True)
+    result = runner.invoke(cli, ["print", str(mesh), "--preview-token", token, "--json"])
+    assert result.exit_code == 0, result.output
+    assert asked == []
+    assert printer.started == ["plate.3mf"]
+
+
+def test_the_terminal_yes_reaches_a_gated_tool_without_a_token(monkeypatch):
+    """``kiln queue submit`` calls ``submit_job``, whose gate reads the
+    consent record first; the yes given at the terminal is that record."""
+    seen: dict = {}
+
+    def _submit(**kw):
+        seen["consent"] = consent_for(file_name=kw["file_name"], printer_name=kw.get("printer_name"))
+        return {"success": True, "job_id": "j1", "message": "queued"}
+
+    monkeypatch.setattr("kiln.plugins.queue_tools.submit_job", _submit)
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: True)
+    monkeypatch.setattr(print_gate, "_audit", lambda *a: None)
+    result = CliRunner().invoke(cli, ["queue", "submit", "benchy.gcode", "--printer", "garage"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert seen["consent"] is not None
+    assert seen["consent"].source == SOURCE_TERMINAL
+    assert seen["consent"].printer_name == "garage"
+
+
+def test_render_never_claims_a_picture_for_gcode(tmp_path):
+    g = tmp_path / "x.gcode"
+    g.write_text("G28\n")
+    assert print_gate.render_for_terminal(str(g)) == ([], None)
+    assert print_gate.render_for_terminal("") == ([], None)
+    assert print_gate.render_for_terminal(str(tmp_path / "missing.stl")) == ([], None)

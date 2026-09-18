@@ -261,6 +261,13 @@ class TestSubmitJobTool:
 
 
 class TestSplitPlanKeys:
+    @pytest.fixture(autouse=True)
+    def _preview_gate_is_not_under_test(self, monkeypatch):
+        """These tests are about idempotency keys on the parts; submit_split_plan
+        now gates on a preview like submit_job.  The gate has its own tests
+        (test_print_doors.py); here it is switched off the way CI does."""
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
     @staticmethod
     def _plan():
         from kiln.job_splitter import SplitJob, SplitPlan

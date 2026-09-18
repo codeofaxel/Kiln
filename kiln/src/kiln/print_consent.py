@@ -46,6 +46,9 @@ SOURCE_ELICITED = "user_elicited"
 SOURCE_PREVIEW_TOKEN = "preview_token"
 SOURCE_STANDING_OPT_IN = "standing_opt_in"
 SOURCE_CI_BYPASS = "ci_bypass"
+#: A person at a terminal was shown the preview (or, when nothing could be
+#: rendered, the description of the job) and typed yes.
+SOURCE_TERMINAL = "user_terminal"
 #: A plate built from an approved input — copies of one approved mesh, one
 #: object cut out of an approved plate — starts under the input's approval.
 SOURCE_DERIVED = "derived"

@@ -280,13 +280,25 @@ def plan_assembly_split(
 # ---------------------------------------------------------------------------
 
 
-def submit_split_plan(plan: SplitPlan, idempotency_key: str | None = None) -> str:
+def submit_split_plan(
+    plan: SplitPlan,
+    idempotency_key: str | None = None,
+    *,
+    preview_token: str | None = None,
+) -> str:
     """Submit all parts of a split plan to the job queue.
 
     Each part is submitted as a separate job with metadata linking it
     back to the plan.
 
+    Every part is a print the scheduler will start later with nobody there
+    to ask, so the preview gate is taken here, once, on the plan's original
+    file: refused without ``preview_token`` (or a person's yes recorded by
+    the host) — the same rule as ``submit_job``.
+
     :param plan: The :class:`SplitPlan` to submit.
+    :param preview_token: Token from ``issue_preview_token`` for the plan's
+        original file.
     :param idempotency_key: Optional opaque key naming this whole
         submission.  Each part's queue job is keyed
         ``{idempotency_key}:part:{part_id}``, so a retry of the same
@@ -324,6 +336,12 @@ def submit_split_plan(plan: SplitPlan, idempotency_key: str | None = None) -> st
     # `from kiln.queue import get_queue` raised ImportError on every
     # part and the blanket except below silently marked them all failed.
     import kiln.server as _srv
+
+    if block := _srv._preview_gate_error(
+        "submit_split_plan", plan.original_file, preview_token,
+    ):
+        refusal = block.get("error") if isinstance(block.get("error"), dict) else {}
+        raise PermissionError(str(refusal.get("message") or block))
 
     queue = _srv._get_queue()
 
