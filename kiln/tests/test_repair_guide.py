@@ -31,6 +31,9 @@ import pytest
 import kiln._pro_guide_bridge as guide_bridge
 from kiln.plugins import repair_guide_tools as rg
 
+#: The real probe, kept before the autouse fixture stubs it, for the tests of the probe itself.
+_REAL_PROBE = rg._probe_picture
+
 SLUG = "bambu:a1-mini/maintenance/filament-cutter-replacement"
 SOURCE = "https://wiki.bambulab.com/en/a1-mini/maintenance/filament-cutter-replacement"
 IMG = "https://wiki.bambulab.com/a1m/replace-filament-cutter/"
@@ -173,6 +176,13 @@ def with_pro(monkeypatch):
 def without_pro(monkeypatch):
     """A public-only install: the bridge is silent."""
     monkeypatch.setattr(guide_bridge, "_reader", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _pictures_live(monkeypatch):
+    """No network in the suite: every picture probes as live unless a test says otherwise."""
+    rg._picture_status_cache.clear()
+    monkeypatch.setattr(rg, "_probe_picture", lambda url: "live")
 
 
 @pytest.fixture(autouse=True)
@@ -408,9 +418,25 @@ class TestPublicOnly:
         assert out["coverage"] is None
 
     def test_a_maker_kiln_has_no_index_for_gets_the_sentence_alone(self, without_pro):
-        out = rg.repair_guide("voron_trident", topic="nozzle")
+        out = rg.repair_guide("some_unknown_make_zz", topic="nozzle")
         assert out["kiln_note"] == rg.NO_GUIDE_SENTENCE + "."
         assert "maker_index_url" not in out
+
+    def test_every_maker_kiln_supports_has_a_landing_page(self, without_pro):
+        """The gap-fill reading (2026-09-18): no supported printer is left
+        without its maker's front door, and a project's own docs stand in
+        for a maker's."""
+        import json
+        from pathlib import Path
+
+        import kiln
+
+        catalogue = json.loads((Path(kiln.__file__).parent / "data" / "printer_intelligence.json").read_text())
+        for printer_id in catalogue:
+            if printer_id.startswith("_") or printer_id == "default":
+                continue
+            maker, url = rg.maker_index(printer_id)
+            assert maker and url, printer_id
 
     def test_an_unprefixed_creality_id_finds_its_maker(self, without_pro):
         assert rg.maker_index("k1") == ("Creality", "https://wiki.creality.com/en/home")
@@ -436,14 +462,22 @@ class TestPublicOnly:
             "elegoo": "https://wiki.elegoo.com/", "qidi": "https://wiki.qidi3d.com/",
             "creality": "https://wiki.creality.com/", "aon3d": "https://docs.aon3d.com/",
             "visionminer": "https://wiki.visionminer.com/",
+            "intamsys": "https://help.intamsys.com/", "ankermake": "https://support.ankermake.com/",
+            "flashforge": "https://wiki.flashforge.com/", "sovol": "https://wiki.sovol3d.com/",
+            "artillery": "https://www.artillery3d.com/", "voron": "https://docs.vorondesign.com/",
+            "ratrig": "https://wiki.ratrig.com/", "klipper": "https://www.klipper3d.org/",
         }
         for vendor, table in rg.MAKER_MAINTENANCE_INDEX.items():
             assert table["_fallback"].startswith(hosts[vendor]), vendor
 
     def test_public_kiln_carries_no_step_and_fetches_no_picture(self):
+        """The plugin asks the maker's server whether a picture is still there
+        (a HEAD, no body) and never reads, proxies or re-serves the bytes."""
         src = inspect.getsource(rg)
-        for fetcher in ("urllib", "requests", "httpx", "urlopen"):
+        for fetcher in ("requests", "httpx", "base64", ".read()"):
             assert fetcher not in src, f"the plugin must not fetch or proxy pictures ({fetcher})"
+        assert 'method="HEAD"' in src
+        assert src.count("urlopen(") == 1
         # No step body of any maker's guide lives in public Kiln.
         assert "Grab the base of the front cover" not in src
         assert "/a1m/replace-filament-cutter/" not in src
@@ -517,8 +551,13 @@ class TestDoctorDoor:
         assert "Kiln Pro" in detail
 
     def test_the_line_is_honest_for_a_maker_with_nothing(self, with_pro):
-        detail, warn = rg.coverage_line("voron_trident")
+        detail, warn = rg.coverage_line("some_unknown_make_zz")
         assert warn is True and detail == rg.NO_GUIDE_SENTENCE
+
+    def test_the_line_points_a_bare_maker_at_its_own_site(self, with_pro):
+        detail, warn = rg.coverage_line("voron_trident")
+        assert warn is True and detail.startswith(rg.NO_GUIDE_SENTENCE)
+        assert "https://docs.vorondesign.com/" in detail
 
     def test_kiln_doctor_reports_the_capability(self, with_pro, monkeypatch):
         from click.testing import CliRunner
@@ -602,3 +641,89 @@ def test_the_stub_table_matches_kiln_pros_shape():
         assert ("image_url" in step) != step.get("no_image", False)
         if "image_url" in step:
             assert step["image_alt"]
+
+
+
+class TestAPictureIsConfirmedBeforeItIsShown:
+    """Adam, 2026-09-18: never feed a dead link with confidence.  The maker's
+    server is asked once per picture; gone means the step says so and points
+    at the maker's page, unreachable means the picture stays, marked."""
+
+    def _step(self, monkeypatch, status):
+        rg._picture_status_cache.clear()
+        monkeypatch.setattr(rg, "_probe_picture", lambda url: status)
+        return rg.repair_guide("bambu_a1_mini", topic="cutter", step=1, power_off_confirmed=True)
+
+    def test_a_live_picture_is_served_with_its_attribution(self, with_pro, monkeypatch):
+        step = self._step(monkeypatch, "live")
+        assert step["image_url"].startswith("https://wiki.bambulab.com/")
+        assert step["image_status"] == "live"
+        assert step["image_attribution"].startswith("Image: Bambu Lab, https://wiki.bambulab.com/")
+        assert "kiln_note" not in step
+
+    def test_a_gone_picture_is_not_offered_and_the_step_says_so(self, with_pro, monkeypatch):
+        step = self._step(monkeypatch, "gone")
+        assert "image_url" not in step and "image_attribution" not in step
+        assert step["no_image"] is True and step["picture_gone"] is True
+        assert "no longer at the address" in step["kiln_note"]
+        assert "maker_page_url" in step["kiln_note"]
+        assert step["maker_page_url"].startswith("https://wiki.bambulab.com/")
+        # The maker's words are untouched: no prose stands in for the photo.
+        assert step["do"].startswith("Grab the base of the front cover")
+
+    def test_an_unreachable_server_keeps_the_picture_but_says_it_is_unverified(self, with_pro, monkeypatch):
+        step = self._step(monkeypatch, "unverified")
+        assert step["image_url"] and step["image_status"] == "unverified"
+        assert "could not reach" in step["kiln_note"]
+
+    def test_the_probe_is_asked_once_per_picture(self, with_pro, monkeypatch):
+        calls = []
+        rg._picture_status_cache.clear()
+        monkeypatch.setattr(rg, "_probe_picture", lambda url: calls.append(url) or "live")
+        for _ in range(3):
+            rg.repair_guide("bambu_a1_mini", topic="cutter", step=1, power_off_confirmed=True)
+        assert len(calls) == 1
+
+    def test_only_404_and_410_mean_gone(self, monkeypatch):
+        import urllib.error
+
+        def raising(code):
+            def opener(request, timeout):
+                raise urllib.error.HTTPError(request.full_url, code, "x", {}, None)
+            return opener
+
+        for code, expected in ((404, "gone"), (410, "gone"), (402, "unverified"), (403, "unverified"), (500, "unverified")):
+            monkeypatch.setattr(rg.urllib.request, "urlopen", raising(code))
+            assert _REAL_PROBE("https://wiki.bambulab.com/x.jpeg") == expected, code
+
+    def test_a_picture_named_in_the_makers_own_language_is_still_probed(self, monkeypatch):
+        """Creality names pictures in Chinese; the probe must ask for them, not crash."""
+        asked = []
+
+        class _Ok:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def opener(request, timeout):
+            asked.append(request.full_url)
+            return _Ok()
+
+        monkeypatch.setattr(rg.urllib.request, "urlopen", opener)
+        assert _REAL_PROBE("https://wiki.creality.com/products/k2plus/喷嘴更换/喷嘴更换英文3.png") == "live"
+        assert asked == ["https://wiki.creality.com/products/k2plus/%E5%96%B7%E5%98%B4%E6%9B%B4%E6%8D%A2/%E5%96%B7%E5%98%B4%E6%9B%B4%E6%8D%A2%E8%8B%B1%E6%96%873.png"]
+
+    def test_no_network_is_unverified_never_gone(self, monkeypatch):
+        def boom(request, timeout):
+            raise OSError("no route to host")
+        monkeypatch.setattr(rg.urllib.request, "urlopen", boom)
+        assert _REAL_PROBE("https://wiki.bambulab.com/x.jpeg") == "unverified"
+
+    def test_the_probe_can_be_switched_off_for_air_gapped_installs(self, monkeypatch):
+        monkeypatch.setenv("KILN_REPAIR_GUIDE_PROBE", "0")
+        monkeypatch.setattr(rg.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not be called")))
+        assert _REAL_PROBE("https://wiki.bambulab.com/x.jpeg") == "unverified"

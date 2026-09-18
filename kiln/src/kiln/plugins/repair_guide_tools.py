@@ -22,8 +22,13 @@ The guides live in kiln-pro (``kiln._pro_guide_bridge``); public Kiln keeps
 the mechanism and a tiny map of each maker's public maintenance index per
 model, so an install without kiln-pro still answers honestly: the maker's
 own index page where Kiln knows it, otherwise "your maker publishes no
-guide Kiln can step through".  Pictures are never fetched, proxied or
-cached: the maker's server serves them from the URL in the answer.
+guide Kiln can step through".  Pictures are never proxied or cached: the
+maker's server serves them from the URL in the answer.  Before a step is
+shown, Kiln asks the maker's server whether the picture is still there
+(one HEAD request, a short timeout, remembered for the process): a
+picture that is gone is not offered with confidence -- the step says so
+and points at the maker's page instead -- and a server Kiln cannot reach
+right now leaves the picture in place, marked unverified.
 
 Auto-discovered by :func:`~kiln.plugin_loader.register_all_plugins`.  The
 tool body is a module-level function so ``kiln machine repair-guide`` runs the very same
@@ -33,6 +38,10 @@ code the MCP tool runs.
 from __future__ import annotations
 
 import logging
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any
 
 _logger = logging.getLogger(__name__)
@@ -50,9 +59,20 @@ MAKER_LANDING: dict[str, dict[str, str]] = {
     "prusa": {"_maker": "Prusa Research", "_prefixes": "prusa_", "_fallback": "https://help.prusa3d.com/en"},
     "elegoo": {"_maker": "Elegoo", "_prefixes": "elegoo_", "_fallback": "https://wiki.elegoo.com/fdm-printers"},
     "qidi": {"_maker": "QIDI", "_prefixes": "qidi_", "_fallback": "https://wiki.qidi3d.com/en/home"},
-    "creality": {"_maker": "Creality", "_prefixes": "creality_,k1,k2,ender3,cr10", "_fallback": "https://wiki.creality.com/en/home"},
+    "creality": {"_maker": "Creality", "_prefixes": "creality_,k1,k2,ender3,ender5,cr10,sparkx", "_fallback": "https://wiki.creality.com/en/home"},
     "aon3d": {"_maker": "AON3D", "_prefixes": "aon3d_,aon_", "_fallback": "https://docs.aon3d.com/"},
     "visionminer": {"_maker": "Vision Miner", "_prefixes": "visionminer_,vision_miner_", "_fallback": "https://wiki.visionminer.com/docs"},
+    # The gap-fill reading (2026-09-18): every remaining maker Kiln supports,
+    # plus the three projects whose own docs stand in for a maker's.  Each
+    # URL answered 200 in-session that day.
+    "intamsys": {"_maker": "INTAMSYS", "_prefixes": "intamsys_", "_fallback": "https://help.intamsys.com/en/home"},
+    "ankermake": {"_maker": "AnkerMake", "_prefixes": "anker_,ankermake_", "_fallback": "https://support.ankermake.com/s/"},
+    "flashforge": {"_maker": "Flashforge", "_prefixes": "flashforge_", "_fallback": "https://wiki.flashforge.com/en/home"},
+    "sovol": {"_maker": "Sovol", "_prefixes": "sovol_", "_fallback": "https://wiki.sovol3d.com/en/HOME"},
+    "artillery": {"_maker": "Artillery", "_prefixes": "artillery_", "_fallback": "https://www.artillery3d.com/pages/support"},
+    "voron": {"_maker": "Voron Design", "_prefixes": "voron_", "_fallback": "https://docs.vorondesign.com/"},
+    "ratrig": {"_maker": "Rat Rig", "_prefixes": "ratrig_", "_fallback": "https://wiki.ratrig.com/"},
+    "klipper": {"_maker": "Klipper", "_prefixes": "klipper_", "_fallback": "https://www.klipper3d.org/"},
 }
 #: Kept under the old name for the doctor and the tests.
 MAKER_MAINTENANCE_INDEX = MAKER_LANDING
@@ -167,9 +187,55 @@ def _header(slug: str, guide: dict[str, Any], printer_id: str, start: int) -> di
         "start_at_step": start,
         "image_note": (
             f"Pictures are {maker}'s, served from {maker}'s own site by URL at answer time; "
-            "Kiln does not copy, proxy or cache them."
+            "Kiln does not copy, proxy or cache them. Each step says whether its picture was "
+            "confirmed reachable, could not be checked, or is gone from the maker's site."
         ),
     }
+
+
+#: A browser's user agent: some makers' wikis answer a bare client with 402.
+_PICTURE_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36"
+_PICTURE_TIMEOUT_S = 3.0
+_picture_status_cache: dict[str, str] = {}
+
+
+def _probe_picture(url: str) -> str:
+    """``"live"``, ``"gone"`` or ``"unverified"`` for the maker's picture at *url*.
+
+    One HEAD request with a browser user agent.  ``gone`` only on the
+    answers that mean the picture is no longer there (404, 410); anything
+    else that is not a 2xx -- a timeout, no network, a bot wall -- is
+    ``unverified``, because Kiln not reaching a server is not the same as
+    the maker having removed the picture.  Set ``KILN_REPAIR_GUIDE_PROBE=0``
+    to skip the request (air-gapped installs; the answer then says
+    unverified).
+    """
+    if os.environ.get("KILN_REPAIR_GUIDE_PROBE", "1") == "0":
+        return "unverified"
+    try:
+        # A maker may name a picture in its own language; the wire wants it percent-encoded.
+        parts = urllib.parse.urlsplit(url)
+        ascii_url = urllib.parse.urlunsplit((
+            parts.scheme, parts.netloc.encode("idna").decode("ascii"),
+            urllib.parse.quote(parts.path, safe="/%:@+,;=~"),
+            urllib.parse.quote(parts.query, safe="=&%+/:@?,;~"), "",
+        ))
+        request = urllib.request.Request(ascii_url, method="HEAD", headers={"User-Agent": _PICTURE_UA})
+        with urllib.request.urlopen(request, timeout=_PICTURE_TIMEOUT_S) as response:  # noqa: S310 -- maker host from the curated table
+            return "live" if 200 <= int(response.status) < 300 else "unverified"
+    except urllib.error.HTTPError as exc:
+        return "gone" if exc.code in (404, 410) else "unverified"
+    except Exception:  # noqa: BLE001 -- any transport failure is "could not check"
+        return "unverified"
+
+
+def picture_status(url: str) -> str:
+    """:func:`_probe_picture`, remembered for the life of the process."""
+    status = _picture_status_cache.get(url)
+    if status is None:
+        status = _probe_picture(url)
+        _picture_status_cache[url] = status
+    return status
 
 
 def _step_block(guide: dict[str, Any], n: int, *, maker: str, source_url: str | None) -> dict[str, Any] | None:
@@ -188,9 +254,27 @@ def _step_block(guide: dict[str, Any], n: int, *, maker: str, source_url: str | 
         block["warning"] = warning
     image_url = step.get("image_url")
     if isinstance(image_url, str) and image_url.strip():
-        block["image_url"] = image_url
-        block["image_alt"] = step.get("image_alt")
-        block["image_attribution"] = f"Image: {maker}, {source_url}" if source_url else f"Image: {maker}"
+        status = picture_status(image_url)
+        if status == "gone":
+            # Never offered with confidence: the maker's server says the
+            # picture is no longer at the address Kiln has.  No prose in
+            # place of the photo; the maker's page (in the header) has it.
+            block["no_image"] = True
+            block["picture_gone"] = True
+            block["kiln_note"] = (
+                f"{maker}'s picture for this step is no longer at the address Kiln has; "
+                f"open {maker}'s page for this guide (maker_page_url in the header) to see it."
+            )
+        else:
+            block["image_url"] = image_url
+            block["image_alt"] = step.get("image_alt")
+            block["image_attribution"] = f"Image: {maker}, {source_url}" if source_url else f"Image: {maker}"
+            block["image_status"] = status
+            if status == "unverified":
+                block["kiln_note"] = (
+                    f"Kiln could not reach {maker}'s server to confirm this picture just now; "
+                    f"if it does not load, open {maker}'s page for this guide (maker_page_url in the header)."
+                )
     else:
         block["no_image"] = True
         # Kiln's own words, only where the picture cannot say it.
