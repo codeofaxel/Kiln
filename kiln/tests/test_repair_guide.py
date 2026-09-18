@@ -48,6 +48,7 @@ CUTTER_GUIDE: dict[str, Any] = {
     "source_title": "Filament Cutter Replacement Guide",
     "fetched_at": "2026-09-17",
     "model_ids": ["bambu_a1_mini", "bambu_a1"],
+    "machine": "A1 mini / A1",
     "applies_also_to": "Please note that this guide also applies to the A1 3D printer.",
     "topic": "cutter",
     "fixes_codes": [],
@@ -88,6 +89,7 @@ POWERED_GUIDE: dict[str, Any] = {
     "source_title": "Cold pull",
     "fetched_at": "2026-09-17",
     "model_ids": ["prusa_mk4"],
+    "machine": "MK4S/MK3.9S",
     "applies_also_to": None,
     "topic": "nozzle",
     "fixes_codes": [],
@@ -109,6 +111,7 @@ LEVER_GUIDE: dict[str, Any] = {
     "source_url": "https://wiki.bambulab.com/en/a1/maintenance/filament_cutter_lever_replacement",
     "source_title": "Filament Cutter Lever Replacement",
     "model_ids": ["bambu_a1"],
+    "machine": "A1",
     "applies_also_to": None,
     "steps": [{"n": 1, "title": "Remove the lever", "do": "Remove the lever.", "no_image": True, "verify": None}],
 }
@@ -225,6 +228,7 @@ class TestMoreThanOneGuideMatches:
         by_slug = {c["guide"]: c for c in out["choices"]}
         assert by_slug[LEVER_SLUG]["section"] == "a1" and by_slug[SLUG]["section"] == "a1-mini"
         assert by_slug[SLUG]["applies_also_to"] == CUTTER_GUIDE["applies_also_to"]
+        assert by_slug[SLUG]["machine"] == "A1 mini / A1" and by_slug[LEVER_SLUG]["machine"] == "A1"
         assert "guide=" in out["kiln_note"]
         assert "steps" not in out and "step_zero" not in out
 
@@ -566,7 +570,7 @@ class TestRegistration:
 
 def test_the_stub_table_matches_kiln_pros_shape():
     """Every key the plugin reads exists on the stub, spelled as the table spells it."""
-    keys = {"vendor", "source_url", "source_title", "fetched_at", "model_ids", "applies_also_to", "topic",
+    keys = {"vendor", "source_url", "source_title", "fetched_at", "model_ids", "machine", "applies_also_to", "topic",
             "fixes_codes", "tools", "interval", "parts", "power_off_warning", "warnings", "steps"}
     assert set(CUTTER_GUIDE) == keys
     for step in CUTTER_GUIDE["steps"]:

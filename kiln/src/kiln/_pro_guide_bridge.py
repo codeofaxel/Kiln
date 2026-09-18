@@ -75,6 +75,10 @@ def find_guide(printer_id: str, *, topic: str = "", code: str = "", guide: str =
                 {
                     "guide": slug,
                     "maker_page_title": g.get("source_title"),
+                    # The maker's own product name for the page ("Centauri
+                    # Carbon 2 Combo", "A1 mini / A1"); null where the page
+                    # names no product.
+                    "machine": g.get("machine"),
                     "section": reader.section_of(slug),
                     "applies_also_to": g.get("applies_also_to"),
                     "topic": g.get("topic"),

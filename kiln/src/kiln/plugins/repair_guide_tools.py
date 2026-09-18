@@ -264,8 +264,8 @@ def run_repair_guide(
             "choices": choices,
             "kiln_note": (
                 f"{len(choices)} of the maker's guides match this topic for this model. Ask which one "
-                "applies (the section names the machine or the page type), then call again with "
-                "guide=<the chosen slug>."
+                "applies (machine is the maker's own product name for the page; section is the "
+                "maker's page section), then call again with guide=<the chosen slug>."
             ),
         }
     if found is None:
