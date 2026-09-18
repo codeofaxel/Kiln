@@ -566,6 +566,19 @@ def _budget_skipped_view(
     }
 
 
+def _sha_of_views(views: list[dict]) -> str:
+    """One hash over every PNG a result shows, in view order."""
+    import hashlib
+
+    h = hashlib.sha256()
+    for view in views:
+        try:
+            h.update(Path(view["path"]).read_bytes())
+        except OSError:
+            h.update(str(view.get("path")).encode())
+    return h.hexdigest()[:32]
+
+
 def visualize_model(
     file_path: str,
     *,
@@ -1051,10 +1064,15 @@ def visualize_model(
         }
         if successful:
             # A render happened: the floor of the preview ladder, on record
-            # for the print gate.  The door writes it, not the caller.
+            # for the print gate.  The door writes it, not the caller — which
+            # look it drew, and a hash of the pixels shown, so a token can
+            # say which pictures the person was looking at.
             from kiln.preview_evidence import record as _record_evidence
 
-            _record_evidence("png", file_path, renderer=result["renderer"], views=len(successful))
+            _record_evidence(
+                "png", file_path, renderer=result["renderer"], views=len(successful),
+                shown_sha=_sha_of_views(successful),
+            )
 
         if not share_link:
             # Attaching a link uploads the mesh.  A caller embedding these

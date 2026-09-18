@@ -10129,11 +10129,13 @@ def issue_preview_token(
     2. ``door="url"`` — a hosted viewer link.  Use it when this host draws
        no panel.  Accepted only when ``visualize_model(share_link=True)``
        issued a ``viewer_url`` for this file that is still live.
-    3. ``door="png"`` — static renders.  The total fallback.  Accepted
-       only when a render is on record AND the stage is unavailable for a
-       reason the server can name AND the link door refused for a reason
-       it recorded.  A PNG claim on a host that draws the stage is refused
-       and told to open the stage.
+    3. ``door="png"`` — the stage's own still (``visualize_model`` with
+       ``renderer`` ``stage`` or ``stage_paint``).  The total fallback.
+       Accepted only when such a render is on record AND the stage is
+       unavailable for a reason the server can name AND the link door
+       refused for a reason it recorded.  A raw ``openscad`` render is
+       inspection-only and is refused; a PNG claim on a host that draws
+       the stage is refused and told to open the stage.
 
     The user approves → you call this tool → you pass the returned token as
     ``preview_token`` to ``start_print`` (or any other tool that starts a
@@ -13348,6 +13350,9 @@ def render_model_preview(
 ) -> dict:
     """DEPRECATED — use visualize_model instead. This renders only 1 angle; visualize_model renders 6 angles with auto-framing, colored 3MF support, and quality scores.
 
+    INSPECTION-ONLY UNLESS THE STAGE DREW IT: the result's ``renderer`` says which look these pixels are. ``stage`` (the stage photographed) and ``stage_paint`` (the stage's look painted) are accepted by ``issue_preview_token(door="png")`` for print sign-off; a raw ``openscad`` render is not — it has no plate and none of the stage's lighting, and a person once approved the wrong colours from one. Use it to inspect, and sign off from the stage, the viewer link, or a stage still.
+
+
     This tool is a thin wrapper around ``visualize_model`` with a single
     isometric angle.  Prefer ``visualize_model`` directly for multi-angle
     previews with proper auto-framing.
@@ -13398,6 +13403,9 @@ def visualize_model(
     color: str = "",
 ) -> dict:
     """Primary 3D preview tool — renders high-quality PNGs from multiple camera angles via OpenSCAD.
+
+    INSPECTION-ONLY UNLESS THE STAGE DREW IT: the result's ``renderer`` says which look these pixels are. ``stage`` (the stage photographed) and ``stage_paint`` (the stage's look painted) are accepted by ``issue_preview_token(door="png")`` for print sign-off; a raw ``openscad`` render is not — it has no plate and none of the stage's lighting, and a person once approved the wrong colours from one. Use it to inspect, and sign off from the stage, the viewer link, or a stage still.
+
 
     Universal visualization tool that works with ANY 3D file — STL, 3MF,
     OBJ, or SCAD.  Returns PNG images from 6 angles: isometric, front,
