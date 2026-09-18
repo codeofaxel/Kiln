@@ -158,7 +158,6 @@ class _StubReader:
             "count": len(mine),
             "topics": sorted({g["topic"] for g in mine.values()}),
             "publishes": "photo_guides_per_model" if printer_id.startswith(("bambu", "prusa", "creality")) else None,
-            "publishes_note": None,
             "maker_guides_in_table": None,
         }
 
@@ -406,21 +405,43 @@ class TestPublicOnly:
         assert out["coverage"] is None
 
     def test_a_maker_kiln_has_no_index_for_gets_the_sentence_alone(self, without_pro):
-        out = rg.repair_guide("creality_k1", topic="nozzle")
+        out = rg.repair_guide("voron_trident", topic="nozzle")
         assert out["kiln_note"] == rg.NO_GUIDE_SENTENCE + "."
         assert "maker_index_url" not in out
+
+    def test_an_unprefixed_creality_id_finds_its_series_page(self, without_pro):
+        assert rg.maker_index("k1")[1] == "https://wiki.creality.com/en/k1-flagship-series/k1"
+        assert rg.maker_index("ender3_v2") == ("Creality", "https://wiki.creality.com/en/ender-series")
+        assert rg.maker_index("cr10_se")[0] == "Creality"
+        assert rg.maker_index("qidi_q2c") == ("QIDI", "https://wiki.qidi3d.com/en/home")
 
     def test_a_model_without_its_own_index_falls_back_to_the_makers_landing_page(self, without_pro):
         out = rg.repair_guide("bambu_a2l", topic="nozzle")
         assert out["maker_index_url"] == "https://wiki.bambulab.com/en/home"
 
     def test_the_public_map_points_only_at_the_makers_own_hosts(self):
-        hosts = {"bambu": "https://wiki.bambulab.com/", "prusa": "https://help.prusa3d.com/"}
+        hosts = {
+            "bambu": "https://wiki.bambulab.com/", "prusa": "https://help.prusa3d.com/",
+            "elegoo": "https://wiki.elegoo.com/", "qidi": "https://wiki.qidi3d.com/",
+            "creality": "https://wiki.creality.com/", "aon3d": "https://docs.aon3d.com/",
+            "visionminer": "https://wiki.visionminer.com/",
+        }
         for vendor, table in rg.MAKER_MAINTENANCE_INDEX.items():
             for key, url in table.items():
-                if key == "_maker":
+                if key in ("_maker", "_prefixes"):
                     continue
                 assert url.startswith(hosts[vendor]), (vendor, key, url)
+
+    def test_every_public_printer_id_of_a_listed_maker_has_a_page(self):
+        # A maker in the map answers for ALL of Kiln's ids for it, so the
+        # per-id entries can only lag the printer catalogue in one place.
+        intel = json.loads((Path(inspect.getfile(rg)).parent.parent / "data" / "printer_intelligence.json").read_text())
+        for printer_id in intel:
+            if printer_id.startswith("_"):
+                continue
+            maker, url = rg.maker_index(printer_id)
+            if maker is not None:
+                assert url, printer_id
 
     def test_public_kiln_carries_no_step_and_fetches_no_picture(self):
         src = inspect.getsource(rg)
