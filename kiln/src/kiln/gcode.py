@@ -133,8 +133,20 @@ _BED_TEMP_COMMANDS: set[str] = {"M140", "M190"}
 # Chamber temperature command.
 _CHAMBER_TEMP_COMMANDS: set[str] = {"M141"}
 
+# Raw G-code that starts a print from a file on the printer.  Every start
+# door in Kiln shows the person the print first; these words would reach
+# the motors around that rule, so they are refused everywhere and the
+# reader is sent to the door that asks.  The adapters' own start and resume
+# paths write these words themselves, not through this validator.
+_PRINT_START_COMMANDS: dict[str, str] = {
+    "M23": "Selecting a file to print (M23) is blocked -- use the start_print tool, which shows the print first",
+    "M24": "Starting an SD print (M24) is blocked -- use start_print (shown and signed off first) or resume_print",
+    "M32": "Starting a print from a file (M32) is blocked -- use the start_print tool, which shows the print first",
+}
+
 # Commands that are unconditionally blocked.
 _BLOCKED_COMMANDS: dict[str, str] = {
+    **_PRINT_START_COMMANDS,
     "M112": "Emergency stop (M112) is blocked -- use the cancel_print tool instead",
     "M502": "Reset to factory defaults (M502) is blocked -- this can overwrite critical calibration",
     "M500": "Save settings to EEPROM (M500) is blocked -- agents must not persist firmware changes",
