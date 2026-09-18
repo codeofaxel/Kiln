@@ -102,7 +102,18 @@ POWERED_GUIDE: dict[str, Any] = {
     ],
 }
 
-TABLE = {SLUG: CUTTER_GUIDE, "prusa:article/cold-pull_2075": POWERED_GUIDE}
+#: A second cutter page the maker publishes for the A1 only (the lever, not the blade).
+LEVER_SLUG = "bambu:a1/maintenance/filament_cutter_lever_replacement"
+LEVER_GUIDE: dict[str, Any] = {
+    **CUTTER_GUIDE,
+    "source_url": "https://wiki.bambulab.com/en/a1/maintenance/filament_cutter_lever_replacement",
+    "source_title": "Filament Cutter Lever Replacement",
+    "model_ids": ["bambu_a1"],
+    "applies_also_to": None,
+    "steps": [{"n": 1, "title": "Remove the lever", "do": "Remove the lever.", "no_image": True, "verify": None}],
+}
+
+TABLE = {SLUG: CUTTER_GUIDE, LEVER_SLUG: LEVER_GUIDE, "prusa:article/cold-pull_2075": POWERED_GUIDE}
 CODE_MAP = {"12008001": (SLUG, 1)}
 
 
@@ -113,17 +124,22 @@ class _StubReader:
         key = printer_id.lower().replace("-", "_")
         return {s: g for s, g in TABLE.items() if key in g["model_ids"]}
 
-    def find_guide(self, printer_id, *, topic="", code=""):
+    def find_guide(self, printer_id, *, topic="", code="", guide=""):
         mine = self._mine(printer_id)
+        if guide and guide in mine:
+            return guide, mine[guide], 1
         if code:
             mapped = self.guide_for_code(code)
             if mapped and mapped[0] in mine:
                 return mapped[0], mine[mapped[0]], mapped[1]
         want = topic.strip().lower()
-        for slug, g in mine.items():
-            if want and want == g["topic"]:
-                return slug, g, 1
-        return None
+        matches = [(slug, g) for slug, g in sorted(mine.items()) if want and want == g["topic"]]
+        if len(matches) == 1:
+            return matches[0][0], matches[0][1], 1
+        return matches or None
+
+    def section_of(self, slug):
+        return slug.split(":", 1)[-1].split("/", 1)[0]
 
     def guide_for_caller(self, slug):
         return dict(TABLE[slug]) if slug in TABLE else None
@@ -197,8 +213,39 @@ class TestPlan:
         assert "Bambu Lab" in out["image_note"] and "cache" in out["image_note"]
 
     def test_the_a1_gets_the_same_guide_the_page_says_it_applies_to(self, with_pro):
-        out = rg.repair_guide("bambu_a1", topic="cutter", plan_only=True)
+        out = rg.repair_guide("bambu_a1", guide=SLUG, plan_only=True)
         assert out["guide"] == SLUG and out["printer_id"] == "bambu_a1"
+
+
+class TestMoreThanOneGuideMatches:
+    def test_two_pages_for_one_topic_are_listed_never_picked(self, with_pro):
+        out = rg.repair_guide("bambu_a1", topic="cutter", plan_only=True)
+        assert out["success"] is True and out["guide"] is None
+        assert sorted(c["guide"] for c in out["choices"]) == sorted([LEVER_SLUG, SLUG])
+        by_slug = {c["guide"]: c for c in out["choices"]}
+        assert by_slug[LEVER_SLUG]["section"] == "a1" and by_slug[SLUG]["section"] == "a1-mini"
+        assert by_slug[SLUG]["applies_also_to"] == CUTTER_GUIDE["applies_also_to"]
+        assert "guide=" in out["kiln_note"]
+        assert "steps" not in out and "step_zero" not in out
+
+    def test_the_chosen_slug_selects_it_at_every_door(self, with_pro):
+        out = rg.repair_guide("bambu_a1", guide=LEVER_SLUG, step=1, power_off_confirmed=True)
+        assert out["guide"] == LEVER_SLUG and out["do"] == "Remove the lever."
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        result = CliRunner().invoke(cli, ["repair-guide", "--guide", LEVER_SLUG, "--printer-id", "bambu_a1", "--plan", "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output[result.output.index("{"):])["data"]["guide"] == LEVER_SLUG
+
+    def test_a_code_still_picks_its_guide_without_asking(self, with_pro):
+        out = rg.repair_guide("bambu_a1", hms_code="1200-8001", plan_only=True)
+        assert out["guide"] == SLUG and "choices" not in out
+
+    def test_a_slug_for_another_model_is_not_borrowed(self, with_pro):
+        out = rg.repair_guide("bambu_a1_mini", guide=LEVER_SLUG, topic="cutter", plan_only=True)
+        assert out["guide"] == SLUG
 
 
 class TestStepZeroIsTheMakersWarning:
@@ -300,7 +347,7 @@ class TestACodeFindsTheGuide:
 
     def test_a_code_written_in_topic_is_read_as_one(self, with_pro):
         out = rg.repair_guide("bambu_a1", topic="1200-8001", plan_only=True)
-        assert out["guide"] == SLUG
+        assert out["guide"] == SLUG and "choices" not in out
 
     def test_a_code_that_maps_to_another_models_guide_does_not_borrow_it(self, with_pro):
         out = rg.repair_guide("prusa_mk4", hms_code="1200-8001", plan_only=True)

@@ -51,23 +51,36 @@ def _reader() -> Any | None:
     return maintenance_guides
 
 
-def find_guide(printer_id: str, *, topic: str = "", code: str = "") -> dict[str, Any] | None:
-    """The guide for *printer_id* that *topic* or *code* names, or ``None``.
+def find_guide(printer_id: str, *, topic: str = "", code: str = "", guide: str = "") -> dict[str, Any] | None:
+    """The guide for *printer_id* that *guide*, *code* or *topic* names, or ``None``.
 
     Returns ``{"slug", "guide", "start_at_step"}`` -- the guide THIS caller is
     entitled to (kiln-pro's ``guide_for_caller`` applies the rule, which
-    today is "everyone").  ``None`` means: no kiln-pro, no guide for this
-    model and topic/code, or a guide the caller's tier does not unlock; all
-    three read the same to a door, which then answers with the maker's
-    public maintenance index if it knows one.
+    today is "everyone") -- or ``{"choices": [...]}`` when a topic names
+    more than one guide for the model (two machines behind one printer id,
+    or two pages for one job); the person picks by slug.  ``None`` means: no
+    kiln-pro, no guide for this model and topic/code, or a guide the caller's
+    tier does not unlock; all three read the same to a door, which then
+    answers with the maker's public maintenance index if it knows one.
     """
     reader = _reader()
     if reader is None or not printer_id:
         return None
     try:
-        found = reader.find_guide(printer_id, topic=topic, code=code)
+        found = reader.find_guide(printer_id, topic=topic, code=code, guide=guide)
         if found is None:
             return None
+        if isinstance(found, list):
+            return {"choices": [
+                {
+                    "guide": slug,
+                    "maker_page_title": g.get("source_title"),
+                    "section": reader.section_of(slug),
+                    "applies_also_to": g.get("applies_also_to"),
+                    "topic": g.get("topic"),
+                }
+                for slug, g in found
+            ]}
         slug, _guide, start = found
         served = reader.guide_for_caller(slug)
     except Exception as exc:  # noqa: BLE001 -- a guide is never worth a crash

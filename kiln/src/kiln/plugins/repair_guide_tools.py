@@ -225,6 +225,7 @@ def run_repair_guide(
     plan_only: bool = False,
     power_off_confirmed: bool = False,
     printer_name: str | None = None,
+    guide: str = "",
 ) -> dict[str, Any]:
     """The one door every surface calls."""
     import kiln.server as _srv
@@ -241,14 +242,32 @@ def run_repair_guide(
     # A code anywhere in ``topic`` is read as the fault code it is.
     codes = list(extract_codes(hms_code)) + list(extract_codes(topic))
     code = codes[0].replace("_", "") if codes else ""
-    if not topic.strip() and not code:
+    if not topic.strip() and not code and not guide.strip():
         return _srv._error_dict(
             "Say what to repair: a topic (cutter, nozzle, hotend, ptfe_tube, extruder_gears, belts, "
             "bed_level, lubrication, firmware_recovery, filament_sensor) or the fault code on the screen.",
             code="INVALID_INPUT",
         )
     maker_name, index_url = maker_index(model)
-    found = bridge.find_guide(model, topic=topic, code=code)
+    found = bridge.find_guide(model, topic=topic, code=code, guide=guide.strip())
+    if found is not None and "choices" in found:
+        # More than one of the maker's guides answers this topic for this
+        # model -- two machines behind one printer id, or two pages for one
+        # job.  Never a silent first pick: the person says which, by slug.
+        choices = found["choices"]
+        return {
+            "success": True,
+            "printer_id": model,
+            "printer": _display_name(model),
+            "topic": topic or None,
+            "guide": None,
+            "choices": choices,
+            "kiln_note": (
+                f"{len(choices)} of the maker's guides match this topic for this model. Ask which one "
+                "applies (the section names the machine or the page type), then call again with "
+                "guide=<the chosen slug>."
+            ),
+        }
     if found is None:
         cover = bridge.coverage(model)
         payload: dict[str, Any] = {
@@ -344,6 +363,7 @@ def repair_guide(
     plan_only: bool = False,
     power_off_confirmed: bool = False,
     printer_name: str = "",
+    guide: str = "",
 ) -> dict[str, Any]:
     """Walk through the printer maker's own repair guide, one step per call.
 
@@ -389,6 +409,11 @@ def repair_guide(
             unplugged it.  Required for every ``step >= 1``.
         printer_name: Which registered printer's declared model to use when
             ``printer_id`` is omitted.
+        guide: A guide's slug, from a ``choices`` answer.  When a topic
+            matches more than one of the maker's guides for this model (one
+            Kiln printer id can cover two machines; a maker often has two
+            pages for one job) the answer lists them and nothing is picked
+            for the person -- ask, then pass the chosen slug here.
     """
     import kiln.server as _srv
 
@@ -398,7 +423,7 @@ def repair_guide(
         return run_repair_guide(
             printer_id=printer_id, topic=topic, hms_code=hms_code, step=step,
             plan_only=plan_only, power_off_confirmed=power_off_confirmed,
-            printer_name=printer_name or None,
+            printer_name=printer_name or None, guide=guide,
         )
     except Exception as exc:
         _logger.exception("Unexpected error in repair_guide")

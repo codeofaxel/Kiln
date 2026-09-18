@@ -3653,9 +3653,10 @@ def plate_clear_cmd(note, printer_name, json_mode) -> None:
 @click.option("--plan", "plan_only", is_flag=True, help="Show the header and the step titles; serve no step.")
 @click.option("--power-off-confirmed", "power_off_confirmed", is_flag=True, help="You have powered the printer off and unplugged it. Required for every step from 1 on.")
 @click.option("--printer-id", "printer_id", default="", help="Printer model id (e.g. bambu_a1_mini). Default: the named printer's declared printer_model.")
+@click.option("--guide", default="", help="A guide's slug from a 'choices' answer, when a topic matches more than one of the maker's guides.")
 @click.option("--printer", "printer_name", default=None, help="Target printer name.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def repair_guide_cmd(topic, hms_code, step, plan_only, power_off_confirmed, printer_id, printer_name, json_mode) -> None:
+def repair_guide_cmd(topic, hms_code, step, plan_only, power_off_confirmed, printer_id, guide, printer_name, json_mode) -> None:
     """Walk through the maker's own repair guide, one step at a time.
 
     Runs the same tool the MCP server exposes (repair_guide): the maker's
@@ -3674,7 +3675,7 @@ def repair_guide_cmd(topic, hms_code, step, plan_only, power_off_confirmed, prin
 
         result = _repair(printer_id=printer_id, topic=topic, hms_code=hms_code, step=step,
                          plan_only=plan_only, power_off_confirmed=power_off_confirmed,
-                         printer_name=printer_name or "")
+                         printer_name=printer_name or "", guide=guide)
         if not result.get("success", False):
             err = result.get("error") or {}
             msg = err.get("message") if isinstance(err, dict) else str(err)
