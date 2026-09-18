@@ -647,7 +647,11 @@ def visualize_model(
             than handing a person a link — passes ``False`` and keeps the
             whole call local.  ``allow_stage=False`` alone does NOT stop
             this: the render goes local while the link upload still goes
-            out.
+            out.  While the inline 3D panel is not fetching geometry on
+            this connection (``local_stage.panel_fetches_stalled``), the
+            result also carries ``stage_fallback`` — the same sentence the
+            make results carry — so an agent knows the link is the stage
+            today rather than a courtesy.
         deadline: A ``time.monotonic()`` instant by which the WHOLE call,
             every backend included, must be back — or ``None`` (the
             default) for no ceiling at all.  Every backend checks it
@@ -1149,7 +1153,20 @@ def visualize_model(
 
         from kiln.stage_link import attach_stage_link
 
-        return attach_stage_link(result, file_path)
+        result = attach_stage_link(result, file_path)
+        # The inline panel's health, read at this door too: while its
+        # fetches are not arriving the link above IS the stage, and this
+        # result says so in the same words the make results do — one
+        # flag, one sentence, whichever door the agent came through.
+        try:
+            from kiln.local_stage import panel_fetch_fallback_note
+
+            note = panel_fetch_fallback_note()
+        except Exception:  # noqa: BLE001 — furniture, never a failed render
+            note = None
+        if note:
+            result["stage_fallback"] = note
+        return result
 
     finally:
         if is_wrapper:

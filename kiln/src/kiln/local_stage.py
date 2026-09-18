@@ -76,6 +76,7 @@ import logging
 import os
 import secrets
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -291,6 +292,37 @@ _host_read_the_stage = False
 #: take the geometry?" without anyone having to instrument it.
 _signal_logged = False
 
+#: Seconds a minted token is given for the panel's fetch to arrive before
+#: the mint counts as unfetched.  Measured hosts fetch the moment the panel
+#: renders — well under a second — so a few seconds is generous.  Never
+#: slept through: the clock is read on the NEXT result, so no tool call
+#: ever waits on a panel (see panel_fetches_stalled).
+_FETCH_GRACE_S = 3.0
+
+#: The stage's own monotonic clock — a name, so a test can move it.
+_now = time.monotonic
+
+#: token -> (mesh path, minted-at monotonic, minted-at wall clock), for
+#: mints a rendered panel was expected to fetch and has not yet.  An entry
+#: leaves on its fetch, or when it crosses the grace and is judged.
+_awaiting_fetch: dict[str, tuple[str, float, float]] = {}
+
+#: Set once a mint crossed the grace with no fetch on record anywhere.
+#: Sticky until a fetch lands.  Read by the result hook and by
+#: ``visualize_model``; it never blocks anything.
+_fetches_stalled = False
+
+#: What every door says while the panel is not fetching — the make results
+#: and ``visualize_model`` carry this same sentence, so an agent reading
+#: either learns the browser link IS the stage today, and why.
+PANEL_FETCH_FALLBACK_NOTE = (
+    "Kiln's inline 3D panel is not fetching geometry on this connection (the "
+    "host may be holding a tool list it cached before a restart_server), so "
+    "the viewer_url IS the 3D stage for now: hand it to the user. Reconnecting "
+    "the Kiln MCP server in the host, or opening a new chat, brings the panel "
+    "back."
+)
+
 
 def enabled() -> bool:
     """Whether the inline stage runs at all on this install."""
@@ -440,6 +472,105 @@ def resolve(token: str) -> str | None:
     # The minting process answers from memory; every OTHER Kiln server on
     # this machine answers from the shared ledger.  See _ledger_write.
     return hit or _ledger_read(token)
+
+
+# ---------------------------------------------------------------------------
+# Did the panel actually fetch?
+# ---------------------------------------------------------------------------
+#
+# A host can declare MCP Apps, load the panel HTML, and still never call
+# ``kiln_viewer_payload`` — measured 2026-09-19, a whole day of makes with
+# zero fetches, because the host was holding a tool list it cached before a
+# ``restart_server`` (it does not re-list on ``tools/list_changed``).  The
+# declaration said "panel", so the token rode alone and no link was
+# attached: neither the panel nor the link worked, and nothing said so.
+#
+# The stage cannot make the host fetch.  What it can do is notice that a
+# fetch it expected never came, and put the browser stage link on the next
+# result as if the host drew no panel — which, in every way that matters
+# to the user, it did not.
+
+
+def _expect_fetch(token: str, mesh_path: str) -> None:
+    """A panel will open on this result and must come back for the mesh."""
+    with _lock:
+        _awaiting_fetch[token] = (mesh_path, _now(), time.time())
+
+
+def _fetch_arrived(token: str) -> None:
+    """The panel fetched: whatever was feared, fetches are arriving."""
+    global _fetches_stalled
+    with _lock:
+        _awaiting_fetch.pop(token, None)
+        _fetches_stalled = False
+
+
+def _fetched_by_any_server(mesh_path: str, since_wall: float) -> bool:
+    """Whether SOME Kiln server on this machine served a panel fetch for
+    *mesh_path* at or after the mint.
+
+    Read from the shared stage record, not this process's memory: a desktop
+    host routes a panel's fetch over whichever session's connection it
+    holds (measured 2026-09-01), so the minting process is routinely not
+    the one that sees the fetch.  Without this, every multi-session desktop
+    would read a working panel as broken.
+    """
+    try:
+        from kiln.preview_evidence import evidence_for
+
+        facts = evidence_for(mesh_path).get("stage")
+        if not isinstance(facts, dict) or facts.get("via") != "panel_fetch":
+            return False
+        at = facts.get("at")
+        # A second of slack: two clocks, one file, no ordering guarantee.
+        return isinstance(at, (int, float)) and at >= since_wall - 1.0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def panel_fetches_stalled() -> bool:
+    """Whether the rendered panel's fetches are failing to arrive.
+
+    Judges every mint that has crossed the grace since the last look: one
+    fetched by this process or by any sibling server is fine; one nobody
+    fetched flips the flag.  Sticky until a fetch lands, and read on the
+    NEXT result — this never waits for anything.
+    """
+    global _fetches_stalled
+    now = _now()
+    with _lock:
+        due = {
+            tok: entry
+            for tok, entry in _awaiting_fetch.items()
+            if now - entry[1] >= _FETCH_GRACE_S
+        }
+        for tok in due:
+            _awaiting_fetch.pop(tok, None)
+    if not due:
+        return _fetches_stalled
+    unfetched = [
+        mesh for mesh, _minted, wall in due.values()
+        if not _fetched_by_any_server(mesh, wall)
+    ]
+    with _lock:
+        was = _fetches_stalled
+        _fetches_stalled = bool(unfetched)
+    if unfetched and not was:
+        logger.warning(
+            "inline stage: the panel's fetch for %s never arrived within %.0fs — "
+            "results carry the browser stage link until a fetch lands; the host "
+            "may be holding a tool list cached before a restart_server, so "
+            "reconnect the Kiln MCP server in the host or open a new chat",
+            Path(unfetched[0]).name,
+            _FETCH_GRACE_S,
+        )
+    return _fetches_stalled
+
+
+def panel_fetch_fallback_note() -> str | None:
+    """The sentence every door carries while fetches are not arriving, or
+    ``None`` — one source, so no two results explain it differently."""
+    return PANEL_FETCH_FALLBACK_NOTE if panel_fetches_stalled() else None
 
 
 # ---------------------------------------------------------------------------
@@ -837,6 +968,10 @@ def _register_payload_verb(mcp: Any) -> bool:
             from kiln.preview_evidence import record as _record_evidence
 
             _record_evidence("stage", mesh, via="panel_fetch")
+            # ...and proof that fetches reach this process at all, which
+            # is what the link fallback waits on.  Beside the result, never
+            # inside it: the lean payload contract is the panel's.
+            _fetch_arrived(artifact_token)
             return {VIEWER_STRUCTURED_CONTENT_KEY: payload}
 
         return True
@@ -958,8 +1093,17 @@ def _install_result_hook(mcp: Any) -> bool:
     either).  Off by default, because on the hosts that render the panel
     the geometry lands in the model's context and truncates the tool's own
     output there — see the module docstring.
+
+    The browser stage link rides too — but only while the panel is not
+    fetching (``panel_fetches_stalled``): a host that declared the panel
+    and then never came back for a mint's geometry gets, on the next
+    result, exactly what a host with no panel gets.  A host that never
+    declared apps is untouched: no panel was promised, so no fetch is
+    missing, and its results carry the token and nothing else, as before.
+    The upload goes to a thread (``attach_stage_link_async``), so the
+    server keeps serving while it runs.
     """
-    def _attach(inner: Any, ctx: Any, name: str | None) -> None:
+    async def _attach(inner: Any, ctx: Any, name: str | None) -> None:
         """Mutate one tool result in place.  Deliberately knows no SDK detail —
         ``wrap_call_tool_result`` owns every difference between majors, and
         this stays the description of WHAT to attach.  ``ctx`` is the request
@@ -967,6 +1111,9 @@ def _install_result_hook(mcp: Any) -> bool:
         can see the session on SDK 2; ``name`` is the called tool when the
         request shape yields one, else None (which reads as "attach")."""
         try:
+            # Judged BEFORE this call mints, so the grace runs between
+            # results and a result never counts against itself.
+            stalled = panel_fetches_stalled()
             token = token_for_call_result(inner)
             if not token:
                 return
@@ -986,17 +1133,21 @@ def _install_result_hook(mcp: Any) -> bool:
             sc["artifact"] = artifact
             renders = host_renders_apps(mcp, ctx)
             _log_signal_once(mcp, renders, ctx)
+            # A panel opens for this result only when the host draws panels
+            # AND this tool's declaration points at the stage.
+            opens = renders and _tool_opens_stage(mcp, name)
+            mesh = resolve(token) or ""
             # Opt-in FIRST: with inline geometry off — the default — there is
             # nothing to decide and no mesh to read off disk, so the ordinary
             # path never pays for an encode whose result it would discard.
-            if inline_geometry_enabled() and renders and _tool_opens_stage(mcp, name):
+            if inline_geometry_enabled() and opens:
                 payload = _inline_payload(token)
                 if payload is not None:
                     # Geometry rode the result to a host that draws the
                     # panel — the inline route's equivalent of a fetch.
                     from kiln.preview_evidence import record as _record_evidence
 
-                    _record_evidence("stage", resolve(token) or "", via="inline")
+                    _record_evidence("stage", mesh, via="inline")
                     # A STEP import's analytic truth rides the payload so
                     # the stage labels the model as CAD over its display
                     # tessellation — or says the facts are unavailable,
@@ -1007,6 +1158,19 @@ def _install_result_hook(mcp: Any) -> bool:
 
                         attach_cad_facts(payload, facts)
                     sc[VIEWER_STRUCTURED_CONTENT_KEY] = payload
+            elif opens and mesh:
+                # Lean: the panel must come back for this mesh.  Noted, so
+                # the NEXT result can tell whether it did.
+                _expect_fetch(token, mesh)
+            if stalled and opens:
+                # The panel is not fetching.  This result gets the link a
+                # panel-less host would get — the upload runs in a thread,
+                # and the note says why the link is the stage today.
+                from kiln.stage_link import attach_stage_link_async
+
+                await attach_stage_link_async(sc, mesh_path=mesh or None)
+                if sc.get("viewer_url"):
+                    sc["stage_fallback"] = PANEL_FETCH_FALLBACK_NOTE
             inner.structuredContent = sc
         except Exception:  # noqa: BLE001
             logger.debug("local stage token not attached", exc_info=True)
@@ -1058,7 +1222,9 @@ def install(mcp: Any) -> dict[str, Any]:
 
 
 def _reset_for_tests() -> None:
-    global _host_read_the_stage, _signal_logged
+    global _host_read_the_stage, _signal_logged, _fetches_stalled
     _tokens.clear()
+    _awaiting_fetch.clear()
+    _fetches_stalled = False
     _host_read_the_stage = False
     _signal_logged = False
