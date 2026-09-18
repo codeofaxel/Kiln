@@ -437,6 +437,9 @@
     "park_head": {
       "level": "confirm",
       "physical_effect": true
+    },
+    "repair_guide": {
+      "level": "safe"
     }
   }
 }

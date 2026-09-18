@@ -14999,6 +14999,20 @@ def troubleshoot_printer(
                 result["hms_wiki_url"] = link
             if fault.decoded:
                 result["hms_decoded"] = dict(fault.decoded)
+            # One sentence when the code maps to a maker's guide: the door
+            # is repair_guide, which serves the maker's steps one at a time.
+            # The mapping lives in kiln-pro beside the code's reading; a
+            # public-only install has no mapping and says nothing here.
+            from kiln import _pro_guide_bridge
+
+            mapped = _pro_guide_bridge.guide_for_code(code.replace("_", ""), kind=kind)
+            if mapped is not None:
+                _slug, start = mapped
+                result["repair_guide_next_step"] = (
+                    "Kiln can walk you through the maker's guide, one step and one picture at a time: "
+                    f"repair_guide(printer_id={printer_id!r}, hms_code={code!r}, step={start}) after step 0, "
+                    "the maker's power-off warning."
+                )
         # Which wizard step failed is the strongest thing a user can tell us
         # about a load failure, and until now Kiln had no way to hear it. The
         # reading is free-tier: it is arithmetic over the printer's own load

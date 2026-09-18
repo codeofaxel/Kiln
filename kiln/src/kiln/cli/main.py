@@ -3646,6 +3646,50 @@ def plate_clear_cmd(note, printer_name, json_mode) -> None:
         sys.exit(1)
 
 
+@cli.command("repair-guide")
+@click.argument("topic", default="")
+@click.option("--code", "hms_code", default="", help="The fault code on the printer's screen (any separators).")
+@click.option("--step", type=int, default=0, show_default=True, help="Serve only this step (0 = the maker's power-off warning); the answer names the next one.")
+@click.option("--plan", "plan_only", is_flag=True, help="Show the header and the step titles; serve no step.")
+@click.option("--power-off-confirmed", "power_off_confirmed", is_flag=True, help="You have powered the printer off and unplugged it. Required for every step from 1 on.")
+@click.option("--printer-id", "printer_id", default="", help="Printer model id (e.g. bambu_a1_mini). Default: the named printer's declared printer_model.")
+@click.option("--printer", "printer_name", default=None, help="Target printer name.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def repair_guide_cmd(topic, hms_code, step, plan_only, power_off_confirmed, printer_id, printer_name, json_mode) -> None:
+    """Walk through the maker's own repair guide, one step at a time.
+
+    Runs the same tool the MCP server exposes (repair_guide): the maker's
+    power-off warning first, then the maker's numbered steps in the maker's
+    words with the maker's picture (as a URL, attributed). TOPIC is what to
+    repair (cutter, nozzle, hotend, ...) or the fault code itself. Use
+    --plan first, then --step 0, then --step 1, 2, ... with
+    --power-off-confirmed once the printer is off. Where the maker publishes
+    no guide Kiln can step through, it says so and links the maker's index.
+    """
+    from kiln.server import ensure_runtime_config
+
+    ensure_runtime_config()
+    try:
+        from kiln.plugins.repair_guide_tools import repair_guide as _repair
+
+        result = _repair(printer_id=printer_id, topic=topic, hms_code=hms_code, step=step,
+                         plan_only=plan_only, power_off_confirmed=power_off_confirmed,
+                         printer_name=printer_name or "")
+        if not result.get("success", False):
+            err = result.get("error") or {}
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+            click.echo(format_error(msg or "No guide.", json_mode=json_mode))
+            sys.exit(1)
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to read the repair guide: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
 @cli.command("emergency-trip")
 @click.argument("printer_name")
 @click.option("--input", "input_name", default="external_button", help="Which input tripped.")
@@ -10452,6 +10496,28 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                 checks.append({"name": "homing", "ok": True, "warn": warn, "detail": detail})
             except Exception as exc:
                 logger.debug("Homing check failed: %s", exc)
+
+            # 6d'. Repair guides -- can Kiln walk this model through its
+            #      maker's own maintenance procedures?  Reported either way so
+            #      the door is DISCOVERABLE: "N guides Kiln can step through"
+            #      where kiln-pro has them, the maker's own maintenance index
+            #      where public Kiln knows one, and the honest "your maker
+            #      publishes no guide Kiln can step through" otherwise.  Reads
+            #      the same bridge the tool reads, so doctor never promises a
+            #      walkthrough the tool would not serve.
+            try:
+                from kiln.plugins.repair_guide_tools import coverage_line as _repair_coverage_line
+
+                declared_model = str(verify_adapter.declared_printer_model() or "").strip()
+                mapped_model = ""
+                if declared_model:
+                    from kiln.printer_profile_ids import map_printer_hint_to_profile_id
+
+                    mapped_model = map_printer_hint_to_profile_id(declared_model) or declared_model
+                detail, warn = _repair_coverage_line(mapped_model)
+                checks.append({"name": "repair_guides", "ok": True, "warn": warn, "detail": detail})
+            except Exception as exc:
+                logger.debug("Repair guide coverage check failed: %s", exc)
 
             # 6e. The plate record -- what Kiln knows is on the build plate.
             #     Home and park cross the head's row a vendor raise above the
