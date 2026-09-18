@@ -53,6 +53,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Your printer's own repair guide, one step at a time.** Kiln walks you
+  through the maker's steps photos, and says so when none are available.
+
 - **Home or park the print head, safely.** Kiln uses the printer's own moves
   and won't drive through a part it knows is on the plate.
 
