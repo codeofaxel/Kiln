@@ -159,6 +159,7 @@ class _StubReader:
             "topics": sorted({g["topic"] for g in mine.values()}),
             "publishes": "photo_guides_per_model" if printer_id.startswith(("bambu", "prusa", "creality")) else None,
             "maker_guides_in_table": None,
+            "maker_index_url": {"bambu_p2s": "https://wiki.bambulab.com/en/p2s/maintenance"}.get(printer_id),
         }
 
 
@@ -400,7 +401,9 @@ class TestPublicOnly:
         out = rg.repair_guide("bambu_a1_mini", topic="cutter")
         assert out["success"] is True and out["guide"] is None
         assert out["maker"] == "Bambu Lab"
-        assert out["maker_index_url"] == "https://wiki.bambulab.com/en/a1-mini/maintenance"
+        # Public Kiln alone knows the maker's landing page, never which page
+        # serves which model -- that curation is kiln-pro's.
+        assert out["maker_index_url"] == "https://wiki.bambulab.com/en/home"
         assert rg.NO_GUIDE_SENTENCE in out["kiln_note"]
         assert out["coverage"] is None
 
@@ -409,15 +412,23 @@ class TestPublicOnly:
         assert out["kiln_note"] == rg.NO_GUIDE_SENTENCE + "."
         assert "maker_index_url" not in out
 
-    def test_an_unprefixed_creality_id_finds_its_series_page(self, without_pro):
-        assert rg.maker_index("k1")[1] == "https://wiki.creality.com/en/k1-flagship-series/k1"
-        assert rg.maker_index("ender3_v2") == ("Creality", "https://wiki.creality.com/en/ender-series")
-        assert rg.maker_index("cr10_se")[0] == "Creality"
+    def test_an_unprefixed_creality_id_finds_its_maker(self, without_pro):
+        assert rg.maker_index("k1") == ("Creality", "https://wiki.creality.com/en/home")
+        assert rg.maker_index("ender3_v2")[0] == "Creality" and rg.maker_index("cr10_se")[0] == "Creality"
         assert rg.maker_index("qidi_q2c") == ("QIDI", "https://wiki.qidi3d.com/en/home")
 
-    def test_a_model_without_its_own_index_falls_back_to_the_makers_landing_page(self, without_pro):
-        out = rg.repair_guide("bambu_a2l", topic="nozzle")
-        assert out["maker_index_url"] == "https://wiki.bambulab.com/en/home"
+    def test_with_kiln_pro_the_empty_answer_names_the_models_own_page(self, with_pro):
+        out = rg.repair_guide("bambu_a1_mini", topic="belts")
+        assert out["coverage"]["count"] == 1  # a guide exists, other topic
+        out = rg.repair_guide("bambu_p2s", topic="belts")
+        assert out["maker_index_url"] == "https://wiki.bambulab.com/en/p2s/maintenance"
+        assert rg.coverage_line("bambu_p2s")[0].endswith("https://wiki.bambulab.com/en/p2s/maintenance")
+
+    def test_public_kiln_carries_no_per_model_page_map(self):
+        src = inspect.getsource(rg)
+        for table in rg.MAKER_LANDING.values():
+            assert set(table) == {"_maker", "_prefixes", "_fallback"}
+        assert "/maintenance" not in src.split("MAKER_LANDING")[1].split("NO_GUIDE_SENTENCE")[0]
 
     def test_the_public_map_points_only_at_the_makers_own_hosts(self):
         hosts = {
@@ -427,21 +438,7 @@ class TestPublicOnly:
             "visionminer": "https://wiki.visionminer.com/",
         }
         for vendor, table in rg.MAKER_MAINTENANCE_INDEX.items():
-            for key, url in table.items():
-                if key in ("_maker", "_prefixes"):
-                    continue
-                assert url.startswith(hosts[vendor]), (vendor, key, url)
-
-    def test_every_public_printer_id_of_a_listed_maker_has_a_page(self):
-        # A maker in the map answers for ALL of Kiln's ids for it, so the
-        # per-id entries can only lag the printer catalogue in one place.
-        intel = json.loads((Path(inspect.getfile(rg)).parent.parent / "data" / "printer_intelligence.json").read_text())
-        for printer_id in intel:
-            if printer_id.startswith("_"):
-                continue
-            maker, url = rg.maker_index(printer_id)
-            if maker is not None:
-                assert url, printer_id
+            assert table["_fallback"].startswith(hosts[vendor]), vendor
 
     def test_public_kiln_carries_no_step_and_fetches_no_picture(self):
         src = inspect.getsource(rg)
@@ -516,7 +513,7 @@ class TestDoctorDoor:
         detail, warn = rg.coverage_line("bambu_a1_mini")
         assert warn is True
         assert rg.NO_GUIDE_SENTENCE in detail
-        assert "https://wiki.bambulab.com/en/a1-mini/maintenance" in detail
+        assert "https://wiki.bambulab.com/en/home" in detail
         assert "Kiln Pro" in detail
 
     def test_the_line_is_honest_for_a_maker_with_nothing(self, with_pro):

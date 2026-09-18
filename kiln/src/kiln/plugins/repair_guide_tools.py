@@ -37,100 +37,25 @@ from typing import Any
 
 _logger = logging.getLogger(__name__)
 
-#: Each maker's PUBLIC maintenance index, per public printer id.  A link to
-#: the maker's own page for the caller's own machine is a funnel, not a
-#: leak: it carries no step, no picture and no code mapping, and it is the
-#: honest answer when kiln-pro is not installed or has no guide for a
-#: topic.  Every URL was fetched and answered 200 in-session on 2026-09-17.
-#: Per model where the maker publishes per model, the model's series page
-#: where it publishes per series, the vendor's landing page otherwise.
-MAKER_MAINTENANCE_INDEX: dict[str, dict[str, str]] = {
-    "bambu": {
-        "_maker": "Bambu Lab",
-        "_prefixes": "bambu_",
-        "_fallback": "https://wiki.bambulab.com/en/home",
-        "bambu_a1_mini": "https://wiki.bambulab.com/en/a1-mini/maintenance",
-        "bambu_a1": "https://wiki.bambulab.com/en/a1/maintenance",
-        "bambu_p1p": "https://wiki.bambulab.com/en/p1/maintenance",
-        "bambu_p1s": "https://wiki.bambulab.com/en/p1/maintenance",
-        "bambu_p2s": "https://wiki.bambulab.com/en/p2s/maintenance",
-        "bambu_x1c": "https://wiki.bambulab.com/en/x1/maintenance",
-        "bambu_x1e": "https://wiki.bambulab.com/en/x1/maintenance",
-        "bambu_h2d": "https://wiki.bambulab.com/en/h2/maintenance",
-        "bambu_h2d_pro": "https://wiki.bambulab.com/en/h2/maintenance",
-        "bambu_h2s": "https://wiki.bambulab.com/en/h2/maintenance",
-        "bambu_h2c": "https://wiki.bambulab.com/en/h2/maintenance",
-    },
-    "prusa": {
-        "_maker": "Prusa Research",
-        "_prefixes": "prusa_",
-        "_fallback": "https://help.prusa3d.com/en",
-        "prusa_mk4": "https://help.prusa3d.com/product/mk4s/printer-maintenance_247",
-        "prusa_mini": "https://help.prusa3d.com/product/mini-2/printer-maintenance_247",
-        "prusa_xl": "https://help.prusa3d.com/product/xl-plus/printer-maintenance_247",
-        "prusa_mk3s": "https://help.prusa3d.com/product/mk3s-plus/printer-maintenance_247",
-    },
-    "elegoo": {
-        "_maker": "Elegoo",
-        "_prefixes": "elegoo_",
-        "_fallback": "https://wiki.elegoo.com/fdm-printers",
-        "elegoo_centauri_carbon": "https://wiki.elegoo.com/Centauri-carbon",
-        "elegoo_neptune3": "https://wiki.elegoo.com/neptune",
-        "elegoo_neptune4": "https://wiki.elegoo.com/neptune",
-        "elegoo_orangestorm_giga": "https://wiki.elegoo.com/orangestorm-giga",
-    },
-    "qidi": {
-        "_maker": "QIDI",
-        "_prefixes": "qidi_",
-        "_fallback": "https://wiki.qidi3d.com/en/home",
-        "qidi_max4": "https://wiki.qidi3d.com/en/Max4",
-        "qidi_plus4": "https://wiki.qidi3d.com/en/X-Plus4/Manual",
-        "qidi_plus5": "https://wiki.qidi3d.com/en/Plus5",
-        "qidi_q1_pro": "https://wiki.qidi3d.com/en/Q1-Pro",
-        "qidi_q2": "https://wiki.qidi3d.com/en/Q2",
-        "qidi_x_max3": "https://wiki.qidi3d.com/en/X-Max3",
-        "qidi_x_plus3": "https://wiki.qidi3d.com/en/X-Plus3",
-        "qidi_x_smart3": "https://wiki.qidi3d.com/en/X-Smart3/Maintenance",
-    },
-    "creality": {
-        # Creality's public ids carry no vendor prefix (k1, ender3, cr10).
-        "_maker": "Creality",
-        "_prefixes": "creality_,k1,k2,ender3,cr10",
-        "_fallback": "https://wiki.creality.com/en/home",
-        "creality_hi": "https://wiki.creality.com/en/cr-series/creality-hi",
-        "cr10": "https://wiki.creality.com/en/cr-series",
-        "cr10_se": "https://wiki.creality.com/en/cr-series",
-        "ender3": "https://wiki.creality.com/en/ender-series",
-        "ender3_v2": "https://wiki.creality.com/en/ender-series",
-        "ender3_s1": "https://wiki.creality.com/en/ender-series",
-        "ender3_s1_pro": "https://wiki.creality.com/en/ender-series",
-        "ender3_v3": "https://wiki.creality.com/en/ender-series",
-        "ender3_v3_ke": "https://wiki.creality.com/en/ender-series",
-        "ender3_v3_plus": "https://wiki.creality.com/en/ender-series",
-        "ender3_v3_se": "https://wiki.creality.com/en/ender-series",
-        "ender3_v4": "https://wiki.creality.com/en/ender-series/ender-3-v4",
-        "k1": "https://wiki.creality.com/en/k1-flagship-series/k1",
-        "k1_max": "https://wiki.creality.com/en/k1-flagship-series/k1-max",
-        "k1_se": "https://wiki.creality.com/en/k1-flagship-series",
-        "k1c": "https://wiki.creality.com/en/k1-flagship-series/k1c",
-        "k2": "https://wiki.creality.com/en/k2-flagship-series/k2",
-        "k2_plus": "https://wiki.creality.com/en/k2-flagship-series/k2-plus",
-        "k2_pro": "https://wiki.creality.com/en/k2-flagship-series/k2-pro",
-        "k2_se": "https://wiki.creality.com/en/k2-flagship-series/k2-se",
-    },
-    "aon3d": {
-        "_maker": "AON3D",
-        "_prefixes": "aon3d_,aon_",
-        "_fallback": "https://docs.aon3d.com/",
-        "aon_m2_plus": "https://docs.aon3d.com/m2/maintenance_overview/",
-    },
-    "visionminer": {
-        "_maker": "Vision Miner",
-        "_prefixes": "visionminer_,vision_miner_",
-        "_fallback": "https://wiki.visionminer.com/docs",
-        "visionminer_22idex_v4": "https://wiki.visionminer.com/docs/v4",
-    },
+#: Each maker's PUBLIC landing page, one per maker -- the honest answer when
+#: kiln-pro is not installed.  A link to the maker's own site is a funnel,
+#: not a leak, and this is deliberately no more than that: WHICH of the
+#: maker's pages is the maintenance index for WHICH model is curated work
+#: and lives in kiln-pro, served for the caller's own model.  Every URL
+#: here answered 200 in-session on 2026-09-17.  Creality's public ids carry
+#: no vendor prefix (k1, ender3, cr10), so each maker names the id prefixes
+#: it answers for.
+MAKER_LANDING: dict[str, dict[str, str]] = {
+    "bambu": {"_maker": "Bambu Lab", "_prefixes": "bambu_", "_fallback": "https://wiki.bambulab.com/en/home"},
+    "prusa": {"_maker": "Prusa Research", "_prefixes": "prusa_", "_fallback": "https://help.prusa3d.com/en"},
+    "elegoo": {"_maker": "Elegoo", "_prefixes": "elegoo_", "_fallback": "https://wiki.elegoo.com/fdm-printers"},
+    "qidi": {"_maker": "QIDI", "_prefixes": "qidi_", "_fallback": "https://wiki.qidi3d.com/en/home"},
+    "creality": {"_maker": "Creality", "_prefixes": "creality_,k1,k2,ender3,cr10", "_fallback": "https://wiki.creality.com/en/home"},
+    "aon3d": {"_maker": "AON3D", "_prefixes": "aon3d_,aon_", "_fallback": "https://docs.aon3d.com/"},
+    "visionminer": {"_maker": "Vision Miner", "_prefixes": "visionminer_,vision_miner_", "_fallback": "https://wiki.visionminer.com/docs"},
 }
+#: Kept under the old name for the doctor and the tests.
+MAKER_MAINTENANCE_INDEX = MAKER_LANDING
 
 NO_GUIDE_SENTENCE = "your maker publishes no guide Kiln can step through"
 
@@ -142,8 +67,6 @@ def _model_key(printer_id: str) -> str:
 def _vendor_for(printer_id: str) -> str | None:
     key = _model_key(printer_id)
     for vendor, table in MAKER_MAINTENANCE_INDEX.items():
-        if key in table:
-            return vendor
         for prefix in table["_prefixes"].split(","):
             if key.startswith(prefix) or key == prefix.rstrip("_"):
                 return vendor
@@ -151,13 +74,12 @@ def _vendor_for(printer_id: str) -> str | None:
 
 
 def maker_index(printer_id: str) -> tuple[str | None, str | None]:
-    """``(maker name, index URL)`` public Kiln knows for this model, or ``(None, None)``."""
+    """``(maker name, landing URL)`` public Kiln knows for this model's maker, or ``(None, None)``."""
     vendor = _vendor_for(printer_id)
     if vendor is None:
         return None, None
     table = MAKER_MAINTENANCE_INDEX[vendor]
-    url = table.get(_model_key(printer_id)) or table.get("_fallback")
-    return table.get("_maker"), url
+    return table.get("_maker"), table.get("_fallback")
 
 
 def _resolve_printer_id(printer_id: str, printer_name: str | None) -> str:
@@ -352,11 +274,13 @@ def run_repair_guide(
                 f"{cover.get('maker')} publishes {cover.get('count')} guide(s) Kiln can step through for this "
                 f"model ({', '.join(cover.get('topics') or [])}), none for this topic."
             )
-        elif maker_name and index_url:
-            payload["maker"] = maker_name
-            payload["maker_index_url"] = index_url
+        elif (cover and cover.get("maker_index_url")) or (maker_name and index_url):
+            # kiln-pro knows the maker's maintenance page for THIS model;
+            # public Kiln alone knows only the maker's landing page.
+            payload["maker"] = (cover or {}).get("maker") or maker_name
+            payload["maker_index_url"] = (cover or {}).get("maker_index_url") or index_url
             payload["kiln_note"] = (
-                f"{NO_GUIDE_SENTENCE}. {maker_name}'s own maintenance index for this model is at maker_index_url."
+                f"{NO_GUIDE_SENTENCE}. {payload['maker']}'s own maintenance pages are at maker_index_url."
             )
         else:
             payload["kiln_note"] = f"{NO_GUIDE_SENTENCE}."
@@ -525,9 +449,11 @@ def coverage_line(printer_id: str) -> tuple[str, bool]:
             f"{cover.get('maker')}: {cover.get('count')} guide(s) for this model Kiln can step through "
             f"({topics}) -- repair_guide (kiln machine repair-guide <topic|code> --plan, then --step N)"
         ), False
+    if cover and cover.get("maker_index_url"):
+        return f"{NO_GUIDE_SENTENCE}; {cover.get('maker')}'s own maintenance pages for this model are at {cover['maker_index_url']}", True
     if maker_name and index_url:
         return (
-            f"{NO_GUIDE_SENTENCE}; {maker_name}'s own maintenance index for this model is {index_url}"
+            f"{NO_GUIDE_SENTENCE}; {maker_name}'s own site is {index_url}"
             + ("" if cover is not None else " (Kiln Pro adds the step-by-step walkthroughs)")
         ), True
     return f"{NO_GUIDE_SENTENCE}", True
