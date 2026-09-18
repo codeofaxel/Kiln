@@ -193,7 +193,7 @@ class TestWhichDoor:
         server's own: the host declared no panel, the link door refused
         for a reason it recorded, the render happened."""
         path = _stl(tmp_path / "jar.stl")
-        preview_evidence.record("png", path, renderer="openscad")
+        preview_evidence.record("png", path, renderer="stage_paint", shown_sha="abc")
         preview_evidence.record_url_refusal(path, "signed_out")
         refusal, verdict = preview_evidence.judge(path, "png", host_renders=False)
         assert refusal is None, refusal
@@ -531,14 +531,17 @@ class TestOneShotPipelines:
         print_signoff.clear()
         # Steps: validate, profile, stability, slice, safety, upload,
         # preflight, start_print — pause after preflight (index 6).
+        before = set(pipelines._executions)
         result = pipelines.quick_print(
             model_path=mesh, printer_name="garage", skip_validation=True,
             pause_after_step=6, signoff=record,
         )
         assert printer.started == [], result.to_dict()
-        # The paused execution is the newest one registered; resume it as
-        # the pipeline_resume tool would, in a fresh context.
-        ex = max(pipelines._executions.values(), key=lambda e: e.started_at if hasattr(e, "started_at") else 0)
+        # The execution THIS call registered — not the newest in a
+        # process-wide registry another test file may have added to —
+        # resumed as the pipeline_resume tool would, in a fresh context.
+        (new_id,) = set(pipelines._executions) - before
+        ex = pipelines._executions[new_id]
         assert ex.state.value == "paused", ex.state
         resumed = ex.resume()
         assert printer.started == ["jar.gcode"], resumed.to_dict()
@@ -624,7 +627,7 @@ class TestCliDoors:
         runner, printer = cli_env
         gcode = tmp_path / "part.gcode"
         gcode.write_text("G28\n")
-        preview_evidence.record("png", str(gcode), renderer="openscad")
+        preview_evidence.record("png", str(gcode), renderer="stage", shown_sha="abc")
         preview_evidence.record_url_refusal(str(gcode), "signed_out")
         monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
         monkeypatch.setattr("kiln.local_stage.host_renders_apps", lambda *a, **k: False)
@@ -732,3 +735,80 @@ def test_the_json_ledger_is_private(tmp_path):
     assert ledger.is_file()
     assert oct(ledger.stat().st_mode & 0o777) == "0o600"
     json.loads(ledger.read_text())
+
+
+# ---------------------------------------------------------------------------
+# The PNG that signs off is the stage's own still, never the raw render
+# ---------------------------------------------------------------------------
+
+
+class TestPngIsTheStageStill:
+    """Measured 2026-09-19: the sign-off image that reached the person was
+    the plain OpenSCAD render — flat gradient, no plate, none of the
+    stage's lighting — and a person approved a white jar that printed
+    black.  The stage photographs itself (``stage``) or paints its own
+    look (``stage_paint``); a raw render is for inspection only."""
+
+    def _headless(self, path):
+        preview_evidence.record_url_refusal(path, "signed_out")
+
+    def test_the_raw_render_is_refused_as_inspection_only(self, tmp_path):
+        path = _stl(tmp_path / "jar.stl")
+        self._headless(path)
+        preview_evidence.record("png", path, renderer="openscad", shown_sha="abc")
+        refusal, _ = preview_evidence.judge(path, "png", host_renders=False)
+        assert refusal is not None
+        assert "inspection" in refusal["message"]
+        assert refusal["code"] == "PREVIEW_DOOR_NOT_USED"
+
+    @pytest.mark.parametrize("renderer", ["stage", "stage_paint"])
+    def test_the_stage_still_is_accepted(self, tmp_path, renderer):
+        path = _stl(tmp_path / "jar.stl")
+        self._headless(path)
+        preview_evidence.record("png", path, renderer=renderer, shown_sha="abc")
+        refusal, verdict = preview_evidence.judge(path, "png", host_renders=False)
+        assert refusal is None, refusal
+        assert verdict["evidence"]["png"]["renderer"] == renderer
+        assert verdict["evidence"]["png"]["shown_sha"] == "abc"
+
+    def test_the_token_carries_the_hash_of_what_was_shown(self, tmp_path, monkeypatch):
+        path = _stl(tmp_path / "jar.stl")
+        self._headless(path)
+        preview_evidence.record("png", path, renderer="stage_paint", shown_sha="deadbeef")
+        monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr("kiln.local_stage.host_renders_apps", lambda *a, **k: False)
+        out = server.issue_preview_token(path, door="png")
+        assert out["success"], out
+        assert out["evidence"]["png"]["shown_sha"] == "deadbeef"
+
+    def test_the_renderer_records_which_look_and_a_hash_of_the_pixels(self, tmp_path):
+        from kiln.model_visualizer import visualize_model
+
+        mesh = _stl(tmp_path / "jar.stl")
+
+        def _run(cmd, **kwargs):
+            for i, arg in enumerate(cmd):
+                if arg == "-o" and i + 1 < len(cmd):
+                    pathlib.Path(cmd[i + 1]).write_bytes(b"png-bytes")
+            m = MagicMock()
+            m.returncode = 0
+            return m
+
+        with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
+             patch("subprocess.run", side_effect=_run):
+            result = visualize_model(
+                mesh, output_dir=str(tmp_path / "out"), share_link=False, allow_stage=False,
+            )
+        assert result["success"], result
+        png = preview_evidence.evidence_for(mesh)["png"]
+        assert png["renderer"] == "openscad"
+        assert len(png["shown_sha"]) == 32
+        # And that record does not sign off a print.
+        self._headless(mesh)
+        refusal, _ = preview_evidence.judge(mesh, "png", host_renders=False)
+        assert refusal is not None and "inspection" in refusal["message"]
+
+    def test_the_raw_render_tools_say_so(self):
+        for tool in ("visualize_model", "render_model_preview"):
+            doc = getattr(server, tool).__doc__ or ""
+            assert "inspection" in doc.lower() and "sign-off" in doc.lower(), tool

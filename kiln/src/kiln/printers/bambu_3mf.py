@@ -84,6 +84,8 @@ than being handed a sequence cut for a different orifice.
 from __future__ import annotations
 
 import ast
+import contextlib
+import dataclasses
 import hashlib
 import json
 import logging
@@ -1368,6 +1370,202 @@ def _declared_filament_colors(plate_json: str | None) -> list[str] | None:
     return colors or None
 
 
+#: Kiln's witness that the thumbnail family was rendered from the archive's
+#: own model in the colours the archive declares.  Written by
+#: :func:`complete_bambu_archive` and by the builder when it renders; read
+#: by :func:`bambu_archive_problems`.  A slicer's own full set carries
+#: ``plate_no_light_1.png`` instead, which Bambu Studio writes only when it
+#: drew the pictures itself.
+KILN_PREVIEW_MARKER = "Metadata/kiln_preview.json"
+
+#: The slots the printer and Studio draw from.  Measured on the A1
+#: (firmware 01.07.02.00, 2026-09-19): the file-list tile is
+#: ``plate_1_small.png``; an archive with only ``plate_1.png`` shows the
+#: broken-image placeholder.  The Auxiliaries set is Studio's and optional.
+_REQUIRED_TILE_SLOTS: tuple[str, ...] = (
+    "Metadata/plate_1.png",
+    "Metadata/plate_1_small.png",
+    "Metadata/top_1.png",
+    "Metadata/pick_1.png",
+)
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _png_dimensions(data: bytes) -> tuple[int, int] | None:
+    if len(data) < 24 or data[:8] != _PNG_MAGIC:
+        return None
+    import struct
+
+    return struct.unpack(">II", data[16:24])
+
+
+def _declared_plate_colors(zf: zipfile.ZipFile) -> list[str]:
+    try:
+        plate_json = zf.read("Metadata/plate_1.json").decode("utf-8")
+    except KeyError:
+        return []
+    return _declared_filament_colors(plate_json) or []
+
+
+def _archive_is_painted(zf: zipfile.ZipFile) -> bool:
+    """Whether the model itself carries colour: a palette or a paint channel."""
+    try:
+        from kiln.threemf_parser import _scan_color_constructs
+
+        has_palette, has_paint = _scan_color_constructs(zf)
+        return bool(has_palette or has_paint)
+    except Exception:  # noqa: BLE001 — an unreadable model reads as uncoloured
+        return False
+
+
+def bambu_archive_problems(path: str | os.PathLike[str], *, name: str | None = None) -> list[str]:
+    """Why *path* must not go to a Bambu printer — empty when it may.
+
+    Reads the archive the printer would receive and says, in the printer's
+    terms, what its screen would fail to show: a sliced plate must carry
+    every tile slot at its size, and a plate that declares more than one
+    colour (or whose model is painted) must carry a witness that the
+    picture was drawn in those colours — the slicer's own no-light slot,
+    or Kiln's marker with a hash of the picture it wrote.  Files that are
+    not 3MF archives are not this check's business.  *name* is the
+    printer-side name when *path* is a temp copy of it, so the extension
+    judged is the one the printer sees.
+    """
+    p = Path(path)
+    if Path(name or p.name).suffix.lower() != ".3mf":
+        return []
+    try:
+        zf = zipfile.ZipFile(str(p))
+    except (OSError, zipfile.BadZipFile) as exc:
+        return [f"{p.name} is not a readable 3MF archive ({exc})"]
+    with zf:
+        names = set(zf.namelist())
+        if "Metadata/plate_1.gcode" not in names:
+            return [
+                f"{p.name} is not a sliced plate (no Metadata/plate_1.gcode): a printer "
+                "cannot start a project file — slice it first (slice_model) and upload "
+                "the .gcode.3mf it recommends"
+            ]
+        problems: list[str] = []
+        for slot in _REQUIRED_TILE_SLOTS:
+            want = _BAMBU_THUMBNAIL_SPECS[slot]
+            short = slot.rsplit("/", 1)[-1]
+            if slot not in names:
+                problems.append(f"missing {short} ({want[0]}x{want[1]})")
+                continue
+            got = _png_dimensions(zf.read(slot))
+            if got is None:
+                problems.append(f"{short} is not a PNG")
+            elif tuple(got) != tuple(want):
+                problems.append(f"{short} is {got[0]}x{got[1]}, the printer wants {want[0]}x{want[1]}")
+        colors = _declared_plate_colors(zf)
+        # Who drew the picture, and in what: the slicer's own full set (it
+        # writes plate_no_light_1.png only when it rendered the plate in
+        # its filament colours), or Kiln's marker naming a stage look, the
+        # declared colours, and the hash of the picture it wrote.
+        witnessed = "Metadata/plate_no_light_1.png" in names
+        if not witnessed and KILN_PREVIEW_MARKER in names and "Metadata/plate_1.png" in names:
+            try:
+                marker = json.loads(zf.read(KILN_PREVIEW_MARKER).decode("utf-8"))
+                digest = hashlib.sha256(zf.read("Metadata/plate_1.png")).hexdigest()[:32]
+                witnessed = (
+                    marker.get("sha") == digest
+                    and [c.upper() for c in marker.get("colors", [])] == [c.upper() for c in colors]
+                )
+            except (KeyError, ValueError, AttributeError):
+                witnessed = False
+        if not witnessed:
+            problems.append(
+                "the preview is not on record as drawn in the plate's declared colours "
+                f"({', '.join(colors) or 'none declared'})"
+            )
+    if problems:
+        problems.append(
+            "the printer's screen would show a broken tile; complete the archive with "
+            "kiln.printers.bambu_3mf.complete_bambu_archive (slice_model does this for the "
+            "file it recommends)"
+        )
+    return problems
+
+
+def _archive_triangles(path: str, colors: list[str]) -> list[Any]:
+    """The archive's own model, coloured as the archive declares."""
+    from kiln.threemf_parser import parse_colored_3mf
+
+    mesh = parse_colored_3mf(path)
+    triangles = list(mesh.triangles)
+    if not mesh.colors_found and colors:
+        # One declared colour and an unpainted model: the whole plate is it.
+        h = colors[0].lstrip("#")
+        rgb = tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+        triangles = [dataclasses.replace(t, color=rgb) for t in triangles]
+    return triangles
+
+
+def complete_bambu_archive(
+    path: str | os.PathLike[str], *, output_path: str | os.PathLike[str] | None = None,
+) -> str:
+    """Give a sliced Bambu archive the preview family its screen needs.
+
+    Every thumbnail slot is rendered from the archive's OWN model in the
+    colours its plate declares (a painted plate keeps its paint) — the
+    plain coloured render the printer's screen shows, not Kiln's stage,
+    which belongs to the previews shown to a person — scaled to each
+    slot's size, and written beside the marker that vouches for them.
+    Every other member — the G-code above all — is copied byte for byte:
+    an archive a slicer already wrapped must never be wrapped again
+    (measured: re-wrapping Orca's plate doubled its start sequence).
+    Rewrites in place unless *output_path* is given.  Idempotent.
+
+    Raises ``ValueError`` for an archive that is not a sliced plate.
+    """
+    src = Path(path)
+    dst = Path(output_path) if output_path else src
+    with zipfile.ZipFile(str(src)) as zf:
+        if "Metadata/plate_1.gcode" not in zf.namelist():
+            raise ValueError(f"{src.name} is not a sliced plate (no Metadata/plate_1.gcode)")
+        colors = _declared_plate_colors(zf)
+    from kiln.colored_renderer import render_colored_mesh
+
+    triangles = _archive_triangles(str(src), colors)
+    if not triangles:
+        raise ValueError(f"{src.name} carries no model to draw a preview from")
+    rendered: dict[str, bytes] = {}
+    for slot_names in _thumbnail_aspect_groups().values():
+        width, height = max(
+            (_BAMBU_THUMBNAIL_SPECS[n] for n in slot_names), key=lambda size: size[0] * size[1],
+        )
+        result = render_colored_mesh(triangles, width=width, height=height)
+        try:
+            source = Path(result.path).read_bytes()
+        finally:
+            with contextlib.suppress(OSError):
+                os.remove(result.path)
+        rendered.update(_fit_to_specs(source, slot_names))
+    marker = json.dumps(
+        {
+            "colors": colors,
+            "renderer": "colored_mesh",
+            "from": "3D/3dmodel.model",
+            "sha": hashlib.sha256(rendered["Metadata/plate_1.png"]).hexdigest()[:32],
+        }
+    )
+    replaced = set(rendered) | {KILN_PREVIEW_MARKER}
+    tmp = dst.with_name(dst.name + ".completing")
+    with zipfile.ZipFile(str(src)) as src_zf, zipfile.ZipFile(str(tmp), "w", zipfile.ZIP_DEFLATED) as dst_zf:
+        for item in src_zf.infolist():
+            if item.filename in replaced:
+                continue
+            dst_zf.writestr(item, src_zf.read(item.filename))
+        for name, data in rendered.items():
+            dst_zf.writestr(name, data)
+        dst_zf.writestr(KILN_PREVIEW_MARKER, marker)
+    os.replace(str(tmp), str(dst))
+    logger.info("Completed Bambu archive %s: %d preview slots in %s", dst.name, len(rendered), colors or "neutral")
+    return str(dst)
+
+
 def thumbnail_inputs_for_model(
     model_path: str | None,
 ) -> tuple[list[str] | None, str | None]:
@@ -1834,8 +2032,10 @@ def build_bambu_3mf(
     # filament colors this file declares, so the printer shows the part
     # rather than a blank preview.  ``plate_json`` is the declaration —
     # the very string written to the archive below.
+    rendered_here = False
     if not thumbnails and stl_paths:
         thumbnails = _stl_thumbnail_set(stl_paths, plate_json)
+        rendered_here = bool(thumbnails)
 
     # Build the 3MF.
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -1868,6 +2068,20 @@ def build_bambu_3mf(
         zf.writestr("Metadata/project_settings.config", "{}")
         for name, data in thumbnails.items():
             zf.writestr(name, data)
+        if rendered_here and "Metadata/plate_1.png" in thumbnails:
+            # Kiln drew these itself, in the plate's declared colour: say
+            # so, with a hash of the picture it wrote.
+            zf.writestr(
+                KILN_PREVIEW_MARKER,
+                json.dumps(
+                    {
+                        "colors": _declared_filament_colors(plate_json) or [],
+                        "renderer": "plate_preview",
+                        "from": "stl",
+                        "sha": hashlib.sha256(thumbnails["Metadata/plate_1.png"]).hexdigest()[:32],
+                    }
+                ),
+            )
 
     file_size = os.path.getsize(output_path)
     file_md5 = hashlib.md5(  # noqa: S324
@@ -1976,8 +2190,10 @@ def repackage_gcode_as_bambu_3mf(
     # The colors come from the plate metadata copied out of the source
     # above; when there is none, the archive declares no color and the
     # render stays neutral rather than inventing one.
+    rendered_here = False
     if not thumbnails and stl_paths:
         thumbnails = _stl_thumbnail_set(stl_paths, plate_json)
+        rendered_here = bool(thumbnails)
 
     # Update the time prediction in slice_info.config so the printer
     # display shows correct time remaining instead of the full plate's
@@ -2004,6 +2220,20 @@ def repackage_gcode_as_bambu_3mf(
             zf.writestr("Metadata/slice_info.config", slice_info)
         for name, data in thumbnails.items():
             zf.writestr(name, data)
+        if rendered_here and "Metadata/plate_1.png" in thumbnails:
+            # Kiln drew these itself, in the plate's declared colour: say
+            # so, with a hash of the picture it wrote.
+            zf.writestr(
+                KILN_PREVIEW_MARKER,
+                json.dumps(
+                    {
+                        "colors": _declared_filament_colors(plate_json) or [],
+                        "renderer": "plate_preview",
+                        "from": "stl",
+                        "sha": hashlib.sha256(thumbnails["Metadata/plate_1.png"]).hexdigest()[:32],
+                    }
+                ),
+            )
 
     logger.info(
         "Repackaged gcode as Bambu 3MF: %s (%d bytes, est %dm)",

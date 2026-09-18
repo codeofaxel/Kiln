@@ -726,6 +726,20 @@ def run_adapter_gate(
             material_id=_resolve_material(kwargs),
             allow_oversize=override,
         )
+        if fetched and not verdict.get("blocked") and str(printer_id or "").lower().startswith("bambu"):
+            # Same rule the upload door applies, on the printer's own copy: a
+            # plate its screen cannot draw is not started by name either.
+            from kiln.printers.bambu_3mf import bambu_archive_problems
+
+            problems = bambu_archive_problems(fetched, name=str(file_name or ""))
+            if problems:
+                verdict = {
+                    "blocked": True,
+                    "reason": (
+                        f"{os.path.basename(str(file_name))} is not ready for the printer: "
+                        + "; ".join(problems) + "."
+                    ),
+                }
     finally:
         if fetched:
             with contextlib.suppress(OSError):

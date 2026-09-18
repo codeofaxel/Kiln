@@ -66,6 +66,13 @@ DOORS: tuple[str, ...] = (DOOR_STAGE, DOOR_URL, DOOR_PNG)
 #: evidence is what the yes was about.
 EVIDENCE_TTL_S = 3600.0
 
+#: The renderers whose still is the stage's own look — photographed from
+#: the stage document, or painted to match it.  A raw OpenSCAD render is a
+#: different picture (flat background, no plate, no stage lighting) and
+#: on 2026-09-19 a person approved a white jar from one that printed
+#: black.  Only these sign off; the rest are for inspection.
+STAGE_RENDERERS: tuple[str, ...] = ("stage", "stage_paint")
+
 #: Per-door refusal codes, so an agent can branch without parsing prose.
 CODE_UNKNOWN_DOOR = "PREVIEW_DOOR_UNKNOWN"
 CODE_NOT_USED = "PREVIEW_DOOR_NOT_USED"
@@ -414,6 +421,14 @@ def judge(
         return _refusal(
             f"No PNG render is on record for {name}: call visualize_model(file_path) and "
             "show the user the renders, then call issue_preview_token again with door='png'.",
+            CODE_NOT_USED,
+        ), verdict
+    if ev[DOOR_PNG].get("renderer") not in STAGE_RENDERERS:
+        return _refusal(
+            f"The render on record for {name} is the raw {ev[DOOR_PNG].get('renderer') or 'unknown'} "
+            "render, which is inspection-only: the sign-off still is the stage's own look, so "
+            "re-run visualize_model where the stage document is cached and a browser or the "
+            "painter is available, or hand the user a link (door='url').",
             CODE_NOT_USED,
         ), verdict
     verdict["skipped"] = {

@@ -143,7 +143,7 @@ def _mesh_with_png_on_record(tmp_path, monkeypatch):
     mesh = tmp_path / "plate.3mf"
     mesh.write_bytes(b"PK\x03\x04 not really a 3mf")
     image = tmp_path / "plate_iso.png"
-    preview_evidence.record("png", str(mesh), renderer="openscad")
+    preview_evidence.record("png", str(mesh), renderer="stage_paint", shown_sha="abc")
     preview_evidence.record_url_refusal(str(mesh), "signed_out")
     monkeypatch.setattr(print_gate, "render_for_terminal", lambda path: ([str(image)], None))
     monkeypatch.setattr(print_gate.click, "launch", lambda target: None)
