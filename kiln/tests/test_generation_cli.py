@@ -416,3 +416,56 @@ class TestGenerateAndPrint:
         assert data["data"]["preview"]["path"] == "/tmp/model_preview.svg"
         assert data["data"]["material"] == "PLA"
         assert data["data"]["support_style"] == "minimal"
+
+    @pytest.mark.parametrize("person_present", [False, True])
+    def test_auto_print_asks_a_person_and_refuses_a_bare_shell(self, runner, monkeypatch, person_present):
+        """--auto-print is not consent: the object did not exist when the
+        flag was typed.  A person at the terminal is shown the generated
+        model and asked; a shell with nobody at it is refused, so an agent
+        cannot print a thing nobody saw by adding a flag."""
+        from kiln.cli import print_gate
+
+        monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+        monkeypatch.setattr(print_gate, "_person_is_present", lambda: person_present)
+        monkeypatch.setattr(print_gate, "render_for_terminal", lambda path: ([], None))
+        monkeypatch.setattr(print_gate, "_audit", lambda *a: None)
+        with patch("kiln.generation.OpenSCADProvider") as MockProvider, \
+             patch("kiln.generation.validate_mesh") as mock_validate, \
+             patch("kiln.preview.render_multi_view_preview") as mock_preview, \
+             patch("kiln.cli.main._resolve_slice_plan") as mock_plan, \
+             patch("kiln.slicer.slice_file") as mock_slice, \
+             patch("kiln.cli.main._get_adapter_from_ctx") as mock_get_adapter:
+            provider = MockProvider.return_value
+            provider.display_name = "OpenSCAD"
+            provider.generate.return_value = _make_job(
+                provider="openscad", prompt="cube([10,10,10]);",
+                status=GenerationStatus.SUCCEEDED, progress=100,
+            )
+            provider.download_result.return_value = _make_result(
+                provider="openscad", prompt="cube([10,10,10]);",
+            )
+            mock_validate.return_value = _make_validation(valid=True)
+            mock_preview.return_value = SimpleNamespace(to_dict=lambda: {"path": "/tmp/p.svg", "format": "svg"})
+            mock_plan.return_value = {
+                "profile_path": "/tmp/prusa_mini.ini", "extra_args": [], "material": "PLA",
+                "support_style": None, "support_reason": None,
+            }
+            mock_slice.return_value = SimpleNamespace(output_path="/tmp/model.gcode", message="Sliced")
+            adapter = MagicMock()
+            adapter.upload_file.return_value = SimpleNamespace(
+                success=True, message="Uploaded", remote_name=None, file_name="model.gcode",
+                to_dict=lambda: {"success": True},
+            )
+            mock_get_adapter.return_value = adapter
+
+            result = runner.invoke(cli, [
+                "generate-and-print", "cube([10,10,10]);", "--provider", "openscad", "--auto-print",
+            ], input="y\n")
+
+        if person_present:
+            assert result.exit_code == 0, result.output
+            adapter.start_print.assert_called_once_with("model.gcode")
+        else:
+            assert result.exit_code != 0
+            assert "PREVIEW_NOT_CONFIRMED" in result.output
+            adapter.start_print.assert_not_called()

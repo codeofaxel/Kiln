@@ -268,6 +268,62 @@ def test_the_terminal_yes_reaches_a_gated_tool_without_a_token(monkeypatch):
     assert seen["consent"].printer_name == "garage"
 
 
+# ---------------------------------------------------------------------------
+# Arming an unattended mode is one yes, in person — a flag is not it
+# ---------------------------------------------------------------------------
+
+
+def _watch(runner, watch_dir, printer, **kw):
+    from unittest.mock import patch
+
+    with (
+        patch("kiln.cli.main._load_fleet_adapters", return_value=({"lab-printer": printer}, [])),
+        patch("kiln.cli.main._collect_routing_candidates", return_value=[{"printer_id": "lab-printer"}]),
+        patch("kiln.cli.main._route_printer_for_job",
+              return_value=("lab-printer", {"recommended_printer": {"score": 92.0}}, None)),
+    ):
+        return runner.invoke(
+            cli, ["ingest", "watch", "--dir", str(watch_dir), "--once", "--auto-queue", "--json"], **kw,
+        )
+
+
+def test_the_watcher_does_not_arm_from_a_shell_with_nobody_at_it(cli_env, tmp_path):
+    """An agent can type --auto-queue and drop a file; that is the hole."""
+    runner, printer = cli_env
+    watch_dir = tmp_path / "incoming"
+    watch_dir.mkdir()
+    (watch_dir / "widget.gcode").write_text("G28\n")
+    result = _watch(runner, watch_dir, printer)
+    assert result.exit_code != 0
+    assert "PREVIEW_NOT_CONFIRMED" in result.output
+    assert printer.started == []
+
+
+def test_the_watcher_arms_after_one_yes_in_person(cli_env, audits, monkeypatch, tmp_path):
+    runner, printer = cli_env
+    watch_dir = tmp_path / "incoming"
+    watch_dir.mkdir()
+    (watch_dir / "widget.gcode").write_text("G28\n")
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: True)
+    result = _watch(runner, watch_dir, printer, input="y\n")
+    assert result.exit_code == 0, result.output
+    assert printer.started == ["widget.gcode"]
+    rec = next(d for _, a, d in audits if a == "consent_granted")
+    assert "incoming" in rec["scope"]
+
+
+def test_the_watcher_arms_unattended_only_on_the_audited_switch(cli_env, audits, monkeypatch, tmp_path):
+    runner, printer = cli_env
+    watch_dir = tmp_path / "incoming"
+    watch_dir.mkdir()
+    (watch_dir / "widget.gcode").write_text("G28\n")
+    monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+    result = _watch(runner, watch_dir, printer)
+    assert result.exit_code == 0, result.output
+    assert printer.started == ["widget.gcode"]
+    assert any(a == "preview_gate_skipped" for _, a, _ in audits)
+
+
 def test_render_never_claims_a_picture_for_gcode(tmp_path):
     g = tmp_path / "x.gcode"
     g.write_text("G28\n")

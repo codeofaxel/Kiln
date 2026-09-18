@@ -147,6 +147,13 @@ class TestHelp:
 
 
 class TestIngestWatch:
+    @pytest.fixture(autouse=True)
+    def _preview_gate_is_not_under_test(self, monkeypatch):
+        """These tests are about detection and dispatch; arming --auto-queue
+        now asks the person once (test_cli_print_gate.py).  Switched off the
+        way CI does, explicitly."""
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
     def test_detect_only_once_json(self, runner, tmp_path):
         watch_dir = tmp_path / "incoming"
         watch_dir.mkdir()

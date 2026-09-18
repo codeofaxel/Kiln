@@ -27,7 +27,14 @@ from typing import Any
 
 import click
 
-from kiln.print_consent import SOURCE_TERMINAL, PrintConsent, set_consent
+from kiln.cli.output import format_error
+from kiln.print_consent import (
+    SOURCE_CI_BYPASS,
+    SOURCE_STANDING_OPT_IN,
+    SOURCE_TERMINAL,
+    PrintConsent,
+    set_consent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -158,3 +165,48 @@ def confirm_print_at_terminal(
         {"file": file_path, "by": "user", "consent": SOURCE_TERMINAL, "door": door},
     )
     return True
+
+
+def _ci_bypass_set() -> bool:
+    return os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip().lower() in ("1", "true", "yes")
+
+
+def confirm_standing_auto_print_at_terminal(
+    *,
+    tool: str,
+    scope: str,
+    json_mode: bool = False,
+) -> None:
+    """One yes, given in person, that covers every print an unattended mode
+    will start.  Returns on a yes; exits the command otherwise.
+
+    A watched folder cannot show each file to anyone — that is what it is
+    for.  The flag that arms it is not the consent: an agent driving a shell
+    can type a flag, drop a file, and print unseen, which is the hole the
+    gate exists to close.  So the person is asked once, before it arms, and every
+    start afterwards is audited as resting on that answer.  With nobody at
+    the terminal it does not arm; a real unattended service is a CI-style
+    decision and takes the same audited switch.
+    """
+    if _ci_bypass_set():
+        _audit(tool, "preview_gate_skipped", {"scope": scope, "consent": SOURCE_CI_BYPASS})
+        return
+    if not _person_is_present():
+        _audit(tool, "preview_gate_refused", {"scope": scope, "reason": "no_person_at_terminal"})
+        click.echo(
+            format_error(
+                f"{tool} will not start prints unattended: {scope}, and nobody is "
+                "at this terminal to agree to that. Run it in a terminal and "
+                "answer the prompt, or for an unattended service set "
+                "KILN_SKIP_PREVIEW_GATE=1 (every start is audited).",
+                code="PREVIEW_NOT_CONFIRMED",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    click.echo(f"{scope}. No preview will be shown for those prints.")
+    if not click.confirm("Continue?", default=False):
+        _audit(tool, "consent_refused", {"scope": scope, "action": "decline"})
+        click.echo("Nothing was started.")
+        sys.exit(1)
+    _audit(tool, "consent_granted", {"scope": scope, "by": "user", "consent": SOURCE_STANDING_OPT_IN})

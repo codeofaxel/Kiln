@@ -6052,6 +6052,20 @@ def ingest_watch_cmd(
             )
             sys.exit(1)
         pending = {name: deque() for name in adapters}
+        # The watcher exists to start prints nobody previews.  The flag is
+        # not the consent — an agent can type a flag — so the person is
+        # asked once, in person, before it arms; every start it then makes
+        # is granted below as resting on that answer.
+        from kiln.cli.print_gate import confirm_standing_auto_print_at_terminal
+
+        confirm_standing_auto_print_at_terminal(
+            tool="kiln ingest watch --auto-queue",
+            scope=(
+                f"Every printable file that lands in {watch_dir} will be sent to "
+                + ", ".join(sorted(adapters))
+            ),
+            json_mode=json_mode,
+        )
 
     def _dispatch_pending() -> None:
         if not auto_queue:
@@ -6090,9 +6104,8 @@ def ingest_watch_cmd(
                     continue
 
                 remote_name = upload_result.file_name or local_path.name
-                # --auto-queue is the standing opt-in: a watched folder is
-                # unattended by design, and the person who armed it is the
-                # one who approved what lands in it.  Said so, where the
+                # The person who armed the watcher said yes to this, once,
+                # in person (or the audited switch did).  Said so, where the
                 # adapter template looks.
                 from kiln.print_signoff import SOURCE_STANDING_OPT_IN, grant
 
@@ -9333,12 +9346,26 @@ def generate_and_print_cmd(
         # --- Step 5: Optionally start print ---
         if auto_print:
             remote = upload_result.remote_name or os.path.basename(slice_result.output_path)
-            # --auto-print is the standing opt-in for an object that did
-            # not exist when the command was typed; the same rule as the
-            # generate_and_print tool's KILN_AUTO_PRINT_GENERATED.
-            from kiln.print_signoff import SOURCE_STANDING_OPT_IN, grant
+            # The object did not exist when the command was typed, so the
+            # flag could not have been consent to it.  The generated model
+            # is on disk now: the person is shown it and asked, like any
+            # other file started from a terminal.  Nobody at the terminal
+            # gets the token refusal — an agent's --auto-print is not a yes.
+            cli_gate(
+                "kiln generate-and-print --auto-print", result.local_path, None,
+                printer_name=ctx.obj.get("printer"), json_mode=json_mode,
+            )
+            # The yes was about the model; the printer is handed the slice
+            # made from it.  Re-aim the clearance at that file, keeping the
+            # source and door the gate recorded.
+            from kiln.print_signoff import current, grant
 
-            grant("kiln generate-and-print", remote, ctx.obj.get("printer"), source=SOURCE_STANDING_OPT_IN)
+            cleared = current()
+            grant(
+                "kiln generate-and-print", remote, ctx.obj.get("printer"),
+                source=cleared.source if cleared else "unrecorded",
+                door=cleared.door if cleared else "",
+            )
             adapter.start_print(remote)
             if not json_mode:
                 click.echo(f"Printing started: {remote}")
