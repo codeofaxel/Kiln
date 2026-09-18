@@ -46,6 +46,7 @@ import requests
 
 from kiln.printers.base import (
     STALE_STATE_WARN_AGE,
+    ActiveSlotReading,
     FilamentHandlingUnsupported,
     FilamentOpPlan,
     FilamentOpResult,
@@ -1759,6 +1760,51 @@ class ElegooAdapter(PrinterAdapter):
 
 
     # ------------------------------------------------------------------
+    # Multi-colour unit — read the feeding slot from the cache, never ask
+    # ------------------------------------------------------------------
+
+    #: Where a slot reading comes from: the ``active_tray_id`` key of the
+    #: multi-colour unit's status block, as this adapter caches it.
+    _ACTIVE_SLOT_SOURCE: ClassVar[str] = "sdcp:active_tray_id"
+
+    def read_active_slot(self) -> ActiveSlotReading | None:
+        """Which slot the multi-colour unit is feeding, read from the cache.
+
+        The SDCP V3.0.0 status report carries no filament-slot field, so the
+        pushes this adapter merges into its cache never say which slot is
+        feeding.  The slot is client-observed only: it arrives in the reply
+        to a dedicated unit-status request (SDCP command 324 on this
+        WebSocket) as ``active_canvas_id`` / ``active_tray_id``, both
+        zero-based, with ``active_tray_id`` of ``-1`` when nothing is
+        feeding; some clients see the same block wrapped in ``canvas_info``,
+        and both shapes are read.  The message handler merges such a reply
+        into the cache like any other, and this method only reads what is
+        there -- it never sends the request.  Until something asks the unit,
+        the answer is ``None`` ("cannot say").  The field is not proven on
+        hardware, so every reading says ``verified=False``.  Never raises.
+
+        The slot is the unit's own tray id (``"2"``); a tray on a later
+        daisy-chained unit is named with its unit (``"1:2"``) so a switch
+        between units is a change too.
+        """
+        try:
+            with self._state_lock:
+                status = dict(self._last_status)
+        except Exception:  # noqa: BLE001 -- a reading is never worth an error
+            return None
+        block = status.get("canvas_info")
+        if not isinstance(block, dict):
+            block = status
+        tray = _slot_index(block.get("active_tray_id"))
+        if tray is None:
+            return None
+        if tray < 0:
+            return ActiveSlotReading(slot=None, source=self._ACTIVE_SLOT_SOURCE, verified=False)
+        unit = _slot_index(block.get("active_canvas_id"))
+        slot = f"{unit}:{tray}" if unit is not None and unit > 0 else str(tray)
+        return ActiveSlotReading(slot=slot, source=self._ACTIVE_SLOT_SOURCE, verified=False)
+
+    # ------------------------------------------------------------------
     # Filament handling — not available on this backend, said plainly
     # ------------------------------------------------------------------
 
@@ -1815,3 +1861,22 @@ def _safe_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _slot_index(value: Any) -> int | None:
+    """A multi-colour unit's slot or unit index from a cached field, or ``None``.
+
+    Stricter than :func:`_safe_int`: the unit reports whole numbers, so a
+    boolean (``True`` is not slot 1), a float, or any other type is not an
+    index and reads as "cannot say".
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None

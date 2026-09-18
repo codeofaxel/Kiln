@@ -89,6 +89,7 @@ import dataclasses
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import zipfile
@@ -862,6 +863,274 @@ _GCODE_FILAMENT_TYPE_RE = re.compile(
     r"^;\s*filament_type\s*=\s*(.+)$", re.MULTILINE,
 )
 
+#: What each slicer writes about filament consumed, measured 2026-09-18.
+#: PrusaSlicer 2.9.4 and OrcaSlicer 2.3.2 footer: ``; filament used [mm] =
+#: 11035.45, 584.76`` and, only when the profile carried a density,
+#: ``; filament used [g] = 1.27``.  Bambu Studio 02.05 header:
+#: ``; total filament length [mm] : 5127.93,2704.70`` and ``; total
+#: filament weight [g] : 16.28,8.13``.  All of them list one value per USED
+#: extruder, comma separated.  Kiln's own profiles describe a printer and
+#: no filament, so the slicer's grams read ``0.00`` and the length is the
+#: number that survives.
+_GCODE_USED_MM_RE = re.compile(
+    r"^;\s*(?:filament used \[mm\]\s*=|total filament length \[mm\]\s*:)\s*(.+)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_GCODE_USED_G_RE = re.compile(
+    r"^;\s*(?:filament used \[g\]\s*=|total filament weight \[g\]\s*:)\s*(.+)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_GCODE_FILAMENT_DENSITY_RE = re.compile(
+    r"^;\s*filament_density\s*[:=]\s*(.+)$", re.MULTILINE | re.IGNORECASE,
+)
+_GCODE_FILAMENT_DIAMETER_RE = re.compile(
+    r"^;\s*filament_diameter\s*[:=]\s*(.+)$", re.MULTILINE | re.IGNORECASE,
+)
+#: Tool selects wherever they sit on the line: Bambu's AMS blocks indent
+#: the real ``T0`` / ``T1``.  Tools from 255 up are the start sequence's
+#: pseudo-tools (T255, T1000), not trays.
+_GCODE_ANY_TOOL_SELECT_RE = re.compile(r"^\s*T(\d+)\b", re.MULTILINE)
+_BAMBU_FIRST_PSEUDO_TOOL = 255
+_GCODE_E_WORD_RE = re.compile(r"(?:^|\s)E(-?\d*\.?\d+)")
+_FILAMENT_DIAMETER_MM = 1.75
+_DEFAULT_FILAMENT_DENSITY = 1.24  # PLA, the table's own figure
+
+
+@dataclass(frozen=True)
+class FilamentUsage:
+    """Filament a G-code body consumes, per extruder index (0-based).
+
+    ``source`` says where the grams came from: ``slicer_grams`` (the
+    slicer wrote them), ``slicer_length`` (the slicer's length times the
+    filament cross-section times the material density), ``e_moves`` (no
+    slicer comment at all — the E words were summed), or ``none`` (nothing
+    is extruded, and the zeros are the truth).
+    """
+
+    mm: tuple[float, ...]
+    grams: tuple[float, ...]
+    source: str
+
+    @property
+    def total_mm(self) -> float:
+        return float(sum(self.mm))
+
+    @property
+    def total_g(self) -> float:
+        return float(sum(self.grams))
+
+
+def _number_list(text: str) -> list[float]:
+    out: list[float] = []
+    for raw in re.split(r"[,;]", text):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            out.append(float(raw))
+        except ValueError:
+            return []
+    return out
+
+
+def _material_density(filament_type: str | None) -> float:
+    """The family's nominal density from Kiln's material table, or PLA's."""
+    if not filament_type:
+        return _DEFAULT_FILAMENT_DENSITY
+    try:
+        from kiln.cost_estimator import BUILTIN_MATERIALS
+    except ImportError:  # pragma: no cover — the cost table always ships
+        return _DEFAULT_FILAMENT_DENSITY
+    key = filament_type.strip().upper()
+    profile = BUILTIN_MATERIALS.get(key)
+    if profile is None:
+        family = re.match(r"[A-Z]+", key)
+        profile = BUILTIN_MATERIALS.get(family.group(0)) if family else None
+    return profile.density_g_per_cm3 if profile else _DEFAULT_FILAMENT_DENSITY
+
+
+def _real_tools_used(gcode_body: str) -> list[int]:
+    return sorted(
+        {
+            int(t)
+            for t in _GCODE_ANY_TOOL_SELECT_RE.findall(gcode_body)
+            if int(t) < _BAMBU_FIRST_PSEUDO_TOOL
+        }
+    )
+
+
+def _place_on_used_tools(values: list[float], tools: list[int]) -> list[float]:
+    """A slicer's comma list is one value per USED extruder: a print on T0
+    and T2 writes two numbers and the second is tray 3's."""
+    if not values or len(values) != len(tools) or tools == list(range(len(values))):
+        return values
+    out = [0.0] * (max(tools) + 1)
+    for tool, value in zip(tools, values, strict=True):
+        out[tool] = value
+    return out
+
+
+def _sum_e_moves(gcode_body: str) -> list[float]:
+    """Net E per extruder from the moves themselves.
+
+    Retract and unretract cancel because deltas are signed.  Absolute E
+    (``M82``, the G-code default) is differenced and reset by ``G92``;
+    relative E (``M83``, what Kiln slices with) is summed as written.  Moves
+    under a pseudo-tool (Bambu's ``T1000`` unload / ``T255``) belong to no
+    tray and are not counted.
+    """
+    totals: dict[int, float] = {}
+    tool: int | None = 0
+    relative = False
+    last_e = 0.0
+    for line in gcode_body.splitlines():
+        code = line.split(";", 1)[0].strip()
+        if not code:
+            continue
+        if code[0] in "Tt" and code[1:2].isdigit():
+            number = int(re.match(r"\d+", code[1:]).group(0))
+            tool = number if number < _BAMBU_FIRST_PSEUDO_TOOL else None
+            continue
+        word = code.split(None, 1)[0].upper()
+        if word == "M82" or word == "G90":
+            relative = False
+            continue
+        if word == "M83" or word == "G91":
+            relative = True
+            continue
+        if word == "G92":
+            e_word = _GCODE_E_WORD_RE.search(code)
+            if e_word:
+                last_e = float(e_word.group(1))
+            continue
+        if word not in ("G0", "G1", "G2", "G3"):
+            continue
+        e_word = _GCODE_E_WORD_RE.search(code)
+        if not e_word:
+            continue
+        value = float(e_word.group(1))
+        if relative:
+            delta = value
+        else:
+            delta = value - last_e
+            last_e = value
+        if tool is not None:
+            totals[tool] = totals.get(tool, 0.0) + delta
+    if not totals:
+        return []
+    out = [0.0] * (max(totals) + 1)
+    for index, total in totals.items():
+        out[index] = max(total, 0.0)
+    return out
+
+
+def filament_usage_from_gcode(
+    gcode_body: str,
+    *,
+    filament_types: list[str] | None = None,
+) -> FilamentUsage:
+    """How much filament *gcode_body* consumes, per extruder and in total.
+
+    The slicer's own grams win when it wrote them (``filament used [g]``,
+    Studio's ``total filament weight [g]``).  Otherwise its length is
+    turned into grams: length x the 1.75 mm cross-section x density, where
+    density is the slicer's own ``filament_density`` when it is not zero,
+    else Kiln's table for the material — *filament_types* (what the caller
+    declared and the AMS will be told) first, the body's ``filament_type``
+    line second, PLA last.  A body with no slicer comment at all has its E
+    words summed.  Never raises.
+    """
+    tools = _real_tools_used(gcode_body)
+    mm_match = _GCODE_USED_MM_RE.search(gcode_body)
+    mm = _place_on_used_tools(_number_list(mm_match.group(1)), tools) if mm_match else []
+    g_match = _GCODE_USED_G_RE.search(gcode_body)
+    grams = _place_on_used_tools(_number_list(g_match.group(1)), tools) if g_match else []
+
+    if mm and grams and any(g > 0 for g in grams) and len(grams) == len(mm):
+        source = "slicer_grams"
+    else:
+        source = "slicer_length" if mm else "e_moves"
+        if not mm:
+            mm = _sum_e_moves(gcode_body)
+        densities = _number_list(
+            (_GCODE_FILAMENT_DENSITY_RE.search(gcode_body) or [None, ""])[1]
+        )
+        diameters = _number_list(
+            (_GCODE_FILAMENT_DIAMETER_RE.search(gcode_body) or [None, ""])[1]
+        )
+        type_match = _GCODE_FILAMENT_TYPE_RE.search(gcode_body)
+        body_types = [t.strip() for t in type_match.group(1).split(";")] if type_match else []
+
+        def _pick(values: list[float], index: int) -> float | None:
+            if index < len(values) and values[index] > 0:
+                return values[index]
+            if len(values) == 1 and values[0] > 0:
+                return values[0]
+            return None
+
+        grams = []
+        for index, length in enumerate(mm):
+            declared = filament_types[index] if filament_types and index < len(filament_types) else None
+            density = _pick(densities, index)
+            if density is None:
+                density = _material_density(
+                    declared or (body_types[index] if index < len(body_types) else None)
+                )
+            diameter = _pick(diameters, index) or _FILAMENT_DIAMETER_MM
+            area_mm2 = math.pi * (diameter / 2.0) ** 2
+            grams.append(length * area_mm2 * density / 1000.0)
+
+    if not mm or sum(mm) <= 0:
+        return FilamentUsage(mm=tuple(mm), grams=tuple(0.0 for _ in mm), source="none")
+    return FilamentUsage(mm=tuple(mm), grams=tuple(grams), source=source)
+
+
+_SLICE_INFO_WEIGHT_RE = re.compile(r'(<metadata\s+key="weight"\s+value=")([^"]*)(")')
+_SLICE_INFO_FILAMENT_TAG_RE = re.compile(r"<filament\b[^>]*>")
+
+
+def _slice_info_knows_its_weight(slice_info: str) -> bool:
+    match = _SLICE_INFO_WEIGHT_RE.search(slice_info)
+    if not match:
+        return False
+    try:
+        return float(match.group(2)) > 0
+    except ValueError:
+        return False
+
+
+def _fill_slice_info_usage(slice_info: str, usage: FilamentUsage) -> str:
+    """Write *usage* where the printer's screen reads it, touching nothing else.
+
+    The plate's ``weight`` is the sum of the per-filament grams; each
+    ``<filament>`` gets ``used_m`` (metres) and ``used_g`` (grams), two
+    decimals, exactly as Bambu Studio writes them.  Filament tags map to
+    extruders in order when the counts agree, by ``id`` otherwise.
+    """
+    out = _SLICE_INFO_WEIGHT_RE.sub(
+        lambda m: f"{m.group(1)}{usage.total_g:.2f}{m.group(3)}", slice_info, count=1,
+    )
+    tags = list(_SLICE_INFO_FILAMENT_TAG_RE.finditer(out))
+    if not tags:
+        return out
+    pieces: list[str] = []
+    cursor = 0
+    for position, tag in enumerate(tags):
+        if len(tags) == len(usage.mm):
+            index = position
+        else:
+            id_match = re.search(r'\bid="(\d+)"', tag.group(0))
+            index = int(id_match.group(1)) - 1 if id_match else position
+        mm = usage.mm[index] if 0 <= index < len(usage.mm) else 0.0
+        grams = usage.grams[index] if 0 <= index < len(usage.grams) else 0.0
+        text = re.sub(r'\bused_m="[^"]*"', f'used_m="{mm / 1000.0:.2f}"', tag.group(0), count=1)
+        text = re.sub(r'\bused_g="[^"]*"', f'used_g="{grams:.2f}"', text, count=1)
+        pieces.append(out[cursor:tag.start()])
+        pieces.append(text)
+        cursor = tag.end()
+    pieces.append(out[cursor:])
+    return "".join(pieces)
+
 
 #: The generator stamp these slicers write into their G-code header.
 #: OrcaSlicer and BambuStudio share the fork; PrusaSlicer and the other
@@ -1143,26 +1412,38 @@ def _build_slice_info(
     num_filaments: int = 1,
     filament_colors: list[str] | None = None,
     filament_types: list[str] | None = None,
+    usage: FilamentUsage | None = None,
 ) -> str:
     """Build the ``slice_info.config`` XML for the 3MF.
 
     Supports multi-filament: set ``num_filaments`` > 1 and provide
     ``filament_colors`` / ``filament_types`` lists.
+
+    *usage* is what the printer's screen shows as the print's weight: the
+    plate ``weight`` (grams, the sum) and each filament's ``used_m`` /
+    ``used_g`` — the fields Bambu Studio writes and the A1's tile reads.
+    Without it every one of them is ``0.00``, which is what the tile showed
+    for every Kiln print until the builder started passing it.
     """
     colors = filament_colors or [filament_color] * num_filaments
     types = filament_types or [filament_type] * num_filaments
+    used_mm = list(usage.mm) if usage else []
+    used_g = list(usage.grams) if usage else []
 
     # Build filament entries
     filament_entries: list[str] = []
     for i in range(num_filaments):
         ftype = types[i] if i < len(types) else filament_type
         fcolor = colors[i] if i < len(colors) else filament_color
+        metres = (used_mm[i] if i < len(used_mm) else 0.0) / 1000.0
+        grams = used_g[i] if i < len(used_g) else 0.0
         filament_entries.append(
             f'    <filament id="{i + 1}" tray_info_idx="GFL99" type="{ftype}" '
-            f'color="{fcolor}" used_m="0.00" used_g="0.00" '
+            f'color="{fcolor}" used_m="{metres:.2f}" used_g="{grams:.2f}" '
             f'used_for_object="true" used_for_support="false" group_id="0" '
             f'nozzle_diameter="{nozzle_diameter:.2f}" volume_type="Standard"/>'
         )
+    weight = sum(used_g[:num_filaments])
 
     # Build object entries (one per filament for multi-color copies)
     object_entries: list[str] = []
@@ -1189,7 +1470,7 @@ def _build_slice_info(
         f'    <metadata key="nozzle_diameters" value="{nozzle_diameter}"/>\n'
         '    <metadata key="timelapse_type" value="0"/>\n'
         f'    <metadata key="prediction" value="{est_print_time_sec}"/>\n'
-        '    <metadata key="weight" value="0.00"/>\n'
+        f'    <metadata key="weight" value="{weight:.2f}"/>\n'
         f'    <metadata key="first_layer_time" value="{first_layer_time:.1f}"/>\n'
         '    <metadata key="outside" value="false"/>\n'
         '    <metadata key="support_used" value="false"/>\n'
@@ -1513,8 +1794,12 @@ def complete_bambu_archive(
     plain coloured render the printer's screen shows, not Kiln's stage,
     which belongs to the previews shown to a person — scaled to each
     slot's size, and written beside the marker that vouches for them.
-    Every other member — the G-code above all — is copied byte for byte:
-    an archive a slicer already wrapped must never be wrapped again
+    A ``slice_info.config`` whose ``weight`` the slicer left at ``0.00``
+    (Orca through Kiln's density-less profile did, for the painted jar)
+    gets the weight and per-filament ``used_m`` / ``used_g`` the screen
+    shows, read from the plate's own G-code; a weight the slicer knew is
+    kept.  Every other member — the G-code above all — is copied byte for
+    byte: an archive a slicer already wrapped must never be wrapped again
     (measured: re-wrapping Orca's plate doubled its start sequence).
     Rewrites in place unless *output_path* is given.  Idempotent.
 
@@ -1522,10 +1807,16 @@ def complete_bambu_archive(
     """
     src = Path(path)
     dst = Path(output_path) if output_path else src
+    slice_info: str | None = None
     with zipfile.ZipFile(str(src)) as zf:
         if "Metadata/plate_1.gcode" not in zf.namelist():
             raise ValueError(f"{src.name} is not a sliced plate (no Metadata/plate_1.gcode)")
         colors = _declared_plate_colors(zf)
+        if "Metadata/slice_info.config" in zf.namelist():
+            existing = zf.read("Metadata/slice_info.config").decode("utf-8", errors="replace")
+            if not _slice_info_knows_its_weight(existing):
+                plate_gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8", errors="replace")
+                slice_info = _fill_slice_info_usage(existing, filament_usage_from_gcode(plate_gcode))
     from kiln.colored_renderer import render_colored_mesh
 
     triangles = _archive_triangles(str(src), colors)
@@ -1556,6 +1847,9 @@ def complete_bambu_archive(
     with zipfile.ZipFile(str(src)) as src_zf, zipfile.ZipFile(str(tmp), "w", zipfile.ZIP_DEFLATED) as dst_zf:
         for item in src_zf.infolist():
             if item.filename in replaced:
+                continue
+            if item.filename == "Metadata/slice_info.config" and slice_info is not None:
+                dst_zf.writestr(item, slice_info)
                 continue
             dst_zf.writestr(item, src_zf.read(item.filename))
         for name, data in rendered.items():
@@ -1963,6 +2257,12 @@ def build_bambu_3mf(
     # down during printing, after startup is already finished).
     est_time_sec_with_startup = est_time_sec + _BAMBU_STARTUP_OVERHEAD_SEC
 
+    # The weight the screen shows, read from the body the slicer wrote —
+    # before Bambu's start sequence is added, so the purge line is not
+    # counted as the part.  The declared types are the density source when
+    # the slicer had none (Kiln's profiles never do).
+    usage = filament_usage_from_gcode(gcode_body, filament_types=f_types)
+
     slice_info = _build_slice_info(
         total_layers=total_layers,
         est_print_time_sec=est_time_sec_with_startup,
@@ -1973,6 +2273,7 @@ def build_bambu_3mf(
         num_filaments=settings.num_filaments,
         filament_colors=f_colors,
         filament_types=f_types,
+        usage=usage,
     )
     plate_json = _build_plate_json(
         filament_color=settings.filament_color,
@@ -2205,6 +2506,14 @@ def repackage_gcode_as_bambu_3mf(
             r'(<metadata\s+key="prediction"\s+value=")(\d+)(")',
             rf"\g<1>{prediction_sec}\3",
             slice_info,
+        )
+    # A copied slice_info whose weight the slicer left at 0.00 gets the
+    # weight of the gcode this archive actually carries — same reader as
+    # the builder and the completion, so no door shows a blank tile.
+    if slice_info and not _slice_info_knows_its_weight(slice_info):
+        slice_info = _fill_slice_info_usage(
+            slice_info,
+            filament_usage_from_gcode(gcode_bytes.decode("utf-8", errors="replace")),
         )
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)

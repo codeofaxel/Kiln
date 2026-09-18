@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **The pre-print nozzle check is free; its community half is Pro+.**
+  Everyone gets the verdict against the curated budget; Kiln Pro adds how
+  long that nozzle lasts on that filament across the community.
+
 - **You see the print before it starts, from every door.**
 
 - **A long print is never mistaken for a stuck one.** Kiln used to give up
@@ -54,6 +58,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   wrong place.
 
 ### Added
+
+- **Kiln counts your filament-cutter blade's cuts and tells you when it's
+  due.** Every print, load and colour change Kiln can see counts against the
+  maker's own number, and a print start says so when the blade wants
+  attention. *Kiln Pro adds how long blades really last on machines like
+  yours, measured across the community.*
 
 - **Your printer's own repair guide, one step at a time.** Kiln walks you
   through the maker's steps photos, and says so when none are available.

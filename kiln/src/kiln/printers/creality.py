@@ -9,6 +9,7 @@ from urllib.parse import urlparse, urlunparse
 import requests
 
 from kiln.printers.base import (
+    ActiveSlotReading,
     FilamentOpPlan,
     FilamentOpResult,
     FirmwareStatus,
@@ -95,6 +96,9 @@ _LEGACY_SERIAL_MODELS: frozenset[str] = frozenset(
 )
 _CFS_OBJECT_KEYWORDS: tuple[str, ...] = (
     "cfs",
+    # The K2 line's firmware names its multi-material unit object plainly
+    # (community reverse-engineering of the stock Moonraker payload).
+    "box",
     "filament_box",
     "filament box",
     "boxsinfo",
@@ -699,6 +703,40 @@ def _extract_cfs_slots(status: dict[str, Any]) -> list[dict[str, Any]]:
     return slots
 
 
+#: Where a CFS feeding-slot reading comes from, as :class:`ActiveSlotReading`
+#: names it.
+_CFS_SLOT_SOURCE = "moonraker_cfs"
+
+
+def _flag_is_set(value: Any) -> bool:
+    """Truthiness of a slot's loaded / selected / active flag as JSON may spell it."""
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off", "none", "null"}
+    return bool(value)
+
+
+def _active_slot_from_cfs(slots: list[dict[str, Any]]) -> ActiveSlotReading | None:
+    """The one feeding slot among normalised CFS slots, or ``None`` when unsaid.
+
+    Only slots that carry a loaded-shaped flag at all count as an answer:
+    exactly one set flag names the feeding slot, every flag unset is a
+    reading of "nothing feeding", and no flag anywhere, several set, or a
+    set flag on a slot with no id means the payload has not said.
+    """
+    flagged = [slot for slot in slots if slot.get("loaded") is not None]
+    if not flagged:
+        return None
+    feeding = [slot for slot in flagged if _flag_is_set(slot["loaded"])]
+    if not feeding:
+        return ActiveSlotReading(slot=None, source=_CFS_SLOT_SOURCE, verified=False)
+    if len(feeding) > 1:
+        return None
+    slot_id = feeding[0].get("slot")
+    if slot_id is None:
+        return None
+    return ActiveSlotReading(slot=str(slot_id), source=_CFS_SLOT_SOURCE, verified=False)
+
+
 class CrealityAdapter(PrinterAdapter):
     """First-class Creality FDM adapter using the Moonraker API surface.
 
@@ -732,6 +770,8 @@ class CrealityAdapter(PrinterAdapter):
         self._timeout = timeout
         self._verify_ssl = verify_ssl
         self._moonraker_url = self._resolve_moonraker_url()
+        # CFS-shaped Moonraker object names, found once by read_active_slot.
+        self._cfs_object_names: list[str] | None = None
         self._backend = MoonrakerAdapter(
             host=self._moonraker_url,
             api_key=self._api_key,
@@ -1052,6 +1092,59 @@ class CrealityAdapter(PrinterAdapter):
                 "Capture /printer/objects/list, /printer/objects/query, and gcode/help output from real hardware before enabling active slot commands.",
             ],
         }
+
+    def _cfs_object_names_cached(self) -> list[str]:
+        """CFS-shaped Moonraker object names, discovered once per adapter.
+
+        One ``/printer/objects/list`` on the first call; the answer is kept
+        (an empty one too) so the status path never pays for discovery
+        again.  A failed list is not kept, so the next call asks again.
+        """
+        cached = getattr(self, "_cfs_object_names", None)
+        if cached is not None:
+            return cached
+        objects_payload = self._backend._get_json("/printer/objects/list")  # type: ignore[attr-defined]
+        names = [
+            name
+            for name in _extract_object_names(objects_payload)
+            if _contains_keyword(name, _CFS_OBJECT_KEYWORDS)
+        ]
+        self._cfs_object_names = names
+        return names
+
+    def read_active_slot(self) -> ActiveSlotReading | None:
+        """Which CFS slot is feeding, read through Moonraker; ``None`` if unsaid.
+
+        The same discovery :meth:`get_cfs_status` makes, kept cheap for the
+        status path: the CFS-shaped object names are found once per adapter
+        and cached, so every later call is a single ``/printer/objects/query``
+        and the G-code help list is never asked for.  The slot whose
+        ``loaded`` / ``selected`` / ``active`` flag is set is the feeding
+        one; flags all unset are a reading of "nothing feeding".  When no
+        CFS objects exist, the query fails, no slot carries such a flag at
+        all, or more than one slot claims it, the payload has not said which
+        slot is feeding and this returns ``None``.
+
+        Creality documents no Moonraker field for the feeding CFS slot, so
+        those flag keys are a keyword guess and every reading is
+        ``verified=False``: the base observer reports its changes as
+        unverified and nothing is counted from them until a bench confirms
+        the field.  Read-only; sends no command and never raises.
+        """
+        try:
+            cfs_objects = self._cfs_object_names_cached()
+            if not cfs_objects:
+                return None
+            payload = self._backend._get_json(  # type: ignore[attr-defined]
+                "/printer/objects/query",
+                params={name: "" for name in cfs_objects},
+            )
+            status = _moonraker_result(payload).get("status")
+            if not isinstance(status, dict):
+                return None
+            return _active_slot_from_cfs(_extract_cfs_slots(status))
+        except Exception:  # noqa: BLE001 - PrinterError included; a reading never raises
+            return None
 
     def get_bed_mesh(self) -> dict[str, Any] | None:
         return self._backend.get_bed_mesh()

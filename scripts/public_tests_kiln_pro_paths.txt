@@ -7,6 +7,12 @@
 # and commit the diff.  Shrinking it needs no ceremony.
 kiln_pro.bridge
 kiln_pro.bridge.pro_features
+kiln_pro.cutter_intelligence
+kiln_pro.cutter_intelligence.catalogue
+kiln_pro.cutter_intelligence.counter
+kiln_pro.cutter_intelligence.faults
+kiln_pro.cutter_intelligence.store_resolver
+kiln_pro.cutter_intelligence.wear
 kiln_pro.data_overlays
 kiln_pro.data_overlays.load_overlay
 kiln_pro.design_brief

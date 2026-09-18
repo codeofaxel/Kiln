@@ -1185,6 +1185,16 @@ def _merge_push_status(cache: dict[str, Any], delta: dict[str, Any]) -> None:
             cache[key] = value
 
 
+def _tray_now_of(status: dict[str, Any]) -> str | None:
+    """The tray feeding the nozzle as the cache holds it, or ``None`` when
+    the AMS section has never said."""
+    ams = status.get("ams")
+    if not isinstance(ams, dict):
+        return None
+    value = ams.get("tray_now")
+    return None if value is None else str(value)
+
+
 def _is_accessory_module(name: str) -> bool:
     """True when a firmware module belongs to an AMS unit, not the printer."""
     head, sep, idx = str(name).partition("/")
@@ -2436,6 +2446,8 @@ class BambuAdapter(PrinterAdapter):
         # notification per message would be a fault reported hundreds of
         # times, which is how a real one gets tuned out.
         prev_print_error: int = 0
+        prev_tray_now: str | None = None
+        new_tray_now: str | None = None
         # Seconds since we last KNEW this printer's run state, read across the
         # merge below.  ``None`` when we never have — the first frame of a
         # process has nothing behind it to measure from.
@@ -2477,6 +2489,11 @@ class BambuAdapter(PrinterAdapter):
                         prev_print_error = int(
                             self._last_status.get("print_error") or 0
                         )
+                    # The tray feeding the nozzle BEFORE this frame, so a
+                    # change is seen on its edge: a load from the touchscreen
+                    # or a switch in a print the maker's app started is a cut
+                    # nothing Kiln did explains.
+                    prev_tray_now = _tray_now_of(self._last_status)
                     # How long since we last KNEW what this printer was doing.
                     # Read BEFORE the merge refreshes it: it is the only bound
                     # on how late an ending carried by this frame might be.
@@ -2514,6 +2531,7 @@ class BambuAdapter(PrinterAdapter):
                     new_gcode_state = str(
                         self._last_status.get("gcode_state", "")
                     ).lower().strip()
+                    new_tray_now = _tray_now_of(self._last_status)
                     job_id_for_hook = (
                         self._last_status.get("subtask_name")
                         or self._last_status.get("task_id")
@@ -2543,6 +2561,24 @@ class BambuAdapter(PrinterAdapter):
                     _ended_state = str(self._last_status.get("gcode_state") or "")
                 self._maybe_restore_nozzle_detection(prev_gcode_state, _ended_state)
             # _state_lock has been released here (outside the `with`).
+            # A tray change the connection saw.  Skipped when Kiln itself is
+            # driving this machine (its own load / unload / cancel and a
+            # print it started are already reported at their own doors);
+            # counted when the person or the maker's app did it.
+            if (
+                prev_tray_now is not None
+                and new_tray_now is not None
+                and prev_tray_now != new_tray_now
+            ):
+                if self._kiln_is_driving():
+                    # Already charged at the start (or by the command that
+                    # caused it); counted here only so the print's end can
+                    # check the charge against what the wire showed.
+                    held = getattr(self, "_cutter_print", None)
+                    if isinstance(held, dict):
+                        held["observed"] = int(held.get("observed") or 0) + 1
+                else:
+                    self._notice_tray_change(prev_tray_now, new_tray_now)
             # Fire the hook — it's idempotent per (printer, job_id)
             # and cheap when no terminal transition occurred.
             if prev_gcode_state and new_gcode_state and job_id_for_hook:
@@ -2573,6 +2609,8 @@ class BambuAdapter(PrinterAdapter):
                     ended = is_terminal_transition(
                         prev_gcode_state, new_gcode_state
                     )
+                    if ended:
+                        self._reconcile_cutter_print(str(file_name_for_hook or job_id_for_hook))
                     # Read the stopwatch BEFORE the hook's database write: it
                     # is still running, so anything that takes time between
                     # the ending and this read is added to the print.
@@ -2712,6 +2750,24 @@ class BambuAdapter(PrinterAdapter):
     #: stop's own noise rather than a discovery.  The measured window was
     #: about four seconds; this is that with room for a slow reply.
     _STOP_SETTLE_SECONDS: float = 15.0
+
+    #: The push stream reports tray changes on its own edge (above); the
+    #: polled observer in the base class stays out of the way.
+    _slot_observer_native: bool = True
+
+    def _notice_tray_change(self, before: str, after: str) -> None:
+        """Report one observed tray change.  Never raises; never blocks the push path."""
+        try:
+            from kiln._pro_cutter_bridge import record_observed_switch
+
+            record_observed_switch(
+                self.name,
+                printer_model=self.declared_printer_model() or None,
+                from_tray=before,
+                to_tray=after,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("observed tray change not reported", exc_info=True)
 
     def _own_stop_settling(self) -> bool:
         """Is this fault the tail of a stop Kiln itself just sent?"""
@@ -5104,6 +5160,15 @@ class BambuAdapter(PrinterAdapter):
         """Cancel the currently running print job."""
         self._stop_sent_at = time.monotonic()
         self._send_print_command("stop")
+        # On some machines the firmware's own cancel routine cuts the
+        # filament before it parks.  Reported as the verb; which models cut
+        # on a cancel is kiln-pro's table.  Never blocks the stop.
+        try:
+            from kiln._pro_cutter_bridge import record_command_cut
+
+            record_command_cut(self.name, "cancel", printer_model=self.declared_printer_model() or None)
+        except Exception:  # noqa: BLE001 -- cut bookkeeping never touches a stop
+            logger.debug("cutter count recording failed", exc_info=True)
         return PrintResult(success=True, message="Print cancelled.")
 
     #: How long :meth:`emergency_stop` watches the status reports for the stop
@@ -6608,6 +6673,9 @@ class BambuAdapter(PrinterAdapter):
             time.sleep(1.0)
 
     def _ams_change_filament(self, target: int, plan: FilamentOpPlan) -> None:
+        # Kiln's own command: the tray change it causes on the wire is
+        # reported by the filament door, not by the observer.
+        self._filament_command_sent_at = time.monotonic()
         with self._state_lock:
             raw_cur = self._last_status.get("nozzle_target_temper")
         curr_temp = int(plan.temperature)

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-09-16T19:49:46.615970+00:00",
-  "tool_count": 421,
+  "generated": "2026-09-18T23:09:40.778418+00:00",
+  "tool_count": 424,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -12482,6 +12482,68 @@
       }
     },
     {
+      "name": "maintenance_due",
+      "description": "Which parts are due on which machines -- one list, worst first, across mixed makes.",
+      "tier": "free",
+      "access": "free",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "parts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parts"
+          },
+          "recent_faults": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recent Faults"
+          }
+        },
+        "title": "maintenance_dueArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "plan_fleet_material_change",
       "description": "Plan future-object material/color changes across a fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
@@ -13957,9 +14019,9 @@
     },
     {
       "name": "check_nozzle_capacity_for_print",
-      "description": "Pre-print check \u2014 will the nozzle survive this print's wear cost?\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Pre-print check \u2014 will the nozzle survive this print's wear cost?",
+      "tier": "free",
+      "access": "free",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -13988,15 +14050,6 @@
         ],
         "title": "check_nozzle_capacity_for_printArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "nozzle_wear_v1",
-        "variant": "nozzle_wear",
-        "feature": "Nozzle wear tracking",
-        "headline": "Know how worn this nozzle is before it costs a print.",
-        "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
-        "free_included": "Reading and setting this printer's nozzle stays available."
       }
     },
     {
@@ -14097,6 +14150,47 @@
           "auto_recover_id"
         ],
         "title": "confirm_auto_recoverArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cutter_wear_status",
+      "description": "How worn is this machine's filament-cutter blade, against the maker's own number.",
+      "tier": "free",
+      "access": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "printer_model": {
+            "default": "",
+            "title": "Printer Model",
+            "type": "string"
+          },
+          "recent_faults": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recent Faults"
+          }
+        },
+        "required": [
+          "printer_id"
+        ],
+        "title": "cutter_wear_statusArguments",
         "type": "object"
       }
     },
@@ -14529,7 +14623,7 @@
     },
     {
       "name": "get_community_wear_baseline",
-      "description": "Cross-tenant community wear baseline for a cohort.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Pro+ \u2014 cross-tenant community wear baseline for a cohort.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
@@ -15689,6 +15783,80 @@
           "material"
         ],
         "title": "record_completed_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_cutter_replacement",
+      "description": "Record a filament-cutter blade swap -- the whole operation, one call.",
+      "tier": "free",
+      "access": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "replaced_at": {
+            "default": "",
+            "title": "Replaced At",
+            "type": "string"
+          },
+          "previous_cut_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Previous Cut Count"
+          },
+          "cuts_before_kiln": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cuts Before Kiln"
+          },
+          "blade_side": {
+            "default": "",
+            "title": "Blade Side",
+            "type": "string"
+          },
+          "reason_detail": {
+            "default": "",
+            "title": "Reason Detail",
+            "type": "string"
+          },
+          "printer_model": {
+            "default": "",
+            "title": "Printer Model",
+            "type": "string"
+          },
+          "client_event_id": {
+            "default": "",
+            "title": "Client Event Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "reason"
+        ],
+        "title": "record_cutter_replacementArguments",
         "type": "object"
       }
     },

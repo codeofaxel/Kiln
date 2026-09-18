@@ -7197,6 +7197,21 @@ def start_print(
             out["preheat_reasserted"] = reasserted
         if nozzle_advisory is not None:
             out["nozzle_advisory"] = nozzle_advisory
+        # One line about the filament-cutter blade, only when it wants
+        # attention (due, past due, or the machine has raised its cutter
+        # fault this month).  Never blocks, never waits long, says nothing
+        # on a machine with no cutter or no record.
+        try:
+            from kiln._pro_cutter_bridge import consult_blade
+
+            _declared = getattr(adapter, "declared_printer_model", None)
+            _blade = consult_blade(
+                target_name, printer_model=(_declared() if callable(_declared) else None) or None
+            )
+            if _blade is not None:
+                out["blade_advisory"] = _blade
+        except Exception:  # noqa: BLE001 -- an advisory never touches a start
+            logger.debug("blade advisory skipped", exc_info=True)
         return out
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
@@ -9782,11 +9797,9 @@ def preflight_check(
             _planned_grams = 0.0
             if file_result is not None:
                 _planned_grams = float(file_result.get("filament_grams") or 0)
-            _printer_id = ""
-            if _get_registry().count > 0:
-                _names = _get_registry().list_names()
-                if _names:
-                    _printer_id = _names[0]
+            # The machine this pre-flight was aimed at, never the first one
+            # registered: an unaimed check resolves to the default the same way.
+            _printer_id = pf_target or ""
             if _printer_id and _planned_grams > 0:
                 _nozzle_verdict = _pro_nozzle_bridge.consult_capacity(
                     printer_id=_printer_id,
@@ -9804,6 +9817,29 @@ def preflight_check(
                     )
         except Exception as exc:
             logger.debug("Nozzle capacity check skipped: %s", exc)
+
+        # -- Filament-cutter blade (advisory) ------------------------------
+        # One line when the blade is due, past due, or the machine has
+        # raised its cutter fault this month.  Never fails the pre-flight:
+        # a dull blade is a thing to order, not a reason to refuse a print.
+        try:
+            from kiln._pro_cutter_bridge import consult_blade
+
+            if pf_target:
+                _blade = consult_blade(pf_target, printer_model=_pf_model or None)
+                if _blade is not None:
+                    checks.append(
+                        {
+                            "name": "cutter_blade",
+                            "passed": True,
+                            "message": _blade["line"],
+                            "advisory": True,
+                            "word": _blade["word"],
+                            "confidence": _blade["confidence"],
+                        }
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Blade check skipped: %s", exc)
 
         # -- Summary -------------------------------------------------------
         ready = all(c["passed"] for c in checks)
@@ -15911,7 +15947,7 @@ def _heartbeat_device_header() -> dict[str, str]:
     return {"X-Kiln-Heartbeat-Device": value} if value else {}
 
 
-def _pro_api_call(tool_name: str, **kwargs) -> dict:
+def _pro_api_call(tool_name: str, _timeout: float = 30.0, **kwargs) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
     Bearer-token resolution order:
@@ -16061,7 +16097,7 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
             headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=_timeout) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         # Preserve the server's own error body when present — it usually
@@ -16182,9 +16218,14 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 # A nozzle tool is about a printer only this process can
                 # reach: read it here and send the reading with the request,
                 # so the hosted side can compare it with the record it holds.
+                from kiln._pro_cutter_bridge import with_recent_faults
                 from kiln.printer_nozzle_reading import with_local_reading
 
-                return _pro_api_call(_name, **with_local_reading(_name, kwargs))
+                # Likewise a blade-status request carries this install's
+                # recent fault codes: the hosted side has no event log.
+                return _pro_api_call(
+                    _name, **with_recent_faults(_name, with_local_reading(_name, kwargs))
+                )
             return _stub
 
         stub = _make_stub(name)
