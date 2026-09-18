@@ -190,6 +190,12 @@ def map_printer_hint_to_profile_id(raw: str | None) -> str | None:
         return "elegoo_neptune4"
     if "neptune3" in hint_compact or "neptune 3" in raw.lower():
         return "elegoo_neptune3"
+    # The Carbon 2 family (Carbon 2 and Carbon 2 Combo) is its own row: a
+    # load-cell Z home, a 350C nozzle and a LAN protocol the first Carbon does
+    # not speak.  Tested before the bare "centauri" so it cannot fall through
+    # to the older machine.
+    if "carbon2" in hint_compact or hint_compact in {"cc2", "cc2c", "elegoocc2", "elegoocc2c"}:
+        return "elegoo_centauri_carbon_2"
     if "centauri" in hint_compact:
         return "elegoo_centauri_carbon"
     if "orangestorm" in hint_compact or "giga" in hint_compact:

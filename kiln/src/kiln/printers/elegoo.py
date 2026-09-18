@@ -5,7 +5,9 @@ printers that use the **SDCP (Smart Device Control Protocol)** over WebSocket.
 
 This covers Elegoo printers with cbd-tech/ChituBox mainboards including:
 
-* **Centauri Carbon** / **Centauri Carbon 2** (FDM, high-speed)
+* **Centauri Carbon** (FDM, high-speed).  NOT the **Centauri Carbon 2**
+  family: per Elegoo's own SDK that generation speaks MQTT on port 1883
+  with a registration step, not SDCP, and Kiln has no adapter for it yet.
 * **Saturn 3 Ultra** / **Saturn 4 Ultra** (MSLA resin)
 * **Mars 5** / **Mars 5 Ultra** (MSLA resin)
 

@@ -1963,13 +1963,20 @@ def canonical_model_key(reported: str, *, vendor_prefix: str = "") -> str | None
     Matching is strict membership against the intelligence profile list;
     a new model becomes mappable the moment its key is added there.
     """
-    norm = re.sub(r"[^a-z0-9]+", "_", reported.lower()).strip("_")
-    norm = re.sub(r"(?<=[a-z])_(?=\d)", "", norm)
+    spaced = re.sub(r"[^a-z0-9]+", "_", reported.lower()).strip("_")
+    norm = re.sub(r"(?<=[a-z])_(?=\d)", "", spaced)
     if not norm:
         return None
-    candidates = [norm]
-    if vendor_prefix and not norm.startswith(vendor_prefix):
-        candidates.insert(0, f"{vendor_prefix}{norm}")
+    # The collapsed spelling first (``ender3_v2``), then the spelling that
+    # keeps the underscore before a bare generation digit -- the catalogue
+    # keys ``elegoo_centauri_carbon_2`` that way, and collapsing it would
+    # leave a Carbon 2 reporting itself verbatim with a row waiting for it.
+    candidates: list[str] = []
+    for spelling in (norm, spaced):
+        if vendor_prefix and not spelling.startswith(vendor_prefix):
+            candidates.append(f"{vendor_prefix}{spelling}")
+        candidates.append(spelling)
+    candidates = list(dict.fromkeys(candidates))
     try:
         from kiln.printer_intelligence import list_intel_profiles
 

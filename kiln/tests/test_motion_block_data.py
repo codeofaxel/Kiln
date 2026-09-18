@@ -136,6 +136,17 @@ class TestTheFactsTheGateLeansOn:
         assert facts["voron_2"].z_travel_limit_mm is None  # two vendor boards disagree; both in the note
         assert "260" in facts["voron_2"].source("z_travel_limit_mm").note and "290" in facts["voron_2"].source("z_travel_limit_mm").note
 
+    def test_the_centauri_split_is_in_the_data(self):
+        """The Carbon homes Z on a switch, the Carbon 2 by nozzle contact on a
+        load cell -- the two facts that made them two rows (2026-09-18)."""
+        facts = _facts()
+        cc, cc2 = facts["elegoo_centauri_carbon"], facts["elegoo_centauri_carbon_2"]
+        assert cc.z_home_method == "endstop_switch" and cc.z_home_xy_mm == (130.0, 130.0)
+        assert cc2.z_home_method == "nozzle_contact_plate" and cc2.z_home_xy_mm == (128.0, 128.0)
+        assert cc2.home_routine_travels_blind is True and cc.home_routine_travels_blind is None
+        assert cc2.z_travel_limit_mm == 258.0 and cc2.unhomed_move_policy == "refused"
+        assert "load cell" in cc2.source("z_home_method").note
+
     def test_the_a1_first_home_is_on_the_plate_and_the_strip_is_named(self):
         f = _facts()["bambu_a1"]
         assert f.z_home_method == "nozzle_contact_plate"

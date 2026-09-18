@@ -1107,7 +1107,7 @@
   },
   "elegoo_centauri_carbon": {
     "printer_id": "elegoo_centauri_carbon",
-    "display_name": "Elegoo Centauri Carbon / Carbon 2",
+    "display_name": "Elegoo Centauri Carbon",
     "manufacturer": "Elegoo",
     "build_volume_mm": {
       "x": 256,
@@ -1132,6 +1132,40 @@
       0.12,
       0.16,
       0.2,
+      0.28
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
+  },
+  "elegoo_centauri_carbon_2": {
+    "printer_id": "elegoo_centauri_carbon_2",
+    "display_name": "Elegoo Centauri Carbon 2 / Carbon 2 Combo",
+    "manufacturer": "Elegoo",
+    "build_volume_mm": {
+      "x": 256,
+      "y": 256,
+      "z": 256
+    },
+    "max_hotend_temp_c": 350,
+    "max_bed_temp_c": 110,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "asa",
+      "petg",
+      "pla",
+      "pla-cf",
+      "polycarbonate",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 500,
+    "default_layer_heights_mm": [
+      0.12,
+      0.16,
+      0.2,
+      0.24,
       0.28
     ],
     "chamber_temp_c": null,

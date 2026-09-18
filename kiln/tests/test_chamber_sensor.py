@@ -98,6 +98,10 @@ class TestCatalogue:
         # reads TempOfBox from a real sensor, so the flag changes nothing
         # there; it is recorded so the row answers rather than shrugs.
         assert chamber_sensor_for_model("elegoo_centauri_carbon") is True
+        # The Carbon 2 (own row since 2026-09-18): Elegoo's per-model table
+        # lists a chamber thermistor on the Carbon 2 and Carbon 2 Combo, and
+        # the vendor configuration carries the box temperature sensor.
+        assert chamber_sensor_for_model("elegoo_centauri_carbon_2") is True
 
     def test_accessor_is_unknown_where_nothing_is_stated(self) -> None:
         # A model the catalogue has never judged for this fact, and no model

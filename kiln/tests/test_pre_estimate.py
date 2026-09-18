@@ -864,12 +864,13 @@ class TestGetPrinterToolChangeWithAddon:
         with pytest.raises(ValueError, match="not compatible"):
             _get_printer_tool_change("ender3", tool_changer_addon="creality_cfs")
 
-    def test_canvas_works_with_centauri(self):
-        tc = _get_printer_tool_change(
-            "elegoo_centauri_carbon", tool_changer_addon="elegoo_canvas",
-        )
-        assert tc["tool_changer"] == "canvas"
-        assert tc["has_auto_tool_change"] is True
+    def test_canvas_works_with_both_centauri_generations(self):
+        # The maker sells a CANVAS for the first Centauri Carbon and one for
+        # the Carbon 2 / Centauri 2 series; the Carbon 2 Combo ships its own.
+        for printer_id in ("elegoo_centauri_carbon", "elegoo_centauri_carbon_2"):
+            tc = _get_printer_tool_change(printer_id, tool_changer_addon="elegoo_canvas")
+            assert tc["tool_changer"] == "canvas", printer_id
+            assert tc["has_auto_tool_change"] is True, printer_id
 
     def test_chameleon_universal(self):
         tc = _get_printer_tool_change("prusa_mini", tool_changer_addon="chameleon_mk4")

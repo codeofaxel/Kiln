@@ -75,6 +75,13 @@ CANONICAL = {
     "elegoo_neptune4": "elegoo_neptune4",
     "Neptune 3 Pro": "elegoo_neptune3",
     "Centauri Carbon": "elegoo_centauri_carbon",
+    # The Carbon 2 family became its own row on 2026-09-18; the older
+    # machine's spelling must not swallow it, and vice versa.
+    "Centauri Carbon 2": "elegoo_centauri_carbon_2",
+    "Centauri Carbon 2 Combo": "elegoo_centauri_carbon_2",
+    "elegoo_centauri_carbon_2": "elegoo_centauri_carbon_2",
+    "CC2": "elegoo_centauri_carbon_2",
+    "elegoo_centauri_carbon": "elegoo_centauri_carbon",
     "OrangeStorm Giga": "elegoo_orangestorm_giga",
     "voron_trident_300": "voron_trident",
     "Voron Trident": "voron_trident",

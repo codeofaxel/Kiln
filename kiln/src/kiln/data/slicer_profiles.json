@@ -65,10 +65,11 @@
       "tool_changer": "canvas",
       "max_colors": 4,
       "compatible_printers": [
-        "elegoo_centauri_carbon"
+        "elegoo_centauri_carbon",
+        "elegoo_centauri_carbon_2"
       ],
       "requires_klipper": false,
-      "notes": "Integrated multi-color system for Elegoo Centauri Carbon 2 Combo. Not a retrofit add-on — built into the CC2 Combo variant. 70s average per color change. RFID filament detection. Source: NotebookCheck CC2 review (Jan 2026)."
+      "notes": "Elegoo's four-spool, single-nozzle multi-colour feeder. Ships with the Centauri Carbon 2 Combo (and the Centauri 2 Combo); sold separately by the maker as a fitting add-on for the first Centauri Carbon (its own CANVAS product) and for the Centauri Carbon 2 / Centauri 2. 70s average per color change. RFID filament detection. Source: NotebookCheck CC2 review (Jan 2026) for the timing; the maker's two CANVAS product pages for the fit."
     }
   },
   "default": {
@@ -1500,7 +1501,7 @@
     }
   },
   "elegoo_centauri_carbon": {
-    "display_name": "Elegoo Centauri Carbon / Carbon 2",
+    "display_name": "Elegoo Centauri Carbon",
     "slicer": "orcaslicer",
     "notes": "High-speed CoreXY. Enclosed. SDCP protocol. All-metal hotend. Active chamber heating.",
     "settings": {
@@ -1537,6 +1538,46 @@
       "tool_change_seconds": 90,
       "tool_changer": "none",
       "tool_change_notes": "No automatic tool changer available at launch. M600 manual pause only."
+    }
+  },
+  "elegoo_centauri_carbon_2": {
+    "display_name": "Elegoo Centauri Carbon 2 / Carbon 2 Combo",
+    "slicer": "orcaslicer",
+    "notes": "Enclosed CoreXY, 350C hardened steel nozzle, 110C bed, passive chamber. The settings follow the maker's own Carbon 2 slicer profiles (0.4 nozzle machine profile, its 0.20 mm Standard process and its PLA profile: 2 walls, 5/3 shells, 15% rectilinear infill, 160/200 mm/s walls, 0.8 mm retraction at 30 mm/s, 0.4 mm lift); Klipper G-code dialect. Kiln has no adapter for this machine's MQTT protocol, so slice here and send through ELEGOO Slicer or the Matrix app.",
+    "settings": {
+      "layer_height": "0.2",
+      "first_layer_height": "0.2",
+      "perimeters": "2",
+      "top_solid_layers": "5",
+      "bottom_solid_layers": "3",
+      "fill_density": "15%",
+      "fill_pattern": "rectilinear",
+      "infill_speed": "200",
+      "perimeter_speed": "200",
+      "external_perimeter_speed": "160",
+      "first_layer_speed": "50",
+      "travel_speed": "500",
+      "nozzle_diameter": "0.4",
+      "filament_diameter": "1.75",
+      "temperature": "210",
+      "first_layer_temperature": "210",
+      "bed_temperature": "60",
+      "first_layer_bed_temperature": "60",
+      "fan_always_on": "1",
+      "min_fan_speed": "50",
+      "max_fan_speed": "100",
+      "disable_fan_first_layers": "1",
+      "retract_length": "0.8",
+      "retract_speed": "30",
+      "retract_lift": "0.4",
+      "bed_shape": "0x0,256x0,256x256,0x256",
+      "max_print_height": "256",
+      "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 51,
+      "tool_changer": "canvas",
+      "tool_change_notes": "CANVAS: four spools, one nozzle, so every change purges. Ships with the Carbon 2 Combo; the plain Carbon 2 takes it as the maker's own add-on. 51 s is the maker's load time in its Carbon 2 slicer machine profile (machine_load_filament_time); the same profile records the unload time as 0, and the purge adds to the total. Source: the maker's slicer profiles and product pages."
     }
   },
   "elegoo_orangestorm_giga": {

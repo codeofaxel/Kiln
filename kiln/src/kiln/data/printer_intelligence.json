@@ -4015,7 +4015,7 @@
     }
   },
   "elegoo_centauri_carbon": {
-    "display_name": "Elegoo Centauri Carbon / Carbon 2",
+    "display_name": "Elegoo Centauri Carbon",
     "firmware": "sdcp",
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
@@ -4085,19 +4085,19 @@
       "_sources": {
         "z_carrier": {
           "class": "vendor_layout",
-          "note": "inferred from the vendor's corexy layout: `kinematics : corexy` (CC printer.cfg L5), `kinematics=corexy` (CC2 printer.cfg), CC2 README \"It supports CoreXY motion structure\", vendor slicer `fdm_elegoo_3dp_001_common.json` L102 `\"printer_structure\": \"corexy\"` — an enclosed CoreXY cube. No vendor sentence says which part moves in Z"
+          "note": "inferred from the vendor's corexy layout: `kinematics : corexy` (CC printer.cfg L5) and the vendor slicer `fdm_elegoo_3dp_001_common.json` L102 `\"printer_structure\": \"corexy\"` — an enclosed CoreXY cube. No vendor sentence says which part moves in Z"
         },
         "xy_layout": {
           "class": "vendor_config",
-          "note": "`kinematics : corexy`; the CC2 README says \"It supports CoreXY motion structure\"; slicer `printer_structure: corexy` inherited by `ECC/Elegoo Centauri Carbon 0.4 nozzle.json` L4 and `ECC2/... Carbon 2 0.4 nozzle.json` L4"
+          "note": "`kinematics : corexy`; slicer `printer_structure: corexy` inherited by `ECC/Elegoo Centauri Carbon 0.4 nozzle.json` L4"
         },
         "z_home_method": {
           "class": "vendor_config",
-          "note": "As shipped: `[stepper_z] endstop_pin : PG8`, `position_endstop : 4.5`, `[strain_gauge] enable_z_home : 0`: a Z switch that triggers with the nozzle held ~4.5 mm over the plate at bed centre, so a part taller than that at centre is hit; a strain-gauge nozzle-contact path exists (`STRAINGAUGE_Z_HOME`). Carbon 2 is nozzle_contact_plate: `endstop_pin=probe:z_virtual_endstop`, `[load_cell_probe] sensor_type=cs1237`."
+          "note": "As shipped: `[stepper_z] endstop_pin : PG8`, `position_endstop : 4.5`, `[strain_gauge] enable_z_home : 0`: a Z switch that triggers with the nozzle held ~4.5 mm over the plate at bed centre, so a part taller than that at centre is hit; a strain-gauge nozzle-contact path exists (`STRAINGAUGE_Z_HOME`). The Carbon 2, which homes Z by pressing the nozzle onto the plate against a load cell, is its own row."
         },
         "z_home_xy_mm": {
           "class": "vendor_config",
-          "note": "`[safe_z_home]` / `home_x_position : 130.0000` / `home_y_position : 130.000` (bed centre, CC). Carbon 2: `[homing_override] home_x_pos=128 / home_y_pos=128 / home_xy_speed=150 / z_retract_pos=5` (CC2 printer.cfg L315-355). Clean-nozzle sequences also issue `G28 Z I128 J255 K0.1 L4` (rear centre)"
+          "note": "`[safe_z_home]` / `home_x_position : 130.0000` / `home_y_position : 130.000` (bed centre, CC)."
         },
         "home_routine_travels_blind": {
           "class": "vendor_config",
@@ -4109,11 +4109,11 @@
         },
         "unhomed_move_policy": {
           "class": "vendor_config",
-          "note": "The vendor's own firmware source (Centauri Carbon 2): `throw move->move_error(\"Must home axis first\")` (corexy.cpp L195-196); manual moves log \"Must home axis first before manual move\" (`elegoo/extras/gcode_move.cpp` L483-486). Over SDCP the question is moot: the protocol has no move, jog or home command at all (SDCP v3.0.0 spec). The gen-1 Carbon's own host source is not separately confirmed."
+          "note": "The vendor's own Carbon firmware source: with an axis unhomed the move check returns false and the move is dropped -- the \"Must home axis first\" error text is commented out (corexy.cpp L144), so the refusal is silent; a homed move past a soft limit is clamped to the limit rather than refused (L148-160). Over SDCP the question is moot: the protocol has no move, jog or home command at all (SDCP v3.0.0 spec)."
         },
         "z_travel_limit_mm": {
           "class": "vendor_config",
-          "note": "`[stepper_z] position_max : 258.000000` (L65), `position_min : -5` (L66), `[printer] minimum_z_position : -20.000000` (L12); X `position_max : 256.5` (L25), Y `position_max : 270.000000` (L45). Carbon 2 identical 258 (`position_max=258.000000`, `position_min=-10`, CC2 printer.cfg). The vendor slicer end G-code commands Z up to `printable_height+0.5` = 256.5 (CC L68 line 11)"
+          "note": "`[stepper_z] position_max : 258.000000` (L65), `position_min : -5` (L66), `[printer] minimum_z_position : -20.000000` (L12); X `position_max : 256.5` (L25), Y `position_max : 270.000000` (L45). The vendor slicer end G-code commands Z up to `printable_height+0.5` = 256.5 (CC L68 line 11)"
         },
         "z_travel_limit_kind": {
           "class": "vendor_config",
@@ -4121,11 +4121,11 @@
         },
         "park_verb": {
           "class": "vendor_config",
-          "note": "No G27 / PARK verb; no `[gcode_macro]` sections in the vendor printer.cfg — the vendor's park is a `[pause_resume]` config position that runs only inside the print pause / cancel flow (SDCP Cmd 129/130). Slicer pause verb `M600` (CC L64, CC2 L62)"
+          "note": "No G27 / PARK verb; no `[gcode_macro]` sections in the vendor printer.cfg — the vendor's park is a `[pause_resume]` config position that runs only inside the print pause / cancel flow (SDCP Cmd 129/130). Slicer pause verb `M600` (CC L64)"
         },
         "park_position_mm": {
           "class": "vendor_config",
-          "note": "`[pause_resume] pause_abs_pos_x : 202` / `pause_abs_pos_y : 264.5` / `pause_rel_pos_z : 10` (a relative lift, so Z is omitted): rear-right, Y beyond the 256 plate edge, over the purge chute; `[change_filament] pos_x : 202 / pos_y : 264.5` agrees. Carbon 2: `after_pause_gcode_macro2=G90\\nG1 X202 Y250 F20000\\nG1 Y264 F3000`. Reachable by no verb Kiln can send."
+          "note": "`[pause_resume] pause_abs_pos_x : 202` / `pause_abs_pos_y : 264.5` / `pause_rel_pos_z : 10` (a relative lift, so Z is omitted): rear-right, Y beyond the 256 plate edge, over the purge chute; `[change_filament] pos_x : 202 / pos_y : 264.5` agrees. Reachable by no verb Kiln can send."
         },
         "park_refuses_unhomed": {
           "class": "not_found",
@@ -4134,6 +4134,145 @@
         "purge_wipe_station": {
           "class": "vendor_config",
           "note": "Purge chute at X202 Y264.5 (`[auto_leveling] extrude_feed_gcode`), then a wipe at Y261.5 sweeping X110<->X140 after `STRAINGAUGE_Z_HOME` at `G1 X128 Y254`. Station: rear-right corner, X≈168-204, Y≈250-264.5; z_mm omitted because the wipe runs 0.5 mm below the strain-gauge home. The slicer's on-plate purge (`G1 X128 Y-1.2`, L-shaped along the front and left edges) is a purge line, not the station."
+        }
+      }
+    }
+  },
+  "elegoo_centauri_carbon_2": {
+    "display_name": "Elegoo Centauri Carbon 2 / Carbon 2 Combo",
+    "firmware": "proprietary",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_chamber_sensor": true,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 250,
+        "bed": 70,
+        "fan": 40
+      },
+      "ABS": {
+        "hotend": 270,
+        "bed": 90,
+        "fan": 40
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 35,
+        "fan": 100
+      },
+      "ASA": {
+        "hotend": 270,
+        "bed": 90,
+        "fan": 80
+      },
+      "PC": {
+        "hotend": 270,
+        "bed": 110,
+        "fan": 35
+      },
+      "PLA-CF": {
+        "hotend": 220,
+        "bed": 60,
+        "fan": 80
+      },
+      "PETG-CF": {
+        "hotend": 250,
+        "bed": 70,
+        "fan": 40
+      }
+    },
+    "build_volume_mm": [
+      256,
+      256,
+      256
+    ],
+    "max_hotend_temp": 350,
+    "max_bed_temp": 110,
+    "has_input_shaping": true,
+    "nozzle_clumping_probe": null,
+    "motion": {
+      "z_carrier": "bed",
+      "xy_layout": "corexy",
+      "z_home_method": "nozzle_contact_plate",
+      "z_home_xy_mm": [
+        128,
+        128
+      ],
+      "home_routine_travels_blind": true,
+      "firmware_family": "proprietary",
+      "unhomed_move_policy": "refused",
+      "z_travel_limit_mm": 258,
+      "z_travel_limit_kind": "firmware_config",
+      "park_verb": "none",
+      "park_position_mm": {
+        "x": 202,
+        "y": 264
+      },
+      "park_refuses_unhomed": null,
+      "purge_wipe_station": {
+        "x_mm": 203,
+        "y_mm": 264,
+        "kind": "chute"
+      },
+      "_sources": {
+        "z_carrier": {
+          "class": "vendor_layout",
+          "note": "inferred from the vendor's corexy layout: `kinematics=corexy` (Carbon 2 printer.cfg L2), the vendor firmware README's \"It supports CoreXY motion structure\", and the vendor slicer's `printer_structure: corexy` (common Elegoo machine file L102) inherited by every Carbon 2 nozzle profile -- an enclosed CoreXY cube. No vendor sentence says which part moves in Z"
+        },
+        "xy_layout": {
+          "class": "vendor_config",
+          "note": "`kinematics=corexy` (Carbon 2 printer.cfg L2); the vendor firmware README says \"It supports CoreXY motion structure\"; the vendor slicer's common Elegoo machine file carries `printer_structure: corexy` (L102), inherited by every Carbon 2 nozzle profile."
+        },
+        "z_home_method": {
+          "class": "vendor_config",
+          "note": "`[stepper_z] endstop_pin=probe:z_virtual_endstop` (Carbon 2 printer.cfg L88) with `[load_cell_probe] sensor_type=cs1237` (L358-360) on the bed-sensor MCU: the nozzle is pressed onto the plate and a load cell under the bed feels it; `z_samples=5` / `z_samples_tolerance=0.01` (L354-355). The vendor's own G28 override heats the nozzle to 140 first (its safe_home_temp default)."
+        },
+        "z_home_xy_mm": {
+          "class": "vendor_config",
+          "note": "`[homing_override] home_x_pos=128 / home_y_pos=128 / home_xy_speed=150` (Carbon 2 printer.cfg L347-349): bed centre. The clean-nozzle sequences also issue `G28 Z I128 J255 K0.1 L4` (rear centre, L445)."
+        },
+        "home_routine_travels_blind": {
+          "class": "vendor_config",
+          "note": "The vendor's own G28 override (firmware source, homing_override.cpp) lifts Z before X/Y home only when the load-cell endstop already reads triggered (`z_ready_retract_pos=10` / `z_ready_end_pos=5`, L342-343); otherwise X and Y home at whatever Z the head is at, with no lift. No [safe_z_home] section exists."
+        },
+        "firmware_family": {
+          "class": "vendor_sentence",
+          "note": "The vendor README calls it \"a complete 3D printer firmware project, including both the application layer program and the MCU firmware\" over a Klipper-style printer.cfg; the vendor slicer emits Klipper dialect (`gcode_flavor: klipper`, Carbon 2 profile L61). `proprietary` names this host; the LAN protocol is MQTT (the vendor's own SDK), not the first Carbon's SDCP."
+        },
+        "unhomed_move_policy": {
+          "class": "vendor_config",
+          "note": "The vendor's own Carbon 2 firmware source: `throw move->move_error(\"Must home axis first\")` (corexy.cpp L196); manual moves log \"Must home axis first before manual move\" (gcode_move.cpp L485). Kiln sends this machine no move at all today: its LAN protocol is MQTT, which Kiln has no adapter for."
+        },
+        "z_travel_limit_mm": {
+          "class": "vendor_config",
+          "note": "`[stepper_z] position_max=258.000000` (Carbon 2 printer.cfg L93), `position_min=-10` (L92); `[printer] z_range=0,256` (L9); X `position_max=256.5` (L41), Y `position_max=270.000000` (L66). The vendor slicer's end G-code commands Z up to `printable_height+0.5` = 256.5."
+        },
+        "z_travel_limit_kind": {
+          "class": "vendor_config",
+          "note": "`position_max` config line"
+        },
+        "park_verb": {
+          "class": "vendor_config",
+          "note": "No G27 / PARK verb and no `[gcode_macro]` sections in the vendor printer.cfg -- the vendor's park is a `[pause_resume]` macro that runs only inside the print pause / cancel flow (L199-206). Slicer pause verb `M600` (Carbon 2 profile L62)."
+        },
+        "park_position_mm": {
+          "class": "vendor_config",
+          "note": "`[pause_resume] after_pause_gcode_macro2=G90\\nG1 X202 Y250 F20000\\nG1 Y264 F3000` (L201) and `cancel_print_gcode_macro1=M400\\nG1 X202 Y250 F20000\\nG1 Y264 F3000` (L205): rear-right, Y beyond the 256 plate edge, over the purge chute; Z is a relative lift in macro1 (L200), so omitted. Reachable by no verb Kiln can send."
+        },
+        "park_refuses_unhomed": {
+          "class": "not_found",
+          "note": "No vendor park verb; the pause-flow moves run only during a print, and the firmware itself refuses unhomed moves (see unhomed_move_policy)."
+        },
+        "purge_wipe_station": {
+          "class": "vendor_config",
+          "note": "`[bed_mesh] clean_nozzle_gcode` (L445): `G1 X203 Y250 F20000` then `G1 Y264 F3000` to the chute at the rear right, a purge, then a wipe at Y262 sweeping X168-187; a second pass at X202 Y264 (L481). The runout and load macros purge at the same chute (X204 Y264, L286 / L295). Station: rear-right corner, X~168-204, Y~250-264. z_mm omitted: no absolute Z is stated."
         }
       }
     }

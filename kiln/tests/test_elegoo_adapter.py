@@ -1030,6 +1030,17 @@ class TestGetPrinterInfo:
         assert info.raw_model == "Centauri Carbon"
         assert info.source == "sdcp"
 
+    def test_a_carbon_2_lands_on_its_own_row_not_the_carbon_and_not_verbatim(self) -> None:
+        """The catalogue keys the Carbon 2 family ``elegoo_centauri_carbon_2``,
+        with the underscore the digit-collapsing rule would drop; the
+        normalizer tries that spelling too, so the machine's own name maps."""
+        adapter = _adapter()
+        adapter._last_status = {"MachineName": "Centauri Carbon 2"}
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "elegoo_centauri_carbon_2"
+        assert info.raw_model == "Centauri Carbon 2"
+
     def test_digit_spacing_normalizes_to_canonical_key(self) -> None:
         """"Neptune 4" must land on elegoo_neptune4, not elegoo_neptune_4."""
         adapter = _adapter()

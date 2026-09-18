@@ -762,7 +762,7 @@
     "notes": "Klipper-based. All-metal hotend. High-speed capable."
   },
   "elegoo_centauri_carbon": {
-    "display_name": "Elegoo Centauri Carbon / Carbon 2",
+    "display_name": "Elegoo Centauri Carbon",
     "max_hotend_temp": 320.0,
     "max_bed_temp": 110.0,
     "max_chamber_temp": 70.0,
@@ -775,6 +775,21 @@
       256
     ],
     "notes": "High-speed CoreXY with SDCP protocol. Enclosed, active chamber heating. All-metal hotend with a brass-hardened steel nozzle rated to 320C by the manufacturer. The ceiling here read 300C until 2026-07-20, which capped the machine 20C below its rated hotend and blocked its top of range for no stated reason; corrected to the manufacturer's figure, which the printer registry already carried."
+  },
+  "elegoo_centauri_carbon_2": {
+    "display_name": "Elegoo Centauri Carbon 2 / Carbon 2 Combo",
+    "max_hotend_temp": 350.0,
+    "max_bed_temp": 110.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      256,
+      256,
+      256
+    ],
+    "notes": "Elegoo Centauri Carbon 2 and Carbon 2 Combo (the Combo ships the four-spool CANVAS unit; the plain Carbon 2 takes it as an add-on). Enclosed CoreXY, 256 mm cube; 500 mm/s, 20,000 mm/s2 and a 32 mm3/s flow rate are the maker's own figures. The maker rates the stock hardened steel nozzle to 350C and the bed to 110C, so both ceilings here are the maker's; a hotend rated to 350C cannot be PTFE-lined, which is the only sense in which all_metal is inferred. The enclosure is passive: the vendor configuration carries a chamber thermistor and an auto-controlled exhaust grille but no chamber heater, and the maker publishes no chamber temperature, so max_chamber_temp is null (unverified) rather than borrowed from the first Carbon. Z is found by pressing the nozzle onto the plate against a load cell under the bed, not by the first Carbon's Z switch. This row is not the first-generation Carbon: that machine speaks SDCP over WebSocket and keeps its own row; the Carbon 2 family speaks MQTT (per the maker's own SDK), which Kiln has no adapter for yet, so its firmware key reads proprietary and Kiln does not drive it."
   },
   "elegoo_orangestorm_giga": {
     "display_name": "Elegoo OrangeStorm Giga",

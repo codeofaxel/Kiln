@@ -76,6 +76,60 @@ def test_every_printer_file_lists_the_same_printers():
     )
 
 
+def _name_tokens(name: str) -> tuple[str, ...]:
+    return tuple(t for t in str(name).lower().split() if t)
+
+
+def family_members(display_name: str) -> list[tuple[str, ...]]:
+    """The machines a "/"-joined display name lists, each spelled in full.
+
+    A later member inherits the first member's leading words: the words of
+    the first member that come before the point where the later member
+    overlaps it ("Sovol SV07 / SV07 Plus" -> "Sovol SV07 Plus"), or, with no
+    overlap, all but the words the later member replaces ("Voron 0 / 0.2"
+    -> "Voron 0.2").
+    """
+    parts = [_name_tokens(part) for part in str(display_name).split("/")]
+    parts = [part for part in parts if part]
+    if not parts:
+        return []
+    first = parts[0]
+    members = [first]
+    for member in parts[1:]:
+        overlap = 0
+        for size in range(min(len(first), len(member)), 0, -1):
+            if first[-size:] == member[:size]:
+                overlap = size
+                break
+        if overlap:
+            members.append(first[:-overlap] + member)
+        elif len(member) < len(first):
+            members.append(first[: len(first) - len(member)] + member)
+        else:
+            members.append(member)
+    return members
+
+
+def test_family_members_spell_each_listed_machine_in_full():
+    assert family_members("Sovol SV07 / SV07 Plus") == [("sovol", "sv07"), ("sovol", "sv07", "plus")]
+    assert family_members("Voron 0 / 0.2") == [("voron", "0"), ("voron", "0.2")]
+    assert family_members("Elegoo Centauri Carbon 2 / Carbon 2 Combo") == [
+        ("elegoo", "centauri", "carbon", "2"),
+        ("elegoo", "centauri", "carbon", "2", "combo"),
+    ]
+    assert family_members("Elegoo Neptune 3 / 3 Pro / 3 Plus")[1:] == [
+        ("elegoo", "neptune", "3", "pro"),
+        ("elegoo", "neptune", "3", "plus"),
+    ]
+    # The case the test was written for still reads as a shadow: the family
+    # lists the very machine that has its own row.
+    assert _name_tokens("Sovol SV07 Plus") in family_members("Sovol SV07 / SV07 Plus")
+    # And the 2026-09-18 false positive does not: no member IS the older Carbon.
+    assert _name_tokens("Elegoo Centauri Carbon") not in family_members(
+        "Elegoo Centauri Carbon 2 / Carbon 2 Combo"
+    )
+
+
 def test_no_family_profile_shadows_a_machine_that_has_its_own_id():
     """A family profile is fine; one that shadows a real id is not.
 
@@ -90,29 +144,31 @@ def test_no_family_profile_shadows_a_machine_that_has_its_own_id():
     served the smaller machine's build volume — 100mm short in every axis — to
     anyone who asked by name instead of by id.
 
-    Detection is a containment test on the display names, not a "/" check, so
-    honest families pass and shadowed ids fail.
+    Detection reads the machines a family name lists -- each "/" member,
+    with the leading words the first member lends it ("Sovol SV07 / SV07
+    Plus" lists a "Sovol SV07 Plus") -- and fails when one of them IS another
+    row's machine.  A plain token-containment test was the first cut, and it
+    called "Elegoo Centauri Carbon 2 / Carbon 2 Combo" a shadow of "Elegoo
+    Centauri Carbon" on 2026-09-18: every word of the older machine's name
+    sits inside the newer one's, yet the family lists no machine but the two
+    Carbon 2s.  Honest families pass and shadowed ids fail.
     """
     profiles = json.loads(ROSTER_FILES["printer_profiles"].read_text(encoding="utf-8"))
     entries = {k: v for k, v in profiles.items() if not k.startswith("_")}
-
-    def tokens(name: str) -> set[str]:
-        return {t for t in str(name).replace("/", " ").lower().split() if t}
 
     shadowed: list[str] = []
     for pid, entry in entries.items():
         if "/" not in str(entry.get("display_name", "")):
             continue
-        family = tokens(entry.get("display_name", ""))
-        for other_id, other in entries.items():
-            if other_id == pid:
-                continue
-            other_tokens = tokens(other.get("display_name", ""))
-            if other_tokens and other_tokens <= family:
-                shadowed.append(
-                    f"{pid}={entry.get('display_name')!r} shadows "
-                    f"{other_id}={other.get('display_name')!r}"
-                )
+        for member in family_members(entry.get("display_name", "")):
+            for other_id, other in entries.items():
+                if other_id == pid:
+                    continue
+                if member == _name_tokens(other.get("display_name", "")):
+                    shadowed.append(
+                        f"{pid}={entry.get('display_name')!r} shadows "
+                        f"{other_id}={other.get('display_name')!r}"
+                    )
 
     assert not shadowed, (
         "these family profiles name a machine that also has its own printer id, "
