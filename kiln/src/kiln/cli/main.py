@@ -3646,7 +3646,12 @@ def plate_clear_cmd(note, printer_name, json_mode) -> None:
         sys.exit(1)
 
 
-@cli.command("repair-guide")
+@cli.group("machine")
+def machine() -> None:
+    """Look after the machine itself: the maker's own repair and maintenance guides."""
+
+
+@machine.command("repair-guide")
 @click.argument("topic", default="")
 @click.option("--code", "hms_code", default="", help="The fault code on the printer's screen (any separators).")
 @click.option("--step", type=int, default=0, show_default=True, help="Serve only this step (0 = the maker's power-off warning); the answer names the next one.")

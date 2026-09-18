@@ -26,7 +26,7 @@ guide Kiln can step through".  Pictures are never fetched, proxied or
 cached: the maker's server serves them from the URL in the answer.
 
 Auto-discovered by :func:`~kiln.plugin_loader.register_all_plugins`.  The
-tool body is a module-level function so ``kiln repair-guide`` runs the very same
+tool body is a module-level function so ``kiln machine repair-guide`` runs the very same
 code the MCP tool runs.
 """
 
@@ -311,9 +311,15 @@ def run_repair_guide(
                 {"step": int(s.get("n", 0)), "title": s.get("title")}
                 for s in guide.get("steps") or [] if isinstance(s, dict)
             ],
+            # Two audiences, two fields: the person hears plain words; the
+            # agent driving the tool reads which argument carries their word.
             "how_to_step": (
-                f"Power off and unplug the printer, then call repair_guide(step={start}, "
-                "power_off_confirmed=True) and go one step per call; each answer names the next step."
+                "Power off the printer and unplug it, then say so; Kiln then gives one step at a "
+                "time and names the next one after each."
+            ),
+            "agent_note": (
+                f"When the person says the printer is off and unplugged, call repair_guide(step={start}, "
+                "power_off_confirmed=True); never set that argument on their behalf."
             ),
         }
     n = int(step or 0)
@@ -330,7 +336,8 @@ def run_repair_guide(
             "next_step": {
                 "step": start,
                 "title": next((s.get("title") for s in guide.get("steps") or [] if isinstance(s, dict) and int(s.get("n", 0)) == start), None),
-                "requires": "power_off_confirmed=True -- a person's statement that the printer is off and unplugged",
+                "requires": "the person's word that the printer is off and unplugged",
+                "agent_note": "pass power_off_confirmed=True only once the person has said so",
             },
             "done": False,
         }
@@ -339,10 +346,16 @@ def run_repair_guide(
         # The refusal carries step 0 itself, so the warning is served before
         # any step however the door was knocked on.
         return _srv._error_dict(
-            f"Step {n} is refused until a person confirms the printer is powered off and unplugged. "
-            f"{maker}'s warning, verbatim: {zero['text']} Then call again with power_off_confirmed=True.",
+            f"Before step {n}: power off the printer and unplug it, then say so. "
+            f"{maker}'s warning, verbatim: {zero['text']}",
             code="POWER_OFF_REQUIRED",
-            extra={"power_off_required": True, "step_zero": zero, "guide": slug, "printer_id": model},
+            extra={
+                "power_off_required": True, "step_zero": zero, "guide": slug, "printer_id": model,
+                "agent_note": (
+                    "Ask the person; when they say the printer is off and unplugged, call again with "
+                    "power_off_confirmed=True. Never set it on their behalf."
+                ),
+            },
         )
     block = _step_block(guide, n, maker=maker, source_url=header.get("maker_page_url"))
     if block is None:
@@ -444,7 +457,7 @@ def coverage_line(printer_id: str) -> tuple[str, bool]:
         topics = ", ".join(cover.get("topics") or [])
         return (
             f"{cover.get('maker')}: {cover.get('count')} guide(s) for this model Kiln can step through "
-            f"({topics}) -- repair_guide (kiln repair-guide <topic|code> --plan, then --step N)"
+            f"({topics}) -- repair_guide (kiln machine repair-guide <topic|code> --plan, then --step N)"
         ), False
     if maker_name and index_url:
         return (

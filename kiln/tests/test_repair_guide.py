@@ -209,7 +209,10 @@ class TestPlan:
         assert [s["title"] for s in out["steps"]][0] == "Remove the toolhead front cover"
         # Nothing of a step's body is served by the plan.
         assert "do" not in out and "image_url" not in out
-        assert "power_off_confirmed=True" in out["how_to_step"]
+        # The person hears plain words; the argument name is for the agent only.
+        assert "power_off_confirmed" not in out["how_to_step"]
+        assert "say so" in out["how_to_step"]
+        assert "power_off_confirmed=True" in out["agent_note"]
 
     def test_the_plan_says_the_pictures_are_the_makers_and_not_copied(self, with_pro):
         out = rg.repair_guide("bambu_a1_mini", topic="cutter", plan_only=True)
@@ -239,7 +242,7 @@ class TestMoreThanOneGuideMatches:
 
         from kiln.cli.main import cli
 
-        result = CliRunner().invoke(cli, ["repair-guide", "--guide", LEVER_SLUG, "--printer-id", "bambu_a1", "--plan", "--json"])
+        result = CliRunner().invoke(cli, ["machine", "repair-guide", "--guide", LEVER_SLUG, "--printer-id", "bambu_a1", "--plan", "--json"])
         assert result.exit_code == 0, result.output
         assert json.loads(result.output[result.output.index("{"):])["data"]["guide"] == LEVER_SLUG
 
@@ -261,7 +264,8 @@ class TestStepZeroIsTheMakersWarning:
         assert out["printer_must_be_off"] is True
         assert out["also"] == CUTTER_GUIDE["warnings"]
         assert out["next_step"]["step"] == 1
-        assert "power_off_confirmed=True" in out["next_step"]["requires"]
+        assert "power_off_confirmed" not in out["next_step"]["requires"]
+        assert "power_off_confirmed=True" in out["next_step"]["agent_note"]
 
     def test_the_default_call_is_step_zero(self, with_pro):
         out = rg.repair_guide("bambu_a1_mini", topic="cutter")
@@ -275,6 +279,8 @@ class TestStepZeroIsTheMakersWarning:
         # The refusal itself serves step 0, so the warning is read before
         # anything is unscrewed however the door was knocked on.
         assert POWER_OFF in out["error"]["message"]
+        assert "power_off_confirmed" not in out["error"]["message"]
+        assert "power_off_confirmed=True" in out["agent_note"]
         assert out["step_zero"]["text"] == POWER_OFF
         assert out["power_off_required"] is True
 
@@ -441,7 +447,7 @@ class TestCliDoor:
 
         from kiln.cli.main import cli
 
-        result = CliRunner().invoke(cli, ["repair-guide", "cutter", "--printer-id", "bambu_a1_mini", "--plan", "--json"])
+        result = CliRunner().invoke(cli, ["machine", "repair-guide", "cutter", "--printer-id", "bambu_a1_mini", "--plan", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output[result.output.index("{"):])
         assert payload["status"] == "success"
@@ -452,10 +458,11 @@ class TestCliDoor:
 
         from kiln.cli.main import cli
 
-        refused = CliRunner().invoke(cli, ["repair-guide", "cutter", "--printer-id", "bambu_a1_mini", "--step", "2"])
+        refused = CliRunner().invoke(cli, ["machine", "repair-guide", "cutter", "--printer-id", "bambu_a1_mini", "--step", "2"])
         assert refused.exit_code == 1 and "power off" in refused.output.lower()
+        assert "power_off_confirmed" not in refused.output
         served = CliRunner().invoke(
-            cli, ["repair-guide", "1200-8001", "--printer-id", "bambu_a1_mini", "--step", "2", "--power-off-confirmed", "--json"],
+            cli, ["machine", "repair-guide", "1200-8001", "--printer-id", "bambu_a1_mini", "--step", "2", "--power-off-confirmed", "--json"],
         )
         assert served.exit_code == 0, served.output
         payload = json.loads(served.output[served.output.index("{"):])
@@ -482,7 +489,7 @@ class TestDoctorDoor:
         detail, warn = rg.coverage_line("bambu_a1_mini")
         assert warn is False
         assert detail.startswith("Bambu Lab: 1 guide(s) for this model")
-        assert "cutter" in detail and "kiln repair-guide" in detail
+        assert "cutter" in detail and "kiln machine repair-guide" in detail
 
     def test_the_line_is_honest_without_kiln_pro(self, without_pro):
         detail, warn = rg.coverage_line("bambu_a1_mini")
