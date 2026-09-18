@@ -1885,8 +1885,21 @@ def status(ctx: click.Context, json_mode: bool) -> None:
         state = adapter.get_state()
         job = adapter.get_job()
 
+        # A cool-down a Kiln server left running (killed with the part fan
+        # on) finishes from this read, the same as from printer_status:
+        # fan off once the nozzle is at or below the hand-off, and said so.
+        cooldown = None
+        try:
+            from kiln.printers.routine_ledger import complete_stranded_cooldown
+
+            cooldown = complete_stranded_cooldown(adapter, state)
+        except Exception as exc:  # noqa: BLE001 -- a backstop must never fail the read
+            logger.debug("stranded cool-down check failed: %s", exc)
+
         # Enrich JSON output with printer context so agents get everything in one call
         extra: dict = {}
+        if cooldown:
+            extra["cooldown"] = cooldown
         if json_mode:
             try:
                 cfg = load_printer_config(ctx.obj.get("printer"))
@@ -1896,6 +1909,8 @@ def status(ctx: click.Context, json_mode: bool) -> None:
                 logger.debug("Failed to enrich printer info: %s", exc)  # Best-effort enrichment
 
         click.echo(format_status(state.to_dict(), job.to_dict(), json_mode=json_mode, extra=extra))
+        if cooldown and not json_mode:
+            click.echo(f"  {cooldown['note']}")
 
         # Migration nag: warn if the active printer has no printer_model.
         # Incident #0 (2026-04-15) exposed that the field silently
@@ -3360,7 +3375,7 @@ def temp(
 
 @cli.command()
 @click.option("--node", default="part", help="Fan node (part, aux, chamber).")
-@click.option("--percent", type=int, default=100, help="Fan speed, 0-100.")
+@click.option("--percent", type=int, required=True, help="Fan speed, 0-100 (required: never defaulted).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def fan(node: str, percent: int, json_mode: bool) -> None:
     """Set a printer fan's speed."""
@@ -3390,7 +3405,7 @@ def fan(node: str, percent: int, json_mode: bool) -> None:
 
 @cli.command()
 @click.option("--node", default="chamber_light", help="Light node (chamber_light, work_light).")
-@click.option("--mode", default="on", help="on, off, or flashing where the machine supports it.")
+@click.option("--mode", required=True, help="on, off, or flashing where the machine supports it (required).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def light(node: str, mode: str, json_mode: bool) -> None:
     """Turn a printer light on or off."""
@@ -3426,6 +3441,15 @@ def filament() -> None:
     from kiln.server import ensure_runtime_config
 
     ensure_runtime_config()
+    # This process is the whole server for the routine it runs: whatever
+    # it switched on (a heater mid-wait, the cool-down's fan) settles on
+    # the way out, a Ctrl-C included.  The MCP server registers the same
+    # drain on its own shutdown path.
+    import atexit
+
+    from kiln.printers.routine_ledger import drain_at_exit
+
+    atexit.register(drain_at_exit)
 
 
 def _emit_filament_result(result: dict, json_mode: bool) -> None:
@@ -3439,6 +3463,35 @@ def _emit_filament_result(result: dict, json_mode: bool) -> None:
         click.echo(format_error(msg or "Filament operation failed.", code=code, json_mode=json_mode))
         sys.exit(1)
     click.echo(format_response("success", data=result, json_mode=json_mode))
+    _wait_for_cooldown(result, json_mode)
+
+
+def _wait_for_cooldown(result: dict, json_mode: bool) -> None:
+    """A served cool-down runs on from a thread; a one-shot process has to
+    stay for it, or the fan-off leaves with the process.  A person is at
+    the machine, and nothing here is timing the call, so this door waits
+    (the MCP server answers and lets its own thread finish).  The wait is
+    narrated on stderr so stdout stays the answer."""
+    cooldown = (result.get("details") or {}).get("cooldown")
+    if not isinstance(cooldown, dict) or cooldown.get("status") != "running":
+        return
+    from kiln.printers.routine_ledger import open_holds, wait_settled
+
+    handoff = cooldown.get("handoff_c")
+    timeout = float(cooldown.get("timeout_s") or 150.0)
+    click.echo(
+        f"Cooling: the part fan is on until the nozzle reads {handoff:g} °C; staying to turn it off ...",
+        err=True,
+    )
+    wait_settled(timeout + 5.0)
+    if any(label.startswith("part fan") for label in open_holds()):
+        click.echo(
+            f"The nozzle had not reached {handoff:g} °C within {timeout:g}s; the fan is left on and "
+            "the next `kiln status` turns it off once it has.",
+            err=True,
+        )
+    else:
+        click.echo("Fan off.", err=True)
 
 
 @filament.command("load")

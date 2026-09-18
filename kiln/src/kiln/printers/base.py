@@ -3606,6 +3606,8 @@ class PrinterAdapter(ABC):
                 "model and wipe the nozzle before resuming."
             )
             result.details["heater"] = f"left at {plan.temperature:g} °C: the print is paused and will need it"
+            # The paused print owns its heater from here; a shutdown must not cool it.
+            self._release_heater_hold()
             return result
         # A plan sent nothing; a step that is not the last one is the middle
         # of a sequence a person is walking through -- the heater stays as
@@ -3626,6 +3628,8 @@ class PrinterAdapter(ABC):
         if plan.options.get("keep_hot"):
             result.details["heater"] = f"left ON at {plan.temperature:g} °C (keep_hot was asked for)"
             result.message = f"{result.message} Heater left ON at {plan.temperature:g} °C, as asked."
+            # Asked for, like set_temperature: the caller owns it, the watchdog covers it.
+            self._release_heater_hold()
             return result
         # First the retract that stops the drool.  A nozzle at print
         # temperature with the melt zone still pressurised oozes for the
@@ -3661,6 +3665,7 @@ class PrinterAdapter(ABC):
         except Exception:  # noqa: BLE001 -- the op already happened; report the heater honestly
             off = False
         if off:
+            self._release_heater_hold()
             result.details["heater"] = "off"
             result.message = (
                 f"{result.message} "
@@ -3677,6 +3682,34 @@ class PrinterAdapter(ABC):
                 f"at {plan.temperature:g} °C. Send set_temperature(0)."
             )
         return result
+
+    def _hold_heater(self, target: float) -> None:
+        """Kiln just set the hotend to *target* for a routine of its own:
+        register the heater-off, so a server stopped mid-routine sends it.
+
+        Measured 2026-09-18: a purge's heat, extrude and watch run longer
+        than a client waits, and a host that restarts the server in that
+        window leaves whatever the routine had switched on.  The heater is
+        the hazard; this is the memory of it outside the routine's frame.
+        Released by :meth:`_finish_filament_op` once the heater is off, or
+        when the caller asked to keep it hot.
+        """
+        from kiln.printers.routine_ledger import hold, printer_key
+
+        self._release_heater_hold()
+        self._heater_hold = hold(
+            f"hotend at {target:g} °C for a filament routine",
+            printer_key(self),
+            lambda: self.set_tool_temp(0),
+            adapter=self,
+            kind="heater",
+        )
+
+    def _release_heater_hold(self) -> None:
+        held = getattr(self, "_heater_hold", None)
+        if held is not None:
+            held.release()
+            self._heater_hold = None
 
     def _after_heater_off(self, result: FilamentOpResult) -> str:
         """What happens between "heater off" and the answer, and the sentence for it.
@@ -4889,6 +4922,7 @@ class PrinterAdapter(ABC):
         still_parked = " The head was parked over the purge chute first and is still there." if parked else ""
         try:
             self.set_tool_temp(target)
+            self._hold_heater(target)
         except PrinterError as exc:
             return FilamentOpResult(
                 success=False,

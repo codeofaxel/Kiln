@@ -214,6 +214,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **A purge or wipe finishes cooling the nozzle even if your assistant stops
+  listening.** Kiln used to leave the part fan running if the request was
+  abandoned mid-routine; the fan now goes off on its own once the nozzle has
+  cooled, and a status check finishes the job if Kiln was restarted in
+  between.
+
+- **Setting a fan or light now needs the setting.** A request that arrived
+  without a fan speed used to run the fan at full; it is now refused, so an
+  intent to turn something off can never turn it on.
+
 - **Two printers were misfiled: the Voron Trident and the Creality Hi.** Each
   now gets its own correct profile.
 
