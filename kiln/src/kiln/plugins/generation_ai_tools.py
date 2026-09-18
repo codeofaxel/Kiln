@@ -955,6 +955,12 @@ class _GenerationAIToolsPlugin:
                             "consent": "KILN_AUTO_PRINT_GENERATED",
                         },
                     )
+                    from kiln import print_signoff
+
+                    print_signoff.grant(
+                        "generate_and_print", file_name, printer_name,
+                        source=print_signoff.SOURCE_STANDING_OPT_IN,
+                    )
                     sent_at = time.monotonic()
                     print_result = adapter.start_print(file_name)
                     _srv._note_print_started(adapter)

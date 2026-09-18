@@ -533,6 +533,11 @@ class TestFiles:
 
 
 class TestPrint:
+
+    @pytest.fixture(autouse=True)
+    def _preview_gate_bypassed(self, monkeypatch):
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # this door now gates on a preview like start_print; these tests are about the rest
+
     def test_print_status(self, runner, mock_adapter, config_file):
         p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
         with p1, p2, p3:

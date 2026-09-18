@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from kiln.pipelines import (
     PIPELINES,
     PipelineResult,
@@ -1145,6 +1147,11 @@ class TestRunResliceAndPrintTool:
         - Valid overrides parsed and forwarded to pipeline
         - Pipeline failure propagated as structured result
     """
+
+    @pytest.fixture(autouse=True)
+    def _preview_gate_bypassed(self, monkeypatch):
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # this door now gates on a preview like start_print; these tests are about the rest
+
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_invalid_overrides_json(self, mock_auth: MagicMock) -> None:

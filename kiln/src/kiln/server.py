@@ -77,6 +77,7 @@ from kiln.mcp_compat import (
 )
 from kiln.print_consent import (
     SOURCE_CI_BYPASS,
+    SOURCE_DERIVED,
     SOURCE_ELICITED,
     PrintConsent,
     consent_for,
@@ -1459,6 +1460,11 @@ def _get_adapter() -> PrinterAdapter:
     _install_print_lifecycle_hooks()
 
     if _adapter is not None:
+        from kiln.print_signoff import require_signoff
+
+        # Handed out by a door, so its starts must be cleared — the same
+        # mark the registry puts on everything it registers.
+        require_signoff(_adapter)
         return _adapter
 
     host = _PRINTER_HOST
@@ -2165,6 +2171,14 @@ _CONSENT_FILE_ARG: dict[str, str] = {
     "start_monitored_print": "file_name",
     "slice_and_print": "input_path",
     "retry_print_with_fix": "model_path",
+    "run_quick_print": "model_path",
+    "run_reslice_and_print": "model_path",
+    "submit_job": "file_name",
+    "fleet_submit_job": "file_path",
+    "reprint_with_material": "file_path",
+    "multi_copy_print": "model_path",
+    "multi_color_copies": "model_path",
+    "print_plate_object": "file_path",
 }
 
 
@@ -2276,6 +2290,34 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     return None
 
 
+class _PlateAlreadyBuilt(Exception):
+    """Control flow only: the previewed plate is reused, not rebuilt."""
+
+
+@contextlib.contextmanager
+def _covered_by_approval(
+    tool_name: str, approved_file: str, derived_file: str, printer_name: str | None,
+):
+    """Run an inner start of *derived_file* under the approval *approved_file* got.
+
+    The plate-building tools gate the INPUT — the one mesh copied across the
+    plate, the plate an object is cut out of — because that is what a person
+    can preview before the call.  What they start is a file that did not
+    exist until the call built it, so the inner gate would refuse it.  This
+    is the record that the two are one print: a consent for the derived
+    file, sourced ``derived``, alive only for the inner call.
+    """
+    token = set_consent(
+        PrintConsent(
+            tool=tool_name, file_name=derived_file, printer_name=printer_name, source=SOURCE_DERIVED,
+        )
+    )
+    try:
+        yield
+    finally:
+        reset_consent(token)
+
+
 def _preview_gate_error(
     tool_name: str,
     file_name: str,
@@ -2306,60 +2348,54 @@ def _preview_gate_error(
     # A person was actually asked about THIS file on THIS machine and said
     # yes.  That is the thing the token has only ever stood in for, so it
     # ends the question rather than being checked alongside one.
+    from kiln import print_signoff
+
     if granted := consent_for(file_name=file_name, printer_name=printer_name):
         _audit(
             tool_name,
             "preview_gate_satisfied",
             details={"file": file_name, "consent": granted.source},
         )
+        print_signoff.grant(tool_name, file_name, printer_name, source=granted.source)
         return None
-    if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
-        if not is_resume:
-            logger.warning(
-                "KILN_SKIP_PREVIEW_GATE is set — skipping mandatory preview "
-                "confirmation for %s(%s).  Only do this in CI.",
-                tool_name, file_name,
-            )
-            _audit(
-                tool_name,
-                "preview_gate_skipped",
-                details={"file": file_name, "consent": SOURCE_CI_BYPASS},
-            )
-        return None
-    if is_resume:
-        return None
-    if not preview_token:
-        return _error_dict(
-            f"{tool_name} refuses to proceed without a preview confirmation. "
-            "Render a preview with visualize_model(), show it to the user, "
-            "and call issue_preview_token(file_path) to get a token. "
-            "Pass the token as preview_token=<token>. To bypass (advanced / "
-            "CI only), set KILN_SKIP_PREVIEW_GATE=1.",
-            code="PREVIEW_NOT_CONFIRMED",
+    # The token half lives in kiln.print_signoff so the CLI, which has no
+    # consent to read, asks the same question of the same code.  Every
+    # yes it returns has already granted the clearance the adapter
+    # template checks; every no is worded here, once, in the envelope
+    # every caller reads.  We can't hash a file on the printer, so the
+    # token is matched against the name it was issued for.
+    verdict = print_signoff.token_verdict(
+        tool_name,
+        file_name,
+        preview_token,
+        printer_name=printer_name,
+        printer_id=(
+            _resolve_printer_model_live(printer_name)
+            if printer_name
+            else _PRINTER_MODEL
+        ),
+        is_resume=is_resume,
+    )
+    if verdict.audit == "preview_gate_skipped":
+        _audit(
+            tool_name,
+            "preview_gate_skipped",
+            details={"file": file_name, "consent": SOURCE_CI_BYPASS},
         )
-    try:
-        from kiln.preview_gate import get_preview_gate
-
-        # We can't hash a file on the printer, so the token is matched
-        # against the name it was issued for.
-        ok, reason = get_preview_gate().validate(
-            preview_token,
-            file_name,
-            printer_id=(
-                _resolve_printer_model_live(printer_name)
-                if printer_name
-                else _PRINTER_MODEL
-            ),
+    elif verdict.audit:
+        # The door the person saw the print through rides the audit line:
+        # a PNG-only sign-off is distinguishable from a stage sign-off
+        # after the fact, which is the whole reason the token carries it.
+        _audit(
+            tool_name,
+            verdict.audit,
+            details={"file": file_name, "consent": verdict.source, "door": verdict.door or "unrecorded"},
         )
-        if not ok:
-            return _error_dict(
-                f"Preview token rejected: {reason}. Re-render the preview "
-                f"and issue a fresh token.",
-                code="PREVIEW_TOKEN_INVALID",
-            )
-    except Exception as exc:  # noqa: BLE001 — a broken gate must not brick printing
-        logger.warning("Preview gate validation failed: %s", exc)
-    return None
+    if verdict.ok:
+        return None
+    if verdict.code == print_signoff.CODE_TOKEN_INVALID:
+        return _error_dict(verdict.message, code="PREVIEW_TOKEN_INVALID")
+    return _error_dict(verdict.message, code="PREVIEW_NOT_CONFIRMED")
 
 
 # Slicer settings that change how the object is MADE but not what it is.
@@ -10055,20 +10091,36 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
 @mcp.tool()
 def issue_preview_token(
     file_path: str,
+    door: str = "",
     printer_id: str | None = None,
     ttl_seconds: int = 600,
 ) -> dict:
     """Issue a preview-confirmation token for a file about to be printed.
 
-    Call this AFTER rendering a preview (``visualize_model`` /
-    ``preview_generated_model``) and showing it to the user.  The user
-    approves → you call this tool → you pass the returned token as
-    ``preview_token`` to ``start_print`` or ``fulfillment_order``.
+    Call this AFTER the user has seen the print, and say WHICH door showed
+    it — ``door`` is required and is checked against what this server
+    itself recorded, never taken on your word:
 
-    Without a valid token, ``start_print`` refuses to execute (unless
-    ``KILN_SKIP_PREVIEW_GATE=1``).  This is the deepest safety gate
-    that prevents an agent from sending a print to the physical printer
-    without the user ever seeing what's about to be printed.
+    1. ``door="stage"`` — the inline 3D stage (the MCP Apps panel that
+       opens on a make, which the user can orbit).  This is the first and
+       best option.  Accepted only when the panel actually fetched the
+       geometry for this file (or for the design mesh it was sliced from).
+    2. ``door="url"`` — a hosted viewer link.  Use it when this host draws
+       no panel.  Accepted only when ``visualize_model(share_link=True)``
+       issued a ``viewer_url`` for this file that is still live.
+    3. ``door="png"`` — static renders.  The total fallback.  Accepted
+       only when a render is on record AND the stage is unavailable for a
+       reason the server can name AND the link door refused for a reason
+       it recorded.  A PNG claim on a host that draws the stage is refused
+       and told to open the stage.
+
+    The user approves → you call this tool → you pass the returned token as
+    ``preview_token`` to ``start_print`` (or any other tool that starts a
+    print) or ``fulfillment_order``.  Without a valid token those tools
+    refuse (unless ``KILN_SKIP_PREVIEW_GATE=1``).  This is the deepest
+    safety gate that prevents an agent from sending a print to the
+    physical printer without the user ever seeing what's about to be
+    printed.
 
     Tokens are single-use and expire after ``ttl_seconds`` (default 600
     seconds / 10 minutes).  Scoped to the specific file hash and
@@ -10080,29 +10132,56 @@ def issue_preview_token(
             Hashed to bind the token to specific bytes.  If the file
             changes between issuing and using the token, the token is
             rejected.
+        door: ``"stage"``, ``"url"`` or ``"png"`` — which door the user
+            saw the print through.  Verified against the server's record.
         printer_id: Optional printer model ID to scope the token to a
             specific printer.  When set, using the token with a different
             printer will be rejected.
         ttl_seconds: Lifetime of the token (default 600).
 
     Returns:
-        Dict with ``token`` and ``expires_at`` (unix timestamp).
+        Dict with ``token``, ``door``, ``evidence`` and ``expires_at``
+        (unix timestamp); or a refusal whose message says which door to
+        open and to call this tool again.
     """
     if err := _check_auth("print"):
         return err
     try:
+        from kiln import local_stage, preview_evidence
         from kiln.preview_gate import get_preview_gate
+
+        # What this host declared (or proved, by reading the stage
+        # document) decides whether "the stage was unavailable" is true.
+        # Read by the server, not asserted by the caller.
+        try:
+            renders = local_stage.host_renders_apps(mcp)
+        except Exception:  # noqa: BLE001 — no session reads as no panel
+            renders = False
+        refusal, verdict = preview_evidence.judge(file_path, door, host_renders=renders)
+        if refusal is not None:
+            _audit(
+                "issue_preview_token",
+                "preview_door_refused",
+                details={"file": file_path, "door": door, "code": refusal["code"]},
+            )
+            return _error_dict(refusal["message"], code=refusal["code"])
         t = get_preview_gate().issue(
             file_path, printer_id=printer_id, ttl_seconds=ttl_seconds,
+            door=verdict["door"],
+            evidence={"evidence": verdict["evidence"], "skipped": verdict["skipped"]},
         )
         return {
             "success": True,
             "token": t.token,
+            "door": t.door,
+            "evidence": verdict["evidence"],
+            "skipped": verdict["skipped"],
             "file_hash": t.file_hash,
             "expires_at": t.issued_at + t.ttl_seconds,
             "ttl_seconds": ttl_seconds,
             "usage_hint": (
-                "Pass this token as preview_token=<token> to start_print or fulfillment_order. "
+                "Pass this token as preview_token=<token> to the tool that starts the print "
+                "(start_print, slice_and_print, run_quick_print, ...) or to fulfillment_order. "
                 "Single-use, expires in ~10 minutes."
             ),
         }
@@ -11419,6 +11498,14 @@ def download_and_upload(
                 "download_and_upload",
                 "auto_printed_without_preview",
                 details={"file": file_name, "consent": "KILN_AUTO_PRINT_MARKETPLACE"},
+            )
+            from kiln import print_signoff
+
+            # The standing opt-in is the clearance; said so where the
+            # adapter template will look for it.
+            print_signoff.grant(
+                "download_and_upload", file_name, printer_name,
+                source=print_signoff.SOURCE_STANDING_OPT_IN,
             )
             sent_at = time.monotonic()
             print_res = adapter.start_print(file_name)
@@ -13879,6 +13966,7 @@ def print_plate_object(
     bed_type: str = "auto",
     plate_number: int = 1,
     printer_name: str | None = None,
+    preview_token: str | None = None,
 ) -> dict:
     """Extract a single object from a multi-object .gcode.3mf and print it.
 
@@ -13916,6 +14004,8 @@ def print_plate_object(
     """
     if err := _check_auth("print"):
         return err
+    if block := _preview_gate_error("print_plate_object", file_path, preview_token, printer_name=printer_name):
+        return block
 
     import tempfile
 
@@ -13990,18 +14080,20 @@ def print_plate_object(
         )
 
     # Step 3: Start print (start_print has its own preflight gate built in)
+    # The person previewed the plate; the object is cut out of it.
     uploaded_name = upload_result.get("file_name") or os.path.basename(extracted_path)
     try:
-        print_result = start_print(
-            file_name=uploaded_name,
-            use_ams=use_ams,
-            ams_mapping=ams_mapping,
-            bed_leveling=bed_leveling,
-            flow_cali=flow_cali,
-            vibration_cali=vibration_cali,
-            bed_type=bed_type,
-            printer_name=printer_name,
-        )
+        with _covered_by_approval("print_plate_object", file_path, uploaded_name, printer_name):
+            print_result = start_print(
+                file_name=uploaded_name,
+                use_ams=use_ams,
+                ams_mapping=ams_mapping,
+                bed_leveling=bed_leveling,
+                flow_cali=flow_cali,
+                vibration_cali=vibration_cali,
+                bed_type=bed_type,
+                printer_name=printer_name,
+            )
     except Exception as exc:
         return _error_dict(
             f"Start print failed: {exc}. File uploaded as: {uploaded_name}",
@@ -15067,6 +15159,7 @@ def run_quick_print(
     use_ams: str | None = None,
     ams_mapping: str | list[int] | None = None,
     skip_validation: bool = False,
+    preview_token: str | None = None,
 ) -> dict:
     """Full print pipeline: validate + slice + safety-check + upload + print (recommended one-shot tool).
 
@@ -15098,6 +15191,9 @@ def run_quick_print(
             Defaults to False — designs are pre-tested for printability
             before they reach the printer.  Use True for already-validated
             inputs or pre-sliced 3MFs the validator can't introspect.
+        preview_token: Token from ``issue_preview_token`` after the user
+            has seen ``model_path``.  Required: this tool ends at the
+            printer, so it is gated exactly as ``start_print`` is.
 
     On Bambu AMS printers the response carries ``ams_selection``
     (``{slot, type, color}``) naming the tray actually used — routing is
@@ -15109,6 +15205,18 @@ def run_quick_print(
         parsed_ams_mapping, _arg_err = parse_json_array(ams_mapping, "ams_mapping")
         if _arg_err is not None:
             return _arg_err
+
+        # Gated on the model the person can actually preview, before any
+        # step runs.  The clearance rides the pipeline as data so a pause
+        # before the start step — resumed in a later call — still carries
+        # it (see pipelines._start_print).
+        if block := _preview_gate_error(
+            "run_quick_print", model_path, preview_token, printer_name=printer_name,
+        ):
+            return block
+        from kiln import print_signoff
+
+        signoff = print_signoff.record_for(print_signoff.current())
 
         # Tri-state use_ams: "auto"/None -> None (pipeline auto-resolves),
         # "true"/"false" -> bool.
@@ -15129,6 +15237,7 @@ def run_quick_print(
             use_ams=resolved_use_ams,
             ams_mapping=parsed_ams_mapping,
             skip_validation=skip_validation,
+            signoff=signoff,
         )
         resp = {"success": result.success, **result.to_dict()}
         # Hoist the AMS selection from the start_print step to the top
@@ -15163,6 +15272,7 @@ def run_reslice_and_print(
     use_ams: bool | None = None,
     ams_mapping: str | list[int] | None = None,
     skip_validation: bool = False,
+    preview_token: str | None = None,
 ) -> dict:
     """Reslice with custom slicer overrides + print (use for retries with adjusted settings).
 
@@ -15207,6 +15317,13 @@ def run_reslice_and_print(
     if err := _check_auth("print"):
         return err
     try:
+        if block := _preview_gate_error(
+            "run_reslice_and_print", model_path, preview_token, printer_name=printer_name,
+        ):
+            return block
+        from kiln import print_signoff
+
+        signoff = print_signoff.record_for(print_signoff.current())
         parsed_overrides, _arg_err = parse_json_object(overrides, "overrides")
         if _arg_err is not None:
             return _arg_err
@@ -15252,6 +15369,7 @@ def run_reslice_and_print(
             use_ams=use_ams,
             ams_mapping=parsed_ams_mapping,
             skip_validation=skip_validation,
+            signoff=signoff,
         )
         resp = {"success": result.success, **result.to_dict()}
         # Surface the AMS tray selection and the start narrative (parity
@@ -15280,6 +15398,7 @@ def multi_copy_print(
     spacing_mm: float = 10.0,
     overrides: str | dict[str, Any] | None = None,
     slicer_path: str | None = None,
+    preview_token: str | None = None,
 ) -> dict:
     """Print multiple copies of a model arranged on one build plate.
 
@@ -15304,6 +15423,13 @@ def multi_copy_print(
     """
     if err := _check_auth("print"):
         return err
+    if block := _preview_gate_error("multi_copy_print", model_path, preview_token, printer_name=printer_name):
+        return block
+    from kiln import print_signoff
+
+    # Copies of the previewed mesh: the clearance rides the pipeline as
+    # data and is re-granted for the plate it actually starts.
+    signoff = print_signoff.record_for(print_signoff.current())
 
     # --- Validation ---
     if copies < 2:
@@ -15350,6 +15476,7 @@ def multi_copy_print(
                 overrides=parsed_overrides,
                 slicer_path=slicer_path,
                 extra_args=extra_args,
+                signoff=signoff,
             )
         else:
             # Fallback: STL mesh duplication
@@ -15382,6 +15509,7 @@ def multi_copy_print(
                 printer_id=printer_id,
                 overrides=parsed_overrides,
                 slicer_path=slicer_path,
+                signoff=signoff,
             )
 
         summary = {"success": result.success, **result.to_dict()}
@@ -17243,6 +17371,7 @@ def reprint_with_material(
     extra_overrides: str | dict[str, Any] | None = None,
     use_ams: bool | None = None,
     ams_mapping: str | list[int] | None = None,
+    preview_token: str | None = None,
 ) -> dict:
     """Reprint a model with a different material — auto-adjusts temperatures,
     speeds, and retraction for the new material.
@@ -17303,6 +17432,8 @@ def reprint_with_material(
             overrides.update(extra)
 
         # Step 3: Delegate to run_reslice_and_print
+        # Token and all: it is the same file the person previewed, so the
+        # inner gate is the gate.
         result = run_reslice_and_print(
             model_path=file_path,
             printer_name=printer_name,
@@ -17310,6 +17441,7 @@ def reprint_with_material(
             overrides=_json.dumps(overrides),
             use_ams=use_ams,
             ams_mapping=ams_mapping,
+            preview_token=preview_token,
         )
 
         # Enrich the result with material context
@@ -17674,6 +17806,7 @@ def multi_material_print(
     auto_ams: bool = True,
     extra_overrides: str | dict[str, Any] | None = None,
     slicer_path: str | None = None,
+    preview_token: str | None = None,
 ) -> dict:
     """Print multiple objects in different materials/colors on one build plate.
 
@@ -17913,7 +18046,38 @@ def multi_material_print(
             )
 
         output_3mf = _os.path.join(tempfile.gettempdir(), "kiln_multi_material.3mf")
+        # The thing printed is the PLATE, which does not exist until this
+        # call builds it — so the first call builds it and hands it back
+        # for preview, and the second call, token in hand, prints the plate
+        # the person saw.  Verified against the plate as it sits on disk
+        # BEFORE any rebuild: a rebuild is new bytes, and the yes was about
+        # the bytes that were shown.  No elicitation here: the consent
+        # subject is a file the tool-call wrapper cannot name.
+        from kiln import print_signoff
+
+        plate_cleared = False
+        if preview_token:
+            if not _os.path.isfile(output_3mf):
+                return _error_dict(
+                    f"The previewed plate {output_3mf} is no longer on disk; call again without "
+                    "preview_token to rebuild it, preview it, and issue a fresh token.",
+                    code="PREVIEW_TOKEN_INVALID",
+                )
+            plate_verdict = print_signoff.token_verdict(
+                "multi_material_print", output_3mf, preview_token,
+                printer_name=printer_name, printer_id=_resolve_printer_model_live(printer_name),
+            )
+            if not plate_verdict.ok:
+                return _error_dict(plate_verdict.message, code="PREVIEW_TOKEN_INVALID")
+            _audit(
+                "multi_material_print", "preview_gate_satisfied",
+                details={"file": output_3mf, "consent": plate_verdict.source, "door": plate_verdict.door},
+            )
+            plate_cleared = True
+        compose_result: dict[str, Any] = {"success": True, "reused_previewed_plate": True}
         try:
+            if plate_cleared:
+                raise _PlateAlreadyBuilt
             try:
                 positioned = auto_arrange_parts(part_specs, printer_id=printer_id)
             except ValueError:
@@ -17928,6 +18092,8 @@ def multi_material_print(
             compose_result = compose_multicolor_3mf(
                 positioned, output_path=output_3mf, printer_id=printer_id or None,
             )
+        except _PlateAlreadyBuilt:
+            pass
         except Exception as exc:
             return _error_dict(
                 f"Failed to build multi-material 3MF: {exc}",
@@ -18063,15 +18229,31 @@ def multi_material_print(
             )
         ):
             return refusal
-        result = run_reslice_and_print(
-            model_path=output_3mf,
-            printer_name=printer_name,
-            printer_id=printer_id,
-            overrides=_json.dumps(merged_overrides) if merged_overrides else None,
-            slicer_path=slicer_path,
-            use_ams=use_ams_flag,
-            ams_mapping=_json.dumps(ams_mapping_list) if ams_mapping_list else None,
-        )
+        if not plate_cleared:
+            # Built, not yet seen.  The CI bypass clears it here like any
+            # other door; otherwise the plate goes back for preview.
+            plate_verdict = print_signoff.token_verdict(
+                "multi_material_print", output_3mf, None, printer_name=printer_name,
+            )
+            if not plate_verdict.ok:
+                return _error_dict(
+                    plate_verdict.message
+                    + f" The plate is built at {output_3mf}: show it to the user (stage, link, "
+                    "or renders), call issue_preview_token on that path, and call "
+                    "multi_material_print again with preview_token.",
+                    code="PREVIEW_NOT_CONFIRMED",
+                    extra={"plate_path": output_3mf, "printed": False},
+                )
+        with _covered_by_approval("multi_material_print", output_3mf, output_3mf, printer_name):
+            result = run_reslice_and_print(
+                model_path=output_3mf,
+                printer_name=printer_name,
+                printer_id=printer_id,
+                overrides=_json.dumps(merged_overrides) if merged_overrides else None,
+                slicer_path=slicer_path,
+                use_ams=use_ams_flag,
+                ams_mapping=_json.dumps(ams_mapping_list) if ams_mapping_list else None,
+            )
 
         # Enrich result
         if isinstance(result, dict):
@@ -18193,6 +18375,7 @@ def multi_color_copies(
     spacing_mm: float = 10.0,
     printer_id: str | None = None,
     slicer_path: str | None = None,
+    preview_token: str | None = None,
 ) -> dict:
     """Print multiple copies of the same model, each in a different AMS color.
 
@@ -18240,6 +18423,8 @@ def multi_color_copies(
     """
     if err := _check_auth("print"):
         return err
+    if block := _preview_gate_error("multi_color_copies", model_path, preview_token):
+        return block
     try:
         import json as _json
         import tempfile
@@ -18434,14 +18619,16 @@ def multi_color_copies(
             "multi_color_copies", None, output_3mf, needs=n_copies,
         ):
             return refusal
-        result = run_reslice_and_print(
-            model_path=output_3mf,
-            printer_id=printer_id,
-            overrides=_json.dumps(overrides) if overrides else None,
-            slicer_path=slicer_path,
-            use_ams=True,
-            ams_mapping=_json.dumps(resolved_slots),
-        )
+        # The person previewed model_path; the plate is copies of it.
+        with _covered_by_approval("multi_color_copies", model_path, output_3mf, None):
+            result = run_reslice_and_print(
+                model_path=output_3mf,
+                printer_id=printer_id,
+                overrides=_json.dumps(overrides) if overrides else None,
+                slicer_path=slicer_path,
+                use_ams=True,
+                ams_mapping=_json.dumps(resolved_slots),
+            )
 
         # Enrich result
         if isinstance(result, dict):

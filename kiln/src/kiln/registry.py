@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
+from kiln.print_signoff import require_signoff
 from kiln.printers.base import (
     PrinterAdapter,
     PrinterStatus,
@@ -178,6 +179,9 @@ class PrinterRegistry:
             # which is the backend family and so identical for two printers of
             # one brand.  This is the only place both names are in scope.
             name_printer_for_outcomes(adapter, name)
+            # A registered printer is one a door will start prints on, so
+            # its starts must carry a sign-off — see kiln.print_signoff.
+            require_signoff(adapter)
             logger.info("Registered printer %r (%s) at site %r", name, adapter.name, site)
         # Disconnect outside the lock to avoid holding it during I/O
         # (MQTT disconnect can block waiting for thread join).

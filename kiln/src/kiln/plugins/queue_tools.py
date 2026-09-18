@@ -86,6 +86,7 @@ def submit_job(
     printer_name: str | None = None,
     priority: int = 0,
     idempotency_key: str | None = None,
+    preview_token: str | None = None,
 ) -> dict:
     """Submit a print job to the queue.
 
@@ -105,6 +106,10 @@ def submit_job(
             queuing a duplicate print.  Use a NEW key for each job you
             genuinely want printed; reusing a key with different
             parameters is refused.
+        preview_token: Token from ``issue_preview_token`` after the user
+            has seen the file.  Required: a queued job is a print the
+            scheduler will start unattended, so the gate is here, at the
+            door, and the sign-off rides the job.
 
     Jobs are executed in priority order, with FIFO tie-breaking.
     Use ``job_status`` to check progress and ``queue_summary`` for an overview.
@@ -114,6 +119,12 @@ def submit_job(
 
     if err := _srv._check_auth("queue"):
         return err
+    if block := _srv._preview_gate_error("submit_job", file_name, preview_token, printer_name=printer_name):
+        return block
+    from kiln import print_signoff
+
+    signoff = print_signoff.record_for(print_signoff.current())
+    print_signoff.clear()  # nothing in this call starts a print; the job carries it
     # A replay of an already-queued job must not be judged by the cap:
     # the original job is already counted against it, and refusing the
     # retry would tell the caller "queue full" about a job that is in
@@ -155,6 +166,7 @@ def submit_job(
             submitted_by="mcp-agent",
             priority=priority,
             idempotency_key=idempotency_key,
+            metadata={"preview_signoff": signoff} if signoff else None,
         )
         job = outcome.job
         if outcome.replayed:

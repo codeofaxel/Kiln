@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from kiln.events import EventBus, EventType
+from kiln.print_signoff import grant_from_record
 from kiln.print_start_verdict import resolve_print_start
 from kiln.printers.base import PrinterError, PrinterStatus, status_is_unreachable
 from kiln.printers.progress_motion import (
@@ -909,6 +910,17 @@ class JobScheduler:
                 # An unconfirmed start must not be read as a failure here:
                 # requeuing a job the printer actually took dispatches the
                 # same file at a machine that is already running it.
+                # A queued job was cleared when it entered the queue (every
+                # queue door gates on a preview token and stores the
+                # record on the job); the scheduler re-grants that record
+                # here, in its own thread, so the adapter template can see
+                # it.  A job with no record still dispatches as "queued" —
+                # the queue's doors are the gate, pinned by test — but says
+                # so, rather than borrowing a door it never passed.
+                grant_from_record(
+                    (next_job.metadata or {}).get("preview_signoff") or {},
+                    tool="scheduler", file_name=next_job.file_name, printer_name=printer_name,
+                )
                 sent_at = time.monotonic()
                 result = adapter.start_print(next_job.file_name)
                 verdict = resolve_print_start(

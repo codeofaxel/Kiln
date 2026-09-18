@@ -1049,6 +1049,13 @@ def visualize_model(
                 + outcome
             ),
         }
+        if successful:
+            # A render happened: the floor of the preview ladder, on record
+            # for the print gate.  The door writes it, not the caller.
+            from kiln.preview_evidence import record as _record_evidence
+
+            _record_evidence("png", file_path, renderer=result["renderer"], views=len(successful))
+
         if not share_link:
             # Attaching a link uploads the mesh.  A caller embedding these
             # pixels in a file has nobody to hand a URL to, so that upload

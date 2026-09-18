@@ -51,8 +51,8 @@ from kiln.server import (
     _generate_print_comment,
     _tool_limiter,
     _validate_local_file,
-    check_orientation,
     cfs_status,
+    check_orientation,
     get_bed_mesh,
     get_filament_status,
     get_speed_profile,
@@ -1960,6 +1960,7 @@ class TestSubmitJob:
     """Tests for the submit_job MCP tool."""
 
     def test_basic_submission(self, monkeypatch):
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # submit_job now gates like start_print
         import kiln.server as mod
 
         fresh_queue = PrintQueue()
@@ -1973,6 +1974,7 @@ class TestSubmitJob:
         assert result["message"].startswith("Job")
 
     def test_job_appears_in_queue(self, monkeypatch):
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # submit_job now gates like start_print
         import kiln.server as mod
 
         fresh_queue = PrintQueue()
@@ -1990,6 +1992,7 @@ class TestSubmitJob:
         assert job.submitted_by == "mcp-agent"
 
     def test_submission_publishes_event(self, monkeypatch):
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # submit_job now gates like start_print
         import kiln.server as mod
 
         fresh_queue = PrintQueue()
@@ -2003,6 +2006,7 @@ class TestSubmitJob:
         assert events[0].type == EventType.JOB_QUEUED
 
     def test_priority_ordering(self, monkeypatch):
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # submit_job now gates like start_print
         import kiln.server as mod
 
         fresh_queue = PrintQueue()
@@ -2018,6 +2022,7 @@ class TestSubmitJob:
         assert next_job.file_name == "high.gcode"
 
     def test_submit_with_no_printer_name(self, monkeypatch):
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # submit_job now gates like start_print
         import kiln.server as mod
 
         fresh_queue = PrintQueue()
@@ -4025,6 +4030,11 @@ class TestMultiCopyPrint:
     Covers: validation errors, PrusaSlicer strategy, OrcaSlicer fallback,
     file not found, invalid overrides, auth check.
     """
+
+    @pytest.fixture(autouse=True)
+    def _preview_gate_bypassed(self, monkeypatch):
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # this door now gates on a preview like start_print; these tests are about the rest
+
 
     def _mock_pipeline_result(self, success=True):
         result = MagicMock()

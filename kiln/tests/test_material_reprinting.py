@@ -14,6 +14,8 @@ import os
 import tempfile
 from unittest.mock import patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -852,6 +854,11 @@ class TestMulticolorPlacement:
     are numeric (positions, footprint spans, per-object extruders) — never
     the presence of a string.
     """
+
+    @pytest.fixture(autouse=True)
+    def _preview_gate_bypassed(self, monkeypatch):
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # this door now gates on a preview like start_print; these tests are about the rest
+
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     @patch("kiln.server.run_reslice_and_print")

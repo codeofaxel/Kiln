@@ -175,6 +175,28 @@ def _sha256_of(path: Path) -> str | None:
         return None
 
 
+def _issued(path: Path, url: str, expires_at: float) -> None:
+    """A link exists for these bytes: on record, for the print gate."""
+    try:
+        from kiln.preview_evidence import record
+
+        record("url", path, viewer_url=url, expires_at=float(expires_at))
+    except Exception:  # noqa: BLE001 — furniture, never a failed link
+        logger.debug("stage link evidence not recorded", exc_info=True)
+
+
+def _refused(path: Path, reason: str) -> None:
+    """No link, and this door says why — the record a PNG-only sign-off
+    needs, written by the door and never by the caller."""
+    try:
+        from kiln.preview_evidence import record_url_refusal
+
+        record_url_refusal(path, reason)
+    except Exception:  # noqa: BLE001
+        logger.debug("stage link refusal not recorded", exc_info=True)
+
+
+
 def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     """Return ``{"viewer_url", "expires_at"}`` for a local mesh, or ``None``.
 
@@ -185,10 +207,11 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     """
     global _REFUSED_BEARER
 
+    path = Path(mesh_path)
     if (os.environ.get(_OPT_OUT_ENV) or "").strip().lower() in {"1", "true", "yes"}:
+        _refused(path, "opted_out")
         return None
 
-    path = Path(mesh_path)
     try:
         if path.suffix.lower() not in _MESH_SUFFIXES or not path.is_file():
             return None
@@ -196,6 +219,7 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     except OSError:
         return None
     if size <= 0 or size > _MAX_UPLOAD_BYTES:
+        _refused(path, "too_large" if size > 0 else "empty")
         return None
 
     sha = _sha256_of(path)
@@ -222,6 +246,7 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     if cached:
         # Same bytes already staged — the sixteen-pose case, and the
         # re-render-an-unchanged-design case, both land here.
+        _issued(path, cached[0], cached[1])
         return {"viewer_url": cached[0], "expires_at": cached[1], "cached": True}
 
     try:
@@ -229,10 +254,12 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
 
         bearer = resolve_api_bearer()
     except Exception:
+        _refused(path, "signed_out")
         return None
     token = getattr(bearer, "token", "") or ""
     if not token:
         # Signed out.  Nothing to scope a link to; not a failure.
+        _refused(path, "signed_out")
         return None
     if token == _REFUSED_BEARER:
         # The server already refused THIS bearer this process (expired or
@@ -241,11 +268,13 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
         # four multi-megabyte uploads refused inside one decorate call,
         # each spending upload time inside a live tool request.  A fresh
         # sign-in mints a different token and clears the skip by value.
+        _refused(path, "session_refused")
         return None
 
     try:
         import httpx
     except ImportError:
+        _refused(path, "no_httpx")
         return None
 
     # A real upload, so the sidecar is worth building now: one parse of the
@@ -271,6 +300,7 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
             )
     except Exception as exc:  # noqa: BLE001 — any transport failure is a no-link
         logger.debug("stage link unavailable: %s", exc)
+        _refused(path, "transport")
         return None
 
     if resp.status_code in (401, 403):
@@ -279,16 +309,20 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
         # paying for the same refusal again.
         _REFUSED_BEARER = token
         logger.debug("stage link refused: HTTP %s (bearer remembered)", resp.status_code)
+        _refused(path, f"http_{resp.status_code}")
         return None
     if resp.status_code != 200:
         logger.debug("stage link refused: HTTP %s", resp.status_code)
+        _refused(path, f"http_{resp.status_code}")
         return None
     try:
         body = resp.json()
     except Exception:  # noqa: BLE001
+        _refused(path, "bad_response")
         return None
     url = (body or {}).get("viewer_url")
     if not isinstance(url, str) or not url:
+        _refused(path, "bad_response")
         return None
 
     expires_at = body.get("viewer_expires_at")
@@ -298,6 +332,7 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
             expires_in if isinstance(expires_in, (int, float)) else 1800
         )
     _cache_put(cache_key, url, float(expires_at))
+    _issued(path, url, float(expires_at))
     return {"viewer_url": url, "expires_at": float(expires_at), "cached": False}
 
 

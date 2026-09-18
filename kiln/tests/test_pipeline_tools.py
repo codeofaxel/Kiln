@@ -13,7 +13,7 @@ Covers:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -103,6 +103,11 @@ def _bypass_auth():
 class TestRunQuickPrint:
     """Tests for the run_quick_print() MCP tool."""
 
+    @pytest.fixture(autouse=True)
+    def _preview_gate_bypassed(self, monkeypatch):
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # this door now gates on a preview like start_print; these tests are about the rest
+
+
     @patch("kiln.server._pipeline_quick_print")
     def test_happy_path(self, mock_pipeline):
         from kiln.server import run_quick_print
@@ -123,6 +128,7 @@ class TestRunQuickPrint:
             use_ams=None,
             ams_mapping=None,
             skip_validation=False,
+            signoff=ANY,  # the clearance record the gate handed the pipeline
         )
 
     @patch("kiln.server._pipeline_quick_print")
@@ -146,6 +152,7 @@ class TestRunQuickPrint:
             use_ams=None,
             ams_mapping=None,
             skip_validation=False,
+            signoff=ANY,  # the clearance record the gate handed the pipeline
         )
 
     @patch("kiln.server._pipeline_quick_print")
@@ -164,6 +171,7 @@ class TestRunQuickPrint:
             use_ams=None,
             ams_mapping=None,
             skip_validation=True,
+            signoff=ANY,  # the clearance record the gate handed the pipeline
         )
 
     @patch("kiln.server._pipeline_quick_print")

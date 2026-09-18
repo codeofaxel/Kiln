@@ -46,6 +46,9 @@ SOURCE_ELICITED = "user_elicited"
 SOURCE_PREVIEW_TOKEN = "preview_token"
 SOURCE_STANDING_OPT_IN = "standing_opt_in"
 SOURCE_CI_BYPASS = "ci_bypass"
+#: A plate built from an approved input — copies of one approved mesh, one
+#: object cut out of an approved plate — starts under the input's approval.
+SOURCE_DERIVED = "derived"
 
 
 def _norm(value: str | None) -> str:
@@ -95,10 +98,11 @@ class PrintConsent:
         }
 
 
-#: Consent for the tool call currently being served.  One writer (the
-#: tool-call wrapper in ``kiln.server``) and one reader (the preview gate);
-#: anything else reading this would be a second opinion on a question that
-#: has one answer.
+#: Consent for the tool call currently being served.  Two writers — the
+#: tool-call wrapper in ``kiln.server`` (a person's yes) and
+#: ``_covered_by_approval`` there (a plate derived from an approved input)
+#: — and one reader (the preview gate); anything else reading this would be
+#: a second opinion on a question that has one answer.
 _current: ContextVar[PrintConsent | None] = ContextVar(
     "kiln_current_print_consent", default=None,
 )

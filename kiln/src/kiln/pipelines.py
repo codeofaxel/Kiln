@@ -38,6 +38,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.print_signoff import grant_from_record
 from kiln.print_start_verdict import resolve_print_start
 
 logger = logging.getLogger(__name__)
@@ -460,6 +461,7 @@ def quick_print(
     use_ams: bool | None = None,
     ams_mapping: list[int] | None = None,
     skip_validation: bool = False,
+    signoff: dict[str, Any] | None = None,
 ) -> PipelineResult:
     """Validate → slice → preflight → upload → start print in one call.
 
@@ -493,6 +495,7 @@ def quick_print(
     # the validation step may update it to point at an auto-repaired or
     # auto-scaled mesh.
     ctx: dict[str, Any] = {
+        "signoff": signoff,
         "effective_profile": profile_path,
         "gcode_path": None,
         "adapter": None,
@@ -829,6 +832,13 @@ def quick_print(
                 # absent on purpose — that's the R3 safety net.)
                 start_kwargs["use_ams"] = False
 
+            # The door that ran this pipeline passed the preview gate and
+            # stored the clearance on the execution; re-granted here for
+            # the file actually being started, because a pause before this
+            # step resumes in a later call whose context has nothing.
+            grant_from_record(
+                ctx.get("signoff"), tool="pipeline", file_name=remote_name, printer_name=printer_name,
+            )
             sent_at = time.monotonic()
             print_result = adapter.start_print(remote_name, **start_kwargs)
             verdict = resolve_print_start(
@@ -917,6 +927,7 @@ def reslice_and_print(
     use_ams: bool | None = None,
     ams_mapping: list[int] | None = None,
     skip_validation: bool = False,
+    signoff: dict[str, Any] | None = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
 
@@ -955,6 +966,7 @@ def reslice_and_print(
     # the validation step may update it to point at an auto-repaired or
     # auto-scaled mesh.
     ctx: dict[str, Any] = {
+        "signoff": signoff,
         "effective_profile": profile_path,
         "gcode_path": None,
         "adapter": None,
@@ -1319,6 +1331,13 @@ def reslice_and_print(
                         start_kwargs["ams_mapping"] = ams_decision["ams_mapping"]
                     ams_selection = ams_decision.get("selection")
 
+            # The door that ran this pipeline passed the preview gate and
+            # stored the clearance on the execution; re-granted here for
+            # the file actually being started, because a pause before this
+            # step resumes in a later call whose context has nothing.
+            grant_from_record(
+                ctx.get("signoff"), tool="pipeline", file_name=remote_name, printer_name=printer_name,
+            )
             sent_at = time.monotonic()
             print_result = adapter.start_print(remote_name, **start_kwargs)
             verdict = resolve_print_start(

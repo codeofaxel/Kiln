@@ -33,7 +33,7 @@ import os
 import secrets
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,13 @@ class PreviewToken:
     printer_id: str | None
     issued_at: float
     ttl_seconds: int
+    #: Which door showed the person the file — "stage", "url" or "png" —
+    #: and what the server had on record for it when the token was issued.
+    #: Empty for a token minted by a caller that did not say (the CLI's
+    #: fulfillment path, older callers); the print gate reads it for the
+    #: audit line, never to decide.
+    door: str = ""
+    evidence: dict = field(default_factory=dict)
 
     def expired(self, now: float | None = None) -> bool:
         if now is None:
@@ -101,8 +108,16 @@ class PreviewGate:
         file_path_or_hash: str,
         printer_id: str | None = None,
         ttl_seconds: int = _DEFAULT_TTL_SEC,
+        *,
+        door: str = "",
+        evidence: dict | None = None,
     ) -> PreviewToken:
-        """Issue a new confirmation token for a file about to be printed."""
+        """Issue a new confirmation token for a file about to be printed.
+
+        *door* and *evidence* are what ``issue_preview_token`` verified
+        before calling this; they ride the token so the print gate can say
+        which door signed the print off.
+        """
         if _looks_like_path(file_path_or_hash):
             file_hash = hash_file(file_path_or_hash)
             filename_key = os.path.basename(file_path_or_hash)
@@ -126,6 +141,8 @@ class PreviewGate:
             printer_id=printer_id,
             issued_at=time.time(),
             ttl_seconds=ttl_seconds,
+            door=door,
+            evidence=dict(evidence or {}),
         )
         with self._lock:
             self._tokens[token_str] = t
@@ -143,6 +160,20 @@ class PreviewGate:
         printer_id: str | None = None,
         consume: bool = True,
     ) -> tuple[bool, str | None]:
+        """:meth:`validate_detail` without the token — the shape every
+        existing caller reads."""
+        ok, reason, _token = self.validate_detail(
+            token_str, file_path_or_name, printer_id=printer_id, consume=consume,
+        )
+        return ok, reason
+
+    def validate_detail(
+        self,
+        token_str: str,
+        file_path_or_name: str,
+        printer_id: str | None = None,
+        consume: bool = True,
+    ) -> tuple[bool, str | None, PreviewToken | None]:
         """Validate a confirmation token against a file + printer.
 
         Accepts either:
@@ -154,17 +185,18 @@ class PreviewGate:
         match for the real-world hot path.  Tests + CLI tools that
         have a local path get the stronger hash check for free.
 
-        Returns ``(ok, reason_if_not_ok)``.  On success with
-        ``consume=True`` the token is removed (single-use).
+        Returns ``(ok, reason_if_not_ok, token)``.  On success with
+        ``consume=True`` the token is removed (single-use).  The token
+        rides back so the gate can read which door it was issued for.
         """
         if not token_str or not token_str.startswith(_TOKEN_PREFIX):
-            return False, "invalid_token_format"
+            return False, "invalid_token_format", None
         with self._lock:
             t = self._tokens.get(token_str)
         if t is None:
-            return False, "token_not_found_or_already_used"
+            return False, "token_not_found_or_already_used", None
         if t.expired():
-            return False, "token_expired"
+            return False, "token_expired", t
 
         if _looks_like_path(file_path_or_name):
             # Caller has a local path — prefer content-hash match.
@@ -172,34 +204,34 @@ class PreviewGate:
                 # Token was issued with a bare filename so we have no
                 # hash to compare against; fall through to key match.
                 if os.path.basename(file_path_or_name) != t.filename_key:
-                    return False, "token_filename_mismatch"
+                    return False, "token_filename_mismatch", t
             else:
                 actual_hash = hash_file(file_path_or_name)
                 if t.file_hash != actual_hash:
-                    return False, "token_file_hash_mismatch"
+                    return False, "token_file_hash_mismatch", t
         else:
             # Caller has a bare filename (e.g. the printer-side
             # file_name on start_print).  Match by filename_key; no
             # bogus hash_file() call on a non-path.
             if t.filename_key:
                 if file_path_or_name != t.filename_key:
-                    return False, "token_filename_mismatch"
+                    return False, "token_filename_mismatch", t
             elif t.file_hash:
                 # Token was issued with a pre-computed hash (no path,
                 # no filename) — fall through to hash string equality.
                 if t.file_hash != file_path_or_name:
-                    return False, "token_file_hash_mismatch"
+                    return False, "token_file_hash_mismatch", t
             else:
                 # Neither side has a handle to match on.
-                return False, "token_has_no_binding"
+                return False, "token_has_no_binding", t
 
         # Match by printer_id if token was scoped to one
         if t.printer_id and printer_id and t.printer_id != printer_id:
-            return False, "token_printer_mismatch"
+            return False, "token_printer_mismatch", t
         if consume:
             with self._lock:
                 self._tokens.pop(token_str, None)
-        return True, None
+        return True, None, t
 
 
 # ---------------------------------------------------------------------------

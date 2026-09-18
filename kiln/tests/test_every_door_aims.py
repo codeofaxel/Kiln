@@ -216,6 +216,9 @@ def test_print_plate_object_aims_both_of_its_steps(monkeypatch):
     import kiln.generation.validation as _val
 
     monkeypatch.setattr(_val, "extract_plate_object_gcode", _extract, raising=False)
+    # This test is about aim, not consent: the plate-object door now gates
+    # on the plate like every other start, so the CI bypass opens it here.
+    monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
 
     server.print_plate_object(
         file_path="/tmp/plate.3mf", object_name="widget", printer_name="workshop",

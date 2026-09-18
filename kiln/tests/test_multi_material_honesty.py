@@ -421,6 +421,11 @@ def _no_auth(*_a, **_k):
 
 
 class TestPerObjectPrintsRefuse:
+
+    @pytest.fixture(autouse=True)
+    def _preview_gate_bypassed(self, monkeypatch):
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # this door now gates on a preview like start_print; these tests are about the rest
+
     def _stl(self, tmp_path) -> str:
         p = tmp_path / "cube.stl"
         # one triangle is enough: arrangement only needs a bounding box

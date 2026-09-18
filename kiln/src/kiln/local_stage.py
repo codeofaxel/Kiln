@@ -832,6 +832,11 @@ def _register_payload_verb(mcp: Any) -> bool:
                 payload = _payload_for_mesh(mesh)
             except Exception as exc:  # noqa: BLE001
                 return {"success": False, "error": f"Could not read that mesh: {exc}"}
+            # The panel fetched this geometry: the strongest evidence the
+            # stage showed it.  Recorded by this door, for the print gate.
+            from kiln.preview_evidence import record as _record_evidence
+
+            _record_evidence("stage", mesh, via="panel_fetch")
             return {VIEWER_STRUCTURED_CONTENT_KEY: payload}
 
         return True
@@ -987,6 +992,11 @@ def _install_result_hook(mcp: Any) -> bool:
             if inline_geometry_enabled() and renders and _tool_opens_stage(mcp, name):
                 payload = _inline_payload(token)
                 if payload is not None:
+                    # Geometry rode the result to a host that draws the
+                    # panel — the inline route's equivalent of a fetch.
+                    from kiln.preview_evidence import record as _record_evidence
+
+                    _record_evidence("stage", resolve(token) or "", via="inline")
                     # A STEP import's analytic truth rides the payload so
                     # the stage labels the model as CAD over its display
                     # tessellation — or says the facts are unavailable,

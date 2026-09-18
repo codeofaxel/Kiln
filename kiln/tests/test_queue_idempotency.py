@@ -189,6 +189,7 @@ def tool_env(monkeypatch):
     q = PrintQueue()
     bus = _Bus()
     monkeypatch.setattr(srv, "_check_auth", lambda scope: None)
+    monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # submit_job now gates like start_print
     monkeypatch.setattr(srv, "_get_queue", lambda: q)
     monkeypatch.setattr(srv, "_event_bus", bus, raising=False)
     return q, bus

@@ -2936,6 +2936,23 @@ class PrinterAdapter(ABC):
                 success=False,
                 message=reason + (" " + hint if hint else ""),
             )
+        # The consent backstop.  An adapter a door handed out (a printer
+        # registry, the CLI) starts nothing no clearance covers: the gate
+        # every door calls grants one, and a door that forgot to call it
+        # is refused here rather than trusted.  See kiln.print_signoff.
+        try:
+            from kiln.print_signoff import adapter_verdict
+
+            unsigned = adapter_verdict(self, file_name, kwargs)
+        except Exception:  # noqa: BLE001 — bookkeeping must not strand a legitimate print
+            import logging as _logging
+
+            _logging.getLogger(__name__).debug(
+                "sign-off backstop raised; allowing print", exc_info=True
+            )
+            unsigned = None
+        if unsigned is not None:
+            return PrintResult(success=False, message=unsigned["reason"])
         result = self._start_print_impl(file_name, **kwargs)
         if getattr(result, "success", False) and not is_resume_mode_3mf(file_name):
             # A resume 3MF continues the print that's already running (a

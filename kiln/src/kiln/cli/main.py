@@ -551,7 +551,41 @@ def _get_adapter_from_ctx(ctx: click.Context):
             hint = "\n  Quick fix: kiln setup"
         raise click.ClickException(f"Invalid printer config for {pname!r}: {err}{hint}")
 
-    return _make_adapter(cfg)
+    adapter = _make_adapter(cfg)
+    # Handed out by a door: its starts must carry a sign-off, exactly as a
+    # registry-issued adapter's must.  See kiln.print_signoff.
+    from kiln.print_signoff import require_signoff
+
+    require_signoff(adapter)
+    return adapter
+
+
+def cli_gate(
+    tool: str,
+    file_path: str,
+    preview_token: str | None,
+    *,
+    printer_name: str | None,
+    json_mode: bool,
+) -> None:
+    """The CLI's half of the preview gate — the same verdict the MCP doors
+    get, worded for a terminal, exiting on a no.
+
+    ``kiln print`` and three sibling start paths called the adapter
+    directly with no gate at all, which is how a print was started unseen
+    on 2026-09-16.  A yes here grants the clearance the adapter template
+    checks; there is no other way through it.
+    """
+    from kiln.print_signoff import token_verdict
+
+    verdict = token_verdict(tool, file_path, preview_token, printer_name=printer_name)
+    if verdict.ok:
+        return
+    message = verdict.message.replace(
+        "pass the token as preview_token=<token>", "pass it as --preview-token <token>"
+    )
+    click.echo(format_error(message, code=verdict.code, json_mode=json_mode))
+    sys.exit(1)
 
 
 
@@ -2472,6 +2506,10 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
     help="AMS slot mapping per extruder, comma-separated (e.g. '0,1'). Implies --use-ams.",
 )
 @click.option("--no-nozzle-check", is_flag=True, help="Disable nozzle clumping/blob detection (Bambu). Use when prints trigger false HMS 0300-8014 errors.")
+@click.option(
+    "--preview-token", "preview_tokens", multiple=True,
+    help="Preview sign-off token from issue_preview_token, one per file in order. Required: a print is shown before it starts.",
+)
 @click.option("--object", "object_name", type=str, default=None, help="Extract and print a single object from a multi-object .gcode.3mf (Bambu). Partial name match supported (e.g. 'cap').")
 @click.option("--list-objects", is_flag=True, help="List named objects on the plate of a .gcode.3mf file, then exit.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
@@ -2487,6 +2525,7 @@ def print_cmd(
     use_ams: bool | None,
     ams_mapping: str | None,
     no_nozzle_check: bool,
+    preview_tokens: tuple[str, ...],
     object_name: str | None,
     list_objects: bool,
     json_mode: bool,
@@ -2666,6 +2705,11 @@ def print_cmd(
                         continue
                     file_name = upload_result.file_name or os.path.basename(f)
 
+                cli_gate(
+                    "kiln print --queue", f,
+                    preview_tokens[expanded.index(f)] if expanded.index(f) < len(preview_tokens) else None,
+                    printer_name=ctx.obj.get("printer"), json_mode=json_mode,
+                )
                 job_id = str(uuid.uuid4())[:8]
                 db.save_job(
                     {
@@ -2774,6 +2818,12 @@ def print_cmd(
 
         for i, f in enumerate(expanded):
             file_name = f
+            # Shown before it starts.  One token per file, in order; the
+            # clearance it grants covers this file's start below.
+            cli_gate(
+                "kiln print", f, preview_tokens[i] if i < len(preview_tokens) else None,
+                printer_name=ctx.obj.get("printer"), json_mode=json_mode,
+            )
             if os.path.isfile(f):
                 if not json_mode:
                     click.echo(f"Uploading {f}...")
@@ -3867,6 +3917,10 @@ def remove(name: str) -> None:
     help="Support strategy: off, auto, minimal (buildplate-only), or aggressive.",
 )
 @click.option("--print-after", is_flag=True, help="Upload and start printing after slicing.")
+@click.option(
+    "--preview-token", "preview_token", default=None,
+    help="Preview sign-off token from issue_preview_token for INPUT_FILE. Required with --print-after.",
+)
 @click.option("--copies", "-c", default=1, type=click.IntRange(1, 20), help="Number of copies to arrange on the plate (1-20, default 1).")
 @click.option("--spacing", default=10.0, type=float, help="Gap between copies in mm (default 10).")
 @click.option("--use-ams/--no-ams", default=None, help="Enable AMS filament feeding (Bambu). Default: auto-detect.")
@@ -3893,6 +3947,7 @@ def slice(
     material: str | None,
     support_mode: str,
     print_after: bool,
+    preview_token: str | None,
     copies: int,
     spacing: float,
     use_ams: bool | None,
@@ -3916,6 +3971,13 @@ def slice(
     With --print-after, the sliced G-code is uploaded and printing starts
     immediately.
     """
+    if print_after:
+        # Gated on the model the person can preview, before the slicer
+        # runs; the clearance covers the slice made from it by lineage.
+        cli_gate(
+            "kiln slice --print-after", input_file, preview_token,
+            printer_name=ctx.obj.get("printer"), json_mode=json_mode,
+        )
     from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
     try:
@@ -6002,6 +6064,13 @@ def ingest_watch_cmd(
                     continue
 
                 remote_name = upload_result.file_name or local_path.name
+                # --auto-queue is the standing opt-in: a watched folder is
+                # unattended by design, and the person who armed it is the
+                # one who approved what lands in it.  Said so, where the
+                # adapter template looks.
+                from kiln.print_signoff import SOURCE_STANDING_OPT_IN, grant
+
+                grant("kiln ingest-watch", remote_name, printer_name, source=SOURCE_STANDING_OPT_IN)
                 # An unconfirmed start is not a failed one: dropping the job
                 # here would leave a running print with nothing tracking it.
                 sent_at = time.monotonic()
@@ -9238,6 +9307,12 @@ def generate_and_print_cmd(
         # --- Step 5: Optionally start print ---
         if auto_print:
             remote = upload_result.remote_name or os.path.basename(slice_result.output_path)
+            # --auto-print is the standing opt-in for an object that did
+            # not exist when the command was typed; the same rule as the
+            # generate_and_print tool's KILN_AUTO_PRINT_GENERATED.
+            from kiln.print_signoff import SOURCE_STANDING_OPT_IN, grant
+
+            grant("kiln generate-and-print", remote, ctx.obj.get("printer"), source=SOURCE_STANDING_OPT_IN)
             adapter.start_print(remote)
             if not json_mode:
                 click.echo(f"Printing started: {remote}")

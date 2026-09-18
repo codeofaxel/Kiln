@@ -335,16 +335,18 @@ def test_every_gated_tool_is_asked_about():
 def test_the_argument_each_tool_is_asked_about_still_exists():
     """The other half of the pin: the map names an argument per tool, and a
     renamed parameter would leave the prompt describing an empty file."""
-    from kiln.plugins import monitoring_tools, slicer_tools, smart_print_tools
+    from kiln.plugins import fleet_tools, monitoring_tools, queue_tools, slicer_tools, smart_print_tools
 
     sources = {
         "start_print": inspect.getsource(server),
         "start_monitored_print": inspect.getsource(monitoring_tools),
         "slice_and_print": inspect.getsource(slicer_tools),
         "retry_print_with_fix": inspect.getsource(smart_print_tools),
+        "submit_job": inspect.getsource(queue_tools),
+        "fleet_submit_job": inspect.getsource(fleet_tools),
     }
     for tool, arg in server._CONSENT_FILE_ARG.items():
-        src = sources[tool]
+        src = sources.get(tool) or inspect.getsource(server)
         sig = src[src.index(f"def {tool}(") :]
         sig = sig[: sig.index(") -> dict:")]
         assert f"{arg}:" in sig, f"{tool} has no argument named {arg!r}"

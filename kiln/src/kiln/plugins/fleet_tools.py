@@ -346,6 +346,7 @@ class _FleetToolsPlugin:
             material: str | None = None,
             priority: str | None = None,
             idempotency_key: str | None = None,
+            preview_token: str | None = None,
         ) -> dict:
             """Submit a print job to the fleet orchestrator.
 
@@ -373,6 +374,17 @@ class _FleetToolsPlugin:
             # kiln-pro import inside the try fails.
             from kiln.queue import IdempotencyConflict
 
+            # The orchestrator starts this print unattended, so the gate
+            # is here, at the door, and the sign-off rides the job for the
+            # orchestrator to re-grant at dispatch.
+            if block := _srv._preview_gate_error(
+                "fleet_submit_job", file_path, preview_token, printer_name=printer_name,
+            ):
+                return block
+            from kiln import print_signoff
+
+            signoff = print_signoff.record_for(print_signoff.current())
+            print_signoff.clear()
             try:
                 from kiln.fleet_orchestrator import get_fleet_orchestrator
 
@@ -383,12 +395,17 @@ class _FleetToolsPlugin:
                 priority_rank = {"low": -1, "normal": 0, "high": 1}.get(
                     (priority or "normal").lower(), 0
                 )
+                metadata: dict = {}
+                if material:
+                    metadata["material"] = material
+                if signoff:
+                    metadata["preview_signoff"] = signoff
                 job, replayed = orch.submit_job_result(
                     file_path,
                     submitted_by="mcp-agent",
                     priority=priority_rank,
                     preferred_printer=printer_name,
-                    metadata={"material": material} if material else None,
+                    metadata=metadata or None,
                     idempotency_key=idempotency_key,
                 )
                 return {

@@ -457,13 +457,21 @@ class _SmartPrintToolsPlugin:
                 )
                 if _srv._retry_changes_the_object(
                     merged_overrides, _mesh_repaired
-                ) and (
-                    block := _srv._preview_gate_error(
+                ):
+                    if block := _srv._preview_gate_error(
                         "retry_print_with_fix", model_path, preview_token,
                         printer_name=printer_name,
+                    ):
+                        return block
+                else:
+                    from kiln import print_signoff
+
+                    # Same object, new settings: the yes the first print got
+                    # still stands, and the adapter template is told so.
+                    print_signoff.grant(
+                        "retry_print_with_fix", file_name, printer_name,
+                        source=print_signoff.SOURCE_PRIOR_APPROVAL,
                     )
-                ):
-                    return block
                 sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name)
             except Exception as exc:
