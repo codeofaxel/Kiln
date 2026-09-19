@@ -130,7 +130,7 @@ def window(
     try:
         seconds = consent_windows.parse_duration(duration)
         w = consent_windows.open_window(seconds=seconds, scope=scope)
-    except (consent_windows.NotAPerson, ValueError) as exc:
+    except (consent_windows.NotAPerson, consent_windows.NotTheFleetTier, ValueError) as exc:
         _refused(exc, json_mode)
         return
     row = _row(w)
@@ -175,7 +175,7 @@ def extend(window_id: str, duration: str, json_mode: bool) -> None:
     try:
         seconds = consent_windows.parse_duration(duration)
         w = consent_windows.extend_window(window_id, seconds=seconds)
-    except (consent_windows.NotAPerson, ValueError) as exc:
+    except (consent_windows.NotAPerson, consent_windows.NotTheFleetTier, ValueError) as exc:
         _refused(exc, json_mode)
         return
     except KeyError:

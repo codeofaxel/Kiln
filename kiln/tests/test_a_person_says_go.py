@@ -110,8 +110,11 @@ def audits(monkeypatch):
 
 @pytest.fixture
 def at_terminal(monkeypatch):
-    """A person is at this terminal — stdin and stdout are both a TTY."""
+    """A person is at this terminal — stdin and stdout are both a TTY — on
+    an install whose tier runs several printers, so the scope tests below
+    can name two printers or the fleet (that gate has its own tests)."""
     monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: True)
+    monkeypatch.setattr(consent_windows, "_fleet_tier_allows", lambda: True)
 
 
 def _token_for(path: str) -> str:
@@ -853,3 +856,44 @@ def test_a_flag_is_not_consent():
     src = pathlib.Path(consent_windows.__file__).read_text()
     read = set(re.findall(r"environ(?:\.get)?\s*[\[(]\s*[\"']([A-Z_]+)", src))
     assert read <= {"KILN_HOME"}, read
+
+
+# ---------------------------------------------------------------------------
+# A window wider than one printer is the fleet tier's
+# ---------------------------------------------------------------------------
+
+
+class TestFleetScopeIsTheFleetTiers:
+    """Running two machines at once is what Business buys (the fleet gate
+    in print_gate says so); a yes that covers several printers or the whole
+    fleet is the same fact from the consent side, so it is refused below
+    that tier with the same words.  One printer is every tier's."""
+
+    def test_a_fleet_window_below_business_is_refused(self, at_terminal, monkeypatch):
+        monkeypatch.setattr(consent_windows, "_fleet_tier_allows", lambda: False)
+        with pytest.raises(consent_windows.NotTheFleetTier, match="Business"):
+            consent_windows.open_window(seconds=60, scope=consent_windows.SCOPE_FLEET)
+        with pytest.raises(consent_windows.NotTheFleetTier):
+            consent_windows.open_window(seconds=60, scope=["garage", "workshop"])
+
+    def test_one_printer_is_every_tiers(self, at_terminal, monkeypatch):
+        monkeypatch.setattr(consent_windows, "_fleet_tier_allows", lambda: False)
+        w = consent_windows.open_window(seconds=60, scope="garage")
+        assert w.scope == ("garage",)
+
+    def test_business_opens_the_fleet(self, at_terminal, monkeypatch):
+        monkeypatch.setattr(consent_windows, "_fleet_tier_allows", lambda: True)
+        w = consent_windows.open_window(seconds=60, scope=consent_windows.SCOPE_FLEET)
+        assert w.scope == consent_windows.SCOPE_FLEET
+
+    def test_the_tier_read_is_the_fleet_gates_own(self, monkeypatch):
+        """Same source of truth as the concurrency gate: the licence's
+        printer cap.  Absent kiln-pro the cap is one, so a plain install
+        reads as not-the-fleet-tier without guessing."""
+        import kiln.licensing as lic
+
+        monkeypatch.setattr(lic, "get_tier", lambda: "business", raising=False)
+        monkeypatch.setattr(lic, "max_printers_for_tier", lambda t: 20 if t == "business" else 1, raising=False)
+        assert consent_windows._fleet_tier_allows() is True
+        monkeypatch.setattr(lic, "get_tier", lambda: "free", raising=False)
+        assert consent_windows._fleet_tier_allows() is False

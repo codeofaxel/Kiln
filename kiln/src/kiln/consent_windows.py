@@ -57,6 +57,26 @@ Scope = tuple[str, ...] | str
 _lock = threading.Lock()
 
 
+class NotTheFleetTier(RuntimeError):
+    """A window over several printers, or the fleet, below the tier that
+    runs several printers at once."""
+
+
+def _fleet_tier_allows() -> bool:
+    """Whether this install's tier runs more than one printer at once.
+
+    The same read the print gate's fleet-concurrency check makes: the
+    licence's printer cap.  Absent kiln-pro the cap is one, so a plain
+    install answers False without guessing.  Never raises.
+    """
+    try:
+        from kiln.licensing import get_tier, max_printers_for_tier
+
+        return int(max_printers_for_tier(get_tier()) or 1) > 1
+    except Exception:  # noqa: BLE001 — no licence module, no fleet
+        return False
+
+
 class NotAPerson(RuntimeError):
     """Raised when a window is opened or extended by something that is not
     a person at a terminal."""
@@ -268,6 +288,14 @@ def open_window(*, seconds: float, scope: Any) -> Window:
     normalized = normalize_scope(scope)
     if normalized is None:
         raise ValueError("a window names the printer(s) it covers, or the fleet")
+    # A yes over several machines is the fleet tier's, the same way running
+    # several machines at once is: one printer is every tier's.
+    if (normalized == SCOPE_FLEET or len(normalized) > 1) and not _fleet_tier_allows():
+        raise NotTheFleetTier(
+            "A window over several printers, or the whole fleet, is a Business feature — "
+            "running more than one printer at once is what that tier adds. Open a window "
+            "for one printer (--printer NAME), or see https://kiln3d.com/pricing."
+        )
     now = _now()
     window = Window(
         id=f"w_{secrets.token_hex(6)}",
