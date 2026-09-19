@@ -838,3 +838,37 @@ class TestPngIsTheStageStill:
         for tool in ("visualize_model", "render_model_preview"):
             doc = getattr(server, tool).__doc__ or ""
             assert "inspection" in doc.lower() and "sign-off" in doc.lower(), tool
+
+
+class TestTheHostedDeployKeepsNoRecord:
+    """One disk for every account: a render one tenant made must never
+    stand as evidence for another tenant's identical bytes.  On the hosted
+    deploy the ledger is neither written nor read, and a local install is
+    untouched.  Named as the guard witness for public-kiln:preview_evidence.py
+    in kiln-pro's tenant-state ledger."""
+
+    def test_nothing_is_recorded_or_read_on_the_shared_disk(self, tmp_path, monkeypatch):
+        from kiln.runtime_env import HOSTED_ENV_VAR
+
+        mesh = _stl(tmp_path / "jar.stl")
+        # A record made on a machine that WAS allowed to write (the same
+        # ledger file), then the same process flips to the hosted posture.
+        assert preview_evidence.record(preview_evidence.DOOR_PNG, mesh) is not None
+        preview_evidence._reset_for_tests()
+        monkeypatch.setenv(HOSTED_ENV_VAR, "1")
+        assert preview_evidence.record(preview_evidence.DOOR_STAGE, mesh) is None
+        preview_evidence.record_url_refusal(mesh, "no link door")
+        found = preview_evidence.evidence_for(mesh)
+        assert found[preview_evidence.DOOR_PNG] is None, "the record on disk is not read back on hosted"
+        assert found[preview_evidence.DOOR_STAGE] is None and found["url_refusal"] is None
+        ledger = json.loads((tmp_path / "home" / "preview_evidence.json").read_text())
+        (entry,) = ledger.values()
+        assert set(entry) == {"path", "touched", preview_evidence.DOOR_PNG}, "hosted wrote nothing"
+
+    def test_a_local_install_is_untouched(self, tmp_path, monkeypatch):
+        from kiln.runtime_env import HOSTED_ENV_VAR
+
+        monkeypatch.delenv(HOSTED_ENV_VAR, raising=False)
+        mesh = _stl(tmp_path / "jar.stl")
+        assert preview_evidence.record(preview_evidence.DOOR_PNG, mesh) is not None
+        assert preview_evidence.evidence_for(mesh)[preview_evidence.DOOR_PNG] is not None

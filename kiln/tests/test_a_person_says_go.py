@@ -619,8 +619,12 @@ class TestHosted:
         # A window file that somehow exists on the box (written before the
         # flag, here) is nobody's: the store is not read there.
         consent_windows.open_window(seconds=7200, scope=consent_windows.SCOPE_FLEET)
+        # Tokens are minted before the flag flips: the hosted box keeps no
+        # preview record (one disk for every account) and starts nothing
+        # itself, so a token there is a fact a local Kiln carried in.
+        token_a, token_b = _token_for(path), _token_for(path)
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
-        assert _gate(path, _token_for(path)) is not None
+        assert _gate(path, token_a) is not None
         # And the command will not open one there.
         with pytest.raises(consent_windows.NotAPerson):
             consent_windows.open_window(seconds=60, scope=consent_windows.SCOPE_FLEET)
@@ -629,16 +633,16 @@ class TestHosted:
             tool="start_print", file_name=path, printer_name="garage", source=SOURCE_TERMINAL,
         ))
         try:
-            block = _gate(path, _token_for(path))
+            block = _gate(path, token_b)
         finally:
             reset_consent(reset)
         assert block is not None
         assert "account" in block["error"]["message"].lower()
 
     def test_an_elicited_yes_is_grade_a_everywhere(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         path = _stl(tmp_path / "jar.stl")
         token = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         reset = set_consent(_elicited(path))
         try:
             assert _gate(path, token) is None
@@ -648,9 +652,9 @@ class TestHosted:
     def test_the_account_approval_hook_is_the_hosted_yes(self, tmp_path, monkeypatch, audits):
         """Public Kiln ships the hook, not an implementation.  Whatever the
         hosted server registers answers for (account, file hash)."""
-        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         path = _stl(tmp_path / "jar.stl")
         token = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         asked: list[dict] = []
 
         def hook(*, file_name, file_hash, printer_name):
@@ -670,16 +674,16 @@ class TestHosted:
         assert rec["identity"] == "account:acct_123"
 
     def test_a_hook_that_says_nothing_is_not_a_yes(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         path = _stl(tmp_path / "jar.stl")
         token = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         register_hosted_approval_hook(lambda **_kw: None)
         assert _gate(path, token) is not None
 
     def test_a_hook_that_answers_for_another_file_is_not_a_yes(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         path = _stl(tmp_path / "jar.stl")
         token = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         register_hosted_approval_hook(lambda **kw: PrintConsent(
             tool="start_print", file_name="other.stl", printer_name=kw["printer_name"],
             source=SOURCE_HOSTED_APPROVAL, identity="account:acct_123",
@@ -687,9 +691,9 @@ class TestHosted:
         assert _gate(path, token) is not None
 
     def test_a_hook_that_raises_is_not_a_yes(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         path = _stl(tmp_path / "jar.stl")
         token = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
 
         def boom(**_kw):
             raise RuntimeError("db down")

@@ -34,6 +34,15 @@ reads it.  It is keyed by the file's content hash, not its path: a
 re-sliced file keeps its name and becomes a different object, and the old
 sign-off must not follow it.
 
+NOT ON THE HOSTED DEPLOY.  The shared multi-tenant server has one disk for
+every account, and a served render there would record "this file was
+shown" under a hash another account's identical file resolves to.  Nothing
+on that box can start a print or consume a token, so the record is inert,
+but it is still one tenant's fact on another tenant's answer.  So on the
+hosted deploy nothing is recorded and nothing is read: every door reads as
+"no evidence", the same as a fresh install.  Judged 2026-09-18 by the
+tenant-state ledger in kiln-pro; the same skip safety_profiles.py uses.
+
 A print file is usually not the thing the stage showed.  The stage shows
 the DESIGN mesh; the printer receives the SLICE.  The slice ledger
 (:mod:`kiln.monitor_twin`) is the one place that knows which mesh a
@@ -93,6 +102,18 @@ _MESH_SUFFIXES = frozenset({".stl", ".3mf", ".obj"})
 def _ledger_path() -> Path:
     home = Path(os.environ.get("KILN_HOME", "").strip() or (Path.home() / ".kiln"))
     return home / "preview_evidence.json"
+
+
+def _shared_disk() -> bool:
+    """True on the hosted multi-tenant deploy, where the ledger is skipped.
+
+    Called at each door's entry, outside the best-effort ``try`` blocks, so
+    the skip is a decision the door makes and never something a broad
+    handler swallows.
+    """
+    from kiln.runtime_env import is_hosted_multitenant
+
+    return is_hosted_multitenant()
 
 
 def _file_hash(path: str | os.PathLike[str] | None) -> str | None:
@@ -176,7 +197,9 @@ def _update(digest: str, path: str, key: str, facts: dict[str, Any]) -> None:
 def record(door: str, file_path: str | os.PathLike[str], **facts: Any) -> str | None:
     """Note that *door* actually showed *file_path*.  Returns the hash it
     was recorded under, or ``None`` when the file could not be hashed.
-    Never raises."""
+    Never raises.  Records nothing on the hosted deploy."""
+    if _shared_disk():
+        return None
     try:
         if door not in DOORS:
             return None
@@ -195,6 +218,8 @@ def record_url_refusal(file_path: str | os.PathLike[str], reason: str) -> None:
 
     This is what lets a PNG-only sign-off be honest — the caller cannot
     assert "the link failed"; the link door has to have said so."""
+    if _shared_disk():
+        return
     try:
         digest = _file_hash(file_path)
         if digest:
@@ -212,11 +237,9 @@ def design_mesh_for(file_path: str | os.PathLike[str]) -> str | None:
     """The mesh this machine sliced *file_path* from, if the slice ledger
     knows one and it is still on disk.  ``None`` for a mesh itself, a file
     Kiln did not slice, or the hosted server (whose ledger is nobody's)."""
+    if _shared_disk():
+        return None
     try:
-        from kiln.runtime_env import is_hosted_multitenant
-
-        if is_hosted_multitenant():
-            return None
         from kiln.monitor_twin import sliced_entry_for
 
         entry = sliced_entry_for(os.path.basename(str(file_path)))
@@ -256,6 +279,8 @@ def evidence_for(file_path: str | os.PathLike[str]) -> dict[str, Any]:
         DOOR_PNG: None,
         "url_refusal": None,
     }
+    if _shared_disk():
+        return out
     sources: list[dict[str, Any]] = []
     if out["file_hash"]:
         own = _entry(out["file_hash"])
