@@ -689,6 +689,380 @@ def _read_back_refusal(
     }
 
 
+# ---------------------------------------------------------------------------
+# The one file that must NOT home: kiln-pro's same-bed retry
+#
+# A same-bed retry prints the failed part again, shifted into a clear zone of
+# the same bed, with the failed part still sitting beside it.  Its startup
+# deliberately emits no G28, no bed scan and no purge line -- any of those
+# would drive the head or the probe into the remnant.  The no-homing rule
+# above would refuse it every time, so the gate takes that one file class on
+# a contract instead, and checks the contract against the MACHINE, live, in
+# this order:
+#
+#   (a) the file carries Kiln's same-bed safe-startup header, whole;
+#   (b) the machine being started is the machine it was baked for;
+#   (c) no emergency latch on that machine;
+#   (d) the machine is not printing or paused;
+#   (e) the firmware, asked now, reports X, Y and Z homed.
+#
+# Every other file keeps the rule unchanged.  A cached "homed" is a guess,
+# and a backend that cannot answer (e) at all refuses with the measurement
+# sentence rather than starting next to a part on the bed.
+# ---------------------------------------------------------------------------
+
+SAME_BED_HEADER_START = "; --- Kiln same-bed retry safe startup ---"
+SAME_BED_HEADER_END = "; --- End Kiln same-bed retry safe startup ---"
+SAME_BED_MOTION_CONTRACT = "no_xyz_motion"
+SAME_BED_MACHINE_KEY = "baked_for_machine"
+SAME_BED_REQUIRED_KEYS = (
+    "safe_startup_policy_id",
+    "safe_startup_policy_version",
+    "safe_startup_motion_contract",
+    SAME_BED_MACHINE_KEY,
+)
+#: The header is the file's first thing; a start marker further down than
+#: this is not Kiln's prologue.
+_SAME_BED_HEADER_SCAN_LINES = 64
+#: And the prologue itself is short; a header that never ends is not one.
+_SAME_BED_HEADER_MAX_LINES = 256
+
+HOMED_UNKNOWN_SENTENCE = (
+    "this printer cannot report whether it is homed; same-bed retry is not "
+    "supported here — run the homed-state measurement for this backend, or "
+    "reslice and print normally"
+)
+
+
+def same_bed_machine_id(adapter: Any) -> str:
+    """The identity a same-bed retry is bound to, or ``""`` when there is none.
+
+    The hardware fingerprint first (``family:serial:…`` / ``family:host:…``,
+    from :func:`kiln.printers.engagement.machine_id`): it survives the
+    registry aliasing one machine under two names (``"default"`` and its
+    config name) and a rename between the bake and the start.  A machine
+    that reports neither serial nor address falls back to the name its
+    owner registered it under, which both the baking door and the starting
+    door can read off the same adapter.  Neither -> ``""``, and a retry
+    cannot be bound to a machine Kiln cannot tell apart from another.
+
+    kiln-pro writes this value into the artifact (``baked_for_machine``) and
+    the gate recomputes it from the adapter being started; the two must
+    agree, so there is exactly one way to compute it.
+    """
+    try:
+        from kiln.printers.engagement import machine_id
+
+        fingerprint = machine_id(adapter)
+    except Exception:  # noqa: BLE001
+        fingerprint = ""
+    if fingerprint:
+        return fingerprint
+    registered = getattr(adapter, "_kiln_registered_name", None)
+    return registered if isinstance(registered, str) and registered else ""
+
+
+def _gcode_head(path: str, max_lines: int) -> list[str] | None:
+    """The first *max_lines* of the job's gcode text, or ``None`` if unreadable.
+
+    Reads the plate gcode of a ``.3mf`` the way ``bed_fit`` does, so the two
+    look at the same bytes.
+    """
+    low = path.lower()
+    try:
+        if low.endswith(".3mf"):
+            import zipfile
+
+            with zipfile.ZipFile(path) as zf:
+                names = [
+                    n for n in zf.namelist()
+                    if n.startswith("Metadata/plate_") and n.endswith(".gcode")
+                ]
+                if not names:
+                    return None
+                text = zf.read(names[0]).decode("utf-8", errors="replace")
+            return text.splitlines()[:max_lines]
+        out: list[str] = []
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                out.append(line.rstrip("\n"))
+                if len(out) >= max_lines:
+                    break
+        return out
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def read_same_bed_contract(path: str) -> dict[str, str] | None:
+    """The ``; key: value`` lines of the same-bed safe-startup header, or
+    ``None`` when the file carries no such header at all.
+
+    A header that is present but incomplete still comes back (with its keys
+    missing), so the refusal can name the missing line rather than say
+    "no header".
+    """
+    head = _gcode_head(path, _SAME_BED_HEADER_MAX_LINES)
+    if not head:
+        return None
+    start = next(
+        (i for i, line in enumerate(head[:_SAME_BED_HEADER_SCAN_LINES])
+         if line.strip() == SAME_BED_HEADER_START),
+        None,
+    )
+    if start is None:
+        return None
+    fields: dict[str, str] = {}
+    for line in head[start + 1:]:
+        stripped = line.strip()
+        if stripped == SAME_BED_HEADER_END:
+            break
+        if not stripped.startswith(";"):
+            continue
+        body = stripped[1:].strip()
+        key, sep, value = body.partition(":")
+        if sep and key.strip() and " " not in key.strip():
+            fields.setdefault(key.strip(), value.strip())
+    return fields
+
+
+def _latch_status(printer_name: str) -> dict[str, Any] | None:
+    """The emergency coordinator's latch status for *printer_name* -- the
+    same read ``kiln.server`` makes before any control tool runs."""
+    try:
+        from kiln.emergency import get_emergency_coordinator
+
+        return get_emergency_coordinator().get_latch_status(printer_name)
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("emergency latch lookup failed for %s: %s", printer_name, exc)
+        return None
+
+
+def evaluate_same_bed_retry(adapter: Any, job_path: str) -> dict[str, Any]:
+    """Judge a no-homing file as a same-bed retry, against the machine, live.
+
+    Conditions (a)-(e) in the module comment above, checked in that order;
+    the first one that fails is the verdict, named with its remedy, and the
+    later ones are not read (no machine round-trip for a file that is not
+    even a retry).  ``blocked=False`` with ``accepted=True`` when all hold.
+
+    ``homed_evidence`` is filled the moment (e) is consulted -- the axes the
+    firmware reported, the field they came from, and when -- on the accepted
+    verdict and on the (e) refusals alike.  The audit line repeats it.
+    """
+    name = os.path.basename(str(job_path))
+    contract = read_same_bed_contract(job_path)
+    machine = same_bed_machine_id(adapter)
+    verdict: dict[str, Any] = {
+        "ok": False,
+        "blocked": True,
+        "accepted": False,
+        "code": None,
+        "condition": None,
+        "reason": "",
+        "contract": contract,
+        "machine": machine,
+        "homed_evidence": None,
+    }
+
+    def refuse(code: str, condition: str, reason: str) -> dict[str, Any]:
+        verdict.update(code=code, condition=condition, reason=reason)
+        _audit_same_bed(verdict, name)
+        return verdict
+
+    # (a) the contract, whole.
+    remedy_a = (
+        " Re-bake the retry through auto_recover on this printer, or reslice "
+        "the part and print it normally (a normal print homes first)."
+    )
+    if contract is None:
+        return refuse(
+            "SAME_BED_RETRY_NO_CONTRACT", "contract",
+            f"{name} has no homing before its first move and carries no Kiln "
+            f"same-bed retry safe-startup header, so it is not a same-bed retry."
+            + remedy_a,
+        )
+    missing = [k for k in SAME_BED_REQUIRED_KEYS if not contract.get(k)]
+    if missing:
+        return refuse(
+            "SAME_BED_RETRY_NO_CONTRACT", "contract",
+            f"{name} carries an incomplete Kiln same-bed retry safe-startup "
+            f"header: missing {', '.join(missing)}." + remedy_a,
+        )
+    if contract["safe_startup_motion_contract"] != SAME_BED_MOTION_CONTRACT:
+        return refuse(
+            "SAME_BED_RETRY_NO_CONTRACT", "contract",
+            f"{name}'s safe_startup_motion_contract is "
+            f"'{contract['safe_startup_motion_contract']}', not "
+            f"'{SAME_BED_MOTION_CONTRACT}'; only a prologue that moves nothing "
+            f"may skip homing." + remedy_a,
+        )
+
+    # (b) this machine is the one it was baked for.
+    baked_for = contract[SAME_BED_MACHINE_KEY]
+    if not machine:
+        return refuse(
+            "SAME_BED_RETRY_WRONG_MACHINE", "machine",
+            f"Kiln cannot identify this printer (it reports no serial, no "
+            f"address and no registered name), so it cannot confirm {name} "
+            f"was baked for it (baked for {baked_for})." + remedy_a,
+        )
+    if baked_for != machine:
+        return refuse(
+            "SAME_BED_RETRY_WRONG_MACHINE", "machine",
+            f"{name} was baked for {baked_for} and is being started on "
+            f"{machine}; the bed it was planned around is not this one."
+            + remedy_a,
+        )
+
+    # (c) no emergency latch.
+    printer_name = _registered_name(adapter)
+    status = _latch_status(printer_name)
+    if status and bool(status.get("latched")):
+        blockers = status.get("critical_interlocks_pending") or []
+        pending = (
+            " Critical interlocks pending: " + ", ".join(str(x) for x in blockers) + "."
+            if blockers else ""
+        )
+        return refuse(
+            "SAME_BED_RETRY_EMERGENCY_LATCHED", "emergency_latch",
+            f"Emergency latch is active for printer '{printer_name}'.{pending} "
+            f"Resolve hazards, acknowledge, then clear via "
+            f"clear_emergency_stop(), and start the retry again.",
+        )
+
+    # (d) not printing or paused.
+    try:
+        state = adapter.get_state()
+    except Exception as exc:  # noqa: BLE001
+        return refuse(
+            "SAME_BED_RETRY_STATE_READ_FAILED", "printer_state",
+            f"could not read the printer's state before the retry ({exc}); "
+            f"retry in a moment, or reslice and print normally.",
+        )
+    from kiln.printers.base import PrinterStatus, effective_state_of
+
+    run_state = effective_state_of(state)
+    if run_state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+        return refuse(
+            "SAME_BED_RETRY_PRINTER_BUSY", "printer_state",
+            f"the printer reports it is {run_state.value}; a same-bed retry "
+            f"starts only on an idle machine. Wait for that job to end, or "
+            f"cancel it, then start the retry again.",
+        )
+
+    # (e) the firmware, asked now, reports X, Y and Z homed.
+    from datetime import datetime, timezone
+
+    try:
+        axes = adapter.homed_axes_now()
+    except Exception as exc:  # noqa: BLE001
+        return refuse(
+            "SAME_BED_RETRY_HOMED_READ_FAILED", "homed_axes",
+            f"could not read which axes are homed from the printer ({exc}); "
+            f"retry in a moment, or reslice and print normally.",
+        )
+    try:
+        field = adapter.homed_axes_field()
+    except Exception:  # noqa: BLE001
+        field = None
+    verdict["homed_evidence"] = {
+        "axes": None if axes is None else sorted(str(a).lower() for a in axes),
+        "field": field,
+        "read_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "backend": getattr(adapter, "name", None) or type(adapter).__name__,
+    }
+    if axes is None:
+        return refuse(
+            "SAME_BED_RETRY_HOMED_UNKNOWN", "homed_axes",
+            f"{name} was not started: {HOMED_UNKNOWN_SENTENCE}.",
+        )
+    reported = set(verdict["homed_evidence"]["axes"])
+    not_homed = sorted({"x", "y", "z"} - reported)
+    if not_homed:
+        return refuse(
+            "SAME_BED_RETRY_NOT_HOMED", "homed_axes",
+            f"the printer reports homed axes: {','.join(sorted(reported)) or 'none'} "
+            f"— {','.join(not_homed)} not homed, and a same-bed retry cannot home "
+            f"with the failed part on the bed. Clear the bed, home the printer "
+            f"(home_axes), then reslice and print normally.",
+        )
+
+    verdict.update(
+        ok=True, blocked=False, accepted=True, code="SAME_BED_RETRY_ACCEPTED",
+        condition=None,
+        reason=(
+            f"same-bed retry accepted on {machine}: the file carries Kiln's "
+            f"no-motion startup contract and the printer reports x,y,z homed."
+        ),
+    )
+    _audit_same_bed(verdict, name)
+    return verdict
+
+
+def _registered_name(adapter: Any) -> str:
+    registered = getattr(adapter, "_kiln_registered_name", None)
+    if isinstance(registered, str) and registered:
+        return registered
+    return getattr(adapter, "name", "") or "printer"
+
+
+def _audit_same_bed(verdict: dict[str, Any], name: str) -> None:
+    """One line per decision, with the evidence the decision rested on."""
+    evidence = verdict.get("homed_evidence") or {}
+    axes = evidence.get("axes")
+    _logger.info(
+        "print_gate: same-bed retry %s on %s (%s): axes=%s field=%s read_at=%s code=%s",
+        "accepted" if verdict.get("accepted") else "refused",
+        verdict.get("machine") or "-",
+        name,
+        ",".join(axes) if axes else ("none" if axes is not None else "-"),
+        evidence.get("field") or "-",
+        evidence.get("read_at") or "-",
+        verdict.get("code"),
+    )
+
+
+def _same_bed_or_original(
+    adapter: Any,
+    job_path: str,
+    original: dict[str, Any],
+    printer_id: str | None,
+    material_id: str | None,
+) -> dict[str, Any]:
+    """A no-homing block, re-judged as a same-bed retry when the file claims
+    to be one; every other file gets *original* back untouched."""
+    if read_same_bed_contract(job_path) is None:
+        return original
+    # The contract excuses the missing homing, nothing else: a material the
+    # hotend cannot reach is still impossible, and is answered before the
+    # machine is asked anything.
+    temp_blocked, temp_code, temp_msg = _temp_verdict(printer_id, material_id)
+    if temp_blocked:
+        block = dict(original)
+        block.update(code=temp_code, reason=temp_msg, suggestions=_suggestions(None, temp_code))
+        return block
+    verdict = evaluate_same_bed_retry(adapter, job_path)
+    if verdict.get("accepted"):
+        return {
+            "ok": True,
+            "blocked": False,
+            "reason": verdict["reason"],
+            "same_bed_retry": verdict,
+            "homed_evidence": verdict["homed_evidence"],
+            "fit": original.get("fit"),
+        }
+    return {
+        "ok": False,
+        "blocked": True,
+        "code": verdict["code"],
+        "reason": verdict["reason"],
+        "condition": verdict["condition"],
+        "homed_evidence": verdict["homed_evidence"],
+        "same_bed_retry": verdict,
+        "fit": original.get("fit"),
+    }
+
+
 def run_adapter_gate(
     adapter: Any, file_name: str, kwargs: dict[str, Any],
 ) -> dict[str, Any] | None:
@@ -719,13 +1093,21 @@ def run_adapter_gate(
             fetched = _fetch_printer_copy(adapter, file_name)
         except _ReadBackFailed as exc:
             return _read_back_refusal(file_name, printer_id, str(exc), override)
+    inspected = job if job is not None else fetched
+    material_id = _resolve_material(kwargs)
     try:
         verdict = evaluate_pre_print_gate(
-            job if job is not None else fetched,
+            inspected,
             printer_id,
-            material_id=_resolve_material(kwargs),
+            material_id=material_id,
             allow_oversize=override,
         )
+        # A file refused for moving before it homes may be kiln-pro's
+        # same-bed retry, the one file that must not home; that claim is
+        # judged against the machine, live -- see evaluate_same_bed_retry.
+        # Any other file keeps this verdict exactly as it was.
+        if inspected and verdict.get("blocked") and verdict.get("code") == "NO_HOMING_SEQUENCE":
+            verdict = _same_bed_or_original(adapter, inspected, verdict, printer_id, material_id)
     finally:
         if fetched:
             with contextlib.suppress(OSError):

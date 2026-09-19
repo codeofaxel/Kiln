@@ -1314,28 +1314,40 @@ class DuetAdapter(PrinterAdapter):
             ),
         )
 
-    def _read_homed_axes(self) -> set[str] | None:
+    def _query_homed_axes(self) -> set[str] | None:
         """RepRapFirmware's own word: ``move.axes[].homed`` (RRF 3), or the
-        legacy ``coords.axesHomed`` flags (RRF 2).  ``None`` when neither
-        answers.
+        legacy ``coords.axesHomed`` flags (RRF 2).  ``None`` when the reply
+        carries neither; a failed transport raises :class:`PrinterError`.
+        Records which field answered, for the gate's evidence.
         """
-        try:
-            if self._generation() == 3:
-                axes = self._model("move.axes")
-                if not isinstance(axes, list):
-                    return None
-                return {
-                    str(a.get("letter", "")).upper()
-                    for a in axes
-                    if isinstance(a, dict) and a.get("homed") is True and str(a.get("letter", "")).upper() in "XYZ"
-                }
-            payload = self._get_json("/rr_status", params={"type": 1})
-            flags = payload.get("coords", {}).get("axesHomed")
-            if not isinstance(flags, list):
+        if self._generation() == 3:
+            self._homed_axes_field = "move.axes[].homed"
+            axes = self._model("move.axes")
+            if not isinstance(axes, list):
                 return None
-            return {axis for axis, flag in zip("XYZ", flags, strict=False) if flag}
+            return {
+                str(a.get("letter", "")).upper()
+                for a in axes
+                if isinstance(a, dict) and a.get("homed") is True and str(a.get("letter", "")).upper() in "XYZ"
+            }
+        self._homed_axes_field = "coords.axesHomed"
+        payload = self._get_json("/rr_status", params={"type": 1})
+        flags = payload.get("coords", {}).get("axesHomed")
+        if not isinstance(flags, list):
+            return None
+        return {axis for axis, flag in zip("XYZ", flags, strict=False) if flag}
+
+    def _read_homed_axes(self) -> set[str] | None:
+        """The confirm-after-homing read: a failed query reads as "not confirmed"."""
+        try:
+            return self._query_homed_axes()
         except PrinterError:
             return None
+
+    def homed_axes_now(self) -> set[str] | None:
+        """A fresh object-model read, lowercase; raises on a failed read."""
+        axes = self._query_homed_axes()
+        return None if axes is None else {c.lower() for c in axes}
 
     def send_gcode(self, commands: list[str]) -> CommandVerdict:
         """Send one or more G-code commands to the printer.

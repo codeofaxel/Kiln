@@ -3698,6 +3698,25 @@ class BambuAdapter(PrinterAdapter):
                 return version or None
         return None
 
+    def homed_axes_now(self) -> set[str] | None:
+        """``None``: a Bambu printer cannot yet tell Kiln whether it is homed.
+
+        The measurement is pending, so nothing here is read.  The ``print``
+        report's ``home_flag`` is the likely place: bits 24 and 25 are
+        measured (nozzle-clumping detection, see
+        :func:`decode_nozzle_clumping_switch`), but which bits, if any,
+        follow the homed state of X, Y and Z has NOT been measured on a
+        printer, and the report's ``cfg`` / ``fun`` fields have not been
+        watched for it either.  Until an A1 has been dumped through a home
+        and a power cycle with those bits followed both ways, no bit is
+        turned into "homed" -- a same-bed retry on a Bambu is refused with
+        the gate's measurement sentence rather than started on a guess.
+        """
+        return None
+
+    def homed_axes_field(self) -> str | None:
+        return None  # nothing is read until the measurement lands
+
     def get_state(self) -> PrinterState:
         """Retrieve the current printer state and temperatures.
 

@@ -4500,6 +4500,35 @@ class PrinterAdapter(ABC):
         """
         return None
 
+    def homed_axes_now(self) -> set[str] | None:
+        """Which axes the firmware says are homed, asked over the wire NOW.
+
+        Lowercase letters (``{"x", "y", "z"}``, or fewer), or ``None`` when
+        this backend cannot say.  A FRESH read on every call, never a
+        cached status: a cached reading is a guess, and the one caller of
+        this -- the pre-print gate deciding whether a same-bed retry may
+        start without homing, next to the failed part still on the bed --
+        cannot start a print on a guess.
+
+        Backends that can read it (Klipper's ``toolhead.homed_axes``,
+        RepRapFirmware's object model, Creality's Klipper backend) answer
+        with the firmware's word and let a transport failure RAISE
+        :class:`PrinterError` rather than answer ``None``: "the read failed,
+        retry" and "this backend cannot say" are different refusals.  The
+        read uses the adapter's own request timeout and retry budget; no
+        caller of this waits longer than one status read would.
+
+        The default knows nothing and says so.
+        """
+        return self._read_homed_axes()
+
+    def homed_axes_field(self) -> str | None:
+        """The firmware field :meth:`homed_axes_now` reads, named the way the
+        firmware names it (``"toolhead.homed_axes"``), or ``None`` when this
+        backend has no such read.  Written into the gate's evidence so the
+        audit line says where the answer came from."""
+        return getattr(self, "_homed_axes_field", None)
+
     def _z_lifts_before_home(self) -> bool | None:
         """Whether the firmware's own homing routine lifts Z before X/Y move.
 
