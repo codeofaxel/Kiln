@@ -670,7 +670,12 @@ def describe_screen_faults(faults: Any) -> list[str]:
     because nothing else on the surface names it; a ``print_error`` with
     none yields no line at all, because ``fault_note`` already names that
     code and a second line saying only the number would say nothing new.
-    Empty for ``None`` and for anything that is not a list of entries.
+    When Kiln has a fix for an ``hms`` code (the entry carries ``remedy``),
+    its ``reading`` and the fix follow the code line, indented: an HMS
+    code's reading lives nowhere else on a text surface, where a
+    ``print_error``'s is already the headline.  A family line is not a fix
+    and earns no second line.  Empty for ``None`` and for anything that is
+    not a list of entries.
     """
     lines: list[str] = []
     if not isinstance(faults, list):
@@ -686,6 +691,12 @@ def describe_screen_faults(faults: Any) -> list[str]:
             lines.append(f"{code}: {text}")
         elif entry.get("kind") == "hms":
             lines.append(code)
+        remedy = entry.get("remedy")
+        if entry.get("kind") == "hms" and isinstance(remedy, str) and remedy:
+            reading = entry.get("reading")
+            if isinstance(reading, str) and reading:
+                lines.append(f"  {reading}")
+            lines.append(f"  {remedy}")
     return lines
 
 

@@ -15038,6 +15038,14 @@ def troubleshoot_printer(
     * a fault code anywhere in the text (``"1200-8007"``, ``"12008007"``);
     * which step of a load/unload wizard failed (``"fails at step 5"``).
 
+    Every code the call names -- in ``hms_code`` or anywhere in ``symptom``,
+    so two codes read off ``printer_status`` fit in one call -- is read
+    through the same reader ``printer_status`` uses and returned under
+    ``fault_readings`` (code, namespace, reading, and the fix when Kiln has
+    one).  When the printer's playbook carries none of the codes named, the
+    response says so in ``codes_without_a_playbook`` rather than answering
+    the codes with word matches alone.
+
     A step number is the most useful sentence a user can offer about a load
     failure: the response's ``load_step_reading`` says whether that step is
     upstream of the melt zone, which rules a nozzle clog in or out before
@@ -15084,6 +15092,30 @@ def troubleshoot_printer(
         named_signals = bool(
             extract_codes(symptom) or extract_load_step(symptom) is not None
         )
+        # Every code this call names, read once through the reader every
+        # other door uses.  The agent is the caller here: on 2026-09-19 it
+        # read two codes off printer_status, had one hms_code slot, and put
+        # both in the sentence -- where they were matched against the
+        # playbook and never read.  One list, one shape, whichever field
+        # carried the code; the explicit code leads and the sentence's
+        # follow, de-duplicated by extract_codes, which also folds the AMS
+        # unit / slot spellings the way the playbook's own codes are folded.
+        code = _normalize_hms_code(hms_code)
+        named_codes = extract_codes(f"{hms_code} {symptom}")
+        fault_readings: list[dict[str, Any]] = []
+        private_reading_attached = False
+        for bare in named_codes:
+            grouped = _normalize_hms_code(bare)
+            _link, kind, fault = _hms_reference(grouped)
+            entry: dict[str, Any] = {
+                "code": grouped.replace("_", "-"),
+                "kind": kind,
+                "reading": fault.reading,
+            }
+            if fault.remedy:
+                entry["remedy"] = fault.remedy
+            private_reading_attached = private_reading_attached or fault.private
+            fault_readings.append(entry)
         # Said ONCE per session, and only when there is something to say.
         # A user debugging a stuck load calls this repeatedly, and the tenth
         # showing of the same suggestion persuades nobody — it teaches them
@@ -15096,7 +15128,10 @@ def troubleshoot_printer(
         if has_private_depth:
             upgrade_hint = ""
         else:
-            if named_signals and intel.firmware == "bambu":
+            # A reading kiln-pro just put on the wire (a free row, served to
+            # a signed-in caller of any tier) makes "can't read a fault code
+            # here" a lie; that caller gets the generic line instead.
+            if named_signals and intel.firmware == "bambu" and not private_reading_attached:
                 # Leads with what the free tier does NOT do, then what it
                 # still DOES, then what Pro adds. That order is deliberate:
                 # opening by telling users they did something clever and
@@ -15133,13 +15168,30 @@ def troubleshoot_printer(
             "count": len(matches),
             "upgrade_hint": upgrade_hint,
         }
+        if fault_readings:
+            result["fault_readings"] = fault_readings
+        # A named code the playbook does not carry is said out loud.  The
+        # matcher keeps its word matches -- they are labelled matched_on:
+        # "text" -- but until 2026-09-19 nothing said the codes had gone
+        # unmatched, and a symptom naming two codes came back as hot-end
+        # entries that shared a word with it.  Only a caller who HAS a
+        # playbook is told what it lacks; for a caller with none the honest
+        # line is the nudge above, not a list of "missing" codes.
+        if named_codes and intel.failure_modes:
+            carried = {c for fm in intel.failure_modes for c in fm.codes}
+            missing = [
+                _normalize_hms_code(bare).replace("_", "-")
+                for bare in named_codes
+                if bare not in carried
+            ]
+            if missing:
+                result["codes_without_a_playbook"] = missing
         # Bambu HMS code lookup: the normalized raw code + a wiki pointer are
         # the free floor.  kiln-pro adds a decoded ``hms_decoded`` block (cause /
         # fix / severity, cited): at the REST boundary for hosted callers, and
         # here, through the same reading every fault door makes, when kiln-pro
         # is installed beside this server and its catalog answers for this
         # caller's tier.  One field, one shape, whichever door attached it.
-        code = _normalize_hms_code(hms_code)
         if code:
             result["hms_code"] = code
             link, kind, fault = _hms_reference(code)

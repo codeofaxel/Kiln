@@ -684,6 +684,17 @@ _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
     "12008010": (
         f"This is an AMS lite filament feed fault. {_PRIVATE_READING_POINTER}"
     ),
+    # 0300-4000: read off an A1's own screen 2026-09-19 ("Z axis homing
+    # failed; the task has been stopped", print_error 50348032) beside HMS
+    # 0300-1800-0001-0003 (the extruder eddy current sensor not responding),
+    # after a cancel mid-start-sequence days after a toolhead reassembly.
+    # The same code every cancel in the levelling window raised on
+    # 2026-08-13 (six of six).  Kiln's reading -- the ways in, in the order
+    # to check them, and the Home retest that tells them apart -- is a
+    # kiln-pro row, and a FREE one.
+    "03004000": (
+        f"This is a Z-axis homing fault. {_PRIVATE_READING_POINTER}"
+    ),
     # Third-party lookup (printara3d.com/tools/bambu-error-codes), the only
     # list that carries these; Bambu documents none of them.
     "12008003": "The AMS could not pull the filament back out of the extruder",
@@ -733,16 +744,19 @@ _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
 # above is a print_error -- ``_is_nozzle_clump_error`` and
 # ``_classify_flow_anomaly`` are both handed the ``print_error`` field, so
 # that is the field these readings are for, whatever the same digits may
-# mean elsewhere.  These four ALSO name an HMS module (checked 2026-09-03
-# against the published index), which is a trap rather than a
+# mean elsewhere.  These five ALSO name an HMS module (four checked
+# 2026-09-03 against the published index; 0300-4000 on 2026-09-19 against
+# the vendor's own sentence table), which is a trap rather than a
 # reclassification: a reader who looks one up on the wiki lands on the
 # other namespace's page.
 #
-# Three of the four happen to agree closely enough to be harmless.
+# Three of the first four happen to agree closely enough to be harmless.
 # ``0300_1900`` does not, and is the reason this set is written down: as an
 # HMS module it is the A1 mini's Y-axis eddy current sensor, nothing to do
 # with filament.  Kiln's own print_error reading for it could not be
 # confirmed against any primary source, so it is marked as a hint above.
+# ``0300_4000`` does not either: the print_error is a failed Z home, the
+# HMS module is the toolhead-to-mainboard data link.
 _HMS_NAMESPACE_COLLISIONS: dict[str, str] = {
     "03001A00": "HMS 0300-1A00 is nozzle-covered / nozzle-clogged detection",
     "03001800": "HMS 0300-1800 is the extruder eddy current sensor",
@@ -750,6 +764,10 @@ _HMS_NAMESPACE_COLLISIONS: dict[str, str] = {
     "03001900": (
         "HMS 0300-1900 is the A1 mini's Y-axis eddy current sensor -- "
         "unrelated to filament, and the reading above disagrees with it"
+    ),
+    "03004000": (
+        "HMS 0300-4000 is serial-port / G-code data transmission between "
+        "the toolhead and the mainboard -- unrelated to homing"
     ),
 }
 
@@ -935,6 +953,16 @@ def compose_bambu_faults(
         it came from, ONLY when the vendor publishes one for this device
         type (:mod:`kiln.printers.bambu_hms_text`).  Absent otherwise --
         never a family reading dressed as the vendor's words.
+    ``reading`` / ``remedy``
+        Kiln's own reading of the code, from :func:`read_bambu_fault` -- the
+        same read every other door makes, so the status door says what
+        ``troubleshoot_printer`` says.  ``reading`` is never empty: kiln-pro's
+        cause when the caller's tier unlocks the row, public Kiln's family
+        line otherwise.  ``remedy`` is present only when Kiln has a fix for
+        this code.  Until 2026-09-19 an ``hms`` entry carried the vendor's
+        sentence and nothing else, and the one code a real A1's screen never
+        showed -- the extruder eddy current sensor, whose fix opens with
+        "power off" -- was the one whose fix stayed a tool away.
 
     The printer's screen also shows six decimal digits after the code
     (``[1200-8001 290420]``).  They are not here because they are not on
@@ -969,6 +997,7 @@ def compose_bambu_faults(
         found = lookup_screen_text(pretty, device_type=device_type, kind="print_error")
         if found is not None:
             entry["screen_text"], entry["source"] = found
+        _attach_reading(entry)
         faults.append(entry)
         seen.add(pretty)
 
@@ -996,8 +1025,19 @@ def compose_bambu_faults(
             found = lookup_screen_text(shown, device_type=device_type, kind="hms")
             if found is not None:
                 entry["screen_text"], entry["source"] = found
+            _attach_reading(entry)
             faults.append(entry)
     return faults
+
+
+def _attach_reading(entry: dict[str, Any]) -> None:
+    """Put Kiln's reading of *entry*'s code on the entry, in the entry's own
+    namespace.  One read per code; the headline reads the entry, not the
+    code again."""
+    fault = read_bambu_fault(entry["code"], kind=entry["kind"])
+    entry["reading"] = fault.reading
+    if fault.remedy:
+        entry["remedy"] = fault.remedy
 
 
 # Bambu LED node names.
@@ -3560,28 +3600,41 @@ class BambuAdapter(PrinterAdapter):
         # slot, a hot end unclogged) belongs beside the generic "clear it on
         # the screen" sentence, not lost behind it.  ``None`` here lets
         # PrinterState supply that generic sentence on its own.
+        # Every code the report carries, spelled as the screen spells it,
+        # with the vendor's own sentence where it publishes one and Kiln's
+        # reading beside it.  The sentence table is warmed from here on every
+        # reading -- not only on a fault -- so it is on disk before the first
+        # fault needs it; the call returns at once and the lookup below never
+        # blocks.  ``getattr`` for the same reason ``_chamber_lookup_model``
+        # uses it: this builder runs on instances that never ran
+        # ``__init__``, and an instance with no serial has no table to ask
+        # for.
+        device_type = device_type_from_serial(getattr(self, "_serial", ""))
+        kick_background_refresh(device_type)
+        faults = compose_bambu_faults(status, device_type=device_type) or None
+
+        # The headline is the print_error entry's own reading -- composed
+        # once above, not read a second time here.  The composer skips a
+        # code ``format_error_code`` refuses (a negative value), and only
+        # then is the code read directly, so a malformed field still gets
+        # the generic sentence rather than nothing.
         fault_note: str | None = None
         fault_remedy: str | None = None
         if print_error_int:
             pretty = format_error_code(print_error_int)
-            fault = read_bambu_fault(
-                pretty or str(print_error_int), kind="print_error"
+            lead = next(
+                (f for f in faults or () if f.get("kind") == "print_error"), None
             )
-            fault_note = describe_unacknowledged_fault(pretty, fault.reading)
-            if fault.remedy:
-                fault_remedy = describe_fault_remedy(fault.remedy)
-
-        # Every code the report carries, spelled as the screen spells it,
-        # with the vendor's own sentence where it publishes one.  The
-        # sentence table is warmed from here on every reading -- not only
-        # on a fault -- so it is on disk before the first fault needs it;
-        # the call returns at once and the lookup below never blocks.
-        # ``getattr`` for the same reason ``_chamber_lookup_model`` uses it:
-        # this builder runs on instances that never ran ``__init__``, and
-        # an instance with no serial has no table to ask for.
-        device_type = device_type_from_serial(getattr(self, "_serial", ""))
-        kick_background_refresh(device_type)
-        faults = compose_bambu_faults(status, device_type=device_type) or None
+            if lead is None:
+                fault = read_bambu_fault(
+                    pretty or str(print_error_int), kind="print_error"
+                )
+                reading, remedy = fault.reading, fault.remedy
+            else:
+                reading, remedy = lead["reading"], lead.get("remedy")
+            fault_note = describe_unacknowledged_fault(pretty, reading)
+            if remedy:
+                fault_remedy = describe_fault_remedy(remedy)
 
         # ``chamber_temper`` arrives in every report from every Bambu, so
         # its presence says nothing about whether the machine has a chamber

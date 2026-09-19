@@ -916,14 +916,16 @@ class TestBambuFaultReadings:
         assert '"print_error"' in source and '"hms"' in source
 
     def test_the_namespace_collisions_are_recorded_not_reclassified(self):
-        """Checked against wiki.bambulab.com/en/hms/home on 2026-09-03."""
+        """Four checked against wiki.bambulab.com/en/hms/home on 2026-09-03;
+        0300-4000 against the vendor's own sentence table on 2026-09-19, when
+        its print_error reading (a failed Z home) joined the table."""
         from kiln.printers.bambu import (
             _BAMBU_PRINT_ERROR_FAULTS,
             _HMS_NAMESPACE_COLLISIONS,
         )
 
         assert set(_HMS_NAMESPACE_COLLISIONS) == {
-            "03001900", "03001A00", "03001800", "03000900",
+            "03001900", "03001A00", "03001800", "03000900", "03004000",
         }
         # A collision is still a print_error entry — that is the point.
         for prefix in _HMS_NAMESPACE_COLLISIONS:

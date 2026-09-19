@@ -208,7 +208,12 @@ class TestTheCodeInTheScreensSpelling:
         for stamp in MEASURED_STAMPS:
             assert stamp not in flat
         for entry in faults:
-            assert set(entry) == {"code", "kind", "raw"}
+            # No sentence (no device type to ask for one) and no fix (the
+            # bridge is silent): the code, its namespace, the wire's own
+            # fields, and Kiln's reading of it -- which is never empty and
+            # never a stand-in for the stamp.
+            assert set(entry) == {"code", "kind", "raw", "reading"}
+            assert entry["reading"]
 
     def test_no_fault_composes_nothing(self) -> None:
         from kiln.printers.bambu import compose_bambu_faults

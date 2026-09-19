@@ -607,11 +607,20 @@ def diagnose_issue(
       one, which is why a sentence containing "filament" matched whichever
       filament entry happened to be in the list.
 
-    When a code or a step is present, text matches are DROPPED rather than
-    appended.  This is the whole point: a structured signal is evidence that
-    the loose ones are noise, and burying a precise answer under four generic
-    ones is the failure being fixed here.  With neither present the historical
-    text behaviour is unchanged, so nothing that worked before regresses.
+    When a code or a step MATCHES a mode, text matches are DROPPED rather
+    than appended.  This is the whole point: a structured signal is evidence
+    that the loose ones are noise, and burying a precise answer under four
+    generic ones is the failure being fixed here.  With neither present the
+    historical text behaviour is unchanged, so nothing that worked before
+    regresses.
+
+    A named code that NO mode carries does not suppress the text matches:
+    this function has nothing precise to put in their place, and dropping
+    them would throw away the only matches there are.  The door that calls
+    this (``troubleshoot_printer``) names such codes in
+    ``codes_without_a_playbook`` and reads them through the fault reader, so
+    the caller is told, rather than left to infer from ``matched_on: "text"``
+    that the code went unheard -- which is what happened on 2026-09-19.
     """
     intel = get_printer_intel(printer_id)
     symptom_lower = symptom.lower()
