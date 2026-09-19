@@ -52,6 +52,12 @@ def real_stage(monkeypatch):
     monkeypatch.setenv("KILN_STAGE_DOC", str(doc))
     monkeypatch.setenv("KILN_STAGE_BROWSER", browsers[-1])
     monkeypatch.delenv("KILN_NO_STAGE_STILLS", raising=False)
+    # The question here is WHICH backend answers, not how fast: a cold
+    # browser on a loaded machine can miss the 20 s set budget and the
+    # product honestly falls back, which reads as a wrong answer here.
+    from kiln import stage_still
+
+    monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 120.0)
 
 _MODEL = """\
 <?xml version="1.0" encoding="UTF-8"?>
