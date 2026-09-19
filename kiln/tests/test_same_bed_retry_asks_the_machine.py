@@ -480,18 +480,57 @@ def test_the_base_default_cannot_say():
     assert PrinterAdapter.homed_axes_field(adapter) is None
 
 
-def test_bambu_cannot_say_yet_and_does_not_guess_from_home_flag(retry_file, monkeypatch):
+def _bambu_that_answers(monkeypatch, *, home_flag, answers=True):
+    """A Bambu whose next pushall is answered with *home_flag* -- or not."""
     from kiln.printers.bambu import BambuAdapter
 
     monkeypatch.setenv("KILN_BAMBU_TLS_PIN_FILE", "/dev/null")
     adapter = BambuAdapter(
         host="192.168.1.5", access_code="12345678", serial="01P00A000000001", timeout=2
     )
-    # A push that sets every bit: the homed-axis bits of home_flag are not
-    # measured, so no reading of it may be turned into "homed".
-    adapter._last_status = {"gcode_state": "IDLE", "home_flag": (1 << 32) - 1}
+    monkeypatch.setattr(adapter, "_ensure_mqtt", lambda: None)
+    published = []
+
+    def _publish(cmd):
+        published.append(cmd)
+        if answers:
+            with adapter._state_lock:
+                adapter._last_status = {"gcode_state": "IDLE", "home_flag": home_flag}
+                adapter._gcode_state_time = (adapter._gcode_state_time or 0.0) + 1.0
+
+    monkeypatch.setattr(adapter, "_publish_command", _publish)
+    return adapter, published
+
+
+def test_bambu_reads_the_measured_homed_bits_from_a_fresh_push(monkeypatch):
+    """Measured on an A1 2026-09-19: home_flag bits 0-2 follow X, Y, Z."""
+    homed_flag = 863978903  # the read after the screen Home
+    adapter, published = _bambu_that_answers(monkeypatch, home_flag=homed_flag)
+    assert adapter.homed_axes_now() == {"x", "y", "z"}
+    assert published and published[0]["pushing"]["command"] == "pushall"
+    assert "home_flag" in (adapter.homed_axes_field() or "")
+
+
+def test_bambu_after_a_power_cycle_reports_nothing_homed(monkeypatch):
+    unhomed_flag = 863978896  # the read after the power cycle, bits 0-2 clear
+    adapter, _ = _bambu_that_answers(monkeypatch, home_flag=unhomed_flag)
+    assert adapter.homed_axes_now() == set()
+
+
+def test_bambu_never_answers_from_the_cache(monkeypatch):
+    """A stale cached flag saying "homed" is not an answer: no fresh push, no reading."""
+    adapter, _ = _bambu_that_answers(monkeypatch, home_flag=863978903, answers=False)
+    adapter._last_status = {"gcode_state": "IDLE", "home_flag": 863978903}
+    adapter._gcode_state_time = 1.0
+    adapter._timeout = 0.2
     assert adapter.homed_axes_now() is None
-    assert adapter.homed_axes_field() is None
+
+
+def test_bambu_cannot_say_yet_and_does_not_guess_from_home_flag(retry_file, monkeypatch):
+    """A Bambu that answers no push refuses the retry with the measurement sentence."""
+    adapter, _ = _bambu_that_answers(monkeypatch, home_flag=0, answers=False)
+    adapter._timeout = 0.2
+    assert adapter.homed_axes_now() is None
 
     adapter._kiln_registered_name = MACHINE
     monkeypatch.setattr(

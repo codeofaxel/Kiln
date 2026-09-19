@@ -337,6 +337,15 @@ _NOZZLE_CLUMP_MESSAGE = (
 #:
 #: The ``cfg`` / ``fun`` / ``fun2`` layouts are not yet exercised against a
 #: real printer; the ``home_flag`` layout is.
+#: ``home_flag`` bits 0, 1 and 2 follow the homed state of X, Y and Z.
+#: Measured on an A1 (firmware 01.07.02.00, 2026-09-19): all three clear
+#: with the printer idle after a cancelled print and again after a power
+#: cycle, all three set after a Home from the screen, and no other bit of
+#: the field moved between the three reads.  Read only from a push the
+#: printer answered NOW, never from the cache -- see homed_axes_now.
+_HOMED_AXIS_BITS: dict[str, int] = {"x": 0, "y": 1, "z": 2}
+HOMED_AXES_FIELD = "print.home_flag[bits 0-2]"
+
 _CLUMP_HOME_FLAG_ON_BIT = 24
 _CLUMP_HOME_FLAG_SUPPORTED_BIT = 25
 _CLUMP_CFG_ON_BIT = 24
@@ -3699,23 +3708,38 @@ class BambuAdapter(PrinterAdapter):
         return None
 
     def homed_axes_now(self) -> set[str] | None:
-        """``None``: a Bambu printer cannot yet tell Kiln whether it is homed.
+        """Which axes the printer says are homed, from a push it answers NOW.
 
-        The measurement is pending, so nothing here is read.  The ``print``
-        report's ``home_flag`` is the likely place: bits 24 and 25 are
-        measured (nozzle-clumping detection, see
-        :func:`decode_nozzle_clumping_switch`), but which bits, if any,
-        follow the homed state of X, Y and Z has NOT been measured on a
-        printer, and the report's ``cfg`` / ``fun`` fields have not been
-        watched for it either.  Until an A1 has been dumped through a home
-        and a power cycle with those bits followed both ways, no bit is
-        turned into "homed" -- a same-bed retry on a Bambu is refused with
-        the gate's measurement sentence rather than started on a guess.
+        Bits 0-2 of the ``print`` report's ``home_flag`` (see
+        :data:`_HOMED_AXIS_BITS` for the measurement).  The printer is
+        asked for a fresh report and the answer is read only when the
+        push that carries it arrived after the ask: a cached ``home_flag``
+        is what the printer said some time ago, and the one caller of this
+        -- the same-bed retry gate -- starts a print on the answer.  A
+        printer that does not answer in time gives ``None`` ("cannot say
+        right now"), never the stale bits.
         """
-        return None
+        self._ensure_mqtt()
+        with self._state_lock:
+            asked_at = self._gcode_state_time
+        self._publish_command(
+            {"pushing": {"sequence_id": self._next_seq(), "command": "pushall"}}
+        )
+        deadline = time.monotonic() + min(2.0, self._timeout / 2)
+        while time.monotonic() < deadline:
+            with self._state_lock:
+                if self._gcode_state_time and self._gcode_state_time != asked_at:
+                    flag = self._last_status.get("home_flag")
+                    break
+            time.sleep(0.05)
+        else:
+            return None
+        if not isinstance(flag, int):
+            return None
+        return {axis for axis, bit in _HOMED_AXIS_BITS.items() if flag >> bit & 1}
 
     def homed_axes_field(self) -> str | None:
-        return None  # nothing is read until the measurement lands
+        return HOMED_AXES_FIELD
 
     def get_state(self) -> PrinterState:
         """Retrieve the current printer state and temperatures.
