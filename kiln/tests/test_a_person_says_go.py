@@ -548,7 +548,7 @@ class TestCliDoors:
     def _png_token(self, tmp_path):
         gcode = tmp_path / "part.gcode"
         gcode.write_text("G28\n")
-        preview_evidence.record("png", str(gcode), renderer="openscad")
+        preview_evidence.record("png", str(gcode), renderer="stage_paint", shown_sha="abc")
         preview_evidence.record_url_refusal(str(gcode), "signed_out")
         return gcode, server.issue_preview_token(str(gcode), door="png")["token"]
 

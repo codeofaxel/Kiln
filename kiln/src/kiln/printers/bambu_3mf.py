@@ -1761,6 +1761,22 @@ def bambu_archive_problems(path: str | os.PathLike[str], *, name: str | None = N
                 "the preview is not on record as drawn in the plate's declared colours "
                 f"({', '.join(colors) or 'none declared'})"
             )
+        # The tile also shows the print's weight.  A plate that lays down
+        # filament and claims 0.00 g is incomplete (Orca's density-less
+        # profile and Kiln's old packager both wrote it); a plate that
+        # extrudes nothing may say so honestly.
+        if "Metadata/slice_info.config" in names:
+            info = zf.read("Metadata/slice_info.config").decode("utf-8", errors="replace")
+            if not _slice_info_knows_its_weight(info):
+                body = zf.read("Metadata/plate_1.gcode").decode("utf-8", errors="replace")
+                # Judged by what completion would write: a plate whose real
+                # weight rounds to 0.00 g (a purge line and nothing else)
+                # is not incomplete, it is light.
+                if round(sum(filament_usage_from_gcode(body).grams), 2) > 0:
+                    problems.append(
+                        "the plate's weight reads 0.00 g though it extrudes filament — the "
+                        "printer's screen would show no weight"
+                    )
     if problems:
         problems.append(
             "the printer's screen would show a broken tile; complete the archive with "

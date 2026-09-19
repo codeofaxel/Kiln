@@ -80,7 +80,7 @@ _MODEL = """\
   <build><item objectid="2" /></build>
 </model>"""
 
-_GCODE = "; sliced\nM73 P0 R60\nG28\nG1 X10 Y10 Z0.2 E1\nM73 P100 R0\n"
+_GCODE = "; sliced\nM73 P0 R60\nG28\nG1 X10 Y10 Z0.2 E500\nM73 P100 R0\n"
 _SLICE_INFO = (
     '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n  <plate>\n'
     '    <metadata key="index" value="1"/>\n    <metadata key="prediction" value="3600"/>\n'
@@ -97,13 +97,15 @@ def _png(width: int, height: int, rgb=(128, 128, 128)) -> bytes:
     return buf.getvalue()
 
 
-def _archive(tmp_path: Path, name: str, extra: dict[str, bytes], *, sliced: bool = True) -> str:
+def _archive(
+    tmp_path: Path, name: str, extra: dict[str, bytes], *, sliced: bool = True, slice_info: str = _SLICE_INFO,
+) -> str:
     p = tmp_path / name
     with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("3D/3dmodel.model", _MODEL)
         if sliced:
             zf.writestr("Metadata/plate_1.gcode", _GCODE)
-            zf.writestr("Metadata/slice_info.config", _SLICE_INFO)
+            zf.writestr("Metadata/slice_info.config", slice_info)
             zf.writestr("Metadata/plate_1.json", _PLATE_JSON)
         for n, d in extra.items():
             zf.writestr(n, d)
@@ -123,7 +125,8 @@ def studio_like(tmp_path: Path) -> str:
     """Bambu Studio's own set, plate_no_light included: the slicer drew it."""
     slots = {n: _png(*s, rgb=(247, 35, 35)) for n, s in bambu_3mf._BAMBU_THUMBNAIL_SPECS.items()}
     slots["Metadata/plate_no_light_1.png"] = _png(512, 512, rgb=(247, 35, 35))
-    return _archive(tmp_path, "studio.gcode.3mf", slots)
+    # Studio also writes the weight it computed.
+    return _archive(tmp_path, "studio.gcode.3mf", slots, slice_info=_SLICE_INFO.replace('value="0.00"', 'value="24.41"'))
 
 
 def _png_size(data: bytes):
@@ -424,3 +427,58 @@ class TestPaintedPreviewReachesTheStage:
         )
         assert result["success"], result
         assert result["renderer"] == "colored_mesh"
+
+
+# ---------------------------------------------------------------------------
+# A plate that extrudes never ships with a 0.00 weight
+# ---------------------------------------------------------------------------
+
+
+class TestZeroWeightNeverShips:
+    """The tile shows the print's weight from slice_info.config.  Orca's
+    density-less profile and Kiln's own packager both wrote 0.00; a plate
+    that lays down filament and claims to weigh nothing is incomplete.
+    The slice door fills it from the G-code; the upload door refuses one
+    that slipped past.  A plate with no extrusion may honestly say 0.00."""
+
+    def _studio_with_zero_weight(self, tmp_path):
+        slots = {n: _png(*s) for n, s in bambu_3mf._BAMBU_THUMBNAIL_SPECS.items()}
+        slots["Metadata/plate_no_light_1.png"] = _png(512, 512)
+        return _archive(tmp_path, "zero.gcode.3mf", slots)
+
+    def test_a_zero_weight_on_an_extruding_plate_is_named(self, tmp_path):
+        problems = bambu_3mf.bambu_archive_problems(self._studio_with_zero_weight(tmp_path))
+        assert any("weight" in p for p in problems), problems
+
+    def test_completion_fills_it_and_the_check_passes(self, tmp_path):
+        path = self._studio_with_zero_weight(tmp_path)
+        bambu_3mf.complete_bambu_archive(path)
+        assert bambu_3mf.bambu_archive_problems(path) == []
+        with zipfile.ZipFile(path) as zf:
+            info = zf.read("Metadata/slice_info.config").decode()
+        assert 'key="weight" value="0.00"' not in info
+
+    def test_a_plate_that_extrudes_nothing_may_say_zero(self, tmp_path):
+        slots = {n: _png(*s) for n, s in bambu_3mf._BAMBU_THUMBNAIL_SPECS.items()}
+        slots["Metadata/plate_no_light_1.png"] = _png(512, 512)
+        p = tmp_path / "empty.gcode.3mf"
+        with zipfile.ZipFile(p, "w") as zf:
+            zf.writestr("3D/3dmodel.model", _MODEL)
+            zf.writestr("Metadata/plate_1.gcode", "G28\nG1 X10 Y10 Z5\n")
+            zf.writestr("Metadata/slice_info.config", _SLICE_INFO)
+            zf.writestr("Metadata/plate_1.json", _PLATE_JSON)
+            for n, d in slots.items():
+                zf.writestr(n, d)
+        assert bambu_3mf.bambu_archive_problems(str(p)) == []
+
+    def test_the_upload_door_refuses_a_zero_weight(self, tmp_path):
+        from kiln.printers.bambu import BambuAdapter, PrinterError
+
+        with mock.patch.object(BambuAdapter, "_ensure_mqtt", lambda self: None, create=True):
+            adapter = BambuAdapter(host="192.0.2.5", access_code="12345678", serial="01P00A000000000")
+        ftp = mock.MagicMock()
+        with mock.patch.object(adapter, "_ftp_connect", return_value=ftp), \
+             mock.patch.object(adapter, "_detect_storage_path", return_value="/model"), \
+             pytest.raises(PrinterError, match="weight"):
+            adapter.upload_file(self._studio_with_zero_weight(tmp_path))
+        ftp.storbinary.assert_not_called()
