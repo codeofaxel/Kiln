@@ -2551,6 +2551,9 @@ class PrinterAdapter(ABC):
                     # type across adapters.
                     from kiln.printers import PrinterError
                     raise PrinterError(str(exc)) from None
+                if refusal := _incomplete_upload_reason(self, file_path):
+                    from kiln.printers import PrinterError
+                    raise PrinterError(refusal)
                 return original(self, file_path)
 
             _safe_upload_file._kiln_safety_wrapped = True  # type: ignore[attr-defined]
@@ -6345,6 +6348,40 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
 
 class _UnsafeUpload(Exception):
     """Internal sentinel raised by the pre-upload safety check."""
+
+
+def _incomplete_upload_reason(adapter: PrinterAdapter, file_path: str) -> str | None:
+    """Why this file must not leave for this printer — ``None`` when it may.
+
+    The one door every non-Bambu upload passes.  A file that leaves Kiln
+    for a printer carries the preview that printer's surface draws and a
+    weight that is not a lie, or it does not leave: the same rule the Bambu
+    adapter applies to its archives, applied here to raw G-code so that
+    Mainsail, Fluidd, OctoPrint, PrusaLink and Duet Web Control all get a
+    tile instead of a placeholder.  Lives in the shared wrapper rather than
+    in each adapter for the same reason the bed-fit check above it does: a
+    ninth backend inherits it without knowing it exists.
+
+    Soft-passes everything it cannot establish — an unmapped backend, a
+    file that is not G-code, an unreadable file, any internal error.  See
+    :mod:`kiln.printers.gcode_complete` for what each surface reads.
+    """
+    try:
+        from kiln.printers.gcode_complete import family_for_adapter, gcode_problems
+
+        family = family_for_adapter(adapter)
+        if family is None:
+            return None
+        problems = gcode_problems(file_path, family)
+        if not problems:
+            return None
+        return (
+            f"Refused to upload {os.path.basename(file_path)}: "
+            + "; ".join(problems) + "."
+        )
+    except Exception:  # noqa: BLE001 — a check that breaks must not block a print
+        logger.debug("gcode completeness check raised; allowing upload", exc_info=True)
+        return None
 
 
 def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> None:

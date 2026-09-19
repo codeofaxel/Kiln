@@ -39,6 +39,35 @@ def slice_overrides_for_adapter(adapter: Any) -> dict[str, str]:
     return dict(BAMBU_SLICE_OVERRIDES) if adapter_wraps_gcode(adapter) else {}
 
 
+def _complete_raw_gcode(
+    adapter: Any, gcode_path: str, stl_paths: list[str] | None,
+) -> None:
+    """Give a raw-G-code printer's file its preview and its weight, in place.
+
+    The other half of what a wrap does for a Bambu.  ``slice_and_print``,
+    ``reslice_and_print`` and ``quick_print`` all come through this helper,
+    so the file each of them sends arrives complete rather than being
+    refused at the upload door one step later.  Best-effort: a picture that
+    cannot be drawn costs the picture, never the print.  See
+    :mod:`kiln.printers.gcode_complete`.
+    """
+    if not gcode_path.lower().endswith((".gcode", ".gco", ".g")):
+        return
+    try:
+        from kiln.printers.gcode_complete import (
+            complete_gcode_for_printer,
+            family_for_adapter,
+        )
+
+        complete_gcode_for_printer(
+            gcode_path,
+            family_for_adapter(adapter),
+            model_path=stl_paths[0] if stl_paths else None,
+        )
+    except Exception:  # noqa: BLE001 — the upload door still refuses an incomplete file
+        logger.warning("G-code completion failed for %s", gcode_path, exc_info=True)
+
+
 def prepare_upload_for_adapter(
     adapter: Any,
     gcode_path: str,
@@ -55,6 +84,7 @@ def prepare_upload_for_adapter(
     runs on whatever comes back.
     """
     if not adapter_wraps_gcode(adapter) or not gcode_path.lower().endswith(".gcode"):
+        _complete_raw_gcode(adapter, gcode_path, stl_paths)
         return gcode_path, False
     kwargs: dict[str, Any] = {}
     if stl_paths:
