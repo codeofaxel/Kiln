@@ -256,12 +256,15 @@ def _write(windows: list[Window]) -> None:
 
 
 def _hosted() -> bool:
-    try:
-        from kiln.runtime_env import is_hosted_multitenant
+    """Whether this process is the hosted server, asked outside any handler.
 
-        return is_hosted_multitenant()
-    except Exception:  # noqa: BLE001
-        return False
+    Never wrapped: a broad except around the guard turns "refuse on the
+    shared disk" into "carry on", which is the one failure a guard must
+    not have.  runtime_env is public Kiln's own and always imports.
+    """
+    from kiln.runtime_env import is_hosted_multitenant
+
+    return is_hosted_multitenant()
 
 
 def _require_person() -> None:
