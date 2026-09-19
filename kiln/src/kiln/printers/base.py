@@ -4359,7 +4359,9 @@ class PrinterAdapter(ABC):
             "such as bambu_a1, bambu_p1s, prusa_mk4, k1 or ender3_v3_ke, and call again."
         )
 
-    def _motion_gate(self, options: dict[str, Any], *, axes: str, action: str) -> Any:
+    def _motion_gate(
+        self, options: dict[str, Any], *, axes: str, action: str,
+    ) -> tuple[Any, list[HomeStep] | None]:
         """The generic backend's answer to "may the head move?", before any G-code.
 
         Reads the catalogue's motion block for the declared model and the
@@ -4379,11 +4381,13 @@ class PrinterAdapter(ABC):
           a generic backend cannot say how high the head is before it
           travels sideways.
 
-        Returns the motion facts (or ``None``) for the caller's plan text.
+        Returns ``(motion facts or None, detour steps or None)`` -- the facts
+        for the caller's plan text, and the served path around a recorded
+        part for it to run instead of its own sequence.
         """
         motion = self.motion_facts()
         if options.get("plate_clear") is True:
-            return motion
+            return motion, None
         wants_z = "Z" in axes.upper()
         if motion is None:
             if wants_z or action == "park":
@@ -4392,11 +4396,18 @@ class PrinterAdapter(ABC):
                     "unknown_key" if self.declared_printer_model() else "undeclared",
                 )
                 raise ModelDeclarationRequired(self._declare_model_text())
-            return None
+            return None, None
+        detour: list[HomeStep] | None = None
         if wants_z and motion.z_home_descends_onto_plate:
-            self._plate_gate(options, station=None, action=action, touches_plate=True,
-                             allow_plan=False, contact="homes Z by " + motion.describe_z_home(),
-                             refusal_reason="on_plate" if motion.z_home_known else "unknown_method")
+            # The plan is asked for, not assumed: public Kiln refuses to press
+            # a nozzle onto a recorded part, and kiln-pro's planner may know a
+            # path that homes around it.  What comes back is run INSTEAD of
+            # this backend's own G28 (see :meth:`_home_axes_impl`), so a plan
+            # is accepted here only because there is somewhere to run it --
+            # the reason this asked for none before the run path existed.
+            detour = self._plate_gate(options, station=None, action=action, touches_plate=True,
+                                      allow_plan=True, contact="homes Z by " + motion.describe_z_home(),
+                                      refusal_reason="on_plate" if motion.z_home_known else "unknown_method")
         if action == "park":
             from kiln.plate_state import plate_occupancy
 
@@ -4413,7 +4424,7 @@ class PrinterAdapter(ABC):
                     "`kiln plate clear`, or plate_clear=true on park_head.",
                     snapshot_path=witness,
                 )
-        return motion
+        return motion, detour
 
     def home_axes(self, *, axes: str = "XYZ", **options: Any) -> HomeResult:
         """Home the head -- what the Home button on the printer's screen does.
@@ -4558,7 +4569,17 @@ class PrinterAdapter(ABC):
                 f"{self.name} cannot home through Kiln: this backend does not "
                 "accept G-code. Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, with your eyes on the plate. The screen's Home button descends the nozzle to the bed and is the wrong tool with a part on the plate."
             )
-        motion = self._motion_gate(options, axes=axes, action="home")
+        motion, detour = self._motion_gate(options, axes=axes, action="home")
+        if detour is not None:
+            # A served path around the part on the plate, run in place of this
+            # backend's own G28.  It claims no axis homed -- the firmware's own
+            # read is the only thing that may (see ``homed_axes_now``).
+            from kiln.printers.motion_plan import run_home_plan
+
+            return run_home_plan(
+                self, {"printer_id": self.declared_printer_model() or self.name},
+                axes=axes, options=options, action="home", steps=detour,
+            )
         command = "G28" if axes == "XYZ" else "G28 " + " ".join(axes)
         plan = [HomeStep(
             number=1, label="home " + " ".join(axes),
@@ -4716,7 +4737,7 @@ class PrinterAdapter(ABC):
                 "Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, with your "
                 "eyes on the plate."
             )
-        motion = self._motion_gate(options, axes="XY", action="park")
+        motion, _ = self._motion_gate(options, axes="XY", action="park")
         if motion is not None and motion.z_home_descends_onto_plate and options.get("plate_clear") is not True:
             # The vendor's Z home would press onto a plate nobody has vouched
             # for: park is the firmware's X/Y home only, Z untouched.
