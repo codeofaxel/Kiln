@@ -230,11 +230,9 @@ def design_mesh_for(file_path: str | os.PathLike[str]) -> str | None:
     """The mesh this machine sliced *file_path* from, if the slice ledger
     knows one and it is still on disk.  ``None`` for a mesh itself, a file
     Kiln did not slice, or the hosted server (whose ledger is nobody's)."""
+    if _shared_disk():
+        return None
     try:
-        from kiln.runtime_env import is_hosted_multitenant
-
-        if is_hosted_multitenant():
-            return None
         from kiln.monitor_twin import sliced_entry_for
 
         entry = sliced_entry_for(os.path.basename(str(file_path)))
