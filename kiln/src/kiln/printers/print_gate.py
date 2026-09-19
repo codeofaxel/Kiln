@@ -1122,6 +1122,24 @@ def run_adapter_gate(
                         + "; ".join(problems) + "."
                     ),
                 }
+        elif fetched and not verdict.get("blocked"):
+            # The same rule for every other family, on the printer's own
+            # copy: a file whose surface would show no preview and no weight
+            # is not started by name either.  Soft-passes for a backend with
+            # no established surface -- see kiln.printers.gcode_complete.
+            from kiln.printers.gcode_complete import family_for_adapter, gcode_problems
+
+            problems = gcode_problems(
+                fetched, family_for_adapter(adapter), name=str(file_name or ""),
+            )
+            if problems:
+                verdict = {
+                    "blocked": True,
+                    "reason": (
+                        f"{os.path.basename(str(file_name))} is not ready for the printer: "
+                        + "; ".join(problems) + "."
+                    ),
+                }
     finally:
         if fetched:
             with contextlib.suppress(OSError):
