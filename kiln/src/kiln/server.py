@@ -8714,10 +8714,14 @@ def ams_status() -> dict:
     Each tray carries its unit's own ``slot`` (0-3), the printer's
     ``tray_id`` for it (``unit * 4 + slot`` on a chained unit, the unit id
     itself on an AMS HT) and Studio's ``name`` (``A1``…``D4``, ``HT-A``);
-    each unit carries its ``name`` (``A``, ``HT-B``).  ``tray_now`` is the
-    ``tray_id`` of the tray feeding the nozzle: ``"254"`` is the external
-    spool, ``"255"`` no tray.  A1 / AMS Lite reports may keep ``tray_now``
-    at ``"255"`` while exposing loaded AMS trays and selected/target tray
+    each unit carries its ``name`` (``A``, ``HT-B``).  ``feeding`` is the
+    tray feeding the nozzle -- ``{tray_id, unit, slot, name, source}``, or
+    ``None`` when nothing feeds -- read from the extruder block on newer
+    firmware (where the legacy ``tray_now`` can be a unit's local slot)
+    and from ``tray_now`` otherwise; ``feeding_source`` says which.  The
+    raw ``tray_now`` is kept as sent: ``"254"`` is the external spool,
+    ``"255"`` no tray.  A1 / AMS Lite reports may keep ``tray_now`` at
+    ``"255"`` while exposing loaded AMS trays and selected/target tray
     fields such as ``tray_pre`` or ``tray_tar``.  The ``ams_exist_bits`` and
     ``tray_exist_bits`` fields are bitmasks showing which AMS units and
     trays are physically present.
