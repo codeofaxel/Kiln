@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import pytest
 
+from kiln.printers import print_gate as pg
+
 # Import base FIRST (mirrors the working import order) then the gate.
 from kiln.printers.base import PrinterAdapter, PrintResult
-from kiln.printers import print_gate as pg
 from kiln.printers.print_gate import evaluate_pre_print_gate as G
 
 trimesh = pytest.importorskip("trimesh")
@@ -251,6 +252,26 @@ _NO_HOMING = (
 _HOMED = ";===== machine: A1 =====\nG28\n" + _NO_HOMING
 
 
+def _tile_slots() -> dict[str, bytes]:
+    """The preview family a Bambu plate must carry (see bambu_3mf) — so
+    these copies are judged on their G-code, which is what they test."""
+    import io
+
+    from PIL import Image
+
+    from kiln.printers.bambu_3mf import _BAMBU_THUMBNAIL_SPECS, _REQUIRED_TILE_SLOTS
+
+    out = {}
+    for slot in _REQUIRED_TILE_SLOTS:
+        b = io.BytesIO()
+        Image.new("RGB", _BAMBU_THUMBNAIL_SPECS[slot], (90, 90, 90)).save(b, format="PNG")
+        out[slot] = b.getvalue()
+    b = io.BytesIO()
+    Image.new("RGB", (512, 512), (90, 90, 90)).save(b, format="PNG")
+    out["Metadata/plate_no_light_1.png"] = b.getvalue()  # the slicer's own witness
+    return out
+
+
 def _threemf_bytes(gcode: str) -> bytes:
     import io
     import zipfile
@@ -258,6 +279,8 @@ def _threemf_bytes(gcode: str) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("Metadata/plate_1.gcode", gcode)
+        for name, data in _tile_slots().items():
+            zf.writestr(name, data)
     return buf.getvalue()
 
 

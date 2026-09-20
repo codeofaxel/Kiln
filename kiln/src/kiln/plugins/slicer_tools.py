@@ -355,6 +355,19 @@ def _steer_to_wrapped_upload(
     unprintable one, because the message and ``upload_file``'s docstring
     both pointed at it.
     """
+    # The recommended file is one the printer's screen can draw.  A slicer
+    # that wrote its own plate (Orca, Studio) may have left the tile slots
+    # out or drawn them grey; completion renders them from the plate's own
+    # model in its declared colours and never touches the G-code.
+    try:
+        from kiln.printers.bambu_3mf import bambu_archive_problems, complete_bambu_archive
+
+        if bambu_archive_problems(threemf_path):
+            complete_bambu_archive(threemf_path)
+            response["preview_completed"] = True
+    except Exception as exc:  # noqa: BLE001 — the upload door still refuses an incomplete file
+        _logger.warning("Bambu preview completion failed for %s: %s", threemf_path, exc)
+        response.setdefault("warnings", []).append(f"Preview completion failed: {exc}")
     response["recommended_upload_path"] = threemf_path
     response["recommended_upload_reason"] = (
         f"{effective_printer_id or 'This printer'} starts prints "
@@ -370,6 +383,43 @@ def _steer_to_wrapped_upload(
         f"{response.get('message', 'Sliced')} "
         f"Upload {wrapped_name}."
     ).strip()
+
+
+def _steer_to_complete_gcode(
+    response: dict,
+    gcode_path: str,
+    effective_printer_id: str | None,
+    model_path: str | None,
+) -> None:
+    """The raw-G-code sibling of :func:`_steer_to_wrapped_upload`.
+
+    A Bambu gets a wrapped archive; everybody else gets the G-code itself,
+    and the file this tool recommends must already be one the printer's
+    surface can draw and weigh.  Kiln's profiles name no filament, so
+    PrusaSlicer writes ``0.00 g``, and its CLI draws no thumbnail at all —
+    so Mainsail, Fluidd, OctoPrint, PrusaLink and Duet Web Control were all
+    handed a file with a placeholder tile and no weight.  The completion
+    puts both in, from the mesh that was sliced and the file's own moves,
+    and never touches a move.
+
+    Best-effort by contract: a picture that cannot be drawn costs the
+    picture, never the slice.  The upload door still refuses a file that
+    leaves here incomplete.
+    """
+    try:
+        from kiln.printers.gcode_complete import complete_gcode_for_printer
+
+        complete_gcode_for_printer(gcode_path, model_path=model_path)
+        response["preview_completed"] = True
+    except Exception as exc:  # noqa: BLE001 — the upload door still refuses an incomplete file
+        _logger.warning("G-code completion failed for %s: %s", gcode_path, exc)
+        response.setdefault("warnings", []).append(f"Preview completion failed: {exc}")
+    response["recommended_upload_path"] = gcode_path
+    response["recommended_upload_reason"] = (
+        f"{effective_printer_id or 'This printer'} prints the G-code itself; "
+        f"it now carries the preview its file list draws and the weight its "
+        f"screen shows."
+    )
 
 
 def _maybe_auto_assembly_manual(metadata: dict) -> dict | None:
@@ -890,6 +940,12 @@ class _SlicerToolsPlugin:
                     _steer_to_wrapped_upload(
                         response, threemf_path, effective_printer_id,
                     )
+                elif _gcode_path:
+                    # Every other printer prints this G-code as it stands,
+                    # so it leaves here carrying its preview and its weight.
+                    _steer_to_complete_gcode(
+                        response, _gcode_path, effective_printer_id, effective_input,
+                    )
 
                 # Surface the bed-fit result so callers can see if we
                 # auto-centered + the translation applied.
@@ -1167,6 +1223,14 @@ class _SlicerToolsPlugin:
                             _logger.warning(
                                 "Post-wrap safety verification skipped: %s", _exc,
                             )
+                    else:
+                        # Not a Bambu: the G-code itself is the file that
+                        # goes to the printer, so it leaves this door
+                        # carrying its preview and its weight, the same as
+                        # the one slice_model recommends.
+                        _steer_to_complete_gcode(
+                            response, _gcode_path, effective_printer_id, effective_input,
+                        )
                     if warning:
                         response.setdefault("warnings", []).append(warning)
 

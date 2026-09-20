@@ -18,7 +18,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   Everyone gets the verdict against the curated budget; Kiln Pro adds how
   long that nozzle lasts on that filament across the community.
 
-- **You see the print before it starts, from every door.**
+- **You see the print before it starts, from every door — and it starts only when you say go.** One yes is one print on one printer, and a time-boxed window exists only when you open it yourself; a yes that covers several printers or the whole fleet is Business+. See https://kiln3d.com/pricing.
+
+- **The picture you sign off on is the part on Kiln's stage.** The live 3D panel where your app draws one; otherwise the stage picture and a 30-minute viewer link, together — never a plain render — and the record says which pixels you were shown.
+
+- **Every print file leaves with a preview and a real weight, or not at all.** Your printer's screen or web page shows the part and the filament it will use — Bambu tiles in true colours, Klipper, OctoPrint, PrusaLink and Duet the way each reads it — or Kiln refuses to send it. Printers whose screens show nothing get the weight only.
+
+- **The 3D panel never fails silently.** When a panel can't load its part you get the viewer link instead, and a restart tells you which open chats need reconnecting.
 
 - **A long print is never mistaken for a stuck one.** Kiln used to give up
   after two hours and could send the same file again. It now leaves a running

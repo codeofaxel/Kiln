@@ -2562,6 +2562,9 @@ class PrinterAdapter(ABC):
                     # type across adapters.
                     from kiln.printers import PrinterError
                     raise PrinterError(str(exc)) from None
+                if refusal := _incomplete_upload_reason(self, file_path):
+                    from kiln.printers import PrinterError
+                    raise PrinterError(refusal)
                 return original(self, file_path)
 
             _safe_upload_file._kiln_safety_wrapped = True  # type: ignore[attr-defined]
@@ -4370,7 +4373,9 @@ class PrinterAdapter(ABC):
             "such as bambu_a1, bambu_p1s, prusa_mk4, k1 or ender3_v3_ke, and call again."
         )
 
-    def _motion_gate(self, options: dict[str, Any], *, axes: str, action: str) -> Any:
+    def _motion_gate(
+        self, options: dict[str, Any], *, axes: str, action: str,
+    ) -> tuple[Any, list[HomeStep] | None]:
         """The generic backend's answer to "may the head move?", before any G-code.
 
         Reads the catalogue's motion block for the declared model and the
@@ -4390,11 +4395,13 @@ class PrinterAdapter(ABC):
           a generic backend cannot say how high the head is before it
           travels sideways.
 
-        Returns the motion facts (or ``None``) for the caller's plan text.
+        Returns ``(motion facts or None, detour steps or None)`` -- the facts
+        for the caller's plan text, and the served path around a recorded
+        part for it to run instead of its own sequence.
         """
         motion = self.motion_facts()
         if options.get("plate_clear") is True:
-            return motion
+            return motion, None
         wants_z = "Z" in axes.upper()
         if motion is None:
             if wants_z or action == "park":
@@ -4403,11 +4410,18 @@ class PrinterAdapter(ABC):
                     "unknown_key" if self.declared_printer_model() else "undeclared",
                 )
                 raise ModelDeclarationRequired(self._declare_model_text())
-            return None
+            return None, None
+        detour: list[HomeStep] | None = None
         if wants_z and motion.z_home_descends_onto_plate:
-            self._plate_gate(options, station=None, action=action, touches_plate=True,
-                             allow_plan=False, contact="homes Z by " + motion.describe_z_home(),
-                             refusal_reason="on_plate" if motion.z_home_known else "unknown_method")
+            # The plan is asked for, not assumed: public Kiln refuses to press
+            # a nozzle onto a recorded part, and kiln-pro's planner may know a
+            # path that homes around it.  What comes back is run INSTEAD of
+            # this backend's own G28 (see :meth:`_home_axes_impl`), so a plan
+            # is accepted here only because there is somewhere to run it --
+            # the reason this asked for none before the run path existed.
+            detour = self._plate_gate(options, station=None, action=action, touches_plate=True,
+                                      allow_plan=True, contact="homes Z by " + motion.describe_z_home(),
+                                      refusal_reason="on_plate" if motion.z_home_known else "unknown_method")
         if action == "park":
             from kiln.plate_state import plate_occupancy
 
@@ -4424,7 +4438,7 @@ class PrinterAdapter(ABC):
                     "`kiln plate clear`, or plate_clear=true on park_head.",
                     snapshot_path=witness,
                 )
-        return motion
+        return motion, detour
 
     def home_axes(self, *, axes: str = "XYZ", **options: Any) -> HomeResult:
         """Home the head -- what the Home button on the printer's screen does.
@@ -4511,6 +4525,35 @@ class PrinterAdapter(ABC):
         """
         return None
 
+    def homed_axes_now(self) -> set[str] | None:
+        """Which axes the firmware says are homed, asked over the wire NOW.
+
+        Lowercase letters (``{"x", "y", "z"}``, or fewer), or ``None`` when
+        this backend cannot say.  A FRESH read on every call, never a
+        cached status: a cached reading is a guess, and the one caller of
+        this -- the pre-print gate deciding whether a same-bed retry may
+        start without homing, next to the failed part still on the bed --
+        cannot start a print on a guess.
+
+        Backends that can read it (Klipper's ``toolhead.homed_axes``,
+        RepRapFirmware's object model, Creality's Klipper backend) answer
+        with the firmware's word and let a transport failure RAISE
+        :class:`PrinterError` rather than answer ``None``: "the read failed,
+        retry" and "this backend cannot say" are different refusals.  The
+        read uses the adapter's own request timeout and retry budget; no
+        caller of this waits longer than one status read would.
+
+        The default knows nothing and says so.
+        """
+        return self._read_homed_axes()
+
+    def homed_axes_field(self) -> str | None:
+        """The firmware field :meth:`homed_axes_now` reads, named the way the
+        firmware names it (``"toolhead.homed_axes"``), or ``None`` when this
+        backend has no such read.  Written into the gate's evidence so the
+        audit line says where the answer came from."""
+        return getattr(self, "_homed_axes_field", None)
+
     def _z_lifts_before_home(self) -> bool | None:
         """Whether the firmware's own homing routine lifts Z before X/Y move.
 
@@ -4540,7 +4583,17 @@ class PrinterAdapter(ABC):
                 f"{self.name} cannot home through Kiln: this backend does not "
                 "accept G-code. Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, with your eyes on the plate. The screen's Home button descends the nozzle to the bed and is the wrong tool with a part on the plate."
             )
-        motion = self._motion_gate(options, axes=axes, action="home")
+        motion, detour = self._motion_gate(options, axes=axes, action="home")
+        if detour is not None:
+            # A served path around the part on the plate, run in place of this
+            # backend's own G28.  It claims no axis homed -- the firmware's own
+            # read is the only thing that may (see ``homed_axes_now``).
+            from kiln.printers.motion_plan import run_home_plan
+
+            return run_home_plan(
+                self, {"printer_id": self.declared_printer_model() or self.name},
+                axes=axes, options=options, action="home", steps=detour,
+            )
         command = "G28" if axes == "XYZ" else "G28 " + " ".join(axes)
         plan = [HomeStep(
             number=1, label="home " + " ".join(axes),
@@ -4698,7 +4751,7 @@ class PrinterAdapter(ABC):
                 "Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, with your "
                 "eyes on the plate."
             )
-        motion = self._motion_gate(options, axes="XY", action="park")
+        motion, _ = self._motion_gate(options, axes="XY", action="park")
         if motion is not None and motion.z_home_descends_onto_plate and options.get("plate_clear") is not True:
             # The vendor's Z home would press onto a plate nobody has vouched
             # for: park is the firmware's X/Y home only, Z untouched.
@@ -6327,6 +6380,40 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
 
 class _UnsafeUpload(Exception):
     """Internal sentinel raised by the pre-upload safety check."""
+
+
+def _incomplete_upload_reason(adapter: PrinterAdapter, file_path: str) -> str | None:
+    """Why this file must not leave for this printer — ``None`` when it may.
+
+    The one door every non-Bambu upload passes.  A file that leaves Kiln
+    for a printer carries the preview that printer's surface draws and a
+    weight that is not a lie, or it does not leave: the same rule the Bambu
+    adapter applies to its archives, applied here to raw G-code so that
+    Mainsail, Fluidd, OctoPrint, PrusaLink and Duet Web Control all get a
+    tile instead of a placeholder.  Lives in the shared wrapper rather than
+    in each adapter for the same reason the bed-fit check above it does: a
+    ninth backend inherits it without knowing it exists.
+
+    Soft-passes everything it cannot establish — an unmapped backend, a
+    file that is not G-code, an unreadable file, any internal error.  See
+    :mod:`kiln.printers.gcode_complete` for what each surface reads.
+    """
+    try:
+        from kiln.printers.gcode_complete import family_for_adapter, gcode_problems
+
+        family = family_for_adapter(adapter)
+        if family is None:
+            return None
+        problems = gcode_problems(file_path, family)
+        if not problems:
+            return None
+        return (
+            f"Refused to upload {os.path.basename(file_path)}: "
+            + "; ".join(problems) + "."
+        )
+    except Exception:  # noqa: BLE001 — a check that breaks must not block a print
+        logger.debug("gcode completeness check raised; allowing upload", exc_info=True)
+        return None
 
 
 def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> None:

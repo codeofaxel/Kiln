@@ -18,7 +18,7 @@ import os
 import pytest
 from click.testing import CliRunner
 
-from kiln import preview_evidence, print_signoff, server
+from kiln import preview_evidence, print_consent, print_signoff, server
 from kiln.cli import print_gate
 from kiln.cli.main import cli
 from kiln.preview_gate import PreviewGate
@@ -42,6 +42,7 @@ def _isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("KILN_EMERGENCY_PERSIST", "0")
     preview_evidence._reset_for_tests()
     print_signoff._reset_for_tests()
+    print_consent._reset_for_tests()
     import kiln.preview_gate as pg
 
     monkeypatch.setattr(pg, "_gate", PreviewGate())
@@ -51,6 +52,7 @@ def _isolated(monkeypatch, tmp_path):
     yield
     preview_evidence._reset_for_tests()
     print_signoff._reset_for_tests()
+    print_consent._reset_for_tests()
 
 
 @pytest.fixture
@@ -143,7 +145,7 @@ def _mesh_with_png_on_record(tmp_path, monkeypatch):
     mesh = tmp_path / "plate.3mf"
     mesh.write_bytes(b"PK\x03\x04 not really a 3mf")
     image = tmp_path / "plate_iso.png"
-    preview_evidence.record("png", str(mesh), renderer="openscad")
+    preview_evidence.record("png", str(mesh), renderer="stage_paint", shown_sha="abc")
     preview_evidence.record_url_refusal(str(mesh), "signed_out")
     monkeypatch.setattr(print_gate, "render_for_terminal", lambda path: ([str(image)], None))
     monkeypatch.setattr(print_gate.click, "launch", lambda target: None)
@@ -236,17 +238,29 @@ def test_a_file_only_on_the_printer_is_described_not_shown(cli_env, audits, monk
     assert rec["door"] == "described"
 
 
-def test_a_token_on_the_command_line_is_never_second_guessed(cli_env, monkeypatch, tmp_path):
-    """With a token the person is not asked again: the token IS the yes."""
+def test_a_token_on_the_command_line_is_the_preview_not_the_yes(cli_env, audits, monkeypatch, tmp_path):
+    """With a token the preview is on record and is not re-rendered — but
+    the token is not the yes.  A person at the terminal is still asked;
+    a shell with nobody at it is refused."""
     runner, printer = cli_env
     mesh, _ = _mesh_with_png_on_record(tmp_path, monkeypatch)
     token = server.issue_preview_token(str(mesh), door="png")["token"]
-    asked: list[str] = []
-    monkeypatch.setattr(print_gate, "confirm_print_at_terminal", lambda **kw: asked.append("asked") or True)
+    rendered: list[str] = []
+    monkeypatch.setattr(print_gate, "render_for_terminal", lambda path: rendered.append(path) or ([], None))
+
     result = runner.invoke(cli, ["print", str(mesh), "--preview-token", token, "--json"])
+    assert result.exit_code != 0, result.output
+    assert "PREVIEW_NOT_CONFIRMED" in result.output
+    assert printer.started == []
+
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: True)
+    result = runner.invoke(cli, ["print", str(mesh), "--preview-token", token], input="y\n")
     assert result.exit_code == 0, result.output
-    assert asked == []
+    assert rendered == []  # the token stands for the preview; nothing is drawn twice
     assert printer.started == ["plate.3mf"]
+    rec = next(d for _, a, d in audits if a == "consent_granted")
+    assert rec["consent"] == SOURCE_TERMINAL
+    assert rec["door"] == "png"
 
 
 def test_the_terminal_yes_reaches_a_gated_tool_without_a_token(monkeypatch):

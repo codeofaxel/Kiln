@@ -84,9 +84,12 @@ than being handed a sequence cut for a different orifice.
 from __future__ import annotations
 
 import ast
+import contextlib
+import dataclasses
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import zipfile
@@ -860,6 +863,274 @@ _GCODE_FILAMENT_TYPE_RE = re.compile(
     r"^;\s*filament_type\s*=\s*(.+)$", re.MULTILINE,
 )
 
+#: What each slicer writes about filament consumed, measured 2026-09-18.
+#: PrusaSlicer 2.9.4 and OrcaSlicer 2.3.2 footer: ``; filament used [mm] =
+#: 11035.45, 584.76`` and, only when the profile carried a density,
+#: ``; filament used [g] = 1.27``.  Bambu Studio 02.05 header:
+#: ``; total filament length [mm] : 5127.93,2704.70`` and ``; total
+#: filament weight [g] : 16.28,8.13``.  All of them list one value per USED
+#: extruder, comma separated.  Kiln's own profiles describe a printer and
+#: no filament, so the slicer's grams read ``0.00`` and the length is the
+#: number that survives.
+_GCODE_USED_MM_RE = re.compile(
+    r"^;\s*(?:filament used \[mm\]\s*=|total filament length \[mm\]\s*:)\s*(.+)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_GCODE_USED_G_RE = re.compile(
+    r"^;\s*(?:filament used \[g\]\s*=|total filament weight \[g\]\s*:)\s*(.+)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_GCODE_FILAMENT_DENSITY_RE = re.compile(
+    r"^;\s*filament_density\s*[:=]\s*(.+)$", re.MULTILINE | re.IGNORECASE,
+)
+_GCODE_FILAMENT_DIAMETER_RE = re.compile(
+    r"^;\s*filament_diameter\s*[:=]\s*(.+)$", re.MULTILINE | re.IGNORECASE,
+)
+#: Tool selects wherever they sit on the line: Bambu's AMS blocks indent
+#: the real ``T0`` / ``T1``.  Tools from 255 up are the start sequence's
+#: pseudo-tools (T255, T1000), not trays.
+_GCODE_ANY_TOOL_SELECT_RE = re.compile(r"^\s*T(\d+)\b", re.MULTILINE)
+_BAMBU_FIRST_PSEUDO_TOOL = 255
+_GCODE_E_WORD_RE = re.compile(r"(?:^|\s)E(-?\d*\.?\d+)")
+_FILAMENT_DIAMETER_MM = 1.75
+_DEFAULT_FILAMENT_DENSITY = 1.24  # PLA, the table's own figure
+
+
+@dataclass(frozen=True)
+class FilamentUsage:
+    """Filament a G-code body consumes, per extruder index (0-based).
+
+    ``source`` says where the grams came from: ``slicer_grams`` (the
+    slicer wrote them), ``slicer_length`` (the slicer's length times the
+    filament cross-section times the material density), ``e_moves`` (no
+    slicer comment at all — the E words were summed), or ``none`` (nothing
+    is extruded, and the zeros are the truth).
+    """
+
+    mm: tuple[float, ...]
+    grams: tuple[float, ...]
+    source: str
+
+    @property
+    def total_mm(self) -> float:
+        return float(sum(self.mm))
+
+    @property
+    def total_g(self) -> float:
+        return float(sum(self.grams))
+
+
+def _number_list(text: str) -> list[float]:
+    out: list[float] = []
+    for raw in re.split(r"[,;]", text):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            out.append(float(raw))
+        except ValueError:
+            return []
+    return out
+
+
+def _material_density(filament_type: str | None) -> float:
+    """The family's nominal density from Kiln's material table, or PLA's."""
+    if not filament_type:
+        return _DEFAULT_FILAMENT_DENSITY
+    try:
+        from kiln.cost_estimator import BUILTIN_MATERIALS
+    except ImportError:  # pragma: no cover — the cost table always ships
+        return _DEFAULT_FILAMENT_DENSITY
+    key = filament_type.strip().upper()
+    profile = BUILTIN_MATERIALS.get(key)
+    if profile is None:
+        family = re.match(r"[A-Z]+", key)
+        profile = BUILTIN_MATERIALS.get(family.group(0)) if family else None
+    return profile.density_g_per_cm3 if profile else _DEFAULT_FILAMENT_DENSITY
+
+
+def _real_tools_used(gcode_body: str) -> list[int]:
+    return sorted(
+        {
+            int(t)
+            for t in _GCODE_ANY_TOOL_SELECT_RE.findall(gcode_body)
+            if int(t) < _BAMBU_FIRST_PSEUDO_TOOL
+        }
+    )
+
+
+def _place_on_used_tools(values: list[float], tools: list[int]) -> list[float]:
+    """A slicer's comma list is one value per USED extruder: a print on T0
+    and T2 writes two numbers and the second is tray 3's."""
+    if not values or len(values) != len(tools) or tools == list(range(len(values))):
+        return values
+    out = [0.0] * (max(tools) + 1)
+    for tool, value in zip(tools, values, strict=True):
+        out[tool] = value
+    return out
+
+
+def _sum_e_moves(gcode_body: str) -> list[float]:
+    """Net E per extruder from the moves themselves.
+
+    Retract and unretract cancel because deltas are signed.  Absolute E
+    (``M82``, the G-code default) is differenced and reset by ``G92``;
+    relative E (``M83``, what Kiln slices with) is summed as written.  Moves
+    under a pseudo-tool (Bambu's ``T1000`` unload / ``T255``) belong to no
+    tray and are not counted.
+    """
+    totals: dict[int, float] = {}
+    tool: int | None = 0
+    relative = False
+    last_e = 0.0
+    for line in gcode_body.splitlines():
+        code = line.split(";", 1)[0].strip()
+        if not code:
+            continue
+        if code[0] in "Tt" and code[1:2].isdigit():
+            number = int(re.match(r"\d+", code[1:]).group(0))
+            tool = number if number < _BAMBU_FIRST_PSEUDO_TOOL else None
+            continue
+        word = code.split(None, 1)[0].upper()
+        if word == "M82" or word == "G90":
+            relative = False
+            continue
+        if word == "M83" or word == "G91":
+            relative = True
+            continue
+        if word == "G92":
+            e_word = _GCODE_E_WORD_RE.search(code)
+            if e_word:
+                last_e = float(e_word.group(1))
+            continue
+        if word not in ("G0", "G1", "G2", "G3"):
+            continue
+        e_word = _GCODE_E_WORD_RE.search(code)
+        if not e_word:
+            continue
+        value = float(e_word.group(1))
+        if relative:
+            delta = value
+        else:
+            delta = value - last_e
+            last_e = value
+        if tool is not None:
+            totals[tool] = totals.get(tool, 0.0) + delta
+    if not totals:
+        return []
+    out = [0.0] * (max(totals) + 1)
+    for index, total in totals.items():
+        out[index] = max(total, 0.0)
+    return out
+
+
+def filament_usage_from_gcode(
+    gcode_body: str,
+    *,
+    filament_types: list[str] | None = None,
+) -> FilamentUsage:
+    """How much filament *gcode_body* consumes, per extruder and in total.
+
+    The slicer's own grams win when it wrote them (``filament used [g]``,
+    Studio's ``total filament weight [g]``).  Otherwise its length is
+    turned into grams: length x the 1.75 mm cross-section x density, where
+    density is the slicer's own ``filament_density`` when it is not zero,
+    else Kiln's table for the material — *filament_types* (what the caller
+    declared and the AMS will be told) first, the body's ``filament_type``
+    line second, PLA last.  A body with no slicer comment at all has its E
+    words summed.  Never raises.
+    """
+    tools = _real_tools_used(gcode_body)
+    mm_match = _GCODE_USED_MM_RE.search(gcode_body)
+    mm = _place_on_used_tools(_number_list(mm_match.group(1)), tools) if mm_match else []
+    g_match = _GCODE_USED_G_RE.search(gcode_body)
+    grams = _place_on_used_tools(_number_list(g_match.group(1)), tools) if g_match else []
+
+    if mm and grams and any(g > 0 for g in grams) and len(grams) == len(mm):
+        source = "slicer_grams"
+    else:
+        source = "slicer_length" if mm else "e_moves"
+        if not mm:
+            mm = _sum_e_moves(gcode_body)
+        densities = _number_list(
+            (_GCODE_FILAMENT_DENSITY_RE.search(gcode_body) or [None, ""])[1]
+        )
+        diameters = _number_list(
+            (_GCODE_FILAMENT_DIAMETER_RE.search(gcode_body) or [None, ""])[1]
+        )
+        type_match = _GCODE_FILAMENT_TYPE_RE.search(gcode_body)
+        body_types = [t.strip() for t in type_match.group(1).split(";")] if type_match else []
+
+        def _pick(values: list[float], index: int) -> float | None:
+            if index < len(values) and values[index] > 0:
+                return values[index]
+            if len(values) == 1 and values[0] > 0:
+                return values[0]
+            return None
+
+        grams = []
+        for index, length in enumerate(mm):
+            declared = filament_types[index] if filament_types and index < len(filament_types) else None
+            density = _pick(densities, index)
+            if density is None:
+                density = _material_density(
+                    declared or (body_types[index] if index < len(body_types) else None)
+                )
+            diameter = _pick(diameters, index) or _FILAMENT_DIAMETER_MM
+            area_mm2 = math.pi * (diameter / 2.0) ** 2
+            grams.append(length * area_mm2 * density / 1000.0)
+
+    if not mm or sum(mm) <= 0:
+        return FilamentUsage(mm=tuple(mm), grams=tuple(0.0 for _ in mm), source="none")
+    return FilamentUsage(mm=tuple(mm), grams=tuple(grams), source=source)
+
+
+_SLICE_INFO_WEIGHT_RE = re.compile(r'(<metadata\s+key="weight"\s+value=")([^"]*)(")')
+_SLICE_INFO_FILAMENT_TAG_RE = re.compile(r"<filament\b[^>]*>")
+
+
+def _slice_info_knows_its_weight(slice_info: str) -> bool:
+    match = _SLICE_INFO_WEIGHT_RE.search(slice_info)
+    if not match:
+        return False
+    try:
+        return float(match.group(2)) > 0
+    except ValueError:
+        return False
+
+
+def _fill_slice_info_usage(slice_info: str, usage: FilamentUsage) -> str:
+    """Write *usage* where the printer's screen reads it, touching nothing else.
+
+    The plate's ``weight`` is the sum of the per-filament grams; each
+    ``<filament>`` gets ``used_m`` (metres) and ``used_g`` (grams), two
+    decimals, exactly as Bambu Studio writes them.  Filament tags map to
+    extruders in order when the counts agree, by ``id`` otherwise.
+    """
+    out = _SLICE_INFO_WEIGHT_RE.sub(
+        lambda m: f"{m.group(1)}{usage.total_g:.2f}{m.group(3)}", slice_info, count=1,
+    )
+    tags = list(_SLICE_INFO_FILAMENT_TAG_RE.finditer(out))
+    if not tags:
+        return out
+    pieces: list[str] = []
+    cursor = 0
+    for position, tag in enumerate(tags):
+        if len(tags) == len(usage.mm):
+            index = position
+        else:
+            id_match = re.search(r'\bid="(\d+)"', tag.group(0))
+            index = int(id_match.group(1)) - 1 if id_match else position
+        mm = usage.mm[index] if 0 <= index < len(usage.mm) else 0.0
+        grams = usage.grams[index] if 0 <= index < len(usage.grams) else 0.0
+        text = re.sub(r'\bused_m="[^"]*"', f'used_m="{mm / 1000.0:.2f}"', tag.group(0), count=1)
+        text = re.sub(r'\bused_g="[^"]*"', f'used_g="{grams:.2f}"', text, count=1)
+        pieces.append(out[cursor:tag.start()])
+        pieces.append(text)
+        cursor = tag.end()
+    pieces.append(out[cursor:])
+    return "".join(pieces)
+
 
 #: The generator stamp these slicers write into their G-code header.
 #: OrcaSlicer and BambuStudio share the fork; PrusaSlicer and the other
@@ -1141,26 +1412,38 @@ def _build_slice_info(
     num_filaments: int = 1,
     filament_colors: list[str] | None = None,
     filament_types: list[str] | None = None,
+    usage: FilamentUsage | None = None,
 ) -> str:
     """Build the ``slice_info.config`` XML for the 3MF.
 
     Supports multi-filament: set ``num_filaments`` > 1 and provide
     ``filament_colors`` / ``filament_types`` lists.
+
+    *usage* is what the printer's screen shows as the print's weight: the
+    plate ``weight`` (grams, the sum) and each filament's ``used_m`` /
+    ``used_g`` — the fields Bambu Studio writes and the A1's tile reads.
+    Without it every one of them is ``0.00``, which is what the tile showed
+    for every Kiln print until the builder started passing it.
     """
     colors = filament_colors or [filament_color] * num_filaments
     types = filament_types or [filament_type] * num_filaments
+    used_mm = list(usage.mm) if usage else []
+    used_g = list(usage.grams) if usage else []
 
     # Build filament entries
     filament_entries: list[str] = []
     for i in range(num_filaments):
         ftype = types[i] if i < len(types) else filament_type
         fcolor = colors[i] if i < len(colors) else filament_color
+        metres = (used_mm[i] if i < len(used_mm) else 0.0) / 1000.0
+        grams = used_g[i] if i < len(used_g) else 0.0
         filament_entries.append(
             f'    <filament id="{i + 1}" tray_info_idx="GFL99" type="{ftype}" '
-            f'color="{fcolor}" used_m="0.00" used_g="0.00" '
+            f'color="{fcolor}" used_m="{metres:.2f}" used_g="{grams:.2f}" '
             f'used_for_object="true" used_for_support="false" group_id="0" '
             f'nozzle_diameter="{nozzle_diameter:.2f}" volume_type="Standard"/>'
         )
+    weight = sum(used_g[:num_filaments])
 
     # Build object entries (one per filament for multi-color copies)
     object_entries: list[str] = []
@@ -1187,7 +1470,7 @@ def _build_slice_info(
         f'    <metadata key="nozzle_diameters" value="{nozzle_diameter}"/>\n'
         '    <metadata key="timelapse_type" value="0"/>\n'
         f'    <metadata key="prediction" value="{est_print_time_sec}"/>\n'
-        '    <metadata key="weight" value="0.00"/>\n'
+        f'    <metadata key="weight" value="{weight:.2f}"/>\n'
         f'    <metadata key="first_layer_time" value="{first_layer_time:.1f}"/>\n'
         '    <metadata key="outside" value="false"/>\n'
         '    <metadata key="support_used" value="false"/>\n'
@@ -1366,6 +1649,231 @@ def _declared_filament_colors(plate_json: str | None) -> list[str] | None:
         return None
     colors = [c for c in declared if isinstance(c, str) and c.strip()]
     return colors or None
+
+
+#: Kiln's witness that the thumbnail family was rendered from the archive's
+#: own model in the colours the archive declares.  Written by
+#: :func:`complete_bambu_archive` and by the builder when it renders; read
+#: by :func:`bambu_archive_problems`.  A slicer's own full set carries
+#: ``plate_no_light_1.png`` instead, which Bambu Studio writes only when it
+#: drew the pictures itself.
+KILN_PREVIEW_MARKER = "Metadata/kiln_preview.json"
+
+#: The slots the printer and Studio draw from.  Measured on the A1
+#: (firmware 01.07.02.00, 2026-09-19): the file-list tile is
+#: ``plate_1_small.png``; an archive with only ``plate_1.png`` shows the
+#: broken-image placeholder.  The Auxiliaries set is Studio's and optional.
+_REQUIRED_TILE_SLOTS: tuple[str, ...] = (
+    "Metadata/plate_1.png",
+    "Metadata/plate_1_small.png",
+    "Metadata/top_1.png",
+    "Metadata/pick_1.png",
+)
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _png_dimensions(data: bytes) -> tuple[int, int] | None:
+    if len(data) < 24 or data[:8] != _PNG_MAGIC:
+        return None
+    import struct
+
+    return struct.unpack(">II", data[16:24])
+
+
+def _declared_plate_colors(zf: zipfile.ZipFile) -> list[str]:
+    try:
+        plate_json = zf.read("Metadata/plate_1.json").decode("utf-8")
+    except KeyError:
+        return []
+    return _declared_filament_colors(plate_json) or []
+
+
+def _archive_is_painted(zf: zipfile.ZipFile) -> bool:
+    """Whether the model itself carries colour: a palette or a paint channel."""
+    try:
+        from kiln.threemf_parser import _scan_color_constructs
+
+        has_palette, has_paint = _scan_color_constructs(zf)
+        return bool(has_palette or has_paint)
+    except Exception:  # noqa: BLE001 — an unreadable model reads as uncoloured
+        return False
+
+
+def bambu_archive_problems(path: str | os.PathLike[str], *, name: str | None = None) -> list[str]:
+    """Why *path* must not go to a Bambu printer — empty when it may.
+
+    Reads the archive the printer would receive and says, in the printer's
+    terms, what its screen would fail to show: a sliced plate must carry
+    every tile slot at its size, and a plate that declares more than one
+    colour (or whose model is painted) must carry a witness that the
+    picture was drawn in those colours — the slicer's own no-light slot,
+    or Kiln's marker with a hash of the picture it wrote.  Files that are
+    not 3MF archives are not this check's business.  *name* is the
+    printer-side name when *path* is a temp copy of it, so the extension
+    judged is the one the printer sees.
+    """
+    p = Path(path)
+    if Path(name or p.name).suffix.lower() != ".3mf":
+        return []
+    try:
+        zf = zipfile.ZipFile(str(p))
+    except (OSError, zipfile.BadZipFile) as exc:
+        return [f"{p.name} is not a readable 3MF archive ({exc})"]
+    with zf:
+        names = set(zf.namelist())
+        if "Metadata/plate_1.gcode" not in names:
+            return [
+                f"{p.name} is not a sliced plate (no Metadata/plate_1.gcode): a printer "
+                "cannot start a project file — slice it first (slice_model) and upload "
+                "the .gcode.3mf it recommends"
+            ]
+        problems: list[str] = []
+        for slot in _REQUIRED_TILE_SLOTS:
+            want = _BAMBU_THUMBNAIL_SPECS[slot]
+            short = slot.rsplit("/", 1)[-1]
+            if slot not in names:
+                problems.append(f"missing {short} ({want[0]}x{want[1]})")
+                continue
+            got = _png_dimensions(zf.read(slot))
+            if got is None:
+                problems.append(f"{short} is not a PNG")
+            elif tuple(got) != tuple(want):
+                problems.append(f"{short} is {got[0]}x{got[1]}, the printer wants {want[0]}x{want[1]}")
+        colors = _declared_plate_colors(zf)
+        # Who drew the picture, and in what: the slicer's own full set (it
+        # writes plate_no_light_1.png only when it rendered the plate in
+        # its filament colours), or Kiln's marker naming a stage look, the
+        # declared colours, and the hash of the picture it wrote.
+        witnessed = "Metadata/plate_no_light_1.png" in names
+        if not witnessed and KILN_PREVIEW_MARKER in names and "Metadata/plate_1.png" in names:
+            try:
+                marker = json.loads(zf.read(KILN_PREVIEW_MARKER).decode("utf-8"))
+                digest = hashlib.sha256(zf.read("Metadata/plate_1.png")).hexdigest()[:32]
+                witnessed = (
+                    marker.get("sha") == digest
+                    and [c.upper() for c in marker.get("colors", [])] == [c.upper() for c in colors]
+                )
+            except (KeyError, ValueError, AttributeError):
+                witnessed = False
+        if not witnessed:
+            problems.append(
+                "the preview is not on record as drawn in the plate's declared colours "
+                f"({', '.join(colors) or 'none declared'})"
+            )
+        # The tile also shows the print's weight.  A plate that lays down
+        # filament and claims 0.00 g is incomplete (Orca's density-less
+        # profile and Kiln's old packager both wrote it); a plate that
+        # extrudes nothing may say so honestly.
+        if "Metadata/slice_info.config" in names:
+            info = zf.read("Metadata/slice_info.config").decode("utf-8", errors="replace")
+            if not _slice_info_knows_its_weight(info):
+                body = zf.read("Metadata/plate_1.gcode").decode("utf-8", errors="replace")
+                # Judged by what completion would write: a plate whose real
+                # weight rounds to 0.00 g (a purge line and nothing else)
+                # is not incomplete, it is light.
+                if round(sum(filament_usage_from_gcode(body).grams), 2) > 0:
+                    problems.append(
+                        "the plate's weight reads 0.00 g though it extrudes filament — the "
+                        "printer's screen would show no weight"
+                    )
+    if problems:
+        problems.append(
+            "the printer's screen would show a broken tile; complete the archive with "
+            "kiln.printers.bambu_3mf.complete_bambu_archive (slice_model does this for the "
+            "file it recommends)"
+        )
+    return problems
+
+
+def _archive_triangles(path: str, colors: list[str]) -> list[Any]:
+    """The archive's own model, coloured as the archive declares."""
+    from kiln.threemf_parser import parse_colored_3mf
+
+    mesh = parse_colored_3mf(path)
+    triangles = list(mesh.triangles)
+    if not mesh.colors_found and colors:
+        # One declared colour and an unpainted model: the whole plate is it.
+        h = colors[0].lstrip("#")
+        rgb = tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+        triangles = [dataclasses.replace(t, color=rgb) for t in triangles]
+    return triangles
+
+
+def complete_bambu_archive(
+    path: str | os.PathLike[str], *, output_path: str | os.PathLike[str] | None = None,
+) -> str:
+    """Give a sliced Bambu archive the preview family its screen needs.
+
+    Every thumbnail slot is rendered from the archive's OWN model in the
+    colours its plate declares (a painted plate keeps its paint) — the
+    plain coloured render the printer's screen shows, not Kiln's stage,
+    which belongs to the previews shown to a person — scaled to each
+    slot's size, and written beside the marker that vouches for them.
+    A ``slice_info.config`` whose ``weight`` the slicer left at ``0.00``
+    (Orca through Kiln's density-less profile did, for the painted jar)
+    gets the weight and per-filament ``used_m`` / ``used_g`` the screen
+    shows, read from the plate's own G-code; a weight the slicer knew is
+    kept.  Every other member — the G-code above all — is copied byte for
+    byte: an archive a slicer already wrapped must never be wrapped again
+    (measured: re-wrapping Orca's plate doubled its start sequence).
+    Rewrites in place unless *output_path* is given.  Idempotent.
+
+    Raises ``ValueError`` for an archive that is not a sliced plate.
+    """
+    src = Path(path)
+    dst = Path(output_path) if output_path else src
+    slice_info: str | None = None
+    with zipfile.ZipFile(str(src)) as zf:
+        if "Metadata/plate_1.gcode" not in zf.namelist():
+            raise ValueError(f"{src.name} is not a sliced plate (no Metadata/plate_1.gcode)")
+        colors = _declared_plate_colors(zf)
+        if "Metadata/slice_info.config" in zf.namelist():
+            existing = zf.read("Metadata/slice_info.config").decode("utf-8", errors="replace")
+            if not _slice_info_knows_its_weight(existing):
+                plate_gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8", errors="replace")
+                slice_info = _fill_slice_info_usage(existing, filament_usage_from_gcode(plate_gcode))
+    from kiln.colored_renderer import render_colored_mesh
+
+    triangles = _archive_triangles(str(src), colors)
+    if not triangles:
+        raise ValueError(f"{src.name} carries no model to draw a preview from")
+    rendered: dict[str, bytes] = {}
+    for slot_names in _thumbnail_aspect_groups().values():
+        width, height = max(
+            (_BAMBU_THUMBNAIL_SPECS[n] for n in slot_names), key=lambda size: size[0] * size[1],
+        )
+        result = render_colored_mesh(triangles, width=width, height=height)
+        try:
+            source = Path(result.path).read_bytes()
+        finally:
+            with contextlib.suppress(OSError):
+                os.remove(result.path)
+        rendered.update(_fit_to_specs(source, slot_names))
+    marker = json.dumps(
+        {
+            "colors": colors,
+            "renderer": "colored_mesh",
+            "from": "3D/3dmodel.model",
+            "sha": hashlib.sha256(rendered["Metadata/plate_1.png"]).hexdigest()[:32],
+        }
+    )
+    replaced = set(rendered) | {KILN_PREVIEW_MARKER}
+    tmp = dst.with_name(dst.name + ".completing")
+    with zipfile.ZipFile(str(src)) as src_zf, zipfile.ZipFile(str(tmp), "w", zipfile.ZIP_DEFLATED) as dst_zf:
+        for item in src_zf.infolist():
+            if item.filename in replaced:
+                continue
+            if item.filename == "Metadata/slice_info.config" and slice_info is not None:
+                dst_zf.writestr(item, slice_info)
+                continue
+            dst_zf.writestr(item, src_zf.read(item.filename))
+        for name, data in rendered.items():
+            dst_zf.writestr(name, data)
+        dst_zf.writestr(KILN_PREVIEW_MARKER, marker)
+    os.replace(str(tmp), str(dst))
+    logger.info("Completed Bambu archive %s: %d preview slots in %s", dst.name, len(rendered), colors or "neutral")
+    return str(dst)
 
 
 def thumbnail_inputs_for_model(
@@ -1765,6 +2273,12 @@ def build_bambu_3mf(
     # down during printing, after startup is already finished).
     est_time_sec_with_startup = est_time_sec + _BAMBU_STARTUP_OVERHEAD_SEC
 
+    # The weight the screen shows, read from the body the slicer wrote —
+    # before Bambu's start sequence is added, so the purge line is not
+    # counted as the part.  The declared types are the density source when
+    # the slicer had none (Kiln's profiles never do).
+    usage = filament_usage_from_gcode(gcode_body, filament_types=f_types)
+
     slice_info = _build_slice_info(
         total_layers=total_layers,
         est_print_time_sec=est_time_sec_with_startup,
@@ -1775,6 +2289,7 @@ def build_bambu_3mf(
         num_filaments=settings.num_filaments,
         filament_colors=f_colors,
         filament_types=f_types,
+        usage=usage,
     )
     plate_json = _build_plate_json(
         filament_color=settings.filament_color,
@@ -1834,8 +2349,10 @@ def build_bambu_3mf(
     # filament colors this file declares, so the printer shows the part
     # rather than a blank preview.  ``plate_json`` is the declaration —
     # the very string written to the archive below.
+    rendered_here = False
     if not thumbnails and stl_paths:
         thumbnails = _stl_thumbnail_set(stl_paths, plate_json)
+        rendered_here = bool(thumbnails)
 
     # Build the 3MF.
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -1868,6 +2385,20 @@ def build_bambu_3mf(
         zf.writestr("Metadata/project_settings.config", "{}")
         for name, data in thumbnails.items():
             zf.writestr(name, data)
+        if rendered_here and "Metadata/plate_1.png" in thumbnails:
+            # Kiln drew these itself, in the plate's declared colour: say
+            # so, with a hash of the picture it wrote.
+            zf.writestr(
+                KILN_PREVIEW_MARKER,
+                json.dumps(
+                    {
+                        "colors": _declared_filament_colors(plate_json) or [],
+                        "renderer": "plate_preview",
+                        "from": "stl",
+                        "sha": hashlib.sha256(thumbnails["Metadata/plate_1.png"]).hexdigest()[:32],
+                    }
+                ),
+            )
 
     file_size = os.path.getsize(output_path)
     file_md5 = hashlib.md5(  # noqa: S324
@@ -1976,8 +2507,10 @@ def repackage_gcode_as_bambu_3mf(
     # The colors come from the plate metadata copied out of the source
     # above; when there is none, the archive declares no color and the
     # render stays neutral rather than inventing one.
+    rendered_here = False
     if not thumbnails and stl_paths:
         thumbnails = _stl_thumbnail_set(stl_paths, plate_json)
+        rendered_here = bool(thumbnails)
 
     # Update the time prediction in slice_info.config so the printer
     # display shows correct time remaining instead of the full plate's
@@ -1989,6 +2522,14 @@ def repackage_gcode_as_bambu_3mf(
             r'(<metadata\s+key="prediction"\s+value=")(\d+)(")',
             rf"\g<1>{prediction_sec}\3",
             slice_info,
+        )
+    # A copied slice_info whose weight the slicer left at 0.00 gets the
+    # weight of the gcode this archive actually carries — same reader as
+    # the builder and the completion, so no door shows a blank tile.
+    if slice_info and not _slice_info_knows_its_weight(slice_info):
+        slice_info = _fill_slice_info_usage(
+            slice_info,
+            filament_usage_from_gcode(gcode_bytes.decode("utf-8", errors="replace")),
         )
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -2004,6 +2545,20 @@ def repackage_gcode_as_bambu_3mf(
             zf.writestr("Metadata/slice_info.config", slice_info)
         for name, data in thumbnails.items():
             zf.writestr(name, data)
+        if rendered_here and "Metadata/plate_1.png" in thumbnails:
+            # Kiln drew these itself, in the plate's declared colour: say
+            # so, with a hash of the picture it wrote.
+            zf.writestr(
+                KILN_PREVIEW_MARKER,
+                json.dumps(
+                    {
+                        "colors": _declared_filament_colors(plate_json) or [],
+                        "renderer": "plate_preview",
+                        "from": "stl",
+                        "sha": hashlib.sha256(thumbnails["Metadata/plate_1.png"]).hexdigest()[:32],
+                    }
+                ),
+            )
 
     logger.info(
         "Repackaged gcode as Bambu 3MF: %s (%d bytes, est %dm)",

@@ -942,6 +942,13 @@ class CrealityAdapter(PrinterAdapter):
     def _read_homed_axes(self) -> set[str] | None:
         return self._backend._read_homed_axes()
 
+    def homed_axes_now(self) -> set[str] | None:
+        """Klipper's ``toolhead.homed_axes``, read live through the backend."""
+        return self._backend.homed_axes_now()
+
+    def homed_axes_field(self) -> str | None:
+        return self._backend.homed_axes_field()
+
     def _z_lifts_before_home(self) -> bool | None:
         return self._backend._z_lifts_before_home()
 

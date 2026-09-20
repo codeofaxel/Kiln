@@ -566,6 +566,46 @@ def _budget_skipped_view(
     }
 
 
+def _bbox_from_triangles(triangles: list) -> _BoundingBoxInfo:
+    """The camera framing for a parsed coloured mesh, derived the way the
+    STL path derives it — from the same bounds and distance rule — so a
+    painted part is framed exactly as its unpainted twin would be."""
+    import struct
+    import tempfile
+
+    if not triangles:
+        return _BoundingBoxInfo()
+    fd, tmp = tempfile.mkstemp(suffix=".stl", prefix="kiln_bbox_")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(b"\0" * 80 + struct.pack("<I", len(triangles)))
+            for t in triangles:
+                fh.write(struct.pack("<fff", 0.0, 0.0, 0.0))
+                for v in (t.v0, t.v1, t.v2):
+                    fh.write(struct.pack("<fff", *v))
+                fh.write(b"\0\0")
+        return _distance_from_stl(tmp)
+    except Exception:  # noqa: BLE001 — default framing beats no render
+        logger.debug("bbox from triangles failed; default framing", exc_info=True)
+        return _BoundingBoxInfo()
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+
+
+def _sha_of_views(views: list[dict]) -> str:
+    """One hash over every PNG a result shows, in view order."""
+    import hashlib
+
+    h = hashlib.sha256()
+    for view in views:
+        try:
+            h.update(Path(view["path"]).read_bytes())
+        except OSError:
+            h.update(str(view.get("path")).encode())
+    return h.hexdigest()[:32]
+
+
 def visualize_model(
     file_path: str,
     *,
@@ -607,7 +647,11 @@ def visualize_model(
             than handing a person a link — passes ``False`` and keeps the
             whole call local.  ``allow_stage=False`` alone does NOT stop
             this: the render goes local while the link upload still goes
-            out.
+            out.  While the inline 3D panel is not fetching geometry on
+            this connection (``local_stage.panel_fetches_stalled``), the
+            result also carries ``stage_fallback`` — the same sentence the
+            make results carry — so an agent knows the link is the stage
+            today rather than a courtesy.
         deadline: A ``time.monotonic()`` instant by which the WHOLE call,
             every backend included, must be back — or ``None`` (the
             default) for no ceiling at all.  Every backend checks it
@@ -643,16 +687,28 @@ def visualize_model(
         }
 
     # ------------------------------------------------------------------
-    # Colored 3MF fast path — use PIL-based renderer when per-face
-    # colors are present (OpenSCAD cannot render per-face colors).
+    # Colored 3MF — per-face colors, which OpenSCAD cannot render.  With
+    # the stage allowed, the stage gets first refusal below (its payload
+    # carries vertex colours, so a painted part is photographed in its
+    # paint); the PIL renderer is the fallback.  Before 2026-09-19 this
+    # branch returned here, so a painted model never reached the stage
+    # anywhere Kiln shows one, and the sign-off picture of a painted jar
+    # was a flat render.
     # ------------------------------------------------------------------
+    colored_mesh = None
     if ext == ".3mf":
         try:
             from kiln.colored_renderer import render_colored_mesh_multi_angle
             from kiln.threemf_parser import parse_colored_3mf
 
             mesh = parse_colored_3mf(file_path)
-            if mesh.colors_found:
+            if mesh.colors_found and allow_stage:
+                logger.debug(
+                    "3MF has per-face colors (%d unique) — stage first, colored renderer after",
+                    mesh.color_count,
+                )
+                colored_mesh = mesh
+            elif mesh.colors_found:
                 logger.debug(
                     "3MF has per-face colors (%d unique) — using colored renderer",
                     mesh.color_count,
@@ -691,7 +747,8 @@ def visualize_model(
                     ),
                 }
             # No colors — fall through to OpenSCAD for uniform gray render
-            logger.debug("3MF has no per-face colors — falling through to OpenSCAD")
+            if colored_mesh is None:
+                logger.debug("3MF has no per-face colors — falling through to OpenSCAD")
         except ImportError:
             logger.debug("Colored renderer not available — falling through to OpenSCAD")
         except Exception:  # noqa: BLE001
@@ -703,7 +760,7 @@ def visualize_model(
         # we short-circuit to the slicer-rendered plate thumbnails —
         # these are the same images the Bambu LCD shows the user, which
         # is exactly what the preview gate is asking to confirm.
-        if _is_bambu_wrapped_3mf(file_path):
+        if colored_mesh is None and _is_bambu_wrapped_3mf(file_path):
             logger.debug("3MF is Bambu-wrapped — extracting slicer thumbnails")
             thumb_out_dir = output_dir or _default_output_dir()
             bambu_views = _extract_bambu_thumbnails(
@@ -762,16 +819,24 @@ def visualize_model(
     # We use it both to center the model in the wrapper and to set camera distance.
     render_color = color if color else "#AAAAAA"
 
-    # Pre-compute bbox from raw file for centering.
-    _raw_scad = _make_scad_wrapper(file_path, color=render_color)
-    bbox = _get_bounding_box(_raw_scad)
-    if _raw_scad != file_path:
-        with contextlib.suppress(OSError):
-            os.unlink(_raw_scad)
+    if colored_mesh is not None:
+        # The parsed triangles already say where the part is; no OpenSCAD
+        # export is needed for a bbox, and no SCAD wrapper — the stage and
+        # the colored renderer both read the file itself.
+        bbox = _bbox_from_triangles(colored_mesh.triangles)
+        scad_path = file_path
+        is_wrapper = False
+    else:
+        # Pre-compute bbox from raw file for centering.
+        _raw_scad = _make_scad_wrapper(file_path, color=render_color)
+        bbox = _get_bounding_box(_raw_scad)
+        if _raw_scad != file_path:
+            with contextlib.suppress(OSError):
+                os.unlink(_raw_scad)
 
-    # Create the centered wrapper using the bbox.
-    scad_path = _make_scad_wrapper(file_path, color=render_color, bbox=bbox)
-    is_wrapper = scad_path != file_path
+        # Create the centered wrapper using the bbox.
+        scad_path = _make_scad_wrapper(file_path, color=render_color, bbox=bbox)
+        is_wrapper = scad_path != file_path
 
     # Aspect-ratio-adaptive angle selection: flat models tilt side views
     # up so the top decoration is visible; tall models steepen top/bottom.
@@ -824,7 +889,9 @@ def visualize_model(
         ) if allow_stage else None
         if stage_views:
             stage_renderer = "stage"
-        elif allow_stage:
+        elif allow_stage and colored_mesh is None:
+            # The painter takes one colour; a painted part would come out
+            # in the wrong one.  Its fallback is the colored renderer.
             from kiln.stage_paint import try_paint_stage_views
 
             stage_views = try_paint_stage_views(
@@ -861,6 +928,22 @@ def visualize_model(
 
         # Nothing left to draw when the stage already produced every view.
         openscad_views = [] if used_stage else selected
+
+        # A painted part the stage declined: the colored renderer draws
+        # the remaining angles.  OpenSCAD never sees a painted 3MF.
+        used_colored = False
+        if openscad_views and colored_mesh is not None:
+            from kiln.colored_renderer import render_colored_mesh_multi_angle
+
+            views.extend(render_colored_mesh_multi_angle(
+                colored_mesh.triangles,
+                output_dir=output_dir,
+                width=width,
+                height=height,
+                angles=[label for label, _ in openscad_views],
+            ))
+            openscad_views = []
+            used_colored = True
 
         # Out of budget before OpenSCAD is even resolved: the honest
         # answer is "skipped", not OPENSCAD_NOT_FOUND on a machine that
@@ -1039,7 +1122,7 @@ def visualize_model(
             # Which engine produced the pixels — "stage" is the browser
             # photograph of the shared three.js stage, "openscad" the
             # canonical fallback.  Agents and tests branch on this.
-            "renderer": stage_renderer if used_stage else "openscad",
+            "renderer": stage_renderer if used_stage else ("colored_mesh" if used_colored else "openscad"),
             "rendered": len(successful),
             "failed": len(failed),
             "skipped": len(skipped),
@@ -1051,10 +1134,15 @@ def visualize_model(
         }
         if successful:
             # A render happened: the floor of the preview ladder, on record
-            # for the print gate.  The door writes it, not the caller.
+            # for the print gate.  The door writes it, not the caller — which
+            # look it drew, and a hash of the pixels shown, so a token can
+            # say which pictures the person was looking at.
             from kiln.preview_evidence import record as _record_evidence
 
-            _record_evidence("png", file_path, renderer=result["renderer"], views=len(successful))
+            _record_evidence(
+                "png", file_path, renderer=result["renderer"], views=len(successful),
+                shown_sha=_sha_of_views(successful),
+            )
 
         if not share_link:
             # Attaching a link uploads the mesh.  A caller embedding these
@@ -1065,7 +1153,20 @@ def visualize_model(
 
         from kiln.stage_link import attach_stage_link
 
-        return attach_stage_link(result, file_path)
+        result = attach_stage_link(result, file_path)
+        # The inline panel's health, read at this door too: while its
+        # fetches are not arriving the link above IS the stage, and this
+        # result says so in the same words the make results do — one
+        # flag, one sentence, whichever door the agent came through.
+        try:
+            from kiln.local_stage import panel_fetch_fallback_note
+
+            note = panel_fetch_fallback_note()
+        except Exception:  # noqa: BLE001 — furniture, never a failed render
+            note = None
+        if note:
+            result["stage_fallback"] = note
+        return result
 
     finally:
         if is_wrapper:

@@ -1508,16 +1508,33 @@ class MoonrakerAdapter(PrinterAdapter):
             ),
         )
 
-    def _read_homed_axes(self) -> set[str] | None:
-        """Klipper's own word: ``toolhead.homed_axes`` (``"xyz"``, or fewer)."""
-        try:
-            payload = self._get_json("/printer/objects/query", params={"toolhead": "homed_axes"})
-        except PrinterError:
-            return None
+    #: Where Klipper states which axes are homed.
+    _homed_axes_field = "toolhead.homed_axes"
+
+    def _query_homed_axes(self) -> set[str] | None:
+        """Klipper's own word: ``toolhead.homed_axes`` (``"xyz"``, or fewer).
+
+        One HTTP query per call, on the adapter's own timeout and retry
+        budget; a transport failure raises :class:`PrinterError`.  ``None``
+        only when the reply carries no such field.
+        """
+        payload = self._get_json("/printer/objects/query", params={"toolhead": "homed_axes"})
         raw = payload.get("result", {}).get("status", {}).get("toolhead", {}).get("homed_axes")
         if not isinstance(raw, str):
             return None
         return {c.upper() for c in raw if c.upper() in "XYZ"}
+
+    def _read_homed_axes(self) -> set[str] | None:
+        """The confirm-after-homing read: a failed query reads as "not confirmed"."""
+        try:
+            return self._query_homed_axes()
+        except PrinterError:
+            return None
+
+    def homed_axes_now(self) -> set[str] | None:
+        """A fresh ``toolhead.homed_axes`` read, lowercase; raises on a failed read."""
+        axes = self._query_homed_axes()
+        return None if axes is None else {c.lower() for c in axes}
 
     def _z_lifts_before_home(self) -> bool | None:
         """Whether the owner configured ``[safe_z_home]`` -- read off the printer."""

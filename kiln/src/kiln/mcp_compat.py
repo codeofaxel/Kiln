@@ -390,8 +390,10 @@ def _adapt_mutator(mutate: Any) -> Any:
     if wants_args:
         return mutate
 
-    def _three(result: Any, ctx: Any, name: str | None, _args: dict | None) -> None:
-        mutate(result, ctx, name)
+    def _three(result: Any, ctx: Any, name: str | None, _args: dict | None) -> Any:
+        # Handed back, not dropped: a coroutine function's coroutine has
+        # to reach the chain runner that awaits it.
+        return mutate(result, ctx, name)
 
     return _three
 
@@ -402,7 +404,12 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     ``mutate(result, ctx, name)`` — or ``mutate(result, ctx, name,
     arguments)`` — is called with the tool result object AFTER the real
     handler produced it, and mutates it in place; its return value is
-    ignored and it must not raise (callers wrap their own body).  ``ctx`` is
+    ignored and it must not raise (callers wrap their own body).  It may be
+    a coroutine function: the coroutine is awaited in place, on the
+    handler's own loop, so a mutator with blocking work to do (an upload)
+    hands that work to a thread and the server keeps serving meanwhile —
+    a plain function would stall the whole stdio server for the transfer.
+    A sync mutator is called exactly as before.  ``ctx`` is
     the ``ServerRequestContext`` SDK 2 hands the handler — the only place the
     session (and so the host's declared capabilities) lives on 2.x — and None
     on 1.x, where ``client_capabilities`` reads the lowlevel server attribute
@@ -446,22 +453,26 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     identity = f"{getattr(mutate, '__module__', '?')}."\
                f"{getattr(mutate, '__qualname__', repr(mutate))}"
 
-    def _run_all(
+    async def _run_all(
         result: Any, ctx: Any, name: str | None, args: dict | None, chain: list
     ) -> None:
+        import inspect
+
         for _identity, fn in list(chain):
             try:
-                fn(result, ctx, name, args)
+                out = fn(result, ctx, name, args)
+                if inspect.isawaitable(out):
+                    await out
             except Exception:  # noqa: BLE001 -- one bad mutator, not all
                 _logger.debug("call-tool mutator failed", exc_info=True)
 
     def _wrap(previous: Any) -> Any:
         """Shared body: run the handler, let ``mutate`` see the result."""
 
-        def _apply(resp: Any, ctx: Any, name: str | None, args: dict | None) -> Any:
+        async def _apply(resp: Any, ctx: Any, name: str | None, args: dict | None) -> Any:
             # 1.x hands back a ServerResult with the real result on ``.root``;
             # 2.x hands back the CallToolResult itself, which has no ``.root``.
-            _run_all(getattr(resp, "root", resp), ctx, name, args, chain)
+            await _run_all(getattr(resp, "root", resp), ctx, name, args, chain)
             return resp
 
         return _apply
@@ -481,7 +492,7 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
         apply = _wrap(previous)
 
         async def _wrapped_v2(ctx: Any, params: Any) -> Any:
-            return apply(
+            return await apply(
                 await previous(ctx, params),
                 ctx,
                 _call_tool_name(params),
@@ -509,7 +520,7 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     apply = _wrap(previous)
 
     async def _wrapped_v1(req: Any) -> Any:
-        return apply(
+        return await apply(
             await previous(req), None, _call_tool_name(req), _call_tool_args(req)
         )
 

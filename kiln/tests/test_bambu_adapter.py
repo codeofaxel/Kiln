@@ -876,12 +876,33 @@ class TestListFilesNlstFallback:
 # upload_file tests
 # ---------------------------------------------------------------------------
 
+def _sliced_plate(path) -> None:
+    """A minimal plate the upload door accepts: sliced, with its preview
+    family (the door refuses a text file named .3mf, by design)."""
+    import io
+    import zipfile
+
+    from PIL import Image
+
+    from kiln.printers.bambu_3mf import _BAMBU_THUMBNAIL_SPECS, _REQUIRED_TILE_SLOTS
+
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("Metadata/plate_1.gcode", "G28\nG1 X1\n")
+        for slot in _REQUIRED_TILE_SLOTS:
+            b = io.BytesIO()
+            Image.new("RGB", _BAMBU_THUMBNAIL_SPECS[slot], (90, 90, 90)).save(b, format="PNG")
+            zf.writestr(slot, b.getvalue())
+        b = io.BytesIO()
+        Image.new("RGB", (512, 512), (90, 90, 90)).save(b, format="PNG")
+        zf.writestr("Metadata/plate_no_light_1.png", b.getvalue())  # the slicer's own witness
+
+
 class TestBambuAdapterUploadFile:
     """Tests for the upload_file method."""
 
     def test_successful_upload(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, tmp_path: Any) -> None:
         test_file = tmp_path / "test.3mf"
-        test_file.write_text("fake 3mf content")
+        _sliced_plate(test_file)
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             result = adapter_with_mqtt.upload_file(str(test_file))
@@ -898,7 +919,7 @@ class TestBambuAdapterUploadFile:
 
     def test_ftp_connection_error(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
         test_file = tmp_path / "test.3mf"
-        test_file.write_text("content")
+        _sliced_plate(test_file)
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS") as mock_ftp_cls:
             mock_ftp_cls.return_value.connect.side_effect = Exception("Connection refused")
@@ -907,7 +928,7 @@ class TestBambuAdapterUploadFile:
 
     def test_ftp_upload_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, tmp_path: Any) -> None:
         test_file = tmp_path / "test.3mf"
-        test_file.write_text("content")
+        _sliced_plate(test_file)
         mock_ftp_class.storbinary.side_effect = Exception("Upload failed")
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
@@ -916,7 +937,7 @@ class TestBambuAdapterUploadFile:
 
     def test_permission_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, tmp_path: Any) -> None:
         test_file = tmp_path / "locked.3mf"
-        test_file.write_text("content")
+        _sliced_plate(test_file)
         real_open = open
 
         def selective_open(path, *args, **kwargs):
@@ -932,7 +953,7 @@ class TestBambuAdapterUploadFile:
 
     def test_ftp_quit_called_on_success(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, tmp_path: Any) -> None:
         test_file = tmp_path / "test.3mf"
-        test_file.write_text("content")
+        _sliced_plate(test_file)
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             adapter_with_mqtt.upload_file(str(test_file))
