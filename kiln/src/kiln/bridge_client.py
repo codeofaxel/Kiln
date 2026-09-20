@@ -65,14 +65,35 @@ def handle_relay_request(
     carrying a ``cloud_artifact_token`` is resolved HERE — fetch the geometry
     from the cloud to a temp file, then run the normal ``slice_and_print`` on it.
     Every other tool is a straight passthrough.
+
+    The yes: a relayed start may carry ``print_authority`` — the record the
+    hosted server made when a person pressed Approve for these bytes on this
+    printer, or the delegation an agent is printing under.  The local gate
+    needs a person's yes and never takes one from an argument, so the block
+    is taken OUT of the args here and turned into the consent for this one
+    call (see :func:`_consent_from_authority`), and only after the bytes
+    that arrived hash to the bytes that were approved.  Bytes that differ
+    are refused before any tool runs: a consent by file name would let a
+    re-generated model print under the old approval.
     """
     request_id = req.get("request_id")
     tool = str(req.get("tool_name") or "")
     args = dict(req.get("args") or {})
+    reset = None
     try:
         token = args.pop("cloud_artifact_token", None)
+        authority = args.pop("print_authority", None)
         if tool == "slice_and_print" and token:
             args["input_path"] = fetch_artifact(str(token))
+        if authority:
+            consent = _consent_from_authority(
+                authority, file_name=str(args.get("input_path") or args.get("model_path") or ""),
+                printer_name=args.get("printer_name"),
+            )
+            if consent is not None:
+                from kiln.print_consent import set_consent
+
+                reset = set_consent(consent)
         result = call_tool(tool, args)
         return {"request_id": request_id, "ok": True, "result": result}
     except Exception as exc:  # deliberately broad — one call must not kill the ws
@@ -82,6 +103,87 @@ def handle_relay_request(
             "ok": False,
             "error": {"message": str(exc), "tool": tool},
         }
+    finally:
+        if reset is not None:
+            from kiln.print_consent import reset_consent
+
+            reset_consent(reset)
+
+
+class NotTheApprovedBytes(RuntimeError):
+    """The file that arrived is not the file the person approved."""
+
+
+def _sha256_of(path: str) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _consent_from_authority(block: Any, *, file_name: str, printer_name: Any):
+    """The consent a relayed authority block stands for, or ``None``.
+
+    Only two kinds are known — ``approval`` (a person's yes to one print)
+    and ``delegation`` (an account's yes to a named agent for a while) —
+    and each maps to the consent source public Kiln already grades A on
+    the hosted server.  Anything else is dropped, and the call runs with
+    no consent, so the gate refuses it in its own words rather than this
+    module inventing a yes.  Raises :class:`NotTheApprovedBytes` when the
+    approved hash and the fetched bytes disagree, which the caller turns
+    into a refused call.
+    """
+    from kiln.print_consent import (
+        SCOPE_FLEET,
+        SOURCE_HOSTED_APPROVAL,
+        SOURCE_HOSTED_DELEGATION,
+        PrintConsent,
+    )
+
+    if not isinstance(block, dict):
+        return None
+    kind = str(block.get("kind") or "")
+    source = {"approval": SOURCE_HOSTED_APPROVAL, "delegation": SOURCE_HOSTED_DELEGATION}.get(kind)
+    record_id = str(block.get("id") or "")
+    grantor = str(block.get("grantor") or "")
+    if source is None or not record_id or not grantor:
+        return None
+    expected = str(block.get("file_sha256") or "").strip().lower()
+    if file_name and expected:
+        actual = _sha256_of(file_name)
+        shortest = min(len(actual), len(expected))
+        if shortest < 32 or actual[:shortest] != expected[:shortest]:
+            raise NotTheApprovedBytes(
+                "not started: the file that arrived is not the one that was approved "
+                f"({record_id}); approve the print again from the page that shows it."
+            )
+    if kind == "approval":
+        identity = f"{grantor}#{record_id}"
+        scope = None
+    else:
+        agent = str(block.get("said_go_by") or "")
+        identity = f"{agent} under {grantor}#{record_id}"
+        printers = block.get("printers")
+        if printers == SCOPE_FLEET:
+            scope = SCOPE_FLEET
+        elif isinstance(printers, (list, tuple)) and printers:
+            scope = tuple(str(p) for p in printers)
+        else:
+            scope = None
+    until = block.get("until")
+    return PrintConsent(
+        tool="bridge relay",
+        file_name=file_name or str(block.get("file_name") or ""),
+        printer_name=str(printer_name) if printer_name else str(block.get("printer_name") or "") or None,
+        source=source,
+        scope=scope,
+        expires_at=float(until) if isinstance(until, (int, float)) else None,
+        identity=identity,
+        door=str(block.get("door") or ""),
+    )
 
 
 # ---------------------------------------------------------------------------

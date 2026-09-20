@@ -4,7 +4,14 @@ Covers passthrough, the never-raise contract, and the print path's cloud->local
 geometry resolution — no socket, cloud, or printer involved.
 """
 
+import hashlib
+import pathlib
+
+import pytest
+
+from kiln import print_consent
 from kiln.bridge_client import handle_relay_request
+from kiln.print_consent import SOURCE_HOSTED_APPROVAL, SOURCE_HOSTED_DELEGATION
 
 
 def _recording_caller(recorded):
@@ -165,3 +172,161 @@ class TestHandshake403NamesTheFix:
         real one."""
         text = self._run_one_loop_iteration(monkeypatch, "live", caplog)
         assert "session has expired" not in text
+
+
+# ---------------------------------------------------------------------------
+# A relayed start carries the hosted authority — the person's approval, or
+# the delegation an agent prints under — and the bridge turns it into the
+# consent the local gate reads, after checking the bytes are the ones approved.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _no_consent_leaks():
+    print_consent._reset_for_tests()
+    yield
+    print_consent._reset_for_tests()
+
+
+def _mesh(tmp_path: pathlib.Path) -> tuple[str, str]:
+    path = tmp_path / "jar.stl"
+    path.write_bytes(b"\x00" * 84 + b"\x01" * 50)
+    return str(path), hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _approval(sha: str, **over):
+    block = {
+        "kind": "approval",
+        "id": "apv_1",
+        "grantor": "account:acct_123",
+        "said_go_by": "account:acct_123",
+        "file_sha256": sha,
+        "printer_name": "garage",
+        "door": "web_stage",
+        "until": 4102444800.0,
+    }
+    block.update(over)
+    return block
+
+
+def _consent_seen_by_tool(seen):
+    def call_tool(name, args):
+        seen.append((name, dict(args), print_consent._current.get()))
+        return {"ran": name}
+
+    return call_tool
+
+
+def test_a_relayed_approval_becomes_the_consent_for_the_call(tmp_path):
+    path, sha = _mesh(tmp_path)
+    seen = []
+    resp = handle_relay_request(
+        {
+            "request_id": "r6",
+            "tool_name": "slice_and_print",
+            "args": {
+                "cloud_artifact_token": "tok",
+                "printer_name": "garage",
+                "print_authority": _approval(sha),
+            },
+        },
+        call_tool=_consent_seen_by_tool(seen),
+        fetch_artifact=lambda _t: path,
+    )
+    assert resp["ok"] is True, resp
+    name, args, consent = seen[0]
+    assert "print_authority" not in args  # never reaches the tool's signature
+    assert consent is not None
+    assert consent.source == SOURCE_HOSTED_APPROVAL
+    assert consent.identity == "account:acct_123#apv_1"
+    assert consent.door == "web_stage"
+    assert consent.matches(file_name=path, printer_name="garage")
+    # The yes lives exactly as long as the call.
+    assert print_consent._current.get() is None
+
+
+def test_a_relayed_delegation_names_the_agent_and_carries_its_scope(tmp_path):
+    path, sha = _mesh(tmp_path)
+    seen = []
+    resp = handle_relay_request(
+        {
+            "request_id": "r7",
+            "tool_name": "slice_and_print",
+            "args": {
+                "cloud_artifact_token": "tok",
+                "printer_name": "garage",
+                "print_authority": _approval(
+                    sha, kind="delegation", id="dlg_9",
+                    said_go_by="agent:openclaw/igor#K7Q2",
+                    printers=["garage", "workshop"],
+                ),
+            },
+        },
+        call_tool=_consent_seen_by_tool(seen),
+        fetch_artifact=lambda _t: path,
+    )
+    assert resp["ok"] is True, resp
+    _, _, consent = seen[0]
+    assert consent.source == SOURCE_HOSTED_DELEGATION
+    assert consent.identity == "agent:openclaw/igor#K7Q2 under account:acct_123#dlg_9"
+    assert consent.scope == ("garage", "workshop")
+    assert consent.expires_at == 4102444800.0
+
+
+def test_bytes_other_than_the_approved_ones_are_refused_before_the_tool(tmp_path):
+    path, _sha = _mesh(tmp_path)
+    seen = []
+    resp = handle_relay_request(
+        {
+            "request_id": "r8",
+            "tool_name": "slice_and_print",
+            "args": {
+                "cloud_artifact_token": "tok",
+                "printer_name": "garage",
+                "print_authority": _approval("ab" * 32),
+            },
+        },
+        call_tool=_consent_seen_by_tool(seen),
+        fetch_artifact=lambda _t: path,
+    )
+    assert resp["ok"] is False
+    assert seen == []
+    assert "approved" in resp["error"]["message"].lower()
+
+
+def test_a_relayed_call_without_authority_runs_with_no_consent(tmp_path):
+    """Unchanged: the local gate then refuses it in its own words."""
+    path, _sha = _mesh(tmp_path)
+    seen = []
+    resp = handle_relay_request(
+        {
+            "request_id": "r9",
+            "tool_name": "slice_and_print",
+            "args": {"cloud_artifact_token": "tok", "printer_name": "garage"},
+        },
+        call_tool=_consent_seen_by_tool(seen),
+        fetch_artifact=lambda _t: path,
+    )
+    assert resp["ok"] is True
+    assert seen[0][2] is None
+
+
+def test_a_malformed_authority_is_dropped_not_trusted(tmp_path):
+    path, sha = _mesh(tmp_path)
+    seen = []
+    resp = handle_relay_request(
+        {
+            "request_id": "r10",
+            "tool_name": "slice_and_print",
+            "args": {
+                "cloud_artifact_token": "tok",
+                "printer_name": "garage",
+                "print_authority": _approval(sha, kind="wish"),
+            },
+        },
+        call_tool=_consent_seen_by_tool(seen),
+        fetch_artifact=lambda _t: path,
+    )
+    assert resp["ok"] is True
+    assert "print_authority" not in seen[0][1]
+    assert seen[0][2] is None
