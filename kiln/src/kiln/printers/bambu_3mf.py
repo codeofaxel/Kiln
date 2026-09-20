@@ -480,15 +480,17 @@ _FALLBACK_FILAMENT_TYPE = "PLA"
 #: bundle 2026-09-20).  ``M1002 set_filament_type:`` in the start sequence
 #: and ``<filament type="…">`` in ``slice_info.config`` are read by the
 #: machine, so a word outside this list is mapped onto it or, failing that,
-#: sent as ``UNKNOWN`` -- the value Bambu Studio itself writes for a slot
-#: with no filament, which the firmware therefore knows.
+#: sent as ``PLA`` -- what every Kiln wrap told the printer before the type
+#: was read off the G-code at all, so an exotic word changes nothing about
+#: what the machine hears.  (``UNKNOWN`` is a value Studio writes only
+#: transiently, before the real type; what the firmware makes of it for a
+#: whole job is unverified, so it is not used.)
 BAMBU_FILAMENT_TYPES: frozenset[str] = frozenset({
     "ABS", "ABS-GF", "ASA", "ASA-AERO", "ASA-CF", "BVOH", "EVA", "HIPS",
     "PA", "PA-CF", "PA-GF", "PA6-CF", "PC", "PCTG", "PE", "PE-CF", "PET-CF",
     "PETG", "PETG-CF", "PHA", "PLA", "PLA-AERO", "PLA-CF", "PP", "PP-CF",
     "PP-GF", "PPA-CF", "PPA-GF", "PPS", "PPS-CF", "PVA", "TPU", "TPU-AMS",
 })
-BAMBU_UNKNOWN_FILAMENT_TYPE = "UNKNOWN"
 #: Kiln's material-table rows spelled the way Bambu spells them.
 _TABLE_ROW_TO_BAMBU: dict[str, str] = {
     "CF-PLA": "PLA-CF",
@@ -505,11 +507,11 @@ def bambu_filament_type(word: str | None) -> str:
     any case); else Kiln's material row for it, spelled Bambu's way
     (``CF-PLA`` -> ``PLA-CF``, ``NYLON`` -> ``PA``); else the family it
     starts with when Bambu has that (``PETG-HF`` -> ``PETG``); else
-    ``UNKNOWN``.  Never raises.
+    ``PLA``, the historical fallback.  Never raises.
     """
     text = " ".join(str(word or "").split()).upper()
     if not text:
-        return BAMBU_UNKNOWN_FILAMENT_TYPE
+        return _FALLBACK_FILAMENT_TYPE
     if text in BAMBU_FILAMENT_TYPES:
         return text
     try:
@@ -525,29 +527,46 @@ def bambu_filament_type(word: str | None) -> str:
     family = re.match(r"[A-Z]+", text)
     if family and family.group(0) in BAMBU_FILAMENT_TYPES:
         return family.group(0)
-    return BAMBU_UNKNOWN_FILAMENT_TYPE
+    return _FALLBACK_FILAMENT_TYPE
 
 
-#: The first temperatures a body asks for -- what the print itself heats
-#: to before its first layer.  Both slicers write them at the top of the
+#: The temperatures a body prints its first layer at.  The command the
+#: print WAITS on (``M109`` / ``M190``) is read before a set-only one
+#: (``M104`` / ``M140``): a body that opens with a 140 °C preheat, as
+#: Bambu-style start blocks do, still heats the start sequence to the
+#: temperature it printed at.  Both slicers write these at the top of the
 #: body when the profile's start block is empty, as Kiln's Bambu profiles
 #: leave it: PrusaSlicer ``M190 S65`` / ``M104 S220`` / ``M109 S220``, Orca
-#: ``M190 S60`` / ``M109 S225`` (measured 2026-09-20 on a 20 mm cube).
-_GCODE_HOTEND_SET_RE = re.compile(r"^\s*M10[49]\s+(?:T\d+\s+)?S(\d+(?:\.\d+)?)", re.MULTILINE)
-_GCODE_BED_SET_RE = re.compile(r"^\s*M1[49]0\s+S(\d+(?:\.\d+)?)", re.MULTILINE)
+#: ``M190 S60`` / ``M109 S225`` (measured 2026-09-20 on a 20 mm cube).  A
+#: body with no such command is read from its footer's first-layer keys.
+_GCODE_HOTEND_WAIT_RE = re.compile(r"^\s*M109\s+(?:T\d+\s+)?S(\d+(?:\.\d+)?)", re.MULTILINE)
+_GCODE_HOTEND_SET_RE = re.compile(r"^\s*M104\s+(?:T\d+\s+)?S(\d+(?:\.\d+)?)", re.MULTILINE)
+_GCODE_BED_WAIT_RE = re.compile(r"^\s*M190\s+S(\d+(?:\.\d+)?)", re.MULTILINE)
+_GCODE_BED_SET_RE = re.compile(r"^\s*M140\s+S(\d+(?:\.\d+)?)", re.MULTILINE)
+_GCODE_FOOTER_HOTEND_RE = re.compile(
+    r"^;\s*(?:first_layer_temperature|nozzle_temperature_initial_layer|temperature|nozzle_temperature)\s*=\s*(\d+)",
+    re.MULTILINE,
+)
+_GCODE_FOOTER_BED_RE = re.compile(
+    r"^;\s*(?:first_layer_bed_temperature|bed_temperature)\s*=\s*(\d+)", re.MULTILINE,
+)
 
 
 def _print_temperatures(gcode_body: str) -> tuple[int | None, int | None]:
-    """``(hotend, bed)`` from the body's first positive heating commands."""
+    """``(hotend, bed)`` the body prints at, or ``None`` where it never says."""
 
-    def _first(pattern: re.Pattern[str]) -> int | None:
-        for match in pattern.finditer(gcode_body):
-            value = int(float(match.group(1)))
-            if value > 0:
-                return value
+    def _first(*patterns: re.Pattern[str]) -> int | None:
+        for pattern in patterns:
+            for match in pattern.finditer(gcode_body):
+                value = int(float(match.group(1)))
+                if value > 0:
+                    return value
         return None
 
-    return _first(_GCODE_HOTEND_SET_RE), _first(_GCODE_BED_SET_RE)
+    return (
+        _first(_GCODE_HOTEND_WAIT_RE, _GCODE_HOTEND_SET_RE, _GCODE_FOOTER_HOTEND_RE),
+        _first(_GCODE_BED_WAIT_RE, _GCODE_BED_SET_RE, _GCODE_FOOTER_BED_RE),
+    )
 
 
 def resolve_settings_from_gcode(settings: BambuPrintSettings, gcode_body: str) -> BambuPrintSettings:

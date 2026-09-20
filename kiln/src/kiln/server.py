@@ -6230,11 +6230,22 @@ def _ams_selection_record(
     so callers can render "AMS slot 1 — black PLA" without another MQTT
     round-trip.  Returns ``color=""`` when the tray reports no color.
     """
+    from kiln.ams_routing import TRAYS_PER_UNIT
+
+    # ``slot`` is the printer's tray id (unit * 4 + slot); the trays carry
+    # their unit's own slot, so the id is resolved before it is matched.
+    unit_wanted, slot_wanted = divmod(int(slot), TRAYS_PER_UNIT)
     color = ""
-    for unit in ams_info.get("units", []):
+    for position, unit in enumerate(ams_info.get("units", [])):
+        try:
+            unit_id = int(unit.get("unit_id", position))
+        except (TypeError, ValueError):
+            unit_id = position
+        if unit_id != unit_wanted:
+            continue
         for tray in unit.get("trays", []):
             try:
-                if int(tray.get("slot", -1)) == int(slot):
+                if int(tray.get("slot", -1)) == slot_wanted:
                     color = str(tray.get("tray_color", "") or "")
                     break
             except (TypeError, ValueError):
@@ -6610,7 +6621,7 @@ def _resolve_use_ams(
                 )
             warnings_out.extend(plan.warnings)
             first = resolved[0]
-            first_type = next((t.material for t in trays if t.slot == first), "")
+            first_type = next((t.material for t in trays if t.tray_id == first), "")
             logger.info("AMS colour routing: %s", plan.summary)
             return {
                 "use_ams": True,

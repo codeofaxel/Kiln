@@ -4483,14 +4483,20 @@ class BambuAdapter(PrinterAdapter):
                 return warnings
 
             ams_info = self.get_ams_status()
+            # Keyed by the printer's own tray id (unit * 4 + slot), which is
+            # what ``ams_mapping`` carries -- unit 1's first tray is 4.
             loaded_trays: dict[int, str] = {}
-            for unit in ams_info.get("units", []):
+            for unit_pos, unit in enumerate(ams_info.get("units", [])):
+                try:
+                    unit_id = int(unit.get("unit_id", unit_pos))
+                except (TypeError, ValueError):
+                    unit_id = unit_pos
                 for tray in unit.get("trays", []):
                     tray_idx = tray.get("slot")
                     tray_color = tray.get("tray_color", "")
                     if tray_idx is not None and tray_color:
                         # tray_color is hex like "FF0000FF" (RRGGBBAA).
-                        loaded_trays[int(tray_idx)] = tray_color[:6].upper()
+                        loaded_trays[unit_id * 4 + int(tray_idx)] = tray_color[:6].upper()
 
             for i, slot in enumerate(ams_mapping):
                 if i >= len(expected_colors):

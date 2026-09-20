@@ -115,3 +115,42 @@ class TestTheLearningDoor:
     def test_agreement_across_units_is_the_one_allowed_inference(self):
         assert self._material(_ams("255", {0: [(0, "PLA")], 1: [(2, "PLA")]})) == "PLA"
         assert self._material(_ams("255", _TWO_UNITS)) is None
+
+
+class TestTheRoutingPath:
+    """The plan hands ``start_print`` the printer's tray ids, and every
+    reader beside it keys by the same id."""
+
+    def _trays(self):
+        from kiln.ams_routing import loaded_trays
+
+        return loaded_trays({"tray_now": "255", "units": [
+            {"unit_id": 0, "trays": [{"slot": 0, "tray_type": "PLA", "tray_color": "FF0000FF"}]},
+            {"unit_id": 1, "trays": [{"slot": 1, "tray_type": "PLA", "tray_color": "0000FFFF"}]},
+        ]})
+
+    def test_a_colour_on_the_second_unit_maps_to_its_printer_id(self):
+        from kiln.ams_routing import Filament, plan_ams_mapping
+
+        trays = self._trays()
+        assert [t.tray_id for t in trays] == [0, 5]
+        plan = plan_ams_mapping([Filament(hex6="0000FF")], trays)
+        assert plan.ok and plan.mapping == [5]
+        assert plan.matches[0]["slot"] == 5
+        assert "AMS 2 slot 2" in plan.matches[0]["tray"]
+
+    def test_the_selection_record_finds_the_second_units_colour(self):
+        from kiln.server import _ams_selection_record
+
+        info = {"units": [
+            {"unit_id": 0, "trays": [{"slot": 1, "tray_type": "PLA", "tray_color": "FF0000FF"}]},
+            {"unit_id": 1, "trays": [{"slot": 1, "tray_type": "PETG", "tray_color": "0000FFFF"}]},
+        ]}
+        assert _ams_selection_record(5, "PETG", info)["color"] == "0000FFFF"
+        assert _ams_selection_record(1, "PLA", info)["color"] == "FF0000FF"
+
+    def test_the_colour_advisor_keys_by_the_same_id(self):
+        from kiln.ams_routing import advise_colours
+
+        out = advise_colours(["0000FF"], self._trays(), printer="x1")
+        assert out is not None and out.matched[0]["slot"] == 5

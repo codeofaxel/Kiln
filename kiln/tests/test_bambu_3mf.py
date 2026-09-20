@@ -928,6 +928,24 @@ class TestBuildBambu3mf:
         assert 'type="PETG"' in info
         assert (result.filament_type, result.hotend_temp, result.bed_temp) == ("PETG", 240, 80)
 
+    def test_a_preheat_does_not_become_the_print_temperature(self, tmp_path):
+        """Bambu-style bodies open with a 140 °C preheat and only wait at the
+        real temperature; the wait is what the start sequence heats to."""
+        body = MINIMAL_GCODE_BODY.replace("M104 S200\nM140 S60", "M104 S140\nM140 S100\nM190 S100\nM109 S250")
+        out = str(tmp_path / "abs.3mf")
+        p_start, p_end = self._mock_templates()
+        with p_start, p_end:
+            result = build_bambu_3mf(body, out)
+        assert (result.hotend_temp, result.bed_temp) == (250, 100)
+
+    def test_a_body_with_no_heating_command_is_read_from_its_footer(self, tmp_path):
+        body = MINIMAL_GCODE_BODY.replace("M104 S200\nM140 S60\n", "") + "; first_layer_temperature = 245\n; first_layer_bed_temperature = 85\n"
+        out = str(tmp_path / "footer.3mf")
+        p_start, p_end = self._mock_templates()
+        with p_start, p_end:
+            result = build_bambu_3mf(body, out)
+        assert (result.hotend_temp, result.bed_temp) == (245, 85)
+
     def test_a_stated_setting_outranks_the_gcode(self, tmp_path):
         body = MINIMAL_GCODE_BODY + "; filament_type = PETG\n"
         out = str(tmp_path / "abs.3mf")
@@ -949,9 +967,12 @@ class TestBuildBambu3mf:
         assert bambu_filament_type("PA-CF") == "PA-CF"
         assert bambu_filament_type("PETG-HF") == "PETG"    # family Bambu has
         assert bambu_filament_type("PLA+") == "PLA"
-        assert bambu_filament_type("WOODFILL") == "UNKNOWN"
-        assert bambu_filament_type("PEEK") == "UNKNOWN"    # a Bambu cannot print it and its firmware has no word for it
-        assert bambu_filament_type("") == "UNKNOWN" and bambu_filament_type(None) == "UNKNOWN"
+        # A word Bambu has no spelling for: PLA, what every wrap said before
+        # the type was read off the G-code at all -- nothing new reaches the
+        # machine for an exotic word.
+        assert bambu_filament_type("WOODFILL") == "PLA"
+        assert bambu_filament_type("PEEK") == "PLA"
+        assert bambu_filament_type("") == "PLA" and bambu_filament_type(None) == "PLA"
         assert "UNKNOWN" not in BAMBU_FILAMENT_TYPES
         # Through the build: the footer's CF-PLA lands as PLA-CF.
         body = MINIMAL_GCODE_BODY + "; filament_type = CF-PLA\n"

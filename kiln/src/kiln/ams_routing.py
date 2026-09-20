@@ -305,14 +305,21 @@ def read_file_filaments(path: str | None) -> FileFilaments:
 UNREAD_MATERIAL = "UNKNOWN"
 
 
+#: Trays per Bambu AMS unit.  The printer names a tray by the GLOBAL id
+#: ``unit * TRAYS_PER_UNIT + slot`` -- in ``tray_now``, in ``ams_mapping``
+#: on the print command, in its own load command -- so unit 1's first tray
+#: is 4.  Every other changer Kiln reads (a Klipper MMU's gates, a CFS's
+#: bays) has one unit, where the id and the slot coincide.
+TRAYS_PER_UNIT = 4
+
+
 @dataclass(frozen=True)
 class Tray:
     """One loaded AMS tray.  ``hex6`` is ``None`` when the colour was not read.
 
     ``slot`` is the unit's own id for the tray (0-3); ``unit`` is which AMS
-    unit holds it.  Bambu's ``tray_now`` names a tray by the GLOBAL id
-    ``unit * 4 + slot``, so a reader that has only the slot cannot tell
-    unit 1's first tray from unit 0's.
+    unit holds it; :attr:`tray_id` is the printer's own id for it, the one
+    every command and status field uses.
     """
 
     slot: int
@@ -322,11 +329,17 @@ class Tray:
     unit: int = 0
 
     @property
+    def tray_id(self) -> int:
+        """The printer's id for this tray: ``unit * 4 + slot``."""
+        return self.unit * TRAYS_PER_UNIT + self.slot
+
+    @property
     def label(self) -> str:
         # "red UNKNOWN in slot 1" reads like a material called UNKNOWN.  A
         # slot whose material was never reported is just filament.
         material = "filament" if self.material == UNREAD_MATERIAL else self.material
-        return f"{_colour_name(self.hex6)} {material} in slot {self.slot + 1}"
+        where = f"slot {self.slot + 1}" if not self.unit else f"AMS {self.unit + 1} slot {self.slot + 1}"
+        return f"{_colour_name(self.hex6)} {material} in {where}"
 
 
 def loaded_trays(ams_info: dict[str, Any] | None) -> list[Tray]:
@@ -495,17 +508,20 @@ def plan_ams_mapping(
             )
         return (de, de, None)
 
+    # Trays are keyed by the printer's own id: what ``mapping`` carries to
+    # the print command, and what tells unit 1's slot 1 (id 5) from unit
+    # 0's (id 1).
     scored: list[tuple[float, int, int, float | None, str | None]] = []
     for i, f in enumerate(wanted):
         for t in trays:
             s = _score(f, t)
             if s is not None:
-                scored.append((s[0], i, t.slot, s[1], s[2]))
+                scored.append((s[0], i, t.tray_id, s[1], s[2]))
     scored.sort(key=lambda x: (x[0], x[1], x[2]))
 
     chosen: dict[int, tuple[Tray, float | None, str | None]] = {}
     used_slots: set[int] = set()
-    by_slot = {t.slot: t for t in trays}
+    by_slot = {t.tray_id: t for t in trays}
     for _rank, i, slot, de, warning in scored:
         if i in chosen or slot in used_slots:
             continue
@@ -520,7 +536,7 @@ def plan_ams_mapping(
                 {
                     "extruder": i,
                     "wanted": f.label,
-                    "slot": tray.slot,
+                    "slot": tray.tray_id,
                     "tray": tray.label,
                     "delta_e": round(de, 1) if de is not None else None,
                     "exact": de is not None and de < 1.0 and warning is None,
@@ -529,7 +545,7 @@ def plan_ams_mapping(
             )
             if warning:
                 plan.warnings.append(warning)
-            mapping.append(tray.slot)
+            mapping.append(tray.tray_id)
         else:
             nearest = None
             if f.hex6 is not None:
@@ -636,7 +652,7 @@ def advise_colours(
     )
     matched: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
-    by_slot = {t.slot: t for t in trays}
+    by_slot = {t.tray_id: t for t in trays}
     for hex6, match in zip(wanted, plan.matches, strict=True):
         entry = {
             "color": f"#{hex6}",

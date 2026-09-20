@@ -42,7 +42,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from kiln.ams_routing import UNREAD_MATERIAL, Tray, loaded_trays, normalize_hex
+from kiln.ams_routing import TRAYS_PER_UNIT, UNREAD_MATERIAL, Tray, loaded_trays, normalize_hex
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,7 @@ class MultiMaterialStatus:
             "source": self.source,
             "num_slots": self.num_slots,
             "loaded_slots": [
-                {"slot": t.slot, "material": t.material, "color": t.hex6}
+                {"slot": t.slot, "unit": t.unit, "tray_id": t.tray_id, "material": t.material, "color": t.hex6}
                 for t in self.slots
             ],
             "tool_map": list(self.tool_map) if self.tool_map is not None else None,
@@ -272,7 +272,7 @@ def _record_seen(status: MultiMaterialStatus) -> None:
 #: 255 is "no tray feeding" -- which the A1 / AMS Lite keeps reporting with
 #: trays loaded.  The same facts :class:`kiln.printers.bambu.BambuPrinter`
 #: keeps for its filament commands.
-BAMBU_TRAYS_PER_UNIT = 4
+BAMBU_TRAYS_PER_UNIT = TRAYS_PER_UNIT
 BAMBU_EXTERNAL_SPOOL_TRAY = 254
 BAMBU_NO_TRAY = 255
 
