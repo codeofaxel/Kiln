@@ -179,10 +179,11 @@ def _material_from_printer(printer_name: str | None) -> str | None:
         if _is_external_spool(feeding_id):
             return None
         active = _feeding_tray(feeding_id)
-        if active is None:
+        if active is None and str(ams.get("feeding_source") or "") != "extruder":
             # After a print the feeding tray reads 255 and tray_pre names the
             # one that ran it -- the field this door, which records outcomes,
-            # legitimately wants.
+            # legitimately wants.  Not on firmware with an extruder block,
+            # where those legacy fields can be a unit's local slot.
             for field in ("active_tray", "tray_pre", "tray_tar"):
                 candidate = _feeding_tray(ams.get(field))
                 if candidate is not None and _find_tray(loaded, *candidate) is not None:

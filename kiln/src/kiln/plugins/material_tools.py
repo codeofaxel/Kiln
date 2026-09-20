@@ -198,7 +198,12 @@ class _MaterialToolsPlugin:
                     "message": "Active material unknown — the external spool is feeding (no RFID/AMS data).",
                 }
             active = _feeding_tray(feeding_id)
-            if active is None:
+            # The report said nothing feeds.  On firmware with an extruder
+            # block the legacy fields (tray_now, tray_pre, tray_tar) can be
+            # a unit's LOCAL slot, so they are trusted only when the block
+            # did not speak.
+            block_spoke = str(ams.get("feeding_source") or "") == "extruder"
+            if active is None and not block_spoke:
                 for field in ("active_tray", "tray_pre", "tray_tar"):
                     candidate = _feeding_tray(ams.get(field))
                     if candidate is None:
@@ -207,8 +212,9 @@ class _MaterialToolsPlugin:
                         active = candidate
                         active_source = field
                         break
+            nothing_feeding = active is None and (block_spoke or tray_now == "255")
 
-            if active is None and tray_now == "255" and loaded_trays:
+            if nothing_feeding and loaded_trays:
                 materials = sorted({
                     str(tray.get("tray_type", "") or "").strip()
                     for _unit, tray in loaded_trays
@@ -249,7 +255,7 @@ class _MaterialToolsPlugin:
                     result["candidate_colors"] = colors
                 return result
 
-            if active is None and tray_now == "255":
+            if nothing_feeding:
                 # No tray feeding and none loaded: the external spool holder
                 # is the only place filament can be coming from.
                 return {

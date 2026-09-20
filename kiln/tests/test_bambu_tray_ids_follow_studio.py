@@ -697,3 +697,17 @@ class TestTheExtruderBlockWins:
                               options={"wait_seconds": 1})
         result = adapter._load_filament_impl(plan)
         assert result.success and "tray 128 (slot HT-A) is feeding the nozzle" in result.message
+
+    def test_an_idle_new_firmware_report_is_not_read_as_unit_a(self, get_active_material):
+        # The block says nothing feeds (65535) while the legacy fields still
+        # read "0" (a local slot): the door must not answer "PLA in A1", nor
+        # fall back to tray_pre / tray_tar, which are local slots here too.
+        idle = {**_H2D_STATUS, "ams": {**_H2D_STATUS["ams"], "tray_now": "0", "tray_pre": "0", "tray_tar": "0"},
+                "device": {"extruder": {"state": 2, "info": [{"id": 0, "snow": 65535, "spre": 65535, "star": 65535}]}}}
+        adapter = _adapter()
+        adapter._last_status = idle
+        status = adapter.get_ams_status()
+        assert status["feeding"] is None and status["feeding_source"] == "extruder"
+        r = _report(get_active_material, status)
+        assert r["source"] == "ams_loaded_unknown_slot"
+        assert sorted(r["loaded_slot_names"]) == ["A1", "A4", "HT-A"]

@@ -6327,6 +6327,10 @@ class BambuAdapter(PrinterAdapter):
         # rule.  ``None`` when nothing feeds; the raw fields stay as sent.
         ref, source = _feeding_ref(status)
         result["feeding"] = _feeding_record(ref, source)
+        # Which field answered, even when the answer is "nothing": a reader
+        # consults the legacy tray_pre / tray_tar fallbacks only when the
+        # extruder block did not speak, since there they may be local slots.
+        result["feeding_source"] = source
 
         if not isinstance(ams_data, list):
             return result
