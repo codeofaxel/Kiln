@@ -3341,7 +3341,7 @@ class TestValidate3mfFilamentIds:
         issues = adapter_with_mqtt._validate_3mf_filament_ids(str(three_mf), 1)
         assert len(issues) == 1
         assert "index 7" in issues[0]
-        assert "4 slot" in issues[0]
+        assert "4 tray(s) (A1, A2, A3, A4)" in issues[0]
 
     def test_no_metadata_no_issues(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
         """Missing plate metadata returns no issues."""

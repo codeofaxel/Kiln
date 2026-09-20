@@ -41,7 +41,10 @@ import paho.mqtt.client as mqtt
 
 from kiln.bambu_trays import EXTERNAL_SPOOL_TRAY as _EXTERNAL_SPOOL_TRAY
 from kiln.bambu_trays import NO_TRAY as _NO_TRAY
+from kiln.bambu_trays import TrayRef as _TrayRef
 from kiln.bambu_trays import describe_tray_id as _describe_tray_id
+from kiln.bambu_trays import feeding_record as _feeding_record
+from kiln.bambu_trays import read_extruder_slot as _read_extruder_slot
 from kiln.bambu_trays import read_tray_id as _read_tray_id
 from kiln.bambu_trays import tray_id as _bambu_tray_id
 from kiln.bambu_trays import tray_name as _bambu_tray_name
@@ -903,11 +906,16 @@ def describe_bambu_filament_fault_public(
     canonical, unit, slot = normalize_bambu_hms(code)
     if not canonical:
         return f"The printer reported {code}, which is not a readable HMS code.", None
+    # The same words every other door uses for a tray: the unit's letter
+    # and the slot number Studio shows ("slot B2"), so a fault on a second
+    # unit reads like the load, the plan and the status that name it.
     where = ""
     if unit is not None and slot is not None:
-        where = f" (AMS {chr(ord('A') + unit)}, slot {slot + 1})"
+        with contextlib.suppress(ValueError):
+            where = f" (slot {_bambu_tray_name(unit, slot)})"
     elif unit is not None:
-        where = f" (AMS {chr(ord('A') + unit)})"
+        with contextlib.suppress(ValueError):
+            where = f" (AMS {_bambu_unit_name(unit)})"
     entry = _BAMBU_HMS_FILAMENT_FAULTS.get(canonical)
     if entry is not None:
         reading, model = entry
@@ -1241,14 +1249,63 @@ def _merge_push_status(cache: dict[str, Any], delta: dict[str, Any]) -> None:
             cache[key] = value
 
 
-def _tray_now_of(status: dict[str, Any]) -> str | None:
-    """The tray feeding the nozzle as the cache holds it, or ``None`` when
-    the AMS section has never said."""
-    ams = status.get("ams")
-    if not isinstance(ams, dict):
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
         return None
-    value = ams.get("tray_now")
-    return None if value is None else str(value)
+
+
+def _feeding_ref(status: dict[str, Any]) -> tuple[_TrayRef | None, str]:
+    """``(what feeds the nozzle, which field said so)`` from a raw status.
+
+    Firmware that speaks the newer status protocol reports the feeding
+    tray per nozzle in ``device.extruder.info[].snow`` -- packed
+    ``(unit << 8) | slot`` -- and there the legacy ``ams.tray_now`` may be
+    the unit's LOCAL slot (a community capture of an H2D reads
+    ``tray_now "0"`` while ``snow`` names HT-A).  The vendor's own parser
+    lets the extruder block win whenever it is present; so does this.  On
+    a two-nozzle machine the current extruder is bits 4-7 of the block's
+    ``state``.  A hand-assembled cache may carry ``tray_now`` at the top
+    level; it is read last.  ``(None, "")`` when nothing has said anything.
+    """
+    device = status.get("device")
+    extruder = device.get("extruder") if isinstance(device, dict) else None
+    if isinstance(extruder, dict) and isinstance(extruder.get("info"), list):
+        info = [entry for entry in extruder["info"] if isinstance(entry, dict)]
+        current = 0
+        state = _int_or_none(extruder.get("state"))
+        if state is not None:
+            current = (state >> 4) & 0xF
+        chosen = next((e for e in info if _int_or_none(e.get("id")) == current), info[0] if info else None)
+        if chosen is not None and chosen.get("snow") is not None:
+            ref = _read_extruder_slot(chosen.get("snow"))
+            if ref is not None:
+                return ref, "extruder"
+    ams = status.get("ams")
+    if isinstance(ams, dict) and ams.get("tray_now") is not None:
+        return _read_tray_id(ams.get("tray_now")), "tray_now"
+    if status.get("tray_now") is not None:
+        return _read_tray_id(status.get("tray_now")), "tray_now"
+    return None, ""
+
+
+def _tray_now_of(status: dict[str, Any]) -> str | None:
+    """The tray feeding the nozzle as the cache holds it, as the printer's
+    own tray id, or ``None`` when the AMS section has never said.
+
+    Read through :func:`_feeding_ref`, so on newer firmware it is the
+    extruder block's answer and not a local slot; a value neither field
+    could read falls back to the raw ``tray_now`` string.
+    """
+    ref, source = _feeding_ref(status)
+    if ref is not None:
+        return str(ref.tray_id)
+    if source == "tray_now":
+        ams = status.get("ams")
+        value = ams.get("tray_now") if isinstance(ams, dict) and ams.get("tray_now") is not None else status.get("tray_now")
+        return None if value is None else str(value)
+    return None
 
 
 def _raw_ams_trays(ams_data: Any) -> list[tuple[int, int, int, str, dict[str, Any]]]:
@@ -4846,11 +4903,17 @@ class BambuAdapter(PrinterAdapter):
             if not isinstance(filament_ids, list) or not filament_ids:
                 return issues
 
-            # Count available AMS tray slots.
+            # Count available AMS trays, and name them: an AMS HT's one
+            # tray is not "index 4", and a second unit's are not 4-7 by
+            # position, so the ids the printer uses are what a caller is
+            # pointed at.
             ams_info = self.get_ams_status()
-            total_slots = 0
-            for unit in ams_info.get("units", []):
-                total_slots += len(unit.get("trays", []))
+            names: list[str] = []
+            for position, unit in enumerate(ams_info.get("units", [])):
+                for tray in unit.get("trays", []):
+                    with contextlib.suppress(TypeError, ValueError):
+                        names.append(_bambu_tray_name(int(unit.get("unit_id", position)), int(tray.get("slot", 0))))
+            total_slots = len(names)
 
             if total_slots == 0:
                 return issues  # No AMS info — can't validate.
@@ -4860,12 +4923,12 @@ class BambuAdapter(PrinterAdapter):
                 issues.append(
                     f"3MF plate {plate_number} references filament profile "
                     f"index {max_id} but your AMS only has {total_slots} "
-                    f"slot(s) (indices 0-{total_slots - 1}). This file was "
+                    f"tray(s) ({', '.join(names)}). This file was "
                     f"likely sliced with a multi-filament project that "
                     f"doesn't match your AMS setup. Re-slice the model in "
                     f"BambuStudio/OrcaSlicer with only your installed "
-                    f"filaments, or provide an explicit --ams-mapping to "
-                    f"remap the extruder indices to valid AMS slots."
+                    f"filaments, or provide an explicit --ams-mapping naming "
+                    f"the printer's tray id for each filament (see ams_status)."
                 )
         except PrinterError:
             logger.debug("Could not query AMS for filament_ids validation", exc_info=True)
@@ -6111,16 +6174,12 @@ class BambuAdapter(PrinterAdapter):
             return None
 
         ams_data = status.get("ams")
-        raw_now = None
         if isinstance(ams_data, dict):
-            raw_now = ams_data.get("tray_now")
             ams_data = ams_data.get("ams")
-        if raw_now is None:
-            raw_now = status.get("tray_now")
         if not isinstance(ams_data, list):
             return None
 
-        # Keyed by the printer's own tray id, the number ``tray_now``
+        # Keyed by the printer's own tray id, the number the feeding field
         # carries -- matching it against the unit's slot (0-3) found unit
         # 0's spool for a tray feeding from unit 1, and nothing for an AMS HT.
         trays: list[dict[str, Any]] = [
@@ -6132,7 +6191,7 @@ class BambuAdapter(PrinterAdapter):
             return None
 
         active: int | None = None
-        ref = _read_tray_id(raw_now)
+        ref, _source = _feeding_ref(status)
         if ref is not None:
             # 255 is "no tray" and 254 the external spool, whose colour the
             # printer does not report at all.
@@ -6262,6 +6321,12 @@ class BambuAdapter(PrinterAdapter):
                 result[key] = ams_wrapper[key]
             elif key in status:
                 result[key] = status[key]
+        # What feeds the nozzle, as the printer's own tray id, with the
+        # field that said so: the extruder block on newer firmware (where
+        # ``tray_now`` may be a local slot), else ``tray_now`` read by the
+        # rule.  ``None`` when nothing feeds; the raw fields stay as sent.
+        ref, source = _feeding_ref(status)
+        result["feeding"] = _feeding_record(ref, source)
 
         if not isinstance(ams_data, list):
             return result
@@ -6423,8 +6488,9 @@ class BambuAdapter(PrinterAdapter):
     # 255 to unload.  Studio (v02.06) sends ``ams_id`` / ``slot_id`` beside
     # ``target``, and on firmware that speaks its new AMS protocol asks for
     # the external spool as target 255 + slot_id 0; Kiln sends ``target``
-    # alone, the form bench-verified on the A1, and the new-protocol spool
-    # form stays unverified.  The firmware's routine does the whole job —
+    # alone -- bench-verified on the A1 for an AMS tray (2026-09-15); the
+    # 254 and 255 targets and the new-protocol spool form are pinned from
+    # the source, not the bench.  The firmware's routine does the whole job —
     # retract the old filament, feed the new one, purge — which is why
     # "load" here needs no G-code of its own, and why the printer's own
     # purge fault (the touchscreen wizard's HMS 1200-8007 on 2026-09-03) is
@@ -6589,17 +6655,16 @@ class BambuAdapter(PrinterAdapter):
 
     @staticmethod
     def _tray_now_of(status: dict[str, Any]) -> Any:
-        """``tray_now`` as the printer reports it.
+        """The feeding tray as the printer's own id, read the one way.
 
-        Every Bambu push carries it inside the ``ams`` section, never at
-        the top level of ``print`` -- which is where the watch below used to
-        look, so on a real machine it could only ever time out.  The
-        top-level key is read second for a cache that was assembled by hand.
+        Every Bambu push carries ``tray_now`` inside the ``ams`` section,
+        never at the top level of ``print`` -- which is where the watch
+        below used to look, so on a real machine it could only ever time
+        out.  Newer firmware also names the feeding tray per nozzle in the
+        extruder block, and that answer wins (see :func:`_feeding_ref`);
+        the top-level key is read last, for a cache assembled by hand.
         """
-        section = status.get("ams")
-        if isinstance(section, dict) and section.get("tray_now") is not None:
-            return section["tray_now"]
-        return status.get("tray_now")
+        return _tray_now_of(status)
 
     def _ams_tray(self, slot: int) -> dict[str, Any] | None:
         """The tray dict ``get_ams_status`` reports for the printer's tray id *slot*."""

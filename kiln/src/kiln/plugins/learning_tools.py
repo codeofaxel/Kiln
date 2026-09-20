@@ -161,6 +161,7 @@ def _material_from_printer(printer_name: str | None) -> str | None:
             _is_external_spool,
             _iter_ams_trays,
             _loaded_ams_trays,
+            _report_feeding,
         )
 
         adapter = _srv._resolve_adapter(printer_name)
@@ -174,9 +175,10 @@ def _material_from_printer(printer_name: str | None) -> str | None:
         # the unit id on an AMS HT; 254 the external spool), resolved to the
         # unit's own slot before matching.
         loaded = _loaded_ams_trays(ams)
-        if _is_external_spool(ams.get("tray_now")):
+        feeding_id, _source = _report_feeding(ams)
+        if _is_external_spool(feeding_id):
             return None
-        active = _feeding_tray(ams.get("tray_now"))
+        active = _feeding_tray(feeding_id)
         if active is None:
             # After a print the feeding tray reads 255 and tray_pre names the
             # one that ran it -- the field this door, which records outcomes,

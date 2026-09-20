@@ -1,26 +1,24 @@
-"""A Bambu tray id is computed in ONE place, the way Bambu Studio computes it.
+"""A Bambu tray id is computed in ONE place, the way the vendor's own slicer computes it.
 
-Studio (v02.06.00.51, the version installed beside this checkout) numbers a
-tray by its UNIT TYPE, never by printer model:
+The vendor numbers a tray by its UNIT TYPE, never by printer model:
 
 * a chained unit -- AMS, AMS Lite, AMS 2 Pro; unit ids 0-15 -- names its
-  trays ``unit * 4 + slot`` (``DevMapping.cpp:127``,
-  ``DeviceManager.cpp:1542-1543``);
+  trays ``unit * 4 + slot``;
 * an AMS HT -- one slot, unit ids 128-135 -- is addressed by its unit id
-  itself: tray 128 is HT-A (``DevMapping.cpp:131``,
-  ``DevExtruderSystem.cpp:289-291``, ``DeviceManager.cpp:1557-1558``);
+  itself: tray 128 is HT-A;
 * 254 is the external spool and 255 is "no tray" in ``tray_now`` and in
-  the load command's ``target`` (``DevDefs.h:85-86``,
-  ``DevExtruderSystem.cpp:277-286``); neither belongs in ``ams_mapping``,
-  where an unmapped or external filament is ``-1`` (``SelectMachine.cpp:1410``).
+  the load command's ``target``; neither belongs in ``ams_mapping``, where
+  an unmapped or external filament is ``-1``;
+* newer firmware names the feeding tray per nozzle in the extruder block,
+  packed ``(unit << 8) | slot``, and there ``tray_now`` may be a local slot.
 
-The full evidence table is the docstring of :mod:`kiln.bambu_trays`.  Kiln
-applied the chained rule to every id, so an AMS HT feeding the nozzle read
-as "unit 32", its tray was "not present" to the load command, and a spool
-on a second chained unit was auto-routed and colour-checked as unit 0's.
-The owner's A1 carries one AMS Lite (unit 0, trays 0-3), so nothing below
-is bench-verified beyond that unit; every other case is pinned from the
-cited source.
+The rule lives in :mod:`kiln.bambu_trays`.  Kiln applied the chained rule
+to every id, so an AMS HT feeding the nozzle read as "unit 32", its tray
+was "not present" to the load command, and a spool on a second chained
+unit was auto-routed and colour-checked as unit 0's.  The owner's A1
+carries one AMS Lite (unit 0, trays 0-3), so nothing below is
+bench-verified beyond that unit; every other case is pinned from the
+vendor's own source and from community status captures.
 """
 
 from __future__ import annotations
@@ -574,3 +572,128 @@ class TestTheCommandLine:
         assert "AMS A:" in out and "AMS HT-B:" in out
         assert "Slot HT-B (tray 129): ABS" in out
         assert "Active: tray 129 (slot HT-B)" in out
+
+
+class TestTheSameWordsEverywhereElse:
+    def test_a_fault_on_a_second_unit_names_the_slot_the_way_the_load_does(self):
+        from kiln.printers.bambu import describe_bambu_filament_fault_public
+
+        # HMS 0701_7100: unit B (0701), slot 2 (7100) — the wiki's one row
+        # covers all sixteen, and the reading says which one.
+        reading, _ = describe_bambu_filament_fault_public("0701_7100_0002_0001")
+        assert "(slot B2)" in reading
+        reading, _ = describe_bambu_filament_fault_public("0700_7000_0002_0001")
+        assert "(slot A1)" in reading
+
+    def test_the_capacity_check_names_the_trays_it_counted(self, tmp_path):
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr("Metadata/plate_1.json", json.dumps({"filament_ids": [0, 1, 2, 3]}))
+        adapter = _adapter()
+        adapter.get_ams_status = mock.MagicMock(return_value=_ams("255", _A, _HT_B))
+        issues = adapter._validate_3mf_filament_ids(str(threemf), 1)
+        assert len(issues) == 1 and "3 tray(s) (A1, A2, HT-B)" in issues[0]
+
+    def test_the_record_kind_follows_the_units_own_module_name(self):
+        from kiln.multi_material import from_bambu_ams
+
+        lite = {**_A, "module_name": "ams_f1/0"}
+        boxed = {**_A, "module_name": "ams/0"}
+        assert from_bambu_ams(_ams("255", lite), printer_model="bambu_a1").kind == "ams_lite"
+        # An A1 on its AMS Hub carries chained units; the model alone would call them Lite.
+        assert from_bambu_ams(_ams("255", boxed), printer_model="bambu_a1").kind == "ams"
+        assert from_bambu_ams(_ams("255", {**_HT_B, "module_name": "n3s/129"}), printer_model="bambu_a1").kind == "ams"
+        # No module names (an older reading): the model decides, as before.
+        assert from_bambu_ams(_ams("255", _A), printer_model="bambu_a1").kind == "ams_lite"
+        assert from_bambu_ams(_ams("255", _A), printer_model="bambu_x1c").kind == "ams"
+
+
+# ---------------------------------------------------------------------------
+# New-protocol firmware: the extruder block names the feeding tray
+# ---------------------------------------------------------------------------
+
+
+#: Shaped from a community capture of an H2D (firmware 01.01.02.07): the
+#: legacy ``ams.tray_now`` reads the unit's LOCAL slot ("0") while
+#: ``device.extruder.info[0].snow`` = 32768 = unit 128, slot 0 — HT-A is
+#: feeding.  The left nozzle's 65279 (unit 254, slot 255) is "nothing".
+_H2D_STATUS = {
+    "gcode_state": "IDLE",
+    "ams": {
+        "ams": [
+            {"id": "0", "info": "1101", "tray": [
+                {"id": "0", "tray_type": "PLA", "tray_color": "FF0000FF"},
+                {"id": "3", "tray_type": "PETG", "tray_color": "0000FFFF"},
+            ]},
+            {"id": "128", "info": "2004", "tray": [{"id": "0", "tray_type": "PA-GF", "tray_color": "111111FF"}]},
+        ],
+        "ams_exist_bits": "11", "tray_exist_bits": "1000f",
+        "tray_now": "0", "tray_tar": "0", "tray_pre": "0",
+    },
+    "device": {"extruder": {"state": 2, "info": [
+        {"id": 0, "snow": 32768, "spre": 32768, "star": 32768},
+        {"id": 1, "snow": 65279, "spre": 65279, "star": 65279},
+    ]}},
+    "vir_slot": [{"id": "254"}, {"id": "255"}],
+}
+
+
+class TestTheExtruderBlockWins:
+    def test_the_packed_slot_reads_into_the_same_vocabulary(self):
+        from kiln.bambu_trays import read_extruder_slot
+
+        assert (read_extruder_slot(32768).unit, read_extruder_slot(32768).slot, read_extruder_slot(32768).tray_id) == (128, 0, 128)
+        assert (read_extruder_slot(258).unit, read_extruder_slot(258).slot, read_extruder_slot(258).tray_id) == (1, 2, 6)
+        assert read_extruder_slot(0).tray_id == 0
+        assert read_extruder_slot(65535).none          # 0xFFFF: nothing (the X1C capture, idle)
+        assert read_extruder_slot(255).none            # 0x00FF: slot 255 is nothing
+        assert read_extruder_slot(65279).none          # 0xFEFF: nothing on the left nozzle (the H2D capture)
+        assert read_extruder_slot(65280).external      # 0xFF00: the right external spool (an X2D capture)
+        assert read_extruder_slot(65024).external      # 0xFE00: the left external spool
+        for junk in (None, "", "x", -1, 70000, 16 << 8):
+            assert read_extruder_slot(junk) is None, junk
+
+    def test_the_ams_report_names_the_feeding_tray_from_the_extruder_block(self):
+        adapter = _adapter()
+        adapter._last_status = dict(_H2D_STATUS)
+        status = adapter.get_ams_status()
+        assert status["tray_now"] == "0"  # the wire value, untouched
+        assert status["feeding"] == {"tray_id": 128, "unit": 128, "slot": 0, "name": "HT-A", "source": "extruder"}
+
+    def test_a_legacy_report_reads_tray_now_by_the_rule(self):
+        adapter = _adapter()
+        adapter._last_status = {"gcode_state": "IDLE", "ams": {"ams": _RAW_AMS, "tray_now": "5"}}
+        status = adapter.get_ams_status()
+        assert status["feeding"] == {"tray_id": 5, "unit": 1, "slot": 1, "name": "B2", "source": "tray_now"}
+        adapter._last_status["ams"]["tray_now"] = "254"
+        assert adapter.get_ams_status()["feeding"] == {"tray_id": 254, "unit": None, "slot": None, "name": "Ext", "source": "tray_now"}
+        adapter._last_status["ams"]["tray_now"] = "255"
+        assert adapter.get_ams_status()["feeding"] is None
+
+    def test_every_reader_follows_the_report(self):
+        from kiln.multi_material import from_bambu_ams
+
+        adapter = _adapter()
+        adapter._last_status = dict(_H2D_STATUS)
+        status = adapter.get_ams_status()
+        assert from_bambu_ams(status, printer_model="bambu_h2d").feeding == (128, 0)
+        assert adapter.active_filament_color() == "#111111"
+
+    def test_the_reporting_door_reads_the_feeding_block(self, get_active_material):
+        adapter = _adapter()
+        adapter._last_status = dict(_H2D_STATUS)
+        r = _report(get_active_material, adapter.get_ams_status())
+        assert (r["material"], r["active_slot"], r["active_slot_name"], r["active_slot_source"]) == ("PA-GF", 128, "HT-A", "extruder")
+
+    def test_the_load_watch_confirms_on_the_extruder_block(self):
+        from kiln.printers.base import FilamentOpPlan
+
+        adapter = _adapter()
+        adapter._last_status = {**_H2D_STATUS, "nozzle_target_temper": 0}
+        sent: list[dict[str, Any]] = []
+        adapter._publish_command = lambda payload: sent.append(payload)
+        adapter._park_for_firmware_routine = lambda plan: {"status": "in_place", "reason": "test"}
+        plan = FilamentOpPlan(action="load", temperature=260.0, temperature_source="test", slot=128,
+                              options={"wait_seconds": 1})
+        result = adapter._load_filament_impl(plan)
+        assert result.success and "tray 128 (slot HT-A) is feeding the nozzle" in result.message

@@ -10885,6 +10885,7 @@ def register_printer(
                     "units": len(ams_info.get("units", [])),
                     "loaded_tray_count": len(loaded_trays),
                     "loaded_trays": loaded_trays,
+                    "feeding": ams_info.get("feeding"),
                     "tray_now": ams_info.get("tray_now"),
                     "tray_pre": ams_info.get("tray_pre"),
                     "tray_tar": ams_info.get("tray_tar"),

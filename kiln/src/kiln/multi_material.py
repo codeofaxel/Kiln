@@ -280,8 +280,21 @@ BAMBU_NO_TRAY = NO_TRAY
 
 
 def _bambu_feeding(info: dict[str, Any]) -> tuple[tuple[int, int] | None, bool]:
-    """``(feeding, external_spool)`` from a reading's ``tray_now``."""
-    ref = read_tray_id(info.get("tray_now"))
+    """``(feeding, external_spool)`` from a reading.
+
+    The adapter's report carries ``feeding`` -- the printer's own tray id
+    read from the extruder block on newer firmware, from ``tray_now`` on
+    older -- or ``None`` when nothing feeds.  A reading without the key
+    (an older adapter, a hand-built one) is read from ``tray_now`` by the
+    same rule.
+    """
+    if "feeding" in info:
+        feeding = info.get("feeding")
+        if not isinstance(feeding, dict):
+            return None, False
+        ref = read_tray_id(feeding.get("tray_id"))
+    else:
+        ref = read_tray_id(info.get("tray_now"))
     if ref is None:
         return None, False
     if ref.external:
@@ -298,7 +311,21 @@ def from_bambu_ams(ams_info: dict[str, Any] | None, *, printer_model: str | None
     exist = str(info.get("ams_exist_bits", "0") or "0").strip()
     trays = str(info.get("tray_exist_bits", "0") or "0").strip()
     model = str(printer_model or "").strip().lower()
-    kind = KIND_AMS_LITE if model in ("bambu_a1", "bambu_a1_mini", "bambu_a2l") else KIND_AMS
+    # The unit's own firmware module name says what it is ("ams_f1/0" is
+    # an AMS Lite; "ams/", "n3f/" and "n3s/" are the chained kinds) and
+    # wins over the printer model: an A1 can carry chained units through
+    # its AMS Hub, and a reading with no module names falls back to the
+    # model, which is all the older adapters reported.
+    heads = {
+        str(u.get("module_name") or "").partition("/")[0].lower()
+        for u in units if isinstance(u, dict)
+    } - {""}
+    if "ams_f1" in heads:
+        kind = KIND_AMS_LITE
+    elif heads:
+        kind = KIND_AMS
+    else:
+        kind = KIND_AMS_LITE if model in ("bambu_a1", "bambu_a1_mini", "bambu_a2l") else KIND_AMS
     if not units and exist == "0" and trays == "0":
         return none_status("bambu:no_ams_hardware")
     slots = tuple(loaded_trays(info))

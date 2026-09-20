@@ -858,20 +858,21 @@ class TestBambuFaultReadings:
         assert as_hms[0] != as_err[0]
 
     @pytest.mark.parametrize(
-        "code,unit,slot",
+        "code,where",
         [
-            ("0700_7000_0002_0003", "AMS A", "slot 1"),
-            ("0701_7200_0002_0003", "AMS B", "slot 3"),
-            ("0703_7300_0002_0003", "AMS D", "slot 4"),
-            ("1202_2100_0002_0006", "AMS C", "slot 2"),
+            ("0700_7000_0002_0003", "(slot A1)"),
+            ("0701_7200_0002_0003", "(slot B3)"),
+            ("0703_7300_0002_0003", "(slot D4)"),
+            ("1202_2100_0002_0006", "(slot C2)"),
         ],
     )
-    def test_unit_and_slot_variants_share_one_reading(self, code, unit, slot):
-        """Bambu files these as synonyms of one entry; so does Kiln."""
+    def test_unit_and_slot_variants_share_one_reading(self, code, where):
+        """Bambu files these as synonyms of one entry; so does Kiln.  The
+        reading names the slot the way every other door does ("slot B3")."""
         from kiln.printers.bambu import describe_bambu_filament_fault
 
         text, url = describe_bambu_filament_fault(code, kind="hms")
-        assert unit in text and slot in text
+        assert where in text
         # The link points at the canonical unit-A / slot-1 page that exists.
         assert url.endswith(("/0700_7000_0002_0003", "/1200_2000_0002_0006"))
         assert "/en/" in url

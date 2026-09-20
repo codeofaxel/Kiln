@@ -39,6 +39,22 @@ def _is_external_spool(value: Any) -> bool:
     return ref is not None and ref.external
 
 
+def _report_feeding(ams: dict[str, Any]) -> tuple[Any, str]:
+    """``(the id the report says feeds, which field said so)``.
+
+    The adapter's ``feeding`` record wins -- on newer firmware it is the
+    extruder block's answer, where ``tray_now`` may be a local slot -- and
+    a report without the key is read from ``tray_now``.  The id is the
+    printer's own tray id, 254 for the external spool, or ``None``.
+    """
+    if "feeding" in ams:
+        feeding = ams.get("feeding")
+        if isinstance(feeding, dict):
+            return feeding.get("tray_id"), str(feeding.get("source") or "feeding")
+        return None, "feeding"
+    return ams.get("tray_now"), "tray_now"
+
+
 def _iter_ams_trays(ams: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
     """``(unit_id, tray)`` for every tray the reading carries, in order."""
     trays: list[tuple[int, dict[str, Any]]] = []
@@ -172,7 +188,8 @@ class _MaterialToolsPlugin:
             all_trays = _iter_ams_trays(ams)
             loaded_trays = _loaded_ams_trays(ams)
 
-            if _is_external_spool(tray_now):
+            feeding_id, active_source = _report_feeding(ams)
+            if _is_external_spool(feeding_id):
                 return {
                     "success": True,
                     "material": "unknown",
@@ -180,8 +197,7 @@ class _MaterialToolsPlugin:
                     "tray_now": tray_now,
                     "message": "Active material unknown — the external spool is feeding (no RFID/AMS data).",
                 }
-            active = _feeding_tray(tray_now)
-            active_source = "tray_now"
+            active = _feeding_tray(feeding_id)
             if active is None:
                 for field in ("active_tray", "tray_pre", "tray_tar"):
                     candidate = _feeding_tray(ams.get(field))
