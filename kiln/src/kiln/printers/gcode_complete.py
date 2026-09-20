@@ -129,7 +129,10 @@ rule below is quoted from the firmware source, at the version named.
   colorspace above 1.  Kiln writes 160x120 (fits every panel) and 256x192
   (the 800-wide panels pick it over the smaller one), 4:3 like the render.
   A PanelDue is optional hardware Kiln cannot see, so its blocks are
-  written and their absence is never a refusal.
+  written and their absence is never a refusal.  They are written for the
+  Duet family and for any model the catalogue lists as RepRapFirmware
+  (``firmware_family`` in ``printer_intelligence.json``), so the slice
+  door serves them without knowing the adapter.
 
 * **Klipper / Moonraker** would convert a QOI block to PNG through Pillow
   (``SUPPORTED_THUMB_FORMATS`` and ``FMT_CONV_MAP``, metadata.py L42-45),
@@ -345,13 +348,11 @@ _MODEL_SCREENS: dict[str, str | None] = {
     "prusa_mk2_5s": None,
 }
 
-#: Model tokens that name a large-display Buddy printer even without a
-#: vendor prefix (``"MK4S"``, ``"mk3.9s"``, ``"CORE One"``).  ``xl``, ``mini``
-#: and ``ix`` are not here: bare, they name other makers' printers too, so
-#: they count only behind ``prusa``.  ``mk3_5`` and ``mk3_9`` are listed
-#: because the general hint mapper files them under the 8-bit MK3S
-#: (``"mk3"`` is in ``"mk3.5"``).
-_LARGE_DISPLAY_TOKENS: tuple[str, ...] = ("mk4", "mk3_5", "mk3_9", "core_one", "coreone")
+def _normalise_model(printer_model: str | None) -> str:
+    hint = str(printer_model or "").strip().lower()
+    for ch in ("-", " ", ".", "+", "/"):
+        hint = hint.replace(ch, "_")
+    return re.sub(r"_+", "_", hint).strip("_")
 
 
 def screen_for_model(printer_model: str | None) -> QoiScreen | None:
@@ -360,42 +361,55 @@ def screen_for_model(printer_model: str | None) -> QoiScreen | None:
     ``None`` covers both "this model's screen reads no QOI" and "Kiln does
     not know this model" — neither is a reason to write a block or to
     refuse a file.  The spelling is taken as people write it (``"Prusa
-    MK4S"``, ``"mk3.9"``, ``"prusa-mini"``): normalised, looked up, and
-    only then handed to the shared hint mapper.
+    MK4S"``, ``"mk3.9"``, ``"prusa-mini"``): normalised, looked up, then
+    handed to the shared hint mapper the rest of Kiln resolves a model
+    with, minus the two places that mapper is looser than a screen can be.
     """
-    if not printer_model:
-        return None
-    hint = str(printer_model).strip().lower()
-    for ch in ("-", " ", ".", "+", "/"):
-        hint = hint.replace(ch, "_")
-    hint = re.sub(r"_+", "_", hint).strip("_")
+    hint = _normalise_model(printer_model)
     if not hint:
         return None
     if hint in _MODEL_SCREENS:
         key = _MODEL_SCREENS[hint]
         return QOI_SCREENS[key] if key else None
-    body = hint.removeprefix("original_")
-    if body.startswith("prusa"):
-        body = body.removeprefix("prusa").strip("_")
-        if "mini" in body:
-            return QOI_SCREENS["buddy_mini"]
-        if (
-            any(token in body for token in _LARGE_DISPLAY_TOKENS)
-            or body.startswith(("xl", "ix", "core"))
-        ):
-            return QOI_SCREENS["buddy_large"]
-    elif any(hint.startswith(token) for token in _LARGE_DISPLAY_TOKENS):
+    is_prusa = "prusa" in hint
+    # The xBuddy upgrades, which the shared mapper files under the 8-bit
+    # MK3S ("mk3" is in "mk3.5"), and the Core One and iX, which it does
+    # not know.
+    if "mk3_5" in hint or "mk3_9" in hint or hint.startswith(("core_one", "coreone")):
         return QOI_SCREENS["buddy_large"]
-    elif "prusa" not in hint:
-        # Every screen here is a Prusa's.  The shared mapper files any
-        # "... XL" under prusa_xl, which would hand a Neptune 4 XL on
-        # Klipper a Prusa screen and a refusal to go with it.
-        return None
+    if is_prusa and ("core" in hint or re.search(r"(^|_)ix($|_)", hint)):
+        return QOI_SCREENS["buddy_large"]
     from kiln.printer_profile_ids import map_printer_hint_to_profile_id
 
     mapped = map_printer_hint_to_profile_id(printer_model)
+    if mapped == "prusa_xl" and not is_prusa:
+        # The mapper files any "... XL" here; other makers sell XLs too, and
+        # a Neptune 4 XL on Klipper must not get a Prusa screen and a
+        # refusal to go with it.
+        return None
     key = _MODEL_SCREENS.get(mapped or "")
     return QOI_SCREENS[key] if key else None
+
+
+def _controller_screens(printer_model: str | None) -> tuple[str, ...]:
+    """Screens the declared model's CONTROLLER may carry, from the catalogue.
+
+    A Duet-driven machine (``firmware_family == "reprapfirmware"`` in
+    ``printer_intelligence.json``) may have a PanelDue whatever software is
+    in front of it, so the slice door — which knows the model and not the
+    adapter — writes its blocks too.  Written, never refused over.
+    """
+    if not printer_model:
+        return ()
+    try:
+        from kiln.motion_facts import motion_facts_for
+
+        facts = motion_facts_for(printer_model)
+    except Exception:  # noqa: BLE001 — no catalogue answer is no screen
+        return ()
+    if facts is not None and getattr(facts, "firmware_family", None) == "reprapfirmware":
+        return ("paneldue",)
+    return ()
 
 
 def declared_model_for_adapter(adapter: object) -> str | None:
@@ -439,7 +453,7 @@ def _screens_for(surface: GcodeSurface, printer_model: str | None) -> list[QoiSc
     by_model = screen_for_model(printer_model)
     if by_model:
         screens.append(by_model)
-    for key in surface.qoi_screens:
+    for key in surface.qoi_screens + _controller_screens(printer_model):
         screen = QOI_SCREENS[key]
         if screen not in screens:
             screens.append(screen)
@@ -1047,8 +1061,8 @@ def _fit_png(source: bytes, width: int, height: int) -> bytes | None:
     progress picture, square for the MINI's) while the render is 4:3: a
     plain resize would squash the model, so the picture keeps its
     proportions and the frame is filled out with the render's own
-    background — the corner pixel, which is transparent for a picture
-    drawn on transparency and the backdrop colour for an opaque one.
+    background — the colour most of its corners share, which is transparent
+    for a picture drawn on transparency and the backdrop for an opaque one.
     """
     try:
         import io
@@ -1061,7 +1075,12 @@ def _fit_png(source: bytes, width: int, height: int) -> bytes | None:
             fitted_w = max(1, round(rgba.width * scale))
             fitted_h = max(1, round(rgba.height * scale))
             fitted = rgba.resize((fitted_w, fitted_h), Image.LANCZOS)
-            canvas = Image.new("RGBA", (width, height), rgba.getpixel((0, 0)))
+            corners = [
+                rgba.getpixel((x, y))
+                for x in (0, rgba.width - 1) for y in (0, rgba.height - 1)
+            ]
+            backdrop = max(set(corners), key=corners.count)
+            canvas = Image.new("RGBA", (width, height), backdrop)
             canvas.paste(fitted, ((width - fitted_w) // 2, (height - fitted_h) // 2))
             out = io.BytesIO()
             canvas.save(out, format="PNG")
@@ -1104,10 +1123,12 @@ def _insert_thumbnails(text: str, blocks: str) -> str:
 
     After the generator line, which is how PrusaSlicer orders its own
     output, and before the first extrusion, which is where OctoPrint's
-    reader stops.
+    reader stops.  A file whose first line already opens a thumbnail block
+    gets the new blocks in front of it, never inside it.
     """
     lines = text.splitlines(keepends=True)
-    at = 1 if lines and lines[0].lstrip().startswith(";") else 0
+    first = lines[0].lstrip() if lines else ""
+    at = 1 if first.startswith(";") and not _THUMB_BEGIN_RE.match(first) else 0
     return "".join(lines[:at]) + blocks + "".join(lines[at:])
 
 
@@ -1178,8 +1199,9 @@ def complete_gcode_for_printer(
     the config-declared model, or the slice door's printer id — and a model
     whose own screen reads a QOI block (:func:`screen_for_model`) gets that
     screen's blocks too, at every size it asks for, ahead of the PNGs; a
-    family whose controller may carry such a screen (Duet's PanelDue) gets
-    them through :attr:`GcodeSurface.qoi_screens`.  The weight is read from
+    controller that may carry such a screen (Duet's PanelDue) gets them
+    through :attr:`GcodeSurface.qoi_screens` or, at the slice door, the
+    catalogue's firmware family for the model.  The weight is read from
     the file's own moves by
     :func:`kiln.printers.bambu_3mf.filament_usage_from_gcode` and written
     only where the slicer left a zero or nothing.

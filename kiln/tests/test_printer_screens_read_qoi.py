@@ -299,7 +299,8 @@ class TestEachPrusaModelsSizes:
             ("Prusa iX", "buddy_large"), ("MK3S+", None), ("prusa_mk3s", None),
             ("Original Prusa i3 MK3S", None), ("voron_2", None), ("k1", None),
             ("Rat Rig V-Core 3", None), ("bambu_a1_mini", None), ("Neptune 4 XL", None),
-            ("Ender 3 XL", None), ("xl", None), ("mini", None),
+            ("Ender 3 XL", None), ("xl", None), ("mini", None), ("MK4S 0.4 nozzle", "buddy_large"),
+            ("prusa_xl_5t", "buddy_large"), ("visionminer_22idex_v4", None),
             ("", None), (None, None),
         ],
     )
@@ -313,6 +314,14 @@ class TestEachPrusaModelsSizes:
         path = raw_gcode(tmp_path)
         complete(path, None, "prusa_mini")
         assert qoi_sizes(text_of(path)) == MINI
+
+    def test_the_slice_door_serves_a_duet_machines_paneldue_from_the_catalogue(self, tmp_path):
+        """A Duet-driven machine may carry a PanelDue whatever adapter is in
+        front of it; the catalogue says which machines those are."""
+        path = raw_gcode(tmp_path)
+        complete(path, None, "visionminer_22idex_v4")
+        assert qoi_sizes(text_of(path)) == PANELDUE
+        assert gcode_complete.gcode_problems(path, None, printer_model="visionminer_22idex_v4") == []
 
 
 class TestDuet:
@@ -455,6 +464,20 @@ class TestNothingElseChanges:
         assert _moves_of(after) == _moves_of(before)
         for block in re.findall(r"; thumbnail begin .*?; thumbnail end\n", before, re.DOTALL):
             assert block in after
+
+    def test_a_block_already_on_line_one_is_never_written_into(self, tmp_path):
+        """A file whose first line opens a thumbnail block gets the new
+        blocks in front of it — every block it had still decodes."""
+        path = _png_only(tmp_path)
+        lines = text_of(path).splitlines(keepends=True)
+        first_block = next(i for i, ln in enumerate(lines) if ln.startswith("; thumbnail begin"))
+        Path(path).write_text("".join(lines[first_block:]), encoding="utf-8")
+        before = set(gcode_complete.gcode_thumbnails(text_of(path)))
+        complete(path, "prusalink", "prusa_mk4")
+        after = text_of(path)
+        assert set(gcode_complete.gcode_thumbnails(after)) == before | {(16, 16)} | LARGE
+        assert qoi_sizes(after) == LARGE
+        assert after.startswith("\n;\n; thumbnail_QOI begin 313x173 ")
 
     def test_the_bambu_family_is_left_to_its_own_check(self, tmp_path):
         path = raw_gcode(tmp_path)

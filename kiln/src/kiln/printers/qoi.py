@@ -79,9 +79,9 @@ def qoi_encode(
     Exactly the reference encoder's choices: a run is closed at 62 or at the
     last pixel; an index hit is preferred to a difference; a difference to
     a luma chunk; a luma chunk to a full RGB; and any change in alpha is a
-    full RGBA.  The index is written only when a pixel is coded explicitly
-    — never for a run or an index hit — which is what keeps a reference
-    decoder's index in step with this encoder's.
+    full RGBA.  The index slot is written when a pixel is coded explicitly,
+    as the reference does; a decoder writes it after every chunk, and the
+    two never disagree at a slot the encoder emits an index hit for.
 
     Raises :class:`ValueError` for a header the reference decoder would
     refuse or a pixel buffer that is not ``width * height * channels`` long.
