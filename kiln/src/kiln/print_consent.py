@@ -57,8 +57,10 @@ name a wider scope — a list of printers, or the fleet — and ``matches()``
 honours it; the default is the one printer.  A yes never becomes a
 window: a window is a separate record a person opens on purpose.
 
-Identity is recorded as what it is: ``os_user:<name>`` locally, the
-hook's account on the hosted server, and nothing where nothing is known.
+Identity is recorded as what it is: ``os_user:<name>`` locally; on the
+hosted server the hook's account (``account:<id>#<approval>``), or the
+agent that said go and whose yes it rested on (``agent:<id> under
+account:<id>#<record>``); and nothing where nothing is known.
 """
 
 from __future__ import annotations

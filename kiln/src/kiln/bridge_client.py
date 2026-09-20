@@ -160,12 +160,15 @@ def _consent_from_authority(block: Any, *, file_name: str, printer_name: Any):
                 "not started: the file that arrived is not the one that was approved "
                 f"({record_id}); approve the print again from the page that shows it."
             )
+    # The identity is WHO SAID GO, then whose yes it rested on: the person
+    # starting under their own approval is the account; an agent starting
+    # under a delegation — or under the one print the person approved at
+    # its asking — is "agent under account#record", never the person.
+    said_go_by = str(block.get("said_go_by") or grantor)
+    identity = f"{grantor}#{record_id}" if said_go_by == grantor else f"{said_go_by} under {grantor}#{record_id}"
     if kind == "approval":
-        identity = f"{grantor}#{record_id}"
         scope = None
     else:
-        agent = str(block.get("said_go_by") or "")
-        identity = f"{agent} under {grantor}#{record_id}"
         printers = block.get("printers")
         if printers == SCOPE_FLEET:
             scope = SCOPE_FLEET

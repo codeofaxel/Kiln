@@ -239,10 +239,58 @@ def test_a_relayed_approval_becomes_the_consent_for_the_call(tmp_path):
     assert consent is not None
     assert consent.source == SOURCE_HOSTED_APPROVAL
     assert consent.identity == "account:acct_123#apv_1"
+    assert consent.printer_name == "garage"
     assert consent.door == "web_stage"
     assert consent.matches(file_name=path, printer_name="garage")
     # The yes lives exactly as long as the call.
     assert print_consent._current.get() is None
+
+
+def test_an_agent_starting_under_the_print_the_person_approved_at_its_asking_is_named(tmp_path):
+    """A person's one-print approval answered to an agent's question: the
+    yes is the person's, the start is the agent's, and the clearance says
+    both — never the person alone."""
+    path, sha = _mesh(tmp_path)
+    seen = []
+    resp = handle_relay_request(
+        {
+            "request_id": "r6b",
+            "tool_name": "slice_and_print",
+            "args": {
+                "cloud_artifact_token": "tok",
+                "printer_name": "garage",
+                "print_authority": _approval(sha, said_go_by="agent:openclaw/igor#K7Q2"),
+            },
+        },
+        call_tool=_consent_seen_by_tool(seen),
+        fetch_artifact=lambda _t: path,
+    )
+    assert resp["ok"] is True, resp
+    _, _, consent = seen[0]
+    assert consent.source == SOURCE_HOSTED_APPROVAL
+    assert consent.identity == "agent:openclaw/igor#K7Q2 under account:acct_123#apv_1"
+
+
+def test_a_call_that_names_no_printer_gets_a_consent_aimed_at_none(tmp_path):
+    """The gate matches a consent against the name the call used; the
+    hosted server already held the record to the printer it was made
+    for, so a call aimed at the default printer is not refused for
+    naming none."""
+    path, sha = _mesh(tmp_path)
+    seen = []
+    resp = handle_relay_request(
+        {
+            "request_id": "r6c",
+            "tool_name": "slice_and_print",
+            "args": {"cloud_artifact_token": "tok", "print_authority": _approval(sha, printer_name="default")},
+        },
+        call_tool=_consent_seen_by_tool(seen),
+        fetch_artifact=lambda _t: path,
+    )
+    assert resp["ok"] is True, resp
+    consent = seen[0][2]
+    assert consent.printer_name is None
+    assert consent.matches(file_name=path, printer_name=None)
 
 
 def test_a_relayed_delegation_names_the_agent_and_carries_its_scope(tmp_path):

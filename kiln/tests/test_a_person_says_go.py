@@ -756,6 +756,22 @@ class TestHosted:
         )
         assert _gate(path, token) is not None
 
+    def test_the_hosted_refusal_names_the_account_doors_not_the_terminal(self, tmp_path, monkeypatch):
+        """With a token and no yes, the sentence an agent reads on the
+        hosted server names the two doors that exist there — the person's
+        Approve on the print page, or a delegation — and not the terminal
+        or the window, which are nobody's on that box."""
+        path = _stl(tmp_path / "jar.stl")
+        token = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        block = _gate(path, token)
+        assert block is not None
+        message = block["error"]["message"]
+        assert "Approve on the print page" in message
+        assert "delegation" in message
+        assert "kiln consent window" not in message
+        assert "`kiln print" not in message
+
     def test_a_fleet_delegation_covers_every_printer(self, tmp_path, monkeypatch):
         path = _stl(tmp_path / "jar.stl")
         token = _token_for(path)
