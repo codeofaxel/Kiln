@@ -4,27 +4,35 @@ A yes is for one print.  The owner's rule, verbatim: "a yes should not
 automatically be 'ok for this time window' unless the user asks for that
 specifically."  So the thing that lets an unattended agent start prints
 for the next two hours is not a yes that was stretched — it is a separate
-record, opened on purpose, by a command a person types, at a terminal
-they are sitting at.
+record, opened on purpose, by a person, through a door the agent does not
+hold.
 
 What a window is:
 
-* **Opened only by a person.**  ``open_window`` refuses unless stdin and
-  stdout are both terminals — the same test the CLI's y/N uses.  An
-  agent's subprocess, ``yes |``, and a flag it could type all fail it.
-  There is no environment variable and no option that stands in for the
+* **Opened only by a person, through one of two doors.**  ``open_window``
+  refuses unless stdin and stdout are both terminals — the same test the
+  CLI's y/N uses.  An agent's subprocess, ``yes |``, and a flag it could
+  type all fail it.  ``open_window_from_dialog`` takes the answer the
+  host's approval dialog came back with, when the person picked "yes,
+  and for the next while": that answer travels the elicitation channel —
+  the server asks the CLIENT, and only the client's response answers —
+  so the agent is not holding the pen there either.  There is no
+  environment variable, no option and no tool that stands in for the
   person; a window that could be opened without one would be the old
   hole with a longer name.
 * **Scoped.**  One printer, a named list, or the fleet.  A person names
-  it; nothing defaults to "everything".
+  it; nothing defaults to "everything".  The dialog door opens for the
+  one printer the print was aimed at, and nothing wider — a fleet window
+  is a bigger decision and stays a terminal command.
 * **Timed.**  It has an ``until``.  A person can extend it; nothing
-  else can.  It can be revoked at any time.
+  else can.  It can be revoked at any time, from anywhere: closing is the
+  safe direction, so the agent is given a tool for it.
 * **Signed.**  It records who opened it — locally that is the OS user,
   and the record says ``os_user:`` so nobody mistakes it for an account
-  — and when, and every extension.
+  — through which door (``source``), and when, and every extension.
 * **Local.**  On the hosted multi-tenant server the file under
   ``~/.kiln`` is nobody's, so :func:`covering` answers ``None`` there
-  and the command refuses to write one.
+  and neither door will write one.
 
 Two readers: the gate (through :func:`kiln.print_consent.consent_for`)
 when a start arrives with a preview and no other yes, and the scheduler
@@ -48,9 +56,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.print_consent import (
+    SOURCE_ELICITED,
+    SOURCE_TERMINAL,
+    DialogAnswer,
+    window_seconds_for,
+)
+
 logger = logging.getLogger(__name__)
 
 SCOPE_FLEET = "fleet"
+
+#: How a window was opened — which of the two doors.  The same words the
+#: print gate uses for who held the pen: a terminal, or the host's dialog.
+SOURCE_DOORS = (SOURCE_TERMINAL, SOURCE_ELICITED)
 
 Scope = tuple[str, ...] | str
 
@@ -177,6 +196,10 @@ class Window:
     scope: Scope
     revoked_at: float | None = None
     extensions: list[dict[str, Any]] = field(default_factory=list)
+    #: Which door opened it: a terminal (the default — every record
+    #: written before the dialog door existed came through one) or the
+    #: host's dialog.
+    source: str = SOURCE_TERMINAL
 
     def live(self, now: float | None = None) -> bool:
         now = _now() if now is None else now
@@ -194,6 +217,7 @@ class Window:
             "scope": list(self.scope) if isinstance(self.scope, tuple) else self.scope,
             "revoked_at": self.revoked_at,
             "extensions": list(self.extensions),
+            "source": self.source,
         }
 
     @classmethod
@@ -204,6 +228,7 @@ class Window:
                 # No scope on record covers nothing.  Kept, so status can
                 # show it and revoke can remove it; never matched.
                 scope = ()
+            source = str(raw.get("source") or SOURCE_TERMINAL)
             return cls(
                 id=str(raw.get("id") or ""),
                 set_by=str(raw.get("set_by") or ""),
@@ -212,6 +237,7 @@ class Window:
                 scope=scope,
                 revoked_at=float(raw["revoked_at"]) if raw.get("revoked_at") is not None else None,
                 extensions=[e for e in (raw.get("extensions") or []) if isinstance(e, dict)],
+                source=source if source in SOURCE_DOORS else SOURCE_TERMINAL,
             )
         except Exception:  # noqa: BLE001 — an unreadable record covers nothing
             return None
@@ -267,25 +293,29 @@ def _hosted() -> bool:
     return is_hosted_multitenant()
 
 
-def _require_person() -> None:
+def _require_not_hosted() -> None:
     if _hosted():
         raise NotAPerson("the hosted server has no terminal and keeps no standing windows")
+
+
+def _require_person() -> None:
+    _require_not_hosted()
     if not person_at_terminal():
         raise NotAPerson(
             "a standing window is opened by a person at a terminal (stdin and stdout "
-            "both a TTY); nothing else can open or extend one"
+            "both a TTY) or through the host's approval dialog; nothing else can open "
+            "or extend one"
         )
 
 
 # ---------------------------------------------------------------------------
-# Writing — a person, at a terminal
+# Writing — a person, at a terminal or through the host's dialog
 # ---------------------------------------------------------------------------
 
 
-def open_window(*, seconds: float, scope: Any) -> Window:
-    """Open a window for *seconds* over *scope*.  Raises :class:`NotAPerson`
-    off a terminal, ``ValueError`` for no time or no scope."""
-    _require_person()
+def _open(*, seconds: float, scope: Any, source: str) -> Window:
+    """The one writer both doors share.  Each door does its own guarding
+    BEFORE calling this; nothing here asks who is calling."""
     if not isinstance(seconds, (int, float)) or seconds <= 0:
         raise ValueError("a window has to last longer than nothing")
     normalized = normalize_scope(scope)
@@ -306,16 +336,48 @@ def open_window(*, seconds: float, scope: Any) -> Window:
         set_at=now,
         until=now + float(seconds),
         scope=normalized,
+        source=source,
     )
     with _lock:
         windows = _read()
         windows.append(window)
         _write(windows)
     logger.info(
-        "standing consent window %s opened by %s for %s, until %s",
-        window.id, window.set_by, describe_scope(window.scope), time.ctime(window.until),
+        "standing consent window %s opened by %s (%s) for %s, until %s",
+        window.id, window.set_by, source, describe_scope(window.scope), time.ctime(window.until),
     )
     return window
+
+
+def open_window(*, seconds: float, scope: Any) -> Window:
+    """The terminal door: open a window for *seconds* over *scope*.  Raises
+    :class:`NotAPerson` off a terminal, ``ValueError`` for no time or no
+    scope."""
+    _require_person()
+    return _open(seconds=seconds, scope=scope, source=SOURCE_TERMINAL)
+
+
+def open_window_from_dialog(answer: DialogAnswer, *, printer_name: str) -> Window:
+    """The dialog door: open the window the person asked for when they
+    answered the host's approval dialog with "yes, and for the next…".
+
+    *answer* is what ``kiln.mcp_compat.ask_user_to_confirm`` built from
+    the SDK's elicitation result — the only place one is built — and
+    only an answer that is a yes with a window choice opens anything;
+    everything else is ``ValueError``.  The window covers *printer_name*
+    alone, the machine the print was aimed at: the dialog never offers
+    anything wider, and this door would not honour it if it did.  Raises
+    :class:`NotAPerson` on the hosted server, which keeps no windows.
+    """
+    _require_not_hosted()
+    if not isinstance(answer, DialogAnswer) or not answer.opens_window:
+        raise ValueError("only a person's yes with a 'for the next…' choice opens a window")
+    name = str(printer_name or "").strip()
+    if not name:
+        raise ValueError("a window from the dialog covers the one printer the print was aimed at")
+    return _open(
+        seconds=window_seconds_for(answer.choice), scope=(name,), source=SOURCE_ELICITED,
+    )
 
 
 def extend_window(window_id: str, *, seconds: float) -> Window:
@@ -335,6 +397,7 @@ def extend_window(window_id: str, *, seconds: float) -> Window:
                 id=w.id, set_by=w.set_by, set_at=w.set_at, until=now + float(seconds), scope=w.scope,
                 revoked_at=None,
                 extensions=[*w.extensions, {"at": now, "until": now + float(seconds), "by": local_identity()}],
+                source=w.source,
             )
             windows[i] = longer
             _write(windows)
@@ -355,6 +418,7 @@ def revoke_window(window_id: str) -> Window:
                 id=w.id, set_by=w.set_by, set_at=w.set_at, until=w.until, scope=w.scope,
                 revoked_at=w.revoked_at if w.revoked_at is not None else now,
                 extensions=w.extensions,
+                source=w.source,
             )
             windows[i] = closed
             _write(windows)
@@ -366,6 +430,17 @@ def revoke_all() -> list[Window]:
     closed: list[Window] = []
     for w in live_windows():
         closed.append(revoke_window(w.id))
+    return closed
+
+
+def revoke_covering(printer_name: str | None) -> list[Window]:
+    """Close every live window that covers *printer_name* — a fleet window
+    included, since it covers this printer too.  The list closed, possibly
+    empty.  Safe direction, so no guard."""
+    closed: list[Window] = []
+    for w in live_windows():
+        if w.covers(printer_name):
+            closed.append(revoke_window(w.id))
     return closed
 
 
@@ -402,6 +477,26 @@ def covering(printer_name: str | None, now: float | None = None) -> Window | Non
         if w.covers(printer_name):
             return w
     return None
+
+
+def describe(w: Window, now: float | None = None) -> dict[str, Any]:
+    """One window as a person reads it — the shape ``kiln consent status``,
+    the status tool and the line on a print result all share, so the
+    same window is described the same way at every door."""
+    now = _now() if now is None else now
+    return {
+        "id": w.id,
+        "scope": describe_scope(w.scope),
+        "set_by": w.set_by,
+        "opened_via": "host_dialog" if w.source == SOURCE_ELICITED else "terminal",
+        "set_at": time.strftime("%Y-%m-%d %H:%M", time.localtime(w.set_at)),
+        "until": time.strftime("%Y-%m-%d %H:%M", time.localtime(w.until)),
+        "until_clock": time.strftime("%H:%M", time.localtime(w.until)),
+        "remaining_minutes": max(0, int((w.until - now) // 60)),
+        "live": w.live(now),
+        "revoked": w.revoked_at is not None,
+        "extensions": len(w.extensions),
+    }
 
 
 def _reset_for_tests() -> None:

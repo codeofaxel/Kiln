@@ -825,7 +825,9 @@ class TestFleetScope:
 
 def test_the_window_store_is_read_by_the_gate_and_the_scheduler_only():
     """The store is consulted by the one gate (through ``consent_for``) and
-    by the scheduler's dispatch check.  A third reader is a second opinion."""
+    by the scheduler's dispatch check.  The note a print result carries
+    reads it too, to REPORT the window — it decides nothing and starts
+    nothing.  Any other reader is a second opinion."""
     import ast
 
     src = pathlib.Path(server.__file__).parent
@@ -842,7 +844,7 @@ def test_the_window_store_is_read_by_the_gate_and_the_scheduler_only():
                     name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
                     if name == "covering":
                         readers.append(f"{path.name}::{fn.name}")
-    assert sorted(readers) == ["print_consent.py::consent_for"], readers
+    assert sorted(readers) == ["consent_window_note.py::note_for", "print_consent.py::consent_for"], readers
 
 
 def test_a_flag_is_not_consent():

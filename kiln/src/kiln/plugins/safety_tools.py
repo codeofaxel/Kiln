@@ -480,5 +480,115 @@ class _SafetyToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
+        # ------------------------------------------------------------------
+        # consent_window_status / revoke_consent_window
+        #
+        # A standing window is a person's "yes, for a while": prints may
+        # start on a printer without asking each time.  A person opens one
+        # through the host's approval dialog ("yes, and for the next 2
+        # hours") or at a terminal (`kiln consent window`).  There is no
+        # tool that opens or extends one, on purpose: an agent granting
+        # itself standing permission is the hole the window exists to
+        # close.  Closing is the safe direction, so that IS a tool.
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def consent_window_status(printer_name: str | None = None) -> dict:
+            """Which standing consent windows are open, for what, until when.
+
+            A standing window is the person's "yes, for a while": inside it,
+            prints start on the named printer without asking each time (each
+            one still previewed first).  Only the person opens one — by
+            picking "yes, and for the next…" in the approval dialog, or with
+            ``kiln consent window`` at a terminal.  Nothing an agent can call
+            opens or extends one.  Closing one is always allowed: see
+            ``revoke_consent_window``.
+
+            Args:
+                printer_name: Show only the window covering this printer.
+                    Omit for every open window.
+            """
+            from kiln import consent_windows
+            from kiln.runtime_env import is_hosted_multitenant
+
+            if is_hosted_multitenant():
+                return {
+                    "success": True,
+                    "windows": [],
+                    "note": (
+                        "The hosted server keeps no standing windows: the signed-in "
+                        "account approves each print."
+                    ),
+                }
+            live = consent_windows.live_windows()
+            if printer_name:
+                live = [w for w in live if w.covers(printer_name)]
+            rows = [consent_windows.describe(w) for w in live]
+            return {
+                "success": True,
+                "windows": rows,
+                "note": (
+                    "Prints inside a window start without asking; each is still previewed "
+                    "first. To close one early, call revoke_consent_window. Only the person "
+                    "can open or extend one — in the approval dialog, or with "
+                    "`kiln consent window --for 2h --printer NAME` at a terminal."
+                    if rows
+                    else "No standing window is open: every print asks the person first."
+                ),
+            }
+
+        @mcp.tool()
+        def revoke_consent_window(
+            window_id: str | None = None,
+            printer_name: str | None = None,
+            all_windows: bool = False,
+        ) -> dict:
+            """Close a standing consent window now.  Prints ask the person again.
+
+            The person opened the window — in the approval dialog or at a
+            terminal — and can close it here, through you, without touching
+            a terminal: when they say to close it, call this.  Closing is
+            the safe direction, so it needs no confirmation and no window
+            can refuse it.  Jobs queued under the window will not start.
+
+            Args:
+                window_id: The window to close (from ``consent_window_status``
+                    or the ``standing_window`` block on a print result).
+                printer_name: Close every open window covering this printer.
+                all_windows: Close every open window.
+            """
+            if err := _srv._check_auth("print"):
+                return err
+            from kiln import consent_windows
+            from kiln.runtime_env import is_hosted_multitenant
+
+            if is_hosted_multitenant():
+                return {"success": True, "revoked": [], "note": "The hosted server keeps no standing windows."}
+            try:
+                if all_windows:
+                    closed = consent_windows.revoke_all()
+                elif window_id:
+                    closed = [consent_windows.revoke_window(window_id)]
+                elif printer_name:
+                    closed = consent_windows.revoke_covering(printer_name)
+                else:
+                    return _srv._error_dict(
+                        "Say which: window_id, printer_name, or all_windows=true.",
+                        code="VALIDATION_ERROR",
+                    )
+            except KeyError:
+                return _srv._error_dict(f"No window {window_id}.", code="NOT_FOUND")
+            _srv._audit(
+                "revoke_consent_window", "consent_window_revoked",
+                details={"revoked": [w.id for w in closed], "printer": printer_name, "all": all_windows},
+            )
+            return {
+                "success": True,
+                "revoked": [consent_windows.describe(w) for w in closed],
+                "note": (
+                    "Closed. Prints ask the person again." if closed else "No open window to close."
+                ),
+            }
+
 
 plugin = _SafetyToolsPlugin()

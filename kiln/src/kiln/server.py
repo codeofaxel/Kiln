@@ -76,14 +76,17 @@ from kiln.mcp_compat import (
     set_instructions,
 )
 from kiln.print_consent import (
+    NOT_ASKED_HOST_CANNOT,
     SOURCE_CI_BYPASS,
     SOURCE_DERIVED,
     SOURCE_ELICITED,
     PrintConsent,
     consent_for,
     describe_print_request,
+    note_not_asked,
     reset_consent,
     set_consent,
+    why_not_asked,
 )
 from kiln.tool_args import parse_json_array, parse_json_object
 
@@ -2233,10 +2236,28 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     terms gate refuses, and before the tool is dispatched, so a declined
     print is a print that never started.
 
+    Asks nobody when a yes is already on record for this print — a
+    standing window a person opened covers the printer it is aimed at
+    (or, hosted, the account approved the file).  The same
+    :func:`consent_for` the gate reads decides that, so the asker and
+    the gate cannot disagree about whether a yes exists: the whole point
+    of a window is that prints inside it do not ask.
+
     Returns ``None`` when nobody could be asked, which leaves the existing
     preview-token gate exactly as it was.  That is the honest fallback:
     hosts without elicitation, and the REST proxy where no person is
-    attached to the call at all.
+    attached to the call at all.  It also notes WHY nobody was asked, so
+    the gate's refusal can say plainly that no dialog is coming and the
+    yes has to come from a terminal — rather than leaving the agent to
+    imply one it cannot show.
+
+    The dialog's "yes, and for the next…" answers open a standing window
+    for the one printer the print was aimed at, through
+    :func:`kiln.consent_windows.open_window_from_dialog` — the person's
+    answer, not the agent's, because it came back through the host's
+    elicitation channel.  A window that could not be opened (the hosted
+    server keeps none; a write failed) does not withdraw the yes to THIS
+    print; it is audited and the print goes ahead on the single yes.
     """
     arg_name = _CONSENT_FILE_ARG.get(tool_name)
     if arg_name is None or ctx is None:
@@ -2246,14 +2267,34 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     file_value = str(arguments.get(arg_name) or "")
     if _is_resume_mode_3mf(file_value) or arguments.get("resume_from_paused"):
         return None  # already running, already approved
+    printer_name = arguments.get("printer_name")
+    # The one machine this print is aimed at — the name a window is
+    # matched on, and the name a window opened here is written for.
+    try:
+        aimed = printer_name or _resolve_effective_printer_name(None)
+    except Exception:  # noqa: BLE001
+        aimed = printer_name or "default"
+    try:
+        standing = consent_for(file_name=file_value, printer_name=printer_name, aimed_at=aimed)
+    except Exception:  # noqa: BLE001 — an unreadable store is no window
+        standing = None
+    if standing is not None:
+        # A person already said yes for this — inside a window they
+        # opened, on purpose.  Asking again would be the dialog the
+        # window exists to stop.  The gate reads the same record.
+        return None
     try:
         if not host_can_ask_the_user(mcp, ctx):
-            return None
+            return note_not_asked(NOT_ASKED_HOST_CANNOT)
     except Exception as exc:  # noqa: BLE001 — cannot ask is not approved
         logger.debug("Could not read host consent capability: %s", exc)
-        return None
+        return note_not_asked(NOT_ASKED_HOST_CANNOT)
 
-    printer_name = arguments.get("printer_name")
+    hosted = False
+    with contextlib.suppress(Exception):
+        from kiln.runtime_env import is_hosted_multitenant
+
+        hosted = bool(is_hosted_multitenant())
     message = describe_print_request(
         tool_name,
         file_name=os.path.basename(file_value) or file_value,
@@ -2263,25 +2304,28 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             "printer model": arguments.get("printer_id"),
             "filament slots": _consent_filament_line(tool_name, file_value, printer_name),
         },
+        window_printer=None if hosted else aimed,
     )
-    action, detail = await ask_user_to_confirm(ctx, message)
-    if action == "accept":
+    answer = await ask_user_to_confirm(ctx, message, offer_window=not hosted)
+    if answer.accepted:
         # Who: the host does not tell us, so locally it is the OS user this
         # server runs as, labelled as such; on the hosted box that label
         # would be a lie, and nothing is recorded there.
         identity = ""
-        try:
-            from kiln.consent_windows import local_identity
-            from kiln.runtime_env import is_hosted_multitenant
+        if not hosted:
+            with contextlib.suppress(Exception):
+                from kiln.consent_windows import local_identity
 
-            if not is_hosted_multitenant():
                 identity = local_identity()
-        except Exception:  # noqa: BLE001
-            identity = ""
         _audit(
             tool_name, "consent_granted",
-            details={"file": file_value, "by": "user", "identity": identity, "scope": printer_name or "aimed"},
+            details={
+                "file": file_value, "by": "user", "identity": identity,
+                "scope": printer_name or "aimed", "choice": answer.choice,
+            },
         )
+        if answer.opens_window:
+            _open_window_from_answer(tool_name, answer, aimed)
         return set_consent(
             PrintConsent(
                 tool=tool_name,
@@ -2291,19 +2335,43 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
                 identity=identity,
             )
         )
-    if action in ("decline", "cancel"):
+    if answer.action in ("decline", "cancel"):
         _audit(
             tool_name,
             "consent_refused",
-            details={"file": file_value, "action": action},
+            details={"file": file_value, "action": answer.action},
         )
         raise RuntimeError(
             f"{tool_name} was not started: the print was "
-            + ("declined" if action == "decline" else "dismissed without an answer")
+            + ("declined" if answer.action == "decline" else "dismissed without an answer")
             + ". Nothing was sent to the printer."
         )
-    logger.debug("Consent could not be obtained (%s); falling back to token gate", detail)
-    return None
+    logger.debug("Consent could not be obtained (%s); falling back to token gate", answer.detail)
+    return note_not_asked(f"unavailable:{answer.detail}")
+
+
+def _open_window_from_answer(tool_name: str, answer: Any, aimed: str) -> None:
+    """Open the window a dialog answer asked for, and audit it either way.
+    Never raises: the yes to this print stands whether or not the window
+    could be written."""
+    from kiln import consent_windows
+
+    try:
+        w = consent_windows.open_window_from_dialog(answer, printer_name=aimed)
+    except Exception as exc:  # noqa: BLE001 — hosted, or the store could not be written
+        logger.warning("standing window from the dialog not opened (%s): %s", answer.choice, exc)
+        _audit(
+            tool_name, "consent_window_not_opened",
+            details={"printer": aimed, "choice": answer.choice, "reason": str(exc)},
+        )
+        return
+    _audit(
+        tool_name, "consent_window_opened",
+        details={
+            "window_id": w.id, "printer": aimed, "choice": answer.choice,
+            "until": w.until, "by": w.set_by, "source": w.source,
+        },
+    )
 
 
 class _PlateAlreadyBuilt(Exception):
@@ -2352,16 +2420,34 @@ def _covered_by_approval(
 
 def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
     """One sentence: the preview is on record, nobody said go, and the
-    three places a yes can come from.  None of them is a string an agent
-    can type."""
+    places a yes can come from.  None of them is a string an agent can
+    type.
+
+    When this call asked nobody because the HOST cannot show a dialog,
+    it says so in as many words: the agent must tell the person that no
+    approval dialog is coming here, and that the yes — one print, or a
+    standing window — has to be given at a terminal.  An agent left to
+    guess tends to promise a dialog it cannot show.
+    """
     name = os.path.basename(str(file_name or "")) or "this file"
+    if why_not_asked() == NOT_ASKED_HOST_CANNOT:
+        return (
+            f"{tool_name} refuses to proceed: {name} was shown, but nobody said go, and "
+            "this host cannot show an approval dialog, so no dialog is coming — tell the "
+            "person that plainly. Their yes has to be given at a terminal: `kiln print "
+            f"{name}` (or `kiln queue submit {name}`) asks them about this one print, and "
+            f"`kiln consent window --for 2h --printer {aimed}` opens a standing window for a "
+            "while. Kiln cannot open a window from here, and an agent cannot supply "
+            "either yes."
+        )
     return (
         f"{tool_name} refuses to proceed: {name} was shown, but nobody said go — a yes "
         "comes from the host's approval dialog (a host that asks shows one; the person "
-        f"approves it), from a person at a terminal (`kiln print {name}` or `kiln queue "
-        f"submit {name}` asks them), or from a standing window a person opened at a "
-        f"terminal (`kiln consent window --for 2h --printer {aimed}`); an agent cannot "
-        "supply any of the three."
+        "approves it, and can choose there to open a standing window for this printer), "
+        f"from a person at a terminal (`kiln print {name}` or `kiln queue submit {name}` "
+        "asks them), or from a standing window a person opened at a terminal (`kiln "
+        f"consent window --for 2h --printer {aimed}`); an agent cannot supply any of the "
+        "three."
     )
 
 
@@ -17019,6 +17105,18 @@ def _start() -> None:
         onboarding_nudge.install(mcp)
     except Exception:
         logger.debug("onboarding nudge not installed", exc_info=True)
+
+    # The standing-window line on every print result while a window a
+    # person opened covers the printer the call was aimed at: which
+    # machine, until when, and how to close it.  A window nobody is
+    # reminded of is a trap; this is the reminder, on the surface the
+    # person actually sees.
+    try:
+        from kiln import consent_window_note
+
+        consent_window_note.install(mcp)
+    except Exception:
+        logger.debug("standing window note not installed", exc_info=True)
 
 
 def main() -> None:

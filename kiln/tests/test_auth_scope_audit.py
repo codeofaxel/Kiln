@@ -392,6 +392,7 @@ READ_ONLY_TOOLS: set[str] = {
     "safety_audit",
     "safety_settings",
     "safety_status",
+    "consent_window_status",
 
     # service_tools.py -- reports built from history, nothing written
     "generate_print_certificate",

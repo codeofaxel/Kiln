@@ -135,6 +135,12 @@
     "safety_settings": {
       "level": "safe"
     },
+    "consent_window_status": {
+      "level": "safe"
+    },
+    "revoke_consent_window": {
+      "level": "safe"
+    },
     "marketplace_info": {
       "level": "safe"
     },

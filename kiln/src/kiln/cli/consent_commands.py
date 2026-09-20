@@ -16,13 +16,19 @@ terminal.  There is no flag that stands in for the person — an agent can
 type a flag.  ``revoke`` works from anywhere: closing is the safe
 direction.  Nothing here runs on the hosted server, where the file under
 ``~/.kiln`` is nobody's.  See :mod:`kiln.consent_windows`.
+
+The terminal is one of two doors.  A person who never opens one gets a
+window from the approval dialog their assistant's app draws before a
+print — "yes, and for the next 2 hours on this printer" — and closes it
+by telling the assistant (``revoke_consent_window``).  ``status`` shows
+which door opened each window.  Anything wider or longer than the dialog
+offers — several printers, the fleet, a day — is this command's.
 """
 
 from __future__ import annotations
 
 import json
 import sys
-import time
 
 import click
 
@@ -90,18 +96,8 @@ def _refused(exc: Exception, json_mode: bool) -> None:
 
 
 def _row(w: consent_windows.Window) -> dict:
-    now = time.time()
-    return {
-        "id": w.id,
-        "scope": consent_windows.describe_scope(w.scope),
-        "set_by": w.set_by,
-        "set_at": time.strftime("%Y-%m-%d %H:%M", time.localtime(w.set_at)),
-        "until": time.strftime("%Y-%m-%d %H:%M", time.localtime(w.until)),
-        "remaining_minutes": max(0, int((w.until - now) // 60)),
-        "live": w.live(now),
-        "revoked": w.revoked_at is not None,
-        "extensions": len(w.extensions),
-    }
+    """The same description the status tool and a print result carry."""
+    return consent_windows.describe(w)
 
 
 @click.group("consent")
@@ -160,7 +156,7 @@ def status(json_mode: bool) -> None:
         row = _row(w)
         click.echo(
             f"{w.id}  {row['scope']}  until {row['until']} ({row['remaining_minutes']} min)  "
-            f"set by {w.set_by}"
+            f"set by {w.set_by} via {row['opened_via']}"
             + (f"  extended x{row['extensions']}" if row["extensions"] else "")
         )
 

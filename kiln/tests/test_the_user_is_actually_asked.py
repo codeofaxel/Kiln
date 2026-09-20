@@ -24,12 +24,15 @@ import pytest
 
 from kiln import print_consent, server
 from kiln.print_consent import (
+    CHOICE_THIS_PRINT,
     SOURCE_ELICITED,
+    DialogAnswer,
     PrintConsent,
     consent_for,
     describe_print_request,
     reset_consent,
     set_consent,
+    why_not_asked,
 )
 
 # ---------------------------------------------------------------------------
@@ -161,9 +164,9 @@ def _ask(monkeypatch, action: str, *, can_ask: bool = True, observe=None):
     monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
     monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: can_ask)
 
-    async def _fake(ctx, message):
+    async def _fake(ctx, message, **_kw):
         _ask.last_message = message
-        return action, ""
+        return DialogAnswer(action, "", choice=CHOICE_THIS_PRINT if action == "accept" else "")
 
     monkeypatch.setattr(server, "ask_user_to_confirm", _fake)
 
@@ -212,29 +215,40 @@ def test_no_stops_the_call_before_the_tool_runs(monkeypatch, action):
 
 def test_a_host_that_cannot_be_asked_falls_back_rather_than_assuming(monkeypatch):
     """The REST proxy has no person attached; hosts predating elicitation
-    have no dialog.  Neither is a yes, and neither may be refused outright."""
-    token, granted = _ask(
+    have no dialog.  Neither is a yes, and neither may be refused outright.
+    What IS recorded is that nobody was asked, and why — so the gate's
+    refusal can say no dialog is coming (see test_a_window_from_the_dialog)."""
+    token, (granted, reason) = _ask(
         monkeypatch, "accept", can_ask=False,
-        observe=lambda: consent_for(file_name="benchy.3mf", printer_name="garage"),
+        observe=lambda: (consent_for(file_name="benchy.3mf", printer_name="garage"), why_not_asked()),
     )
-    assert token is None
     assert granted is None
+    assert reason == "host_cannot_ask"
+    # The note lives exactly as long as the call, like a consent does.
+    assert token is not None
+    assert why_not_asked() == ""
 
 
 def test_a_host_that_errors_mid_question_is_not_a_yes(monkeypatch):
     monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
     monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
 
-    async def _boom(ctx, message):
-        return "unavailable", "Timeout"
+    async def _boom(ctx, message, **_kw):
+        return DialogAnswer("unavailable", "Timeout")
 
     monkeypatch.setattr(server, "ask_user_to_confirm", _boom)
-    got = asyncio.run(
-        server._obtain_print_consent(
-            "start_print", {"file_name": "b.3mf"}, _Ctx(),
-        )
-    )
-    assert got is None
+
+    async def _run():
+        token = await server._obtain_print_consent("start_print", {"file_name": "b.3mf"}, _Ctx())
+        try:
+            return consent_for(file_name="b.3mf", printer_name=None), why_not_asked()
+        finally:
+            if token is not None:
+                reset_consent(token)
+
+    granted, reason = asyncio.run(_run())
+    assert granted is None
+    assert reason == "unavailable:Timeout"
 
 
 def test_the_ci_bypass_silences_the_prompt_too(monkeypatch):
@@ -243,7 +257,7 @@ def test_the_ci_bypass_silences_the_prompt_too(monkeypatch):
     monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
     monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
 
-    async def _never(ctx, message):
+    async def _never(ctx, message, **_kw):
         raise AssertionError("must not ask when the bypass is set")
 
     monkeypatch.setattr(server, "ask_user_to_confirm", _never)
@@ -255,7 +269,7 @@ def test_the_ci_bypass_silences_the_prompt_too(monkeypatch):
 def test_a_tool_that_does_not_start_a_print_is_never_asked_about(monkeypatch):
     monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
 
-    async def _never(ctx, message):
+    async def _never(ctx, message, **_kw):
         raise AssertionError("must not ask about a read-only tool")
 
     monkeypatch.setattr(server, "ask_user_to_confirm", _never)
@@ -505,8 +519,13 @@ def test_no_preview_argument_is_lost_on_the_way_to_the_schema():
 
 
 def test_the_consent_record_is_read_in_exactly_one_place():
-    """One writer, one reader.  A second opinion on a question with one
-    answer is how two callers come to disagree about who approved what."""
+    """One function answers "is there a yes for this print", and two
+    callers ask it: the gate, to decide whether the print may start, and
+    the asker, to decide whether to put the question at all (a print
+    inside a standing window is not asked about — that is what a window
+    is).  Both read the SAME function, so they cannot disagree about who
+    approved what.  A third caller, or a second function, is the second
+    opinion this pin exists to refuse."""
     readers: list[str] = []
     for path in _MODULES:
         tree = ast.parse(path.read_text())
@@ -522,8 +541,8 @@ def test_the_consent_record_is_read_in_exactly_one_place():
                     )
                     if name == "consent_for":
                         readers.append(f"{path.name}::{fn.name}")
-    assert readers == ["server.py::_preview_gate_error"], (
-        f"consent should be read only by the gate; readers: {readers}"
+    assert sorted(readers) == ["server.py::_obtain_print_consent", "server.py::_preview_gate_error"], (
+        f"consent should be read only by the gate and the asker; readers: {readers}"
     )
 
 

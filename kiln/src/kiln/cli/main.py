@@ -585,6 +585,7 @@ def cli_gate(
 
     block = _preview_gate_error(tool, file_path, preview_token, printer_name=printer_name)
     if block is None:
+        _say_which_window(json_mode)
         return
     refusal = block.get("error") if isinstance(block.get("error"), dict) else {}
     code = str(refusal.get("code") or CODE_NOT_CONFIRMED)
@@ -606,6 +607,33 @@ def cli_gate(
     )
     click.echo(format_error(message, code=code, json_mode=json_mode))
     sys.exit(1)
+
+
+def _say_which_window(json_mode: bool) -> None:
+    """One line when the start just cleared rests on a standing window:
+    which window, until when, and how to close it.  The same reminder a
+    print result carries on the MCP side; a window nobody is reminded of
+    is a trap.  Silent in JSON mode (the output is the command's) and
+    when the clearance rests on anything else."""
+    if json_mode:
+        return
+    try:
+        from kiln import consent_windows, print_signoff
+
+        cleared = print_signoff.current()
+        if cleared is None or not cleared.window_id:
+            return
+        w = consent_windows.get_window(cleared.window_id)
+        if w is None:
+            return
+        facts = consent_windows.describe(w)
+        click.echo(
+            f"Standing window {w.id} covers {facts['scope']} until {facts['until_clock']} "
+            f"(opened via {facts['opened_via']}); prints inside it start without asking. "
+            f"Close it early with: kiln consent revoke {w.id}"
+        )
+    except Exception:  # noqa: BLE001 — a reminder never blocks the print it follows
+        logger.debug("standing window line not printed", exc_info=True)
 
 
 

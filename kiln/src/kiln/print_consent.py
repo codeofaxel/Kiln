@@ -51,6 +51,20 @@ name a wider scope — a list of printers, or the fleet — and ``matches()``
 honours it; the default is the one printer.  A yes never becomes a
 window: a window is a separate record a person opens on purpose.
 
+The dialog can carry that purpose.  Its one field is a choice — this
+print only, this print and the next two hours on this printer, this
+print and the rest of today, or no — and the choice is the person's,
+because it comes back through the host's elicitation channel, which the
+agent does not hold: the server sends an ``elicitation/create`` request
+to the CLIENT, and only the client's JSON-RPC response answers it.  A
+"for a while" answer opens a standing window through
+:func:`kiln.consent_windows.open_window_from_dialog`, the second of the
+two doors a window can be opened through (the first is a terminal).  The
+window is for the one printer the print was aimed at, never wider: a
+fleet window is a bigger decision, and stays a terminal command.  A
+person who never opens a terminal gets the window feature this way;
+nothing here gives an agent a way to open one.
+
 Identity is recorded as what it is: ``os_user:<name>`` locally, the
 hook's account on the hosted server, and nothing where nothing is known.
 """
@@ -97,6 +111,86 @@ def grade_of(source: str) -> str | None:
     if source in (SOURCE_TERMINAL, SOURCE_WINDOW):
         return GRADE_B
     return None
+
+
+# ---------------------------------------------------------------------------
+# The dialog's choices — what a person can say yes to
+# ---------------------------------------------------------------------------
+
+#: The one field of the approval dialog.  Three yeses and a no; the two
+#: "for a while" yeses open a standing window on the printer the print
+#: was aimed at.  Few, fixed, and in words: a person should not be
+#: computing seconds in a dialog.  Anything longer, wider (several
+#: printers, the fleet) or odder is the terminal command's.
+CHOICE_THIS_PRINT = "this_print"
+CHOICE_NEXT_TWO_HOURS = "next_two_hours"
+CHOICE_REST_OF_TODAY = "rest_of_today"
+CHOICE_NO = "no"
+
+#: ``(value, the words the person sees)`` in the order the dialog shows
+#: them.  Both halves are user-visible: hosts render ``enumNames``.
+DIALOG_CHOICES: tuple[tuple[str, str], ...] = (
+    (CHOICE_THIS_PRINT, "Yes, this print only"),
+    (CHOICE_NEXT_TWO_HOURS, "Yes, and for the next 2 hours on this printer without asking again"),
+    (CHOICE_REST_OF_TODAY, "Yes, and for the rest of today on this printer without asking again"),
+    (CHOICE_NO, "No"),
+)
+
+#: The two choices a host is offered when a window cannot be honoured
+#: (the hosted server keeps none).  Offering a window that will not open
+#: is a dialog that lies.
+DIALOG_CHOICES_NO_WINDOW: tuple[tuple[str, str], ...] = tuple(
+    c for c in DIALOG_CHOICES if c[0] in (CHOICE_THIS_PRINT, CHOICE_NO)
+)
+
+_TWO_HOURS = 2 * 3600.0
+#: A "rest of today" answered in the last minute of the day still opens
+#: for a minute: a window that has run out before the gate reads it is
+#: an answer thrown away.
+_SHORTEST_WINDOW = 60.0
+
+
+def seconds_until_local_midnight(now: float | None = None) -> float:
+    """From *now* to the next local midnight, DST-aware, never under a minute."""
+    now = time.time() if now is None else now
+    t = time.localtime(now)
+    midnight = time.mktime((t.tm_year, t.tm_mon, t.tm_mday + 1, 0, 0, 0, 0, 0, -1))
+    return max(_SHORTEST_WINDOW, midnight - now)
+
+
+def window_seconds_for(choice: str, now: float | None = None) -> float:
+    """How long a window the choice opens; ``0`` for a choice that opens none."""
+    if choice == CHOICE_NEXT_TWO_HOURS:
+        return _TWO_HOURS
+    if choice == CHOICE_REST_OF_TODAY:
+        return seconds_until_local_midnight(now)
+    return 0.0
+
+
+@dataclass(frozen=True)
+class DialogAnswer:
+    """What the host's dialog came back with.
+
+    Built in exactly one place — ``kiln.mcp_compat.ask_user_to_confirm``,
+    from the SDK's elicitation result — and consumed by the tool-call
+    wrapper.  ``action`` is ``accept``, ``decline``, ``cancel`` or
+    ``unavailable`` (the question could not be put; never a yes).
+    ``choice`` is the option the person picked when they accepted, one of
+    :data:`DIALOG_CHOICES`; empty otherwise.
+    """
+
+    action: str
+    detail: str = ""
+    choice: str = ""
+
+    @property
+    def accepted(self) -> bool:
+        return self.action == "accept"
+
+    @property
+    def opens_window(self) -> bool:
+        """True for a yes that also asks for a standing window."""
+        return self.accepted and window_seconds_for(self.choice) > 0
 
 
 def _norm(value: str | None) -> str:
@@ -233,10 +327,34 @@ def set_consent(consent: PrintConsent | None):
     return _current.set(consent)
 
 
+#: Why nobody was asked on this call, when nobody was: ``host_cannot_ask``
+#: (the host declared no elicitation) or ``unavailable:<detail>`` (it
+#: declared it and the question still could not be put).  Read by the
+#: gate's refusal so it can say, plainly, that no dialog is coming and
+#: the person's yes has to come from a terminal.  Never a yes.
+NOT_ASKED_HOST_CANNOT = "host_cannot_ask"
+
+_not_asked: ContextVar[str] = ContextVar("kiln_print_consent_not_asked", default="")
+
+
+def note_not_asked(reason: str):
+    """Record that this call asked nobody, and why.  Returns a token to
+    reset with — :func:`reset_consent` takes it like a consent token."""
+    return _not_asked.set(str(reason or ""))
+
+
+def why_not_asked() -> str:
+    """The reason recorded for this call, or ``""`` when a question was put
+    (or nothing recorded one)."""
+    return _not_asked.get()
+
+
 def reset_consent(token) -> None:
-    """Drop the answer when its call ends.  Always in a ``finally``."""
+    """Drop the answer — or the not-asked note — when its call ends.
+    Always in a ``finally``.  A token knows its own variable, so the one
+    reset serves both records the wrapper keeps."""
     with _suppress():
-        _current.reset(token)
+        token.var.reset(token)
 
 
 def consent_for(
@@ -289,6 +407,7 @@ def describe_print_request(
     file_name: str,
     printer_name: str | None,
     extra: dict[str, Any] | None = None,
+    window_printer: str | None = None,
 ) -> str:
     """The question a person is actually asked, in their words.
 
@@ -297,6 +416,11 @@ def describe_print_request(
     file, the machine, and whatever facts the caller could supply, and it
     is explicit that Kiln is describing the job rather than showing it —
     the alternative is a dialog that implies a preview it cannot render.
+
+    *window_printer* is the one machine a "for a while" answer would
+    cover.  When given, the question says so and says how the window is
+    closed, because a window a person cannot see the edge of is not one
+    they agreed to.
     """
     where = f" on {printer_name}" if printer_name else " on the default printer"
     lines = [f"Start printing {file_name or 'this file'}{where}?"]
@@ -310,6 +434,13 @@ def describe_print_request(
         f"Requested by the {tool} tool. Kiln is describing this job, not "
         "showing it — approve only if you know what this file is."
     )
+    if window_printer:
+        lines.append("")
+        lines.append(
+            f"A 'for the next…' answer lets prints start on {window_printer} until then "
+            "without asking you each time; each one is still previewed first. Close it "
+            "early at any time by telling your assistant, or with `kiln consent revoke`."
+        )
     return "\n".join(lines)
 
 
@@ -318,6 +449,7 @@ def _reset_for_tests() -> None:
     set for the life of the command and dropped with the process; a test
     runner that hosts many commands in one process needs this."""
     _current.set(None)
+    _not_asked.set("")
 
 
 class _suppress:
