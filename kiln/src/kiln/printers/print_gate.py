@@ -1127,10 +1127,15 @@ def run_adapter_gate(
             # copy: a file whose surface would show no preview and no weight
             # is not started by name either.  Soft-passes for a backend with
             # no established surface -- see kiln.printers.gcode_complete.
-            from kiln.printers.gcode_complete import family_for_adapter, gcode_problems
+            from kiln.printers.gcode_complete import (
+                declared_model_for_adapter,
+                family_for_adapter,
+                gcode_problems,
+            )
 
             problems = gcode_problems(
                 fetched, family_for_adapter(adapter), name=str(file_name or ""),
+                printer_model=declared_model_for_adapter(adapter),
             )
             if problems:
                 verdict = {
