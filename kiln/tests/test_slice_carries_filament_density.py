@@ -996,10 +996,16 @@ class TestPrusaSlicerWritesTheWeightItself:
         with patch("kiln.printers.gcode_complete._fill_weight", side_effect=AssertionError("the fill ran")):
             gcode_complete.complete_gcode_for_printer(str(raw), "moonraker")
 
+        # Wrapped with nothing declared: the tile's type and the start
+        # sequence's filament come off the G-code the slicer wrote.
         out = str(tmp_path / "cube.gcode.3mf")
-        bambu_3mf.build_bambu_3mf(body, out, settings=bambu_3mf.BambuPrintSettings(filament_type="PETG"))
+        wrapped = bambu_3mf.build_bambu_3mf(body, out)
         with zipfile.ZipFile(out) as zf:
             info = zf.read("Metadata/slice_info.config").decode("utf-8")
+            plate = zf.read("Metadata/plate_1.gcode").decode("utf-8", errors="replace")
+        assert wrapped.filament_type == "PETG"
+        assert 'type="PETG"' in info
+        assert "set_filament_type:PETG" in plate
         weight = re.search(r'<metadata key="weight" value="([^"]*)"', info).group(1)
         assert float(weight) == pytest.approx(usage.total_g, abs=0.01)
         bambu_3mf.complete_bambu_archive(out)

@@ -298,9 +298,10 @@ def _auto_wrap_bambu_3mf(
 
         settings = BambuPrintSettings(
             model_name=_Path(gcode_path).stem,
-            # Temps default to PLA; the PrusaSlicer gcode body already
-            # contains M104/M190 with the correct values from the
-            # profile, so these are only used for metadata fields.
+            # Type and temperatures are left unsaid on purpose: the build
+            # reads them off the G-code -- the material the slice was
+            # weighed as and the temperatures it heats to -- so the start
+            # sequence and the tile agree with the toolpath.
             filament_colors=[_loaded_color] if _loaded_color else None,
         )
         wrap = build_bambu_3mf(

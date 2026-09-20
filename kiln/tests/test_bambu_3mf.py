@@ -146,10 +146,14 @@ class TestBambuPrintSettingsDefaults:
     """BambuPrintSettings dataclass default values and to_dict."""
 
     def test_default_values(self):
+        # Type and temperatures default to "unsaid": the build reads them
+        # off the G-code it wraps, and falls back to PLA on the A1
+        # (220 / 65 / PLA) only for a body that says nothing.
         s = BambuPrintSettings()
-        assert s.hotend_temp == 220
-        assert s.bed_temp == 65
-        assert s.filament_type == "PLA"
+        assert s.hotend_temp is None
+        assert s.bed_temp is None
+        assert s.filament_type is None
+        assert s.get_filament_types() == ["PLA"]
         assert s.filament_color == "#FFFFFF"
         assert s.nozzle_diameter == 0.4
         assert s.layer_height == 0.2
@@ -189,7 +193,7 @@ class TestBambuPrintSettingsDefaults:
         d = s.to_dict()
         assert d["hotend_temp"] == 240
         assert d["filament_type"] == "PETG"
-        assert d["bed_temp"] == 65  # default
+        assert d["bed_temp"] is None  # unsaid: read off the G-code at build time
 
 
 # ---------------------------------------------------------------------------
@@ -889,15 +893,75 @@ class TestBuildBambu3mf:
             build_bambu_3mf(MINIMAL_GCODE_BODY, out)
         assert os.path.isfile(out)
 
-    def test_default_settings_used_when_none(self, tmp_path):
+    def test_settings_come_from_the_gcode_when_none(self, tmp_path):
+        """The body heats to 200 / 60 and names no filament: the start
+        sequence heats to 200 / 60 and the type falls back to PLA."""
         out = str(tmp_path / "test.3mf")
         p_start, p_end = self._mock_templates()
         with p_start, p_end:
-            build_bambu_3mf(MINIMAL_GCODE_BODY, out, settings=None)
+            result = build_bambu_3mf(MINIMAL_GCODE_BODY, out, settings=None)
         with zipfile.ZipFile(out) as zf:
             gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
             assert "; filament_type = PLA" in gcode
-            assert "; temperature = 220" in gcode
+            assert "; temperature = 200" in gcode
+            assert "; bed_temperature = 60" in gcode
+        assert (result.filament_type, result.hotend_temp, result.bed_temp) == ("PLA", 200, 60)
+
+    def test_the_gcodes_own_type_and_temperatures_reach_the_printer(self, tmp_path):
+        """A Kiln PETG slice: the slicer wrote the type and the body heats to
+        240 / 80.  Nothing declared to the wrap, so the start sequence, the
+        header and the tile all say PETG at 240 / 80 -- not PLA at 220 / 65."""
+        body = (
+            MINIMAL_GCODE_BODY.replace("M104 S200", "M104 S240\nM109 S240").replace("M140 S60", "M190 S80")
+            + "; filament_type = PETG\n"
+        )
+        out = str(tmp_path / "petg.3mf")
+        p_start, p_end = self._mock_templates()
+        with p_start, p_end:
+            result = build_bambu_3mf(body, out)
+        with zipfile.ZipFile(out) as zf:
+            gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
+            info = zf.read("Metadata/slice_info.config").decode("utf-8")
+        assert "M104 S240" in gcode and "M190 S80" in gcode
+        assert "set_filament_type:PETG" in gcode
+        assert "; filament_type = PETG" in gcode and "; temperature = 240" in gcode
+        assert 'type="PETG"' in info
+        assert (result.filament_type, result.hotend_temp, result.bed_temp) == ("PETG", 240, 80)
+
+    def test_a_stated_setting_outranks_the_gcode(self, tmp_path):
+        body = MINIMAL_GCODE_BODY + "; filament_type = PETG\n"
+        out = str(tmp_path / "abs.3mf")
+        p_start, p_end = self._mock_templates()
+        with p_start, p_end:
+            result = build_bambu_3mf(body, out, settings=BambuPrintSettings(filament_type="abs", hotend_temp=250, bed_temp=100))
+        with zipfile.ZipFile(out) as zf:
+            gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
+        assert "set_filament_type:ABS" in gcode and "M104 S250" in gcode
+        assert (result.filament_type, result.hotend_temp, result.bed_temp) == ("ABS", 250, 100)
+
+    def test_every_type_reaches_the_printer_in_bambus_vocabulary(self, tmp_path):
+        from kiln.printers.bambu_3mf import BAMBU_FILAMENT_TYPES, bambu_filament_type
+
+        assert bambu_filament_type("PLA-CF") == "PLA-CF"
+        assert bambu_filament_type("pla-cf") == "PLA-CF"
+        assert bambu_filament_type("CF-PLA") == "PLA-CF"   # Kiln's table row, Bambu's spelling
+        assert bambu_filament_type("NYLON") == "PA"
+        assert bambu_filament_type("PA-CF") == "PA-CF"
+        assert bambu_filament_type("PETG-HF") == "PETG"    # family Bambu has
+        assert bambu_filament_type("PLA+") == "PLA"
+        assert bambu_filament_type("WOODFILL") == "UNKNOWN"
+        assert bambu_filament_type("PEEK") == "UNKNOWN"    # a Bambu cannot print it and its firmware has no word for it
+        assert bambu_filament_type("") == "UNKNOWN" and bambu_filament_type(None) == "UNKNOWN"
+        assert "UNKNOWN" not in BAMBU_FILAMENT_TYPES
+        # Through the build: the footer's CF-PLA lands as PLA-CF.
+        body = MINIMAL_GCODE_BODY + "; filament_type = CF-PLA\n"
+        out = str(tmp_path / "cf.3mf")
+        p_start, p_end = self._mock_templates()
+        with p_start, p_end:
+            result = build_bambu_3mf(body, out)
+        with zipfile.ZipFile(out) as zf:
+            assert 'type="PLA-CF"' in zf.read("Metadata/slice_info.config").decode("utf-8")
+        assert result.filament_type == "PLA-CF"
 
     def test_gcode_contains_start_and_end(self, tmp_path):
         out = str(tmp_path / "test.3mf")

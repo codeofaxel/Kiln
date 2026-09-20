@@ -4276,9 +4276,9 @@ class BambuAdapter(PrinterAdapter):
         self,
         gcode_path: str,
         *,
-        hotend_temp: int = 220,
-        bed_temp: int = 65,
-        filament_type: str = "PLA",
+        hotend_temp: int | None = None,
+        bed_temp: int | None = None,
+        filament_type: str | None = None,
         source_3mf_path: str | None = None,
         num_filaments: int = 1,
         filament_colors: list[str] | None = None,
@@ -4300,9 +4300,15 @@ class BambuAdapter(PrinterAdapter):
 
         :param gcode_path: Path to PrusaSlicer ``.gcode`` output (must be
             sliced with ``--use-relative-e-distances`` and empty start/end).
-        :param hotend_temp: Hotend temperature in °C (default 220 for PLA).
-        :param bed_temp: Bed temperature in °C (default 65 for PLA).
+        :param hotend_temp: Hotend temperature in °C for the start sequence.
+            Omitted, the temperature the G-code itself first heats to
+            (220 for a body that says nothing).
+        :param bed_temp: Bed temperature in °C, likewise (65).
         :param filament_type: Filament type string (PLA, PETG, ABS, etc.).
+            Omitted, the type the slicer wrote into the G-code -- every
+            Kiln slice carries the material it was weighed as -- else PLA.
+            Whatever its origin it reaches the printer in Bambu's own
+            vocabulary.
         :param source_3mf_path: Optional source 3MF for thumbnails/geometry.
         :param num_filaments: Number of filaments (>1 for multi-color).
         :param filament_colors: List of hex color strings per filament.
