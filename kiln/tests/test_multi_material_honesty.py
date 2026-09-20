@@ -247,7 +247,9 @@ class TestHelper:
     def test_to_dict_carries_a_summary_sentence(self):
         d = _happy_hare().to_dict()
         assert d["detected"] is True and d["driven_by_kiln"] is False
-        assert d["loaded_slots"][0] == {"slot": 0, "material": "PLA", "color": "FF0000"}
+        # ``tray_id`` is the printer's own id (unit * 4 + slot), the one the
+        # print command takes; a one-unit changer's ids are its slots.
+        assert d["loaded_slots"][0] == {"slot": 0, "unit": 0, "tray_id": 0, "material": "PLA", "color": "FF0000"}
         assert "does not drive" in d["summary"]
 
     def test_capabilities_default_cannot_report(self):

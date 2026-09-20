@@ -358,7 +358,7 @@ class TestSetPrinterLight:
         adapter = MagicMock(spec=[])  # no set_light attribute
         mock_adapter.return_value = adapter
 
-        result = set_printer_light()
+        result = set_printer_light(mode="on")
 
         assert result["success"] is False
         assert "UNSUPPORTED" in str(result)
@@ -370,7 +370,7 @@ class TestSetPrinterLight:
 
         mock_adapter.side_effect = PrinterError("offline")
 
-        result = set_printer_light()
+        result = set_printer_light(mode="on")
 
         assert result["success"] is False
 

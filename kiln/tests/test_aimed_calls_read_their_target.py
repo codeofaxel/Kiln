@@ -307,6 +307,12 @@ class TestSliceAndPrintObeysTheTargetMachine:
 
 
 class TestPlateObjectWrapsForItsTarget:
+    @pytest.fixture(autouse=True)
+    def _preview_gate_is_not_under_test(self, monkeypatch):
+        """About which printer's contract the file gets, not the sign-off
+        gate that now fronts the start door -- switched off the way CI does."""
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
     def _run(self, tmp_path, printer_name: str) -> bool:
         """Returns whether the Bambu 3MF repackager fired."""
         import kiln.server as srv

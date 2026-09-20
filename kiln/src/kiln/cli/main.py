@@ -137,10 +137,23 @@ def _material_extra_args(material: str) -> list[str]:
     ]
 
 
-def _infer_default_material(ctx: click.Context) -> str:
-    """Infer material from tracked state/env, falling back to PLA."""
+#: Where the CLI's material came from: ``--material``, the spool Kiln
+#: tracks as loaded on the printer, an environment default, or nothing.
+_MATERIAL_EXPLICIT = "explicit"
+_MATERIAL_TRACKED = "tracked"
+_MATERIAL_ENV = "env"
+_MATERIAL_DEFAULT = "default"
+
+
+def _infer_default_material_with_source(ctx: click.Context) -> tuple[str, str, str | None]:
+    """Infer material from tracked state/env, falling back to PLA, and say which.
+
+    The third value is the tracked row's ``determined_by`` (who decided the
+    spool's type -- a person, or the machine), ``None`` when the answer did
+    not come from the tracker.
+    """
     try:
-        from kiln.materials import MaterialTracker
+        from kiln.materials import DECLARED, MaterialTracker
         from kiln.persistence import get_db
 
         printer_name = (ctx.obj or {}).get("printer") or "default"
@@ -148,24 +161,39 @@ def _infer_default_material(ctx: click.Context) -> str:
         loaded = tracker.get_material(printer_name, tool_index=0)
         loaded_type = _normalise_material_type(getattr(loaded, "material_type", None))
         if loaded_type:
-            return loaded_type
+            determined_by = str(getattr(loaded, "determined_by", None) or DECLARED)
+            return loaded_type, _MATERIAL_TRACKED, determined_by
     except Exception as exc:
         logger.debug("Material tracker lookup failed: %s", exc)
 
     for env_name in ("KILN_MATERIAL", "KILN_DEFAULT_MATERIAL", "KILN_FILAMENT"):
         env_val = _normalise_material_type(os.environ.get(env_name))
         if env_val:
-            return env_val
+            return env_val, _MATERIAL_ENV, None
 
-    return "PLA"
+    return "PLA", _MATERIAL_DEFAULT, None
+
+
+def _infer_default_material(ctx: click.Context) -> str:
+    """Infer material from tracked state/env, falling back to PLA."""
+    return _infer_default_material_with_source(ctx)[0]
 
 
 def _resolve_material_for_slice(ctx: click.Context, material: str | None) -> tuple[str, bool]:
     """Resolve the effective material and whether it was explicitly provided."""
+    return _resolve_material_for_slice_with_source(ctx, material)[:2]
+
+
+def _resolve_material_for_slice_with_source(
+    ctx: click.Context, material: str | None,
+) -> tuple[str, bool, str, str | None]:
+    """The effective material, whether it was explicit, where it came from,
+    and -- for a tracked spool -- who decided its type."""
     explicit = _normalise_material_type(material)
     if explicit:
-        return explicit, True
-    return _infer_default_material(ctx), False
+        return explicit, True, _MATERIAL_EXPLICIT, None
+    inferred, source, determined_by = _infer_default_material_with_source(ctx)
+    return inferred, False, source, determined_by
 
 
 def _support_profile_overrides(style: str) -> dict[str, str]:
@@ -288,7 +316,9 @@ def _resolve_slice_plan(
     effective_profile = profile
     extra_args: list[str] = []
 
-    material_key, material_is_explicit = _resolve_material_for_slice(ctx, material)
+    (
+        material_key, material_is_explicit, material_source, loaded_determined_by,
+    ) = _resolve_material_for_slice_with_source(ctx, material)
     support_style, support_reason = _resolve_support_style(support_mode, input_file)
 
     use_material_defaults = material_is_explicit or profile is None
@@ -313,9 +343,23 @@ def _resolve_slice_plan(
     if support_style and effective_profile is None:
         extra_args.extend(_support_extra_args(support_style))
 
+    # What the slicer is told to weigh the print with (kiln.slicer_filament):
+    # ``--material`` or an environment default is a declaration; the spool
+    # Kiln tracks as loaded is the loaded one -- and it rides with who
+    # decided it (a person told Kiln, or a machine reported it), so the
+    # slice's note says "as you told it" rather than crediting the printer
+    # with a fact it never reported.  The PLA fallback hands nothing down,
+    # and the slice resolves its own default and says so.
+    declared = material_key if material_source in (_MATERIAL_EXPLICIT, _MATERIAL_ENV) else None
+    loaded = material_key if material_source == _MATERIAL_TRACKED else None
+
     return {
         "material": material_key,
         "material_explicit": material_is_explicit,
+        "material_source": material_source,
+        "declared_material": declared,
+        "loaded_material": loaded,
+        "loaded_determined_by": loaded_determined_by,
         "printer_id": effective_printer_id,
         "profile_path": effective_profile,
         "extra_args": extra_args,
@@ -4008,7 +4052,7 @@ def remove(name: str) -> None:
     "-m",
     default=None,
     type=click.Choice(_MATERIAL_CHOICES),
-    help="Material type (defaults to loaded material, then PLA).",
+    help="Material type — sets the temperatures and what the print is weighed as (defaults to the loaded material, then PLA).",
 )
 @click.option(
     "--support-mode",
@@ -4135,6 +4179,9 @@ def slice(
                 profile=plan["profile_path"],
                 extra_args=extra_args or None,
                 output_dir=output_dir,
+                material=plan.get("declared_material"),
+                loaded_material=plan.get("loaded_material"),
+                loaded_determined_by=plan.get("loaded_determined_by") or "observed",
             )
             copy_strategy = "multicolor_merge"
 
@@ -4165,6 +4212,9 @@ def slice(
                 profile=plan["profile_path"],
                 slicer_path=slicer,
                 extra_args=extra_args or None,
+                material=plan.get("declared_material"),
+                loaded_material=plan.get("loaded_material"),
+                loaded_determined_by=plan.get("loaded_determined_by") or "observed",
             )
 
         if not print_after:
@@ -4191,6 +4241,8 @@ def slice(
                 click.echo(result.message)
                 click.echo(f"Output: {result.output_path}")
                 click.echo(f"Material: {plan['material']}")
+                if getattr(result, "filament", None) is not None:
+                    click.echo(f"Weighed as: {result.filament.note}")
                 if copies > 1:
                     click.echo(f"Copies: {copies} (strategy: {copy_strategy}, spacing: {spacing}mm)")
                 if plan["printer_id"]:
@@ -9285,7 +9337,7 @@ def generate_download(
     "-m",
     default=None,
     type=click.Choice(_MATERIAL_CHOICES),
-    help="Material type (defaults to loaded material, then PLA).",
+    help="Material type — sets the temperatures and what the print is weighed as (defaults to the loaded material, then PLA).",
 )
 @click.option(
     "--support-mode",
@@ -9417,10 +9469,15 @@ def generate_and_print_cmd(
             result.local_path,
             profile=plan["profile_path"],
             extra_args=plan["extra_args"] or None,
+            material=plan.get("declared_material"),
+            loaded_material=plan.get("loaded_material"),
+            loaded_determined_by=plan.get("loaded_determined_by") or "observed",
         )
         if not json_mode:
             click.echo(f"Sliced: {slice_result.output_path}")
             click.echo(f"Material: {plan['material']}")
+            if getattr(slice_result, "filament", None) is not None:
+                click.echo(f"Weighed as: {slice_result.filament.note}")
             if plan["support_style"]:
                 note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
                 click.echo(f"Supports: {plan['support_style']}{note}")
@@ -9473,7 +9530,7 @@ def generate_and_print_cmd(
                             "validation": val.to_dict(),
                             "preview": preview_data,
                             "preview_notified": preview_notified,
-                            "slice": {"output_path": slice_result.output_path, "message": slice_result.message},
+                            "slice": slice_result.to_dict(),
                             "material": plan["material"],
                             "support_mode": support_mode,
                             "support_style": plan["support_style"],

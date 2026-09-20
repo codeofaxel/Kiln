@@ -423,11 +423,12 @@ class TestOrcaArgvWiring:
         cmd = seen["cmd"]
         filaments = cmd[cmd.index("--load-filaments") + 1].split(";")
         assert len(filaments) == 3
-        assert [os.path.basename(f) for f in filaments] == [
-            "profile_filament_1.json",
-            "profile_filament_2.json",
-            "profile_filament_3.json",
-        ]
+        # Named for the profile, one per slot, in slot order.  The file the
+        # slicer loads is derived from the profile (it carries the filament
+        # density — kiln.slicer_filament) and keeps the profile's stem.
+        names = [os.path.basename(f) for f in filaments]
+        assert all(n.startswith("profile_") for n in names), names
+        assert [n.rsplit("_filament_", 1)[1] for n in names] == ["1.json", "2.json", "3.json"]
 
     def test_plain_3mf_still_loads_one_filament(self, tmp_path):
         from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf

@@ -190,16 +190,23 @@ _fallback_warned: set[tuple[str, str]] = set()
 class BambuPrintSettings:
     """Print-specific settings for Bambu 3MF building.
 
-    All temperatures are in degrees Celsius.  Defaults are for PLA on
-    the Bambu A1 with a 0.4 mm nozzle.
+    All temperatures are in degrees Celsius.  ``hotend_temp``, ``bed_temp``
+    and ``filament_type`` left ``None`` mean "the caller did not say": the
+    build reads them off the G-code being wrapped -- the temperatures its
+    first heating commands ask for and the ``filament_type`` its slicer
+    wrote (every Kiln slice carries one, see :mod:`kiln.slicer_filament`)
+    -- and falls back to PLA on the A1 (220 / 65 / ``PLA``) only for a body
+    that says nothing.  A value the caller states always wins.  Whatever
+    the type's origin, it reaches the printer in Bambu's own vocabulary
+    (:func:`bambu_filament_type`).
 
     For multi-color prints, set ``num_filaments`` > 1 and provide
     ``filament_colors`` / ``filament_types`` lists with that many entries.
     """
 
-    hotend_temp: int = 220
-    bed_temp: int = 65
-    filament_type: str = "PLA"
+    hotend_temp: int | None = None
+    bed_temp: int | None = None
+    filament_type: str | None = None
     filament_color: str = "#FFFFFF"
     nozzle_diameter: float = 0.4
     layer_height: float = 0.2
@@ -221,7 +228,7 @@ class BambuPrintSettings:
         """Return the filament type list, generating from defaults if needed."""
         if self.filament_types and len(self.filament_types) >= self.num_filaments:
             return self.filament_types[: self.num_filaments]
-        return [self.filament_type] * self.num_filaments
+        return [self.filament_type or _FALLBACK_FILAMENT_TYPE] * self.num_filaments
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -256,6 +263,12 @@ class Bambu3MFResult:
     # today is every model but the A1.
     start_gcode_model: str = "bambu_a1"
     requested_model: str | None = None
+    #: What the printer is told -- the filament type in Bambu's vocabulary
+    #: and the temperatures the start sequence heats to -- after the
+    #: caller's word, the G-code's own, and the fallback were reconciled.
+    filament_type: str = "PLA"
+    hotend_temp: int = 220
+    bed_temp: int = 65
 
     @property
     def start_gcode_warning(self) -> str | None:
@@ -454,6 +467,135 @@ def _assert_fully_resolved(gcode: str, *, source: str) -> None:
 
 
 _CAPTURE_HOTEND_TEMP = 220  # every capture was taken with Generic PLA at 220C
+
+#: What a settings field falls back to when neither the caller nor the
+#: G-code says: PLA on the A1, the values every capture was taken with.
+_FALLBACK_HOTEND_TEMP = 220
+_FALLBACK_BED_TEMP = 65
+_FALLBACK_FILAMENT_TYPE = "PLA"
+
+#: The filament types Bambu's firmware is written to -- every distinct
+#: ``filament_type`` across the 1,575 filament presets bundled with Bambu
+#: Studio 02.06.00.51 (profiles 02.06.00.01, read off this machine's app
+#: bundle 2026-09-20).  ``M1002 set_filament_type:`` in the start sequence
+#: and ``<filament type="…">`` in ``slice_info.config`` are read by the
+#: machine, so a word outside this list is mapped onto it or, failing that,
+#: sent as ``PLA`` -- what every Kiln wrap told the printer before the type
+#: was read off the G-code at all, so an exotic word changes nothing about
+#: what the machine hears.  (``UNKNOWN`` is a value Studio writes only
+#: transiently, before the real type; what the firmware makes of it for a
+#: whole job is unverified, so it is not used.)
+BAMBU_FILAMENT_TYPES: frozenset[str] = frozenset({
+    "ABS", "ABS-GF", "ASA", "ASA-AERO", "ASA-CF", "BVOH", "EVA", "HIPS",
+    "PA", "PA-CF", "PA-GF", "PA6-CF", "PC", "PCTG", "PE", "PE-CF", "PET-CF",
+    "PETG", "PETG-CF", "PHA", "PLA", "PLA-AERO", "PLA-CF", "PP", "PP-CF",
+    "PP-GF", "PPA-CF", "PPA-GF", "PPS", "PPS-CF", "PVA", "TPU", "TPU-AMS",
+})
+#: Kiln's material-table rows spelled the way Bambu spells them.
+_TABLE_ROW_TO_BAMBU: dict[str, str] = {
+    "CF-PLA": "PLA-CF",
+    "NYLON": "PA",
+    "PLA+": "PLA",
+    "SILK-PLA": "PLA",
+}
+
+
+def bambu_filament_type(word: str | None) -> str:
+    """*word* as the filament type a Bambu understands.
+
+    The word itself when it is one of Bambu's (``PLA-CF``, ``PETG``, in
+    any case); else Kiln's material row for it, spelled Bambu's way
+    (``CF-PLA`` -> ``PLA-CF``, ``NYLON`` -> ``PA``); else the family it
+    starts with when Bambu has that (``PETG-HF`` -> ``PETG``); else
+    ``PLA``, the historical fallback.  Never raises.
+    """
+    text = " ".join(str(word or "").split()).upper()
+    if not text:
+        return _FALLBACK_FILAMENT_TYPE
+    if text in BAMBU_FILAMENT_TYPES:
+        return text
+    try:
+        from kiln.slicer_filament import material_density
+
+        row = material_density(text)
+    except Exception:  # noqa: BLE001 -- the table is a lookup, never a failure
+        row = None
+    if row is not None:
+        spelled = _TABLE_ROW_TO_BAMBU.get(row[0], row[0])
+        if spelled in BAMBU_FILAMENT_TYPES:
+            return spelled
+    family = re.match(r"[A-Z]+", text)
+    if family and family.group(0) in BAMBU_FILAMENT_TYPES:
+        return family.group(0)
+    return _FALLBACK_FILAMENT_TYPE
+
+
+#: The temperatures a body prints its first layer at.  The command the
+#: print WAITS on (``M109`` / ``M190``) is read before a set-only one
+#: (``M104`` / ``M140``): a body that opens with a 140 °C preheat, as
+#: Bambu-style start blocks do, still heats the start sequence to the
+#: temperature it printed at.  Both slicers write these at the top of the
+#: body when the profile's start block is empty, as Kiln's Bambu profiles
+#: leave it: PrusaSlicer ``M190 S65`` / ``M104 S220`` / ``M109 S220``, Orca
+#: ``M190 S60`` / ``M109 S225`` (measured 2026-09-20 on a 20 mm cube).  A
+#: body with no such command is read from its footer's first-layer keys.
+_GCODE_HOTEND_WAIT_RE = re.compile(r"^\s*M109\s+(?:T\d+\s+)?S(\d+(?:\.\d+)?)", re.MULTILINE)
+_GCODE_HOTEND_SET_RE = re.compile(r"^\s*M104\s+(?:T\d+\s+)?S(\d+(?:\.\d+)?)", re.MULTILINE)
+_GCODE_BED_WAIT_RE = re.compile(r"^\s*M190\s+S(\d+(?:\.\d+)?)", re.MULTILINE)
+_GCODE_BED_SET_RE = re.compile(r"^\s*M140\s+S(\d+(?:\.\d+)?)", re.MULTILINE)
+_GCODE_FOOTER_HOTEND_RE = re.compile(
+    r"^;\s*(?:first_layer_temperature|nozzle_temperature_initial_layer|temperature|nozzle_temperature)\s*=\s*(\d+)",
+    re.MULTILINE,
+)
+_GCODE_FOOTER_BED_RE = re.compile(
+    r"^;\s*(?:first_layer_bed_temperature|bed_temperature)\s*=\s*(\d+)", re.MULTILINE,
+)
+
+
+def _print_temperatures(gcode_body: str) -> tuple[int | None, int | None]:
+    """``(hotend, bed)`` the body prints at, or ``None`` where it never says."""
+
+    def _first(*patterns: re.Pattern[str]) -> int | None:
+        for pattern in patterns:
+            for match in pattern.finditer(gcode_body):
+                value = int(float(match.group(1)))
+                if value > 0:
+                    return value
+        return None
+
+    return (
+        _first(_GCODE_HOTEND_WAIT_RE, _GCODE_HOTEND_SET_RE, _GCODE_FOOTER_HOTEND_RE),
+        _first(_GCODE_BED_WAIT_RE, _GCODE_BED_SET_RE, _GCODE_FOOTER_BED_RE),
+    )
+
+
+def resolve_settings_from_gcode(settings: BambuPrintSettings, gcode_body: str) -> BambuPrintSettings:
+    """The settings the build runs with: the caller's word, else the G-code's own, else the fallback.
+
+    The G-code is the artifact that knows what the slice was for: the type
+    its slicer wrote (``; filament_type = PETG``, the resolved material of
+    a Kiln slice) and the temperatures it heats to.  A caller that stated a
+    value keeps it.  Every type -- stated, read, or fallen back to -- is
+    then put into Bambu's vocabulary, so nothing outside it reaches the
+    machine.
+    """
+    hotend, bed = _print_temperatures(gcode_body)
+    filament_type = settings.filament_type
+    if not filament_type:
+        match = _GCODE_FILAMENT_TYPE_RE.search(gcode_body)
+        if match:
+            filament_type = match.group(1).split(";")[0].split(",")[0].strip()
+    filament_types = (
+        [bambu_filament_type(t) for t in settings.filament_types]
+        if settings.filament_types else None
+    )
+    return replace(
+        settings,
+        hotend_temp=settings.hotend_temp if settings.hotend_temp is not None else (hotend or _FALLBACK_HOTEND_TEMP),
+        bed_temp=settings.bed_temp if settings.bed_temp is not None else (bed or _FALLBACK_BED_TEMP),
+        filament_type=bambu_filament_type(filament_type or _FALLBACK_FILAMENT_TYPE),
+        filament_types=filament_types,
+    )
 
 
 def _capture_bed_temp(template: str) -> int | None:
@@ -870,8 +1012,10 @@ _GCODE_FILAMENT_TYPE_RE = re.compile(
 #: ``; total filament length [mm] : 5127.93,2704.70`` and ``; total
 #: filament weight [g] : 16.28,8.13``.  All of them list one value per USED
 #: extruder, comma separated.  Kiln's own profiles describe a printer and
-#: no filament, so the slicer's grams read ``0.00`` and the length is the
-#: number that survives.
+#: no filament, so the slicer's grams used to read ``0.00`` and the length
+#: was the number that survived.  A slice through ``kiln.slicer`` now
+#: carries a density (:mod:`kiln.slicer_filament`) and the grams are the
+#: slicer's own; the length path remains for files sliced elsewhere.
 _GCODE_USED_MM_RE = re.compile(
     r"^;\s*(?:filament used \[mm\]\s*=|total filament length \[mm\]\s*:)\s*(.+)$",
     re.MULTILINE | re.IGNORECASE,
@@ -934,19 +1078,16 @@ def _number_list(text: str) -> list[float]:
 
 
 def _material_density(filament_type: str | None) -> float:
-    """The family's nominal density from Kiln's material table, or PLA's."""
-    if not filament_type:
-        return _DEFAULT_FILAMENT_DENSITY
-    try:
-        from kiln.cost_estimator import BUILTIN_MATERIALS
-    except ImportError:  # pragma: no cover — the cost table always ships
-        return _DEFAULT_FILAMENT_DENSITY
-    key = filament_type.strip().upper()
-    profile = BUILTIN_MATERIALS.get(key)
-    if profile is None:
-        family = re.match(r"[A-Z]+", key)
-        profile = BUILTIN_MATERIALS.get(family.group(0)) if family else None
-    return profile.density_g_per_cm3 if profile else _DEFAULT_FILAMENT_DENSITY
+    """The family's nominal density from Kiln's material table, or PLA's.
+
+    The same lookup the slice-time resolver uses
+    (:func:`kiln.slicer_filament.material_density`), so the safety net and
+    the slicer can never disagree about what a spool weighs.
+    """
+    from kiln.slicer_filament import material_density
+
+    row = material_density(filament_type)
+    return row[1] if row else _DEFAULT_FILAMENT_DENSITY
 
 
 def _real_tools_used(gcode_body: str) -> list[int]:
@@ -2092,6 +2233,11 @@ def build_bambu_3mf(
     """
     if settings is None:
         settings = BambuPrintSettings()
+    # The caller's word, else the G-code's own, else PLA on the A1 -- read
+    # here, at the one place every wrapping door passes through, so a door
+    # that slices PETG and wraps with the defaults no longer tells the
+    # printer PLA and purges at PLA temperatures.
+    settings = resolve_settings_from_gcode(settings, gcode_body)
 
     # A multicolor gcode wrapped as a single-filament 3MF is a print that
     # tool-changes 186 times into whatever is in tray 1: the toolpath is
@@ -2109,7 +2255,7 @@ def build_bambu_3mf(
                 settings,
                 num_filaments=count,
                 filament_colors=colors or settings.filament_colors,
-                filament_types=types or settings.filament_types,
+                filament_types=[bambu_filament_type(t) for t in types] if types else settings.filament_types,
             )
             logger.info(
                 "Gcode declares %d filaments (%s) — wrapping as multicolor.",
@@ -2275,8 +2421,8 @@ def build_bambu_3mf(
 
     # The weight the screen shows, read from the body the slicer wrote —
     # before Bambu's start sequence is added, so the purge line is not
-    # counted as the part.  The declared types are the density source when
-    # the slicer had none (Kiln's profiles never do).
+    # counted as the part.  A Kiln slice carries the slicer's own grams;
+    # the declared types are the density source when a body has none.
     usage = filament_usage_from_gcode(gcode_body, filament_types=f_types)
 
     slice_info = _build_slice_info(
@@ -2421,6 +2567,9 @@ def build_bambu_3mf(
         est_print_time_sec=est_time_sec_with_startup,
         start_gcode_model=start_source,
         requested_model=printer_model,
+        filament_type=str(settings.filament_type),
+        hotend_temp=int(settings.hotend_temp),
+        bed_temp=int(settings.bed_temp),
     )
 
 

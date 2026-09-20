@@ -6316,11 +6316,22 @@ def _ams_selection_record(
     so callers can render "AMS slot 1 — black PLA" without another MQTT
     round-trip.  Returns ``color=""`` when the tray reports no color.
     """
+    from kiln.ams_routing import TRAYS_PER_UNIT
+
+    # ``slot`` is the printer's tray id (unit * 4 + slot); the trays carry
+    # their unit's own slot, so the id is resolved before it is matched.
+    unit_wanted, slot_wanted = divmod(int(slot), TRAYS_PER_UNIT)
     color = ""
-    for unit in ams_info.get("units", []):
+    for position, unit in enumerate(ams_info.get("units", [])):
+        try:
+            unit_id = int(unit.get("unit_id", position))
+        except (TypeError, ValueError):
+            unit_id = position
+        if unit_id != unit_wanted:
+            continue
         for tray in unit.get("trays", []):
             try:
-                if int(tray.get("slot", -1)) == int(slot):
+                if int(tray.get("slot", -1)) == slot_wanted:
                     color = str(tray.get("tray_color", "") or "")
                     break
             except (TypeError, ValueError):
@@ -6696,7 +6707,7 @@ def _resolve_use_ams(
                 )
             warnings_out.extend(plan.warnings)
             first = resolved[0]
-            first_type = next((t.material for t in trays if t.slot == first), "")
+            first_type = next((t.material for t in trays if t.tray_id == first), "")
             logger.info("AMS colour routing: %s", plan.summary)
             return {
                 "use_ams": True,
@@ -9074,6 +9085,19 @@ def set_fan(percent: int, node: str = "part") -> dict:
         return _error_dict(f"Unexpected error in set_fan: {exc}", code="INTERNAL_ERROR")
 
 
+def _wrapped_filament_type(threemf_path: str) -> str | None:
+    """The first filament type a wrapped archive declares to the printer, or ``None``."""
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(threemf_path) as zf:
+            info = zf.read("Metadata/slice_info.config").decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 -- a report, never a failure of the wrap
+        return None
+    match = re.search(r'<filament\b[^>]*\btype="([^"]*)"', info)
+    return match.group(1) if match else None
+
+
 @mcp.tool()
 def wrap_gcode_as_3mf(
     gcode_path: str,
@@ -9099,10 +9123,14 @@ def wrap_gcode_as_3mf(
         gcode_path: Absolute path to a PrusaSlicer ``.gcode`` file on the
             local filesystem.  The file must have been sliced with
             ``--use-relative-e-distances`` and empty start/end G-code.
-        hotend_temp: Hotend temperature in °C (default 220 for PLA).
-        bed_temp: Bed temperature in °C (default 65 for PLA).
+        hotend_temp: Hotend temperature in °C for the start sequence.
+            Omitted, the temperature the G-code itself first heats to.
+        bed_temp: Bed temperature in °C, likewise.
         filament_type: Filament type string — ``"PLA"``, ``"PETG"``,
-            ``"ABS"``, etc.
+            ``"ABS"``, etc.  Omitted, the type the slicer wrote into the
+            G-code (every Kiln slice carries the material it was weighed
+            as).  The response's ``filament_type`` is what the printer is
+            told, in Bambu's own vocabulary.
         source_3mf_path: Optional path to a source 3MF to copy
             thumbnails and geometry from.
         num_filaments: Number of filaments (>1 for multi-color prints).
@@ -9206,7 +9234,9 @@ def wrap_gcode_as_3mf(
             "success": True,
             "output_path": output_path,
             "gcode_path": gcode_path,
-            "filament_type": filament_type,
+            # What the printer is told, read back off the archive -- the
+            # caller's word, else the G-code's own, in Bambu's vocabulary.
+            "filament_type": _wrapped_filament_type(output_path) or filament_type,
             "num_filaments": num_filaments,
         }
         if filament_colors:
@@ -15510,8 +15540,10 @@ def run_quick_print(
         printer_id: Printer model ID for auto-profile selection
             (e.g. ``"ender3"``, ``"bambu_x1c"``, ``"klipper_generic"``).
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
-        material: Filament material hint (e.g. ``"PLA"``).  When set, AMS
-            auto-routing prefers a loaded tray whose type matches.
+        material: Filament material (e.g. ``"PLA"``).  Its density is what
+            the slicer weighs the print with (omitted: the spool the
+            printer reports loaded, then PLA — the slice step says which),
+            and AMS auto-routing prefers a loaded tray whose type matches.
         use_ams: AMS feeding mode (Bambu): ``"auto"`` (default — detect and
             route to a loaded tray), ``"true"``, or ``"false"``.
         ams_mapping: Explicit AMS slot mapping as a JSON array string,
@@ -15631,10 +15663,12 @@ def run_reslice_and_print(
         overrides: JSON string of PrusaSlicer INI key-value pairs to override.
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
         slicer_path: Explicit path to the slicer binary.
-        material: Filament material hint (e.g. ``"PLA"``).  For fully-auto
-            raw-gcode reslices, AMS routing prefers a loaded tray of this
-            material.  (3MF plates carry their own filament map, so routing
-            defers to the adapter there.)
+        material: Filament material (e.g. ``"PLA"``).  Its density is what
+            the slicer weighs the print with (omitted: the spool the
+            printer reports loaded, then PLA — the slice step says which).
+            For fully-auto raw-gcode reslices, AMS routing prefers a loaded
+            tray of this material.  (3MF plates carry their own filament
+            map, so routing defers to the adapter there.)
         use_ams: Enable AMS filament feeding (Bambu printers). If omitted,
             auto-detected from 3MF metadata.
         ams_mapping: JSON string of AMS slot indices (e.g. ``"[0, 2]"``).

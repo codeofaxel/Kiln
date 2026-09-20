@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **The weight on your printer's screen is for the filament you're actually using.** Every slice is weighed with the material you name or the spool your printer reports loaded, and Kiln tells you which one it used.
+
+- **Your Bambu is told the filament you're actually printing.** It warms up for that filament, and its screen shows the right one.
+
 - **Prusa and Duet touchscreens now show the part before it prints.** The picture used to appear only on the printer's browser page (PrusaLink, Duet Web Control) while the touchscreen on the printer stayed blank; the screen now gets its own copy. Elegoo files get a preview too.
 
 - **Bambu fault codes now come with the cause and the fix.** Every code

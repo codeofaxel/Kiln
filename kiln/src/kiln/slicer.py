@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln.openscad_runner import present_signals
+from kiln.slicer_filament import LOADED_OBSERVED, SliceFilament, ensure_profile_filament
 from kiln.slicer_orca import (
     PRIME_TOWER_WIDTH_MM,
     ini_to_settings,
@@ -159,6 +160,9 @@ class SliceResult:
     message: str = ""
     stdout: str = ""
     stderr: str = ""
+    #: The density the slicer was handed and where it came from, so every
+    #: door's response can say which (see :mod:`kiln.slicer_filament`).
+    filament: SliceFilament | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -167,6 +171,8 @@ class SliceResult:
             "slicer": self.slicer,
             "message": self.message,
         }
+        if self.filament is not None:
+            d["filament"] = self.filament.to_dict()
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -719,7 +725,9 @@ def _slice_with_orca(
             # bare slice_file("model.stl") — the documented form — fails
             # validation before it starts.  Kiln's own generic profile is a
             # real answer to "you didn't say", and it keeps the bare call
-            # working on both backends.
+            # working on both backends.  slice_file resolves it before the
+            # filament identity is written, so this branch serves only a
+            # direct caller of this runner.
             #
             # Resolved through the ordinary door rather than read straight
             # off the profile, so it passes the same invariants every other
@@ -865,6 +873,9 @@ def slice_file(
     slicer_path: str | None = None,
     extra_args: list[str] | None = None,
     timeout: int = 300,
+    material: str | None = None,
+    loaded_material: str | None = None,
+    loaded_determined_by: str = LOADED_OBSERVED,
 ) -> SliceResult:
     """Slice a 3D model file to G-code.
 
@@ -878,6 +889,22 @@ def slice_file(
         slicer_path: Explicit slicer binary path.  Auto-detected if omitted.
         extra_args: Additional CLI arguments to pass to the slicer.
         timeout: Maximum slicing time in seconds (default 300).
+        material: The filament material the caller declared for this slice
+            (``"PETG"``, in any spelling).  Its density is what the slicer
+            weighs the print with.
+        loaded_material: The spool loaded on the target printer, when the
+            door knows it (:func:`kiln.slicer_filament.loaded_filament_type`).
+            Answers when nothing was declared.
+        loaded_determined_by: Who decided *loaded_material* -- ``observed``
+            when the door read the machine's own unit (the default),
+            ``user_reported`` when it read Kiln's record of what a person
+            loaded.  Chooses the words the result's note uses, never the
+            density.
+
+    Every slice leaves with a filament density: the profile is given one
+    before either slicer runs (declared > loaded > the profile's own >
+    PLA), and the result's ``filament`` says which.  See
+    :mod:`kiln.slicer_filament`.
 
     Returns:
         A :class:`SliceResult` with the path to the generated G-code.
@@ -937,6 +964,27 @@ def slice_file(
             slicer = alt
             multicolor_switched = True
 
+    # "No profile" cannot mean "no preset" on the Orca dialect the way it
+    # does for PrusaSlicer (see _slice_with_orca); Kiln's own generic
+    # profile is the answer, resolved here so the identity below is written
+    # onto it rather than onto nothing.
+    if not profile and slicer_cli_family(slicer) == _CLI_BAMBU:
+        from kiln.slicer_profiles import resolve_slicer_profile
+
+        profile = resolve_slicer_profile("default")
+
+    # The filament identity, applied HERE -- the one place every slicing
+    # door funnels through -- so a slice cannot leave without a density
+    # whatever door it entered by.  The derived file keeps the printer
+    # profile's name, so telemetry still counts the slice against the
+    # printer and Orca's presets are still named for it.
+    slicer_profile, filament = ensure_profile_filament(
+        profile,
+        material=material,
+        loaded_type=loaded_material,
+        loaded_determined_by=loaded_determined_by,
+    )
+
     # Prepare output
     out_dir = output_dir or _DEFAULT_OUTPUT_DIR
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
@@ -976,11 +1024,12 @@ def slice_file(
             slicer,
             input_abs,
             out_file,
-            profile=profile,
+            profile=slicer_profile,
             extra_args=extra_args,
             timeout=timeout,
             multicolor=multicolor,
         )
+        result.filament = filament
         if multicolor_switched:
             result.message += (
                 f" (multicolor 3MF: auto-selected "
@@ -997,10 +1046,10 @@ def slice_file(
         out_file,
     ]
 
-    if profile:
-        if not os.path.isfile(profile):
-            raise SlicerError(f"Profile file not found: {os.path.basename(profile)}")
-        cmd.extend(["--load", profile])
+    if slicer_profile:
+        if not os.path.isfile(slicer_profile):
+            raise SlicerError(f"Profile file not found: {os.path.basename(slicer_profile)}")
+        cmd.extend(["--load", slicer_profile])
 
     if extra_args:
         cmd.extend(extra_args)
@@ -1055,6 +1104,7 @@ def slice_file(
         message=message,
         stdout=(result.stdout or "").strip(),
         stderr=(result.stderr or "").strip(),
+        filament=filament,
     )
 
 
@@ -1064,8 +1114,11 @@ def derive_filament_weight(estimates: dict[str, Any], material: str | None) -> N
     A slicer gets weight by multiplying extruded volume by the filament's
     density, and density lives on a FILAMENT profile.  Kiln's bundled profiles
     describe a printer — bed, speeds, temperatures — and name no filament, so
-    the slicer has no density and reports ``0``.  The volume is right there in
-    the same G-code, so the missing half is only the material.
+    the slicer used to have no density and report ``0``.  Every slice Kiln
+    runs now carries one (:mod:`kiln.slicer_filament`), so on a Kiln-sliced
+    file the weight is already there and this returns at once; it remains
+    for G-code sliced elsewhere.  The volume is right there in the same
+    G-code, so the missing half is only the material.
 
     Weight is physics and is computed here when the caller names a material.
     Cost is not: the table's price is a generic figure, not what anyone paid,
@@ -1112,8 +1165,8 @@ def estimate_print(
         profile: Optional slicer profile path.
         slicer_path: Optional explicit slicer binary path.
         material: Optional filament family (``"PLA"``, ``"PETG"``, …).  Only
-            a density source: without it a weight the slicer could not work
-            out is reported as absent rather than guessed.
+            a density source: the slice is run with it, so the slicer weighs
+            the print itself; without it the slice weighs as PLA and says so.
 
     Returns:
         Dict with ``estimated_time_seconds``, ``filament_length_mm``,
@@ -1123,12 +1176,16 @@ def estimate_print(
     Raises:
         SlicerError: If slicing fails.
     """
-    result = slice_file(file_path, profile=profile, slicer_path=slicer_path)
+    result = slice_file(
+        file_path, profile=profile, slicer_path=slicer_path, material=material,
+    )
     if not result.success or not result.output_path:
         raise SlicerError("Slicing failed — cannot estimate print.")
 
     estimates = _parse_gcode_estimates(result.output_path)
     derive_filament_weight(estimates, material)
+    if result.filament is not None:
+        estimates["filament"] = result.filament.to_dict()
     return estimates
 
 
@@ -1183,10 +1240,11 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
         # ; filament used [g] = 12.34 or total filament used [g] = 12.34
         #
         # A zero here is the slicer saying it could not work the weight out —
-        # it needs a filament density, and Kiln's profiles describe a printer,
-        # not a filament.  Nothing that gets extruded weighs nothing, so the
-        # key is left ABSENT rather than recorded as 0: "I don't know" is a
-        # true statement about every print, "0 g" is a false one.  See
+        # it needs a filament density, which a Kiln slice now always carries
+        # (kiln.slicer_filament) and G-code sliced elsewhere may not.
+        # Nothing that gets extruded weighs nothing, so the key is left
+        # ABSENT rather than recorded as 0: "I don't know" is a true
+        # statement about every print, "0 g" is a false one.  See
         # derive_filament_weight, which fills it in when a material is named.
         fil_g = _re.search(r"filament used \[g\]\s*=\s*([\d.]+)", line, _re.IGNORECASE)
         if fil_g and float(fil_g.group(1)) > 0:
@@ -1234,6 +1292,9 @@ def slice_multicolor_copies(
     extra_args: list[str] | None = None,
     output_dir: str | None = None,
     timeout: int = 300,
+    material: str | None = None,
+    loaded_material: str | None = None,
+    loaded_determined_by: str = LOADED_OBSERVED,
 ) -> SliceResult:
     """Slice an STL into *count* copies, each assigned a different tool (T0, T1, ...).
 
@@ -1258,6 +1319,11 @@ def slice_multicolor_copies(
     :param extra_args: Additional CLI arguments for the slicer.
     :param output_dir: Directory for output files.
     :param timeout: Slicing timeout per copy in seconds.
+    :param material: The declared material, handed to every copy's slice
+        (see :func:`slice_file`).
+    :param loaded_material: The spool loaded on the printer, likewise.
+    :param loaded_determined_by: Who decided it (``observed`` / ``user_reported``),
+        likewise.
     :returns: A :class:`SliceResult` with the merged gcode path.
     :raises SlicerError: If slicing any copy fails.
     :raises ValueError: If copies don't fit on the bed.
@@ -1332,6 +1398,7 @@ def slice_multicolor_copies(
     work_dir = _tempfile.mkdtemp(prefix="kiln_multicolor_")
     gcode_bodies: list[str] = []
     slicer_name: str | None = None
+    filament: SliceFilament | None = None
 
     placed = 0
     for row in range(actual_rows):
@@ -1362,11 +1429,15 @@ def slice_multicolor_copies(
                 slicer_path=slicer_path,
                 extra_args=list(extra_args) if extra_args else None,
                 timeout=timeout,
+                material=material,
+                loaded_material=loaded_material,
+                loaded_determined_by=loaded_determined_by,
             )
             if not result.success or not result.output_path:
                 raise SlicerError(f"Slicing copy {placed} failed: {result.message}")
 
             slicer_name = result.slicer
+            filament = result.filament
 
             # Read the gcode body
             with open(result.output_path, errors="replace") as fh:
@@ -1390,6 +1461,7 @@ def slice_multicolor_copies(
         output_path=merged_path,
         slicer=slicer_name,
         message=f"Sliced {count} multi-color copies of {Path(input_path).name}",
+        filament=filament,
     )
 
 
