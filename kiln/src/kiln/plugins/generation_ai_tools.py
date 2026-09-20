@@ -669,6 +669,7 @@ class _GenerationAIToolsPlugin:
             profile: str | None = None,
             printer_id: str | None = None,
             timeout: int = 600,
+            material: str | None = None,
         ) -> dict:
             """Full pipeline: generate a model, validate, slice, and upload (preview).
 
@@ -690,6 +691,11 @@ class _GenerationAIToolsPlugin:
                 printer_id: Optional printer model ID for bundled profile
                     auto-selection (e.g. ``"prusa_mini"``).
                 timeout: Max seconds to wait for generation (default 600).
+                material: Filament material for the slice (``"PLA"``,
+                    ``"PETG"``, …); its density is what the slicer weighs
+                    the print with.  Omitted, the spool the printer reports
+                    loaded answers, then PLA — ``slice.filament`` says which.
+
             """
             from kiln.generation import (
                 GenerationAuthError,
@@ -882,9 +888,17 @@ class _GenerationAIToolsPlugin:
                         except Exception:
                             _logger.debug("handoff re-resolve failed", exc_info=True)
 
+                # The density the slicer weighs the print with: what was
+                # declared, else the spool the target reports loaded, else
+                # PLA -- the same reading slice_and_print makes, and the
+                # response's slice.filament says which.
+                from kiln.plugins.slicer_tools import _loaded_material_for
+
                 slice_result = slice_file(
                     result.local_path,
                     profile=effective_profile,
+                    material=material,
+                    loaded_material=_loaded_material_for(printer_name, material),
                 )
 
                 # Step 6: Upload (but do NOT auto-start — require explicit start_print)

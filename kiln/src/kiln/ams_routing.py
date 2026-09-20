@@ -307,12 +307,19 @@ UNREAD_MATERIAL = "UNKNOWN"
 
 @dataclass(frozen=True)
 class Tray:
-    """One loaded AMS tray.  ``hex6`` is ``None`` when the colour was not read."""
+    """One loaded AMS tray.  ``hex6`` is ``None`` when the colour was not read.
+
+    ``slot`` is the unit's own id for the tray (0-3); ``unit`` is which AMS
+    unit holds it.  Bambu's ``tray_now`` names a tray by the GLOBAL id
+    ``unit * 4 + slot``, so a reader that has only the slot cannot tell
+    unit 1's first tray from unit 0's.
+    """
 
     slot: int
     material: str
     hex6: str | None
     remain: int | None = None
+    unit: int = 0
 
     @property
     def label(self) -> str:
@@ -331,9 +338,13 @@ def loaded_trays(ams_info: dict[str, Any] | None) -> list[Tray]:
     out: list[Tray] = []
     if not isinstance(ams_info, dict):
         return out
-    for unit in ams_info.get("units", []) or []:
+    for position, unit in enumerate(ams_info.get("units", []) or []):
         if not isinstance(unit, dict):
             continue
+        try:
+            unit_id = int(unit.get("unit_id", position))
+        except (TypeError, ValueError):
+            unit_id = position
         for tray in unit.get("trays", []) or []:
             if not isinstance(tray, dict):
                 continue
@@ -354,8 +365,8 @@ def loaded_trays(ams_info: dict[str, Any] | None) -> list[Tray]:
                 remain = int(tray.get("remain")) if tray.get("remaining_known", True) else None
             except (TypeError, ValueError):
                 remain = None
-            out.append(Tray(slot=slot, material=material.upper(), hex6=hex6, remain=remain))
-    out.sort(key=lambda t: t.slot)
+            out.append(Tray(slot=slot, material=material.upper(), hex6=hex6, remain=remain, unit=unit_id))
+    out.sort(key=lambda t: (t.unit, t.slot))
     return out
 
 

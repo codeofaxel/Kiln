@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln.openscad_runner import present_signals
-from kiln.slicer_filament import SliceFilament, ensure_profile_filament
+from kiln.slicer_filament import LOADED_OBSERVED, SliceFilament, ensure_profile_filament
 from kiln.slicer_orca import (
     PRIME_TOWER_WIDTH_MM,
     ini_to_settings,
@@ -873,6 +873,7 @@ def slice_file(
     timeout: int = 300,
     material: str | None = None,
     loaded_material: str | None = None,
+    loaded_determined_by: str = LOADED_OBSERVED,
 ) -> SliceResult:
     """Slice a 3D model file to G-code.
 
@@ -889,9 +890,14 @@ def slice_file(
         material: The filament material the caller declared for this slice
             (``"PETG"``, in any spelling).  Its density is what the slicer
             weighs the print with.
-        loaded_material: The spool the target printer reports loaded, when
-            the door asked it (:func:`kiln.slicer_filament.loaded_filament_type`).
+        loaded_material: The spool loaded on the target printer, when the
+            door knows it (:func:`kiln.slicer_filament.loaded_filament_type`).
             Answers when nothing was declared.
+        loaded_determined_by: Who decided *loaded_material* -- ``observed``
+            when the door read the machine's own unit (the default),
+            ``user_reported`` when it read Kiln's record of what a person
+            loaded.  Chooses the words the result's note uses, never the
+            density.
 
     Every slice leaves with a filament density: the profile is given one
     before either slicer runs (declared > loaded > the profile's own >
@@ -971,7 +977,10 @@ def slice_file(
     # profile's name, so telemetry still counts the slice against the
     # printer and Orca's presets are still named for it.
     slicer_profile, filament = ensure_profile_filament(
-        profile, material=material, loaded_type=loaded_material,
+        profile,
+        material=material,
+        loaded_type=loaded_material,
+        loaded_determined_by=loaded_determined_by,
     )
 
     # Prepare output
@@ -1283,6 +1292,7 @@ def slice_multicolor_copies(
     timeout: int = 300,
     material: str | None = None,
     loaded_material: str | None = None,
+    loaded_determined_by: str = LOADED_OBSERVED,
 ) -> SliceResult:
     """Slice an STL into *count* copies, each assigned a different tool (T0, T1, ...).
 
@@ -1309,7 +1319,9 @@ def slice_multicolor_copies(
     :param timeout: Slicing timeout per copy in seconds.
     :param material: The declared material, handed to every copy's slice
         (see :func:`slice_file`).
-    :param loaded_material: The spool the printer reports loaded, likewise.
+    :param loaded_material: The spool loaded on the printer, likewise.
+    :param loaded_determined_by: Who decided it (``observed`` / ``user_reported``),
+        likewise.
     :returns: A :class:`SliceResult` with the merged gcode path.
     :raises SlicerError: If slicing any copy fails.
     :raises ValueError: If copies don't fit on the bed.
@@ -1417,6 +1429,7 @@ def slice_multicolor_copies(
                 timeout=timeout,
                 material=material,
                 loaded_material=loaded_material,
+                loaded_determined_by=loaded_determined_by,
             )
             if not result.success or not result.output_path:
                 raise SlicerError(f"Slicing copy {placed} failed: {result.message}")

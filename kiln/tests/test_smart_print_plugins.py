@@ -1091,7 +1091,9 @@ class TestSliceAndEstimate:
         assert result["estimate"]["estimated_time_human"] == "1h 30m"
         assert result["estimate"]["material"] == "PLA"
         assert result["estimate"]["filament_used_mm"] == 3000.0
-        assert result["estimate"]["filament_used_grams"] == round(3000.0 * 0.003, 1)
+        # No slicer grams in the (mocked) file and no real filament on the
+        # (mocked) slice: length x the 1.75 mm cross-section x PLA's density.
+        assert result["estimate"]["filament_used_grams"] == 8.95
 
     def test_time_formatting_in_estimate(self, estimate_tools_fns):
         """estimated_time_human reflects _format_time output for given seconds."""
@@ -1242,7 +1244,10 @@ class TestSliceAndEstimate:
         assert result["slice"]["slicer"] == "OrcaSlicer"
 
     def test_filament_grams_calculation(self, estimate_tools_fns):
-        """filament_used_grams = filament_used_mm * 0.003, rounded to 1dp."""
+        """With no slicer-written grams and no filament identity on the slice:
+        filament_used_mm x pi(1.75/2)^2 x 1.24 g/cm3, rounded to 2dp -- the same
+        physics the slicer applies, not a PLA constant the response then
+        contradicts when a material was declared."""
         fn = estimate_tools_fns["slice_and_estimate"]
         slice_result = self._make_slice_result()
         meta = self._make_meta(filament_mm=5000.0)
@@ -1256,4 +1261,4 @@ class TestSliceAndEstimate:
         ):
             result = fn(input_path="/tmp/cube.stl")
 
-        assert result["estimate"]["filament_used_grams"] == round(5000.0 * 0.003, 1)
+        assert result["estimate"]["filament_used_grams"] == 14.91
