@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Bambu fault codes now come with the cause and the fix.** Every code
+  your printer is holding — including ones the screen never shows you — is
+  explained right where you see it.
+
+- **Tell Kiln a Bambu fault code in plain words and it looks it up.** If
+  Kiln has nothing on that code, it says so instead of guessing.
+
 - **The pre-print nozzle check is free; its community half is Pro+.**
   Everyone gets the verdict against the curated budget; Kiln Pro adds how
   long that nozzle lasts on that filament across the community.
