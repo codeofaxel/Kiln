@@ -156,8 +156,9 @@ def _material_from_printer(printer_name: str | None) -> str | None:
     try:
         import kiln.server as _srv
         from kiln.plugins.material_tools import (
-            _coerce_ams_slot,
+            _EXTERNAL,
             _find_tray,
+            _global_tray,
             _iter_ams_trays,
             _loaded_ams_trays,
         )
@@ -169,21 +170,29 @@ def _material_from_printer(printer_name: str | None) -> str | None:
         if not isinstance(ams, dict):
             return None
 
+        # Tray ids are the printer's GLOBAL ids (unit * 4 + slot; 254 the
+        # external spool), resolved to the unit's own slot before matching.
         loaded = _loaded_ams_trays(ams)
-        slot = _coerce_ams_slot(ams.get("tray_now"))
-        if slot is None:
+        active = _global_tray(ams.get("tray_now"))
+        if active == _EXTERNAL:
+            return None
+        if not isinstance(active, tuple):
+            active = None
+            # After a print the feeding tray reads 255 and tray_pre names the
+            # one that ran it -- the field this door, which records outcomes,
+            # legitimately wants.
             for field in ("active_tray", "tray_pre", "tray_tar"):
-                candidate = _coerce_ams_slot(ams.get(field))
-                if candidate is not None and _find_tray(loaded, candidate) is not None:
-                    slot = candidate
+                candidate = _global_tray(ams.get(field))
+                if isinstance(candidate, tuple) and _find_tray(loaded, *candidate) is not None:
+                    active = candidate
                     break
-        if slot is not None:
-            tray = _find_tray(_iter_ams_trays(ams), slot)
+        if active is not None:
+            tray = _find_tray(_iter_ams_trays(ams), *active)
             material = str((tray or {}).get("tray_type", "") or "").strip()
             return material or None
 
         materials = {
-            str(tray.get("tray_type", "") or "").strip() for tray in loaded
+            str(tray.get("tray_type", "") or "").strip() for _unit, tray in loaded
         }
         materials.discard("")
         if len(materials) == 1:

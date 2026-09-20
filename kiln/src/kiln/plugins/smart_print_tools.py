@@ -136,33 +136,19 @@ class _SmartPrintToolsPlugin:
             # ------------------------------------------------------------------
             # 2. Auto-detect material from AMS when not supplied.
             # ------------------------------------------------------------------
+            # The one reader every slicing door uses (the global tray id,
+            # the second AMS unit, the external spool, the A1's tray_now=255
+            # with trays loaded are all its business, not this door's), so
+            # the retry weighs the print with the same spool slice_and_print
+            # would on the same reading.
             material_detected: str | None = None
             effective_material = material
-            if effective_material is None and hasattr(adapter, "get_ams_status"):
-                try:
-                    ams = adapter.get_ams_status()
-                    tray_now_str = ams.get("tray_now", "255")
-                    # "255" means no tray / external spool.
-                    with_suppress = True
-                    try:
-                        tray_now = int(tray_now_str)
-                    except (TypeError, ValueError):
-                        with_suppress = False
-                        tray_now = 255
+            if effective_material is None:
+                from kiln.slicer_filament import loaded_filament_type
 
-                    if with_suppress and tray_now != 255:
-                        for unit in ams.get("units", []):
-                            for tray in unit.get("trays", []):
-                                if tray.get("slot") == tray_now:
-                                    ttype = tray.get("tray_type", "")
-                                    if ttype:
-                                        material_detected = ttype.upper()
-                                        effective_material = material_detected
-                                    break
-                            if material_detected:
-                                break
-                except Exception as exc:
-                    _logger.debug("AMS material detection failed: %s", exc)
+                material_detected = loaded_filament_type(adapter)
+                if material_detected:
+                    effective_material = material_detected
 
             # ------------------------------------------------------------------
             # 3. Diagnosis pipeline (skipped when skip_diagnosis=True).
@@ -377,7 +363,14 @@ class _SmartPrintToolsPlugin:
             # 6. Slice, upload, print — mirroring slice_and_print's flow.
             # ------------------------------------------------------------------
             try:
-                slice_result = slice_file(model_path, profile=effective_profile)
+                # The density the slicer weighs the print with: what was
+                # declared, else the tray detected above (kiln.slicer_filament).
+                slice_result = slice_file(
+                    model_path,
+                    profile=effective_profile,
+                    material=material,
+                    loaded_material=material_detected,
+                )
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
                     f"Slicer not found: {exc}. "

@@ -4276,9 +4276,9 @@ class BambuAdapter(PrinterAdapter):
         self,
         gcode_path: str,
         *,
-        hotend_temp: int = 220,
-        bed_temp: int = 65,
-        filament_type: str = "PLA",
+        hotend_temp: int | None = None,
+        bed_temp: int | None = None,
+        filament_type: str | None = None,
         source_3mf_path: str | None = None,
         num_filaments: int = 1,
         filament_colors: list[str] | None = None,
@@ -4300,9 +4300,15 @@ class BambuAdapter(PrinterAdapter):
 
         :param gcode_path: Path to PrusaSlicer ``.gcode`` output (must be
             sliced with ``--use-relative-e-distances`` and empty start/end).
-        :param hotend_temp: Hotend temperature in °C (default 220 for PLA).
-        :param bed_temp: Bed temperature in °C (default 65 for PLA).
+        :param hotend_temp: Hotend temperature in °C for the start sequence.
+            Omitted, the temperature the G-code itself first heats to
+            (220 for a body that says nothing).
+        :param bed_temp: Bed temperature in °C, likewise (65).
         :param filament_type: Filament type string (PLA, PETG, ABS, etc.).
+            Omitted, the type the slicer wrote into the G-code -- every
+            Kiln slice carries the material it was weighed as -- else PLA.
+            Whatever its origin it reaches the printer in Bambu's own
+            vocabulary.
         :param source_3mf_path: Optional source 3MF for thumbnails/geometry.
         :param num_filaments: Number of filaments (>1 for multi-color).
         :param filament_colors: List of hex color strings per filament.
@@ -4477,14 +4483,20 @@ class BambuAdapter(PrinterAdapter):
                 return warnings
 
             ams_info = self.get_ams_status()
+            # Keyed by the printer's own tray id (unit * 4 + slot), which is
+            # what ``ams_mapping`` carries -- unit 1's first tray is 4.
             loaded_trays: dict[int, str] = {}
-            for unit in ams_info.get("units", []):
+            for unit_pos, unit in enumerate(ams_info.get("units", [])):
+                try:
+                    unit_id = int(unit.get("unit_id", unit_pos))
+                except (TypeError, ValueError):
+                    unit_id = unit_pos
                 for tray in unit.get("trays", []):
                     tray_idx = tray.get("slot")
                     tray_color = tray.get("tray_color", "")
                     if tray_idx is not None and tray_color:
                         # tray_color is hex like "FF0000FF" (RRGGBBAA).
-                        loaded_trays[int(tray_idx)] = tray_color[:6].upper()
+                        loaded_trays[unit_id * 4 + int(tray_idx)] = tray_color[:6].upper()
 
             for i, slot in enumerate(ams_mapping):
                 if i >= len(expected_colors):

@@ -154,8 +154,10 @@ line and echoed into the config block, and no thumbnail block is emitted —
 the renderer that draws them is not there in CLI mode.  The same slice
 wrote ``; filament used [mm] = 1493.99`` and ``; total filament used [g] =
 0.00``, with no ``; filament used [g]`` line at all, because Kiln's
-profiles describe a printer and name no filament density (see
-:func:`kiln.slicer.derive_filament_weight`).
+profiles describe a printer and named no filament density.  Since then
+every slice is handed one (:mod:`kiln.slicer_filament`) and the slicer
+writes both lines itself; the weight fill below stays as the safety net for
+G-code sliced elsewhere, and a Kiln slice leaves it untouched.
 
 THE FORMAT WRITTEN is PrusaSlicer's own, from its emitter
 (``src/libslic3r/GCode/Thumbnails.hpp`` L72-82, 2.9.4)::

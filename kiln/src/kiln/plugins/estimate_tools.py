@@ -147,7 +147,11 @@ class _EstimateToolsPlugin:
                 )
                 if gate_err is not None:
                     return _gate_error_response(gate_err)
-                result = slice_file(effective_input, profile=effective_profile)
+                # The slicer weighs the print with this material's density
+                # (kiln.slicer_filament), so the estimate's grams are its own.
+                result = slice_file(
+                    effective_input, profile=effective_profile, material=material or None,
+                )
 
                 # 3. Parse gcode metadata
                 meta = None
@@ -157,12 +161,35 @@ class _EstimateToolsPlugin:
                     except Exception as exc:
                         _logger.debug("Could not extract gcode metadata: %s", exc)
 
-                # 4. Build estimate dict
-                mat_upper = material.upper() if material else "PLA"
+                # 4. Build estimate dict.  The grams are the slicer's own
+                # (it was handed this material's density and wrote them);
+                # only a file with no such line falls back to length x the
+                # cross-section x the density the slice was told about --
+                # never a fixed PLA constant beside a block that says PETG.
+                from kiln.slicer_filament import SliceFilament
+
+                resolved = getattr(result, "filament", None)
+                mat_upper = (
+                    resolved.material if isinstance(resolved, SliceFilament)
+                    else (material.upper() if material else "PLA")
+                )
                 filament_mm = meta.filament_used_mm if meta else None
                 filament_g: float | None = None
-                if filament_mm is not None:
-                    filament_g = round(filament_mm * 0.003, 1)
+                slicer_grams: float | None = None
+                if result.output_path and os.path.isfile(result.output_path):
+                    from kiln.slicer import _parse_gcode_estimates
+
+                    slicer_grams = _parse_gcode_estimates(result.output_path).get("filament_weight_g")
+                if slicer_grams:
+                    filament_g = round(float(slicer_grams), 2)
+                elif filament_mm is not None:
+                    import math as _math
+
+                    fil = getattr(result, "filament", None)
+                    known = isinstance(fil, SliceFilament)
+                    diameter = fil.diameter_mm if known else 1.75
+                    density = fil.density_g_per_cm3 if known else 1.24
+                    filament_g = round(filament_mm * _math.pi * (diameter / 2) ** 2 * density / 1000.0, 2)
 
                 time_sec = meta.estimated_time_seconds if meta else None
                 time_human = _format_time(time_sec)
@@ -176,6 +203,8 @@ class _EstimateToolsPlugin:
                     "material": mat_upper,
                     "slicer": slicer_name,
                 }
+                if isinstance(getattr(result, "filament", None), SliceFilament):
+                    estimate["filament"] = result.filament.to_dict()
 
                 # 5. Printability analysis (STL/OBJ/3MF only)
                 ext = os.path.splitext(input_path)[1].lower()
