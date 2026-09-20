@@ -401,7 +401,11 @@ def _steer_to_complete_gcode(
     so Mainsail, Fluidd, OctoPrint, PrusaLink and Duet Web Control were all
     handed a file with a placeholder tile and no weight.  The completion
     puts both in, from the mesh that was sliced and the file's own moves,
-    and never touches a move.
+    and never touches a move.  The printer id is passed along because the
+    printer's OWN screen is a property of the machine, not of the software
+    in front of it: a Prusa MK4 / MINI / XL / Core One draws a QOI block
+    its firmware asks for by exact size, and the slice door is the one
+    door that knows the model without knowing the adapter.
 
     Best-effort by contract: a picture that cannot be drawn costs the
     picture, never the slice.  The upload door still refuses a file that
@@ -410,7 +414,9 @@ def _steer_to_complete_gcode(
     try:
         from kiln.printers.gcode_complete import complete_gcode_for_printer
 
-        complete_gcode_for_printer(gcode_path, model_path=model_path)
+        complete_gcode_for_printer(
+            gcode_path, printer_model=effective_printer_id, model_path=model_path,
+        )
         response["preview_completed"] = True
     except Exception as exc:  # noqa: BLE001 — the upload door still refuses an incomplete file
         _logger.warning("G-code completion failed for %s: %s", gcode_path, exc)

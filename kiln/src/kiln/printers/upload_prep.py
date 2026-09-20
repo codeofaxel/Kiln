@@ -57,11 +57,13 @@ def _complete_raw_gcode(
         from kiln.printers.gcode_complete import (
             complete_gcode_for_printer,
             family_for_adapter,
+            printer_model_for_adapter,
         )
 
         complete_gcode_for_printer(
             gcode_path,
             family_for_adapter(adapter),
+            printer_model=printer_model_for_adapter(adapter),
             model_path=stl_paths[0] if stl_paths else None,
         )
     except Exception:  # noqa: BLE001 — the upload door still refuses an incomplete file
