@@ -313,7 +313,7 @@ def _require_person() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _open(*, seconds: float, scope: Any, source: str) -> Window:
+def _open_window(*, seconds: float, scope: Any, source: str) -> Window:
     """The one writer both doors share.  Each door does its own guarding
     BEFORE calling this; nothing here asks who is calling."""
     if not isinstance(seconds, (int, float)) or seconds <= 0:
@@ -354,7 +354,7 @@ def open_window(*, seconds: float, scope: Any) -> Window:
     :class:`NotAPerson` off a terminal, ``ValueError`` for no time or no
     scope."""
     _require_person()
-    return _open(seconds=seconds, scope=scope, source=SOURCE_TERMINAL)
+    return _open_window(seconds=seconds, scope=scope, source=SOURCE_TERMINAL)
 
 
 def open_window_from_dialog(answer: DialogAnswer, *, printer_name: str) -> Window:
@@ -375,7 +375,7 @@ def open_window_from_dialog(answer: DialogAnswer, *, printer_name: str) -> Windo
     name = str(printer_name or "").strip()
     if not name:
         raise ValueError("a window from the dialog covers the one printer the print was aimed at")
-    return _open(
+    return _open_window(
         seconds=window_seconds_for(answer.choice), scope=(name,), source=SOURCE_ELICITED,
     )
 

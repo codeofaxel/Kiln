@@ -271,7 +271,7 @@ def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> s
             return (
                 f"not started on {printer_name}: standing window {window_id} that this job "
                 "was queued under has been revoked or has run out. A person can open a new "
-                "one with `kiln consent window`."
+                "one in the approval dialog of the next print, or with `kiln consent window`."
             )
     return None
 
