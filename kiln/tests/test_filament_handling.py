@@ -688,12 +688,12 @@ class TestBambuLoad:
         assert "no tray is feeding" in result.message
 
     def test_empty_tray_is_refused_before_anything_moves(self, bambu):
-        with pytest.raises(PrinterError, match="tray 2 reports no filament"):
+        with pytest.raises(PrinterError, match=r"tray 2 \(slot A3\) reports no filament"):
             bambu.load_filament(slot=2, temperature=210)
         assert not [p for p in _published(bambu) if p.get("print", {}).get("command") == "ams_change_filament"]
 
     def test_missing_tray_is_refused(self, bambu):
-        with pytest.raises(PrinterError, match="tray 7 is not present"):
+        with pytest.raises(PrinterError, match=r"tray 7 \(slot B4\) is not present"):
             bambu.load_filament(slot=7, temperature=210)
 
     def test_tray_window_beats_the_caller(self, bambu):

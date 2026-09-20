@@ -39,6 +39,13 @@ from typing import Any, ClassVar
 
 import paho.mqtt.client as mqtt
 
+from kiln.bambu_trays import EXTERNAL_SPOOL_TRAY as _EXTERNAL_SPOOL_TRAY
+from kiln.bambu_trays import NO_TRAY as _NO_TRAY
+from kiln.bambu_trays import describe_tray_id as _describe_tray_id
+from kiln.bambu_trays import read_tray_id as _read_tray_id
+from kiln.bambu_trays import tray_id as _bambu_tray_id
+from kiln.bambu_trays import tray_name as _bambu_tray_name
+from kiln.bambu_trays import unit_name as _bambu_unit_name
 from kiln.printer_intelligence import chamber_sensor_for_model
 from kiln.printers.bambu_hms_text import (
     device_type_from_serial,
@@ -1242,6 +1249,39 @@ def _tray_now_of(status: dict[str, Any]) -> str | None:
         return None
     value = ams.get("tray_now")
     return None if value is None else str(value)
+
+
+def _raw_ams_trays(ams_data: Any) -> list[tuple[int, int, int, str, dict[str, Any]]]:
+    """``(unit, slot, tray_id, name, tray)`` for every tray in the raw ``ams`` array.
+
+    The firmware gives each unit its ``id`` and each tray the unit's OWN
+    ``id`` (0-3); the printer's id for the tray -- what ``tray_now`` carries
+    and ``ams_mapping`` takes -- is computed once here, by the one rule in
+    :mod:`kiln.bambu_trays`.  A unit or tray id that is not one a Bambu can
+    name is skipped rather than turned into a number.
+    """
+    out: list[tuple[int, int, int, str, dict[str, Any]]] = []
+    if not isinstance(ams_data, list):
+        return out
+    for position, unit in enumerate(ams_data):
+        if not isinstance(unit, dict):
+            continue
+        raw_trays = unit.get("tray")
+        if not isinstance(raw_trays, list):
+            continue
+        try:
+            unit_id = int(unit.get("id", position))
+        except (TypeError, ValueError):
+            continue
+        for tray in raw_trays:
+            if not isinstance(tray, dict):
+                continue
+            try:
+                slot = int(tray.get("id", 0))
+                out.append((unit_id, slot, _bambu_tray_id(unit_id, slot), _bambu_tray_name(unit_id, slot), tray))
+            except (TypeError, ValueError):
+                continue
+    return out
 
 
 def _is_accessory_module(name: str) -> bool:
@@ -4483,8 +4523,9 @@ class BambuAdapter(PrinterAdapter):
                 return warnings
 
             ams_info = self.get_ams_status()
-            # Keyed by the printer's own tray id (unit * 4 + slot), which is
-            # what ``ams_mapping`` carries -- unit 1's first tray is 4.
+            # Keyed by the printer's own tray id, which is what
+            # ``ams_mapping`` carries -- unit 1's first tray is 4, an AMS
+            # HT's only tray is its unit id (see ``kiln.bambu_trays``).
             loaded_trays: dict[int, str] = {}
             for unit_pos, unit in enumerate(ams_info.get("units", [])):
                 try:
@@ -4495,8 +4536,12 @@ class BambuAdapter(PrinterAdapter):
                     tray_idx = tray.get("slot")
                     tray_color = tray.get("tray_color", "")
                     if tray_idx is not None and tray_color:
+                        try:
+                            key = _bambu_tray_id(unit_id, int(tray_idx))
+                        except (TypeError, ValueError):
+                            continue
                         # tray_color is hex like "FF0000FF" (RRGGBBAA).
-                        loaded_trays[unit_id * 4 + int(tray_idx)] = tray_color[:6].upper()
+                        loaded_trays[key] = tray_color[:6].upper()
 
             for i, slot in enumerate(ams_mapping):
                 if i >= len(expected_colors):
@@ -4506,7 +4551,7 @@ class BambuAdapter(PrinterAdapter):
                 if loaded_hex and expected_hex and expected_hex != loaded_hex:
                     msg = (
                         f"AMS color mismatch: plate {plate_number} filament {i} "
-                        f"expects #{expected_hex} but AMS slot {slot} has "
+                        f"expects #{expected_hex} but {_describe_tray_id(slot)} has "
                         f"#{loaded_hex} loaded."
                     )
                     logger.warning("%s", msg)
@@ -5023,12 +5068,16 @@ class BambuAdapter(PrinterAdapter):
             ):
                 loaded_trays = self._peek_loaded_ams_trays()
                 if loaded_trays:
-                    slot_idx = int(loaded_trays[0].get("slot", 0))
+                    # The printer's own id for the tray -- a spool on a
+                    # second unit used to be routed by its unit's slot,
+                    # which named unit 0's tray.
+                    slot_idx = int(loaded_trays[0]["tray_id"])
                     ams_mapping = [slot_idx]
                     use_ams = True
                     logger.info(
-                        "Single-filament AMS auto-routing: tray %d (%s)",
+                        "Single-filament AMS auto-routing: tray %d (slot %s, %s)",
                         slot_idx,
+                        loaded_trays[0].get("name", "?"),
                         loaded_trays[0].get("tray_type", "unknown"),
                     )
                 # If we have no cached AMS data at all, stay silent — the
@@ -6005,9 +6054,12 @@ class BambuAdapter(PrinterAdapter):
         file — should read ``_last_status`` directly instead, the way
         ``active_filament_color`` does.
 
-        :returns: List of loaded-tray dicts (``tray_type`` non-empty), or
-            ``None`` if no AMS data is cached yet.  Empty list means AMS
-            is attached but no trays have filament.
+        :returns: List of loaded-tray dicts (``tray_type`` non-empty) --
+            ``slot`` the unit's own id, ``unit`` the unit, ``tray_id`` the
+            printer's id for the tray (what ``ams_mapping`` takes) and
+            ``name`` Studio's name for it -- or ``None`` if no AMS data is
+            cached yet.  Empty list means AMS is attached but no trays have
+            filament.
         """
         try:
             status = self._get_cached_status()
@@ -6020,23 +6072,12 @@ class BambuAdapter(PrinterAdapter):
         if not isinstance(ams_data, list):
             return None
 
-        loaded: list[dict[str, Any]] = []
-        for unit in ams_data:
-            if not isinstance(unit, dict):
-                continue
-            raw_trays = unit.get("tray")
-            if not isinstance(raw_trays, list):
-                continue
-            for tray in raw_trays:
-                if not isinstance(tray, dict):
-                    continue
-                if tray.get("tray_type"):
-                    loaded.append({
-                        "slot": tray.get("id", 0),
-                        "tray_type": tray.get("tray_type", ""),
-                        "tray_color": tray.get("tray_color", ""),
-                    })
-        return loaded
+        return [
+            {"slot": slot, "unit": unit_id, "tray_id": tid, "name": name,
+             "tray_type": tray.get("tray_type", ""), "tray_color": tray.get("tray_color", "")}
+            for unit_id, slot, tid, name, tray in _raw_ams_trays(ams_data)
+            if tray.get("tray_type")
+        ]
 
     def active_filament_color(self) -> str | None:
         """The ``#RRGGBB`` of the filament actually loaded, or ``None``.
@@ -6079,29 +6120,25 @@ class BambuAdapter(PrinterAdapter):
         if not isinstance(ams_data, list):
             return None
 
-        trays: list[dict[str, Any]] = []
-        for unit in ams_data:
-            if not isinstance(unit, dict):
-                continue
-            raw_trays = unit.get("tray")
-            if not isinstance(raw_trays, list):
-                continue
-            trays.extend(
-                {"slot": t.get("id", 0), "tray_color": t.get("tray_color", "")}
-                for t in raw_trays
-                if isinstance(t, dict) and t.get("tray_type")
-            )
+        # Keyed by the printer's own tray id, the number ``tray_now``
+        # carries -- matching it against the unit's slot (0-3) found unit
+        # 0's spool for a tray feeding from unit 1, and nothing for an AMS HT.
+        trays: list[dict[str, Any]] = [
+            {"slot": tid, "tray_color": tray.get("tray_color", "")}
+            for _unit, _slot, tid, _name, tray in _raw_ams_trays(ams_data)
+            if tray.get("tray_type")
+        ]
         if not trays:
             return None
 
         active: int | None = None
-        if raw_now is not None and str(raw_now).strip().lstrip("-").isdigit():
-            active = int(str(raw_now).strip())
-
-        # 255 is Bambu's "no tray" — an external spool, whose colour the
-        # printer does not report at all.
-        if active == 255:
-            return None
+        ref = _read_tray_id(raw_now)
+        if ref is not None:
+            # 255 is "no tray" and 254 the external spool, whose colour the
+            # printer does not report at all.
+            if not ref.loaded_tray:
+                return None
+            active = ref.tray_id
 
         chosen: dict[str, Any] | None = None
         if active is not None:
@@ -6137,10 +6174,13 @@ class BambuAdapter(PrinterAdapter):
                 "units": [
                     {
                         "unit_id": 0,
+                        "name": "A",
                         "humidity": 3,
                         "trays": [
                             {
                                 "slot": 0,
+                                "tray_id": 0,
+                                "name": "A1",
                                 "tray_type": "PLA",
                                 "tray_color": "FF0000FF",
                                 "remain": 85,
@@ -6154,6 +6194,14 @@ class BambuAdapter(PrinterAdapter):
                     }
                 ]
             }
+
+        ``unit_id`` and ``slot`` are the firmware's own ids as it sent them;
+        ``tray_id`` is the printer's id for the tray -- the number
+        ``tray_now`` reports and ``ams_mapping`` / ``load_filament`` take --
+        and ``name`` what Bambu Studio calls it, both from
+        :mod:`kiln.bambu_trays` (unit B's first slot is tray 4; an AMS HT,
+        unit 128+, is its own tray id).  ``tray_now`` is ``"254"`` for the
+        external spool and ``"255"`` for no tray.
 
         Returns an empty ``units`` list if no AMS data is available
         (e.g. printer not connected or no AMS attached).
@@ -6301,7 +6349,7 @@ class BambuAdapter(PrinterAdapter):
                     # callers don't render it as "0% / empty".
                     tag_uid = str(tray.get("tag_uid") or "").strip()
                     remaining_known = bool(tag_uid) and set(tag_uid) != {"0"}
-                    trays.append({
+                    entry: dict[str, Any] = {
                         "slot": slot_id,
                         "tray_type": tray.get("tray_type", ""),
                         "tray_color": tray.get("tray_color", ""),
@@ -6311,7 +6359,14 @@ class BambuAdapter(PrinterAdapter):
                         "nozzle_temp_min": nozzle_min,
                         "nozzle_temp_max": nozzle_max,
                         "bed_temp": bed_t,
-                    })
+                    }
+                    # The printer's own id for the tray -- what ``tray_now``
+                    # reports and ``ams_mapping`` / ``load_filament`` take --
+                    # and Studio's name for it, beside the unit's own slot.
+                    with contextlib.suppress(TypeError, ValueError):
+                        entry["tray_id"] = _bambu_tray_id(int(unit_id), int(slot_id))
+                        entry["name"] = _bambu_tray_name(int(unit_id), int(slot_id))
+                    trays.append(entry)
 
             unit_out: dict[str, Any] = {
                 "unit_id": unit_id,
@@ -6319,6 +6374,8 @@ class BambuAdapter(PrinterAdapter):
                 "humidity_known": humidity_known,
                 "trays": trays,
             }
+            with contextlib.suppress(TypeError, ValueError):
+                unit_out["name"] = _bambu_unit_name(int(unit_id))
             if humidity_raw_int is not None:
                 unit_out["humidity_raw"] = humidity_raw_int
             if dry_time_int is not None:
@@ -6360,16 +6417,21 @@ class BambuAdapter(PrinterAdapter):
     #   {"print": {"command": "ams_change_filament",
     #              "target": <tray id>, "curr_temp": N, "tar_temp": N}}
     #
-    # ``target`` is the GLOBAL tray id the status reports in ``tray_now``
-    # (unit*4 + slot on AMS units), 254 for the external spool, 255 to
-    # unload.  The firmware's routine does the whole job — retract the old
-    # filament, feed the new one, purge — which is why "load" here needs
-    # no G-code of its own, and why the printer's own purge fault (the
-    # touchscreen wizard's HMS 1200-8007 on 2026-09-03) is what a load
-    # reports back.
+    # ``target`` is the tray id the status reports in ``tray_now`` -- unit*4
+    # + slot on a chained unit, the unit id itself on an AMS HT (see
+    # ``kiln.bambu_trays`` for the evidence) -- 254 for the external spool,
+    # 255 to unload.  Studio (v02.06) sends ``ams_id`` / ``slot_id`` beside
+    # ``target``, and on firmware that speaks its new AMS protocol asks for
+    # the external spool as target 255 + slot_id 0; Kiln sends ``target``
+    # alone, the form bench-verified on the A1, and the new-protocol spool
+    # form stays unverified.  The firmware's routine does the whole job —
+    # retract the old filament, feed the new one, purge — which is why
+    # "load" here needs no G-code of its own, and why the printer's own
+    # purge fault (the touchscreen wizard's HMS 1200-8007 on 2026-09-03) is
+    # what a load reports back.
 
-    _BAMBU_EXTERNAL_SPOOL_TRAY: int = 254
-    _BAMBU_NO_TRAY: int = 255
+    _BAMBU_EXTERNAL_SPOOL_TRAY: int = _EXTERNAL_SPOOL_TRAY
+    _BAMBU_NO_TRAY: int = _NO_TRAY
     _FILAMENT_LOAD_WAIT_S: float = 120.0
     _FILAMENT_UNLOAD_WAIT_S: float = 90.0
     _FILAMENT_PURGE_WATCH_S: float = 10.0
@@ -6540,17 +6602,19 @@ class BambuAdapter(PrinterAdapter):
         return status.get("tray_now")
 
     def _ams_tray(self, slot: int) -> dict[str, Any] | None:
-        """The tray dict ``get_ams_status`` reports for global tray *slot*."""
+        """The tray dict ``get_ams_status`` reports for the printer's tray id *slot*."""
+        ref = _read_tray_id(slot)
+        if ref is None or not ref.loaded_tray:
+            return None
         try:
             status = self.get_ams_status()
         except PrinterError:
             return None
-        unit_id, tray_id = divmod(int(slot), 4)
         for unit in status.get("units", []):
-            if int(unit.get("unit_id", 0)) != unit_id:
+            if int(unit.get("unit_id", 0)) != ref.unit:
                 continue
             for tray in unit.get("trays", []):
-                if int(tray.get("slot", -1)) == tray_id:
+                if int(tray.get("slot", -1)) == ref.slot:
                     return tray
         return None
 
@@ -6579,7 +6643,7 @@ class BambuAdapter(PrinterAdapter):
                     return (
                         float(lo),
                         float(hi),
-                        f"the AMS tray {tray_slot} report ({tray.get('tray_type') or 'unknown type'})",
+                        f"the AMS {_describe_tray_id(tray_slot)} report ({tray.get('tray_type') or 'unknown type'})",
                     )
                 if not material and tray.get("tray_type"):
                     material = str(tray["tray_type"])
@@ -6726,7 +6790,7 @@ class BambuAdapter(PrinterAdapter):
                     what = (
                         "no tray is feeding the nozzle"
                         if expect_tray == self._BAMBU_NO_TRAY
-                        else f"tray {expect_tray} is feeding the nozzle"
+                        else f"{_describe_tray_id(expect_tray)} is feeding the nozzle"
                     )
                     return FilamentOpResult(
                         success=True,
@@ -6809,19 +6873,29 @@ class BambuAdapter(PrinterAdapter):
         success is read from ``tray_now`` and failure from the fault code
         the routine raises — the same signals the touchscreen wizard shows.
         """
-        if plan.slot is None:
+        ref = _read_tray_id(plan.slot) if plan.slot is not None else None
+        if plan.slot is None or (ref is not None and ref.external):
             target = self._BAMBU_EXTERNAL_SPOOL_TRAY
+        elif ref is None or not ref.loaded_tray:
+            # 255 is the unload target and 64-127 / 136-253 belong to no
+            # unit: neither names a tray, so neither is "not present".
+            raise PrinterError(
+                f"{_describe_tray_id(plan.slot)} is not a tray this printer can load: "
+                "a chained unit's trays are 0-15 (unit B starts at 4), an AMS HT is "
+                "128-135, and 254 is the external spool. Use ams_status to see which "
+                "trays exist, or unload_filament to unload."
+            )
         else:
-            target = plan.slot
+            target = ref.tray_id
             tray = self._ams_tray(target)
             if tray is None:
                 raise PrinterError(
-                    f"AMS tray {target} is not present in the AMS report. "
+                    f"AMS {_describe_tray_id(target)} is not present in the AMS report. "
                     "Use ams_status to see which trays exist."
                 )
             if not tray.get("tray_type"):
                 raise PrinterError(
-                    f"AMS tray {target} reports no filament. Put a spool in it "
+                    f"AMS {_describe_tray_id(target)} reports no filament. Put a spool in it "
                     "(or pick a tray that has one) and try again."
                 )
         faults_before = self._snapshot_faults()

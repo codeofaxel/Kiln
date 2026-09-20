@@ -249,7 +249,7 @@ class TestHelper:
         assert d["detected"] is True and d["driven_by_kiln"] is False
         # ``tray_id`` is the printer's own id (unit * 4 + slot), the one the
         # print command takes; a one-unit changer's ids are its slots.
-        assert d["loaded_slots"][0] == {"slot": 0, "unit": 0, "tray_id": 0, "material": "PLA", "color": "FF0000"}
+        assert d["loaded_slots"][0] == {"slot": 0, "unit": 0, "tray_id": 0, "name": None, "material": "PLA", "color": "FF0000"}
         assert "does not drive" in d["summary"]
 
     def test_capabilities_default_cannot_report(self):

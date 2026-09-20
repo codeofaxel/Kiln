@@ -1844,7 +1844,7 @@ class _SlicerToolsPlugin:
                         "loaded there).  Retry in a few seconds for the "
                         "MQTT cache to refresh, or call start_print() "
                         "directly with use_ams='true' and an explicit "
-                        "ams_mapping=[<slot>]. "
+                        "ams_mapping=[<tray id>]. "
                         + " ".join(ams_routing_warnings),
                         code="AMS_STATE_AMBIGUOUS",
                     )

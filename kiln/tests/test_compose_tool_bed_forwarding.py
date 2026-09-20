@@ -238,11 +238,16 @@ class _RecordingComposer:
 
 
 class TestArrangeThenComposeDoors:
-    def test_multi_color_copies_composes_for_the_arranged_bed(self):
+    def test_multi_color_copies_composes_for_the_arranged_bed(self, monkeypatch):
+        # This door gates on a preview like start_print; the test is about
+        # the bed the composer is handed, so the gate is bypassed as its
+        # siblings in test_material_reprinting do.
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
         stl = _write_stl(_off_plate_box())
         recorder = _RecordingComposer()
         try:
             with patch("kiln.server._check_auth", side_effect=_no_auth), \
+                    patch("kiln.server.ams_status", return_value={"success": False}), \
                     patch("kiln.multicolor_3mf.compose_multicolor_3mf", recorder):
                 from kiln.server import multi_color_copies
 

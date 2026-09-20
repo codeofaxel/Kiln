@@ -42,7 +42,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from kiln.ams_routing import TRAYS_PER_UNIT, UNREAD_MATERIAL, Tray, loaded_trays, normalize_hex
+from kiln.ams_routing import UNREAD_MATERIAL, Tray, loaded_trays, normalize_hex
+from kiln.bambu_trays import EXTERNAL_SPOOL_TRAY, NO_TRAY, TRAYS_PER_UNIT, read_tray_id
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,8 @@ class MultiMaterialStatus:
             "source": self.source,
             "num_slots": self.num_slots,
             "loaded_slots": [
-                {"slot": t.slot, "unit": t.unit, "tray_id": t.tray_id, "material": t.material, "color": t.hex6}
+                {"slot": t.slot, "unit": t.unit, "tray_id": t.tray_id, "name": t.name,
+                 "material": t.material, "color": t.hex6}
                 for t in self.slots
             ],
             "tool_map": list(self.tool_map) if self.tool_map is not None else None,
@@ -267,28 +269,26 @@ def _record_seen(status: MultiMaterialStatus) -> None:
 # ---------------------------------------------------------------------------
 
 
-#: How a Bambu names a tray in ``tray_now`` (and in its own load command):
-#: the GLOBAL id ``unit * 4 + slot``; 254 is the external spool holder and
-#: 255 is "no tray feeding" -- which the A1 / AMS Lite keeps reporting with
-#: trays loaded.  The same facts :class:`kiln.printers.bambu.BambuPrinter`
-#: keeps for its filament commands.
+#: How a Bambu names a tray in ``tray_now`` (and in its own load command) is
+#: decided in :mod:`kiln.bambu_trays`, with the evidence; these are the same
+#: constants under the names this module has always exported.  255 is "no
+#: tray feeding" -- which the A1 / AMS Lite keeps reporting with trays
+#: loaded -- and 254 the external spool holder.
 BAMBU_TRAYS_PER_UNIT = TRAYS_PER_UNIT
-BAMBU_EXTERNAL_SPOOL_TRAY = 254
-BAMBU_NO_TRAY = 255
+BAMBU_EXTERNAL_SPOOL_TRAY = EXTERNAL_SPOOL_TRAY
+BAMBU_NO_TRAY = NO_TRAY
 
 
 def _bambu_feeding(info: dict[str, Any]) -> tuple[tuple[int, int] | None, bool]:
     """``(feeding, external_spool)`` from a reading's ``tray_now``."""
-    raw = str(info.get("tray_now", "") or "").strip()
-    try:
-        tray_id = int(raw)
-    except ValueError:
+    ref = read_tray_id(info.get("tray_now"))
+    if ref is None:
         return None, False
-    if tray_id == BAMBU_EXTERNAL_SPOOL_TRAY:
+    if ref.external:
         return None, True
-    if tray_id < 0 or tray_id >= BAMBU_NO_TRAY:
-        return None, False
-    return divmod(tray_id, BAMBU_TRAYS_PER_UNIT), False
+    if ref.loaded_tray:
+        return (ref.unit, ref.slot), False
+    return None, False
 
 
 def from_bambu_ams(ams_info: dict[str, Any] | None, *, printer_model: str | None) -> MultiMaterialStatus:

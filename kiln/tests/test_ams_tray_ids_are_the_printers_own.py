@@ -12,7 +12,7 @@ and the external spool was reported as "slot 254, tray data unavailable":
 * the slice-time reader (what the print is weighed as), fixed earlier.
 
 The owner's single-unit A1 cannot reach the two-unit cases; they are pinned
-from the adapter's own arithmetic (``divmod(tray_id, 4)``).
+from the one rule in :mod:`kiln.bambu_trays` (Bambu Studio's own).
 """
 
 from __future__ import annotations
@@ -137,7 +137,7 @@ class TestTheRoutingPath:
         plan = plan_ams_mapping([Filament(hex6="0000FF")], trays)
         assert plan.ok and plan.mapping == [5]
         assert plan.matches[0]["slot"] == 5
-        assert "AMS 2 slot 2" in plan.matches[0]["tray"]
+        assert plan.matches[0]["tray"] == "blue PLA in slot B2" and plan.matches[0]["name"] == "B2"
 
     def test_the_selection_record_finds_the_second_units_colour(self):
         from kiln.server import _ams_selection_record
