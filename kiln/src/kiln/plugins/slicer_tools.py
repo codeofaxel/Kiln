@@ -1382,8 +1382,11 @@ class _SlicerToolsPlugin:
                 profile: Path to a slicer profile/config file.
                 printer_id: Optional printer model ID for bundled profile
                     auto-selection (e.g. ``"prusa_mini"``).
-                material: Filament material (e.g. ``"PLA"``, ``"ABS"``).  Affects
-                    automatic brim/raft decisions.
+                material: Filament material (e.g. ``"PLA"``, ``"ABS"``).  Its
+                    density is what the slicer weighs the print with, and it
+                    steers the automatic brim/raft decision.  Omitted, the
+                    spool the printer reports loaded answers, then PLA — the
+                    response's ``slice.filament`` says which.
                 metadata: Optional dict of pass-through fields.  When
                     kiln-pro (https://kiln3d.com) is installed it
                     consumes keys here to generate a printable

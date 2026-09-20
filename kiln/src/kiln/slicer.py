@@ -725,7 +725,9 @@ def _slice_with_orca(
             # bare slice_file("model.stl") — the documented form — fails
             # validation before it starts.  Kiln's own generic profile is a
             # real answer to "you didn't say", and it keeps the bare call
-            # working on both backends.
+            # working on both backends.  slice_file resolves it before the
+            # filament identity is written, so this branch serves only a
+            # direct caller of this runner.
             #
             # Resolved through the ordinary door rather than read straight
             # off the profile, so it passes the same invariants every other

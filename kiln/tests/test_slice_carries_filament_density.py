@@ -249,10 +249,62 @@ class TestTheLoadedSpool:
         assert loaded_filament_type(self._adapter("255", [(0, "PETG")])) == "PETG"
         assert loaded_filament_type(self._adapter("255", [(1, "ABS"), (3, "PLA")])) is None
 
-    def test_the_tray_about_to_feed_answers_when_tray_now_does_not(self):
+    def test_a_target_tray_is_not_a_feeding_tray(self):
+        """tray_tar names the tray the machine is ABOUT to load; that is not
+        a spool the printer reports feeding, and two materials stay a guess."""
         from kiln.slicer_filament import loaded_filament_type
 
-        assert loaded_filament_type(self._adapter("255", [(1, "ABS"), (3, "PLA")], tray_tar="3")) == "PLA"
+        assert loaded_filament_type(self._adapter("255", [(1, "ABS"), (3, "PLA")], tray_tar="3")) is None
+
+    def test_every_make_is_read_through_the_one_record(self):
+        """A Klipper Happy Hare gate map and a Creality CFS answer through
+        the same record a Bambu does -- and an unread material is honest."""
+        from kiln.multi_material import from_creality_cfs, from_happy_hare
+        from kiln.slicer_filament import loaded_filament_type
+
+        def _klipper(mmu):
+            return SimpleNamespace(name="moonraker", get_multi_material_status=lambda: from_happy_hare(mmu))
+
+        # Every curated gate agrees: the MMU's spool answers.
+        assert loaded_filament_type(_klipper({
+            "gate_status": [1, 1, 0], "gate_material": ["PETG", "PETG", ""], "gate_color": ["ff0000", "00ff00", ""],
+        })) == "PETG"
+        # Two materials and no verified word on which gate feeds: no answer.
+        assert loaded_filament_type(_klipper({
+            "gate_status": [1, 1], "gate_material": ["PETG", "ABS"], "gate_color": ["", ""],
+        })) is None
+        # A loaded gate whose material was never curated is unread, not PLA.
+        assert loaded_filament_type(_klipper({
+            "gate_status": [1], "gate_material": [""], "gate_color": ["ff0000"],
+        })) is None
+
+        cfs = SimpleNamespace(name="creality", get_multi_material_status=lambda: from_creality_cfs({
+            "detected": True, "slots": [{"slot": 0, "material": "PLA", "color": "ffffff"}], "warnings": [],
+        }))
+        assert loaded_filament_type(cfs) == "PLA"
+
+    def test_a_unit_that_cannot_be_asked_is_not_an_empty_unit(self):
+        """A failed probe is 'unknown', never 'nothing loaded' -- and a
+        slice must not fail on it."""
+        from kiln.printers.base import PrinterError
+        from kiln.slicer_filament import loaded_filament_type
+
+        def _boom():
+            raise PrinterError("MQTT down")
+
+        assert loaded_filament_type(SimpleNamespace(name="bambu", get_multi_material_status=_boom)) is None
+
+    def test_the_record_itself_names_the_feeding_tray(self):
+        from kiln.multi_material import from_bambu_ams
+
+        info = self._adapter("5", [(0, "PLA")], unit2=[(1, "TPU")]).get_ams_status()
+        status = from_bambu_ams(info, printer_model="bambu_x1c")
+        assert status.feeding == (1, 1) and status.external_spool is False
+        assert status.to_dict()["feeding"] == [1, 1]
+        external = from_bambu_ams(self._adapter("254", [(0, "PLA")]).get_ams_status(), printer_model="bambu_a1")
+        assert external.feeding is None and external.external_spool is True
+        idle = from_bambu_ams(self._adapter("255", [(0, "PLA")]).get_ams_status(), printer_model="bambu_a1")
+        assert idle.feeding is None and idle.external_spool is False
 
     def test_a_printer_without_a_unit_reports_nothing(self):
         from kiln.slicer_filament import loaded_filament_type
@@ -354,7 +406,8 @@ class TestSliceFileCarriesTheIdentity:
 
     def test_a_callers_word_cannot_add_a_line_to_the_profile(self, tmp_path):
         """An MCP argument becomes an INI value; a newline in it must not
-        become a second key."""
+        become a second key.  A known material that needed cleaning is
+        labelled by its table row; an unknown one keeps its cleaned word."""
         stl = _cube(tmp_path / "cube.stl")
         for word, expect_type in (("PETG\nlayer_height = 9", "PETG"), ("WOOD\nlayer_height = 9", "WOOD layer_height 9")):
             seen: dict[str, Any] = {}
@@ -362,6 +415,22 @@ class TestSliceFileCarriesTheIdentity:
             ini = _loaded_ini(seen["cmd"])
             assert ini["layer_height"] != "9", word
             assert ini["filament_type"] == expect_type, word
+
+    def test_the_file_carries_the_spelling_the_printer_uses(self, tmp_path):
+        """A Bambu compares the file's filament type with its tray's in its
+        own vocabulary (``PLA-CF``), and the AMS load blocks read the type
+        off the G-code -- so the word as given is what the slicer is handed;
+        the density still comes from the table's row (``CF-PLA``)."""
+        stl = _cube(tmp_path / "cube.stl")
+        seen: dict[str, Any] = {}
+        result = _run_prusa(stl, seen, profile=resolve_slicer_profile("bambu_a1"), loaded_material="PLA-CF")
+        ini = _loaded_ini(seen["cmd"])
+        assert (ini["filament_type"], ini["filament_density"]) == ("PLA-CF", "1.3")
+        block = result.to_dict()["filament"]
+        assert (block["material"], block["filament_type"], block["source"]) == ("CF-PLA", "PLA-CF", "loaded")
+        seen = {}
+        _run_prusa(stl, seen, profile=resolve_slicer_profile("bambu_a1"), material="petg")
+        assert _loaded_ini(seen["cmd"])["filament_type"] == "PETG"
 
     def test_a_profile_kiln_cannot_read_is_handed_on_untouched_and_the_answer_says_so(self, tmp_path):
         stl = _cube(tmp_path / "cube.stl")

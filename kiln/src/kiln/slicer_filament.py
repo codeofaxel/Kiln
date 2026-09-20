@@ -56,7 +56,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -75,18 +75,6 @@ DEFAULT_MATERIAL = "PLA"
 DENSITY_KEY = "filament_density"
 DIAMETER_KEY = "filament_diameter"
 TYPE_KEY = "filament_type"
-
-#: Bambu names the feeding tray by its GLOBAL id, ``unit * 4 + slot``;
-#: 254 is the external spool (the AMS knows nothing about it) and 255 is
-#: "no tray feeding" -- which the A1 / AMS Lite keeps reporting with trays
-#: loaded, so that case is decided from the trays themselves.
-_TRAYS_PER_UNIT = 4
-_EXTERNAL_SPOOL_TRAY = 254
-_NO_ACTIVE_TRAY = 255
-#: Status fields that name a tray, in the order the AMS door reads them:
-#: the one feeding now, then the one the machine says is active / was
-#: last fed / is about to be fed.
-_TRAY_FIELDS = ("tray_now", "active_tray", "tray_pre", "tray_tar")
 
 #: What a caller's word may look like once it is a ``filament_type`` line in
 #: a slicer profile.  The word is written verbatim when the table has no row
@@ -119,10 +107,15 @@ _LOADED_NOTE_FALLBACK = "the spool recorded as loaded"
 class SliceFilament:
     """What the slicer is told about the filament, and why.
 
-    ``material`` is the table's row (``"PETG"``, ``"CF-PLA"``), or the
-    caller's own word when the table has no row for it and PLA's density
-    stood in.  ``source`` is one of the ``SOURCE_*`` constants; ``note`` is
-    the plain-English sentence a tool response carries.
+    ``material`` is the table's row the density came from (``"PETG"``,
+    ``"CF-PLA"``), or the caller's own word when the table has no row for
+    it and PLA's density stood in.  ``filament_type`` is the spelling the
+    slicer is handed and echoes into the file -- the word as the caller or
+    the printer's unit said it (``"PLA-CF"``), because a Bambu compares the
+    file's type with its tray's in its own vocabulary, and Orca knows the
+    vendor spellings too.  ``source`` is one of the ``SOURCE_*``
+    constants; ``note`` is the plain-English sentence a tool response
+    carries.
     """
 
     material: str
@@ -130,14 +123,20 @@ class SliceFilament:
     diameter_mm: float
     source: str
     note: str
+    filament_type: str = ""
     #: For the ``loaded`` rung only: who decided the spool's type (``observed``
     #: by the machine, ``user_reported`` to Kiln, ``inferred``).  ``None`` on
     #: every other rung.
     determined_by: str | None = None
 
+    def __post_init__(self) -> None:
+        if not self.filament_type:
+            object.__setattr__(self, "filament_type", safe_filament_type(self.material))
+
     def to_dict(self) -> dict[str, Any]:
         d = {
             "material": self.material,
+            "filament_type": self.filament_type,
             "density_g_per_cm3": self.density_g_per_cm3,
             "diameter_mm": self.diameter_mm,
             "source": self.source,
@@ -261,34 +260,49 @@ def resolve_slice_filament(
     profile_type = str(settings.get(TYPE_KEY) or "").split(";")[0].split(",")[0].strip()
     material = str(material).strip() if material is not None else ""
     loaded_type = str(loaded_type).strip() if loaded_type is not None else ""
+    determined_by = str(loaded_determined_by or "").strip().lower()
+    loaded_note = _LOADED_NOTES.get(determined_by, _LOADED_NOTE_FALLBACK)
 
-    loaded_note = _LOADED_NOTES.get(str(loaded_determined_by or "").strip().lower(), _LOADED_NOTE_FALLBACK)
-    for candidate, source, why in (
-        (material, SOURCE_DECLARED, "the material declared for this slice"),
-        (loaded_type, SOURCE_LOADED, loaded_note),
-    ):
-        if not candidate:
-            continue
+    def _from_table(candidate: str, source: str, why: str) -> SliceFilament | None:
+        """The rung's answer when the table has a row for *candidate*."""
         row = material_density(candidate)
         if row is None:
-            logger.debug("No density row for %r (%s); trying the next rung", candidate, source)
-            continue
+            if candidate:
+                logger.debug("No density row for %r (%s); trying the next rung", candidate, source)
+            return None
         name, density = row
-        spelled = f" ({candidate})" if name.upper() != candidate.upper() else ""
+        # The spelling as given, uppercased as every unit reports it -- unless
+        # the word needed cleaning, when the table's row is the safer label.
+        clean = safe_filament_type(candidate)
+        as_given = clean.upper() if clean == candidate else name
+        spelled = f" ({as_given})" if name.upper() != as_given.upper() else ""
         return SliceFilament(
             material=name,
             density_g_per_cm3=density,
             diameter_mm=diameter,
             source=source,
             note=f"{name}{spelled} at {density:g} g/cm³ — {why}",
-            determined_by=(
-                str(loaded_determined_by or "").strip().lower() or None
-                if source == SOURCE_LOADED else None
-            ),
+            filament_type=as_given,
+            determined_by=(determined_by or None) if source == SOURCE_LOADED else None,
         )
 
-    # The profile's own filament: a stated density as stated, else its type
-    # looked up.  Third rung, after what the caller and the printer said.
+    # Rungs one and two: the caller, then the printer.
+    answer = (
+        _from_table(material, SOURCE_DECLARED, "the material declared for this slice")
+        or _from_table(loaded_type, SOURCE_LOADED, loaded_note)
+    )
+    if answer is not None:
+        return answer
+
+    # A word the caller or the printer used that the table has no row for,
+    # named in every later rung's note so it never vanishes silently.
+    unmatched = next((c for c in (material, loaded_type) if c), "")
+    unmatched_note = (
+        f"; {safe_filament_type(unmatched)} is not in Kiln's material table" if unmatched else ""
+    )
+
+    # Rung three, the profile's own filament: a stated density as stated,
+    # else its type looked up.
     stated = _first_number(settings.get(DENSITY_KEY))
     if stated is not None:
         return SliceFilament(
@@ -296,23 +310,17 @@ def resolve_slice_filament(
             density_g_per_cm3=stated,
             diameter_mm=diameter,
             source=SOURCE_PROFILE,
-            note=f"the profile states its own filament density ({stated:g} g/cm³)",
+            note=f"the profile states its own filament density ({stated:g} g/cm³){unmatched_note}",
         )
-    if profile_type:
-        row = material_density(profile_type)
-        if row is not None:
-            name, density = row
-            spelled = f" ({profile_type})" if name.upper() != profile_type.upper() else ""
-            return SliceFilament(
-                material=name,
-                density_g_per_cm3=density,
-                diameter_mm=diameter,
-                source=SOURCE_PROFILE,
-                note=f"{name}{spelled} at {density:g} g/cm³ — the profile's own filament type",
-            )
+    answer = _from_table(profile_type, SOURCE_PROFILE, "the profile's own filament type")
+    if answer is not None:
+        return replace(answer, note=answer.note + unmatched_note) if unmatched_note else answer
 
+    # Rung four: PLA, named as the default -- or as the stand-in for a word
+    # the table does not know, which stays the material's name so a reader
+    # sees what was asked for.
     default = BUILTIN_MATERIALS[DEFAULT_MATERIAL]
-    unknown = next((c for c in (material, loaded_type, profile_type) if c), None)
+    unknown = unmatched or profile_type
     if unknown:
         material_name = safe_filament_type(unknown)
         note = (
@@ -322,7 +330,7 @@ def resolve_slice_filament(
     else:
         note = (
             f"{default.name} at {default.density_g_per_cm3:g} g/cm³, Kiln's default — "
-            f"nothing declared, no spool reported, and the profile names no filament"
+            f"nothing declared, no loaded spool could be named, and the profile names no filament"
         )
         material_name = default.name
     return SliceFilament(
@@ -340,51 +348,41 @@ def resolve_slice_filament(
 
 
 def loaded_filament_type(adapter: Any) -> str | None:
-    """The type of the spool *adapter* reports feeding, or ``None``.
+    """The material of the spool *adapter*'s multi-material unit is feeding, or ``None``.
 
-    Reads the multi-material unit through the adapter's ``get_ams_status``
-    (the Bambu AMS is the only unit Kiln's backends report a material for;
-    a runout sensor says nothing about the material).
-
-    The tray the status names answers -- ``tray_now`` first, then the
-    fields the AMS door reads after it -- resolved the way the adapter
-    resolves a tray id: the GLOBAL id is ``unit * 4 + slot``, so unit 1's
-    first tray is 4, not 0.  254 is the external spool, about which the AMS
-    can say nothing, so that is ``None``.  When no field names a loaded
-    tray (the A1 / AMS Lite keeps ``tray_now`` at 255 with trays loaded),
-    the loaded trays answer only when they all agree; two materials and no
-    word on which will feed is ``None``, and the ladder says so, rather
-    than a guess credited to the printer.  ``None`` also for no unit, no
-    loaded tray, or a unit that cannot be read: a slice must never fail on
-    a status query.
+    One question, every make: :func:`kiln.multi_material.multi_material_status`
+    reads a Bambu AMS, a Klipper Happy Hare or AFC, or a Creality CFS into
+    the one record, and this decides from the record alone.  The slot the
+    unit reports FEEDING answers when the record names one (the Bambu
+    reader fills it from ``tray_now``, resolved to the tray's own unit and
+    slot the way the adapter's load command names it).  The external spool
+    is ``None``: the unit can say nothing about it.  When no feeding slot
+    is named (the A1 / AMS Lite keeps ``tray_now`` at 255 with trays
+    loaded; a Klipper MMU's feeding gate is an unverified reading and is
+    not written into the record), the loaded slots answer only when they
+    all name the same material.  A slot loaded with an unread material
+    (an uncurated MMU gate, a CFS bay without RFID) is ``None`` too: the
+    ladder falls through and says so rather than crediting the printer
+    with a fact it never reported.  Never raises -- a slice must never
+    fail on a status query.
     """
-    if adapter is None or not hasattr(adapter, "get_ams_status"):
-        return None
     try:
-        from kiln.ams_routing import loaded_trays
+        from kiln.ams_routing import UNREAD_MATERIAL
+        from kiln.multi_material import multi_material_status
 
-        ams = adapter.get_ams_status() or {}
-        trays = loaded_trays(ams)
-        if not trays:
+        status = multi_material_status(adapter)
+        if not status.detected or not status.slots or status.external_spool:
             return None
-        for field in _TRAY_FIELDS:
-            raw = str(ams.get(field, "") or "").strip()
-            if not raw:
-                continue
-            try:
-                tray_id = int(raw)
-            except ValueError:
-                continue
-            if tray_id == _EXTERNAL_SPOOL_TRAY:
-                return None
-            if tray_id == _NO_ACTIVE_TRAY or tray_id < 0:
-                continue
-            unit, slot = divmod(tray_id, _TRAYS_PER_UNIT)
-            for tray in trays:
-                if tray.unit == unit and tray.slot == slot:
-                    return tray.material
-        materials = {tray.material for tray in trays}
-        return trays[0].material if len(materials) == 1 else None
+        if status.feeding is not None:
+            unit, slot = status.feeding
+            for tray in status.slots:
+                if (tray.unit, tray.slot) == (unit, slot):
+                    return None if tray.material == UNREAD_MATERIAL else tray.material
+            return None
+        materials = {tray.material for tray in status.slots}
+        if len(materials) != 1 or UNREAD_MATERIAL in materials:
+            return None
+        return status.slots[0].material
     except Exception:  # noqa: BLE001 -- a spool query must never fail a slice
         logger.debug("Loaded-spool read failed; the slice resolves without it", exc_info=True)
         return None
@@ -437,13 +435,10 @@ def ensure_profile_filament(
             filament = resolve_slice_filament(
                 material, loaded_type=loaded_type, loaded_determined_by=loaded_determined_by,
             )
-            return profile, SliceFilament(
-                material=filament.material,
-                density_g_per_cm3=filament.density_g_per_cm3,
-                diameter_mm=filament.diameter_mm,
-                source=filament.source,
-                note=filament.note + " — but the profile could not be read, so the slicer was handed it as-is and not given this density",
-                determined_by=filament.determined_by,
+            return profile, replace(
+                filament,
+                note=filament.note + " — but the profile could not be read, so the slicer "
+                "was handed it as-is and not given this density",
             )
 
     filament = resolve_slice_filament(
@@ -458,7 +453,7 @@ def ensure_profile_filament(
     # profile weighs and names every slot rather than the first.
     slots = _vector_count(settings)
     density_value = ",".join([f"{filament.density_g_per_cm3:g}"] * slots)
-    type_value = ";".join([safe_filament_type(filament.material)] * slots)
+    type_value = ";".join([filament.filament_type] * slots)
 
     # Already carrying exactly this identity (its own earlier output, or a
     # profile whose stated density answered): nothing to write.

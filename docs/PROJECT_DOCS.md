@@ -450,7 +450,7 @@ Paid-tier tools are discoverable too: agents without a license receive a structu
 
 | Tool | Input | Output |
 |---|---|---|
-| `slice_model` | `input_path`, `profile`, `output_dir` | G-code path, slicer info |
+| `slice_model` | `input_path`, `profile`, `output_dir`, `material` | G-code path, slicer info, the filament it was weighed with |
 | `find_slicer` | — | Detected slicer path and version |
 | `slice_and_print` | `input_path`, `profile` | Slice + upload + print result (AMS-aware on Bambu) |
 

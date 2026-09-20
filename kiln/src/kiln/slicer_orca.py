@@ -70,6 +70,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -310,8 +311,16 @@ def _unescape_gcode(value: str) -> str:
 
 
 def _as_list(value: str) -> list[str]:
-    """One-item list, the shape Orca uses for every per-extruder value."""
-    return [str(value)]
+    """One-item list, the shape Orca uses for every per-extruder value.
+
+    A PrusaSlicer vector (``1.75,1.75,1.75,1.75`` or ``PLA;PLA``) collapses
+    to its first slot: the presets emitted here are single-extruder by
+    contract (the module docstring's crash is the multi-extruder path), and
+    a comma-joined string inside a one-item list is a value Orca cannot
+    read at all.
+    """
+    first = re.split(r"[,;]", str(value), maxsplit=1)[0].strip()
+    return [first if first else str(value)]
 
 
 def settings_to_orca_presets(

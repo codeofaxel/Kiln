@@ -4024,7 +4024,7 @@ def remove(name: str) -> None:
     "-m",
     default=None,
     type=click.Choice(_MATERIAL_CHOICES),
-    help="Material type (defaults to loaded material, then PLA).",
+    help="Material type — sets the temperatures and what the print is weighed as (defaults to the loaded material, then PLA).",
 )
 @click.option(
     "--support-mode",
@@ -9309,7 +9309,7 @@ def generate_download(
     "-m",
     default=None,
     type=click.Choice(_MATERIAL_CHOICES),
-    help="Material type (defaults to loaded material, then PLA).",
+    help="Material type — sets the temperatures and what the print is weighed as (defaults to the loaded material, then PLA).",
 )
 @click.option(
     "--support-mode",

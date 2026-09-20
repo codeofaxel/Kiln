@@ -117,6 +117,17 @@ class MultiMaterialStatus:
     unit_name: str | None = None
     version: str | None = None
     warnings: list[str] = field(default_factory=list)
+    #: ``(unit, slot)`` of the tray the unit reports FEEDING right now, in
+    #: the same ids ``slots`` carry -- ``None`` when the unit names none,
+    #: or when this reader has no hardware-verified field for it.  Only the
+    #: Bambu reader fills it today (``tray_now``, the id the adapter's own
+    #: load/unload commands use); a Klipper MMU's or CFS's feeding slot is
+    #: read by :meth:`~kiln.printers.base.PrinterAdapter.read_active_slot`
+    #: as an UNVERIFIED reading and deliberately not written here.
+    feeding: tuple[int, int] | None = None
+    #: The printer is feeding from its external spool holder, about which
+    #: the multi-material unit can say nothing.
+    external_spool: bool = False
 
     @property
     def detected(self) -> bool:
@@ -161,6 +172,8 @@ class MultiMaterialStatus:
                 for t in self.slots
             ],
             "tool_map": list(self.tool_map) if self.tool_map is not None else None,
+            "feeding": list(self.feeding) if self.feeding is not None else None,
+            "external_spool": self.external_spool,
             "unit_name": self.unit_name,
             "version": self.version,
             "warnings": list(self.warnings),
@@ -254,6 +267,30 @@ def _record_seen(status: MultiMaterialStatus) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: How a Bambu names a tray in ``tray_now`` (and in its own load command):
+#: the GLOBAL id ``unit * 4 + slot``; 254 is the external spool holder and
+#: 255 is "no tray feeding" -- which the A1 / AMS Lite keeps reporting with
+#: trays loaded.  The same facts :class:`kiln.printers.bambu.BambuPrinter`
+#: keeps for its filament commands.
+BAMBU_TRAYS_PER_UNIT = 4
+BAMBU_EXTERNAL_SPOOL_TRAY = 254
+BAMBU_NO_TRAY = 255
+
+
+def _bambu_feeding(info: dict[str, Any]) -> tuple[tuple[int, int] | None, bool]:
+    """``(feeding, external_spool)`` from a reading's ``tray_now``."""
+    raw = str(info.get("tray_now", "") or "").strip()
+    try:
+        tray_id = int(raw)
+    except ValueError:
+        return None, False
+    if tray_id == BAMBU_EXTERNAL_SPOOL_TRAY:
+        return None, True
+    if tray_id < 0 or tray_id >= BAMBU_NO_TRAY:
+        return None, False
+    return divmod(tray_id, BAMBU_TRAYS_PER_UNIT), False
+
+
 def from_bambu_ams(ams_info: dict[str, Any] | None, *, printer_model: str | None) -> MultiMaterialStatus:
     """A :class:`MultiMaterialStatus` from a Bambu ``get_ams_status`` reading."""
     info = ams_info if isinstance(ams_info, dict) else {}
@@ -274,6 +311,7 @@ def from_bambu_ams(ams_info: dict[str, Any] | None, *, printer_model: str | None
             "AMS hardware bits are set but no tray state was reported — "
             "the MQTT cache may still be repopulating."
         )
+    feeding, external_spool = _bambu_feeding(info)
     return MultiMaterialStatus(
         kind=kind,
         driven_by_kiln=True,
@@ -281,6 +319,8 @@ def from_bambu_ams(ams_info: dict[str, Any] | None, *, printer_model: str | None
         slots=slots,
         num_slots=num_slots,
         warnings=warnings,
+        feeding=feeding,
+        external_spool=external_spool,
     )
 
 

@@ -166,12 +166,16 @@ class _EstimateToolsPlugin:
                 # only a file with no such line falls back to length x the
                 # cross-section x the density the slice was told about --
                 # never a fixed PLA constant beside a block that says PETG.
-                mat_upper = material.upper() if material else "PLA"
+                from kiln.slicer_filament import SliceFilament
+
+                resolved = getattr(result, "filament", None)
+                mat_upper = (
+                    resolved.material if isinstance(resolved, SliceFilament)
+                    else (material.upper() if material else "PLA")
+                )
                 filament_mm = meta.filament_used_mm if meta else None
                 filament_g: float | None = None
                 slicer_grams: float | None = None
-                from kiln.slicer_filament import SliceFilament
-
                 if result.output_path and os.path.isfile(result.output_path):
                     from kiln.slicer import _parse_gcode_estimates
 

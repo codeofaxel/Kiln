@@ -15424,8 +15424,10 @@ def run_quick_print(
         printer_id: Printer model ID for auto-profile selection
             (e.g. ``"ender3"``, ``"bambu_x1c"``, ``"klipper_generic"``).
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
-        material: Filament material hint (e.g. ``"PLA"``).  When set, AMS
-            auto-routing prefers a loaded tray whose type matches.
+        material: Filament material (e.g. ``"PLA"``).  Its density is what
+            the slicer weighs the print with (omitted: the spool the
+            printer reports loaded, then PLA — the slice step says which),
+            and AMS auto-routing prefers a loaded tray whose type matches.
         use_ams: AMS feeding mode (Bambu): ``"auto"`` (default — detect and
             route to a loaded tray), ``"true"``, or ``"false"``.
         ams_mapping: Explicit AMS slot mapping as a JSON array string,
@@ -15545,10 +15547,12 @@ def run_reslice_and_print(
         overrides: JSON string of PrusaSlicer INI key-value pairs to override.
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
         slicer_path: Explicit path to the slicer binary.
-        material: Filament material hint (e.g. ``"PLA"``).  For fully-auto
-            raw-gcode reslices, AMS routing prefers a loaded tray of this
-            material.  (3MF plates carry their own filament map, so routing
-            defers to the adapter there.)
+        material: Filament material (e.g. ``"PLA"``).  Its density is what
+            the slicer weighs the print with (omitted: the spool the
+            printer reports loaded, then PLA — the slice step says which).
+            For fully-auto raw-gcode reslices, AMS routing prefers a loaded
+            tray of this material.  (3MF plates carry their own filament
+            map, so routing defers to the adapter there.)
         use_ams: Enable AMS filament feeding (Bambu printers). If omitted,
             auto-detected from 3MF metadata.
         ams_mapping: JSON string of AMS slot indices (e.g. ``"[0, 2]"``).
