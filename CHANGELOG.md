@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **The weight on your printer's screen is for the filament you're actually using.** Every slice is weighed with the material you name or the spool your printer reports loaded, and Kiln tells you which one it used.
+
 - **Bambu fault codes now come with the cause and the fix.** Every code
   your printer is holding — including ones the screen never shows you — is
   explained right where you see it.
