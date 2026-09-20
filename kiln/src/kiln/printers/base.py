@@ -4109,6 +4109,62 @@ class PrinterAdapter(ABC):
         blocked = clearance is not None and height is not None and height >= clearance
         return state, clearance, blocked
 
+    def _detour_around_part(
+        self,
+        state: Any,
+        *,
+        station: dict[str, Any] | None,
+        action: str,
+        clearance_mm: float | None,
+    ) -> tuple[list[HomeStep] | None, str | None]:
+        """kiln-pro's path around the recorded part, read line by line before it may run.
+
+        The one place a plan enters any door: the generic home and park and
+        the Bambu emitter's home and park all come through here, so every
+        plan a door runs has passed
+        :func:`~kiln.printers.home_around_part.validate_plan` against the
+        part on record -- nothing crosses the part's row before a proven
+        lift, nothing descends over its footprint, no line Kiln cannot
+        read, any Z reference off the part -- and the planner is asked for
+        the model this adapter is declared as NOW, not the one the print was
+        recorded on.  Nothing here moves the head.
+
+        Returns ``(steps, None)``: a plan to run instead of the door's own
+        sequence.  ``(None, None)``: no plan, and the caller refuses as it
+        would without kiln-pro.  ``(None, why)``: a plan came back that
+        Kiln will not run -- it failed the validator, or the record has no
+        footprint or no height to read it against, or the catalogue has no
+        motion record for this model -- and the caller's refusal carries
+        *why*, in the validator's words.  A plan Kiln cannot judge is a
+        plan it does not run; the planner's word is never the permission.
+        """
+        from kiln.plate_state import plan_motion_around_plate
+        from kiln.printers.home_around_part import _PlanRefused, validate_plan
+
+        motion = self.motion_facts()
+        model = motion.printer_id if motion is not None else (self.declared_printer_model() or None)
+        plan = plan_motion_around_plate(state, station, action=action, clearance_mm=clearance_mm, printer_model=model)
+        if not plan:
+            return None, None
+        job = state.job
+        why: str | None = None
+        if motion is None:
+            why = ("Kiln has no motion record for this printer to read that path against -- what finds Z and "
+                   "what the firmware does with an unhomed move are looked up by model")
+        elif job is None or job.max_z_mm is None:
+            why = "the record does not say how tall the part is, and the height is the whole question"
+        elif not job.footprint_mm or len(job.footprint_mm) != 4:
+            why = "the record does not say where on the plate the part stands, so no line of the path can be shown to miss it"
+        else:
+            try:
+                validate_plan(plan, motion, footprint=[float(v) for v in job.footprint_mm], height=float(job.max_z_mm))
+            except _PlanRefused as refused:
+                why = refused.reason
+        if why is None:
+            return [HomeStep(number=i + 1, **step) for i, step in enumerate(plan)], None
+        logger.warning("%s: refusing the planner's %s path around the part on %s: %s", self.name, action, model, why)
+        return None, why
+
     def _plate_gate(
         self,
         options: dict[str, Any],
@@ -4150,14 +4206,16 @@ class PrinterAdapter(ABC):
           step text carries the row caveat.
 
         Before refusing an occupied plate, kiln-pro's planner is asked once
-        (:func:`~kiln.plate_state.plan_motion_around_plate`); a plan comes
-        back as steps the backend runs instead of its own sequence.  A
-        caller whose motion a plan cannot stand in for (a wipe needs the
-        pad) passes ``allow_plan=False`` and gets the refusal.  The
-        refusal is :class:`PlateClearRequired`, carrying a camera frame
-        where one exists, so the person looks before answering.
+        (:meth:`_detour_around_part`, which reads every line of the answer
+        against the part before handing it over); a plan comes back as
+        steps the backend runs instead of its own sequence, and a plan
+        the validator refuses is refused here, in its words.  A caller
+        whose motion a plan cannot stand in for (a wipe needs the pad)
+        passes ``allow_plan=False`` and gets the refusal.  The refusal is
+        :class:`PlateClearRequired`, carrying a camera frame where one
+        exists, so the person looks before answering.
         """
-        from kiln.plate_state import plan_motion_around_plate, raise_clearance_mm
+        from kiln.plate_state import raise_clearance_mm
 
         if options.get("plate_clear") is True:
             return None
@@ -4180,10 +4238,12 @@ class PrinterAdapter(ABC):
         height = state.job.max_z_mm if (state.occupied and state.job) else None
         if not touches_plate and not blocks_raise:
             return None
+        around = ""
         if state.occupied and allow_plan:
-            plan = plan_motion_around_plate(state, station, action=action, clearance_mm=clearance)
-            if plan:
-                return [HomeStep(number=i + 1, **step) for i, step in enumerate(plan)]
+            detour, refused = self._detour_around_part(state, station=station, action=action, clearance_mm=clearance)
+            if detour is not None:
+                return detour
+            around = self._refused_path_clause(refused)
         witness = None if options.get("plan_only") else self._plate_witness()
         look = (f" -- look at {witness} first" if witness else
                 " -- this printer has no camera Kiln can read, so look at the plate yourself")
@@ -4209,10 +4269,10 @@ class PrinterAdapter(ABC):
             message = (
                 f"Refusing to {action} {model}: {state.describe()}, and the first motion lifts the "
                 f"head only {clearance:g} mm before it crosses the row -- the part is taller than that, "
-                f"and on this family a travel collision raises no fault. Clear the plate{look}, {say_so}"
+                f"and on this family a travel collision raises no fault.{around} Clear the plate{look}, {say_so}"
             )
         elif state.occupied:
-            message = f"{model} {contact}, and {state.describe()}. Clear the plate{look}, {say_so}"
+            message = f"{model} {contact}, and {state.describe()}.{around} Clear the plate{look}, {say_so}"
         elif state.clear:
             message = (
                 f"{model} {contact}. {state.describe()[0].upper()}{state.describe()[1:]}, "
@@ -4373,6 +4433,22 @@ class PrinterAdapter(ABC):
             "such as bambu_a1, bambu_p1s, prusa_mk4, k1 or ender3_v3_ke, and call again."
         )
 
+    @staticmethod
+    def _refused_path_clause(why: str | None) -> str:
+        """The sentence a plate refusal carries when a plan came back and was refused.
+
+        Empty when there was no plan: the refusal then reads exactly as it
+        did before the planner existed.  The person is told that a path
+        was offered and why Kiln would not run it, in the validator's own
+        words, so "clear the plate" is not the only thing they hear.
+        """
+        if not why:
+            return ""
+        return (
+            " Kiln Pro's planner offered a path around it, and Kiln will not run that path: "
+            + why.rstrip(". ") + "."
+        )
+
     def _motion_gate(
         self, options: dict[str, Any], *, axes: str, action: str,
     ) -> tuple[Any, list[HomeStep] | None]:
@@ -4391,13 +4467,18 @@ class PrinterAdapter(ABC):
           switch, a switch off the print surface, or a dedicated strip --
           and an unknown method counts as landing): the plate gate, with
           the vendor's own description of the descent in the refusal.
-        * a park while the plate record says a part is there: refuse --
-          a generic backend cannot say how high the head is before it
+        * a park while the plate record says a part is there: ask kiln-pro's
+          planner, as home does, for a path that lifts first and never
+          descends over the part -- run in place of the firmware's own X/Y
+          home (:meth:`_park_head_impl`) -- and refuse without one: a
+          generic backend cannot say how high the head is before it
           travels sideways.
 
         Returns ``(motion facts or None, detour steps or None)`` -- the facts
         for the caller's plan text, and the served path around a recorded
-        part for it to run instead of its own sequence.
+        part for it to run instead of its own sequence.  Every detour has
+        been read against the part by :meth:`_detour_around_part` -- the
+        one seam both actions share -- before it is handed back.
         """
         motion = self.motion_facts()
         if options.get("plate_clear") is True:
@@ -4427,6 +4508,15 @@ class PrinterAdapter(ABC):
 
             state = plate_occupancy(self)
             if state.occupied:
+                # The same question home asks, through the same seam: a
+                # served path lifts before it travels and never descends
+                # over the part, which is exactly what this backend's own
+                # X/Y home cannot promise.  No station and no vendor raise
+                # here, as for the generic home: the firmware's routine
+                # lifts nothing before it travels.
+                detour, refused = self._detour_around_part(state, station=None, action="park", clearance_mm=None)
+                if detour is not None:
+                    return motion, detour
                 witness = None if options.get("plan_only") else self._plate_witness()
                 look = (f" -- look at {witness} first" if witness else
                         " -- this printer has no camera Kiln can read, so look at the plate yourself")
@@ -4434,8 +4524,8 @@ class PrinterAdapter(ABC):
                 raise PlateClearRequired(
                     f"Refusing to park {motion.printer_id}: {state.describe()}, and on this backend the "
                     f"park is the firmware's own X/Y home, which travels sideways at whatever height the head "
-                    f"has now -- Kiln cannot read that height here. Clear the plate{look}, then say so: "
-                    "`kiln plate clear`, or plate_clear=true on park_head.",
+                    f"has now -- Kiln cannot read that height here.{self._refused_path_clause(refused)} "
+                    f"Clear the plate{look}, then say so: `kiln plate clear`, or plate_clear=true on park_head.",
                     snapshot_path=witness,
                 )
         return motion, detour
@@ -4741,9 +4831,13 @@ class PrinterAdapter(ABC):
         The default is the firmware's own home: on Marlin, Klipper and
         RepRapFirmware the home position IS the machine's safe park, chosen
         by whoever configured it, so ``G28`` is the honest park -- reported
-        as such, never as a position Kiln chose.  A backend with a cited
-        vendor spot overrides this; one that cannot send G-code raises
-        :class:`HomingUnsupported`.
+        as such, never as a position Kiln chose.  With a part on the plate
+        the gate may instead hand back a served path around it (lift, home
+        X and Y at that height, travel to the vendor's park spot around the
+        footprint), run in place of the firmware's own home exactly as the
+        home door runs its detour, and claiming no axis homed.  A backend
+        with a cited vendor spot overrides this; one that cannot send
+        G-code raises :class:`HomingUnsupported`.
         """
         if not self.capabilities.can_send_gcode:
             raise HomingUnsupported(
@@ -4751,7 +4845,16 @@ class PrinterAdapter(ABC):
                 "Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, with your "
                 "eyes on the plate."
             )
-        motion, _ = self._motion_gate(options, axes="XY", action="park")
+        motion, detour = self._motion_gate(options, axes="XY", action="park")
+        if detour is not None:
+            from kiln.printers.motion_plan import run_home_plan
+
+            result = run_home_plan(
+                self, {"printer_id": self.declared_printer_model() or self.name},
+                axes="XY", options=options, action="park", steps=detour,
+            )
+            result.action = "park"
+            return result
         if motion is not None and motion.z_home_descends_onto_plate and options.get("plate_clear") is not True:
             # The vendor's Z home would press onto a plate nobody has vouched
             # for: park is the firmware's X/Y home only, Z untouched.

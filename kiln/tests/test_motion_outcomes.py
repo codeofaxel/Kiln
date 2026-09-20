@@ -252,14 +252,26 @@ class TestTheDoors:
     def test_a_detour_around_a_part_records_nothing(self, bambu, monkeypatch):
         from kiln.plate_state import PlateJob, mark_occupied
 
+        from .test_motion_gate import _facts
+
         _serve(monkeypatch, {"home": _fake_home_doc()})
         bambu._printer_model = "bambu_a1"
         _idle(bambu, monkeypatch)
-        mark_occupied(bambu, PlateJob(file="vase.gcode", max_z_mm=60.0))
-        detour = [{"label": "around", "you_will_see": "x", "stops_when": "y", "gcode": ["G91", "G1 Z1", "G90"], "leaves": []}]
+        mark_occupied(bambu, PlateJob(file="vase.gcode", footprint_mm=[100, 100, 150, 150], max_z_mm=60.0))
+        # The door reads every detour against the part before it runs one,
+        # and no Bambu record states what an unhomed move does -- so this
+        # bench stands a record in that does, and offers a plan that lifts
+        # clear of the 60 mm part before it travels.
+        monkeypatch.setattr(bambu, "motion_facts", lambda: _facts(
+            printer_id="bambu_a1", z_home_method="nozzle_contact_plate", z_home_xy_mm=(128.0, 254.0),
+            unhomed_move_policy="clamped", z_travel_limit_mm=256.0,
+        ))
+        detour = [{"label": "around", "you_will_see": "x", "stops_when": "y",
+                   "gcode": ["G91", "G1 Z62 F300", "G90", "G28 X"], "leaves": []}]
         monkeypatch.setattr("kiln.plate_state.plan_motion_around_plate", lambda *a, **k: detour)
         result = bambu.home_axes(axes="XY")
         assert result.success and result.sequence_source == "kiln_pro_motion_plan"
+        assert _scripts(bambu) == ["G91\nG1 Z62 F300\nG90\nG28 X"]
         assert _outcomes() == {}
 
     def test_no_plan_is_a_refusal_by_reason(self, bambu, monkeypatch):

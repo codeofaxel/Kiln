@@ -495,13 +495,38 @@ def job_for_start(adapter: Any, file_name: str, *, plate_number: int | None = No
                 break
     except Exception:  # noqa: BLE001
         logger.debug("plate job geometry lookup failed", exc_info=True)
-    printer_id = str(getattr(adapter, "_printer_model", "") or "").strip().lower() or None
     return PlateJob(
         file=os.path.basename(str(file_name or "")) or str(file_name),
         footprint_mm=footprint,
         max_z_mm=max_z,
-        printer_id=printer_id,
+        printer_id=declared_model_of(adapter),
     )
+
+
+def declared_model_of(adapter: Any) -> str | None:
+    """The model *adapter* was declared with, lower-cased, or ``None``.
+
+    The one accessor every motion door reads,
+    :meth:`~kiln.printers.base.PrinterAdapter.declared_printer_model`:
+    ``_printer_model`` (the Bambu adapter's own copy) or the safety profile
+    every config.yaml door binds with ``set_safety_profile`` -- so a Klipper
+    or Marlin machine declared in config.yaml records its model at print
+    start exactly as a Bambu does.  Never the global resolver: that answers
+    for the default printer, and a second machine's plate must not carry
+    the first machine's model.  A duck-typed object without the accessor
+    is read by the same function, unbound, so there is one definition.
+    """
+    try:
+        accessor = getattr(adapter, "declared_printer_model", None)
+        if callable(accessor):
+            declared = accessor()
+        else:
+            from kiln.printers.base import PrinterAdapter
+
+            declared = PrinterAdapter.declared_printer_model(adapter)
+    except Exception:  # noqa: BLE001 -- a model Kiln cannot read is a model it does not record
+        return None
+    return str(declared or "").strip().lower() or None
 
 
 def mark_occupied_by_start(adapter: Any, file_name: str, *, plate_number: int | None = None) -> None:
@@ -535,7 +560,12 @@ def raise_clearance_mm(station: dict[str, Any] | None) -> float | None:
 
 
 def plan_motion_around_plate(
-    state: PlateState, station: dict[str, Any] | None, *, action: str, clearance_mm: float | None
+    state: PlateState,
+    station: dict[str, Any] | None,
+    *,
+    action: str,
+    clearance_mm: float | None,
+    printer_model: str | None = None,
 ) -> list[dict[str, Any]] | None:
     """kiln-pro's motion planner, when it is installed; otherwise ``None``.
 
@@ -544,21 +574,38 @@ def plan_motion_around_plate(
     Contract of ``kiln_pro.bridge.plan_motion_around_plate``:
 
     * inputs: ``record`` (this :class:`PlateState` as a dict -- status, the
-      job's file / footprint / height), ``station`` (the model's verified
-      position record, or ``None``), ``action`` (``"home"`` or ``"park"``),
-      ``clearance_mm`` (the vendor raise the part would have to clear);
+      job's file / footprint / height, and the ``printer_id`` the print was
+      STARTED on), ``station`` (the model's verified position record, or
+      ``None``; its ``printer_id`` names the machine as it is declared NOW),
+      ``action`` (``"home"`` or ``"park"``), ``clearance_mm`` (the vendor
+      raise the part would have to clear);
     * output: a list of steps, each a dict with ``label``, ``you_will_see``,
       ``stops_when`` and ``gcode`` (a list of lines; ``leaves`` optional),
       run INSTEAD of Kiln's own sequence and reported as
       ``sequence_source: "kiln_pro_motion_plan"`` -- or ``None``, meaning
       no plan, and public Kiln refuses and asks the person as it would have.
 
-    Anything malformed, and anything raised, reads as ``None``.
+    *printer_model* is the model the adapter is declared as now, resolved
+    by the door that asks (the catalogue key its own motion facts came
+    from).  It travels to the planner as the station record's
+    ``printer_id`` -- a station of its own when the door has none -- so
+    the planner plans for the connected machine and refuses when the
+    record's ``job.printer_id`` names another: a printer re-declared since
+    the print started must not be moved by a plan for the old model.
+    Without it the planner has only the record's word.
+
+    What comes back is a plan, not a permission: the door reads every line
+    against the part (:meth:`~kiln.printers.base.PrinterAdapter._detour_around_part`)
+    before anything is sent.  Anything malformed, and anything raised,
+    reads as ``None``.
     """
     try:
         from kiln_pro.bridge import plan_motion_around_plate as _pro_plan
     except ImportError:
         return None
+    model = str(printer_model or "").strip()
+    if model:
+        station = {**(station if isinstance(station, dict) else {}), "printer_id": model}
     try:
         plan = _pro_plan(record=state.to_dict(), station=station, action=action, clearance_mm=clearance_mm)
     except Exception:  # noqa: BLE001 -- a planner fault is "no plan", never a motion

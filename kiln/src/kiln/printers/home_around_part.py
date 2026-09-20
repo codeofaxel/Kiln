@@ -20,7 +20,12 @@ This module is that decision, and only that decision.  It owns no motion:
 kiln-pro's planner produces the path, the adapter's own ``home_axes`` door
 runs it (that door is the plate-aware gate -- it is never bypassed, and
 ``plate_clear`` is never passed, because the plate is *not* clear), and
-the firmware's own read afterwards is the only proof that it worked.
+the firmware's own read afterwards is the only proof that it worked.  The
+line-by-line check here, :func:`validate_plan`, is the same one every
+door runs on every plan before sending it
+(:meth:`~kiln.printers.base.PrinterAdapter._detour_around_part`); this
+decision runs it first so the refusal can be named, and the door runs it
+again so no plan reaches a machine unread whoever asked for it.
 
 What public Kiln contributes is the judgement, in this order, each step a
 refusal that names itself:
@@ -517,9 +522,13 @@ def evaluate_home_around_part(adapter: Any, *, refusal: dict[str, Any] | None = 
 
     from kiln import plate_state as _plate_state
 
+    # The model the planner plans for is the one this adapter is declared as
+    # NOW -- the catalogue key its motion facts came from -- not the one the
+    # record wrote down when the print started; the planner refuses when the
+    # two name different machines.  The door's own gate asks the same way.
     try:
         steps = _plate_state.plan_motion_around_plate(
-            state, None, action="home", clearance_mm=None,
+            state, None, action="home", clearance_mm=None, printer_model=motion.printer_id,
         )
     except Exception:  # noqa: BLE001 -- a planner fault is "no plan", never a motion
         logger.debug("motion planner raised", exc_info=True)

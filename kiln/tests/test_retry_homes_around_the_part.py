@@ -226,9 +226,9 @@ def planner(monkeypatch):
             self.plan: list[dict[str, Any]] | None = [dict(s) for s in GOOD_PLAN]
             self.asked: list[dict[str, Any]] = []
 
-        def __call__(self, state, station, *, action, clearance_mm):
+        def __call__(self, state, station, *, action, clearance_mm, printer_model=None):
             self.asked.append({"action": action, "clearance_mm": clearance_mm,
-                               "status": state.status})
+                               "status": state.status, "printer_model": printer_model})
             if self.plan is None:
                 return None
             from kiln.printers.base import HomeStep  # noqa: F401  (shape check)
@@ -377,6 +377,9 @@ def test_the_planner_is_asked_about_this_plate_and_this_action(adapter, retry_fi
     hap.home_around_part(adapter, refusal=pg.evaluate_same_bed_retry(adapter, retry_file()))
     assert planner.asked and planner.asked[0]["action"] == "home"
     assert planner.asked[0]["status"] == "occupied"
+    # ... and for the machine this adapter is declared as now, so a printer
+    # re-declared since the print started is never moved by the old model's plan.
+    assert all(ask["printer_model"] == "sovol_sv06" for ask in planner.asked)
 
 
 # =========================================================================
