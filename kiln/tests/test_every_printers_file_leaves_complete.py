@@ -377,6 +377,22 @@ class TestTheCheck:
         assert gcode_complete.SURFACES["elegoo"].reads_thumbnail is False
         assert "could not" in gcode_complete.SURFACES["elegoo"].evidence.lower()
 
+    def test_elegoo_gets_a_best_effort_preview_and_is_never_refused(self, tmp_path, preview):
+        """What the Centauri's screen reads could not be cited, so the
+        picture is written anyway — a comment block costs nothing — and
+        its absence is never a refusal, before or after."""
+        path = raw_gcode(tmp_path)
+        assert gcode_complete.gcode_problems(path, "elegoo") == []
+        complete(path, "elegoo", preview_png=preview)
+        sizes = gcode_complete.gcode_thumbnails(Path(path).read_text(encoding="utf-8"))
+        assert sizes == list(gcode_complete.THUMBNAIL_SIZES), sizes
+        assert gcode_complete.gcode_problems(path, "elegoo") == []
+
+    def test_serial_gets_no_preview_its_own_upload_would_strip(self, tmp_path, preview):
+        path = raw_gcode(tmp_path)
+        complete(path, "serial", preview_png=preview)
+        assert "; thumbnail begin" not in Path(path).read_text(encoding="utf-8")
+
     def test_the_serial_surface_reads_neither(self, tmp_path):
         """Marlin's SD upload drops every comment line, so the check has
         nothing to hold a serial printer to."""

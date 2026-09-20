@@ -232,6 +232,10 @@ class GcodeSurface:
     #: PanelDue.  A screen that belongs to the machine (the Prusa Buddy
     #: display) is reached through :func:`screen_for_model` instead.
     qoi_screens: tuple[str, ...] = ()
+    #: A preview is written even though no reader of it can be cited — the
+    #: block costs nothing and the screen may well draw it — while its
+    #: absence is still never a refusal.  Elegoo.
+    best_effort_thumbnail: bool = False
     #: Whether the uploaded file lands where a screen ON THE PRINTER can
     #: open it.  ``False`` for a transport that keeps the file on a host and
     #: streams it (OctoPrint) or strips every comment on the way (serial):
@@ -521,6 +525,7 @@ SURFACES: dict[str, GcodeSurface] = {
             "could not be established from a source Kiln can cite, so nothing is "
             "refused on its behalf; a preview is still written, best-effort"
         ),
+        best_effort_thumbnail=True,
     ),
     "serial": GcodeSurface(
         family="serial",
@@ -1223,7 +1228,7 @@ def complete_gcode_for_printer(
     for screen in screens:
         for size in screen.png_sizes:
             want("png", size)
-    if surface.reads_thumbnail and not present:
+    if (surface.reads_thumbnail or surface.best_effort_thumbnail) and not present:
         for size in THUMBNAIL_SIZES:
             want("png", size)
     for screen in screens:
