@@ -174,10 +174,13 @@ def _consent_from_authority(block: Any, *, file_name: str, printer_name: Any):
         else:
             scope = None
     until = block.get("until")
+    # The printer is the one the CALL names, or none: the gate matches a
+    # consent against the name the call used, and the hosted server has
+    # already held the record to the printer it was made for.
     return PrintConsent(
         tool="bridge relay",
         file_name=file_name or str(block.get("file_name") or ""),
-        printer_name=str(printer_name) if printer_name else str(block.get("printer_name") or "") or None,
+        printer_name=str(printer_name) if printer_name else None,
         source=source,
         scope=scope,
         expires_at=float(until) if isinstance(until, (int, float)) else None,
