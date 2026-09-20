@@ -381,6 +381,10 @@ class TestSlice:
             profile="/tmp/prusa_mini.ini",
             slicer_path=None,
             extra_args=None,
+            # Nothing declared and no tracked spool: the slice resolves its
+            # own default density and says so (kiln.slicer_filament).
+            material=None,
+            loaded_material=None,
         )
 
     def test_slice_uses_autodetected_prusa_profile(self, runner, tmp_path):

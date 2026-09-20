@@ -377,7 +377,14 @@ class _SmartPrintToolsPlugin:
             # 6. Slice, upload, print — mirroring slice_and_print's flow.
             # ------------------------------------------------------------------
             try:
-                slice_result = slice_file(model_path, profile=effective_profile)
+                # The density the slicer weighs the print with: what was
+                # declared, else the tray detected above (kiln.slicer_filament).
+                slice_result = slice_file(
+                    model_path,
+                    profile=effective_profile,
+                    material=material,
+                    loaded_material=material_detected,
+                )
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
                     f"Slicer not found: {exc}. "

@@ -147,7 +147,11 @@ class _EstimateToolsPlugin:
                 )
                 if gate_err is not None:
                     return _gate_error_response(gate_err)
-                result = slice_file(effective_input, profile=effective_profile)
+                # The slicer weighs the print with this material's density
+                # (kiln.slicer_filament), so the estimate's grams are its own.
+                result = slice_file(
+                    effective_input, profile=effective_profile, material=material or None,
+                )
 
                 # 3. Parse gcode metadata
                 meta = None

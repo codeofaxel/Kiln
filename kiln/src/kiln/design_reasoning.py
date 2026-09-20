@@ -3108,6 +3108,7 @@ def design_to_gcode(
             output_dir=str(out_dir),
             output_name=f"{template_id}.gcode",
             profile=profile,
+            material=material,
         )
         result.gcode_file = slice_result.output_path
         result.steps_completed.append("slicing")

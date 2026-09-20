@@ -138,6 +138,14 @@ _PROCESS_SCALAR: dict[str, str] = {
 # filament value per extruder, so all of these become one-item lists.
 _FILAMENT_PER_EXTRUDER: dict[str, str] = {
     "filament_diameter": "filament_diameter",
+    # Spelled the same on both sides.  Orca's own presets carry it as a
+    # one-item list ("filament_density": ["1.24"] in fdm_filament_pla.json,
+    # OrcaSlicer 2.3.2), and with it stated the slicer writes the print's
+    # weight itself -- measured 2026-09-19: ["1.27"] on a 20 mm cube gave
+    # "; filament used [g] = 4.23".  Every slice arrives with one
+    # (kiln.slicer_filament); a caller building presets by hand may omit
+    # it, and then Orca reports 0 and the after-the-fact fill stands in.
+    "filament_density": "filament_density",
     "temperature": "nozzle_temperature",
     "first_layer_temperature": "nozzle_temperature_initial_layer",
     "min_fan_speed": "fan_min_speed",
@@ -166,9 +174,13 @@ _FILL_PATTERN_ALIASES: dict[str, str] = {
     "stars": "grid",
 }
 
-# Filament family assumed when a profile does not say.  Kiln's profiles are
-# printer settings and carry no filament identity; the temperatures they DO
-# carry are what actually drive the print, and they are translated exactly.
+# Filament family assumed when the settings do not say.  Kiln's bundled
+# profiles are printer settings and carry no filament identity of their own;
+# a slice through slice_file arrives with one written on (the declared
+# material, the loaded spool, or PLA -- kiln.slicer_filament), and this is
+# the default for presets built straight from a bare profile.  The
+# temperatures the profile DOES carry are what actually drive the print,
+# and they are translated exactly.
 _DEFAULT_FILAMENT_TYPE = "PLA"
 
 # Spelled the same on both sides, but it needs stating rather than copying —
@@ -410,12 +422,18 @@ def settings_to_orca_presets(
             process["wipe_tower_y"] = f"{wipe_tower_xy[1]:.2f}"
 
     # --- filament ------------------------------------------------------
+    # The settings' own type when stated (PrusaSlicer's ";"-joined vector,
+    # first slot), else the default.
+    filament_type = (
+        str(settings.get("filament_type", "")).split(";")[0].split(",")[0].strip()
+        or _DEFAULT_FILAMENT_TYPE
+    )
     filament: dict[str, Any] = {
         "type": "filament",
         "name": f"{name}_filament",
         "from": "system",
         "instantiation": "true",
-        "filament_type": [_DEFAULT_FILAMENT_TYPE],
+        "filament_type": [filament_type],
         "compatible_printers": [machine_name],
         "compatible_printers_condition": "",
     }

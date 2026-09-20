@@ -482,6 +482,28 @@ _SLICER_IDENTITY_TOKENS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _loaded_material_for(printer_name: str | None, material: str | None) -> str | None:
+    """The spool the target printer reports loaded, when nothing was declared.
+
+    One reading for every slicing door: the density the slicer is handed
+    (:mod:`kiln.slicer_filament`) and the material hint a door uses for
+    adhesion and validation come from the same answer.  A declared material
+    makes the question moot, so the printer is not asked.  Never raises —
+    an unreachable or unit-less printer reads as ``None``, and the slice
+    resolves PLA and says so.
+    """
+    if material:
+        return None
+    try:
+        import kiln.server as _srv
+        from kiln.slicer_filament import loaded_filament_type
+
+        return loaded_filament_type(_srv._resolve_adapter(printer_name))
+    except Exception:  # noqa: BLE001 — a slice must never fail on a status query
+        _logger.debug("Loaded-spool read for %r failed", printer_name, exc_info=True)
+        return None
+
+
 def _resolve_slicer_name(slicer_path: str | None = None) -> str | None:
     """Name the slicer that will actually run this job.
 
@@ -825,6 +847,7 @@ class _SlicerToolsPlugin:
             slicer_path: str | None = None,
             auto_center: bool = True,
             printer_name: str | None = None,
+            material: str | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
 
@@ -837,6 +860,11 @@ class _SlicerToolsPlugin:
                     auto-selection (e.g. ``"prusa_mini"``).
                 slicer_path: Explicit path to the slicer binary.  Auto-detected
                     if omitted.
+                material: Filament material for this slice (``"PLA"``,
+                    ``"PETG"``, ``"ABS"``, …).  Its density is what the
+                    slicer weighs the print with.  Omitted, the spool the
+                    printer reports loaded answers, then PLA; the response's
+                    ``filament`` block says which.
                 auto_center: When True (default), off-bed STLs are translated
                     to a bed-centered copy before slicing.  This prevents the
                     class of crash where origin-centered meshes (common from
@@ -880,6 +908,8 @@ class _SlicerToolsPlugin:
                     output_dir=output_dir,
                     profile=effective_profile,
                     slicer_path=slicer_path,
+                    material=material,
+                    loaded_material=_loaded_material_for(printer_name, material),
                 )
                 response: dict[str, Any] = {
                     "success": True,
@@ -1018,6 +1048,7 @@ class _SlicerToolsPlugin:
             slicer_path: str | None = None,
             auto_center: bool = True,
             printer_name: str | None = None,
+            material: str | None = None,
         ) -> dict[str, Any]:
             """Reslice a 3D model with custom slicer parameter overrides.
 
@@ -1054,6 +1085,10 @@ class _SlicerToolsPlugin:
                     for the default printer.  Naming a second machine
                     resolves its profile, its bed and its temperature
                     ceilings instead of the default printer's.
+                material: Filament material for this slice (``"PLA"``,
+                    ``"PETG"``, …); its density is what the slicer weighs
+                    the print with.  Omitted, the loaded spool answers,
+                    then PLA — the response's ``filament`` block says which.
             """
             if err := _srv._check_auth("slicer"):
                 return err
@@ -1172,6 +1207,8 @@ class _SlicerToolsPlugin:
                     output_dir=output_dir,
                     profile=effective_profile,
                     slicer_path=slicer_path,
+                    material=material,
+                    loaded_material=_loaded_material_for(printer_name, material),
                 )
 
                 response: dict[str, Any] = {
@@ -1441,49 +1478,23 @@ class _SlicerToolsPlugin:
                             )
 
                 # --- Auto-material from AMS if not specified ---
-                # A1 / AMS Lite keeps tray_now="255" even with trays
-                # loaded, so the old tray_now-only path silently no-opped.
-                # Prefer the active tray when tray_now names a real slot;
-                # otherwise fall back to the first LOADED tray (non-empty
-                # tray_type) so the adhesion/validation material hint is
-                # populated on A1 hardware too.  (Routing is handled
-                # separately by _resolve_use_ams below — this only sets the
-                # material string.)
+                # The active tray when the unit names one, else the first
+                # LOADED tray (the A1 / AMS Lite keeps tray_now="255" with
+                # trays loaded) — read through the one helper every slicing
+                # door uses, so the adhesion/validation hint here and the
+                # density the slicer is handed come from the same reading.
+                # Declared and loaded are kept apart: the slice below is
+                # told both, and its response says which one weighed the
+                # print.  (Routing is handled separately by
+                # _resolve_use_ams below — this only sets the material
+                # string.)
+                declared_material = material
+                loaded_material: str | None = None
                 if material is None:
-                    try:
-                        _adapter = _srv._resolve_adapter(printer_name)
-                        if hasattr(_adapter, "get_ams_status"):
-                            ams = _adapter.get_ams_status()
-                            tray_now = str(ams.get("tray_now", "255"))
-                            active_slot: int | None = None
-                            if tray_now not in ("255", ""):
-                                try:
-                                    active_slot = int(tray_now)
-                                except (TypeError, ValueError):
-                                    active_slot = None
-                            first_loaded_type: str | None = None
-                            for unit in ams.get("units", []):
-                                for tray in unit.get("trays", []):
-                                    ttype = str(tray.get("tray_type", "") or "").strip()
-                                    if not ttype:
-                                        continue
-                                    try:
-                                        tslot = int(tray.get("slot", -1))
-                                    except (TypeError, ValueError):
-                                        continue
-                                    if active_slot is not None and tslot == active_slot:
-                                        material = ttype
-                                        break
-                                    if first_loaded_type is None:
-                                        first_loaded_type = ttype
-                                if material:
-                                    break
-                            if material is None and first_loaded_type is not None:
-                                material = first_loaded_type
-                            if material:
-                                _logger.debug("Auto-detected material from AMS: %s", material)
-                    except Exception:
-                        _logger.debug("AMS material auto-detection failed", exc_info=True)
+                    loaded_material = _loaded_material_for(printer_name, material)
+                    if loaded_material:
+                        material = loaded_material
+                        _logger.debug("Auto-detected material from AMS: %s", material)
 
                 # --- Pre-print validation gate ---
                 # Mesh inputs are pre-tested for printability (manifold,
@@ -1714,6 +1725,8 @@ class _SlicerToolsPlugin:
                 result = slice_file(
                     effective_input,
                     profile=effective_profile,
+                    material=declared_material,
+                    loaded_material=loaded_material,
                 )
 
                 adapter = _srv._resolve_adapter(printer_name)

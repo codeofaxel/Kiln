@@ -870,8 +870,10 @@ _GCODE_FILAMENT_TYPE_RE = re.compile(
 #: ``; total filament length [mm] : 5127.93,2704.70`` and ``; total
 #: filament weight [g] : 16.28,8.13``.  All of them list one value per USED
 #: extruder, comma separated.  Kiln's own profiles describe a printer and
-#: no filament, so the slicer's grams read ``0.00`` and the length is the
-#: number that survives.
+#: no filament, so the slicer's grams used to read ``0.00`` and the length
+#: was the number that survived.  A slice through ``kiln.slicer`` now
+#: carries a density (:mod:`kiln.slicer_filament`) and the grams are the
+#: slicer's own; the length path remains for files sliced elsewhere.
 _GCODE_USED_MM_RE = re.compile(
     r"^;\s*(?:filament used \[mm\]\s*=|total filament length \[mm\]\s*:)\s*(.+)$",
     re.MULTILINE | re.IGNORECASE,
@@ -934,19 +936,16 @@ def _number_list(text: str) -> list[float]:
 
 
 def _material_density(filament_type: str | None) -> float:
-    """The family's nominal density from Kiln's material table, or PLA's."""
-    if not filament_type:
-        return _DEFAULT_FILAMENT_DENSITY
-    try:
-        from kiln.cost_estimator import BUILTIN_MATERIALS
-    except ImportError:  # pragma: no cover — the cost table always ships
-        return _DEFAULT_FILAMENT_DENSITY
-    key = filament_type.strip().upper()
-    profile = BUILTIN_MATERIALS.get(key)
-    if profile is None:
-        family = re.match(r"[A-Z]+", key)
-        profile = BUILTIN_MATERIALS.get(family.group(0)) if family else None
-    return profile.density_g_per_cm3 if profile else _DEFAULT_FILAMENT_DENSITY
+    """The family's nominal density from Kiln's material table, or PLA's.
+
+    The same lookup the slice-time resolver uses
+    (:func:`kiln.slicer_filament.material_density`), so the safety net and
+    the slicer can never disagree about what a spool weighs.
+    """
+    from kiln.slicer_filament import material_density
+
+    row = material_density(filament_type)
+    return row[1] if row else _DEFAULT_FILAMENT_DENSITY
 
 
 def _real_tools_used(gcode_body: str) -> list[int]:
@@ -2275,8 +2274,8 @@ def build_bambu_3mf(
 
     # The weight the screen shows, read from the body the slicer wrote —
     # before Bambu's start sequence is added, so the purge line is not
-    # counted as the part.  The declared types are the density source when
-    # the slicer had none (Kiln's profiles never do).
+    # counted as the part.  A Kiln slice carries the slicer's own grams;
+    # the declared types are the density source when a body has none.
     usage = filament_usage_from_gcode(gcode_body, filament_types=f_types)
 
     slice_info = _build_slice_info(

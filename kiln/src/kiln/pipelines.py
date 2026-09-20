@@ -420,6 +420,24 @@ def _run_stability_check(model_path: str, ctx: dict[str, Any]) -> PipelineStep:
         )
 
 
+def _loaded_material(adapter: Any, material: str | None) -> str | None:
+    """The spool *adapter* reports loaded, asked only when nothing was declared."""
+    if material or adapter is None:
+        return None
+    from kiln.slicer_filament import loaded_filament_type
+
+    return loaded_filament_type(adapter)
+
+
+def _slice_step_data(result: Any) -> dict[str, Any]:
+    """What a slice step records: the file, the slicer, and the filament it was weighed with."""
+    data: dict[str, Any] = {"output_path": result.output_path, "slicer": result.slicer}
+    filament = getattr(result, "filament", None)
+    if filament is not None:
+        data["filament"] = filament.to_dict()
+    return data
+
+
 def _target_printer_id(printer_id: str | None, printer_name: str | None) -> str | None:
     """The printer-model id EVERY step of an aimed pipeline should use.
 
@@ -656,17 +674,22 @@ def quick_print(
             except Exception:  # noqa: BLE001 — the upload step reports an unreachable printer
                 pass
 
+            # The density the slicer weighs the print with: the declared
+            # material, else the spool the target reports loaded, else PLA
+            # -- and the step says which (kiln.slicer_filament).
             result = slice_file(
                 ctx["model_path"],
                 profile=slice_profile,
                 slicer_path=slicer_path,
+                material=material,
+                loaded_material=_loaded_material(ctx.get("adapter"), material),
             )
             ctx["gcode_path"] = result.output_path
             return PipelineStep(
                 name="slice",
                 success=True,
                 message=result.message,
-                data={"output_path": result.output_path, "slicer": result.slicer},
+                data=_slice_step_data(result),
                 duration_seconds=time.time() - step_start,
             )
         except Exception as exc:
@@ -1130,18 +1153,25 @@ def reslice_and_print(
         try:
             from kiln.slicer import slice_file
 
+            # Same density ladder as quick_print, same helper, same receipt.
+            try:
+                adapter = _resolve_pipeline_adapter(printer_name)
+            except Exception:  # noqa: BLE001 — the upload step reports an unreachable printer
+                adapter = None
             result = slice_file(
                 ctx["model_path"],
                 profile=ctx["effective_profile"],
                 slicer_path=slicer_path,
                 extra_args=extra_args,
+                material=material,
+                loaded_material=_loaded_material(adapter, material),
             )
             ctx["gcode_path"] = result.output_path
             return PipelineStep(
                 name="slice",
                 success=True,
                 message=result.message,
-                data={"output_path": result.output_path, "slicer": result.slicer},
+                data=_slice_step_data(result),
                 duration_seconds=time.time() - step_start,
             )
         except Exception as exc:
@@ -1793,7 +1823,7 @@ def benchmark(
                 name="slice",
                 success=True,
                 message=result.message,
-                data={"output_path": gcode_path},
+                data=_slice_step_data(result),
                 duration_seconds=time.time() - step_start,
             )
         )
