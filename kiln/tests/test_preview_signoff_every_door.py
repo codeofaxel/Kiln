@@ -655,8 +655,13 @@ class TestCliDoors:
         assert result.exit_code != 0, result.output
         assert printer.started == []
 
+        # A window over ONE printer: every tier's.  ``kiln print`` with no
+        # --printer is aimed at the effective default printer -- in a real
+        # install the same config name the adapter is registered under
+        # ("garage" here), so the gate and the machine agree on it.
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda *_a, **_k: "garage")
         monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: True)
-        consent_windows.open_window(seconds=3600, scope=consent_windows.SCOPE_FLEET)
+        consent_windows.open_window(seconds=3600, scope=("garage",))
         monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: False)
         result = runner.invoke(cli, ["print", str(gcode), "--json", "--preview-token", token])
         assert result.exit_code == 0, result.output
