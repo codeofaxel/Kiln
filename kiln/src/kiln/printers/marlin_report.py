@@ -4,30 +4,27 @@ Three report commands, each answered on the same serial line the printer
 takes its G-code on:
 
 * ``M115`` -- firmware identity (``FIRMWARE_NAME:Marlin 2.1.2.4 (Jun 15
-  2024 ...) ...``, ``gcode/host/M115.cpp:63-75 @ 2.1.2.4``) and, when the
-  build reports capabilities, one ``Cap:NAME:0|1`` line each (``:94-172``);
-  ``Cap:Z_PROBE`` is ``HAS_BED_PROBE`` (``:136``), the one motion cares
-  about.
+  2024 ...) ...``) and, when the build reports capabilities, one
+  ``Cap:NAME:0|1`` line each; ``Cap:Z_PROBE`` says whether the build has a
+  bed probe, the one motion cares about.
 * ``M211`` -- the software endstops: whether they are on, and the minimum
   and maximum the firmware will command on each axis, in the logical frame
   (the compiled ``Z_MAX_POS`` with this unit's M206 home offset applied,
   which is the ceiling a ``G1 Z`` is clamped to).  Without an ``S``
-  parameter it only reports (``gcode/control/M211.cpp:35-40 @ 2.1.2.4``).
-  Three wire shapes exist: 2.0.9.2 and later print a replayable ``  M211 S1
-  ; ON`` line and then ``  Min:  X..   Max:  X..`` (``:42-52``); 2.0.0 to
-  2.0.9.1 and the vendor 2.0.x trees print one ``echo:Soft endstops: ON  Min:
-  ...`` line; 1.1.x prints one ``echo:Soft endstops: On  Min: ...`` line
-  (``Marlin_main.cpp:9989-10007 @ 1.1.9.1``) whose state word comes from the
-  LCD language, so it is read only when it is the English one.
+  parameter it only reports.  Three wire shapes exist, read in the
+  firmware's own source at each version: 2.0.9.2 and later print a
+  replayable ``  M211 S1 ; ON`` line and then ``  Min:  X..   Max:  X..``;
+  2.0.0 to 2.0.9.1 and the vendor 2.0.x trees print one ``echo:Soft
+  endstops: ON  Min: ...`` line; 1.1.x prints one ``echo:Soft endstops: On
+  Min: ...`` line whose state word comes from the LCD language, so it is
+  read only when it is the English one.
 * ``M119`` -- one line per endstop PIN the build has (``name: open`` or
-  ``name: TRIGGERED``; ``module/endstops.cpp:577-691 @ 2.1.2.4``).  Which
-  endstops exist is the fact used here; their state at the moment of asking
-  is not.  A probe on its own pin is listed as ``z_probe``
-  (``USES_Z_MIN_PROBE_PIN``, ``:668-670``); one sharing the Z-min plug is
-  listed as ``z_min``.  On a BLTouch build the report is NOT passive: it
-  puts the probe in SW mode and then deploys or stows the pin
-  (``endstops.cpp:578,689``; ``feature/bltouch.h:91-99``), so M119 is asked
-  only when M115 has said ``Cap:Z_PROBE:0`` -- no probe, nothing to move.
+  ``name: TRIGGERED``).  Which endstops exist is the fact used here; their
+  state at the moment of asking is not.  A probe on its own pin is listed
+  as ``z_probe``; one sharing the Z-min plug is listed as ``z_min``.  On a
+  BLTouch build the report is NOT passive: it puts the probe in SW mode and
+  then deploys or stows the pin, so M119 is asked only when M115 has said
+  ``Cap:Z_PROBE:0`` -- no probe, nothing to move.
 
 Nothing here heats anything or changes a setting.  A firmware that lacks a
 command answers ``echo:Unknown command: "M211"`` (Prusa: ``Unknown M

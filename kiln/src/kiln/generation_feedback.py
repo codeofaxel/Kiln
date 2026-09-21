@@ -1254,25 +1254,19 @@ def resolve_printer_generation_context(
         except Exception:
             logger.debug("Could not resolve printer model", exc_info=True)
 
-    # Auto-detect material from AMS (Bambu) or spool manager.
+    # Auto-detect material from the multi-material unit (Bambu AMS, or any
+    # changer Kiln reads) through the one record every door reads.  This
+    # used to compare ``tray_now`` -- the printer's tray id -- with each
+    # tray's own slot (0-3), so a spool feeding from a second unit was
+    # never found and the first unit's answered.
     if not ctx.material and adapter is not None:
         try:
-            # Bambu AMS: get_ams_status() → units → trays → tray_type
-            if hasattr(adapter, "get_ams_status"):
-                ams = adapter.get_ams_status()
-                if isinstance(ams, dict):
-                    # Find the currently active tray's material type.
-                    tray_now = ams.get("tray_now")
-                    for unit in ams.get("units", []):
-                        for tray in unit.get("trays", []):
-                            slot = tray.get("slot")
-                            tray_type = tray.get("tray_type", "")
-                            if tray_type and (tray_now is None or str(slot) == str(tray_now)):
-                                ctx.material = tray_type.lower()
-                                ctx.material_source = "ams"
-                                break
-                        if ctx.material:
-                            break
+            from kiln.slicer_filament import loaded_filament_type
+
+            loaded = loaded_filament_type(adapter)
+            if loaded:
+                ctx.material = loaded.lower()
+                ctx.material_source = "ams"
         except Exception:
             logger.debug("Could not auto-detect material from AMS", exc_info=True)
 

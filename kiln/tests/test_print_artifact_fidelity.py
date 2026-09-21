@@ -660,6 +660,13 @@ def _write_plate_3mf(path: Path) -> Path:
 
 
 class TestPlateObjectFidelity:
+    @pytest.fixture(autouse=True)
+    def _preview_gate_is_not_under_test(self, monkeypatch):
+        """These tests are about what reaches the printer; the start door
+        now gates on a preview sign-off (test_preview_signoff_every_door.py
+        has the gate's own tests).  Switched off the way CI does."""
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
     def test_extract_keeps_only_the_requested_object(self, tmp_path: Path):
         plate = _write_plate_3mf(tmp_path / "plate.gcode.3mf")
         with patch("kiln.server._check_auth", side_effect=_no_auth):

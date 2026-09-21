@@ -148,3 +148,27 @@ class TestBundledDataProvenanceDoor:
         long_note = '{"k1": {"motion": {"_sources": {"z_carrier": {"class": "vendor_config", "note": "%s"}}}}}' % ("x" * 421)
         found = gate.data_note_findings("kiln/src/kiln/data/printer_intelligence.json", long_note)
         assert found and "421 chars" in found[0].rule
+
+
+def test_a_commit_message_carrying_research_provenance_is_refused() -> None:
+    """The repository's history is as public as its tree: a source file:line
+    pin, a wiki page, a fetch date or a research project's name in a commit
+    message is the trail a comment is refused for."""
+    for text in (
+        "Pinned from DevMapping.cpp:127",
+        "per gcode/host/M115.cpp:63-75 @ 2.1.2.4",
+        "as wiki.bambulab.com/en/hms/home says",
+        "read 2026-09-20",
+        "cross-checked against pybambu",
+    ):
+        findings = _GATE.find_violations(text, source="abcd123", commit_message=True)
+        assert [f.rule for f in findings] == ["research provenance"], text
+
+
+def test_a_dependency_bump_and_kilns_own_links_pass_the_commit_rule() -> None:
+    for text in (
+        "Bumps stripe from 15.6.0 to 15.6.1 (https://github.com/stripe/stripe-python)",
+        "See https://kiln3d.com/pricing and github.com/codeofaxel/Kiln/issues/12",
+        "Read from the maker's own client and its published guides.",
+    ):
+        assert _GATE.find_violations(text, source="abcd123", commit_message=True) == [], text

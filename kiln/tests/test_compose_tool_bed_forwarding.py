@@ -238,11 +238,18 @@ class _RecordingComposer:
 
 
 class TestArrangeThenComposeDoors:
+    @pytest.fixture(autouse=True)
+    def _preview_gate_is_not_under_test(self, monkeypatch):
+        """About the bed the composer is told, not the preview sign-off
+        that now fronts these start doors -- switched off the way CI does."""
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
     def test_multi_color_copies_composes_for_the_arranged_bed(self):
         stl = _write_stl(_off_plate_box())
         recorder = _RecordingComposer()
         try:
             with patch("kiln.server._check_auth", side_effect=_no_auth), \
+                    patch("kiln.server.ams_status", return_value={"success": False}), \
                     patch("kiln.multicolor_3mf.compose_multicolor_3mf", recorder):
                 from kiln.server import multi_color_copies
 

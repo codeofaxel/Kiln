@@ -361,6 +361,8 @@ def resolve_slicer_profile(
 def profile_with_overrides(
     base_profile: str | None,
     overrides: dict[str, str] | None,
+    *,
+    prefix: str | None = None,
 ) -> str | None:
     """Return a profile path that CARRIES *overrides*, whatever the base.
 
@@ -382,6 +384,10 @@ def profile_with_overrides(
     * a base -> its lines with the override keys replaced in place and any
       new ones appended, so an explicit profile keeps everything the
       caller chose except what was deliberately overridden.
+
+    *prefix* names the written file (default ``overrides_``); a caller that
+    derives from a bundled profile passes that profile's stem so the file
+    still reads as the printer's -- slice telemetry counts by that stem.
 
     Returns ``None`` only when there is nothing at all to say.
     """
@@ -435,7 +441,7 @@ def profile_with_overrides(
     os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", dir=tmp_dir,
-        prefix="overrides_", suffix=".ini", delete=False,
+        prefix=prefix or "overrides_", suffix=".ini", delete=False,
     ) as fh:
         fh.write(content)
         path = fh.name

@@ -388,9 +388,12 @@ class TestGenerateAndPrint:
                 "support_style": "minimal",
                 "support_reason": "overhangs=12.0%",
             }
-            mock_slice.return_value = SimpleNamespace(
-                output_path="/tmp/model.gcode",
-                message="Sliced",
+            from kiln.slicer import SliceResult
+
+            # A real SliceResult: the json payload carries its to_dict(),
+            # filament block included, exactly as `kiln slice --json` does.
+            mock_slice.return_value = SliceResult(
+                success=True, output_path="/tmp/model.gcode", message="Sliced",
             )
             adapter = MagicMock()
             adapter.upload_file.return_value = SimpleNamespace(

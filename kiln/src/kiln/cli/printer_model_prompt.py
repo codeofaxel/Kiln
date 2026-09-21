@@ -33,9 +33,8 @@ import click
 
 logger = logging.getLogger(__name__)
 
-# Bambu serial-number prefix → model.  Verified 2026-06-01 against Bambu's
-# OFFICIAL find-sn wiki (wiki.bambulab.com/en/general/find-sn), page read
-# directly.  The prior table was unsourced and wrong on 5 of 6 entries — most
+# Bambu serial-number prefix → model, from the maker's own published
+# prefix table.  The prior table was unsourced and wrong on 5 of 6 entries — most
 # dangerously it mapped 094→a1_mini when 094 is actually the H2D, and
 # 01S→x1e when 01S is the P1P.  All Bambu prefixes are 3 chars.
 #

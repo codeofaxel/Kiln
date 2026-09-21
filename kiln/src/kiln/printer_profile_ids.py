@@ -21,8 +21,7 @@ Ender 3 V3 SE answers "ender3".
 from __future__ import annotations
 
 #: The model codes a Creality machine's own firmware and slicer use for it,
-#: as the vendor publishes them (CrealityPrint ``resources/profiles/Creality/
-#: machineList.json`` ``printerIntName``, read 2026-09-16), keyed to the
+#: as the vendor's own slicer profiles publish them, keyed to the
 #: catalogue row.  A Creality printer names its code in its own
 #: ``printer.cfg`` header (``# F008 / 350*350*350``), its config directory
 #: (``F016_CR4CU220812S11``) and its firmware image file name -- so a

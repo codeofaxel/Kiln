@@ -137,10 +137,23 @@ def _material_extra_args(material: str) -> list[str]:
     ]
 
 
-def _infer_default_material(ctx: click.Context) -> str:
-    """Infer material from tracked state/env, falling back to PLA."""
+#: Where the CLI's material came from: ``--material``, the spool Kiln
+#: tracks as loaded on the printer, an environment default, or nothing.
+_MATERIAL_EXPLICIT = "explicit"
+_MATERIAL_TRACKED = "tracked"
+_MATERIAL_ENV = "env"
+_MATERIAL_DEFAULT = "default"
+
+
+def _infer_default_material_with_source(ctx: click.Context) -> tuple[str, str, str | None]:
+    """Infer material from tracked state/env, falling back to PLA, and say which.
+
+    The third value is the tracked row's ``determined_by`` (who decided the
+    spool's type -- a person, or the machine), ``None`` when the answer did
+    not come from the tracker.
+    """
     try:
-        from kiln.materials import MaterialTracker
+        from kiln.materials import DECLARED, MaterialTracker
         from kiln.persistence import get_db
 
         printer_name = (ctx.obj or {}).get("printer") or "default"
@@ -148,24 +161,39 @@ def _infer_default_material(ctx: click.Context) -> str:
         loaded = tracker.get_material(printer_name, tool_index=0)
         loaded_type = _normalise_material_type(getattr(loaded, "material_type", None))
         if loaded_type:
-            return loaded_type
+            determined_by = str(getattr(loaded, "determined_by", None) or DECLARED)
+            return loaded_type, _MATERIAL_TRACKED, determined_by
     except Exception as exc:
         logger.debug("Material tracker lookup failed: %s", exc)
 
     for env_name in ("KILN_MATERIAL", "KILN_DEFAULT_MATERIAL", "KILN_FILAMENT"):
         env_val = _normalise_material_type(os.environ.get(env_name))
         if env_val:
-            return env_val
+            return env_val, _MATERIAL_ENV, None
 
-    return "PLA"
+    return "PLA", _MATERIAL_DEFAULT, None
+
+
+def _infer_default_material(ctx: click.Context) -> str:
+    """Infer material from tracked state/env, falling back to PLA."""
+    return _infer_default_material_with_source(ctx)[0]
 
 
 def _resolve_material_for_slice(ctx: click.Context, material: str | None) -> tuple[str, bool]:
     """Resolve the effective material and whether it was explicitly provided."""
+    return _resolve_material_for_slice_with_source(ctx, material)[:2]
+
+
+def _resolve_material_for_slice_with_source(
+    ctx: click.Context, material: str | None,
+) -> tuple[str, bool, str, str | None]:
+    """The effective material, whether it was explicit, where it came from,
+    and -- for a tracked spool -- who decided its type."""
     explicit = _normalise_material_type(material)
     if explicit:
-        return explicit, True
-    return _infer_default_material(ctx), False
+        return explicit, True, _MATERIAL_EXPLICIT, None
+    inferred, source, determined_by = _infer_default_material_with_source(ctx)
+    return inferred, False, source, determined_by
 
 
 def _support_profile_overrides(style: str) -> dict[str, str]:
@@ -288,7 +316,9 @@ def _resolve_slice_plan(
     effective_profile = profile
     extra_args: list[str] = []
 
-    material_key, material_is_explicit = _resolve_material_for_slice(ctx, material)
+    (
+        material_key, material_is_explicit, material_source, loaded_determined_by,
+    ) = _resolve_material_for_slice_with_source(ctx, material)
     support_style, support_reason = _resolve_support_style(support_mode, input_file)
 
     use_material_defaults = material_is_explicit or profile is None
@@ -313,9 +343,23 @@ def _resolve_slice_plan(
     if support_style and effective_profile is None:
         extra_args.extend(_support_extra_args(support_style))
 
+    # What the slicer is told to weigh the print with (kiln.slicer_filament):
+    # ``--material`` or an environment default is a declaration; the spool
+    # Kiln tracks as loaded is the loaded one -- and it rides with who
+    # decided it (a person told Kiln, or a machine reported it), so the
+    # slice's note says "as you told it" rather than crediting the printer
+    # with a fact it never reported.  The PLA fallback hands nothing down,
+    # and the slice resolves its own default and says so.
+    declared = material_key if material_source in (_MATERIAL_EXPLICIT, _MATERIAL_ENV) else None
+    loaded = material_key if material_source == _MATERIAL_TRACKED else None
+
     return {
         "material": material_key,
         "material_explicit": material_is_explicit,
+        "material_source": material_source,
+        "declared_material": declared,
+        "loaded_material": loaded,
+        "loaded_determined_by": loaded_determined_by,
         "printer_id": effective_printer_id,
         "profile_path": effective_profile,
         "extra_args": extra_args,
@@ -2538,7 +2582,7 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
     "--ams-mapping",
     type=str,
     default=None,
-    help="AMS slot mapping per extruder, comma-separated (e.g. '0,1'). Implies --use-ams.",
+    help="The AMS tray per extruder by the printer's tray id, comma-separated (e.g. '0,1'; unit B starts at 4, an AMS HT is 128+). Implies --use-ams.",
 )
 @click.option("--no-nozzle-check", is_flag=True, help="Disable nozzle clumping/blob detection (Bambu). Use when prints trigger false HMS 0300-8014 errors.")
 @click.option(
@@ -3505,7 +3549,7 @@ def _wait_for_cooldown(result: dict, json_mode: bool) -> None:
 
 
 @filament.command("load")
-@click.option("--slot", type=int, default=None, help="AMS tray id (Bambu). Omit for the external / single spool.")
+@click.option("--slot", type=int, default=None, help="The printer's tray id (Bambu; unit B starts at 4, an AMS HT is 128+; see `kiln ams`). Omit for the external / single spool.")
 @click.option("--material", default=None, help="Material name, e.g. PLA — picks a temperature when none is given.")
 @click.option("--temp", "temperature", type=float, default=None, help="Hotend target (°C).")
 @click.option("--length", "length_mm", type=float, default=None, help="Feed distance for generic G-code backends (mm).")
@@ -3980,7 +4024,7 @@ def remove(name: str) -> None:
     "-m",
     default=None,
     type=click.Choice(_MATERIAL_CHOICES),
-    help="Material type (defaults to loaded material, then PLA).",
+    help="Material type — sets the temperatures and what the print is weighed as (defaults to the loaded material, then PLA).",
 )
 @click.option(
     "--support-mode",
@@ -4002,8 +4046,8 @@ def remove(name: str) -> None:
     type=str,
     default=None,
     help=(
-        "AMS slot mapping per copy, comma-separated (e.g. '0,1,2'). "
-        "When --copies matches the number of AMS slots, each copy prints "
+        "The AMS tray per copy by the printer's tray id, comma-separated (e.g. '0,1,2'; "
+        "unit B starts at 4). When --copies matches the number of trays, each copy prints "
         "in a different color. Implies --use-ams."
     ),
 )
@@ -4107,6 +4151,9 @@ def slice(
                 profile=plan["profile_path"],
                 extra_args=extra_args or None,
                 output_dir=output_dir,
+                material=plan.get("declared_material"),
+                loaded_material=plan.get("loaded_material"),
+                loaded_determined_by=plan.get("loaded_determined_by") or "observed",
             )
             copy_strategy = "multicolor_merge"
 
@@ -4137,6 +4184,9 @@ def slice(
                 profile=plan["profile_path"],
                 slicer_path=slicer,
                 extra_args=extra_args or None,
+                material=plan.get("declared_material"),
+                loaded_material=plan.get("loaded_material"),
+                loaded_determined_by=plan.get("loaded_determined_by") or "observed",
             )
 
         if not print_after:
@@ -4163,6 +4213,8 @@ def slice(
                 click.echo(result.message)
                 click.echo(f"Output: {result.output_path}")
                 click.echo(f"Material: {plan['material']}")
+                if getattr(result, "filament", None) is not None:
+                    click.echo(f"Weighed as: {result.filament.note}")
                 if copies > 1:
                     click.echo(f"Copies: {copies} (strategy: {copy_strategy}, spacing: {spacing}mm)")
                 if plan["printer_id"]:
@@ -7572,26 +7624,45 @@ def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
                         )
 
         if ams_data and ams_data.get("units"):
-            tray_now = str(ams_data.get("tray_now", "255"))
+            from kiln.bambu_trays import read_tray_id, tray_name
+            from kiln.bambu_trays import tray_id as _tray_id
+
+            # The report's ``feeding`` record is the printer's own tray id;
+            # each tray carries its unit's slot, so the feeding tray is found by
+            # computing the same id -- comparing the slot alone marked unit
+            # A's spool active for a tray feeding from unit B.
+            record = ams_data.get("feeding") if "feeding" in ams_data else None
+            feeding = (
+                read_tray_id(record.get("tray_id")) if isinstance(record, dict)
+                else None if "feeding" in ams_data
+                else read_tray_id(ams_data.get("tray_now"))
+            )
             slots: list[dict] = []
-            for unit in ams_data["units"]:
-                unit_id = int(unit.get("unit_id", 0))
+            for position, unit in enumerate(ams_data["units"]):
+                unit_id = int(unit.get("unit_id", position))
                 humidity = unit.get("humidity")
                 # The adapter flags humidity / remaining unknown on hardware
                 # that can't measure them (AMS Lite, untagged spools); drop
                 # the value rather than show a placeholder as a real reading.
                 humidity_known = bool(unit.get("humidity_known"))
                 for tray in unit.get("trays", []):
-                    slot_num = unit_id * 4 + int(tray.get("slot", 0)) + 1  # 1-indexed
+                    try:
+                        tid = _tray_id(unit_id, int(tray.get("slot", 0)))
+                        name = tray_name(unit_id, int(tray.get("slot", 0)))
+                    except (TypeError, ValueError):
+                        continue
                     color_hex = tray.get("tray_color", "")
                     # Convert RRGGBBAA hex to readable color name or short hex.
                     color_display = f"#{color_hex[:6]}" if len(color_hex) >= 6 else color_hex
                     tray_type = tray.get("tray_type", "")
                     remain = tray.get("remain")
                     remaining_known = tray.get("remaining_known")
-                    is_active = str(tray.get("slot", -1)) == str(tray_now)
+                    is_active = feeding is not None and feeding.tray_id == tid
                     entry = {
-                        "slot": slot_num,
+                        # Studio's name for the slot and the printer's id for
+                        # the tray (what start_print's ams_mapping takes).
+                        "slot": name,
+                        "tray_id": tid,
                         "type": tray_type,
                         "color": color_display,
                         "color_raw": color_hex,
@@ -8323,9 +8394,11 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                     )
                     tray_now = str(ams_data.get("tray_now", "255"))
                     if tray_now == "255":
+                        from kiln.bambu_trays import describe_tray_id
+
                         selected = ams_data.get("tray_pre") or ams_data.get("tray_tar")
                         if selected not in (None, "", "255"):
-                            click.echo(f"  Selected AMS tray: {selected}")
+                            click.echo(f"  Selected AMS: {describe_tray_id(selected)}")
                         else:
                             click.echo("  Active AMS tray not reported yet; start_print auto-routing will use loaded trays.")
                 else:
@@ -9257,7 +9330,7 @@ def generate_download(
     "-m",
     default=None,
     type=click.Choice(_MATERIAL_CHOICES),
-    help="Material type (defaults to loaded material, then PLA).",
+    help="Material type — sets the temperatures and what the print is weighed as (defaults to the loaded material, then PLA).",
 )
 @click.option(
     "--support-mode",
@@ -9389,10 +9462,15 @@ def generate_and_print_cmd(
             result.local_path,
             profile=plan["profile_path"],
             extra_args=plan["extra_args"] or None,
+            material=plan.get("declared_material"),
+            loaded_material=plan.get("loaded_material"),
+            loaded_determined_by=plan.get("loaded_determined_by") or "observed",
         )
         if not json_mode:
             click.echo(f"Sliced: {slice_result.output_path}")
             click.echo(f"Material: {plan['material']}")
+            if getattr(slice_result, "filament", None) is not None:
+                click.echo(f"Weighed as: {slice_result.filament.note}")
             if plan["support_style"]:
                 note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
                 click.echo(f"Supports: {plan['support_style']}{note}")
@@ -9445,7 +9523,7 @@ def generate_and_print_cmd(
                             "validation": val.to_dict(),
                             "preview": preview_data,
                             "preview_notified": preview_notified,
-                            "slice": {"output_path": slice_result.output_path, "message": slice_result.message},
+                            "slice": slice_result.to_dict(),
                             "material": plan["material"],
                             "support_mode": support_mode,
                             "support_style": plan["support_style"],
@@ -12137,11 +12215,27 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
             if not ams_units:
                 click.echo("No AMS units detected.")
             else:
+                from kiln.bambu_trays import describe_tray_id, tray_name, unit_name
+                from kiln.bambu_trays import tray_id as _tray_id
+
                 untracked = False
-                for unit in ams_units:
-                    click.echo(f"AMS #{unit.get('unit_id', unit.get('id', '?'))}:")
+                for position, unit in enumerate(ams_units):
+                    raw_unit = unit.get("unit_id", unit.get("id", position))
+                    try:
+                        unit_id = int(raw_unit)
+                        click.echo(f"AMS {unit_name(unit_id)}:")
+                    except (TypeError, ValueError):
+                        unit_id = None
+                        click.echo(f"AMS #{raw_unit}:")
                     for tray in unit.get("trays", unit.get("tray", [])):
-                        slot = tray.get("slot", tray.get("id", "?"))
+                        raw_slot = tray.get("slot", tray.get("id", "?"))
+                        # Studio's name for the slot, and the printer's id
+                        # for the tray -- the number ams_mapping and
+                        # load_filament take -- beside it.
+                        try:
+                            slot = f"{tray_name(unit_id, int(raw_slot))} (tray {_tray_id(unit_id, int(raw_slot))})"
+                        except (TypeError, ValueError):
+                            slot = str(raw_slot)
                         raw_color = tray.get("tray_color", tray.get("color", ""))
                         color = f"#{raw_color[:6]}" if isinstance(raw_color, str) and len(raw_color) >= 6 else (raw_color or "unknown")
                         material = tray.get("tray_type", tray.get("type", "unknown")) or "unknown"
@@ -12160,13 +12254,17 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
                         "  Tip: remaining % is only known for spools with a "
                         "Bambu RFID tag."
                     )
+            # The report's own answer first, then the raw tray_now.
+            feeding = result.get("feeding") if "feeding" in result else None
             tray_now = result.get("tray_now")
-            if tray_now and tray_now != "255":
-                click.echo(f"Active tray: {tray_now}")
+            if isinstance(feeding, dict):
+                click.echo(f"Active: {describe_tray_id(feeding.get('tray_id'))}")
+            elif "feeding" not in result and tray_now and tray_now != "255":
+                click.echo(f"Active: {describe_tray_id(tray_now)}")
             elif ams_units:
                 selected = result.get("tray_pre") or result.get("tray_tar")
                 if selected not in (None, "", "255"):
-                    click.echo(f"Selected AMS tray: {selected}")
+                    click.echo(f"Selected: {describe_tray_id(selected)}")
                 else:
                     click.echo("Active tray not reported; AMS trays are loaded.")
     except click.ClickException:

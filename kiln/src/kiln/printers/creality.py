@@ -75,14 +75,8 @@ _OFFICIAL_ROOT_SERVICE_MODELS: frozenset[str] = frozenset(
     {"k1", "k1_max", "k1c", "ender3_v3_ke", "cr10_se"}
 )
 # Models whose maker documents a stock Fluidd interface on port 4408, each
-# on a wiki page named for that model (never inferred from a sibling):
-#   ender3_v3      wiki.creality.com/en/ender-series/ender-3-v3/quick-start-guide/
-#                  how-to-control-the-ender-3-v3-using-fluidd-over-a-local-area-network
-#   ender3_v3_plus wiki.creality.com/en/ender-series/ender-3-v3-plus/quick-start-guide/
-#                  how-to-control-the-ender-3-v3-plus-using-fluidd-over-a-local-area-network
-#                  ("Enter the IP address ... followed by the suffix ':4408' ...
-#                  You can now control your printer in the browser using
-#                  Fluidd!", read 2026-09-15)
+# on the maker's own quick-start page for that model (never inferred from
+# a sibling): the Ender-3 V3 and the Ender-3 V3 Plus.
 _OFFICIAL_STOCK_FLUIDD_MODELS: frozenset[str] = frozenset({"ender3_v3", "ender3_v3_plus"})
 _COMMUNITY_FLUIDD_MODELS: frozenset[str] = frozenset(
     {"k2", "k2_pro", "k2_plus", "creality_hi"}

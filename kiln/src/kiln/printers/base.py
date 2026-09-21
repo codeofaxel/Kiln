@@ -3567,8 +3567,9 @@ class PrinterAdapter(ABC):
         """Feed filament to the nozzle.
 
         Args:
-            slot: Which spool to feed on a multi-material unit (Bambu AMS
-                tray id, 0-based across units).  ``None`` means the external
+            slot: Which spool to feed on a multi-material unit (the Bambu
+                printer's own tray id: ``unit * 4 + slot`` on a chained
+                unit, the unit id on an AMS HT).  ``None`` means the external
                 / single spool the user has already pushed into the extruder.
             material: Material name, used to choose a temperature when
                 *temperature* is omitted and no spool report supplies one.
@@ -6502,12 +6503,20 @@ def _incomplete_upload_reason(adapter: PrinterAdapter, file_path: str) -> str | 
     :mod:`kiln.printers.gcode_complete` for what each surface reads.
     """
     try:
-        from kiln.printers.gcode_complete import family_for_adapter, gcode_problems
+        from kiln.printers.gcode_complete import (
+            declared_model_for_adapter,
+            family_for_adapter,
+            gcode_problems,
+        )
 
         family = family_for_adapter(adapter)
         if family is None:
             return None
-        problems = gcode_problems(file_path, family)
+        # The declared model alone: a refusal keys off config, never off a
+        # self-report and never the global resolver.
+        problems = gcode_problems(
+            file_path, family, printer_model=declared_model_for_adapter(adapter),
+        )
         if not problems:
             return None
         return (
