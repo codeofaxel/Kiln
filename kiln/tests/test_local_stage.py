@@ -1113,8 +1113,10 @@ class TestTheLinkRidesUntilAPanelProves:
         assert sc["artifact"]["artifact_token"]
         assert sc["viewer_url"], "the first mint after a start rode alone"
         assert len(calls) == 1
-        assert sc["shown"]["door"] == "panel"
-        assert "link" in sc["shown"]["reason"]
+        # Declared is not proven: until a panel fetches, the link IS the
+        # door — the same reading the print gate makes.
+        assert sc["shown"]["door"] == "link"
+        assert "viewer_url" in sc["shown"]["reason"]
 
     def test_after_a_fetch_lands_the_result_is_lean_again(self, tmp_path, monkeypatch):
         calls = _wire_link_door(monkeypatch)
@@ -1134,7 +1136,7 @@ class TestTheLinkRidesUntilAPanelProves:
         shared record, and that counts."""
         _wire_link_door(monkeypatch)
         mesh = _real_cube(tmp_path / "a.stl")
-        sc = _run_hook(self._apps_host(), mesh, tool_name="compile_scad")
+        _run_hook(self._apps_host(), mesh, tool_name="compile_scad")
         from kiln.preview_evidence import record
 
         record("stage", mesh, via="panel_fetch")
@@ -1241,3 +1243,53 @@ class TestNoDeadHandles:
         sc = result.structuredContent
         assert sc["shown"]["door"] == "none"
         assert "no mesh" in sc["shown"]["reason"]
+
+    def test_a_stage_named_file_the_stage_cannot_draw_stages_nothing_else(self, tmp_path):
+        """A Bambu STEP slice: the slicer was handed a .step, the wrap is a
+        real .gcode.3mf on disk — which on a Bambu can carry a 1 mm
+        placeholder cube where the picture goes.  The door that named the
+        stage's file is believed; nothing falls through to the wrap."""
+        wrap = tmp_path / "bracket.gcode.3mf"
+        wrap.write_bytes(b"PK\x03\x04")
+        token = local_stage.token_for_call_result(_Result({
+            "success": True,
+            "stage_mesh_path": str(tmp_path / "bracket.step"),
+            "output_3mf_path": str(wrap),
+            "output_path": str(wrap),
+        }))
+        assert token is None
+
+
+class TestTheLinkDoorNeverHoldsTheResult:
+    """The link rides while the panel is unproven, and its upload runs in a
+    thread — but the RESULT was awaiting it, so a first make on a no-panel
+    host sat behind up to the link door's 20-second ceiling.  Bounded: past
+    the budget the result answers, says the link is still uploading, and
+    the door's cache hands the link to the next result for the same bytes."""
+
+    def test_a_slow_upload_lets_the_result_answer(self, tmp_path, monkeypatch):
+        import threading
+        import time as _time
+
+        _wire_link_door(monkeypatch)
+        import httpx
+
+        # The upload takes a second; the budget is a fifth of that.  (The
+        # harness's own loop shutdown waits for the thread — production's
+        # loop keeps serving — so the thread is made to finish on its own.)
+        released = threading.Event()
+        threading.Timer(1.0, released.set).start()
+
+        def _slow_post(url, **kw):
+            released.wait(5.0)
+            return type("R", (), {"status_code": 200, "json": staticmethod(lambda: {
+                "viewer_url": "https://app.kiln3d.com/view#v=late", "expires_in": 1800})})()
+
+        monkeypatch.setattr(httpx, "post", _slow_post)
+        monkeypatch.setattr(local_stage, "_LINK_BUDGET_S", 0.2)
+        started = _time.monotonic()
+        sc = _run_hook(_Host(_Caps()), _real_cube(tmp_path / "c.stl"), tool_name="compile_scad")
+        assert _time.monotonic() - started < 3.0, "the result waited on the upload"
+        assert "viewer_url" not in sc
+        assert sc["shown"]["door"] == "none"
+        assert "still uploading" in sc["shown"]["reason"]

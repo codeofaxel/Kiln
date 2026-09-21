@@ -137,13 +137,14 @@ def note_wrapped(gcode_path: str, wrapped_path: str) -> None:
         entries = _read_json(_SLICES_FILE, [])
         if not isinstance(entries, list):
             return
-        changed = False
-        for entry in entries:
+        # The NEWEST row for this G-code, only: an older row is an older
+        # slice that happened to write the same path, and stamping it too
+        # would let a stale wrap claim a G-code it never contained.
+        for entry in reversed(entries):
             if isinstance(entry, dict) and entry.get("output") == gcode_abs:
                 entry["wrapped"] = os.path.abspath(wrapped_path)
-                changed = True
-        if changed:
-            _write_json(_SLICES_FILE, entries)
+                _write_json(_SLICES_FILE, entries)
+                break
     except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
         logger.debug("monitor_twin.note_wrapped failed", exc_info=True)
 
@@ -285,11 +286,14 @@ def sliced_output_for(mesh_path: str | os.PathLike[str] | None) -> str | None:
                         return found
                 elif entry.get("wrapped") == target:
                     # The file IS the wrap of a slice: its G-code is inside
-                    # it, and older than it by construction, so the
-                    # freshness rule (a slice older than the mesh is not
-                    # its slice) does not apply — the ledger's join does.
+                    # it and older than it by construction — so a G-code
+                    # NEWER than the wrap is a re-slice the wrap never
+                    # contained (the re-wrap failed), and is not its slice.
                     gcode = entry.get("output")
-                    if gcode and os.path.isfile(str(gcode)):
+                    if (
+                        gcode and os.path.isfile(str(gcode))
+                        and os.path.getmtime(str(gcode)) <= mesh_mtime + 1.0
+                    ):
                         return str(gcode)
     except Exception:  # noqa: BLE001 — a missing twin is not a failure
         logger.debug("monitor_twin.sliced_output_for failed", exc_info=True)

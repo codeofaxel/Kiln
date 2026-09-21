@@ -485,6 +485,14 @@ class TestAStageNamedMeshWins:
             "stage_mesh_path": "/x/part_bedcentered.stl",
         }) == "/x/part_bedcentered.stl"
 
+    def test_a_named_file_the_stage_cannot_draw_vetoes_the_wrap(self):
+        """A Bambu STEP slice names a .step; the wrap is not a stand-in."""
+        assert stage_link.find_mesh_path({
+            "stage_mesh_path": "/x/bracket.step",
+            "output_3mf_path": "/x/bracket.gcode.3mf",
+            "output_path": "/x/bracket.gcode.3mf",
+        }) is None
+
     def test_nested_one_level_as_the_slice_doors_nest_it(self):
         assert stage_link.find_mesh_path({
             "success": True,

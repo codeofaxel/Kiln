@@ -1151,57 +1151,97 @@ def _registry_knows(mcp: Any, name: str | None) -> bool:
         return False
 
 
-def _shown(*, opens: bool, stalled: bool, proven: bool, linked: bool, mesh: str) -> dict[str, str]:
+#: How long a result waits for the link door before answering without it.
+#: The upload runs in a thread either way; past this the result goes out
+#: with ``shown`` saying the link is still uploading, and the door's own
+#: content-addressed cache hands the finished link to the NEXT result for
+#: the same bytes.  Bounded because a first make on a no-panel host must not
+#: sit behind the link door's own 20-second ceiling on a large mesh.
+_LINK_BUDGET_S = 8.0
+
+
+async def _attach_link_within_budget(sc: dict, mesh: str) -> bool:
+    """Attach the browser link to *sc* if the link door answers in time.
+
+    Returns ``True`` when nothing is pending — the link rode, or the door
+    refused and recorded why — and ``False`` when the upload is still
+    running past the budget.  The door mutates the dict it is handed, so
+    it is handed a scratch one: a thread that finishes after the budget
+    must not edit a result the server has already serialised.
+    """
+    import asyncio
+
+    from kiln.stage_link import attach_stage_link_async
+
+    scratch: dict[str, Any] = {}
+    try:
+        await asyncio.wait_for(
+            attach_stage_link_async(scratch, mesh_path=mesh or None),
+            timeout=_LINK_BUDGET_S,
+        )
+    except asyncio.TimeoutError:
+        return False
+    except Exception:  # noqa: BLE001 — a link is furniture, never a failed make
+        logger.debug("stage link not attached", exc_info=True)
+        return True
+    for key in ("viewer_url", "viewer_expires_at", "viewer_hint"):
+        if key in scratch:
+            sc[key] = scratch[key]
+    return True
+
+
+def _shown(
+    *, opens: bool, stalled: bool, proven: bool, linked: bool,
+    link_pending: bool = False, mesh: str,
+) -> dict[str, str]:
     """Which door this result took, and why, in a sentence.
 
-    ``door`` is the best door the result carries — ``panel`` (the host
-    draws it and fetches are arriving), ``link`` (a ``viewer_url`` is the
-    stage today) or ``none`` (neither; the still image is the floor).
-    The still door writes its own ``shown`` (``still``) — one vocabulary
-    across every door, so an agent reads the same field whichever tool
-    it came through, and a refusal is always a sentence, never a code.
+    ``door`` is the best door the result is KNOWN to carry — ``panel``
+    (the host draws it and a panel has fetched from this server), ``link``
+    (a ``viewer_url`` is the stage today) or ``none`` (neither; the still
+    image is the floor).  A declared panel that has never fetched is not
+    known to work — the print gate says the same (``panel_proven``) — so
+    until one does the link is the door, and the token rides for the panel
+    to prove itself.  The still door writes its own ``shown`` (``still``):
+    one vocabulary across every door, so an agent reads the same field
+    whichever tool it came through, and a refusal is always a sentence,
+    never a code.
     """
     from kiln.stage_link import last_refusal, refusal_sentence
 
-    def _no_link() -> str:
-        return refusal_sentence(last_refusal(mesh) if mesh else None)
-
     file = Path(mesh).name if mesh else ""
-    if opens and not stalled:
-        if proven:
-            reason = (
+    if opens and not stalled and proven:
+        return {
+            "door": "panel", "file": file,
+            "reason": (
                 "the host draws Kiln's inline 3D panel and has fetched "
                 "geometry from this server before"
-            )
-        elif linked:
-            reason = (
-                "the host draws Kiln's inline 3D panel; no panel has fetched "
-                "from this server yet, so the browser link rides too — hand "
-                "the user the viewer_url if no panel appears"
-            )
-        else:
-            reason = (
-                "the host draws Kiln's inline 3D panel; no panel has fetched "
-                f"from this server yet, and no browser link could ride: {_no_link()}"
-            )
-        return {"door": "panel", "file": file, "reason": reason}
+            ),
+        }
+    if opens and stalled:
+        base = "the inline panel is not fetching geometry on this connection"
+    elif opens:
+        base = (
+            "the host declared Kiln's inline 3D panel but no panel has fetched "
+            "from this server yet"
+        )
+    else:
+        base = "this host draws no MCP Apps panel"
     if linked:
         reason = (
-            PANEL_FETCH_FALLBACK_NOTE if opens else
-            "this host draws no MCP Apps panel, so the browser link is the "
-            "stage: hand the user the viewer_url"
+            PANEL_FETCH_FALLBACK_NOTE if opens and stalled else
+            f"{base}, so the browser link is the stage: hand the user the viewer_url"
         )
         return {"door": "link", "file": file, "reason": reason}
-    base = (
-        "the inline panel is not fetching geometry on this connection"
-        if opens else "this host draws no MCP Apps panel"
-    )
-    return {
-        "door": "none",
-        "file": file,
-        "reason": f"{base}, and no browser link could be issued: {_no_link()}. "
-                  "The still image is the floor.",
-    }
+    if link_pending:
+        reason = (
+            f"{base}, and the browser link is still uploading — it rides the "
+            "next result for this file, or call visualize_model for it"
+        )
+    else:
+        refusal = refusal_sentence(last_refusal(mesh) if mesh else None)
+        reason = f"{base}, and no browser link could be issued: {refusal}. The still image is the floor."
+    return {"door": "none", "file": file, "reason": reason}
 
 
 def _install_result_hook(mcp: Any) -> bool:
@@ -1267,9 +1307,12 @@ def _install_result_hook(mcp: Any) -> bool:
                     # the host opens the panel on nothing.  Say so.
                     sc["shown"] = {
                         "door": "none",
+                        "file": "",
                         "reason": (
-                            "this result names no mesh the stage can show, "
-                            "so the panel the host opens has nothing to draw"
+                            "this result names no mesh the stage can show (the "
+                            "slicer was handed a file the stage cannot draw, or "
+                            "the file is gone), so the panel the host opens has "
+                            "nothing to draw"
                         ),
                     }
                     inner.structuredContent = sc
@@ -1309,19 +1352,19 @@ def _install_result_hook(mcp: Any) -> bool:
                 # the NEXT result can tell whether it did.
                 _expect_fetch(token, mesh)
             proven = _panel_proven
+            link_pending = False
             if not opens or stalled or not proven:
                 # The panel is not known to work for this host — none was
                 # declared, fetches stopped, or none has landed yet.  The
-                # link rides: the upload runs in a thread, and the note
-                # says why the link is the stage today.
-                from kiln.stage_link import attach_stage_link_async
-
-                await attach_stage_link_async(sc, mesh_path=mesh or None)
+                # link rides: the upload runs in a thread, bounded, and the
+                # note says why the link is the stage today.
+                link_pending = not await _attach_link_within_budget(sc, mesh)
                 if sc.get("viewer_url") and opens and stalled:
                     sc["stage_fallback"] = PANEL_FETCH_FALLBACK_NOTE
             sc["shown"] = _shown(
                 opens=opens, stalled=stalled, proven=proven,
-                linked=bool(sc.get("viewer_url")), mesh=mesh,
+                linked=bool(sc.get("viewer_url")), link_pending=link_pending,
+                mesh=mesh,
             )
             inner.structuredContent = sc
         except Exception:  # noqa: BLE001

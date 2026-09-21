@@ -268,7 +268,7 @@ class TestAPanelThatCannotFetchFallsBackToTheLink:
         first = _make(_apps_host(), _real_cube(tmp_path / "a.stl"))
         assert first["artifact"]["artifact_token"]
         assert first.get("viewer_url"), "no panel has proved itself: the first make rode alone"
-        assert first["shown"]["door"] == "panel" and "stage_fallback" not in first
+        assert first["shown"]["door"] == "link" and "stage_fallback" not in first
         assert len(calls) == 1
 
         clock.advance(local_stage._FETCH_GRACE_S + 1.0)

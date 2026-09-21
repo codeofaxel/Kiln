@@ -473,15 +473,44 @@ def _key_rank(key: str) -> int | None:
     return 1 if parts & set(_OUTPUT_MARKERS) else 0
 
 
+def _stage_named(d: dict) -> tuple[bool, str | None]:
+    """``(named, file)``: whether *d* names the stage's file outright, and
+    that file when the stage can draw it.  A named file the stage cannot
+    draw (a STEP the slicer took as-is) answers ``(True, None)``: nothing
+    else in the result may stand in for it.  A wrapped ``.gcode.3mf`` is a
+    print artifact, not the part the person is deciding about — and on a
+    Bambu it can carry a 1 mm placeholder cube where the picture goes, so
+    falling through to it stages a cube and calls the panel proven."""
+    for key, value in d.items():
+        if not (isinstance(value, str) and value):
+            continue
+        if set(key.lower().split("_")) & set(_STAGE_MARKERS):
+            return True, (value if Path(value).suffix.lower() in _MESH_SUFFIXES else None)
+    return False, None
+
+
 def find_mesh_path(result: Any) -> str | None:
     """The renderable mesh a tool result points at, if any.
 
     Looks one level into nested dicts (a produced file is often reported
     under ``artifact`` or ``preview``) but no deeper — a deep crawl starts
     finding inputs and neighbours rather than the thing just made.
+
+    A result that names the stage's file (``stage_mesh_path``) is believed
+    absolutely, including when the file it names cannot be staged: see
+    :func:`_stage_named`.
     """
     if not isinstance(result, dict):
         return None
+
+    named, file = _stage_named(result)
+    if named:
+        return file
+    for value in result.values():
+        if isinstance(value, dict):
+            named, file = _stage_named(value)
+            if named:
+                return file
 
     def _scan(d: dict) -> tuple[int, str] | None:
         best: tuple[int, str] | None = None

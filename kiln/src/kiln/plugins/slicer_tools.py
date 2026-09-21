@@ -183,6 +183,7 @@ def _apply_bed_fit_gate(
         # of scope for the translate path — we'd need format-specific
         # rewriters.  Still run a bbox validation but can't auto-fix.
         fit = validate_mesh_for_printer(input_path, effective_printer_id)
+        fit["approval_carries"] = True  # nothing on this branch moves the mesh
         if not fit["ok"] and fit["error_code"] in ("OFF_BED_GEOMETRY", "EXCEEDS_BED"):
             _attach_fit_enrichment(fit, input_path, effective_printer_id, material_id)
             return input_path, fit, fit

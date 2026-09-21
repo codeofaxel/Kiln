@@ -327,6 +327,31 @@ class TestTheWrapFindsItsSlice:
         monitor_twin.note_wrapped(str(gcode), str(wrapped))
         assert monitor_twin.sliced_output_for(str(wrapped)) == str(gcode.resolve())
 
+    def test_a_gcode_resliced_after_the_wrap_is_not_the_wraps_slice(self, twin_dir, tmp_path):
+        """The wrap is newer than its G-code by construction; a G-code newer
+        than the wrap is a re-slice the wrap never contained."""
+        import os as _os
+        import time as _time
+
+        mesh, gcode = _make_files(tmp_path)
+        wrapped = tmp_path / "part.gcode.3mf"
+        wrapped.write_bytes(b"PK\x03\x04")
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_wrapped(str(gcode), str(wrapped))
+        later = _time.time() + 30
+        _os.utime(gcode, (later, later))
+        assert monitor_twin.sliced_output_for(str(wrapped)) is None
+
+    def test_note_wrapped_stamps_only_the_newest_row(self, twin_dir, tmp_path):
+        mesh, gcode = _make_files(tmp_path)
+        wrapped = tmp_path / "part.gcode.3mf"
+        wrapped.write_bytes(b"PK\x03\x04")
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_wrapped(str(gcode), str(wrapped))
+        rows = monitor_twin._read_json(monitor_twin._SLICES_FILE, [])
+        assert [bool(r.get("wrapped")) for r in rows] == [False, True]
+
     def test_a_wrap_the_ledger_never_saw_answers_nothing(self, twin_dir, tmp_path):
         mesh, gcode = _make_files(tmp_path)
         stranger = tmp_path / "other.gcode.3mf"

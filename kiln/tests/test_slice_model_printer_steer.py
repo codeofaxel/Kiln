@@ -192,6 +192,18 @@ def test_an_auto_centred_slice_says_the_design_yes_does_not_carry(tmp_path, monk
     assert "design" in info["approval_note"]
 
 
+def test_a_3mf_slice_carries_the_yes_too(tmp_path, monkeypatch):
+    """The non-STL branch never moves a mesh; it must say so the same way."""
+    from kiln.plugins import slicer_tools
+
+    monkeypatch.setattr("kiln.printers.bed_fit.validate_mesh_for_printer", _on_bed)
+    monkeypatch.setattr(slicer_tools, "_material_temp_block", lambda *a, **k: None)
+    threemf = tmp_path / "part.3mf"
+    threemf.write_bytes(b"PK\x03\x04")
+    _effective, err, info = slicer_tools._apply_bed_fit_gate(str(threemf), "bambu_a1", True)
+    assert err is None and info["approval_carries"] is True
+
+
 def test_a_slice_that_moved_nothing_carries_the_yes(tmp_path, monkeypatch):
     from kiln.plugins import slicer_tools
 
