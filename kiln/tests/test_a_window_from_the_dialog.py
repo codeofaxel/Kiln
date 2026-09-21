@@ -661,7 +661,6 @@ class TestTheHostedStore:
     @pytest.fixture
     def hosted_store(self, monkeypatch):
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
-        monkeypatch.setattr(consent_windows, "hosted_window_tier_allows", lambda: True)
         store = _FakeStore()
         consent_windows.register_window_store(store)
         yield store
@@ -732,38 +731,36 @@ class TestTheHostedStore:
         assert FIELD_WHERE in schema["properties"]
         assert hosted_store.live()[0].scope == consent_windows.SCOPE_FLEET
 
-    def test_a_free_account_is_not_offered_a_hosted_window_and_the_door_refuses_one(self, monkeypatch):
-        """Free is a person's yes at home; a window an agent can use from
-        anywhere is what Pro adds.  Not on the form, and the door refuses
-        it even if a host sends one — the store is never asked."""
+    def test_a_free_account_is_offered_the_window_and_the_door_opens_it(self, monkeypatch):
+        """One printer is every tier's: a hosted standing window over one
+        printer has no tier gate at grant time (where a print may start
+        from — at home, or away through the cloud — is judged at each
+        start, by the relay).  Several printers or the fleet stays the
+        fleet tier's, judged by the same writer as every door."""
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
-        monkeypatch.setattr(consent_windows, "hosted_window_tier_allows", lambda: False)
+        import kiln.licensing as lic
+
+        monkeypatch.setattr(lic, "get_tier", lambda: "free", raising=False)
         store = _FakeStore()
         consent_windows.register_window_store(store)
         try:
-            assert server.dialog_offers() == (False, False)
-            host = _Host(CHOICE_THIS_PRINT)
+            assert server.dialog_offers() == (True, False)
+            host = _Host(CHOICE_NEXT_TWO_HOURS)
             _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, host)
-            assert list(host.asked[0][1]["properties"]) == [FIELD_ANSWER]
-            with pytest.raises(consent_windows.NotThisTier, match="Pro"):
+            assert list(host.asked[0][1]["properties"]) == [FIELD_ANSWER, FIELD_FOR_HOW_LONG]
+            [w] = store.live()
+            assert w.scope == ("garage",) and w.set_by == "account:acct_123"
+            with pytest.raises(consent_windows.NotTheFleetTier):
                 consent_windows.open_window_from_dialog(
-                    DialogAnswer("accept", "", choice=CHOICE_NEXT_TWO_HOURS), printer_name="garage",
+                    DialogAnswer("accept", "", choice=CHOICE_NEXT_TWO_HOURS, where=WHERE_EVERY_PRINTER),
+                    printer_name="garage",
                 )
-            assert store.calls == []
+            assert store.calls.count("open") == 1
         finally:
             consent_windows.register_window_store(None)
 
-    def test_the_tier_read_is_the_licences_own(self, monkeypatch):
-        import kiln.licensing as lic
-
-        monkeypatch.setattr(lic, "get_tier", lambda: "pro", raising=False)
-        assert consent_windows.hosted_window_tier_allows() is True
-        monkeypatch.setattr(lic, "get_tier", lambda: "free", raising=False)
-        assert consent_windows.hosted_window_tier_allows() is False
-
     def test_without_a_store_hosted_is_as_before(self, monkeypatch):
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
-        monkeypatch.setattr(consent_windows, "hosted_window_tier_allows", lambda: True)
         assert consent_windows.window_store() is None
         assert server.dialog_offers() == (False, False)
         assert consent_windows.covering("garage") is None
@@ -1195,7 +1192,6 @@ class TestTheWindowIsNeverInvisible:
         assert "start on the default printer" in message and "kiln consent revoke" in message
         # On the hosted server the person has no terminal: the only close is to say so.
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
-        monkeypatch.setattr(consent_windows, "hosted_window_tier_allows", lambda: True)
         consent_windows.register_window_store(_FakeStore())
         try:
             host = _Host(CHOICE_THIS_PRINT)

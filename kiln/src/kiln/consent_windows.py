@@ -37,9 +37,9 @@ What a window is:
   there.  What stands in, when kiln-pro registers one, is the signed-in
   account's own store (:class:`WindowStore`): the dialog door opens
   through it (a standing permission the account grants the calling
-  agent, Pro and above — Free is a person's yes at home), the status
-  tool and the line on a print result read through it, and revoke
-  closes through it.  Whether a hosted print may START is not this
+  agent — one printer is every tier's; several or the fleet is the
+  fleet tier's, judged here as at every door), the status tool and the
+  line on a print result read through it, and revoke closes through it.  Whether a hosted print may START is not this
   module's question there: the account's yes — an approval, or the
   standing permission it granted — comes back through the hosted
   approval hook (:mod:`kiln.print_consent`), graded A.  With no store
@@ -87,7 +87,6 @@ __all__ = [
     "SOURCE_WEB",
     "NotAPerson",
     "NotTheFleetTier",
-    "NotThisTier",
     "Window",
     "WindowStore",
     "all_windows",
@@ -96,7 +95,6 @@ __all__ = [
     "describe_scope",
     "extend_window",
     "get_window",
-    "hosted_window_tier_allows",
     "is_live",
     "live_windows",
     "local_identity",
@@ -147,32 +145,6 @@ def _fleet_tier_allows() -> bool:
         return int(max_printers_for_tier(get_tier()) or 1) > 1
     except Exception:  # noqa: BLE001 — no licence module, no fleet
         return False
-
-
-class NotThisTier(RuntimeError):
-    """A standing window through Kiln's cloud below the tier that prints
-    from anywhere (Pro).  Free is a person's yes at home."""
-
-
-def _tier_name() -> str:
-    """The effective tier as a lowercase word; ``free`` when unknown.  A
-    per-request read on the hosted server, so the account's own tier."""
-    try:
-        from kiln.licensing import get_tier
-
-        tier = get_tier()
-        return str(getattr(tier, "value", tier) or "free").lower()
-    except Exception:  # noqa: BLE001 — no licence module, no tier
-        return "free"
-
-
-def hosted_window_tier_allows() -> bool:
-    """Whether the account's tier may hold a standing window through
-    Kiln's cloud: Pro and above.  Free is a person's yes at home (a
-    terminal, the dialog beside the printer, the web app on the printer's
-    own network); a window an agent can use from anywhere is what Pro
-    adds, and the fleet tier adds every printer."""
-    return _tier_name() != "free"
 
 
 class NotAPerson(RuntimeError):
@@ -490,12 +462,6 @@ def open_window_from_dialog(answer: DialogAnswer, *, printer_name: str) -> Windo
         store = window_store()
         if store is None:
             raise NotAPerson("the hosted server has no window store; the account approves each print")
-        if not hosted_window_tier_allows():
-            raise NotThisTier(
-                "A standing window through Kiln's cloud is a Pro feature — printing from "
-                "anywhere is what that tier adds; at home, a yes beside the printer is every "
-                "tier's. See https://kiln3d.com/pricing."
-            )
         w = store.open(
             seconds=check_window_length(seconds), scope=_checked_scope(scope), source=SOURCE_ELICITED,
         )
