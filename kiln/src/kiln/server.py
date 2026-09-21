@@ -2523,7 +2523,8 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
             f"{tool_name} refuses to proceed: {name} was shown, but nobody said go — on the hosted "
             "server a yes is the signed-in person's Approve on the print page for this file on "
             f"{aimed}, or a delegation the person granted this agent for {aimed} (this app's "
-            "approval dialog when it draws one, or their account page, Delegations); a terminal's "
+            "approval dialog when it draws one, or the Agent page in their Kiln settings, "
+            "Delegations); a terminal's "
             "yes or a standing window is nobody's here, and an agent cannot supply either door "
             "itself. Tell the person that plainly."
         )

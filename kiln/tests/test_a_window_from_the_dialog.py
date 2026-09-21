@@ -720,7 +720,7 @@ class TestTheHostedStore:
         assert r.structuredContent[consent_window_note.RESULT_KEY]["id"] == w.id
         out = _tool("consent_window_status")()
         assert [x["id"] for x in out["windows"]] == [w.id] and out["windows"][0]["set_by"] == "account:acct_123"
-        assert "Kiln account page" in out["note"]
+        assert "Agent page in their Kiln settings" in out["note"]
         out = _tool("revoke_consent_window")(window_id=w.id)
         assert out["success"] and hosted_store.live() == [] and "revoke" in hosted_store.calls
 
@@ -1212,7 +1212,7 @@ class TestTheWindowIsNeverInvisible:
         block = server._preview_gate_error("start_print", path, preview, printer_name="garage")
         message = block["error"]["message"]
         # The account's doors — Approve on the print page, or a delegation
-        # (in this app's dialog, or the account page) — never a terminal.
+        # (in this app's dialog, or the Agent page in Settings) — never a terminal.
         assert "kiln consent window" not in message and "kiln print" not in message
         assert "signed-in person" in message and "delegation" in message
         assert "approval dialog" in message and "Tell the person that plainly" in message
@@ -1226,7 +1226,7 @@ class TestTheWindowIsNeverInvisible:
         try:
             store.open(seconds=3600, scope=("garage",), source=consent_windows.SOURCE_WEB)
             note = _tool("consent_window_status")()["note"]
-            assert "Kiln account page" in note and "kiln consent window" not in note
+            assert "Agent page in their Kiln settings" in note and "kiln consent window" not in note
             assert _tool("consent_window_status")()["windows"][0]["opened_via"] == "web"
         finally:
             consent_windows.register_window_store(None)

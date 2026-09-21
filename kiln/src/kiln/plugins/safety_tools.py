@@ -552,7 +552,7 @@ class _SafetyToolsPlugin:
                     "can open or extend one — in the approval dialog (a length they pick or "
                     "type, 24 hours at most)"
                     + (
-                        ", or on their Kiln account page."
+                        ", or on the Agent page in their Kiln settings."
                         if is_hosted_multitenant()
                         else ", or with `kiln consent window --for 2h --printer NAME` at a terminal."
                     )
