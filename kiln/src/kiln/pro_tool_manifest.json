@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-21T04:58:25.572310+00:00",
+  "generated": "2026-09-21T21:49:05.750528+00:00",
   "tool_count": 425,
   "categories": {
     "product_generators": {
@@ -219,6 +219,10 @@
         ],
         "title": "ams_filament_dryingArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -327,6 +331,10 @@
         ],
         "title": "auto_generate_manual_for_printArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -406,6 +414,10 @@
         },
         "title": "derive_assembly_planArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -605,6 +617,10 @@
         },
         "title": "diff_assembly_manualsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -678,6 +694,10 @@
         ],
         "title": "embed_manual_in_3mfArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -708,6 +728,10 @@
         ],
         "title": "find_manual_siblingsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -895,6 +919,10 @@
         ],
         "title": "generate_assembly_manualArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -925,6 +953,10 @@
         ],
         "title": "get_build_historyArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -945,6 +977,10 @@
         ],
         "title": "get_manual_revisionArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -970,6 +1006,10 @@
         ],
         "title": "list_manual_historyArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -1007,6 +1047,10 @@
         },
         "title": "load_assembly_manualArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -1113,6 +1157,10 @@
         ],
         "title": "record_build_outcomeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1138,6 +1186,10 @@
         ],
         "title": "retire_manual_revisionArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1150,6 +1202,10 @@
         "properties": {},
         "title": "billing_alertsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -1162,6 +1218,10 @@
         "properties": {},
         "title": "billing_check_setupArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -1180,6 +1240,10 @@
         },
         "title": "billing_delete_dataArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1203,6 +1267,10 @@
         },
         "title": "billing_exportArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -1221,6 +1289,10 @@
         },
         "title": "billing_historyArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -1244,6 +1316,10 @@
         },
         "title": "billing_invoiceArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -1262,6 +1338,10 @@
         },
         "title": "billing_setup_urlArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -1274,6 +1354,10 @@
         "properties": {},
         "title": "billing_statusArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -1286,6 +1370,10 @@
         "properties": {},
         "title": "billing_summaryArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -1306,6 +1394,10 @@
         ],
         "title": "check_payment_statusArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -1331,6 +1423,10 @@
         ],
         "title": "kiln_spend_caps_confirm_changeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1356,6 +1452,10 @@
         ],
         "title": "kiln_spend_caps_confirm_order_approvalArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1405,6 +1505,10 @@
         },
         "title": "kiln_spend_caps_request_changeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1430,6 +1534,10 @@
         ],
         "title": "kiln_spend_caps_request_order_approvalArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1442,6 +1550,10 @@
         "properties": {},
         "title": "kiln_spend_caps_showArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1467,6 +1579,10 @@
         },
         "title": "license_status_liveArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -1497,6 +1613,10 @@
         },
         "title": "open_billing_portalArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1517,6 +1637,10 @@
         ],
         "title": "preview_overage_chargeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -1542,6 +1666,10 @@
         ],
         "title": "refund_paymentArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1562,6 +1690,10 @@
         ],
         "title": "reissue_licenseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1623,6 +1755,10 @@
         ],
         "title": "start_subscription_checkoutArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -1635,6 +1771,10 @@
         "properties": {},
         "title": "usage_summaryArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -1660,6 +1800,10 @@
         ],
         "title": "export_stepArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -1699,6 +1843,10 @@
         "headline": "Take this design library to every machine you use.",
         "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
         "free_included": "Local files you already have stay on this machine and stay yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -1733,6 +1881,10 @@
         "headline": "Take this design library to every machine you use.",
         "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
         "free_included": "Local files you already have stay on this machine and stay yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -1758,6 +1910,10 @@
         ],
         "title": "cloud_clone_featureArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -1783,6 +1939,10 @@
         ],
         "title": "cloud_clone_presetArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -1817,6 +1977,10 @@
         "headline": "Take this design library to every machine you use.",
         "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
         "free_included": "Local files you already have stay on this machine and stay yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -1842,6 +2006,10 @@
         ],
         "title": "cloud_list_remote_releasesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -1903,6 +2071,10 @@
         ],
         "title": "cloud_pull_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -1938,6 +2110,10 @@
         ],
         "title": "cloud_pull_dfm_assessmentsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -1971,6 +2147,10 @@
         },
         "title": "cloud_pull_fair_recordsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2020,6 +2200,10 @@
         ],
         "title": "cloud_pull_feature_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2045,6 +2229,10 @@
         ],
         "title": "cloud_pull_manual_historyArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2094,6 +2282,10 @@
         ],
         "title": "cloud_pull_preset_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2133,6 +2325,10 @@
         "headline": "Take this design library to every machine you use.",
         "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
         "free_included": "Local files you already have stay on this machine and stay yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2158,6 +2354,10 @@
         ],
         "title": "cloud_push_dfm_assessmentsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2186,6 +2386,10 @@
         },
         "title": "cloud_push_fair_recordsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2228,6 +2432,10 @@
         ],
         "title": "cloud_push_feature_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2253,6 +2461,10 @@
         ],
         "title": "cloud_push_feature_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2278,6 +2490,10 @@
         ],
         "title": "cloud_push_manual_historyArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2320,6 +2536,10 @@
         ],
         "title": "cloud_push_preset_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2345,6 +2565,10 @@
         ],
         "title": "cloud_push_preset_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2370,6 +2594,10 @@
         ],
         "title": "cloud_push_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2421,6 +2649,10 @@
         "headline": "Take this design library to every machine you use.",
         "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
         "free_included": "Local files you already have stay on this machine and stay yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2442,6 +2674,10 @@
         "headline": "Take this design library to every machine you use.",
         "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
         "free_included": "Local files you already have stay on this machine and stay yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2462,6 +2698,10 @@
         ],
         "title": "cloud_remote_removeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2492,6 +2732,10 @@
         ],
         "title": "cloud_retire_remote_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2513,6 +2757,10 @@
         "headline": "Take this design library to every machine you use.",
         "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
         "free_included": "Local files you already have stay on this machine and stay yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2540,6 +2788,10 @@
         "headline": "Take this design library to every machine you use.",
         "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
         "free_included": "Local files you already have stay on this machine and stay yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2574,6 +2826,10 @@
         "headline": "Take this design library to every machine you use.",
         "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
         "free_included": "Local files you already have stay on this machine and stay yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -2595,6 +2851,10 @@
         ],
         "title": "auto_add_rubber_feetArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -2670,6 +2930,10 @@
         "limit": 3,
         "noun": "multicolor splits",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -2691,6 +2955,10 @@
         ],
         "title": "auto_recess_pocketArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -2712,6 +2980,10 @@
         ],
         "title": "batch_decorateArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -2733,6 +3005,10 @@
         ],
         "title": "estimate_batch_costArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -2754,6 +3030,10 @@
         ],
         "title": "estimate_decoration_costArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -2784,6 +3064,10 @@
         "headline": "Put a scannable QR on this product.",
         "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
         "free_included": "The product itself still generates without the QR."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -2805,6 +3089,10 @@
         ],
         "title": "list_brand_assetsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -2880,6 +3168,10 @@
         ],
         "title": "paint_mesh_regionsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -2901,6 +3193,10 @@
         ],
         "title": "register_brand_assetArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -2922,6 +3218,10 @@
         ],
         "title": "remove_brand_assetArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -2972,6 +3272,10 @@
         ],
         "title": "resolve_template_decorationArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -3038,6 +3342,10 @@
         ],
         "title": "segment_mesh_regionsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -3059,6 +3367,10 @@
         ],
         "title": "smart_decorateArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -3079,6 +3391,10 @@
         ],
         "title": "decoration_historyArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -3124,6 +3440,10 @@
         ],
         "title": "iterate_decorationArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -3169,6 +3489,10 @@
         ],
         "title": "record_decoration_successArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -3194,6 +3518,10 @@
         ],
         "title": "rollback_decorationArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -3245,6 +3573,10 @@
         "limit": 3,
         "noun": "inspections",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -3320,6 +3652,10 @@
         ],
         "title": "inspect_mesh_viewArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -3349,6 +3685,10 @@
         ],
         "title": "verify_mesh_measurementsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -3391,6 +3731,10 @@
         ],
         "title": "change_part_colorArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -3445,6 +3789,10 @@
         ],
         "title": "build_organic_meshArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -3576,6 +3924,10 @@
         ],
         "title": "design_sessionArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -3608,6 +3960,10 @@
         },
         "title": "list_design_goalsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -3660,6 +4016,10 @@
         ],
         "title": "add_mesh_commentArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -3685,6 +4045,10 @@
         ],
         "title": "annotate_decoration_preset_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -3710,6 +4074,10 @@
         ],
         "title": "annotate_design_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -3735,6 +4103,10 @@
         ],
         "title": "annotate_feature_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -3846,6 +4218,10 @@
         "headline": "Save this once, reuse it on every future design.",
         "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
         "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -3866,6 +4242,10 @@
         ],
         "title": "archive_decoration_presetArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -3886,6 +4266,10 @@
         ],
         "title": "archive_designArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -3906,6 +4290,10 @@
         ],
         "title": "archive_featureArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4002,6 +4390,10 @@
         ],
         "title": "attach_part_featureArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -4044,6 +4436,10 @@
         "headline": "Keep this part as the version you can return to.",
         "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
         "free_included": "Download the current file where that option is already available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -4076,6 +4472,10 @@
         ],
         "title": "bisect_badArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4096,6 +4496,10 @@
         ],
         "title": "bisect_currentArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4116,6 +4520,10 @@
         ],
         "title": "bisect_endArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4148,6 +4556,10 @@
         ],
         "title": "bisect_goodArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4180,6 +4592,10 @@
         ],
         "title": "bisect_skipArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4239,6 +4655,10 @@
         ],
         "title": "bisect_startArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4262,6 +4682,10 @@
         ],
         "title": "check_design_regressionArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -4309,6 +4733,10 @@
         ],
         "title": "cherry_pick_decoration_modificationArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -4356,6 +4784,10 @@
         ],
         "title": "cherry_pick_feature_modificationArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -4403,6 +4835,10 @@
         ],
         "title": "cherry_pick_modificationArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -4447,6 +4883,10 @@
         "headline": "Keep this part as the version you can return to.",
         "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
         "free_included": "Download the current file where that option is already available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -4491,6 +4931,10 @@
         "headline": "Keep this part as the version you can return to.",
         "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
         "free_included": "Download the current file where that option is already available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -4516,6 +4960,10 @@
         ],
         "title": "compute_mesh_diff_componentsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -4674,6 +5122,10 @@
         "headline": "Save this once, reuse it on every future design.",
         "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
         "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4740,6 +5192,10 @@
         ],
         "title": "create_decoration_preset_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4779,6 +5235,10 @@
         "headline": "Save this once, reuse it on every future design.",
         "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
         "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4854,6 +5314,10 @@
         "headline": "Keep this part as the version you can return to.",
         "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
         "free_included": "Download the current file where that option is already available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4920,6 +5384,10 @@
         ],
         "title": "create_feature_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -4945,6 +5413,10 @@
         ],
         "title": "cross_branch_ab_reportArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -4970,6 +5442,10 @@
         ],
         "title": "cross_feature_ab_reportArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -4999,6 +5475,10 @@
         ],
         "title": "cross_preset_ab_reportArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5027,6 +5507,10 @@
         ],
         "title": "design_version_healthArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5057,6 +5541,10 @@
         ],
         "title": "detect_decoration_preset_merge_conflictsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -5087,6 +5575,10 @@
         ],
         "title": "detect_feature_merge_conflictsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -5143,6 +5635,10 @@
         ],
         "title": "detect_merge_conflictsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -5175,6 +5671,10 @@
         ],
         "title": "dismiss_regression_alertArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -5195,6 +5695,10 @@
         ],
         "title": "fingerprint_featureArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5215,6 +5719,10 @@
         ],
         "title": "get_comment_threadArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5261,6 +5769,10 @@
         "headline": "Save this once, reuse it on every future design.",
         "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
         "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5281,6 +5793,10 @@
         ],
         "title": "get_designArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5315,6 +5831,10 @@
         "headline": "Keep this part as the version you can return to.",
         "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
         "free_included": "Download the current file where that option is already available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5344,6 +5864,10 @@
         "headline": "Propose this change and review it before it merges.",
         "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
         "free_included": "The design itself stays yours to edit and download."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5373,6 +5897,10 @@
         "headline": "Save this once, reuse it on every future design.",
         "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
         "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5393,6 +5921,10 @@
         ],
         "title": "get_part_passportArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5413,6 +5945,10 @@
         ],
         "title": "get_reflog_entryArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5448,6 +5984,10 @@
         },
         "title": "get_regression_alertsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5531,6 +6071,10 @@
         ],
         "title": "import_external_featureArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -5590,6 +6134,10 @@
         ],
         "title": "import_external_meshArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -5620,6 +6168,10 @@
         ],
         "title": "import_model_partsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -5645,6 +6197,10 @@
         },
         "title": "list_bisect_sessionsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5670,6 +6226,10 @@
         ],
         "title": "list_cherry_pick_candidatesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5695,6 +6255,10 @@
         ],
         "title": "list_decoration_cherry_pick_candidatesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5720,6 +6284,10 @@
         ],
         "title": "list_decoration_preset_branchesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5750,6 +6318,10 @@
         },
         "title": "list_decoration_preset_releasesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5770,6 +6342,10 @@
         ],
         "title": "list_decoration_preset_versionsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5814,6 +6390,10 @@
         "headline": "Save this once, reuse it on every future design.",
         "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
         "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5853,6 +6433,10 @@
         "headline": "Keep this part as the version you can return to.",
         "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
         "free_included": "Download the current file where that option is already available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5899,6 +6483,10 @@
         "headline": "Propose this change and review it before it merges.",
         "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
         "free_included": "The design itself stays yours to edit and download."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5924,6 +6512,10 @@
         ],
         "title": "list_design_releasesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5952,6 +6544,10 @@
         },
         "title": "list_designsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -5977,6 +6573,10 @@
         ],
         "title": "list_feature_branchesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -6002,6 +6602,10 @@
         ],
         "title": "list_feature_cherry_pick_candidatesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -6014,6 +6618,10 @@
         "properties": {},
         "title": "list_feature_kindsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -6044,6 +6652,10 @@
         },
         "title": "list_feature_releasesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -6064,6 +6676,10 @@
         ],
         "title": "list_feature_versionsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -6108,6 +6724,10 @@
         "headline": "Save this once, reuse it on every future design.",
         "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
         "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -6138,6 +6758,10 @@
         ],
         "title": "list_mesh_commentsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -6195,6 +6819,10 @@
         ],
         "title": "merge_decoration_preset_branchesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -6288,6 +6916,10 @@
         "headline": "Keep this part as the version you can return to.",
         "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
         "free_included": "Download the current file where that option is already available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -6357,6 +6989,10 @@
         ],
         "title": "merge_feature_branchesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -6397,6 +7033,10 @@
         ],
         "title": "promote_kit_pieceArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -6488,6 +7128,10 @@
         "headline": "Propose this change and review it before it merges.",
         "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
         "free_included": "The design itself stays yours to edit and download."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -6506,6 +7150,10 @@
         },
         "title": "prune_design_render_cacheArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -6548,6 +7196,10 @@
         },
         "title": "pull_reflog_from_cloudArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -6578,6 +7230,10 @@
         },
         "title": "push_reflog_to_cloudArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -6598,6 +7254,10 @@
         ],
         "title": "read_design_sidecarArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -6644,6 +7304,10 @@
         "headline": "Keep this part as the version you can return to.",
         "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
         "free_included": "Download the current file where that option is already available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -6681,6 +7345,10 @@
         ],
         "title": "rebase_feature_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -6718,6 +7386,10 @@
         ],
         "title": "rebase_preset_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -6794,6 +7466,10 @@
         ],
         "title": "recategorize_artifactArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -6872,6 +7548,10 @@
         ],
         "title": "record_decoration_preset_outcomeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -6997,6 +7677,10 @@
         ],
         "title": "record_design_version_outcomeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7022,6 +7706,10 @@
         ],
         "title": "rename_decoration_presetArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7047,6 +7735,10 @@
         ],
         "title": "rename_designArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7072,6 +7764,10 @@
         ],
         "title": "rename_design_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7097,6 +7793,10 @@
         ],
         "title": "rename_featureArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7137,6 +7837,10 @@
         ],
         "title": "render_design_meshArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -7157,6 +7861,10 @@
         ],
         "title": "reopen_comment_threadArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7194,6 +7902,10 @@
         ],
         "title": "reply_to_commentArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7226,6 +7938,10 @@
         ],
         "title": "resolve_comment_threadArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7263,6 +7979,10 @@
         ],
         "title": "restore_from_reflog_entryArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -7283,6 +8003,10 @@
         ],
         "title": "retire_decoration_preset_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7308,6 +8032,10 @@
         ],
         "title": "retire_decoration_preset_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7328,6 +8056,10 @@
         ],
         "title": "retire_design_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7353,6 +8085,10 @@
         ],
         "title": "retire_design_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7373,6 +8109,10 @@
         ],
         "title": "retire_feature_branchArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7398,6 +8138,10 @@
         ],
         "title": "retire_feature_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7449,6 +8193,10 @@
         "headline": "Propose this change and review it before it merges.",
         "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
         "free_included": "The design itself stays yours to edit and download."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -7479,6 +8227,10 @@
         ],
         "title": "rollback_featureArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -7591,6 +8343,10 @@
         "headline": "Save this once, reuse it on every future design.",
         "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
         "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7614,6 +8370,10 @@
         },
         "title": "set_operatorArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7658,6 +8418,10 @@
         "headline": "Keep this part as the version you can return to.",
         "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
         "free_included": "Download the current file where that option is already available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -7697,6 +8461,10 @@
         "headline": "Keep this part as the version you can return to.",
         "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
         "free_included": "Download the current file where that option is already available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -7751,6 +8519,10 @@
         },
         "title": "show_reflogArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -7788,6 +8560,10 @@
         ],
         "title": "sign_decoration_preset_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -7976,6 +8752,10 @@
         ],
         "title": "sign_design_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -8030,6 +8810,10 @@
         ],
         "title": "sign_feature_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -8075,6 +8859,10 @@
         ],
         "title": "source_merge_three_wayArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -8095,6 +8883,10 @@
         ],
         "title": "unarchive_decoration_presetArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -8115,6 +8907,10 @@
         ],
         "title": "unarchive_designArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -8135,6 +8931,10 @@
         ],
         "title": "unarchive_featureArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -8172,6 +8972,10 @@
         ],
         "title": "undo_last_head_changeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -8197,6 +9001,10 @@
         ],
         "title": "verify_decoration_preset_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -8261,6 +9069,10 @@
         },
         "title": "verify_design_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -8315,6 +9127,10 @@
         },
         "title": "verify_feature_releaseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -8365,6 +9181,10 @@
         ],
         "title": "visual_diff_meshesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -8409,6 +9229,10 @@
         "headline": "Keep this part as the version you can return to.",
         "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
         "free_included": "Download the current file where that option is already available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -8491,6 +9315,10 @@
         "headline": "Turn this customer drawing into a machine-specific quoting decision.",
         "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
         "free_included": "Printability checks on meshes you already have stay available outside this workflow."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -8525,6 +9353,10 @@
         "headline": "Turn this customer drawing into a machine-specific quoting decision.",
         "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
         "free_included": "Printability checks on meshes you already have stay available outside this workflow."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -8586,6 +9418,10 @@
         "headline": "Turn this customer drawing into a machine-specific quoting decision.",
         "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
         "free_included": "Printability checks on meshes you already have stay available outside this workflow."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -8626,6 +9462,10 @@
         "headline": "Turn this customer drawing into a machine-specific quoting decision.",
         "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
         "free_included": "Printability checks on meshes you already have stay available outside this workflow."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -8797,6 +9637,10 @@
         "headline": "Size this part for the load it has to carry.",
         "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
         "free_included": "General design guidance and safety cautions stay available at every tier."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -8822,6 +9666,10 @@
         ],
         "title": "answer_material_questionArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -8894,6 +9742,10 @@
         "headline": "Calibrate the numbers to the machine that prints them.",
         "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
         "free_included": "General design guidance and printability checks stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -8962,6 +9814,10 @@
         "headline": "Calibrate the numbers to the machine that prints them.",
         "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
         "free_included": "General design guidance and printability checks stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -8995,6 +9851,10 @@
         ],
         "title": "classify_calibration_confidenceArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -9083,6 +9943,10 @@
         "headline": "Size this feature for the real printer and material.",
         "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
         "free_included": "General fit guidance stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -9199,6 +10063,10 @@
         "headline": "Size this part for the load it has to carry.",
         "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
         "free_included": "General design guidance and safety cautions stay available at every tier."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -9251,6 +10119,10 @@
         "headline": "Calibrate the numbers to the machine that prints them.",
         "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
         "free_included": "General design guidance and printability checks stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -9285,6 +10157,10 @@
         "headline": "Calibrate the numbers to the machine that prints them.",
         "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
         "free_included": "General design guidance and printability checks stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -9312,6 +10188,10 @@
         "headline": "Calibrate the numbers to the machine that prints them.",
         "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
         "free_included": "General design guidance and printability checks stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -9324,6 +10204,10 @@
         "properties": {},
         "title": "get_parser_health_summaryArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -9372,6 +10256,10 @@
         },
         "title": "get_provenance_historyArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -9411,6 +10299,10 @@
         "headline": "Calibrate the numbers to the machine that prints them.",
         "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
         "free_included": "General design guidance and printability checks stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -9447,6 +10339,10 @@
         ],
         "title": "ingest_measurementArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -9491,6 +10387,10 @@
         "headline": "Calibrate the numbers to the machine that prints them.",
         "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
         "free_included": "General design guidance and printability checks stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -9581,6 +10481,10 @@
         "headline": "Size this feature for the real printer and material.",
         "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
         "free_included": "General fit guidance stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -9630,6 +10534,10 @@
         "headline": "Calibrate the numbers to the machine that prints them.",
         "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
         "free_included": "General design guidance and printability checks stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -9669,6 +10577,10 @@
         "headline": "Calibrate the numbers to the machine that prints them.",
         "outcome_preview": "Kiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.",
         "free_included": "General design guidance and printability checks stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -9681,6 +10593,10 @@
         "properties": {},
         "title": "revert_calibration_recommendationsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -9778,6 +10694,10 @@
         ],
         "title": "tolerance_stack_analysisArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -9790,6 +10710,10 @@
         "properties": {},
         "title": "verify_provenance_integrityArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -9859,6 +10783,10 @@
         "pro": "\u2014",
         "business": "\u2014",
         "enterprise": "\u2713"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -10172,6 +11100,10 @@
         "pro": "Safety basics",
         "business": "Which coating family, how it fails, what you still must prove",
         "enterprise": "+ Named products tied to your controlled documents \u00b7 governed review for safety-critical boards"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -10199,6 +11131,10 @@
         "headline": "Assemble the governed evidence for this exact revision.",
         "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
         "free_included": "Safety cautions and the need for human review stay visible."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -10236,6 +11172,10 @@
         "pro": "Warnings",
         "business": "Verdicts \u2014 solvents, fuels, oils, bleach, UV, weather",
         "enterprise": "+ Safety-critical grade \u2014 concentrated acids, caustics, food contact"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -10330,6 +11270,10 @@
         "pro": "Design guidance",
         "business": "+ Validation tests & QC plans",
         "enterprise": "+ Child-safety & supplier vetting"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -10394,6 +11338,10 @@
         "headline": "Size this feature for the real printer and material.",
         "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
         "free_included": "General fit guidance stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -10451,6 +11399,10 @@
         },
         "title": "drying_advisorArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -10525,6 +11477,10 @@
         "pro": "Design guidance",
         "business": "+ Validation tests & QC plans",
         "enterprise": "+ Child-safety & supplier vetting"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -10605,6 +11561,10 @@
         "headline": "Turn this supplier datasheet into a material Kiln can plan with.",
         "outcome_preview": "Kiln Business would verify the quoted datasheet values, build a structured material profile, and keep it in your ingested-materials library.",
         "free_included": "The built-in material catalog stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -10642,6 +11602,10 @@
         "headline": "Turn this supplier datasheet into a material Kiln can plan with.",
         "outcome_preview": "Kiln Business would verify the quoted datasheet values, build a structured material profile, and keep it in your ingested-materials library.",
         "free_included": "The built-in material catalog stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -10662,6 +11626,10 @@
         ],
         "title": "lookup_fastenerArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -10803,6 +11771,10 @@
         "headline": "Assemble the governed evidence for this exact revision.",
         "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
         "free_included": "Safety cautions and the need for human review stay visible."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -10842,6 +11814,10 @@
         "headline": "Assemble the governed evidence for this exact revision.",
         "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
         "free_included": "Safety cautions and the need for human review stay visible."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -10904,6 +11880,10 @@
         "headline": "Assemble the governed evidence for this exact revision.",
         "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
         "free_included": "Safety cautions and the need for human review stay visible."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -10984,6 +11964,10 @@
         ],
         "title": "manage_protection_outcomesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -11184,6 +12168,10 @@
         ],
         "title": "manage_supplier_document_evidenceArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -11322,6 +12310,10 @@
         "headline": "Assemble the governed evidence for this exact revision.",
         "outcome_preview": "Kiln Enterprise would tie the production record to the revision, surface missing approvals, and prepare the review packet.",
         "free_included": "Safety cautions and the need for human review stay visible."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -11363,6 +12355,10 @@
         "pro": "\u2014",
         "business": "\u2014",
         "enterprise": "\u2713"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -11390,6 +12386,10 @@
         "headline": "Turn this supplier datasheet into a material Kiln can plan with.",
         "outcome_preview": "Kiln Business would verify the quoted datasheet values, build a structured material profile, and keep it in your ingested-materials library.",
         "free_included": "The built-in material catalog stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -11484,6 +12484,10 @@
         "headline": "Choose a bonding path for this material pair and exposure.",
         "outcome_preview": "Kiln Pro would rank suitable bonding paths and prepare the surface-preparation and cure steps for the stated conditions.",
         "free_included": "General bonding cautions stay available where safety requires them."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -11566,6 +12570,10 @@
         "headline": "Size this feature for the real printer and material.",
         "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
         "free_included": "General fit guidance stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -11623,6 +12631,10 @@
         "headline": "Size this part for the load it has to carry.",
         "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
         "free_included": "General design guidance and safety cautions stay available at every tier."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -11727,6 +12739,10 @@
         "pro": "Design guidance",
         "business": "+ Validation tests & QC plans",
         "enterprise": "+ Child-safety & supplier vetting"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -11774,6 +12790,10 @@
         "pro": "Safety basics",
         "business": "Grade selection & sourcing for your printer",
         "enterprise": "+ Audit-ready ESD program support"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -11843,6 +12863,10 @@
         "headline": "Choose a bonding path for this material pair and exposure.",
         "outcome_preview": "Kiln Pro would rank suitable bonding paths and prepare the surface-preparation and cure steps for the stated conditions.",
         "free_included": "General bonding cautions stay available where safety requires them."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -11898,6 +12922,10 @@
         ],
         "title": "record_chemical_outcomeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -11960,6 +12988,10 @@
         ],
         "title": "record_esd_measurementArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -12015,6 +13047,10 @@
         ],
         "title": "record_magnet_outcomeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -12060,6 +13096,10 @@
         "pro": "Design guidance",
         "business": "+ Validation tests & QC plans",
         "enterprise": "+ Child-safety & supplier vetting"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -12119,6 +13159,10 @@
         ],
         "title": "add_feature_during_print_fleetArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -12147,6 +13191,10 @@
         },
         "title": "assess_fleet_power_lossArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -12221,6 +13269,10 @@
         ],
         "title": "decorate_during_print_fleetArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -12275,6 +13327,10 @@
         ],
         "title": "evaluate_fleet_rerouteArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -12308,6 +13364,10 @@
         },
         "title": "fleet_cancelArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -12336,6 +13396,10 @@
         },
         "title": "fleet_nozzle_agreementArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -12369,6 +13433,10 @@
         },
         "title": "fleet_pauseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -12402,6 +13470,10 @@
         },
         "title": "fleet_resumeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -12422,6 +13494,10 @@
         ],
         "title": "fleet_set_speedArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -12446,6 +13522,10 @@
         ],
         "title": "fleet_skip_objectsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -12479,6 +13559,10 @@
         },
         "title": "fleet_thermal_postureArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -12541,6 +13625,10 @@
         },
         "title": "maintenance_dueArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -12566,6 +13654,10 @@
         ],
         "title": "may_i_printArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -12664,6 +13756,10 @@
         "headline": "Answer this material question across every machine at once.",
         "outcome_preview": "Kiln Business would compare spools and capability across the registered machines and prepare one cross-machine answer.",
         "free_included": "The per-printer answer stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -12690,6 +13786,10 @@
         ],
         "title": "revert_mid_print_fleetArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -12728,6 +13828,10 @@
         },
         "title": "check_skin_contact_declarationArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -12765,6 +13869,10 @@
         "pro": "Flags",
         "business": "Sell-ready remediation steps",
         "enterprise": "+ Market compliance checks (EU \u00b7 UK \u00b7 US \u00b7 Canada)"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -12785,6 +13893,10 @@
         ],
         "title": "recommend_material_for_skin_contactArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -12825,6 +13937,10 @@
         ],
         "title": "record_skin_contact_outcomeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -12843,6 +13959,10 @@
         },
         "title": "emit_test_eventArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -12855,6 +13975,10 @@
         "properties": {},
         "title": "list_event_subscriptionsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -12867,6 +13991,10 @@
         "properties": {},
         "title": "list_hooksArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -12987,6 +14115,10 @@
         },
         "title": "set_event_subscriptionsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -13011,6 +14143,10 @@
         ],
         "title": "set_hooksArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -13029,6 +14165,10 @@
         },
         "title": "summarize_eventsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -13047,6 +14187,10 @@
         },
         "title": "tail_event_logArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -13077,6 +14221,10 @@
         ],
         "title": "delete_decorationArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -13107,6 +14255,10 @@
         ],
         "title": "delete_designArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -13137,6 +14289,10 @@
         ],
         "title": "delete_featureArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -13220,6 +14376,10 @@
         },
         "title": "resume_interrupted_printArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -13271,6 +14431,10 @@
         ],
         "title": "batch_estimate_plate_part_costsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -13338,6 +14502,10 @@
         ],
         "title": "estimate_plate_part_costsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -13363,6 +14531,10 @@
         ],
         "title": "abrasive_escalationArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -13515,6 +14687,10 @@
         ],
         "title": "add_feature_during_printArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -13575,6 +14751,10 @@
         ],
         "title": "add_pin_jointsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -13618,6 +14798,10 @@
         ],
         "title": "advise_kit_scaleArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -13651,6 +14835,10 @@
         },
         "title": "analyze_mid_print_impactArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -13676,6 +14864,10 @@
         ],
         "title": "answer_printer_questionArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -13699,6 +14891,10 @@
         },
         "title": "apply_mid_print_decoration_planArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -13729,6 +14925,10 @@
         ],
         "title": "auto_detect_nozzleArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -13878,6 +15078,10 @@
         ],
         "title": "auto_recoverArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -13903,6 +15107,10 @@
         ],
         "title": "cancel_auto_recoverArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -14040,6 +15248,10 @@
         ],
         "title": "check_assembly_standsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -14075,6 +15287,10 @@
         ],
         "title": "check_nozzle_capacity_for_printArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -14156,6 +15372,10 @@
         },
         "title": "check_power_loss_recoveryArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -14176,6 +15396,10 @@
         ],
         "title": "confirm_auto_recoverArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -14217,6 +15441,10 @@
         ],
         "title": "cutter_wear_statusArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -14338,6 +15566,10 @@
         ],
         "title": "deboss_during_printArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -14493,6 +15725,10 @@
         ],
         "title": "decorate_during_printArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -14530,6 +15766,10 @@
         ],
         "title": "food_safety_for_printerArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -14590,6 +15830,10 @@
         ],
         "title": "generate_recovery_gcodeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -14610,6 +15854,10 @@
         ],
         "title": "get_auto_recover_statusArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -14644,6 +15892,10 @@
         "headline": "Start this print with the settings your history earned.",
         "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
         "free_included": "Slicing and printing with standard settings stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -14674,6 +15926,10 @@
         ],
         "title": "get_community_wear_baselineArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -14703,6 +15959,10 @@
         "headline": "Know how worn this nozzle is before it costs a print.",
         "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
         "free_included": "Reading and setting this printer's nozzle stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -14723,6 +15983,10 @@
         ],
         "title": "get_material_success_ratesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -14748,6 +16012,10 @@
         ],
         "title": "get_material_warningsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -14780,6 +16048,10 @@
         "headline": "Know how worn this nozzle is before it costs a print.",
         "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
         "free_included": "Reading and setting this printer's nozzle stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -14818,6 +16090,10 @@
         ],
         "title": "get_nozzle_stateArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -14857,6 +16133,10 @@
         "headline": "Start this print with the settings your history earned.",
         "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
         "free_included": "Slicing and printing with standard settings stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -14909,6 +16189,10 @@
         "headline": "Start this print with the settings your history earned.",
         "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
         "free_included": "Slicing and printing with standard settings stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -14958,6 +16242,10 @@
         "headline": "Start this print with the settings your history earned.",
         "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
         "free_included": "Slicing and printing with standard settings stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -14993,6 +16281,10 @@
         ],
         "title": "get_recovery_recommendationsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -15026,6 +16318,10 @@
         },
         "title": "get_recovery_strategy_statsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -15038,6 +16334,10 @@
         "properties": {},
         "title": "get_telemetry_preferencesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -15050,6 +16350,10 @@
         "properties": {},
         "title": "list_nozzle_statesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -15116,6 +16420,10 @@
         "limit": 2,
         "noun": "print-ready fixes",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -15179,6 +16487,10 @@
         "headline": "Know how worn this nozzle is before it costs a print.",
         "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
         "free_included": "Reading and setting this printer's nozzle stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -15220,6 +16532,10 @@
         "headline": "Know how worn this nozzle is before it costs a print.",
         "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
         "free_included": "Reading and setting this printer's nozzle stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -15344,6 +16660,10 @@
         },
         "title": "plan_kit_platesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -15509,6 +16829,10 @@
         ],
         "title": "plan_mid_print_decorationArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -15546,6 +16870,10 @@
         ],
         "title": "plan_object_skipArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -15617,6 +16945,10 @@
         "headline": "Start this print with the settings your history earned.",
         "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
         "free_included": "Slicing and printing with standard settings stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -15680,6 +17012,10 @@
         },
         "title": "preview_decorated_meshArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -15723,6 +17059,10 @@
         },
         "title": "preview_mid_print_sessionArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -15809,6 +17149,10 @@
         ],
         "title": "record_completed_printArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -15883,6 +17227,10 @@
         ],
         "title": "record_cutter_replacementArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -15913,6 +17261,10 @@
         ],
         "title": "record_extrusion_eventArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -16038,6 +17390,10 @@
         "headline": "Know how worn this nozzle is before it costs a print.",
         "outcome_preview": "Kiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.",
         "free_included": "Reading and setting this printer's nozzle stays available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -16093,6 +17449,10 @@
         ],
         "title": "record_recovery_outcomeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -16164,6 +17524,10 @@
         },
         "title": "recover_power_loss_printArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -16199,6 +17563,10 @@
         ],
         "title": "regenerate_3mf_thumbnailArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -16222,6 +17590,10 @@
         },
         "title": "revert_mid_printArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -16301,6 +17673,10 @@
         ],
         "title": "separate_overlapping_partsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -16382,6 +17758,10 @@
         ],
         "title": "set_nozzle_stateArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -16412,6 +17792,10 @@
         ],
         "title": "set_telemetry_preferenceArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -16553,6 +17937,10 @@
         "limit": 3,
         "noun": "part splits",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -16604,6 +17992,10 @@
         },
         "title": "verify_mesh_fitArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -16654,6 +18046,10 @@
         ],
         "title": "wrap_gcode_as_resume_3mfArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -16745,6 +18141,10 @@
         "limit": 3,
         "noun": "ashtrays",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -16824,6 +18224,10 @@
         "limit": 3,
         "noun": "bookmarks",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -16893,6 +18297,10 @@
         "limit": 3,
         "noun": "coasters",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -16987,6 +18395,10 @@
         "limit": 3,
         "noun": "fridge magnets",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -17061,6 +18473,10 @@
         "limit": 3,
         "noun": "frisbees",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -17165,6 +18581,10 @@
         "limit": 3,
         "noun": "jewelry trays",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -17254,6 +18674,10 @@
         "limit": 3,
         "noun": "keychains",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -17373,6 +18797,10 @@
         "limit": 3,
         "noun": "license plate frames",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -17462,6 +18890,10 @@
         "limit": 3,
         "noun": "nameplates",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -17546,6 +18978,10 @@
         "limit": 3,
         "noun": "ornaments",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -17645,6 +19081,10 @@
         "limit": 3,
         "noun": "pen cups",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -17724,6 +19164,10 @@
         "limit": 3,
         "noun": "pet bowls",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -17815,6 +19259,10 @@
         "limit": 3,
         "noun": "pet tags",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -17914,6 +19362,10 @@
         "limit": 3,
         "noun": "rolling trays",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -18003,6 +19455,10 @@
         "limit": 3,
         "noun": "soap dishes",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -18089,6 +19545,10 @@
         "limit": 3,
         "noun": "wall plaques",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -18148,6 +19608,10 @@
         "headline": "Put a scannable QR on this product.",
         "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
         "free_included": "The product itself still generates without the QR."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -18211,6 +19675,10 @@
         ],
         "title": "batch_generate_productsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -18236,6 +19704,10 @@
         ],
         "title": "describe_faceArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -18301,6 +19773,10 @@
         ],
         "title": "generate_decorated_productArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -18346,6 +19822,10 @@
         ],
         "title": "generate_product_baseArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -18371,6 +19851,10 @@
         ],
         "title": "get_face_emboss_depthArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -18391,6 +19875,10 @@
         ],
         "title": "get_product_color_rolesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -18411,6 +19899,10 @@
         ],
         "title": "get_product_facesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -18431,6 +19923,10 @@
         ],
         "title": "list_decoratable_facesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -18443,6 +19939,10 @@
         "properties": {},
         "title": "list_product_typesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -18483,6 +19983,10 @@
         ],
         "title": "recommend_text_sizeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -18501,6 +20005,10 @@
         },
         "title": "enable_auto_proven_recipesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -18526,6 +20034,10 @@
         ],
         "title": "get_proven_recipeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -18544,6 +20056,10 @@
         },
         "title": "list_proven_recipesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -18609,6 +20125,10 @@
         ],
         "title": "record_proven_recipeArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -18621,6 +20141,10 @@
         "properties": {},
         "title": "cancel_speed_scheduleArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -18633,6 +20157,10 @@
         "properties": {},
         "title": "get_speed_scheduleArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -18665,6 +20193,10 @@
         ],
         "title": "set_speed_percentArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -18701,6 +20233,10 @@
         ],
         "title": "set_speed_scheduleArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -18744,6 +20280,10 @@
         ],
         "title": "report_issueArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -18795,6 +20335,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -18846,6 +20390,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -18909,6 +20457,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -18960,6 +20512,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -18990,6 +20546,10 @@
         ],
         "title": "backfill_artifact_into_orgArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19034,6 +20594,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19102,6 +20666,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19122,6 +20690,10 @@
         ],
         "title": "delete_teamArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19205,6 +20777,10 @@
         },
         "title": "export_audit_logArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -19217,6 +20793,10 @@
         "properties": {},
         "title": "github_start_device_loginArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -19297,6 +20877,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19343,6 +20927,10 @@
         "headline": "Route this change through your team's review.",
         "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
         "free_included": "Your own designs and history stay fully editable."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -19363,6 +20951,10 @@
         ],
         "title": "list_my_orgsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -19388,6 +20980,10 @@
         ],
         "title": "list_my_teamsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -19408,6 +21004,10 @@
         ],
         "title": "list_org_membersArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -19420,6 +21020,10 @@
         "properties": {},
         "title": "list_role_templatesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -19464,6 +21068,10 @@
         ],
         "title": "list_scopesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -19484,6 +21092,10 @@
         ],
         "title": "list_team_membersArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -19504,6 +21116,10 @@
         ],
         "title": "list_teamsArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -19543,6 +21159,10 @@
         "headline": "Route this change through your team's review.",
         "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
         "free_included": "Your own designs and history stay fully editable."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19577,6 +21197,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19611,6 +21235,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19636,6 +21264,10 @@
         ],
         "title": "resolve_handleArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -19699,6 +21331,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19784,6 +21420,10 @@
         "headline": "Route this change through your team's review.",
         "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
         "free_included": "Your own designs and history stay fully editable."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19863,6 +21503,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19907,6 +21551,10 @@
         "headline": "Run this work in a workspace your team shares.",
         "outcome_preview": "Kiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.",
         "free_included": "Your personal designs and history stay fully yours."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19932,6 +21580,10 @@
         ],
         "title": "unassign_artifactArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -19998,6 +21650,10 @@
         },
         "title": "generate_technical_drawingArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -20229,6 +21885,10 @@
         "limit": 3,
         "noun": "textures",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -20386,6 +22046,10 @@
         "limit": 3,
         "noun": "textures",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -20622,6 +22286,10 @@
         "limit": 3,
         "noun": "textures",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -20642,6 +22310,10 @@
         ],
         "title": "delete_custom_paletteArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {
@@ -20693,6 +22365,10 @@
         "limit": 3,
         "noun": "textures",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -20705,6 +22381,10 @@
         "properties": {},
         "title": "list_custom_palettesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -20717,6 +22397,10 @@
         "properties": {},
         "title": "list_procedural_texturesArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -20816,6 +22500,10 @@
         },
         "title": "preview_texture_2dArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -20828,6 +22516,10 @@
         "properties": {},
         "title": "push_palettes_to_cloudArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
       }
     },
     {
@@ -20879,6 +22571,10 @@
         "limit": 3,
         "noun": "textures",
         "period": "month"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {
@@ -20912,6 +22608,10 @@
         ],
         "title": "save_custom_paletteArguments",
         "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     }
   ]
