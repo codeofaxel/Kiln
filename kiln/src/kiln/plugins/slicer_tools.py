@@ -295,11 +295,6 @@ PLACEMENT_REGIONS = tuple(
     for r in range(3)
     for c in range(3)
 )
-#: Why the bridge came back empty -> the cause and the remedy of the
-#: fail-closed sentence, keyed by the bridge's three-way reason.  Kept as
-#: separate strings, as the assembly keeps its four parts apart, so the
-#: sentence can move to ``kiln.served_answer.sentence(...)`` in one commit
-#: once that shared helper lands on main.
 _PROFILE_NUMBER_KEYS = ("layer_height", "skirts", "skirt_distance", "brim_width")
 _PLACEABLE_EXTENSIONS = (".stl", ".3mf")
 
