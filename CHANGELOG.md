@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **When Kiln can't reach its servers, it says so in plain words.** Every feature that leans on them names which of four things happened — this computer is offline, you're signed out, the servers didn't answer, or they said no — and what to do next.
+
+- **A check Kiln couldn't make is never reported as a pass.** A pre-flight that can't reach the servers lists the check as not made, instead of quietly leaving it out.
+
 - **The weight on your printer's screen is for the filament you're actually using.** Every slice is weighed with the material you name or the spool your printer reports loaded, and Kiln tells you which one it used.
 
 - **Your Bambu is told the filament you're actually printing.** It warms up for that filament, and its screen shows the right one.
@@ -255,6 +259,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   https://kiln3d.com/pricing.
 
 ### Fixed
+
+- **A Bambu keeps the moves Kiln saved for it through a brief hiccup on Kiln's side.** Homing, parking and wiping used to refuse until you were back online, because Kiln dropped the sequence it had saved for your machine.
 
 - **A spool on a second AMS unit, or in an AMS HT, is now routed, loaded and reported as the tray it really is.** Kiln names every tray the way your printer does.
 
