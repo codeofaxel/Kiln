@@ -413,6 +413,16 @@ class _SmartPrintToolsPlugin:
             verify_err, place_info = _verify_plate_placement(slice_result.output_path, place_info)
             if verify_err is not None:
                 return verify_err
+            # A plate that still holds the print that failed is never
+            # started onto: the file carries the maker's own start sequence.
+            # Refused before the wrap and the upload, with the slice and its
+            # verdict attached so the work is not lost.
+            from kiln.plate_state import start_refusal
+
+            if block := start_refusal(adapter):
+                block["slice"] = slice_result.to_dict()
+                _attach_placement(block, place_info)
+                return block
 
             # Bambu 3MF wrapping.
             upload_path = slice_result.output_path

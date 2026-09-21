@@ -449,20 +449,29 @@ def _slice_step_data(result: Any) -> dict[str, Any]:
     return data
 
 
-def _refused_slice_step(err: dict[str, Any], step_start: float) -> PipelineStep:
-    """A slice step that the placement gate refused: the sentence is the
-    message, the gate's own fields (spots, occupancy, the plate) ride the data."""
+def _refused_step(name: str, err: dict[str, Any], step_start: float) -> PipelineStep:
+    """A step the plate refused: the sentence is the message, the gate's own
+    fields (the plate, spots, occupancy, the verdict) ride the data."""
     data: dict[str, Any] = {"error": err.get("error")}
     for key in ("plate", "spots", "occupancy", "placement"):
         if key in err:
             data[key] = err[key]
     return PipelineStep(
-        name="slice",
+        name=name,
         success=False,
-        message=str((err.get("error") or {}).get("message") or "Slicing refused"),
+        message=str((err.get("error") or {}).get("message") or f"{name} refused"),
         data=data,
         duration_seconds=time.time() - step_start,
     )
+
+
+def _start_refused_step(adapter: Any, step_start: float) -> PipelineStep | None:
+    """The start step's plate gate: a plate that still holds the last print
+    is never started onto (:func:`kiln.plate_state.start_refusal`)."""
+    from kiln.plate_state import start_refusal
+
+    block = start_refusal(adapter) if adapter is not None else None
+    return _refused_step("start_print", block, step_start) if block else None
 
 
 def _slice_step(
@@ -476,34 +485,24 @@ def _slice_step(
     step_start: float,
     **slice_kwargs: Any,
 ) -> tuple[PipelineStep, str | None]:
-    """The slice step every pipeline shares: the placement gate, the slicer,
-    the second verdict on the sliced file.
+    """The slice step every pipeline shares, on the same step every slice
+    tool uses (:func:`kiln.plugins.slicer_tools._placed_slice`): the plate
+    gate, the slicer, the second verdict on the sliced file.
 
-    One helper so the pipelines cannot differ from the slice tools about a
-    plate that still holds the last print (:func:`kiln.plugins.slicer_tools.
-    _apply_plate_placement`).  Returns ``(step, gcode_path)``; a refused
-    step carries no G-code and, being fatal, stops the pipeline.  Raises
-    whatever the slicer raises, for the caller's own failed-step wording.
+    Returns ``(step, gcode_path)``; a refused step carries no G-code and,
+    being fatal, stops the pipeline.  Raises whatever the slicer raises,
+    for the caller's own failed-step wording.
     """
-    from kiln.plugins.slicer_tools import (
-        _apply_plate_placement,
-        _attach_placement,
-        _verify_plate_placement,
-    )
-    from kiln.slicer import slice_file
+    from kiln.plugins.slicer_tools import _attach_placement, _placed_slice
 
-    placed, err, info = _apply_plate_placement(
+    result, err, info = _placed_slice(
         model_path, effective_printer_id=effective_pid, printer_name=printer_name,
-        placement=placement, profile_path=profile, adapter=adapter,
+        placement=placement, profile_path=profile, adapter=adapter, **slice_kwargs,
     )
     if err is not None:
-        return _refused_slice_step(err, step_start), None
-    result = slice_file(placed, profile=profile, **slice_kwargs)
-    verify_err, info = _verify_plate_placement(result.output_path, info)
-    if verify_err is not None:
-        return _refused_slice_step(verify_err, step_start), None
+        return _refused_step("slice", err, step_start), None
     data = _slice_step_data(result)
-    _attach_placement(data, info)
+    _attach_placement(data, info["placement"])
     step = PipelineStep(
         name="slice",
         success=True,
@@ -882,6 +881,9 @@ def quick_print(
         try:
             adapter = ctx["adapter"]
             remote_name = ctx["remote_name"]
+            # A plate that still holds the last print is never started onto.
+            if refused := _start_refused_step(adapter, step_start):
+                return refused
             if adapter is None or remote_name is None:
                 return PipelineStep(
                     name="start_print",
@@ -1375,6 +1377,9 @@ def reslice_and_print(
         try:
             adapter = ctx["adapter"]
             remote_name = ctx["remote_name"]
+            # A plate that still holds the last print is never started onto.
+            if refused := _start_refused_step(adapter, step_start):
+                return refused
             if adapter is None or remote_name is None:
                 return PipelineStep(
                     name="start_print",

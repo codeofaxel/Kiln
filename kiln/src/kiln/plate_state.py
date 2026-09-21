@@ -14,7 +14,11 @@ says the plate is empty (``plate_clear=True`` on ``home_axes``, or
 ``kiln plate clear``).  Read by every door that moves the head:
 :meth:`~kiln.printers.base.PrinterAdapter.home_axes`,
 :meth:`~kiln.printers.base.PrinterAdapter.park_head`, the ``plate_status``
-tool, ``kiln plate`` and ``kiln doctor``.
+tool, ``kiln plate`` and ``kiln doctor`` -- and, because the file a print
+starts from carries the maker's own start sequence (which drives the head
+across the plate), by every door that starts a print (:func:`start_refusal`)
+and every door that slices for one
+(:func:`kiln.plugins.slicer_tools._apply_plate_placement`).
 
 **The default is "unknown", and unknown refuses.**  This is the opposite of
 the engagement record next door (``printers/engagement.py``), whose torn or
@@ -58,6 +62,25 @@ STATUSES = ("unknown", "occupied", "clear")
 #: The block the 3D stage draws an occupied plate from, and the shape the
 #: placement verdict's ``occupancy`` carries (:mod:`kiln._pro_placement_bridge`).
 OCCUPANCY_KIND = "kiln.plate_occupancy.v1"
+
+#: The code every door that starts a print refuses with while the plate
+#: still holds the last one (:func:`start_refusal`).
+START_NOT_YET_CODE = "PLATE_OCCUPIED_START_NOT_YET"
+
+#: What a sentence strips before it names the part on the plate.  The one
+#: prettifier in public Kiln; its list matches kiln-pro's own, so the two
+#: halves name the same part the same way.
+_MODEL_EXTENSIONS = (".gcode.3mf", ".3mf", ".gcode", ".stl", ".obj", ".step")
+
+
+def pretty_job_name(file_name: str | None) -> str:
+    """``jar_v2.gcode.3mf`` -> ``jar v2``: what a sentence calls the part on the plate."""
+    base = os.path.basename(str(file_name or ""))
+    for ext in _MODEL_EXTENSIONS:
+        if base.lower().endswith(ext):
+            base = base[: -len(ext)]
+            break
+    return " ".join(base.replace("_", " ").replace("-", " ").split()) or "the last part"
 
 #: A G-code body longer than this is not scanned for its height: a scan
 #: cut short would report a height that is too LOW, which is the dangerous
@@ -233,6 +256,26 @@ class PlateState:
             return f"the plate was cleared at {self.since_clock()} ({who})"
         return "Kiln has no record of what is on the plate"
 
+    def holds_sentence(self) -> str:
+        """``The last print, jar v2, is still on the plate (since 18:12, about 42 mm tall).``
+
+        The one opening every refusal about an occupied plate shares.  The
+        height clause is dropped, never printed as ``None``, when the record
+        could not read the file's height.
+        """
+        job = self.job
+        tall = f", about {job.max_z_mm:g} mm tall" if job is not None and job.max_z_mm is not None else ""
+        name = pretty_job_name(job.file if job is not None else "")
+        return f"The last print, {name}, is still on the plate (since {self.since_clock()}{tall})."
+
+    def start_refusal_sentence(self) -> str:
+        """Why no print starts while the plate holds the last one."""
+        return (
+            f"{self.holds_sentence()} Kiln can't start a print onto an occupied plate yet — the "
+            "printer's own start sequence drives the head across it — so it won't start this one. "
+            "Clear the plate and say so."
+        )
+
     def occupancy(self, bed_mm: Any = None) -> dict[str, Any] | None:
         """The :data:`OCCUPANCY_KIND` block from the record's own box, or ``None``
         when the plate is not occupied.
@@ -240,9 +283,9 @@ class PlateState:
         Same shape the placement verdict carries, built from the record
         alone: one occupant -- the job's file, its footprint box and its
         height as recorded, each ``None`` when Kiln could not derive it from
-        the file (a part of unknown size is still a part) -- no reserved
-        zones, no proposal, ``source: "record_box"``.  *bed_mm* is the
-        plate's ``[x, y]`` when the caller knows it.
+        the file (a part of unknown size is still a part) -- no proposal,
+        ``source: "record_box"``.  *bed_mm* is the plate's ``[x, y]`` when
+        the caller knows it.
         """
         if not self.occupied:
             return None
@@ -259,7 +302,6 @@ class PlateState:
                 "rect_mm": list(job.footprint_mm) if job and job.footprint_mm else None,
                 "top_mm": job.max_z_mm if job else None,
             }],
-            "reserved": [],
             "proposed": None,
             "source": "record_box",
         }
@@ -317,6 +359,35 @@ def read(adapter: Any) -> PlateState:
     except Exception:  # noqa: BLE001
         logger.debug("plate-state read failed", exc_info=True)
         return PlateState(machine=machine)
+
+
+def start_refusal(adapter: Any, *, resume: bool = False) -> dict[str, Any] | None:
+    """The one gate every door that starts a print calls, before the start.
+
+    ``None`` when the plate is clear or unrecorded; otherwise the refusal
+    every start door returns, in the standard error envelope
+    (``{"success": False, "error": {"code", "message", "retryable"}}`` --
+    the same shape :func:`kiln.server._error_dict` builds -- with the
+    record and its occupancy block beside it).  The reason is physical: the
+    file a print starts from carries the maker's own start sequence, which
+    drives the head across the plate at a few millimetres, so a part left
+    there is hit before the first layer.  A *resume* is that same job,
+    still on the plate where it paused, and passes.  Never raises.
+    """
+    if resume:
+        return None
+    try:
+        state = read(adapter)
+    except Exception:  # noqa: BLE001 -- an unreadable record reads as unknown, which passes
+        return None
+    if not state.occupied:
+        return None
+    return {
+        "success": False,
+        "error": {"code": START_NOT_YET_CODE, "message": state.start_refusal_sentence(), "retryable": False},
+        "plate": state.to_dict(),
+        "occupancy": state.occupancy(None),
+    }
 
 
 def plate_occupancy(adapter: Any) -> PlateState:

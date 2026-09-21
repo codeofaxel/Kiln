@@ -70,7 +70,7 @@ Verdict (``schema: "placement_verdict/1"``)::
      "clearance_mm", "refusals": [{"code", "sentence"}], "conflicts",
      "switched_off": {name: how}, "spots": [{"at_mm", "clearance_mm"}],
      "occupancy": {"kind": "kiln.plate_occupancy.v1", "bed_mm", "occupied",
-                   "reserved", "proposed", "source": "gcode"|"record_box"},
+                   "proposed", "source": "gcode"|"record_box"},
      "record": {"printer_id", "measured", "source"},
      "tier": {"verdict": "free", "plan": "pro"}}
 

@@ -167,8 +167,8 @@ def attach_stage_plate(
     plate, the payload carries an ``occupancy`` block
     (:data:`kiln.plate_state.OCCUPANCY_KIND`): the occupant's footprint box
     and height from the record, or — when a door holds a placement verdict
-    and passes its block as *occupancy* — the engine's own reading, with its
-    reserved zones and the proposed spot.  A clear or unrecorded plate
+    and passes its block as *occupancy* — the engine's own reading, with the
+    proposed spot.  A clear or unrecorded plate
     carries none.  Rects are in bed millimetres with ``bed_mm`` alongside;
     the part's own positions have been centred by :func:`stand_on_plate`,
     so a drawing places the occupant against ``proposed.rect_mm`` when the

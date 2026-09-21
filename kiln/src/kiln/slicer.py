@@ -1189,6 +1189,19 @@ def estimate_print(
     result = slice_file(
         file_path, profile=profile, slicer_path=slicer_path, material=material,
     )
+    return estimates_for_result(result, material)
+
+
+def estimates_for_result(result: SliceResult, material: str | None = None) -> dict[str, Any]:
+    """The time / filament / layer estimates of a :class:`SliceResult`.
+
+    What :func:`estimate_print` reads off the file it sliced, split out so a
+    door that slices through its own gate (the plate gate every slice door
+    shares) can estimate the same way without slicing twice.
+
+    Raises:
+        SlicerError: If the slice did not produce a file.
+    """
     if not result.success or not result.output_path:
         raise SlicerError("Slicing failed — cannot estimate print.")
 

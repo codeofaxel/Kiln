@@ -3110,39 +3110,26 @@ def design_to_gcode(
     # now module-level-shaped and exercised by a test, so a renamed
     # slicer entry point fails the suite instead of a runtime fallback.
     try:
-        from kiln.plugins.slicer_tools import (
-            _apply_plate_placement,
-            _verify_plate_placement,
-        )
-        from kiln.slicer import SlicerNotFoundError, slice_file
+        from kiln.plugins.slicer_tools import _placed_slice
+        from kiln.slicer import SlicerNotFoundError
         from kiln.slicer_profiles import resolve_slicer_profile
 
         profile = resolve_slicer_profile(printer_model) if printer_model else None
-        # The plate may still hold the last print: same gate as slice_model.
-        placed, place_err, place_info = _apply_plate_placement(
+        # The plate may still hold the last print: the same shared step as
+        # slice_model (plate gate, slice, second verdict).
+        slice_result, place_err, sinfo = _placed_slice(
             str(stl_path), effective_printer_id=printer_model or None, printer_name=None,
             placement=placement, profile_path=profile,
+            output_dir=str(out_dir), output_name=f"{template_id}.gcode", material=material,
         )
         if place_err is not None:
             result.errors.append(str(place_err["error"]["message"]))
             result.placement = place_err.get("placement")
         else:
-            slice_result = slice_file(
-                placed,
-                output_dir=str(out_dir),
-                output_name=f"{template_id}.gcode",
-                profile=profile,
-                material=material,
-            )
-            verify_err, place_info = _verify_plate_placement(slice_result.output_path, place_info)
-            if verify_err is not None:
-                result.errors.append(str(verify_err["error"]["message"]))
-                result.placement = verify_err.get("placement")
-            else:
-                result.gcode_file = slice_result.output_path
-                result.steps_completed.append("slicing")
-                if place_info.get("plate") == "occupied":
-                    result.placement = place_info.get("placement")
+            result.gcode_file = slice_result.output_path
+            result.steps_completed.append("slicing")
+            if sinfo["placement"].get("plate") == "occupied":
+                result.placement = sinfo["placement"].get("placement")
     except SlicerNotFoundError:
         result.errors.append(
             "No slicer installed — install PrusaSlicer or OrcaSlicer to get G-code."

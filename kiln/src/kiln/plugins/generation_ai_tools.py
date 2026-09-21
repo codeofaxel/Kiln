@@ -963,6 +963,16 @@ class _GenerationAIToolsPlugin:
                     safety_printer = _srv._resolve_effective_printer_name(printer_name)
                     if block := _srv._emergency_latch_error("generate_and_print", safety_printer):
                         return block
+                    # A plate that still holds the last print is never
+                    # started onto.  The upload stays; the slice, its
+                    # verdict and the upload receipt ride the refusal.
+                    from kiln.plate_state import start_refusal
+
+                    if block := start_refusal(adapter):
+                        block["slice"] = slice_result.to_dict()
+                        block["upload"] = upload.to_dict()
+                        _attach_placement(block, place_info)
+                        return block
                     # Mandatory pre-flight safety gate before starting print.
                     pf = _srv.preflight_check(printer_name=printer_name)
                     if not pf.get("ready", False):

@@ -7184,6 +7184,13 @@ def start_print(
         # is about this machine.
         if block := _emergency_latch_error("start_print", target_name):
             return block
+        # A plate that still holds the last print is never started onto:
+        # the file carries the maker's own start sequence, which drives the
+        # head across the plate.  A resume is that same job, and passes.
+        from kiln.plate_state import start_refusal
+
+        if block := start_refusal(adapter, resume=bool(resume_from_paused or is_resume_3mf)):
+            return block
 
         # Snapshot pre-start temperature targets BEFORE the cancel/start
         # so we can re-assert them after the MQTT start command kicks
@@ -11967,6 +11974,16 @@ def download_and_upload(
         if _AUTO_PRINT_MARKETPLACE:
             safety_printer = _resolve_effective_printer_name(printer_name)
             if block := _emergency_latch_error("download_and_upload", safety_printer):
+                return block
+            # A plate that still holds the last print is never started
+            # onto.  The upload is done and stays; the receipt rides the
+            # refusal so it is not lost.
+            from kiln.plate_state import start_refusal
+
+            if block := start_refusal(adapter):
+                block["upload"] = upload_result.to_dict()
+                block["file_name"] = file_name
+                block["local_path"] = local_path
                 return block
             # Mandatory pre-flight safety gate before starting print.
             pf = unwrap_tool_result(preflight_check(printer_name=printer_name))

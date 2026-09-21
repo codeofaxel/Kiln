@@ -368,53 +368,55 @@ def _resolve_slice_plan(
     }
 
 
-def _cli_plate_placement(
+def _cli_placed_slice(
     ctx: click.Context,
     input_file: str,
     *,
     plan: dict[str, Any],
     placement: str | None,
     json_mode: bool,
-) -> tuple[str, dict[str, Any]]:
-    """The slice tools' plate gate, at the CLI.
+    slicer: Any | None = None,
+    **slice_kwargs: Any,
+) -> tuple[Any, dict[str, Any]]:
+    """The slice tools' shared step, at the CLI (:func:`kiln.plugins.slicer_tools._placed_slice`).
 
-    The part is placed beside what the plate still holds, or the command
-    refuses with the same sentence the tools use -- JSON and rich alike --
-    and exits non-zero.  Returns the effective input and the gate's info,
-    which :func:`_cli_verify_plate_placement` takes after the slice.  No
-    configured printer means no plate record, and the slice proceeds as it
-    always did.
+    The part is placed beside what the plate still holds, sliced, and the
+    sliced file checked once more -- or the command refuses with the same
+    sentence the tools use, JSON and rich alike, and exits non-zero.
+    Returns ``(result, placement_info)``.  No configured printer means no
+    plate record, and the slice proceeds as it always did.  *slicer* lets
+    the multi-colour path slice its copies through the same gate.
     """
-    from kiln.plugins.slicer_tools import _apply_plate_placement
+    from kiln.plugins.slicer_tools import _placed_slice
 
     try:
         adapter = _get_adapter_from_ctx(ctx)
     except Exception:  # noqa: BLE001 — no configured printer means no plate record
         adapter = None
-    placed, err, info = _apply_plate_placement(
+    result, err, info = _placed_slice(
         input_file,
         effective_printer_id=plan.get("printer_id"),
         printer_name=(ctx.obj or {}).get("printer"),
         placement=placement,
         profile_path=plan.get("profile_path"),
         adapter=adapter,
+        slicer=slicer,
+        **slice_kwargs,
     )
     if err is not None:
         _cli_placement_refuse(err, json_mode)
-    return placed, info
+    return result, info["placement"]
 
 
-def _cli_verify_plate_placement(
-    gcode_path: str | None, info: dict[str, Any], *, json_mode: bool,
-) -> dict[str, Any]:
-    """The post-slice pass at the CLI: the sliced file goes back to the plate
-    check, and a refusal exits non-zero before anything is uploaded."""
-    from kiln.plugins.slicer_tools import _verify_plate_placement
+def _cli_start_refusal(adapter: Any, json_mode: bool) -> None:
+    """The start gate every CLI door that starts a print calls first: a plate
+    that still holds the last print is never started onto
+    (:func:`kiln.plate_state.start_refusal`).  Refuses and exits non-zero."""
+    from kiln.plate_state import start_refusal
 
-    err, info = _verify_plate_placement(gcode_path, info)
-    if err is not None:
-        _cli_placement_refuse(err, json_mode)
-    return info
+    block = start_refusal(adapter)
+    if block is not None:
+        _cli_placement_refuse(block, json_mode)
 
 
 def _cli_placement_refuse(err: dict[str, Any], json_mode: bool) -> None:
@@ -3078,6 +3080,9 @@ def print_cmd(
                 if os.path.isfile(f):
                     print_kwargs["local_file_path"] = os.path.abspath(f)
 
+            # A plate that still holds the last print is never started onto:
+            # the file's own start sequence crosses the plate.
+            _cli_start_refusal(adapter, json_mode)
             result = adapter.start_print(file_name, **print_kwargs)
             click.echo(format_action("start", _with_window(result.to_dict(), window), json_mode=json_mode))
 
@@ -4230,7 +4235,7 @@ def slice(
         )
     else:
         window = None
-    from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+    from kiln.slicer import SlicerError, SlicerNotFoundError
 
     try:
         plan = _resolve_slice_plan(
@@ -4271,19 +4276,20 @@ def slice(
         actual_input = input_file
         copy_strategy = None
 
+        placement_info: dict[str, Any] = {"plate": "unknown"}
         if multicolor_mode:
-            # Multi-color copies: slice each copy individually and merge with T commands
+            # Multi-color copies: slice each copy individually and merge with
+            # T commands -- through the same gate as every other slice, so a
+            # plate that still holds the last print refuses this path too.
             from kiln.slicer import slice_multicolor_copies
 
             if not json_mode:
                 click.echo(f"Slicing multi-color plate: {copies} copies, each a different AMS color...")
 
-            result = slice_multicolor_copies(
-                input_file,
-                copies,
-                spacing_mm=spacing,
+            result, placement_info = _cli_placed_slice(
+                ctx, input_file, plan=plan, placement=placement, json_mode=json_mode,
+                slicer=lambda path, **kw: slice_multicolor_copies(path, copies, spacing_mm=spacing, **kw),
                 slicer_path=slicer,
-                profile=plan["profile_path"],
                 extra_args=extra_args or None,
                 output_dir=output_dir,
                 material=plan.get("declared_material"),
@@ -4311,27 +4317,19 @@ def slice(
                 )
                 copy_strategy = "stl_mesh_duplication"
 
-        placement_info: dict[str, Any] = {"plate": "unknown"}
         if not multicolor_mode:
-            # The plate may still hold the last print: same gate as the
-            # slice tools, same sentence, and the sliced file is checked
+            # The plate may still hold the last print: same shared step as
+            # the slice tools, same sentence, and the sliced file is checked
             # once more before it is reported or uploaded.
-            actual_input, placement_info = _cli_plate_placement(
+            result, placement_info = _cli_placed_slice(
                 ctx, actual_input, plan=plan, placement=placement, json_mode=json_mode,
-            )
-            result = slice_file(
-                actual_input,
                 output_dir=output_dir,
                 output_name=output_name,
-                profile=plan["profile_path"],
                 slicer_path=slicer,
                 extra_args=extra_args or None,
                 material=plan.get("declared_material"),
                 loaded_material=plan.get("loaded_material"),
                 loaded_determined_by=plan.get("loaded_determined_by") or "observed",
-            )
-            placement_info = _cli_verify_plate_placement(
-                result.output_path, placement_info, json_mode=json_mode,
             )
 
         if not print_after:
@@ -4428,6 +4426,11 @@ def slice(
                 logger.warning("Bambu 3MF wrapping failed: %s", exc)
                 if not json_mode:
                     click.echo(f"Warning: Bambu 3MF wrapping failed ({exc}), uploading raw gcode")
+
+        # A plate that still holds the last print is never started onto:
+        # the file's own start sequence crosses the plate.  Refused before
+        # the upload; the slice on disk is kept.
+        _cli_start_refusal(adapter, json_mode)
 
         if not json_mode:
             click.echo(f"Uploading {upload_path}...")
@@ -9537,7 +9540,7 @@ def generate_and_print_cmd(
         GenerationStatus,
         validate_mesh,
     )
-    from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+    from kiln.slicer import SlicerError, SlicerNotFoundError
 
     if image and provider != "gemini":
         click.echo(
@@ -9615,21 +9618,17 @@ def generate_and_print_cmd(
             support_mode=support_mode,
         )
 
-        # The plate may still hold the last print: same gate as kiln slice.
-        placed_path, placement_info = _cli_plate_placement(
-            ctx, result.local_path, plan=plan, placement=placement, json_mode=json_mode,
-        )
         if not json_mode:
             click.echo("Slicing...")
-        slice_result = slice_file(
-            placed_path,
-            profile=plan["profile_path"],
+        # The plate may still hold the last print: same shared step as
+        # kiln slice (plate gate, slice, second verdict).
+        slice_result, _placement_info = _cli_placed_slice(
+            ctx, result.local_path, plan=plan, placement=placement, json_mode=json_mode,
             extra_args=plan["extra_args"] or None,
             material=plan.get("declared_material"),
             loaded_material=plan.get("loaded_material"),
             loaded_determined_by=plan.get("loaded_determined_by") or "observed",
         )
-        _cli_verify_plate_placement(slice_result.output_path, placement_info, json_mode=json_mode)
         if not json_mode:
             click.echo(f"Sliced: {slice_result.output_path}")
             click.echo(f"Material: {plan['material']}")
@@ -9657,6 +9656,10 @@ def generate_and_print_cmd(
             # is on disk now: the person is shown it and asked, like any
             # other file started from a terminal.  Nobody at the terminal
             # gets the token refusal — an agent's --auto-print is not a yes.
+            # A plate that still holds the last print is never started
+            # onto: the file's own start sequence crosses the plate.  The
+            # upload above stays; only the start is refused.
+            _cli_start_refusal(adapter, json_mode)
             window = cli_gate(
                 "kiln generate-and-print --auto-print", result.local_path, None,
                 printer_name=ctx.obj.get("printer"), json_mode=json_mode,

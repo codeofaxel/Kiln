@@ -139,22 +139,17 @@ def slice_stl(stl_path: str, profile: str | None, *, placement: Any = "auto") ->
         message), or the slicer fails or emits nothing — callers convert
         that to their own error envelope.
     """
-    from kiln.plugins.slicer_tools import _apply_plate_placement, _verify_plate_placement
-    from kiln.slicer import slice_file
+    from kiln.plugins.slicer_tools import _placed_slice
 
-    placed, err, info = _apply_plate_placement(
-        stl_path, effective_printer_id=None, printer_name=None, placement=placement, profile_path=profile,
+    result, err, _info = _placed_slice(
+        stl_path, effective_printer_id=None, printer_name=None, placement=placement, profile_path=profile or None,
     )
     if err is not None:
         raise RuntimeError(str(err["error"]["message"]))
-    result = slice_file(placed, profile=profile or None)
     if not getattr(result, "success", False) or not result.output_path:
         raise RuntimeError(
             getattr(result, "message", "") or "slicer produced no output"
         )
-    verify_err, _info = _verify_plate_placement(result.output_path, info)
-    if verify_err is not None:
-        raise RuntimeError(str(verify_err["error"]["message"]))
     return result.output_path
 
 

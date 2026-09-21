@@ -26,7 +26,7 @@ def _verdict(ok: bool = True, at=(40.0, 40.0)) -> dict:
         "tower_at_mm": None, "footprint_mm": [40.0, 40.0, 60.0, 60.0], "clearance_mm": 12.0,
         "refusals": [] if ok else [{"code": "TOO_CLOSE", "sentence": "the head would clip the jar"}],
         "conflicts": [], "switched_off": {}, "spots": [{"at_mm": [40.0, 40.0], "clearance_mm": 12.0}],
-        "occupancy": {"kind": bridge.OCCUPANCY_KIND, "bed_mm": [256.0, 256.0], "occupied": [], "reserved": [],
+        "occupancy": {"kind": bridge.OCCUPANCY_KIND, "bed_mm": [256.0, 256.0], "occupied": [],
                       "proposed": None, "source": "record_box"},
         "record": {"printer_id": "bambu_a1", "measured": True, "source": "overlay"},
         "tier": {"verdict": "free", "plan": "pro"},

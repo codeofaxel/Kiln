@@ -133,7 +133,7 @@ class _EstimateToolsPlugin:
                 is_bedslinger,
                 recommend_adhesion,
             )
-            from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+            from kiln.slicer import SlicerError, SlicerNotFoundError
 
             try:
                 # 1. Resolve the slicer profile
@@ -148,37 +148,23 @@ class _EstimateToolsPlugin:
                 # file was not created" (bambu_p1s, 2026-08-24), where
                 # slice_model says EXCEEDS_BED with the dimensions.  Same
                 # helper, same refusal shape, so the two doors cannot differ.
-                from kiln.plugins.slicer_tools import (
-                    _apply_bed_fit_gate,
-                    _apply_plate_placement,
-                    _attach_placement,
-                    _gate_error_response,
-                    _verify_plate_placement,
-                )
+                from kiln.plugins.slicer_tools import _attach_placement, _placed_slice
 
-                # The plate may still hold the last print: same placement
-                # gate as the slice doors, so an estimate is of the part
-                # where it will actually print — and refuses where they do.
-                placed_input, place_err, place_info = _apply_plate_placement(
+                # The plate may still hold the last print: the same shared
+                # step as the slice doors (plate gate, bed-fit gate, slice,
+                # second verdict), so an estimate is of the part where it
+                # will actually print — and refuses where they do.  The
+                # slicer weighs the print with this material's density
+                # (kiln.slicer_filament), so the estimate's grams are its own.
+                result, slice_err, sinfo = _placed_slice(
                     input_path, effective_printer_id=effective_printer_id,
                     printer_name=printer_name, placement=placement,
-                    profile_path=effective_profile,
+                    profile_path=effective_profile, auto_center=True,
+                    material=material or None,
                 )
-                if place_err is not None:
-                    return place_err
-                effective_input, gate_err, gate_info = _apply_bed_fit_gate(
-                    placed_input, effective_printer_id, place_info.get("plate") != "occupied",
-                )
-                if gate_err is not None:
-                    return _gate_error_response(gate_err)
-                # The slicer weighs the print with this material's density
-                # (kiln.slicer_filament), so the estimate's grams are its own.
-                result = slice_file(
-                    effective_input, profile=effective_profile, material=material or None,
-                )
-                verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
-                if verify_err is not None:
-                    return verify_err
+                if slice_err is not None:
+                    return slice_err
+                place_info = sinfo["placement"]
 
                 # 3. Parse gcode metadata
                 meta = None
@@ -378,6 +364,7 @@ class _EstimateToolsPlugin:
             printer_id: str = "",
             slicer_path: str = "",
             material: str = "",
+            placement: str | list[float] | None = None,
         ) -> dict:
             """Estimate print time and filament usage for a model.
 
@@ -423,22 +410,36 @@ class _EstimateToolsPlugin:
                     derive_filament_weight(result, material or None)
                     return {"success": True, **result}
 
-                # Otherwise, slice first with the right profile
-                from kiln.slicer import estimate_print
+                # Otherwise, slice first with the right profile -- through
+                # the same shared step as every slice door, so a plate that
+                # still holds the last print refuses an estimate exactly as
+                # it refuses a slice (``placement`` names the spot; the
+                # clearance verdict is free, placing and starting a second
+                # print on an occupied plate is a kiln-pro feature,
+                # https://kiln3d.com/pricing).
+                from kiln.plugins.slicer_tools import _attach_placement, _placed_slice
+                from kiln.slicer import estimates_for_result
 
                 resolved_profile = profile or None
                 if not resolved_profile and printer_id:
-                    from kiln.slicer_profiles import get_profile_for_printer
+                    # The bundled profile for the model, the way every slice
+                    # door resolves it.  (This branch used to import a name
+                    # slicer_profiles never had, so a printer_id with no
+                    # explicit profile always ended in ESTIMATE_ERROR.)
+                    from kiln.slicer_profiles import resolve_slicer_profile
 
-                    resolved_profile = get_profile_for_printer(printer_id)
+                    resolved_profile = resolve_slicer_profile(printer_id)
 
-                result = estimate_print(
-                    file_path,
-                    profile=resolved_profile,
-                    slicer_path=slicer_path or None,
-                    material=material or None,
+                result, slice_err, sinfo = _placed_slice(
+                    file_path, effective_printer_id=printer_id or None, printer_name=None,
+                    placement=placement, profile_path=resolved_profile,
+                    slicer_path=slicer_path or None, material=material or None,
                 )
-                return {"success": True, **result}
+                if slice_err is not None:
+                    return slice_err
+                response = {"success": True, **estimates_for_result(result, material or None)}
+                _attach_placement(response, sinfo["placement"])
+                return response
             except Exception as exc:
                 return _srv._error_dict(f"Print estimation failed: {exc}", code="ESTIMATE_ERROR")
 

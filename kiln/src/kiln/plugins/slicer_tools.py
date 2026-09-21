@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kiln import plate_state as _plate_state
+from kiln.plate_state import pretty_job_name as _pretty_job_name
 from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_args import parse_json_object
 from kiln.tool_results import unwrap_tool_result
@@ -270,6 +272,14 @@ def _apply_bed_fit_gate(
 # and looks at the sliced file once more before it is handed on.  Nothing
 # here computes clearance: the verdict is the engine's; the doors, the
 # translation and every refusal's wording are public Kiln's.
+#
+# Two failure directions, on purpose.  An OCCUPIED plate with no verdict
+# fails CLOSED: nothing is sliced onto it.  An UNRECORDED plate (status
+# ``unknown``) fails OPEN at the door: it slices exactly as it always did.
+# That is defensible because the record is written only by Kiln's own starts
+# and its print-ended hook -- "no record" means Kiln never put a part there,
+# not that a part might be there -- and a person's own manual print is
+# theirs to clear.
 
 _PLACEMENT_TIER_NOTE = (
     "The clearance verdict is free; placing and starting a second print on an "
@@ -297,31 +307,11 @@ _NO_VERDICT_WORDING = {
 }
 _PROFILE_NUMBER_KEYS = ("layer_height", "skirts", "skirt_distance", "brim_width")
 _PLACEABLE_EXTENSIONS = (".stl", ".3mf")
-_MODEL_EXTENSIONS = (".gcode.3mf", ".3mf", ".gcode", ".stl", ".step", ".stp", ".obj", ".amf")
-
-
-def _pretty_job_name(file_name: str | None) -> str:
-    """``jar_v2.gcode.3mf`` -> ``jar v2``: what a sentence calls the part on the plate."""
-    base = os.path.basename(str(file_name or ""))
-    for ext in _MODEL_EXTENSIONS:
-        if base.lower().endswith(ext):
-            base = base[: -len(ext)]
-            break
-    return " ".join(base.replace("_", " ").replace("-", " ").split()) or "the last part"
 
 
 def _plate_holds_sentence(state: Any) -> str:
-    """``The last print, jar v2, is still on the plate (since 18:12, about 42 mm tall).``
-
-    The height clause is dropped, never printed as ``None``, when the record
-    could not read the file's height.
-    """
-    job = getattr(state, "job", None)
-    tall = ""
-    if job is not None and job.max_z_mm is not None:
-        tall = f", about {job.max_z_mm:g} mm tall"
-    name = _pretty_job_name(job.file if job is not None else "")
-    return f"The last print, {name}, is still on the plate (since {state.since_clock()}{tall})."
+    """The record's own opening (:meth:`kiln.plate_state.PlateState.holds_sentence`)."""
+    return state.holds_sentence()
 
 
 def _no_verdict_sentence(state: Any, reason: str | None) -> str:
@@ -576,7 +566,10 @@ def _apply_plate_placement(
 
     * plate ``clear`` or ``unknown`` (no printer, no record, the hosted
       process): the input passes through unchanged, ``info["plate"]`` says
-      which;
+      which.  ``unknown`` fails OPEN here, deliberately: the record is
+      written only by Kiln's own starts and print-ended hook, so no record
+      means Kiln never put a part on this plate -- not that one might be
+      there -- and a manual print of the person's own is theirs to clear;
     * plate ``occupied`` and no *placement*: refuse
       (``PLACEMENT_PLATE_OCCUPIED``) with what is there and, when a verdict
       is obtainable, the spots that would work;
@@ -721,6 +714,7 @@ def _apply_plate_placement(
             "mesh does not carry; the stage on this result shows the plate as it will print — approve from here"
         ),
         "_verify": {"request": request, "state": state, "bed": bed},
+        "_state": state,
     }
     return placed, None, info
 
@@ -770,9 +764,71 @@ def _attach_placement(response: dict, info: dict | None) -> None:
     if not isinstance(info, dict) or info.get("plate") != "occupied":
         return
     info.pop("_verify", None)
+    state = info.pop("_state", None)
     response["placement"] = info.get("placement")
     response["approval_carries"] = False
     response["approval_note"] = info.get("approval_note")
+    # A slice beside the occupant is still not a print beside it: the file's
+    # own start sequence crosses the plate.  Said here, on the slice result,
+    # so an agent does not go on to start it by hand and meet the refusal.
+    if state is not None:
+        response["start"] = {"allowed": False, "why": state.start_refusal_sentence()}
+
+
+def _placed_slice(
+    input_path: str,
+    *,
+    effective_printer_id: str | None,
+    printer_name: str | None,
+    placement: Any,
+    profile_path: str | None = None,
+    adapter: Any | None = None,
+    auto_center: bool | None = None,
+    material_id: str | None = None,
+    slicer: Any | None = None,
+    **slice_kwargs: Any,
+) -> tuple[Any | None, dict | None, dict[str, Any]]:
+    """The slice every door shares: plate gate, bed-fit gate, slicer, second verdict.
+
+    Returns ``(result, error_dict_or_None, info)``.  *auto_center* ``None``
+    means the door never had a bed-fit gate and keeps not having one; a
+    bool runs :func:`_apply_bed_fit_gate` with it, which never re-centres a
+    part placed beside an occupant.  *slicer* is ``kiln.slicer.slice_file``
+    unless a door slices another way (the CLI's multi-colour copies); it is
+    called as ``slicer(path, profile=profile_path, **slice_kwargs)`` and
+    must return a ``SliceResult``.  ``info`` carries ``placement`` (the
+    plate gate's info, for :func:`_attach_placement`), ``bed_fit`` (the bed
+    gate's block, or ``None``) and ``effective_input`` (the file that was
+    sliced).  Raises whatever the slicer raises; each door words that.
+    """
+    placed, err, place_info = _apply_plate_placement(
+        input_path, effective_printer_id=effective_printer_id, printer_name=printer_name,
+        placement=placement, profile_path=profile_path, adapter=adapter,
+    )
+    info: dict[str, Any] = {"placement": place_info, "bed_fit": None, "effective_input": input_path}
+    if err is not None:
+        return None, err, info
+    effective_input = placed
+    if auto_center is not None:
+        effective_input, gate_err, bed_fit = _apply_bed_fit_gate(
+            placed, effective_printer_id, auto_center and place_info.get("plate") != "occupied",
+            material_id=material_id,
+        )
+        info["bed_fit"] = bed_fit
+        if gate_err is not None:
+            return None, _gate_error_response(gate_err), info
+    info["effective_input"] = effective_input
+    if slicer is None:
+        from kiln.slicer import slice_file
+
+        result = slice_file(effective_input, profile=profile_path, **slice_kwargs)
+    else:
+        result = slicer(effective_input, profile=profile_path, **slice_kwargs)
+    verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
+    info["placement"] = place_info
+    if verify_err is not None:
+        return None, verify_err, info
+    return result, None, info
 
 
 def _auto_wrap_bambu_3mf(
@@ -1461,7 +1517,7 @@ class _SlicerToolsPlugin:
                 return err
 
             try:
-                from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+                from kiln.slicer import SlicerError, SlicerNotFoundError
                 from kiln.slicer_profiles import validate_profile_for_printer
 
                 effective_printer_id, effective_profile = _srv._resolve_slice_profile_context(
@@ -1473,37 +1529,23 @@ class _SlicerToolsPlugin:
                 # Bed-fit safety gate (Layer 1).  Blocks off-bed / oversized
                 # geometry before it hits the slicer.  May auto-translate
                 # an origin-centered STL into a bed-centered temp copy.
-                # Placement gate first: a plate that still holds the last
-                # print refuses until a spot is named, and the part is moved
-                # beside the occupant before the bed check sees it.  On an
-                # occupied plate the bed gate must never re-centre — that
-                # would move the part back onto the occupant.
-                placed_input, place_err, place_info = _apply_plate_placement(
+                # One shared step: the plate gate (a plate that still holds
+                # the last print refuses until a spot is named, and the part
+                # is moved beside the occupant), the bed-fit gate (which
+                # never re-centres a placed part), the slicer, and the
+                # second verdict on the sliced file.
+                result, slice_err, sinfo = _placed_slice(
                     input_path, effective_printer_id=effective_printer_id,
                     printer_name=printer_name, placement=placement,
-                    profile_path=effective_profile,
-                )
-                if place_err is not None:
-                    return place_err
-                effective_input, gate_err, gate_info = _apply_bed_fit_gate(
-                    placed_input, effective_printer_id,
-                    auto_center and place_info.get("plate") != "occupied",
-                )
-                if gate_err is not None:
-                    return _gate_error_response(gate_err)
-                result = slice_file(
-                    effective_input,
-                    output_dir=output_dir,
-                    profile=effective_profile,
-                    slicer_path=slicer_path,
-                    material=material,
+                    profile_path=effective_profile, auto_center=auto_center,
+                    output_dir=output_dir, slicer_path=slicer_path, material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                 )
-                # The sliced file itself goes back to the plate check before
-                # anything is wrapped or recommended.
-                verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
-                if verify_err is not None:
-                    return verify_err
+                if slice_err is not None:
+                    return slice_err
+                effective_input, gate_info, place_info = (
+                    sinfo["effective_input"], sinfo["bed_fit"], sinfo["placement"],
+                )
                 response: dict[str, Any] = {
                     "success": True,
                     **result.to_dict(),
@@ -1729,7 +1771,7 @@ class _SlicerToolsPlugin:
             }
 
             try:
-                from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+                from kiln.slicer import SlicerError, SlicerNotFoundError
 
                 # -- Resolve profile with overrides --
                 effective_printer_id = _srv._resolve_printer_profile_id(
@@ -1799,37 +1841,20 @@ class _SlicerToolsPlugin:
                 if has_temp_overrides and effective_printer_id and _target_model:
                     validation_result = validate_profile_for_printer(effective_printer_id, _target_model)
 
-                # -- Placement on an occupied plate, then the bed-fit gate --
-                # The bed gate must not re-centre a part placed beside the
-                # occupant: that would move it back onto the occupant.
-                placed_input, place_err, place_info = _apply_plate_placement(
+                # -- Plate gate, bed-fit gate, slice, second verdict: the
+                # one shared step (see _placed_slice) --
+                result, slice_err, sinfo = _placed_slice(
                     input_abs, effective_printer_id=effective_printer_id,
                     printer_name=printer_name, placement=placement,
-                    profile_path=effective_profile,
-                )
-                if place_err is not None:
-                    return place_err
-
-                # -- Bed-fit safety gate (Layer 1) --
-                effective_input, gate_err, gate_info = _apply_bed_fit_gate(
-                    placed_input, effective_printer_id,
-                    auto_center and place_info.get("plate") != "occupied",
-                )
-                if gate_err is not None:
-                    return _gate_error_response(gate_err)
-
-                # -- Slice --
-                result = slice_file(
-                    effective_input,
-                    output_dir=output_dir,
-                    profile=effective_profile,
-                    slicer_path=slicer_path,
-                    material=material,
+                    profile_path=effective_profile, auto_center=auto_center,
+                    output_dir=output_dir, slicer_path=slicer_path, material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                 )
-                verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
-                if verify_err is not None:
-                    return verify_err
+                if slice_err is not None:
+                    return slice_err
+                effective_input, gate_info, place_info = (
+                    sinfo["effective_input"], sinfo["bed_fit"], sinfo["placement"],
+                )
 
                 response: dict[str, Any] = {
                     "success": True,
@@ -2063,7 +2088,7 @@ class _SlicerToolsPlugin:
             try:
                 from kiln.printers import PrinterError
                 from kiln.registry import PrinterNotFoundError
-                from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+                from kiln.slicer import SlicerError, SlicerNotFoundError
                 from kiln.slicer_profiles import (
                     profile_with_overrides,
                     resolve_slicer_profile,
@@ -2351,36 +2376,30 @@ class _SlicerToolsPlugin:
                 # orients to fit if it can), and refuses a material the printer
                 # physically can't melt.  May auto-translate an origin-centered
                 # STL to bed-centered.
-                # Placement first: the plate may still hold the last print,
-                # and the bed gate must not re-centre a part placed beside it.
-                placed_input, place_err, place_info = _apply_plate_placement(
+                # Plate gate, bed-fit gate, slice, second verdict: the one
+                # shared step (see _placed_slice).
+                result, slice_err, sinfo = _placed_slice(
                     input_path, effective_printer_id=effective_printer_id,
                     printer_name=printer_name, placement=placement,
-                    profile_path=effective_profile,
-                )
-                if place_err is not None:
-                    return place_err
-                effective_input, gate_err, gate_info = _apply_bed_fit_gate(
-                    placed_input, effective_printer_id,
-                    auto_center and place_info.get("plate") != "occupied",
-                    material_id=material,
-                )
-                if gate_err is not None:
-                    return _gate_error_response(gate_err)
-
-                result = slice_file(
-                    effective_input,
-                    profile=effective_profile,
-                    material=declared_material,
+                    profile_path=effective_profile, auto_center=auto_center,
+                    material_id=material, material=declared_material,
                     loaded_material=loaded_material,
                 )
-                # The sliced file goes back to the plate check before any
-                # wrap, upload or start.
-                verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
-                if verify_err is not None:
-                    return verify_err
+                if slice_err is not None:
+                    return slice_err
+                effective_input, place_info = sinfo["effective_input"], sinfo["placement"]
 
                 adapter = _srv._resolve_adapter(printer_name)
+
+                # A plate that still holds the last print is never started
+                # onto: the file carries the maker's own start sequence,
+                # which drives the head across the plate.  Refused here,
+                # before the upload, with the slice and its verdict attached
+                # so the work is not lost.
+                if block := _plate_state.start_refusal(adapter):
+                    block["slice"] = result.to_dict()
+                    _attach_placement(block, place_info)
+                    return block
 
                 # Bambu printers need PrusaSlicer output wrapped in a 3MF with
                 # the proprietary BambuStudio start/end gcode.  The adapter

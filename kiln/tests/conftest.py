@@ -761,6 +761,28 @@ def _isolate_printer_registry():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_plate_record():
+    """No test may inherit a plate record an earlier test's start left.
+
+    The adapter template records "the plate holds a part" after every
+    start it runs -- fake printers included -- into
+    ``$HOME/.kiln/plate_state.json``, and _TEST_HOME is one directory for
+    the whole session.  Every door that starts a print, or slices for one,
+    reads that record first (``kiln.plate_state.start_refusal`` and the
+    slice doors' plate gate), so a fake printer "started" in one test used
+    to refuse the next test's start on the same fake host with
+    PLATE_OCCUPIED_START_NOT_YET: order-dependent, and invisible before the
+    gate existed.  A fresh record per test; a test that wants an occupied
+    plate writes one.  A test that sets its own ``KILN_HOME`` keeps its own
+    store, untouched by this.
+    """
+    from kiln.plate_state import _store_path
+
+    _store_path().unlink(missing_ok=True)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _bypass_license_tier(monkeypatch, tmp_path):
     """Ensure all tests run with tier checks bypassed by default.
 

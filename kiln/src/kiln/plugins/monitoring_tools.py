@@ -1463,6 +1463,13 @@ class _MonitoringToolsPlugin:
                 # Same door as the control verbs: config.yaml fallback included.
                 adapter = _srv._resolve_adapter(printer_name)
 
+                # A plate that still holds the last print is never started
+                # onto: the file's own start sequence crosses the plate.
+                from kiln.plate_state import start_refusal
+
+                if block := start_refusal(adapter):
+                    return block
+
                 # -- Automatic pre-flight safety gate (mandatory) --
                 pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
                 if not pf.get("ready", False):
