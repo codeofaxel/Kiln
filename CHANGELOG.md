@@ -249,6 +249,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   print, letter counters and enclosed islands intact. Photo reliefs still
   refuse honestly.
 
+- **Print from the web, and say yes once per print.** The print page shows the
+  part and one Approve button — that press is the yes your printer waits for.
+  Free at home; from anywhere through Kiln is Pro. See
+  https://kiln3d.com/pricing.
+
 ### Fixed
 
 - **A spool on a second AMS unit, or in an AMS HT, is now routed, loaded and reported as the tray it really is.** Kiln names every tray the way your printer does.
