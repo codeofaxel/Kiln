@@ -612,7 +612,7 @@ def cli_gate(
     *,
     printer_name: str | None,
     json_mode: bool,
-) -> None:
+) -> dict[str, Any] | None:
     """The CLI's door to the one preview gate — the same verdict the MCP
     doors get, worded for a terminal, exiting on a no.
 
@@ -629,8 +629,7 @@ def cli_gate(
 
     block = _preview_gate_error(tool, file_path, preview_token, printer_name=printer_name)
     if block is None:
-        _say_which_window(json_mode)
-        return
+        return _standing_window_after_gate(json_mode)
     refusal = block.get("error") if isinstance(block.get("error"), dict) else {}
     code = str(refusal.get("code") or CODE_NOT_CONFIRMED)
     message = str(refusal.get("message") or block)
@@ -645,7 +644,7 @@ def cli_gate(
             tool=tool, file_path=file_path, printer_name=printer_name, json_mode=json_mode,
             preview_token=preview_token,
         ):
-            return
+            return None
     message = message.replace(
         "pass the token as preview_token=<token>", "pass it as --preview-token <token>"
     )
@@ -653,31 +652,38 @@ def cli_gate(
     sys.exit(1)
 
 
-def _say_which_window(json_mode: bool) -> None:
-    """One line when the start just cleared rests on a standing window:
-    which window, until when, and how to close it.  The same reminder a
-    print result carries on the MCP side; a window nobody is reminded of
-    is a trap.  Silent in JSON mode (the output is the command's) and
-    when the clearance rests on anything else."""
-    if json_mode:
-        return
+def _standing_window_after_gate(json_mode: bool) -> dict[str, Any] | None:
+    """When the start just cleared rests on a standing window: the same
+    block a print result carries on the MCP side, for the door's JSON —
+    and, off JSON, one line saying which window, until when, and how to
+    close it.  A window nobody is reminded of is a trap.  ``None`` when
+    the clearance rests on anything else; never raises."""
     try:
-        from kiln import consent_windows, print_signoff
+        from kiln import consent_window_note, consent_windows, print_signoff
 
         cleared = print_signoff.current()
         if cleared is None or not cleared.window_id:
-            return
+            return None
         w = consent_windows.get_window(cleared.window_id)
         if w is None:
-            return
-        facts = consent_windows.describe(w)
-        click.echo(
-            f"Standing window {w.id} covers {facts['scope']} until {facts['until_clock']} "
-            f"(opened via {facts['opened_via']}); prints inside it start without asking. "
-            f"Close it early with: kiln consent revoke {w.id}"
-        )
+            return None
+        block = consent_window_note.block_for_window(w, close_hint=f"run `kiln consent revoke {w.id}`")
+        if not json_mode:
+            facts = consent_windows.describe(w)
+            click.echo(
+                f"Standing window {w.id} covers {facts['scope']} until {facts['until_clock']} "
+                f"(opened via {facts['opened_via']}); prints inside it start without asking. "
+                f"Close it early with: kiln consent revoke {w.id}"
+            )
+        return block
     except Exception:  # noqa: BLE001 — a reminder never blocks the print it follows
         logger.debug("standing window line not printed", exc_info=True)
+        return None
+
+
+def _with_window(started: dict[str, Any], window: dict[str, Any] | None) -> dict[str, Any]:
+    """A start's dict with the window block on it, when there is one."""
+    return {**started, "standing_window": window} if window else started
 
 
 
@@ -2927,7 +2933,7 @@ def print_cmd(
             file_name = f
             # Shown before it starts.  One token per file, in order; the
             # clearance it grants covers this file's start below.
-            cli_gate(
+            window = cli_gate(
                 "kiln print", f, preview_tokens[i] if i < len(preview_tokens) else None,
                 printer_name=ctx.obj.get("printer"), json_mode=json_mode,
             )
@@ -2984,7 +2990,7 @@ def print_cmd(
                     print_kwargs["local_file_path"] = os.path.abspath(f)
 
             result = adapter.start_print(file_name, **print_kwargs)
-            click.echo(format_action("start", result.to_dict(), json_mode=json_mode))
+            click.echo(format_action("start", _with_window(result.to_dict(), window), json_mode=json_mode))
 
             # For batch without queue: only start the first file
             if len(expanded) > 1 and i == 0:
@@ -4119,10 +4125,12 @@ def slice(
     if print_after:
         # Gated on the model the person can preview, before the slicer
         # runs; the clearance covers the slice made from it by lineage.
-        cli_gate(
+        window = cli_gate(
             "kiln slice --print-after", input_file, preview_token,
             printer_name=ctx.obj.get("printer"), json_mode=json_mode,
         )
+    else:
+        window = None
     from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
     try:
@@ -4344,7 +4352,7 @@ def slice(
                         "data": {
                             "slice": result.to_dict(),
                             "upload": upload_result.to_dict(),
-                            "print": print_result.to_dict(),
+                            "print": _with_window(print_result.to_dict(), window),
                         },
                     },
                     indent=2,
@@ -9492,6 +9500,7 @@ def generate_and_print_cmd(
             sys.exit(1)
 
         # --- Step 5: Optionally start print ---
+        window = None
         if auto_print:
             remote = upload_result.remote_name or os.path.basename(slice_result.output_path)
             # The object did not exist when the command was typed, so the
@@ -9499,7 +9508,7 @@ def generate_and_print_cmd(
             # is on disk now: the person is shown it and asked, like any
             # other file started from a terminal.  Nobody at the terminal
             # gets the token refusal — an agent's --auto-print is not a yes.
-            cli_gate(
+            window = cli_gate(
                 "kiln generate-and-print --auto-print", result.local_path, None,
                 printer_name=ctx.obj.get("printer"), json_mode=json_mode,
             )
@@ -9537,6 +9546,7 @@ def generate_and_print_cmd(
                             "support_reason": plan["support_reason"],
                             "upload": upload_result.to_dict(),
                             "printing": auto_print,
+                            **({"standing_window": window} if auto_print and window else {}),
                         },
                     },
                     indent=2,

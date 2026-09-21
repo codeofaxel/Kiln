@@ -69,7 +69,17 @@ def note_for(printer_name: str | None) -> dict[str, Any] | None:
     window = consent_windows.covering(printer_name)
     if window is None:
         return None
+    return block_for_window(window)
+
+
+def block_for_window(window: Any, *, close_hint: str | None = None) -> dict[str, Any]:
+    """The block for one open window — the same shape at every door.  The
+    MCP result names the tool that closes it; a CLI door passes the
+    command instead."""
+    from kiln import consent_windows
+
     facts = consent_windows.describe(window)
+    close = close_hint or f"call revoke_consent_window(window_id=\"{facts['id']}\")"
     return {
         "opened": True,
         "id": facts["id"],
@@ -80,9 +90,8 @@ def note_for(printer_name: str | None) -> dict[str, Any] | None:
         "note": (
             f"A standing window is open: prints may start on {facts['scope']} until "
             f"{facts['until_clock']} without asking each time (each one still previewed "
-            "first). Tell the person this. If they want it closed, call "
-            f"revoke_consent_window(window_id=\"{facts['id']}\") — closing is always allowed; "
-            "opening is theirs alone."
+            f"first). Tell the person this. If they want it closed, {close} — closing is "
+            "always allowed; opening is theirs alone."
         ),
     }
 

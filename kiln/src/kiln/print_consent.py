@@ -357,9 +357,26 @@ def dialog_schema(*, offer_window: bool = True, offer_fleet: bool = False) -> di
 # A native app and the hosted "call again with the answer" wire have no
 # elicitation channel; the tool's answer has to CARRY the question.  This is
 # the envelope both use, defined here so the desktop sheet, the hosted route
-# and the MCP dialog cannot drift apart.  The person's filled form comes
-# back on the re-call OUT OF BAND from the agent's tool arguments — a header
-# — so nothing a model can put in ``arguments`` is ever read as an answer.
+# and the MCP dialog cannot drift apart.  The contract, in full:
+#
+# * A refused tool result carries ``input_required`` (below) beside an
+#   ``error`` whose code is ``CONSENT_REQUIRED``.  Its ``schema`` is exactly
+#   :func:`dialog_schema`; the properties present ARE the fields to show
+#   (absent means not offered), each with a ``default``; nothing is
+#   required, so a reflexive accept starts nothing.  ``message`` is shown
+#   to the person verbatim.  ``request_id`` is present only when the
+#   server seals its asks (the hosted server), and then the answer names it.
+# * The person's filled form comes back on the SAME call made again, with
+#   the same arguments, as JSON in the ``X-Kiln-Input-Responses`` header:
+#   ``{"action": "accept", "content": {<field>: <value>, ...}}``, or
+#   ``{"action": "decline"}`` / ``{"action": "cancel"}``, plus
+#   ``"request_id"`` when one was given.  A header, not an argument, so
+#   nothing a model can put in ``arguments`` is ever read as an answer —
+#   and a client strips any answer-shaped key it finds there.
+# * A server honours the header only from a person's own session — a
+#   browser, or the desktop app on its own machine — never from an agent
+#   session or a bare key; an agent's header is refused, and the refusal
+#   says so.
 
 #: The key on a refused tool result that carries the question to put.
 INPUT_REQUIRED_KEY = "input_required"
@@ -374,31 +391,18 @@ INPUT_KIND_PRINT_CONSENT = "print_consent"
 def input_required_block(
     *, message: str, offer_window: bool = True, offer_fleet: bool = False, request_id: str = "",
 ) -> dict[str, Any]:
-    """The question, ready to ride a refused tool result over REST.
-
-    ``schema`` is exactly :func:`dialog_schema` for the offer; ``fields``
-    names the properties a sheet fills; ``how_to_answer`` says where the
-    answer goes.  *request_id* lets a surface that seals its asks (the
-    hosted server) bind the answer to the question it answered.
-    """
-    return {
+    """The question, ready to ride a refused tool result over REST: data
+    only — the rules are the contract above, not prose on the wire.
+    ``schema`` is exactly :func:`dialog_schema` for the offer; *request_id*
+    rides only when a surface that seals its asks gave one."""
+    block: dict[str, Any] = {
         "kind": INPUT_KIND_PRINT_CONSENT,
-        "request_id": request_id,
         "message": message,
         "schema": dialog_schema(offer_window=offer_window, offer_fleet=offer_fleet),
-        "fields": {
-            "answer": FIELD_ANSWER,
-            "for_how_long": FIELD_FOR_HOW_LONG if offer_window else "",
-            "where": FIELD_WHERE if (offer_window and offer_fleet) else "",
-        },
-        "how_to_answer": (
-            "Show the person the message and the form. Send the filled form as JSON in the "
-            f"{INPUT_RESPONSES_HEADER} header of the same call made again, with the same arguments. "
-            "The answer must come from the person's own screen, never from the agent's arguments; "
-            "a server honours the header only from a person's own session (a browser, the desktop "
-            "app on its own machine), never from an agent session or a bare key."
-        ),
     }
+    if request_id:
+        block["request_id"] = request_id
+    return block
 
 
 def _field(content: Any, name: str) -> Any:

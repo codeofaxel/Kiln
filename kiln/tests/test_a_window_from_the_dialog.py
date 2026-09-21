@@ -845,12 +845,14 @@ class TestTheParserEverySurfaceShares:
             "input_required", "CONSENT_REQUIRED", "X-Kiln-Input-Responses", "print_consent",
         )
         block = input_required_block(message="Start printing jar.stl on garage?", offer_window=True, offer_fleet=True, request_id="r1")
-        assert block["kind"] == "print_consent" and block["request_id"] == "r1"
-        assert block["schema"] == dialog_schema(offer_window=True, offer_fleet=True)
-        assert block["fields"] == {"answer": "answer", "for_how_long": "for_how_long", "where": "where"}
-        assert "X-Kiln-Input-Responses" in block["how_to_answer"] and "never from the agent's arguments" in block["how_to_answer"]
+        assert block == {
+            "kind": "print_consent", "request_id": "r1", "message": "Start printing jar.stl on garage?",
+            "schema": dialog_schema(offer_window=True, offer_fleet=True),
+        }
+        # Data only: the properties present are the fields to show, and an
+        # absent request id is absent, not an empty string.
         plain = input_required_block(message="m", offer_window=False)
-        assert plain["fields"] == {"answer": "answer", "for_how_long": "", "where": ""}
+        assert set(plain) == {"kind", "message", "schema"}
         assert list(plain["schema"]["properties"]) == [FIELD_ANSWER]
         json.dumps(block)  # it goes on the wire as JSON
 
@@ -1079,6 +1081,38 @@ class TestRevokeAndStatusInline:
         result = CliRunner().invoke(cli, ["gate_probe"])
         assert result.exit_code == 0, result.output
         assert w.id in result.output and "kiln consent revoke" in result.output and "terminal" in result.output
+
+    def test_the_cli_json_carries_the_same_block_as_the_mcp_result(self, tmp_path, monkeypatch, at_terminal):
+        """Every door: a script reading `kiln print --json` sees the window
+        the way an agent reading a tool result does — same keys, the
+        command that closes it instead of the tool."""
+        from kiln.cli.main import cli
+        from tests.test_a_person_says_go import _Printer
+
+        printer = _Printer()
+        monkeypatch.setattr("kiln.cli.main._make_adapter", lambda cfg: printer)
+        monkeypatch.setattr(
+            "kiln.cli.main.load_printer_config",
+            lambda *_a, **_k: {"type": "moonraker", "host": "http://t.local", "timeout": 1, "retries": 0},
+        )
+        monkeypatch.setattr("kiln.cli.main.validate_printer_config", lambda cfg: (True, None))
+        monkeypatch.setattr("kiln.cli.print_gate._audit", lambda *a, **k: None)
+        gcode = tmp_path / "part.gcode"
+        gcode.write_text("G28\n")
+        preview_evidence.record("png", str(gcode), renderer="stage_paint", shown_sha="abc")
+        preview_evidence.record_url_refusal(str(gcode), "signed_out")
+        token = server.issue_preview_token(str(gcode), door="png")["token"]
+        w = consent_windows.open_window(seconds=3600, scope=("garage",))
+        monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: False)
+        result = CliRunner().invoke(cli, ["--printer", "garage", "print", str(gcode), "--json", "--preview-token", token])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)["data"]
+        block = data["standing_window"]
+        assert block["id"] == w.id and block["printer"] == "garage" and block["opened"] is True
+        assert f"kiln consent revoke {w.id}" in block["note"]
+        # Same keys as the MCP result's block, and the printer really started.
+        assert set(block) == set(consent_window_note.note_for("garage"))
+        assert printer.started == ["part.gcode"]
 
 
 # ---------------------------------------------------------------------------
