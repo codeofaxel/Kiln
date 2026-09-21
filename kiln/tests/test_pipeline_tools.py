@@ -129,6 +129,7 @@ class TestRunQuickPrint:
             ams_mapping=None,
             skip_validation=False,
             signoff=ANY,  # the clearance record the gate handed the pipeline
+            placement=None,
         )
 
     @patch("kiln.server._pipeline_quick_print")
@@ -153,6 +154,7 @@ class TestRunQuickPrint:
             ams_mapping=None,
             skip_validation=False,
             signoff=ANY,  # the clearance record the gate handed the pipeline
+            placement=None,
         )
 
     @patch("kiln.server._pipeline_quick_print")
@@ -172,6 +174,7 @@ class TestRunQuickPrint:
             ams_mapping=None,
             skip_validation=True,
             signoff=ANY,  # the clearance record the gate handed the pipeline
+            placement=None,
         )
 
     @patch("kiln.server._pipeline_quick_print")

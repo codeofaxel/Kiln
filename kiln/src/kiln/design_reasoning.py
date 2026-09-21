@@ -2949,6 +2949,9 @@ class DesignToGCodeResult:
     weight_estimate_g: float = 0.0
     structural_risks: int = 0
     success: bool = False
+    #: The plate-clearance verdict when the plate still held the last print
+    #: (see ``kiln._pro_placement_bridge``); ``None`` on a clear plate.
+    placement: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2962,6 +2965,7 @@ class DesignToGCodeResult:
             "weight_estimate_g": round(self.weight_estimate_g, 2),
             "structural_risks": self.structural_risks,
             "success": self.success,
+            "placement": self.placement,
         }
 
 
@@ -2972,8 +2976,15 @@ def design_to_gcode(
     material: str = "PLA",
     printer_model: str = "",
     infill_percent: float = 20.0,
+    placement: Any = "auto",
 ) -> DesignToGCodeResult:
     """End-to-end pipeline: description → template → STL → structural check → GCode.
+
+    ``placement`` is where the part goes when the plate still holds the last
+    print (``[x, y]`` in mm, a named region, or ``"keep"``); ``"auto"``, the
+    default, refuses the slice step on an occupied plate -- the same gate
+    ``slice_model`` runs, so the G-code this pipeline hands back is never
+    sliced onto a part.
 
     Steps:
         1. Search templates for best match
@@ -3099,19 +3110,39 @@ def design_to_gcode(
     # now module-level-shaped and exercised by a test, so a renamed
     # slicer entry point fails the suite instead of a runtime fallback.
     try:
+        from kiln.plugins.slicer_tools import (
+            _apply_plate_placement,
+            _verify_plate_placement,
+        )
         from kiln.slicer import SlicerNotFoundError, slice_file
         from kiln.slicer_profiles import resolve_slicer_profile
 
         profile = resolve_slicer_profile(printer_model) if printer_model else None
-        slice_result = slice_file(
-            str(stl_path),
-            output_dir=str(out_dir),
-            output_name=f"{template_id}.gcode",
-            profile=profile,
-            material=material,
+        # The plate may still hold the last print: same gate as slice_model.
+        placed, place_err, place_info = _apply_plate_placement(
+            str(stl_path), effective_printer_id=printer_model or None, printer_name=None,
+            placement=placement, profile_path=profile,
         )
-        result.gcode_file = slice_result.output_path
-        result.steps_completed.append("slicing")
+        if place_err is not None:
+            result.errors.append(str(place_err["error"]["message"]))
+            result.placement = place_err.get("placement")
+        else:
+            slice_result = slice_file(
+                placed,
+                output_dir=str(out_dir),
+                output_name=f"{template_id}.gcode",
+                profile=profile,
+                material=material,
+            )
+            verify_err, place_info = _verify_plate_placement(slice_result.output_path, place_info)
+            if verify_err is not None:
+                result.errors.append(str(verify_err["error"]["message"]))
+                result.placement = verify_err.get("placement")
+            else:
+                result.gcode_file = slice_result.output_path
+                result.steps_completed.append("slicing")
+                if place_info.get("plate") == "occupied":
+                    result.placement = place_info.get("placement")
     except SlicerNotFoundError:
         result.errors.append(
             "No slicer installed — install PrusaSlicer or OrcaSlicer to get G-code."

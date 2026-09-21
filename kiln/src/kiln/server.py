@@ -14867,6 +14867,7 @@ def design_to_gcode_pipeline(
     material: str = "PLA",
     printer_model: str = "",
     infill_percent: float = 20.0,
+    placement: str | list[float] | None = None,
 ) -> dict:
     """End-to-end pipeline: description → template → STL → analysis → GCode.
 
@@ -14894,6 +14895,10 @@ def design_to_gcode_pipeline(
             material=material,
             printer_model=printer_model,
             infill_percent=infill_percent,
+            # Where the part goes when the plate still holds the last print
+            # ([x, y] in mm, a named region, or "keep"); omitted, an occupied
+            # plate refuses the slice step.  Same gate as slice_model.
+            placement=placement if placement is not None else "auto",
         )
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:
@@ -15713,6 +15718,7 @@ def run_quick_print(
     ams_mapping: str | list[int] | None = None,
     skip_validation: bool = False,
     preview_token: str | None = None,
+    placement: str | list[float] | None = None,
 ) -> dict:
     """Full print pipeline: validate + slice + safety-check + upload + print (recommended one-shot tool).
 
@@ -15749,6 +15755,13 @@ def run_quick_print(
         preview_token: Token from ``issue_preview_token`` after the user
             has seen ``model_path``.  Required: this tool ends at the
             printer, so it is gated exactly as ``start_print`` is.
+        placement: Where the part goes when the plate still holds the last
+            print: ``[x, y]`` in mm, a named region (``"front-left"``,
+            ``"centre"``, …), or ``"keep"``.  Omitted, an occupied plate
+            refuses at the slice step and lists the spots that would work.
+            The clearance verdict is free; placing and starting a second
+            print on an occupied plate is a kiln-pro feature
+            (https://kiln3d.com/pricing).
 
     On Bambu AMS printers the response carries ``ams_selection``
     (``{slot, type, color}``) naming the tray actually used — routing is
@@ -15793,6 +15806,7 @@ def run_quick_print(
             ams_mapping=parsed_ams_mapping,
             skip_validation=skip_validation,
             signoff=signoff,
+            placement=placement,
         )
         resp = {"success": result.success, **result.to_dict()}
         # Hoist the AMS selection from the start_print step to the top
@@ -15828,6 +15842,7 @@ def run_reslice_and_print(
     ams_mapping: str | list[int] | None = None,
     skip_validation: bool = False,
     preview_token: str | None = None,
+    placement: str | list[float] | None = None,
 ) -> dict:
     """Reslice with custom slicer overrides + print (use for retries with adjusted settings).
 
@@ -15870,6 +15885,13 @@ def run_reslice_and_print(
         skip_validation: Bypass the mesh-level pre-print validation step.
             Defaults to False — designs are pre-tested for printability
             before they reach the printer.
+        placement: Where the part goes when the plate still holds the last
+            print: ``[x, y]`` in mm, a named region (``"front-left"``,
+            ``"centre"``, …), or ``"keep"``.  Omitted, an occupied plate
+            refuses at the slice step and lists the spots that would work.
+            The clearance verdict is free; placing and starting a second
+            print on an occupied plate is a kiln-pro feature
+            (https://kiln3d.com/pricing).
     """
     if err := _check_auth("print"):
         return err
@@ -15927,6 +15949,7 @@ def run_reslice_and_print(
             ams_mapping=parsed_ams_mapping,
             skip_validation=skip_validation,
             signoff=signoff,
+            placement=placement,
         )
         resp = {"success": result.success, **result.to_dict()}
         # Surface the AMS tray selection and the start narrative (parity

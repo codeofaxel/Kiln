@@ -285,11 +285,15 @@ PLACEMENT_REGIONS = tuple(
     for r in range(3)
     for c in range(3)
 )
-#: Why the bridge came back empty -> (cause, remedy) in the fail-closed sentence.
+#: Why the bridge came back empty -> the cause and the remedy of the
+#: fail-closed sentence, keyed by the bridge's three-way reason.  Kept as
+#: separate strings, as the assembly keeps its four parts apart, so the
+#: sentence can move to ``kiln.served_answer.sentence(...)`` in one commit
+#: once that shared helper lands on main.
 _NO_VERDICT_WORDING = {
     "offline": ("this computer is offline", "reconnect to the internet"),
     "signed_out": ("Kiln is signed out", "sign in"),
-    "not_answered": ("Kiln's clearance check didn't answer", "wait a minute"),
+    "unanswered": ("Kiln's clearance check didn't answer", "wait a minute"),
 }
 _PROFILE_NUMBER_KEYS = ("layer_height", "skirts", "skirt_distance", "brim_width")
 _PLACEABLE_EXTENSIONS = (".stl", ".3mf")
@@ -328,12 +332,14 @@ def _no_verdict_sentence(state: Any, reason: str | None) -> str:
     happen (offline / signed out / no answer -- never a code), and the two
     ways out.
     """
-    cause, remedy = _NO_VERDICT_WORDING.get(reason or "", _NO_VERDICT_WORDING["not_answered"])
-    return (
-        f"{_plate_holds_sentence(state)} Kiln can't check whether a second part fits safely "
-        f"beside it because {cause}, so it won't slice onto this plate. Clear the plate and "
-        f"say so, or {remedy} and try again."
-    )
+    cause, remedy = _NO_VERDICT_WORDING.get(reason or "", _NO_VERDICT_WORDING["unanswered"])
+    # Four parts, one assembly -- the shape kiln.served_answer.sentence(
+    # on_the_line=, cannot=, wont=, safe_remedy=) will take over.
+    on_the_line = _plate_holds_sentence(state)
+    cannot = f"Kiln can't check whether a second part fits safely beside it because {cause}"
+    wont = "so it won't slice onto this plate"
+    safe_remedy = f"Clear the plate and say so, or {remedy} and try again"
+    return f"{on_the_line} {cannot}, {wont}. {safe_remedy}."
 
 
 def _region_cell(name: str) -> tuple[int, int] | None:
@@ -557,13 +563,16 @@ def _apply_plate_placement(
     printer_name: str | None,
     placement: Any,
     profile_path: str | None = None,
+    adapter: Any | None = None,
 ) -> tuple[str, dict | None, dict]:
     """Pre-slice gate for a plate that still holds the last print.
 
     Same return shape as :func:`_apply_bed_fit_gate` --
     ``(effective_input_path, error_dict_or_None, info)`` -- and called by
-    every slice door BEFORE it, so a part is placed beside the occupant
-    first and checked against the bed second.
+    every door that reaches the slicer BEFORE it, so a part is placed
+    beside the occupant first and checked against the bed second.  A door
+    that already holds the target's *adapter* passes it; otherwise the
+    machine is resolved from *printer_name* the way every tool does.
 
     * plate ``clear`` or ``unknown`` (no printer, no record, the hosted
       process): the input passes through unchanged, ``info["plate"]`` says
@@ -602,10 +611,11 @@ def _apply_plate_placement(
             return input_path, None, {"plate": "unknown", "gate": "skipped_hosted"}
     except Exception:  # noqa: BLE001
         pass
-    try:
-        adapter = _srv._resolve_adapter(printer_name)
-    except Exception:  # noqa: BLE001 -- no printer means no plate record
-        adapter = None
+    if adapter is None:
+        try:
+            adapter = _srv._resolve_adapter(printer_name)
+        except Exception:  # noqa: BLE001 -- no printer means no plate record
+            adapter = None
     if adapter is None:
         return input_path, None, {"plate": "unknown", "gate": "skipped_no_printer"}
     state = plate_state.read(adapter)

@@ -126,19 +126,35 @@ def part_stl_path(part: Any, design_dir: str) -> str:
     return stl_path
 
 
-def slice_stl(stl_path: str, profile: str | None) -> str:
+def slice_stl(stl_path: str, profile: str | None, *, placement: Any = "auto") -> str:
     """Slice one STL through the real slicing engine; return the gcode path.
 
-    :raises RuntimeError: When the slicer fails or emits nothing — callers
-        convert that to their own error envelope.
+    The plate may still hold the last print, so the slice runs through the
+    same gate as ``slice_model``: a rebuild is an internal caller and asks
+    for ``"auto"``, which refuses on an occupied plate -- the parts of a
+    multi-part recipe keep their layout against each other, and Kiln does
+    not move that layout without being told where.
+
+    :raises RuntimeError: When the plate gate refuses (its sentence is the
+        message), or the slicer fails or emits nothing — callers convert
+        that to their own error envelope.
     """
+    from kiln.plugins.slicer_tools import _apply_plate_placement, _verify_plate_placement
     from kiln.slicer import slice_file
 
-    result = slice_file(stl_path, profile=profile or None)
+    placed, err, info = _apply_plate_placement(
+        stl_path, effective_printer_id=None, printer_name=None, placement=placement, profile_path=profile,
+    )
+    if err is not None:
+        raise RuntimeError(str(err["error"]["message"]))
+    result = slice_file(placed, profile=profile or None)
     if not getattr(result, "success", False) or not result.output_path:
         raise RuntimeError(
             getattr(result, "message", "") or "slicer produced no output"
         )
+    verify_err, _info = _verify_plate_placement(result.output_path, info)
+    if verify_err is not None:
+        raise RuntimeError(str(verify_err["error"]["message"]))
     return result.output_path
 
 

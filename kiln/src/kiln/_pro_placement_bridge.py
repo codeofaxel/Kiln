@@ -43,7 +43,8 @@ Request (``schema: "placement_request/1"``)::
 
     {"printer_id", "serial",
      "plate": {"status": "occupied"|"clear"|"unknown",
-               "job": {"file", "footprint_mm": [x0,y0,x1,y1]|null, "max_z_mm"}|null,
+               "job": {"file", "footprint_mm": [x0,y0,x1,y1]|null, "max_z_mm",
+                       "printer_id": str|null}|null,
                "since": str|null},
      "occupant_gcode": {"path"} | {"name", "gz_b64"} | null,
      "part": {"size_mm": [x,y,z], "layer_height_mm", "tower_mm": [x,y]|null,
@@ -96,11 +97,14 @@ REQUEST_SCHEMA = "placement_request/1"
 TOOL = "placement_plan"
 __all__ = ["OCCUPANCY_KIND", "REQUEST_SCHEMA", "SCHEMA", "TOOL", "ask", "hosted_form", "request_for", "verdict_for"]
 
-#: Why no verdict came back -- the three causes a refusal can name.
+#: Why no verdict came back -- the three causes a refusal can name.  Decided
+#: in ONE place (:func:`reason_for` for an answer, :func:`_served` for a
+#: transport fault); slated to become ``kiln.served_answer.classify_answer``
+#: / ``classify_transport_error`` once that shared helper lands on main.
 OFFLINE = "offline"
 SIGNED_OUT = "signed_out"
-NOT_ANSWERED = "not_answered"
-REASONS = (OFFLINE, SIGNED_OUT, NOT_ANSWERED)
+UNANSWERED = "unanswered"
+REASONS = (OFFLINE, SIGNED_OUT, UNANSWERED)
 
 #: The hosted form carries a G-code body gzipped; over this it is dropped
 #: (sent as ``null``) and the engine falls back to the record's box.
@@ -163,12 +167,12 @@ def ask(request: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     the way the motion bridge reads it: a network fault is
     :data:`OFFLINE`; no sign-in, an unpaired account or an expired session
     is :data:`SIGNED_OUT`; anything else -- a refusal for this machine, a
-    malformed document, an answer with no code -- is :data:`NOT_ANSWERED`.
+    malformed document, an answer with no code -- is :data:`UNANSWERED`.
     Never raises.
     """
     try:
         if not isinstance(request, dict) or not request.get("printer_id"):
-            return None, NOT_ANSWERED
+            return None, UNANSWERED
         pro = _local_pro()
         if pro is not None and hasattr(pro, "build_verdict"):
             try:
@@ -180,7 +184,27 @@ def ask(request: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
         return _served(request)
     except Exception:  # noqa: BLE001 -- the bridge never raises into a slice door
         logger.debug("placement bridge failed", exc_info=True)
-        return None, NOT_ANSWERED
+        return None, UNANSWERED
+
+
+def reason_for(answer: Any) -> str:
+    """The three-way reason for a service answer that carried no verdict.
+
+    The one place the mapping lives: an answer whose code says the door
+    could not be reached is :data:`OFFLINE`; one that says there is no
+    usable sign-in is :data:`SIGNED_OUT`; everything else -- a refusal for
+    this machine, an HTTP rejection, a malformed document, no code at all
+    -- is :data:`UNANSWERED`.  (To be replaced by
+    ``kiln.served_answer.classify_answer`` when that helper lands.)
+    """
+    if not isinstance(answer, dict):
+        return UNANSWERED
+    code = str(answer.get("code") or "")
+    if code in _OFFLINE_CODES:
+        return OFFLINE
+    if code in _SIGNED_OUT_CODES:
+        return SIGNED_OUT
+    return UNANSWERED
 
 
 def _call_local(build_verdict: Any, request: dict[str, Any]) -> Any:
@@ -203,25 +227,21 @@ def _served(request: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]
     try:
         from kiln.server import _pro_api_call
     except Exception:  # noqa: BLE001
-        return None, NOT_ANSWERED
+        return None, UNANSWERED
     try:
         answer = _pro_api_call(TOOL, **hosted_form(request))
     except Exception:  # noqa: BLE001 -- the network is a degrade, never a slice onto a part
+        # A transport fault (slated for kiln.served_answer.classify_transport_error).
         logger.debug("placement_plan request failed", exc_info=True)
         return None, OFFLINE
     if not isinstance(answer, dict):
-        return None, NOT_ANSWERED
+        return None, UNANSWERED
     doc = answer.get("verdict") if "verdict" in answer else answer
     if is_verdict(doc):
         return doc, None
     if answer.get("error") or answer.get("status") == "error":
-        code = str(answer.get("code") or "")
         logger.info("placement_plan not served: %s", answer.get("error") or answer.get("message"))
-        if code in _OFFLINE_CODES:
-            return None, OFFLINE
-        if code in _SIGNED_OUT_CODES:
-            return None, SIGNED_OUT
-    return None, NOT_ANSWERED
+    return None, reason_for(answer)
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +337,14 @@ def request_for(
     plate: dict[str, Any] = {
         "status": state.status,
         "job": (
-            {"file": job.file, "footprint_mm": list(job.footprint_mm) if job.footprint_mm else None, "max_z_mm": job.max_z_mm}
+            {
+                "file": job.file,
+                "footprint_mm": list(job.footprint_mm) if job.footprint_mm else None,
+                "max_z_mm": job.max_z_mm,
+                # The model the print was STARTED on, so the engine can refuse
+                # a printer re-declared since -- as the motion planner does.
+                "printer_id": job.printer_id,
+            }
             if job is not None
             else None
         ),

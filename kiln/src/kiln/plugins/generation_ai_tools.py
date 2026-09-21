@@ -670,6 +670,7 @@ class _GenerationAIToolsPlugin:
             printer_id: str | None = None,
             timeout: int = 600,
             material: str | None = None,
+            placement: str | list[float] | None = None,
         ) -> dict:
             """Full pipeline: generate a model, validate, slice, and upload (preview).
 
@@ -695,6 +696,14 @@ class _GenerationAIToolsPlugin:
                     ``"PETG"``, …); its density is what the slicer weighs
                     the print with.  Omitted, the spool the printer reports
                     loaded answers, then PLA — ``slice.filament`` says which.
+                placement: Where the part goes when the plate still holds
+                    the last print: ``[x, y]`` in mm, a named region
+                    (``"front-left"``, ``"centre"``, …), or ``"keep"``.
+                    Omitted, an occupied plate refuses before slicing and
+                    lists the spots that would work.  The clearance verdict
+                    is free; placing and starting a second print on an
+                    occupied plate is a kiln-pro feature
+                    (https://kiln3d.com/pricing).
 
             """
             from kiln.generation import (
@@ -892,14 +901,31 @@ class _GenerationAIToolsPlugin:
                 # declared, else the spool the target reports loaded, else
                 # PLA -- the same reading slice_and_print makes, and the
                 # response's slice.filament says which.
-                from kiln.plugins.slicer_tools import _loaded_material_for
+                from kiln.plugins.slicer_tools import (
+                    _apply_plate_placement,
+                    _attach_placement,
+                    _loaded_material_for,
+                    _verify_plate_placement,
+                )
 
+                # The plate may still hold the last print: same gate as
+                # slice_model, before the generated part is sliced.
+                placed_path, place_err, place_info = _apply_plate_placement(
+                    result.local_path, effective_printer_id=effective_printer_id,
+                    printer_name=printer_name, placement=placement,
+                    profile_path=effective_profile,
+                )
+                if place_err is not None:
+                    return place_err
                 slice_result = slice_file(
-                    result.local_path,
+                    placed_path,
                     profile=effective_profile,
                     material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                 )
+                verify_err, place_info = _verify_plate_placement(slice_result.output_path, place_info)
+                if verify_err is not None:
+                    return verify_err
 
                 # Step 6: Upload (but do NOT auto-start — require explicit start_print)
                 # Same door as the control verbs: config.yaml fallback included.
@@ -1007,6 +1033,7 @@ class _GenerationAIToolsPlugin:
                     "experimental": True,
                     "auto_print_enabled": _srv._AUTO_PRINT_GENERATED,
                 }
+                _attach_placement(resp, place_info)
                 if _build_vol is not None:
                     resp["bed_dims_mm"] = list(_build_vol)
                     resp["bed_size_source"] = bed_size_source

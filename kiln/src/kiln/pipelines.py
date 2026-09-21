@@ -449,6 +449,71 @@ def _slice_step_data(result: Any) -> dict[str, Any]:
     return data
 
 
+def _refused_slice_step(err: dict[str, Any], step_start: float) -> PipelineStep:
+    """A slice step that the placement gate refused: the sentence is the
+    message, the gate's own fields (spots, occupancy, the plate) ride the data."""
+    data: dict[str, Any] = {"error": err.get("error")}
+    for key in ("plate", "spots", "occupancy", "placement"):
+        if key in err:
+            data[key] = err[key]
+    return PipelineStep(
+        name="slice",
+        success=False,
+        message=str((err.get("error") or {}).get("message") or "Slicing refused"),
+        data=data,
+        duration_seconds=time.time() - step_start,
+    )
+
+
+def _slice_step(
+    *,
+    model_path: str,
+    effective_pid: str | None,
+    printer_name: str | None,
+    adapter: Any,
+    placement: Any,
+    profile: str | None,
+    step_start: float,
+    **slice_kwargs: Any,
+) -> tuple[PipelineStep, str | None]:
+    """The slice step every pipeline shares: the placement gate, the slicer,
+    the second verdict on the sliced file.
+
+    One helper so the pipelines cannot differ from the slice tools about a
+    plate that still holds the last print (:func:`kiln.plugins.slicer_tools.
+    _apply_plate_placement`).  Returns ``(step, gcode_path)``; a refused
+    step carries no G-code and, being fatal, stops the pipeline.  Raises
+    whatever the slicer raises, for the caller's own failed-step wording.
+    """
+    from kiln.plugins.slicer_tools import (
+        _apply_plate_placement,
+        _attach_placement,
+        _verify_plate_placement,
+    )
+    from kiln.slicer import slice_file
+
+    placed, err, info = _apply_plate_placement(
+        model_path, effective_printer_id=effective_pid, printer_name=printer_name,
+        placement=placement, profile_path=profile, adapter=adapter,
+    )
+    if err is not None:
+        return _refused_slice_step(err, step_start), None
+    result = slice_file(placed, profile=profile, **slice_kwargs)
+    verify_err, info = _verify_plate_placement(result.output_path, info)
+    if verify_err is not None:
+        return _refused_slice_step(verify_err, step_start), None
+    data = _slice_step_data(result)
+    _attach_placement(data, info)
+    step = PipelineStep(
+        name="slice",
+        success=True,
+        message=result.message,
+        data=data,
+        duration_seconds=time.time() - step_start,
+    )
+    return step, result.output_path
+
+
 def _target_printer_id(printer_id: str | None, printer_name: str | None) -> str | None:
     """The printer-model id EVERY step of an aimed pipeline should use.
 
@@ -491,8 +556,14 @@ def quick_print(
     ams_mapping: list[int] | None = None,
     skip_validation: bool = False,
     signoff: dict[str, Any] | None = None,
+    placement: str | list[float] | None = None,
 ) -> PipelineResult:
     """Validate → slice → preflight → upload → start print in one call.
+
+    ``placement`` is where the part goes when the plate still holds the
+    last print (``[x, y]`` in mm, a named region, or ``"keep"``); omitted,
+    an occupied plate refuses at the slice step and lists the spots that
+    would work.  Same gate as ``slice_model``.
 
     The pipeline pre-tests the mesh for printability before slicing
     (manifold, walls, overhangs, bridges, bed-fit, material).  Auto-repairs
@@ -669,7 +740,6 @@ def quick_print(
         step_start = time.time()
         try:
             from kiln.printers.upload_prep import slice_overrides_for_adapter
-            from kiln.slicer import slice_file
             from kiln.slicer_profiles import profile_with_overrides
 
             # A printer that uploads a wrapped 3MF needs the gcode sliced
@@ -687,22 +757,21 @@ def quick_print(
 
             # The density the slicer weighs the print with: the declared
             # material, else the spool the target reports loaded, else PLA
-            # -- and the step says which (kiln.slicer_filament).
-            result = slice_file(
-                ctx["model_path"],
+            # -- and the step says which (kiln.slicer_filament).  The
+            # shared step also asks whether the plate still holds a part.
+            step, ctx["gcode_path"] = _slice_step(
+                model_path=ctx["model_path"],
+                effective_pid=effective_pid,
+                printer_name=printer_name,
+                adapter=ctx.get("adapter"),
+                placement=placement,
                 profile=slice_profile,
+                step_start=step_start,
                 slicer_path=slicer_path,
                 material=material,
                 loaded_material=_loaded_material(ctx.get("adapter"), material),
             )
-            ctx["gcode_path"] = result.output_path
-            return PipelineStep(
-                name="slice",
-                success=True,
-                message=result.message,
-                data=_slice_step_data(result),
-                duration_seconds=time.time() - step_start,
-            )
+            return step
         except Exception as exc:
             return PipelineStep(
                 name="slice",
@@ -964,8 +1033,14 @@ def reslice_and_print(
     ams_mapping: list[int] | None = None,
     skip_validation: bool = False,
     signoff: dict[str, Any] | None = None,
+    placement: str | list[float] | None = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
+
+    ``placement`` is where the part goes when the plate still holds the
+    last print (``[x, y]`` in mm, a named region, or ``"keep"``); omitted,
+    an occupied plate refuses at the slice step.  Same gate as
+    ``reslice_with_overrides``.
 
     Steps:
         1. validate_mesh — Pre-print printability gate (manifold, walls,
@@ -1164,29 +1239,26 @@ def reslice_and_print(
     def _slice() -> PipelineStep:
         step_start = time.time()
         try:
-            from kiln.slicer import slice_file
-
-            # Same density ladder as quick_print, same helper, same receipt.
+            # Same density ladder as quick_print, same helper, same receipt
+            # -- and the same plate gate.
             try:
                 adapter = _resolve_pipeline_adapter(printer_name)
             except Exception:  # noqa: BLE001 — the upload step reports an unreachable printer
                 adapter = None
-            result = slice_file(
-                ctx["model_path"],
+            step, ctx["gcode_path"] = _slice_step(
+                model_path=ctx["model_path"],
+                effective_pid=effective_pid,
+                printer_name=printer_name,
+                adapter=adapter,
+                placement=placement,
                 profile=ctx["effective_profile"],
+                step_start=step_start,
                 slicer_path=slicer_path,
                 extra_args=extra_args,
                 material=material,
                 loaded_material=_loaded_material(adapter, material),
             )
-            ctx["gcode_path"] = result.output_path
-            return PipelineStep(
-                name="slice",
-                success=True,
-                message=result.message,
-                data=_slice_step_data(result),
-                duration_seconds=time.time() - step_start,
-            )
+            return step
         except Exception as exc:
             return PipelineStep(
                 name="slice",
@@ -1826,22 +1898,28 @@ def benchmark(
                 )
             )
 
-    # Step 3: Slice
+    # Step 3: Slice (through the shared step, so a plate that still holds
+    # the last print refuses a benchmark exactly as it refuses a print).
     step_start = time.time()
     try:
-        from kiln.slicer import slice_file
-
-        result = slice_file(model_path, profile=effective_profile)
-        gcode_path = result.output_path
-        steps.append(
-            PipelineStep(
-                name="slice",
-                success=True,
-                message=result.message,
-                data=_slice_step_data(result),
-                duration_seconds=time.time() - step_start,
-            )
+        step, gcode_path = _slice_step(
+            model_path=model_path,
+            effective_pid=effective_pid,
+            printer_name=printer_name,
+            adapter=None,
+            placement="auto",
+            profile=effective_profile,
+            step_start=step_start,
         )
+        steps.append(step)
+        if not step.success or not gcode_path:
+            return PipelineResult(
+                pipeline="benchmark",
+                success=False,
+                message=f"Benchmark refused at slicing: {step.message}",
+                steps=steps,
+                total_duration_seconds=time.time() - start,
+            )
     except Exception as exc:
         steps.append(
             PipelineStep(

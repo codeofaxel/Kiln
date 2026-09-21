@@ -49,6 +49,7 @@ class _SmartPrintToolsPlugin:
             skip_diagnosis: bool = False,
             skip_validation: bool = False,
             preview_token: str | None = None,
+            placement: str | list[float] | None = None,
         ) -> dict:
             """Diagnose the last print failure and re-slice + print with fixes.
 
@@ -89,6 +90,14 @@ class _SmartPrintToolsPlugin:
                     validation gate.  Defaults to False — designs are
                     pre-tested for printability before the retry reaches
                     the printer.
+                placement: Where the part goes when the plate still holds
+                    the last print: ``[x, y]`` in mm, a named region
+                    (``"front-left"``, ``"centre"``, …), or ``"keep"``.
+                    Omitted, an occupied plate refuses before slicing and
+                    lists the spots that would work.  The clearance verdict
+                    is free; placing and starting a second print on an
+                    occupied plate is a kiln-pro feature
+                    (https://kiln3d.com/pricing).
             """
             import kiln.server as _srv
             if err := _srv._check_auth("print"):
@@ -362,6 +371,20 @@ class _SmartPrintToolsPlugin:
             # ------------------------------------------------------------------
             # 6. Slice, upload, print — mirroring slice_and_print's flow.
             # ------------------------------------------------------------------
+            # The plate may still hold the print that failed: same gate as
+            # slice_and_print, before anything is sliced.
+            from kiln.plugins.slicer_tools import (
+                _apply_plate_placement,
+                _attach_placement,
+                _verify_plate_placement,
+            )
+
+            model_path, place_err, place_info = _apply_plate_placement(
+                model_path, effective_printer_id=effective_pid, printer_name=printer_name,
+                placement=placement, profile_path=effective_profile, adapter=adapter,
+            )
+            if place_err is not None:
+                return place_err
             try:
                 # The density the slicer weighs the print with: what was
                 # declared, else the tray detected above (kiln.slicer_filament).
@@ -385,6 +408,11 @@ class _SmartPrintToolsPlugin:
                 return _srv._error_dict(
                     f"Model file not found: {exc}", code="FILE_NOT_FOUND"
                 )
+            # The sliced file goes back to the plate check before any wrap
+            # or upload.
+            verify_err, place_info = _verify_plate_placement(slice_result.output_path, place_info)
+            if verify_err is not None:
+                return verify_err
 
             # Bambu 3MF wrapping.
             upload_path = slice_result.output_path
@@ -527,6 +555,7 @@ class _SmartPrintToolsPlugin:
                 result["printer_id"] = effective_pid
             if effective_profile:
                 result["profile_path"] = effective_profile
+            _attach_placement(result, place_info)
             if start_handoff:
                 result["start_gcode_source"] = (
                     f"{start_handoff} — the printer's own start routine"

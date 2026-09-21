@@ -78,14 +78,14 @@ def _install_local_pro(monkeypatch, build_verdict):
 class TestTheSources:
     def test_no_source_means_no_verdict_and_a_reason(self):
         assert bridge.verdict_for(_request()) is None
-        assert bridge.ask(_request()) == (None, bridge.NOT_ANSWERED)
+        assert bridge.ask(_request()) == (None, bridge.UNANSWERED)
 
     def test_an_undeclared_model_asks_nobody(self, monkeypatch):
         import kiln.server as srv
 
         asked: list = []
         monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: asked.append(tool) or {"verdict": _verdict()})
-        assert bridge.ask(_request(printer_id="")) == (None, bridge.NOT_ANSWERED)
+        assert bridge.ask(_request(printer_id="")) == (None, bridge.UNANSWERED)
         assert asked == []
 
     def test_local_kiln_pro_answers_and_the_service_is_not_asked(self, monkeypatch):
@@ -134,7 +134,7 @@ class TestTheSources:
 
         for bad in ({"verdict": {"schema": "other", "ok": True}}, {"verdict": "yes"}, {"schema": bridge.SCHEMA, "ok": "yes"}, "ok", None):
             monkeypatch.setattr(srv, "_pro_api_call", lambda tool, _bad=bad, **kw: _bad)
-            assert bridge.ask(_request()) == (None, bridge.NOT_ANSWERED)
+            assert bridge.ask(_request()) == (None, bridge.UNANSWERED)
 
 
 class TestTheReasons:
@@ -167,7 +167,7 @@ class TestTheReasons:
 
         for code in ("MACHINE_NOT_PAIRED", "KILN_API_HTTP_ERROR", "NOT_SERVED_HERE", ""):
             monkeypatch.setattr(srv, "_pro_api_call", lambda tool, _c=code, **kw: {"status": "error", "code": _c, "error": "no"})
-            assert bridge.ask(_request()) == (None, bridge.NOT_ANSWERED)
+            assert bridge.ask(_request()) == (None, bridge.UNANSWERED)
 
 
 class TestNoCache:
@@ -244,7 +244,7 @@ class TestTheRequest:
         assert req["schema"] == bridge.REQUEST_SCHEMA
         assert req["printer_id"] == "bambu_a1" and req["serial"] == "01P00A000000001"
         assert req["plate"]["status"] == "occupied"
-        assert req["plate"]["job"] == {"file": "jar.gcode.3mf", "footprint_mm": [90.0, 90.0, 160.0, 160.0], "max_z_mm": 42.0}
+        assert req["plate"]["job"] == {"file": "jar.gcode.3mf", "footprint_mm": [90.0, 90.0, 160.0, 160.0], "max_z_mm": 42.0, "printer_id": "bambu_a1"}
         assert req["plate"]["since"]
         assert req["occupant_gcode"] == {"path": str(gcode)}
         assert req["placement"] == [40.0, 40.0] and req["placed_by"] == "agent"

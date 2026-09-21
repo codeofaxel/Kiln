@@ -368,6 +368,67 @@ def _resolve_slice_plan(
     }
 
 
+def _cli_plate_placement(
+    ctx: click.Context,
+    input_file: str,
+    *,
+    plan: dict[str, Any],
+    placement: str | None,
+    json_mode: bool,
+) -> tuple[str, dict[str, Any]]:
+    """The slice tools' plate gate, at the CLI.
+
+    The part is placed beside what the plate still holds, or the command
+    refuses with the same sentence the tools use -- JSON and rich alike --
+    and exits non-zero.  Returns the effective input and the gate's info,
+    which :func:`_cli_verify_plate_placement` takes after the slice.  No
+    configured printer means no plate record, and the slice proceeds as it
+    always did.
+    """
+    from kiln.plugins.slicer_tools import _apply_plate_placement
+
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+    except Exception:  # noqa: BLE001 — no configured printer means no plate record
+        adapter = None
+    placed, err, info = _apply_plate_placement(
+        input_file,
+        effective_printer_id=plan.get("printer_id"),
+        printer_name=(ctx.obj or {}).get("printer"),
+        placement=placement,
+        profile_path=plan.get("profile_path"),
+        adapter=adapter,
+    )
+    if err is not None:
+        _cli_placement_refuse(err, json_mode)
+    return placed, info
+
+
+def _cli_verify_plate_placement(
+    gcode_path: str | None, info: dict[str, Any], *, json_mode: bool,
+) -> dict[str, Any]:
+    """The post-slice pass at the CLI: the sliced file goes back to the plate
+    check, and a refusal exits non-zero before anything is uploaded."""
+    from kiln.plugins.slicer_tools import _verify_plate_placement
+
+    err, info = _verify_plate_placement(gcode_path, info)
+    if err is not None:
+        _cli_placement_refuse(err, json_mode)
+    return info
+
+
+def _cli_placement_refuse(err: dict[str, Any], json_mode: bool) -> None:
+    detail = err.get("error") if isinstance(err.get("error"), dict) else {}
+    click.echo(
+        format_error(
+            str(detail.get("message") or "Slicing refused"),
+            code=str(detail.get("code") or "PLACEMENT_REFUSED"),
+            json_mode=json_mode,
+        )
+    )
+    sys.exit(1)
+
+
 def _notify_preview_if_available(preview_path: str) -> bool:
     """Best-effort preview notification via optional env-configured hooks."""
     cmd_template = os.environ.get("KILN_PREVIEW_NOTIFY_CMD", "").strip()
@@ -4113,6 +4174,15 @@ def remove(name: str) -> None:
         "in a different color. Implies --use-ams."
     ),
 )
+@click.option(
+    "--placement",
+    default=None,
+    help=(
+        "Where the part goes when the plate still holds the last print: '[x, y]' in mm, "
+        "a region such as front-left or centre, or 'keep'. Omitted, an occupied plate refuses "
+        "and lists the spots that would work."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def slice(
@@ -4131,6 +4201,7 @@ def slice(
     spacing: float,
     use_ams: bool | None,
     ams_mapping: str | None,
+    placement: str | None,
     json_mode: bool,
 ) -> None:
     """Slice a 3D model (STL/3MF/STEP) to G-code.
@@ -4240,7 +4311,14 @@ def slice(
                 )
                 copy_strategy = "stl_mesh_duplication"
 
+        placement_info: dict[str, Any] = {"plate": "unknown"}
         if not multicolor_mode:
+            # The plate may still hold the last print: same gate as the
+            # slice tools, same sentence, and the sliced file is checked
+            # once more before it is reported or uploaded.
+            actual_input, placement_info = _cli_plate_placement(
+                ctx, actual_input, plan=plan, placement=placement, json_mode=json_mode,
+            )
             result = slice_file(
                 actual_input,
                 output_dir=output_dir,
@@ -4251,6 +4329,9 @@ def slice(
                 material=plan.get("declared_material"),
                 loaded_material=plan.get("loaded_material"),
                 loaded_determined_by=plan.get("loaded_determined_by") or "observed",
+            )
+            placement_info = _cli_verify_plate_placement(
+                result.output_path, placement_info, json_mode=json_mode,
             )
 
         if not print_after:
@@ -4263,6 +4344,9 @@ def slice(
                 if plan["profile_path"]:
                     payload["profile_path"] = plan["profile_path"]
                 payload["material"] = plan["material"]
+                from kiln.plugins.slicer_tools import _attach_placement
+
+                _attach_placement(payload, placement_info)
                 payload["support_mode"] = support_mode
                 if plan["support_style"]:
                     payload["support_style"] = plan["support_style"]
@@ -4277,6 +4361,8 @@ def slice(
                 click.echo(result.message)
                 click.echo(f"Output: {result.output_path}")
                 click.echo(f"Material: {plan['material']}")
+                if placement_info.get("approval_note"):
+                    click.echo(f"Placement: {placement_info['approval_note']}")
                 if getattr(result, "filament", None) is not None:
                     click.echo(f"Weighed as: {result.filament.note}")
                 if copies > 1:
@@ -9408,6 +9494,14 @@ def generate_download(
     "--auto-print/--no-auto-print", default=False, help="Automatically start printing after upload (default: preview only)."
 )
 @click.option("--preview/--no-preview", "preview_enabled", default=True, help="Render 3-view model preview after generation.")
+@click.option(
+    "--placement",
+    default=None,
+    help=(
+        "Where the part goes when the plate still holds the last print: '[x, y]' in mm, "
+        "a region such as front-left or centre, or 'keep'. Omitted, an occupied plate refuses."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def generate_and_print_cmd(
@@ -9422,6 +9516,7 @@ def generate_and_print_cmd(
     timeout: int,
     auto_print: bool,
     preview_enabled: bool,
+    placement: str | None,
     json_mode: bool,
 ) -> None:
     """Generate a 3D model from text or image, slice it, and upload to the printer.
@@ -9520,16 +9615,21 @@ def generate_and_print_cmd(
             support_mode=support_mode,
         )
 
+        # The plate may still hold the last print: same gate as kiln slice.
+        placed_path, placement_info = _cli_plate_placement(
+            ctx, result.local_path, plan=plan, placement=placement, json_mode=json_mode,
+        )
         if not json_mode:
             click.echo("Slicing...")
         slice_result = slice_file(
-            result.local_path,
+            placed_path,
             profile=plan["profile_path"],
             extra_args=plan["extra_args"] or None,
             material=plan.get("declared_material"),
             loaded_material=plan.get("loaded_material"),
             loaded_determined_by=plan.get("loaded_determined_by") or "observed",
         )
+        _cli_verify_plate_placement(slice_result.output_path, placement_info, json_mode=json_mode)
         if not json_mode:
             click.echo(f"Sliced: {slice_result.output_path}")
             click.echo(f"Material: {plan['material']}")

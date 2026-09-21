@@ -277,7 +277,7 @@ class TestEveryDoor:
         assert resp["placement"]["ok"] is False and len(resp["spots"]) == 2
         assert not spy.called
 
-    @pytest.mark.parametrize("reason", [bridge.OFFLINE, bridge.SIGNED_OUT, bridge.NOT_ANSWERED])
+    @pytest.mark.parametrize("reason", [bridge.OFFLINE, bridge.SIGNED_OUT, bridge.UNANSWERED])
     def test_no_verdict_fails_closed(self, door, registry, extra, tmp_path, machine, monkeypatch, reason):
         from kiln.plugins.slicer_tools import _no_verdict_sentence
 
@@ -449,7 +449,7 @@ class TestTheFailClosedSentence:
             head + "Kiln can't check whether a second part fits safely beside it because Kiln is signed out, "
             "so it won't slice onto this plate. Clear the plate and say so, or sign in and try again."
         )
-        for reason in (bridge.NOT_ANSWERED, None, "something else"):
+        for reason in (bridge.UNANSWERED, None, "something else"):
             assert _no_verdict_sentence(state, reason) == (
                 head + "Kiln can't check whether a second part fits safely beside it because Kiln's clearance check "
                 "didn't answer, so it won't slice onto this plate. Clear the plate and say so, or wait a minute and try again."
@@ -466,7 +466,7 @@ class TestTheFailClosedSentence:
     def test_no_codes_inside_any_sentence(self, monkeypatch):
         from kiln.plugins.slicer_tools import _no_verdict_sentence
 
-        for reason in (bridge.OFFLINE, bridge.SIGNED_OUT, bridge.NOT_ANSWERED):
+        for reason in (bridge.OFFLINE, bridge.SIGNED_OUT, bridge.UNANSWERED):
             text = _no_verdict_sentence(self._state(42.0), reason)
             assert "_" not in text and "SERVER" not in text and "KILN_" not in text
 
@@ -608,3 +608,249 @@ class TestTheStage:
             "reserved": [], "proposed": None, "source": "record_box",
         }
         assert PlateState(machine="m", status="clear").occupancy([256, 256]) is None
+
+
+# ---------------------------------------------------------------------------
+# Every caller of the slicer
+# ---------------------------------------------------------------------------
+
+#: Source files (relative to the kiln package) that call ``slice_file`` and
+#: are walked behaviourally below.  The structural test DERIVES the caller
+#: set from the source, so a new caller fails until it is wired through the
+#: gate AND named here -- a door nobody walks is the one the bug survives in.
+_WALKED = {
+    "plugins/slicer_tools.py",
+    "plugins/estimate_tools.py",
+    "pipelines.py",
+    "cli/main.py",
+    "plugins/smart_print_tools.py",
+    "plugins/generation_ai_tools.py",
+    "design_reasoning.py",
+    "design_rebuild.py",
+}
+
+
+def _slice_file_callers() -> dict[str, tuple[bool, bool]]:
+    """``{relative path: (calls _apply_plate_placement, calls _verify_plate_placement)}``
+    for every module that CALLS ``slice_file`` -- an AST walk, so a
+    docstring that mentions the name does not count and a call does."""
+    import ast
+
+    import kiln
+
+    root = Path(kiln.__file__).parent
+    out: dict[str, tuple[bool, bool]] = {}
+    for py in sorted(root.rglob("*.py")):
+        if py.name == "slicer.py":
+            continue
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        called: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                fn = node.func
+                if isinstance(fn, ast.Name):
+                    called.add(fn.id)
+                elif isinstance(fn, ast.Attribute):
+                    called.add(fn.attr)
+        if "slice_file" in called:
+            out[py.relative_to(root).as_posix()] = (
+                "_apply_plate_placement" in called, "_verify_plate_placement" in called,
+            )
+    return out
+
+
+class TestEveryCallerOfTheSlicer:
+    """The one-door fallacy, closed: every module that reaches the slicer
+    with a printer in hand takes the placement gate and the second verdict."""
+
+    def test_every_slice_file_caller_is_wired_and_walked(self):
+        callers = _slice_file_callers()
+        assert "plugins/slicer_tools.py" in callers, "the walk itself is broken"
+        unwired = sorted(f for f, (gate, verify) in callers.items() if not (gate and verify))
+        assert not unwired, (
+            f"these modules call slice_file without the placement gate and the post-slice "
+            f"verdict: {unwired}.  Wire them through _apply_plate_placement / "
+            f"_verify_plate_placement (one helper, no per-door branch) and walk them in this class."
+        )
+        assert set(callers) == _WALKED, (
+            f"slice_file callers changed: {sorted(set(callers) ^ _WALKED)}.  A new caller must be "
+            f"wired AND walked behaviourally here; a removed one comes off _WALKED."
+        )
+
+    def test_the_pipelines_refuse_at_the_slice_step_and_stop(self, tmp_path, machine, monkeypatch):
+        from kiln import pipelines
+
+        _occupy(machine)
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=False, spots=[]), None)))
+        monkeypatch.setattr(pipelines, "_resolve_pipeline_adapter", lambda name: machine)
+        stl = _cube(tmp_path / "part.stl")
+        spy, _ = _fake_slice(tmp_path)
+        runs = (
+            (pipelines.quick_print, {}),
+            (pipelines.reslice_and_print, {"overrides": {"brim_width": "5"}}),
+            (pipelines.benchmark, {}),
+        )
+        with patch("kiln.slicer.slice_file", spy):
+            for run, kwargs in runs:
+                result = run(model_path=stl, printer_id="ender3", skip_validation=True, **kwargs)
+                step = next(s for s in result.steps if s.name == "slice")
+                assert result.success is False and step.success is False, run.__name__
+                assert step.message.startswith("The last print, jar v2, is still on the plate (since "), run.__name__
+                assert step.data["error"]["code"] == "PLACEMENT_PLATE_OCCUPIED"
+                assert step.data["occupancy"]["kind"] == bridge.OCCUPANCY_KIND
+                assert [s.name for s in result.steps][-1] == "slice", "a refused slice is fatal: nothing runs after it"
+        assert not spy.called
+
+    def test_the_pipelines_place_and_carry_the_verdict(self, tmp_path, machine, monkeypatch):
+        from kiln import pipelines
+
+        _occupy(machine)
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=True), None)))
+        monkeypatch.setattr(pipelines, "_resolve_pipeline_adapter", lambda name: machine)
+        stl = _cube(tmp_path / "part.stl", off=(100.0, 100.0, 0.0))
+        spy, _ = _fake_slice(tmp_path)
+        with patch("kiln.slicer.slice_file", spy):
+            result = pipelines.quick_print(model_path=stl, printer_id="ender3", skip_validation=True, placement=[40, 40])
+        step = next(s for s in result.steps if s.name == "slice")
+        assert step.success is True
+        assert step.data["placement"]["ok"] is True and step.data["approval_carries"] is False
+        bbox = compute_mesh_bbox(spy.call_args.args[0])
+        assert (bbox["x_min"], bbox["y_min"]) == pytest.approx((40.0, 40.0))
+
+    def test_the_run_quick_print_and_run_reslice_tools_take_placement(self):
+        import kiln.server as srv
+
+        for tool in (srv.run_quick_print, srv.run_reslice_and_print, srv.design_to_gcode_pipeline):
+            assert inspect.signature(tool).parameters["placement"].default is None, tool.__name__
+
+    def test_kiln_slice_refuses_in_json_and_rich_and_exits_non_zero(self, tmp_path, machine, monkeypatch):
+        import json
+
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        _occupy(machine)
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=False, spots=[]), None)))
+        monkeypatch.setattr("kiln.cli.main._get_adapter_from_ctx", lambda ctx: machine)
+        stl = _cube(tmp_path / "part.stl", off=(100.0, 100.0, 0.0))
+        spy, _ = _fake_slice(tmp_path)
+        runner = CliRunner()
+        with patch("kiln.slicer.slice_file", spy):
+            res = runner.invoke(cli, ["slice", stl, "--printer-id", "ender3", "--json"])
+            assert res.exit_code == 1, res.output
+            data = json.loads(res.output)
+            assert data["status"] == "error" and data["error"]["code"] == "PLACEMENT_PLATE_OCCUPIED"
+            assert data["error"]["message"].startswith("The last print, jar v2, is still on the plate (since ")
+            res = runner.invoke(cli, ["slice", stl, "--printer-id", "ender3"])
+            assert res.exit_code == 1
+            assert "The last print, jar v2, is still on the plate" in res.output
+        assert not spy.called
+
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=True), None)))
+        with patch("kiln.slicer.slice_file", spy):
+            res = runner.invoke(cli, ["slice", stl, "--printer-id", "ender3", "--placement", "[40, 40]", "--json"])
+        assert res.exit_code == 0, res.output
+        data = json.loads(res.output)
+        assert data["data"]["placement"]["ok"] is True and data["data"]["approval_carries"] is False
+        assert spy.call_args.args[0].endswith("_placed.stl")
+        with patch("kiln.slicer.slice_file", spy):
+            res = runner.invoke(cli, ["slice", stl, "--printer-id", "ender3", "--placement", "front-left"])
+        assert res.exit_code == 0, res.output
+        assert "Placement: placed beside jar v2" in res.output
+
+    def test_kiln_generate_and_print_shares_the_slice_commands_gate(self):
+        """Both CLI commands that slice go through one helper; the JSON and
+        rich refusals above are that helper's."""
+        import inspect as _inspect
+
+        from kiln.cli import main as cli_main
+
+        for cmd in (cli_main.slice, cli_main.generate_and_print_cmd):
+            src = _inspect.getsource(cmd.callback)
+            assert "_cli_plate_placement(" in src and "_cli_verify_plate_placement(" in src, cmd.name
+            assert "placement" in {p.name for p in cmd.params}, cmd.name
+
+    def test_retry_print_with_fix_refuses_before_slicing(self, tmp_path, machine, monkeypatch):
+        from kiln.plugins.smart_print_tools import _SmartPrintToolsPlugin
+
+        tools: dict[str, Any] = {}
+
+        class _FakeMcp:
+            def tool(self, name: str | None = None, **_kwargs):
+                def decorator(fn):
+                    tools[name or fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        _SmartPrintToolsPlugin().register(_FakeMcp())
+        _occupy(machine)
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=False, spots=[]), None)))
+        stl = _cube(tmp_path / "part.stl")
+        spy, _ = _fake_slice(tmp_path)
+        with patch("kiln.slicer.slice_file", spy):
+            resp = tools["retry_print_with_fix"](model_path=stl, printer_id="ender3", skip_diagnosis=True, skip_validation=True)
+        assert resp["success"] is False and resp["error"]["code"] == "PLACEMENT_PLATE_OCCUPIED"
+        assert resp["error"]["message"].startswith("The last print, jar v2, is still on the plate (since ")
+        assert not spy.called
+        assert inspect.signature(tools["retry_print_with_fix"]).parameters["placement"].default is None
+
+    def test_generate_and_print_refuses_before_slicing(self, tmp_path, machine, monkeypatch):
+        from kiln.generation import GenerationStatus
+        from kiln.server import generate_and_print
+        from tests.test_generation_server import _make_job, _make_result, _make_validation
+
+        _occupy(machine)
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=False, spots=[]), None)))
+        monkeypatch.setattr("kiln.server._get_adapter", lambda: machine)
+        stl = _cube(tmp_path / "model.stl")
+        provider = MagicMock()
+        provider.generate.return_value = _make_job(status=GenerationStatus.SUCCEEDED)
+        provider.download_result.return_value = _make_result(local_path=stl)
+        spy, _ = _fake_slice(tmp_path)
+        pipeline = {"ready_to_print": True, "printability_score": 92, "validated_path": stl, "summary": "ok",
+                    "next_action": None, "repaired": False, "model_info": {"dimensions_mm": {"x": 20.0, "y": 20.0, "z": 20.0}},
+                    "checks": [], "status": "pass"}
+        with patch("kiln.server._get_generation_provider", return_value=provider), \
+                patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline", return_value=pipeline), \
+                patch("kiln.generation.validate_mesh", return_value=_make_validation(valid=True)), \
+                patch("kiln.slicer.slice_file", spy):
+            resp = generate_and_print("a cube", provider="meshy", printer_id="ender3")
+        assert resp["success"] is False and resp["error"]["code"] == "PLACEMENT_PLATE_OCCUPIED", resp
+        assert not spy.called
+        assert inspect.signature(generate_and_print).parameters["placement"].default is None
+
+    def test_design_to_gcode_refuses_the_slice_step_in_its_errors(self, tmp_path, machine, monkeypatch):
+        from kiln import design_reasoning
+
+        _occupy(machine)
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=False, spots=[]), None)))
+        spy, _ = _fake_slice(tmp_path)
+
+        def fake_compile(_code, output_path):
+            _cube(Path(output_path))
+
+        with patch("kiln.slicer.slice_file", spy), patch("kiln.parametric.compile_scad_code", side_effect=fake_compile):
+            result = design_reasoning.design_to_gcode("a simple coaster", output_dir=str(tmp_path / "d"), material="ASA")
+        assert result.gcode_file == "" and "slicing" not in result.steps_completed
+        assert any(e.startswith("The last print, jar v2, is still on the plate (since ") for e in result.errors), result.errors
+        assert result.to_dict()["placement"]["ok"] is False
+        assert not spy.called
+
+    def test_design_rebuild_refuses_the_slice_with_the_sentence(self, tmp_path, machine, monkeypatch):
+        from kiln.design_rebuild import slice_stl
+
+        _occupy(machine)
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=False, spots=[]), None)))
+        stl = _cube(tmp_path / "part.stl")
+        spy, _ = _fake_slice(tmp_path)
+        with patch("kiln.slicer.slice_file", spy), pytest.raises(RuntimeError, match=r"^The last print, jar v2, is still on the plate"):
+            slice_stl(stl, None)
+        assert not spy.called
+        mark_clear(machine, "human")
+        with patch("kiln.slicer.slice_file", spy):
+            assert slice_stl(stl, None).endswith("out.gcode")
