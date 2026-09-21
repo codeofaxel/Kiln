@@ -10608,6 +10608,26 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
     except Exception as exc:
         checks.append({"name": "print_preview_gate", "ok": False, "detail": f"walk failed: {exc}"})
 
+    # 4a-bis. Standing consent windows — inside one, prints start without
+    # asking.  Informational (never a failed check): a person running
+    # doctor should see what they, or their agent's dialog, left open.
+    try:
+        from kiln import consent_windows as _cw
+
+        _live = [_cw.describe(w) for w in _cw.live_windows()]
+        checks.append({
+            "name": "standing_consent_windows",
+            "ok": True,
+            "detail": (
+                "; ".join(f"{w['id']} {w['scope']} until {w['until']} via {w['opened_via']}" for w in _live)
+                + " — prints there start without asking; close with `kiln consent revoke <id>`"
+                if _live
+                else "none open: every print asks you"
+            ),
+        })
+    except Exception as exc:
+        checks.append({"name": "standing_consent_windows", "ok": True, "detail": f"check skipped: {exc}"})
+
     # 4b. Printer connection slots — who on this machine is actually holding
     # one.  Separate from the process count above because they answer
     # different questions: a server that never touched the printer holds no

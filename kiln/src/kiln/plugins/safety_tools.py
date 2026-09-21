@@ -165,6 +165,17 @@ class _SafetyToolsPlugin:
 
                 blocked_gcode_commands = sorted(_BLOCKED_COMMANDS.keys())
 
+                # Standing consent windows: prints inside one start without
+                # asking, which is the one safety fact a person asking "is my
+                # printer safe right now?" most needs to hear.
+                standing_windows: list[dict[str, Any]] = []
+                try:
+                    from kiln import consent_windows
+
+                    standing_windows = [consent_windows.describe(w) for w in consent_windows.live_windows()]
+                except Exception as exc:
+                    _logger.debug("Standing windows not read for safety status: %s", exc)
+
                 return {
                     "success": True,
                     "safety_profile": profile_info,
@@ -175,12 +186,20 @@ class _SafetyToolsPlugin:
                     "confirm_mode_enabled": confirm_mode,
                     "blocked_gcode_commands": blocked_gcode_commands,
                     "recent_blocked_actions": recent_blocked,
+                    "standing_windows": standing_windows,
                     "summary": (
                         f"Safety profile: {profile_info.get('display_name', _srv._PRINTER_MODEL or 'default')}. "
                         f"Temp limits: {max_tool}\u00b0C hotend / {max_bed}\u00b0C bed. "
                         f"{len(rate_limits)} rate-limited tools. "
                         f"{len(confirm_tools)} confirm-level tools. "
-                        f"{len(recent_blocked)} blocked action(s) in last hour."
+                        f"{len(recent_blocked)} blocked action(s) in last hour. "
+                        + (
+                            "Standing consent window(s) open: "
+                            + "; ".join(f"{w['id']} {w['scope']} until {w['until_clock']}" for w in standing_windows)
+                            + " — prints there start without asking; revoke_consent_window closes one."
+                            if standing_windows
+                            else "No standing consent window: every print asks the person."
+                        )
                     ),
                 }
             except Exception as exc:
@@ -531,8 +550,12 @@ class _SafetyToolsPlugin:
                     "Prints inside a window start without asking; each is still previewed "
                     "first. To close one early, call revoke_consent_window. Only the person "
                     "can open or extend one — in the approval dialog (a length they pick or "
-                    "type, 24 hours at most), or with `kiln consent window --for 2h --printer "
-                    "NAME` at a terminal."
+                    "type, 24 hours at most)"
+                    + (
+                        ", or on their Kiln account page."
+                        if is_hosted_multitenant()
+                        else ", or with `kiln consent window --for 2h --printer NAME` at a terminal."
+                    )
                     if rows
                     else "No standing window is open: every print asks the person first."
                 ),

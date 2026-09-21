@@ -1042,6 +1042,86 @@ class TestAHostThatCannotAsk:
 
 
 # ---------------------------------------------------------------------------
+# Every surface that reports safety state says whether a window is open
+# ---------------------------------------------------------------------------
+
+
+class TestTheWindowIsNeverInvisible:
+    def test_the_agent_is_told_the_rules_on_connect(self, monkeypatch):
+        monkeypatch.setattr(server, "_get_registry", lambda: types.SimpleNamespace(list_names=lambda: ["garage"]))
+        text = server._build_instructions()
+        block = text[text.index("CONSENT:"):]
+        for phrase in ("you never answer it", "revoke_consent_window", "consent_window_status",
+                       "Nothing you can call opens or extends one", "kiln consent window --for 2h"):
+            assert phrase in block, phrase
+
+    def test_safety_status_names_an_open_window(self, at_terminal):
+        out = _tool("safety_status")()
+        assert out["standing_windows"] == [] and "every print asks" in out["summary"]
+        w = consent_windows.open_window(seconds=3600, scope=("garage",))
+        out = _tool("safety_status")()
+        assert [x["id"] for x in out["standing_windows"]] == [w.id]
+        assert w.id in out["summary"] and "revoke_consent_window" in out["summary"]
+
+    def test_kiln_doctor_names_an_open_window(self, at_terminal, monkeypatch):
+        from kiln.cli.main import cli
+
+        w = consent_windows.open_window(seconds=3600, scope=("garage",))
+        result = CliRunner().invoke(cli, ["doctor", "--json"])
+        assert result.exit_code in (0, 1), result.output
+        checks = {c["name"]: c for c in json.loads(result.output)["checks"]}
+        line = checks["standing_consent_windows"]
+        assert line["ok"] is True and w.id in line["detail"] and "kiln consent revoke" in line["detail"]
+
+    def test_the_question_names_the_default_printer_and_the_right_way_to_close(self, monkeypatch):
+        host = _Host(CHOICE_THIS_PRINT)
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: name or "default")
+        _obtain("start_print", {"file_name": "jar.stl"}, host)
+        [(message, _)] = host.asked
+        assert "start on the default printer" in message and "kiln consent revoke" in message
+        # On the hosted server the person has no terminal: the only close is to say so.
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        consent_windows.register_window_store(_FakeStore())
+        try:
+            host = _Host(CHOICE_THIS_PRINT)
+            _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, host)
+            [(message, _)] = host.asked
+            assert "telling your assistant" in message and "kiln consent" not in message
+        finally:
+            consent_windows.register_window_store(None)
+
+    def test_the_hosted_refusal_never_sends_the_person_to_a_terminal(self, tmp_path, monkeypatch):
+        path = _stl(tmp_path / "jar.stl")
+        preview = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        block = server._preview_gate_error("start_print", path, preview, printer_name="garage")
+        message = block["error"]["message"]
+        assert "kiln consent window" not in message and "kiln print" not in message
+        assert "signed-in account" in message and "Tell the person that plainly" in message
+        assert "standing window" not in message
+        consent_windows.register_window_store(_FakeStore())
+        try:
+            message = server._preview_gate_error("start_print", path, preview, printer_name="garage")["error"]["message"]
+            assert "standing window they opened on their Kiln account" in message
+        finally:
+            consent_windows.register_window_store(None)
+
+    def test_the_status_tool_note_fits_the_surface(self, at_terminal, monkeypatch):
+        consent_windows.open_window(seconds=3600, scope=("garage",))
+        assert "kiln consent window" in _tool("consent_window_status")()["note"]
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        store = _FakeStore()
+        consent_windows.register_window_store(store)
+        try:
+            store.open(seconds=3600, scope=("garage",), source=consent_windows.SOURCE_WEB)
+            note = _tool("consent_window_status")()["note"]
+            assert "Kiln account page" in note and "kiln consent window" not in note
+            assert _tool("consent_window_status")()["windows"][0]["opened_via"] == "web"
+        finally:
+            consent_windows.register_window_store(None)
+
+
+# ---------------------------------------------------------------------------
 # The agent holds no door — pinned in the source and in the SDK
 # ---------------------------------------------------------------------------
 

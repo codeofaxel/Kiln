@@ -280,7 +280,9 @@ class DialogAnswer:
         if self.typed_duration.strip():
             length = self.typed_duration.strip()
         else:
-            length = dict(DIALOG_CHOICES).get(self.choice, self.choice).removeprefix("Yes, and ")
+            length = {CHOICE_NEXT_TWO_HOURS: "the next 2 hours", CHOICE_REST_OF_TODAY: "the rest of today"}.get(
+                self.choice, self.choice,
+            )
         where = "every printer" if self.wants_every_printer else "this printer"
         return f"{length} on {where}"
 
@@ -642,6 +644,7 @@ def describe_print_request(
     extra: dict[str, Any] | None = None,
     window_printer: str | None = None,
     fleet_offered: bool = False,
+    terminal_available: bool = True,
 ) -> str:
     """The question a person is actually asked, in their words.
 
@@ -654,7 +657,9 @@ def describe_print_request(
     *window_printer* is the one machine a "for a while" answer would
     cover.  When given, the question says so and says how the window is
     closed, because a window a person cannot see the edge of is not one
-    they agreed to.
+    they agreed to.  *terminal_available* is False on the hosted server,
+    where the person has no terminal and the only way to close it is to
+    say so.
     """
     where = f" on {printer_name}" if printer_name else " on the default printer"
     lines = [f"Start printing {file_name or 'this file'}{where}?"]
@@ -669,13 +674,14 @@ def describe_print_request(
         "showing it — approve only if you know what this file is."
     )
     if window_printer:
-        where = f"on {window_printer}" + (", or on every printer if you choose that" if fleet_offered else "")
+        machine = "the default printer" if window_printer == "default" else window_printer
+        where = f"on {machine}" + (", or on every printer if you choose that" if fleet_offered else "")
+        closing = "by telling your assistant" + (", or with `kiln consent revoke`" if terminal_available else "")
         lines.append("")
         lines.append(
             f"A 'for a while' answer, or a length you type, lets prints start {where} until "
             "then without asking you each time (24 hours at most); each one is still "
-            "previewed first. Close it early at any time by telling your assistant, or with "
-            "`kiln consent revoke`."
+            f"previewed first. Close it early at any time {closing}."
         )
     return "\n".join(lines)
 

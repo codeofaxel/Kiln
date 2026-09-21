@@ -882,6 +882,23 @@ def _build_instructions() -> str:
         + ". Use `safety_settings` to review."
     )
 
+    # --- Consent: who says go, and for how long ---
+    # Said here, once, so an agent knows the shape before the first refusal
+    # teaches it: the person answers, the agent relays and closes, never opens.
+    parts.append(
+        "CONSENT: A print starts only when the person says go — this app draws an "
+        "approval dialog before every print (you never answer it), and the print "
+        "must have been previewed first. In that dialog the person can also allow "
+        "prints on a printer for a while (a choice, or a length they type; every "
+        "printer on the fleet tier); inside that standing window prints are still "
+        "previewed but not asked about, and every print result carries a "
+        "`standing_window` block naming it. When the person says to close it, call "
+        "`revoke_consent_window`; `consent_window_status` shows what is open. "
+        "Nothing you can call opens or extends one. If this app cannot show the "
+        "dialog, say so plainly: the yes then comes from the person at a terminal "
+        "(`kiln print`, or `kiln consent window --for 2h --printer NAME`)."
+    )
+
     # --- Monitoring & reporting ---
     parts.append(
         "MONITORING: During print jobs, use `monitor_print()` for status — "
@@ -2304,6 +2321,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         },
         window_printer=aimed if offer_window else None,
         fleet_offered=offer_fleet,
+        terminal_available=not _hosted_now(),
     )
     answer = await ask_user_to_confirm(ctx, message, offer_window=offer_window, offer_fleet=offer_fleet)
     if answer.accepted:
@@ -2321,6 +2339,15 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         )
     logger.debug("Consent could not be obtained (%s); falling back to token gate", answer.detail)
     return note_not_asked(f"unavailable:{answer.detail}")
+
+
+def _hosted_now() -> bool:
+    """Whether this process is the hosted multi-tenant server.  Never raises."""
+    with contextlib.suppress(Exception):
+        from kiln.runtime_env import is_hosted_multitenant
+
+        return bool(is_hosted_multitenant())
+    return False
 
 
 def dialog_offers() -> tuple[bool, bool]:
@@ -2485,6 +2512,28 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
     guess tends to promise a dialog it cannot show.
     """
     name = os.path.basename(str(file_name or "")) or "this file"
+    hosted = False
+    with contextlib.suppress(Exception):
+        from kiln.runtime_env import is_hosted_multitenant
+
+        hosted = bool(is_hosted_multitenant())
+    if hosted:
+        # There is no terminal on the hosted server for this person, and the
+        # file under ~/.kiln is nobody's: naming `kiln consent window` here
+        # would send them to a door that does not exist for them.
+        from kiln import consent_windows
+
+        windows = (
+            " or a standing window they opened on their Kiln account"
+            if consent_windows.window_store() is not None
+            else ""
+        )
+        return (
+            f"{tool_name} refuses to proceed: {name} was shown, but nobody said go — on the "
+            "hosted server a yes comes from the signed-in account's approval (this app's "
+            f"dialog, or the account's own approval page){windows}; an agent cannot supply it. "
+            "Tell the person that plainly."
+        )
     if why_not_asked() == NOT_ASKED_HOST_CANNOT:
         return (
             f"{tool_name} refuses to proceed: {name} was shown, but nobody said go, and "
