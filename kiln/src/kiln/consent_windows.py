@@ -30,9 +30,16 @@ What a window is:
 * **Signed.**  It records who opened it — locally that is the OS user,
   and the record says ``os_user:`` so nobody mistakes it for an account
   — through which door (``source``), and when, and every extension.
-* **Local.**  On the hosted multi-tenant server the file under
-  ``~/.kiln`` is nobody's, so :func:`covering` answers ``None`` there
-  and neither door will write one.
+* **Local — or the account's.**  On the hosted multi-tenant server the
+  file under ``~/.kiln`` is nobody's, so nothing here reads or writes it
+  there.  What answers instead, when kiln-pro registers one, is the
+  signed-in account's own store (:class:`WindowStore`): the dialog door
+  opens through it, the gate reads through it, and a window it holds is
+  the account's yes — grade A, like the account's approval.  With no
+  store registered the hosted server keeps no windows and offers none.
+* **Capped.**  Twenty-four hours at most, at every door
+  (:func:`kiln.print_consent.check_window_length`); a person who wants
+  longer opens another when it runs out.
 
 Two readers: the gate (through :func:`kiln.print_consent.consent_for`)
 when a start arrives with a preview and no other yes, and the scheduler
@@ -60,16 +67,53 @@ from kiln.print_consent import (
     SOURCE_ELICITED,
     SOURCE_TERMINAL,
     DialogAnswer,
+    check_window_length,
+    parse_duration,
     window_seconds_for,
 )
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "SCOPE_FLEET",
+    "SOURCE_DOORS",
+    "SOURCE_WEB",
+    "NotAPerson",
+    "NotTheFleetTier",
+    "Window",
+    "WindowStore",
+    "all_windows",
+    "covering",
+    "describe",
+    "describe_scope",
+    "extend_window",
+    "get_window",
+    "is_live",
+    "live_windows",
+    "local_identity",
+    "normalize_scope",
+    "open_window",
+    "open_window_from_dialog",
+    "parse_duration",
+    "person_at_terminal",
+    "register_window_store",
+    "revoke_all",
+    "revoke_covering",
+    "revoke_window",
+    "scope_covers",
+    "window_store",
+]
+
 SCOPE_FLEET = "fleet"
 
-#: How a window was opened — which of the two doors.  The same words the
-#: print gate uses for who held the pen: a terminal, or the host's dialog.
-SOURCE_DOORS = (SOURCE_TERMINAL, SOURCE_ELICITED)
+#: A window opened on the account's own web page (the hosted store writes
+#: it; the page is the web user's door, the way a terminal is the local
+#: user's).
+SOURCE_WEB = "user_web"
+
+#: How a window was opened — which door.  The same words the print gate
+#: uses for who held the pen: a terminal, the host's dialog, the web page.
+SOURCE_DOORS = (SOURCE_TERMINAL, SOURCE_ELICITED, SOURCE_WEB)
 
 Scope = tuple[str, ...] | str
 
@@ -163,26 +207,6 @@ def describe_scope(scope: Any) -> str:
     if scope == SCOPE_FLEET:
         return "the whole fleet"
     return ", ".join(scope)
-
-
-def parse_duration(text: str) -> float:
-    """``2h``, ``30m``, ``90s``, ``1d`` → seconds.  A bare number is hours."""
-    raw = str(text or "").strip().lower()
-    if not raw:
-        raise ValueError("a duration is needed, like 2h or 30m")
-    units = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
-    unit = 3600.0
-    if raw[-1] in units:
-        unit = units[raw[-1]]
-        raw = raw[:-1]
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise ValueError(f"could not read {text!r} as a duration, like 2h or 30m") from exc
-    seconds = value * unit
-    if seconds <= 0:
-        raise ValueError("a window has to last longer than nothing")
-    return seconds
 
 
 @dataclass(frozen=True)
@@ -293,6 +317,44 @@ def _hosted() -> bool:
     return is_hosted_multitenant()
 
 
+class WindowStore:
+    """What the hosted server's window store answers — a hook, not an
+    implementation.  Public Kiln ships none; kiln-pro registers one that
+    keeps each signed-in account's windows and resolves the account
+    itself from the request it is serving, the way the approval hook
+    does.  Every method answers for THAT account only.  ``open`` records
+    ``set_by`` as the account (``account:acct_…``) and ``source`` as the
+    door the answer came through."""
+
+    def covering(self, printer_name: str | None) -> Window | None:  # pragma: no cover - contract
+        raise NotImplementedError
+
+    def live(self) -> list[Window]:  # pragma: no cover - contract
+        raise NotImplementedError
+
+    def open(self, *, seconds: float, scope: Scope, source: str) -> Window:  # pragma: no cover - contract
+        raise NotImplementedError
+
+    def revoke(self, window_id: str) -> Window:  # pragma: no cover - contract
+        raise NotImplementedError
+
+
+_store: WindowStore | None = None
+
+
+def register_window_store(store: WindowStore | None) -> None:
+    """Install (or, with ``None``, remove) the hosted window store."""
+    global _store  # noqa: PLW0603
+    _store = store
+
+
+def window_store() -> WindowStore | None:
+    """The hosted store, when this process is the hosted server and one
+    is registered; ``None`` everywhere else.  Locally the file is the
+    store, and a hook is never consulted for the local user's windows."""
+    return _store if _store is not None and _hosted() else None
+
+
 def _require_not_hosted() -> None:
     if _hosted():
         raise NotAPerson("the hosted server has no terminal and keeps no standing windows")
@@ -313,22 +375,31 @@ def _require_person() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _open_window(*, seconds: float, scope: Any, source: str) -> Window:
-    """The one writer both doors share.  Each door does its own guarding
-    BEFORE calling this; nothing here asks who is calling."""
-    if not isinstance(seconds, (int, float)) or seconds <= 0:
-        raise ValueError("a window has to last longer than nothing")
+def _checked_scope(scope: Any) -> Scope:
+    """The scope a window may be written for.  A yes over several
+    machines is the fleet tier's, the same way running several machines
+    at once is: one printer is every tier's.  The tier read is
+    per-request on the hosted server, so the account's own tier decides
+    there."""
     normalized = normalize_scope(scope)
     if normalized is None:
         raise ValueError("a window names the printer(s) it covers, or the fleet")
-    # A yes over several machines is the fleet tier's, the same way running
-    # several machines at once is: one printer is every tier's.
     if (normalized == SCOPE_FLEET or len(normalized) > 1) and not _fleet_tier_allows():
         raise NotTheFleetTier(
             "A window over several printers, or the whole fleet, is a Business feature — "
             "running more than one printer at once is what that tier adds. Open a window "
             "for one printer (--printer NAME), or see https://kiln3d.com/pricing."
         )
+    return normalized
+
+
+def _open_window(*, seconds: float, scope: Any, source: str) -> Window:
+    """The one writer both doors share.  Each door does its own guarding
+    BEFORE calling this; nothing here asks who is calling.  The length
+    cap and the tier gate live here so neither door can be the lenient
+    one."""
+    seconds = check_window_length(seconds)
+    normalized = _checked_scope(scope)
     now = _now()
     window = Window(
         id=f"w_{secrets.token_hex(6)}",
@@ -359,32 +430,44 @@ def open_window(*, seconds: float, scope: Any) -> Window:
 
 def open_window_from_dialog(answer: DialogAnswer, *, printer_name: str) -> Window:
     """The dialog door: open the window the person asked for when they
-    answered the host's approval dialog with "yes, and for the next…".
+    answered the approval dialog with "yes, and for a while".
 
-    *answer* is what ``kiln.mcp_compat.ask_user_to_confirm`` built from
-    the SDK's elicitation result — the only place one is built — and
-    only an answer that is a yes with a window choice opens anything;
-    everything else is ``ValueError``.  The window covers *printer_name*
-    alone, the machine the print was aimed at: the dialog never offers
-    anything wider, and this door would not honour it if it did.  Raises
-    :class:`NotAPerson` on the hosted server, which keeps no windows.
+    *answer* is what :func:`kiln.print_consent.answer_from_content` built
+    from the person's response — the only place one is built — and only
+    an answer that is a yes asking for a window opens anything; everything
+    else is ``ValueError``.  The window covers *printer_name*, the machine
+    the print was aimed at — or every printer, when the person chose that
+    on a form that offered it (the tier gate in the writer refuses it
+    below the fleet tier whichever door it came through).  A typed length
+    that cannot be read, or is past the cap, is ``ValueError`` in the
+    person's words; the caller reports it and the yes to THIS print
+    stands.  On the hosted server the account's store opens it, or
+    :class:`NotAPerson` when there is none.
     """
-    _require_not_hosted()
     if not isinstance(answer, DialogAnswer) or not answer.opens_window:
-        raise ValueError("only a person's yes with a 'for the next…' choice opens a window")
+        raise ValueError("only a person's yes with a 'for a while' answer opens a window")
     name = str(printer_name or "").strip()
     if not name:
         raise ValueError("a window from the dialog covers the one printer the print was aimed at")
-    return _open_window(
-        seconds=window_seconds_for(answer.choice), scope=(name,), source=SOURCE_ELICITED,
-    )
+    seconds = window_seconds_for(answer.choice, typed=answer.typed_duration)
+    scope: Scope = SCOPE_FLEET if answer.wants_every_printer else (name,)
+    if _hosted():
+        store = window_store()
+        if store is None:
+            raise NotAPerson("the hosted server has no window store; the account approves each print")
+        w = store.open(
+            seconds=check_window_length(seconds), scope=_checked_scope(scope), source=SOURCE_ELICITED,
+        )
+        logger.info("standing consent window %s opened by %s (%s) for %s, until %s",
+                    w.id, w.set_by, w.source, describe_scope(w.scope), time.ctime(w.until))
+        return w
+    return _open_window(seconds=seconds, scope=scope, source=SOURCE_ELICITED)
 
 
 def extend_window(window_id: str, *, seconds: float) -> Window:
     """Move a live window's ``until`` to now + *seconds*.  A person only."""
     _require_person()
-    if not isinstance(seconds, (int, float)) or seconds <= 0:
-        raise ValueError("an extension has to last longer than nothing")
+    seconds = check_window_length(seconds)
     now = _now()
     with _lock:
         windows = _read()
@@ -407,7 +490,13 @@ def extend_window(window_id: str, *, seconds: float) -> Window:
 
 def revoke_window(window_id: str) -> Window:
     """Close a window now.  Anyone may close one: revoking is the safe
-    direction, and a revoke nobody can perform is a window nobody can stop."""
+    direction, and a revoke nobody can perform is a window nobody can stop.
+    On the hosted server the account's store closes it."""
+    if _hosted():
+        store = window_store()
+        if store is None:
+            raise KeyError(f"no window {window_id}")
+        return store.revoke(window_id)
     now = _now()
     with _lock:
         windows = _read()
@@ -450,6 +539,12 @@ def revoke_covering(printer_name: str | None) -> list[Window]:
 
 
 def all_windows() -> list[Window]:
+    """Every record locally; on the hosted server, the account's live
+    windows from the store (a store keeps no history for the gate to read)
+    or nothing."""
+    if _hosted():
+        store = window_store()
+        return list(store.live()) if store is not None else []
     with _lock:
         return _read()
 
@@ -469,10 +564,19 @@ def is_live(window_id: str, now: float | None = None) -> bool:
 
 
 def covering(printer_name: str | None, now: float | None = None) -> Window | None:
-    """The live window that covers *printer_name*, or ``None``.  Always
-    ``None`` on the hosted server, where the file is nobody's."""
+    """The live window that covers *printer_name*, or ``None``.  On the
+    hosted server the file is nobody's, so the account's store answers,
+    or nothing does."""
     if _hosted():
-        return None
+        store = window_store()
+        if store is None:
+            return None
+        try:
+            w = store.covering(printer_name)
+        except Exception:  # noqa: BLE001 — a store that fails has no window
+            logger.debug("hosted window store could not answer", exc_info=True)
+            return None
+        return w if isinstance(w, Window) and w.live(now) and w.covers(printer_name) else None
     for w in live_windows(now):
         if w.covers(printer_name):
             return w
@@ -488,7 +592,7 @@ def describe(w: Window, now: float | None = None) -> dict[str, Any]:
         "id": w.id,
         "scope": describe_scope(w.scope),
         "set_by": w.set_by,
-        "opened_via": "host_dialog" if w.source == SOURCE_ELICITED else "terminal",
+        "opened_via": {SOURCE_ELICITED: "host_dialog", SOURCE_WEB: "web"}.get(w.source, "terminal"),
         "set_at": time.strftime("%Y-%m-%d %H:%M", time.localtime(w.set_at)),
         "until": time.strftime("%Y-%m-%d %H:%M", time.localtime(w.until)),
         "until_clock": time.strftime("%H:%M", time.localtime(w.until)),
@@ -500,5 +604,6 @@ def describe(w: Window, now: float | None = None) -> dict[str, Any]:
 
 
 def _reset_for_tests() -> None:
-    """Nothing is cached in memory; here so fixtures read the same way as
-    the sibling ledgers'."""
+    """Nothing is cached in memory but the hosted store hook; here so
+    fixtures read the same way as the sibling ledgers'."""
+    register_window_store(None)

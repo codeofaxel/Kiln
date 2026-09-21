@@ -234,106 +234,55 @@ def host_can_ask_the_user(mcp: Any, ctx: Any = None) -> bool:
     return getattr(caps, "elicitation", None) is not None
 
 
-async def ask_user_to_confirm(ctx: Any, message: str, *, offer_window: bool = True):
-    """Ask the person whether this print may start — and, when a standing
-    window can be honoured, for how long prints may start without asking.
-    Returns a :class:`kiln.print_consent.DialogAnswer`.
+async def ask_user_to_confirm(
+    ctx: Any, message: str, *, offer_window: bool = True, offer_fleet: bool = False,
+):
+    """Ask the person whether this print may start — and, where a standing
+    window can be honoured, for how long and where prints may start
+    without asking.  Returns a :class:`kiln.print_consent.DialogAnswer`.
 
-    ``action`` is one of ``"accept"``, ``"decline"``, ``"cancel"`` or
-    ``"unavailable"``.  MCP distinguishes the middle two deliberately —
-    declining is an answer, dismissing the dialog is not — and a print is
-    worth telling apart, so this does not collapse them.  ``choice`` is
-    the option the person picked on an accept, one of
-    :data:`kiln.print_consent.DIALOG_CHOICES`.
-
-    ``"unavailable"`` means the question could not be put (no session, an
-    SDK that cannot elicit, a transport error) — or that the host's answer
-    was not one of the options offered.  Callers must treat it as "not
-    asked", never as "asked and approved".
-
-    This is the ONLY place a ``DialogAnswer`` is built, and it is built
-    from what ``ctx.elicit`` returned: the SDK sends an
+    The form and the parser are ``kiln.print_consent``'s
+    (:func:`~kiln.print_consent.dialog_form`,
+    :func:`~kiln.print_consent.answer_from_content`) — the same ones the
+    hosted wire and a native app's sheet use — so this function is only
+    the MCP host's way of drawing them: ``ctx.elicit`` sends the SDK's
     ``elicitation/create`` request to the client and the client's
     JSON-RPC response is the answer.  The agent's only channel to this
     server is ``tools/call``; nothing it can call reaches this function
-    or supplies a result to it.  That is what lets a "for a while" choice
+    or supplies a result to it.  That is what lets a "for a while" answer
     open a standing window honestly — the person picked it, on a dialog
-    the host drew.  *offer_window* is False where a window could not be
-    honoured (the hosted server keeps none); the dialog then offers only
-    this print or no, rather than a choice that would silently shrink.
+    the host drew.
+
+    ``"unavailable"`` means the question could not be put (no session, an
+    SDK that cannot elicit, a transport error) — or that the host's answer
+    was not on the form.  Callers treat it as "not asked", never as
+    "asked and approved".
 
     Form-mode elicitation carries a message and a flat schema of
     primitives; it cannot render the model.  So this asks a question, it
     does not show a picture — see ``print_consent`` for how the two are
-    kept honest.  The choice is a string with ``enum``/``enumNames`` — the
-    one enum shape the spec's form mode allows on both SDK majors
-    (``Literal`` and ``Enum`` fields are refused by the 1.x validator).
+    kept honest.
     """
-    from kiln.print_consent import (
-        CHOICE_NO,
-        DIALOG_CHOICES,
-        DIALOG_CHOICES_NO_WINDOW,
-        DialogAnswer,
-    )
+    from kiln.print_consent import DialogAnswer, answer_from_content, dialog_form
 
     try:
-        from pydantic import BaseModel, Field
-    except Exception:  # noqa: BLE001 — no pydantic, no elicitation
-        return DialogAnswer("unavailable", "pydantic_unavailable")
-
-    choices = DIALOG_CHOICES if offer_window else DIALOG_CHOICES_NO_WINDOW
-    values = [value for value, _ in choices]
-    labels = [label for _, label in choices]
-
-    # Everything about this model is user-visible: hosts render the class
-    # name as the dialog title and the docstring as its description, so
-    # neither may explain the implementation to the person being asked.
-    # (Measured against a live session — the first version put "the spec
-    # allows only flat primitives" in front of the user.)
-    class StartThisPrint(BaseModel):
-        """Confirm before the printer starts."""
-
-        answer: str = Field(
-            default=CHOICE_NO,
-            description=(
-                "Yes starts this print. A 'for the next…' answer also lets prints "
-                "start on this printer until then without asking you each time; "
-                "you can close that early at any time."
-                if offer_window
-                else "Yes starts this print. No leaves the printer idle."
-            ),
-            json_schema_extra={"enum": values, "enumNames": labels},
-        )
+        schema = dialog_form(offer_window=offer_window, offer_fleet=offer_fleet)
+    except Exception as exc:  # noqa: BLE001 — no pydantic, no elicitation
+        _logger.debug("Could not build the confirmation form: %s", exc)
+        return DialogAnswer("unavailable", f"form_unavailable:{type(exc).__name__}")
 
     try:
-        result = await ctx.elicit(message=message, schema=StartThisPrint)
+        result = await ctx.elicit(message=message, schema=schema)
     except Exception as exc:  # noqa: BLE001 — a host that cannot answer is not an error
         _logger.debug("Could not ask the user for confirmation: %s", exc)
         return DialogAnswer("unavailable", f"{type(exc).__name__}")
 
-    action = str(getattr(result, "action", "") or "").lower()
-    if action == "accept":
-        data = getattr(result, "data", None)
-        if data is None:
-            data = getattr(result, "content", None)
-        answer = getattr(data, "answer", None)
-        if answer is None and isinstance(data, dict):
-            answer = data.get("answer")
-        answer = str(answer or "").strip()
-        # An "accept" carrying "no" is a person who opened the dialog and
-        # said no.  That is a decline, whatever the envelope calls it.
-        if answer == CHOICE_NO:
-            return DialogAnswer("decline", "answered_no")
-        # An answer that was not on the form is not a yes to anything: a
-        # host that hands back a value the person could not have picked
-        # has not asked them.  (Also the one gap through which a wider or
-        # longer window could have been requested; it is closed here.)
-        if answer not in values:
-            return DialogAnswer("unavailable", f"unexpected_choice:{answer or 'none'}")
-        return DialogAnswer("accept", "", choice=answer)
-    if action in ("decline", "cancel"):
-        return DialogAnswer(action, "")
-    return DialogAnswer("unavailable", f"unexpected_action:{action or 'none'}")
+    data = getattr(result, "data", None)
+    if data is None:
+        data = getattr(result, "content", None)
+    return answer_from_content(
+        getattr(result, "action", ""), data, offer_window=offer_window, offer_fleet=offer_fleet,
+    )
 
 
 def set_instructions(mcp: Any, text: str) -> None:

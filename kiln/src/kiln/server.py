@@ -84,6 +84,7 @@ from kiln.print_consent import (
     consent_for,
     describe_print_request,
     note_not_asked,
+    note_window_outcome,
     reset_consent,
     set_consent,
     why_not_asked,
@@ -2267,6 +2268,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     file_value = str(arguments.get(arg_name) or "")
     if _is_resume_mode_3mf(file_value) or arguments.get("resume_from_paused"):
         return None  # already running, already approved
+    note_window_outcome(None)  # nothing from an earlier call rides this result
     printer_name = arguments.get("printer_name")
     # The one machine this print is aimed at — the name a window is
     # matched on, and the name a window opened here is written for.
@@ -2290,11 +2292,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         logger.debug("Could not read host consent capability: %s", exc)
         return note_not_asked(NOT_ASKED_HOST_CANNOT)
 
-    hosted = False
-    with contextlib.suppress(Exception):
-        from kiln.runtime_env import is_hosted_multitenant
-
-        hosted = bool(is_hosted_multitenant())
+    offer_window, offer_fleet = dialog_offers()
     message = describe_print_request(
         tool_name,
         file_name=os.path.basename(file_value) or file_value,
@@ -2304,37 +2302,12 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             "printer model": arguments.get("printer_id"),
             "filament slots": _consent_filament_line(tool_name, file_value, printer_name),
         },
-        window_printer=None if hosted else aimed,
+        window_printer=aimed if offer_window else None,
+        fleet_offered=offer_fleet,
     )
-    answer = await ask_user_to_confirm(ctx, message, offer_window=not hosted)
+    answer = await ask_user_to_confirm(ctx, message, offer_window=offer_window, offer_fleet=offer_fleet)
     if answer.accepted:
-        # Who: the host does not tell us, so locally it is the OS user this
-        # server runs as, labelled as such; on the hosted box that label
-        # would be a lie, and nothing is recorded there.
-        identity = ""
-        if not hosted:
-            with contextlib.suppress(Exception):
-                from kiln.consent_windows import local_identity
-
-                identity = local_identity()
-        _audit(
-            tool_name, "consent_granted",
-            details={
-                "file": file_value, "by": "user", "identity": identity,
-                "scope": printer_name or "aimed", "choice": answer.choice,
-            },
-        )
-        if answer.opens_window:
-            _open_window_from_answer(tool_name, answer, aimed)
-        return set_consent(
-            PrintConsent(
-                tool=tool_name,
-                file_name=file_value,
-                printer_name=printer_name,
-                source=SOURCE_ELICITED,
-                identity=identity,
-            )
-        )
+        return consent_from_dialog_answer(tool_name, file_value, printer_name, answer, aimed=aimed)
     if answer.action in ("decline", "cancel"):
         _audit(
             tool_name,
@@ -2350,25 +2323,107 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     return note_not_asked(f"unavailable:{answer.detail}")
 
 
+def dialog_offers() -> tuple[bool, bool]:
+    """``(offer_window, offer_fleet)`` for the approval form on THIS
+    server, for THIS caller — the one answer every surface that draws the
+    form asks for, so the hosted wire and a native sheet offer exactly
+    what the MCP dialog offers.
+
+    A window is offered where one can be honoured: locally always; on the
+    hosted server only when the account's window store is registered.
+    "Every printer" is offered on top of that only when the tier runs
+    several printers at once (a per-request read on the hosted server).
+    Offering what will not open is a form that lies.
+    """
+    from kiln import consent_windows
+
+    hosted = False
+    with contextlib.suppress(Exception):
+        from kiln.runtime_env import is_hosted_multitenant
+
+        hosted = bool(is_hosted_multitenant())
+    offer_window = (not hosted) or consent_windows.window_store() is not None
+    offer_fleet = offer_window and consent_windows._fleet_tier_allows()
+    return offer_window, offer_fleet
+
+
+def consent_from_dialog_answer(
+    tool_name: str, file_value: str, printer_name: str | None, answer: Any, *, aimed: str,
+):
+    """Record a person's accepted dialog answer for the call now being
+    served: the yes to THIS print, and the standing window it asked for.
+    Returns the reset token the caller drops in its ``finally``.
+
+    The one grant behind every surface that can ask — the MCP wrapper
+    above, the hosted server's "input required, call again with the
+    answer" shape, a native app's sheet over the REST door — so a yes
+    means the same thing however it was drawn.  *answer* is a
+    :class:`~kiln.print_consent.DialogAnswer` that
+    :func:`~kiln.print_consent.answer_from_content` built from the
+    person's response; a caller that builds one by hand is building a
+    yes nobody gave.  Raises ``ValueError`` for anything but an accept.
+    """
+    if not getattr(answer, "accepted", False):
+        raise ValueError("only an accepted dialog answer records a consent")
+    hosted = False
+    with contextlib.suppress(Exception):
+        from kiln.runtime_env import is_hosted_multitenant
+
+        hosted = bool(is_hosted_multitenant())
+    # Who: the host does not tell us, so locally it is the OS user this
+    # server runs as, labelled as such; on the hosted box that label
+    # would be a lie, and nothing is recorded there.
+    identity = ""
+    if not hosted:
+        with contextlib.suppress(Exception):
+            from kiln.consent_windows import local_identity
+
+            identity = local_identity()
+    _audit(
+        tool_name, "consent_granted",
+        details={
+            "file": file_value, "by": "user", "identity": identity,
+            "scope": printer_name or "aimed", "choice": answer.choice,
+            "typed_duration": answer.typed_duration, "where": answer.where,
+        },
+    )
+    if answer.opens_window:
+        _open_window_from_answer(tool_name, answer, aimed)
+    return set_consent(
+        PrintConsent(
+            tool=tool_name,
+            file_name=file_value,
+            printer_name=printer_name,
+            source=SOURCE_ELICITED,
+            identity=identity,
+        )
+    )
+
+
 def _open_window_from_answer(tool_name: str, answer: Any, aimed: str) -> None:
     """Open the window a dialog answer asked for, and audit it either way.
     Never raises: the yes to this print stands whether or not the window
-    could be written."""
+    could be written.  A window that did not open is noted for the line
+    the print result carries, so the person hears it now rather than when
+    the next print asks again."""
     from kiln import consent_windows
 
+    asked_for = answer.describe_window_ask()
     try:
         w = consent_windows.open_window_from_dialog(answer, printer_name=aimed)
-    except Exception as exc:  # noqa: BLE001 — hosted, or the store could not be written
-        logger.warning("standing window from the dialog not opened (%s): %s", answer.choice, exc)
+    except Exception as exc:  # noqa: BLE001 — unreadable length, past the cap, hosted, a write failed
+        logger.warning("standing window from the dialog not opened (%s): %s", asked_for, exc)
         _audit(
             tool_name, "consent_window_not_opened",
-            details={"printer": aimed, "choice": answer.choice, "reason": str(exc)},
+            details={"printer": aimed, "asked_for": asked_for, "reason": str(exc)},
         )
+        note_window_outcome({"opened": False, "asked_for": asked_for, "reason": str(exc)})
         return
     _audit(
         tool_name, "consent_window_opened",
         details={
-            "window_id": w.id, "printer": aimed, "choice": answer.choice,
+            "window_id": w.id, "printer": aimed, "asked_for": asked_for,
+            "scope": list(w.scope) if isinstance(w.scope, tuple) else w.scope,
             "until": w.until, "by": w.set_by, "source": w.source,
         },
     )

@@ -92,6 +92,10 @@ SOURCE_DERIVED = "derived"
 SOURCE_WINDOW = "standing_window"
 #: The hosted server's account approved this file (the hook below).
 SOURCE_HOSTED_APPROVAL = "hosted_account_approval"
+#: The signed-in account's standing window covers this printer — the
+#: hosted server's window store (a hook kiln-pro fills; public Kiln ships
+#: none).  The account's, so grade A, like its approval.
+SOURCE_HOSTED_WINDOW = "hosted_account_window"
 
 GRADE_A = "A"
 GRADE_B = "B"
@@ -106,7 +110,7 @@ def grade_of(source: str) -> str | None:
     """``"A"`` when the host or the account held the pen, ``"B"`` when a
     terminal did, ``None`` for a source that is not a person's yes of its
     own (a derived plate rides its input's; a bypass is not a yes)."""
-    if source in (SOURCE_ELICITED, SOURCE_HOSTED_APPROVAL):
+    if source in (SOURCE_ELICITED, SOURCE_HOSTED_APPROVAL, SOURCE_HOSTED_WINDOW):
         return GRADE_A
     if source in (SOURCE_TERMINAL, SOURCE_WINDOW):
         return GRADE_B
@@ -114,14 +118,19 @@ def grade_of(source: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# The dialog's choices — what a person can say yes to
+# The dialog — what a person can say yes to, on every surface
 # ---------------------------------------------------------------------------
+#
+# One form and one parser, used by every surface that can put a question to
+# a person: the MCP host's dialog (``kiln.mcp_compat.ask_user_to_confirm``),
+# the hosted server's stateless "input required, call again with the
+# answer" shape, and a native app's own sheet over the REST door.  Each
+# surface draws it its own way; none of them gets its own vocabulary, so
+# the person is asked the same question everywhere and the answer means
+# the same thing everywhere.
 
-#: The one field of the approval dialog.  Three yeses and a no; the two
-#: "for a while" yeses open a standing window on the printer the print
-#: was aimed at.  Few, fixed, and in words: a person should not be
-#: computing seconds in a dialog.  Anything longer, wider (several
-#: printers, the fleet) or odder is the terminal command's.
+#: The main field: three yeses and a no.  The two "for a while" yeses open
+#: a standing window; a typed length (below) is a yes for that long.
 CHOICE_THIS_PRINT = "this_print"
 CHOICE_NEXT_TWO_HOURS = "next_two_hours"
 CHOICE_REST_OF_TODAY = "rest_of_today"
@@ -131,23 +140,79 @@ CHOICE_NO = "no"
 #: them.  Both halves are user-visible: hosts render ``enumNames``.
 DIALOG_CHOICES: tuple[tuple[str, str], ...] = (
     (CHOICE_THIS_PRINT, "Yes, this print only"),
-    (CHOICE_NEXT_TWO_HOURS, "Yes, and for the next 2 hours on this printer without asking again"),
-    (CHOICE_REST_OF_TODAY, "Yes, and for the rest of today on this printer without asking again"),
+    (CHOICE_NEXT_TWO_HOURS, "Yes, and for the next 2 hours without asking again"),
+    (CHOICE_REST_OF_TODAY, "Yes, and for the rest of today without asking again"),
     (CHOICE_NO, "No"),
 )
 
-#: The two choices a host is offered when a window cannot be honoured
-#: (the hosted server keeps none).  Offering a window that will not open
-#: is a dialog that lies.
+#: The two choices offered where a window cannot be honoured (the hosted
+#: server with no window store).  Offering a window that will not open is
+#: a dialog that lies.
 DIALOG_CHOICES_NO_WINDOW: tuple[tuple[str, str], ...] = tuple(
     c for c in DIALOG_CHOICES if c[0] in (CHOICE_THIS_PRINT, CHOICE_NO)
 )
+
+#: Where a "for a while" answer applies.  "Every printer" is offered only
+#: on an install whose tier runs several printers at once (the fleet
+#: tier's, like running them is); the writer refuses it below that tier
+#: whichever door it came through.
+WHERE_THIS_PRINTER = "this_printer"
+WHERE_EVERY_PRINTER = "every_printer"
+WHERE_CHOICES: tuple[tuple[str, str], ...] = (
+    (WHERE_THIS_PRINTER, "This printer only"),
+    (WHERE_EVERY_PRINTER, "Every printer"),
+)
+
+#: The field names on the wire — what a native sheet or the hosted
+#: "input required" shape has to fill.  Pinned by a test so a renderer
+#: written against them does not drift.
+FIELD_ANSWER = "answer"
+FIELD_FOR_HOW_LONG = "for_how_long"
+FIELD_WHERE = "where"
+
+#: The longest a standing window lasts, through EITHER door.  Longer than
+#: a day is "auto-print on", which is what the standing opt-in is for.
+MAX_WINDOW_SECONDS = 24 * 3600.0
 
 _TWO_HOURS = 2 * 3600.0
 #: A "rest of today" answered in the last minute of the day still opens
 #: for a minute: a window that has run out before the gate reads it is
 #: an answer thrown away.
 _SHORTEST_WINDOW = 60.0
+
+
+def parse_duration(text: str) -> float:
+    """``2h``, ``30m``, ``90s``, ``1d`` → seconds.  A bare number is hours.
+    Raises ``ValueError`` in plain words for anything it cannot read."""
+    raw = str(text or "").strip().lower()
+    if not raw:
+        raise ValueError("a duration is needed, like 2h or 30m")
+    units = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
+    unit = 3600.0
+    if raw[-1] in units:
+        unit = units[raw[-1]]
+        raw = raw[:-1]
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"could not read {text!r} as a duration, like 2h or 30m") from exc
+    seconds = value * unit
+    if seconds <= 0:
+        raise ValueError("a window has to last longer than nothing")
+    return seconds
+
+
+def check_window_length(seconds: float) -> float:
+    """The one cap, for both doors: raises ``ValueError`` past
+    :data:`MAX_WINDOW_SECONDS` or at zero; returns *seconds* otherwise."""
+    if not isinstance(seconds, (int, float)) or seconds <= 0:
+        raise ValueError("a window has to last longer than nothing")
+    if seconds > MAX_WINDOW_SECONDS:
+        raise ValueError(
+            f"a standing window lasts at most 24 hours ({seconds / 3600:.0f}h was asked for); "
+            "open another when it runs out"
+        )
+    return float(seconds)
 
 
 def seconds_until_local_midnight(now: float | None = None) -> float:
@@ -158,8 +223,14 @@ def seconds_until_local_midnight(now: float | None = None) -> float:
     return max(_SHORTEST_WINDOW, midnight - now)
 
 
-def window_seconds_for(choice: str, now: float | None = None) -> float:
-    """How long a window the choice opens; ``0`` for a choice that opens none."""
+def window_seconds_for(choice: str, now: float | None = None, typed: str = "") -> float:
+    """How long a window the answer opens; ``0`` for an answer that opens
+    none.  A typed length wins over the choice — it is the more specific
+    thing the person said.  Raises ``ValueError`` for a typed length that
+    cannot be read or is past the cap; the caller decides what that costs
+    (the print itself, never: the yes to it stands)."""
+    if str(typed or "").strip():
+        return check_window_length(parse_duration(typed))
     if choice == CHOICE_NEXT_TWO_HOURS:
         return _TWO_HOURS
     if choice == CHOICE_REST_OF_TODAY:
@@ -169,19 +240,23 @@ def window_seconds_for(choice: str, now: float | None = None) -> float:
 
 @dataclass(frozen=True)
 class DialogAnswer:
-    """What the host's dialog came back with.
+    """What the person's dialog came back with, whichever surface drew it.
 
-    Built in exactly one place — ``kiln.mcp_compat.ask_user_to_confirm``,
-    from the SDK's elicitation result — and consumed by the tool-call
-    wrapper.  ``action`` is ``accept``, ``decline``, ``cancel`` or
-    ``unavailable`` (the question could not be put; never a yes).
-    ``choice`` is the option the person picked when they accepted, one of
-    :data:`DIALOG_CHOICES`; empty otherwise.
+    Built in exactly one place — :func:`answer_from_content`, from the
+    content a host (or the hosted wire, or a native sheet) handed back —
+    and consumed by :func:`consent_from_dialog_answer` in ``kiln.server``.
+    ``action`` is ``accept``, ``decline``, ``cancel`` or ``unavailable``
+    (the question could not be put, or the answer was not on the form;
+    never a yes).  On an accept, ``choice`` is the option picked,
+    ``typed_duration`` the length typed (raw, possibly unreadable), and
+    ``where`` this printer or every printer.
     """
 
     action: str
     detail: str = ""
     choice: str = ""
+    typed_duration: str = ""
+    where: str = ""
 
     @property
     def accepted(self) -> bool:
@@ -189,8 +264,134 @@ class DialogAnswer:
 
     @property
     def opens_window(self) -> bool:
-        """True for a yes that also asks for a standing window."""
-        return self.accepted and window_seconds_for(self.choice) > 0
+        """True for a yes that also asks for a standing window — a "for a
+        while" choice, or any typed length (readable or not: an unreadable
+        one is reported, not silently dropped)."""
+        if not self.accepted:
+            return False
+        return bool(self.typed_duration.strip()) or window_seconds_for(self.choice) > 0
+
+    @property
+    def wants_every_printer(self) -> bool:
+        return self.where == WHERE_EVERY_PRINTER
+
+    def describe_window_ask(self) -> str:
+        """The window the person asked for, in their words, for a report."""
+        if self.typed_duration.strip():
+            length = self.typed_duration.strip()
+        else:
+            length = dict(DIALOG_CHOICES).get(self.choice, self.choice).removeprefix("Yes, and ")
+        where = "every printer" if self.wants_every_printer else "this printer"
+        return f"{length} on {where}"
+
+
+def dialog_form(*, offer_window: bool = True, offer_fleet: bool = False):
+    """The form, as a pydantic model: the one shape every surface renders.
+
+    Everything about it is user-visible — hosts render the class name as
+    the dialog title, the docstring as its description, the field
+    descriptions as help — so nothing in it explains the implementation.
+    The choice fields are strings with ``enum``/``enumNames``: the one
+    enum shape form-mode elicitation allows on both SDK majors (``Literal``
+    and ``Enum`` fields are refused by the 1.x validator).  Every field has
+    a default, so none is required and a reflexive accept starts nothing.
+    """
+    from pydantic import BaseModel, Field
+
+    choices = DIALOG_CHOICES if offer_window else DIALOG_CHOICES_NO_WINDOW
+    fields: dict[str, Any] = {
+        FIELD_ANSWER: (
+            str,
+            Field(
+                default=CHOICE_NO,
+                description=(
+                    "Yes starts this print. A 'for a while' answer also lets prints "
+                    "start without asking you each time; you can close that early at any time."
+                    if offer_window
+                    else "Yes starts this print. No leaves the printer idle."
+                ),
+                json_schema_extra={
+                    "enum": [v for v, _ in choices], "enumNames": [label for _, label in choices],
+                },
+            ),
+        ),
+    }
+    if offer_window:
+        fields[FIELD_FOR_HOW_LONG] = (
+            str,
+            Field(
+                default="",
+                description=(
+                    "Or type how long, like 45m, 3h or 1d (24 hours at most). "
+                    "A typed length wins over the choice above; blank keeps the choice."
+                ),
+            ),
+        )
+    if offer_window and offer_fleet:
+        fields[FIELD_WHERE] = (
+            str,
+            Field(
+                default=WHERE_THIS_PRINTER,
+                description="Where a 'for a while' answer applies.",
+                json_schema_extra={
+                    "enum": [v for v, _ in WHERE_CHOICES], "enumNames": [label for _, label in WHERE_CHOICES],
+                },
+            ),
+        )
+
+    from pydantic import create_model
+
+    model = create_model("StartThisPrint", __base__=BaseModel, **fields)
+    model.__doc__ = "Confirm before the printer starts."
+    return model
+
+
+def dialog_schema(*, offer_window: bool = True, offer_fleet: bool = False) -> dict[str, Any]:
+    """The same form as plain JSON schema, for a surface that speaks the
+    wire directly (the hosted "input required" shape, a REST door)."""
+    return dialog_form(offer_window=offer_window, offer_fleet=offer_fleet).model_json_schema()
+
+
+def _field(content: Any, name: str) -> Any:
+    if isinstance(content, dict):
+        return content.get(name)
+    return getattr(content, name, None)
+
+
+def answer_from_content(
+    action: str, content: Any, *, offer_window: bool = True, offer_fleet: bool = False,
+) -> DialogAnswer:
+    """The one parser: what the person's response means.
+
+    *action* is the envelope (``accept`` / ``decline`` / ``cancel``);
+    *content* the filled form, as an object or a dict.  An "accept"
+    carrying "no" is a decline, whatever the envelope calls it.  An
+    answer that was not on the form — a value the person could not have
+    picked, or a field the form did not show — is ``unavailable``: a host
+    that hands back something the person could not have said has not
+    asked them.  That is also the one gap through which a wider or longer
+    window could have been requested, and it is closed here, once, for
+    every surface.
+    """
+    action = str(action or "").lower()
+    if action in ("decline", "cancel"):
+        return DialogAnswer(action, "")
+    if action != "accept":
+        return DialogAnswer("unavailable", f"unexpected_action:{action or 'none'}")
+    choices = DIALOG_CHOICES if offer_window else DIALOG_CHOICES_NO_WINDOW
+    offered = [v for v, _ in choices]
+    answer = str(_field(content, FIELD_ANSWER) or "").strip()
+    if answer == CHOICE_NO:
+        return DialogAnswer("decline", "answered_no")
+    if answer not in offered:
+        return DialogAnswer("unavailable", f"unexpected_choice:{answer or 'none'}")
+    typed = str(_field(content, FIELD_FOR_HOW_LONG) or "").strip() if offer_window else ""
+    if not offer_window and str(_field(content, FIELD_FOR_HOW_LONG) or "").strip():
+        return DialogAnswer("unavailable", "unexpected_field:for_how_long")
+    where = str(_field(content, FIELD_WHERE) or "").strip() or WHERE_THIS_PRINTER
+    if where not in (v for v, _ in WHERE_CHOICES) or (where == WHERE_EVERY_PRINTER and not offer_fleet):
+        return DialogAnswer("unavailable", f"unexpected_where:{where}")
+    return DialogAnswer("accept", "", choice=answer, typed_duration=typed, where=where)
 
 
 def _norm(value: str | None) -> str:
@@ -357,6 +558,30 @@ def reset_consent(token) -> None:
         token.var.reset(token)
 
 
+#: What became of the window a dialog answer asked for, when it did NOT
+#: open: ``{"opened": False, "asked_for": "...", "reason": "..."}``.  Set
+#: by the grant, read once by the line every print result carries, so the
+#: person is told in the moment rather than finding out when the next
+#: print asks again.  Not reset by the wrapper: the result hook runs after
+#: the wrapper's cleanup, in the same context, and takes it.  Cleared at
+#: the start of every consent call, so nothing stale rides a later result.
+_window_outcome: ContextVar[dict[str, Any] | None] = ContextVar(
+    "kiln_print_consent_window_outcome", default=None,
+)
+
+
+def note_window_outcome(outcome: dict[str, Any] | None) -> None:
+    _window_outcome.set(dict(outcome) if outcome else None)
+
+
+def take_window_outcome() -> dict[str, Any] | None:
+    """The outcome recorded for this call, consumed."""
+    outcome = _window_outcome.get()
+    if outcome is not None:
+        _window_outcome.set(None)
+    return outcome
+
+
 def consent_for(
     *, file_name: str, printer_name: str | None, aimed_at: str | None = None,
 ) -> PrintConsent | None:
@@ -388,12 +613,20 @@ def consent_for(
         window = None
     if window is None:
         return None
+    # On the hosted server the only windows that exist are the account's
+    # (the store answers for the signed-in account); locally they are the
+    # OS user's.  The grade follows: the account's yes is grade A.
+    hosted = False
+    with _suppress():
+        from kiln.runtime_env import is_hosted_multitenant
+
+        hosted = bool(is_hosted_multitenant())
     return PrintConsent(
         tool="kiln consent window",
         file_name=file_name,
         printer_name=printer_name,
         granted_at=window.set_at,
-        source=SOURCE_WINDOW,
+        source=SOURCE_HOSTED_WINDOW if hosted else SOURCE_WINDOW,
         scope=window.scope,
         expires_at=window.until,
         identity=window.set_by,
@@ -408,6 +641,7 @@ def describe_print_request(
     printer_name: str | None,
     extra: dict[str, Any] | None = None,
     window_printer: str | None = None,
+    fleet_offered: bool = False,
 ) -> str:
     """The question a person is actually asked, in their words.
 
@@ -435,11 +669,13 @@ def describe_print_request(
         "showing it — approve only if you know what this file is."
     )
     if window_printer:
+        where = f"on {window_printer}" + (", or on every printer if you choose that" if fleet_offered else "")
         lines.append("")
         lines.append(
-            f"A 'for the next…' answer lets prints start on {window_printer} until then "
-            "without asking you each time; each one is still previewed first. Close it "
-            "early at any time by telling your assistant, or with `kiln consent revoke`."
+            f"A 'for a while' answer, or a length you type, lets prints start {where} until "
+            "then without asking you each time (24 hours at most); each one is still "
+            "previewed first. Close it early at any time by telling your assistant, or with "
+            "`kiln consent revoke`."
         )
     return "\n".join(lines)
 
@@ -450,6 +686,7 @@ def _reset_for_tests() -> None:
     runner that hosts many commands in one process needs this."""
     _current.set(None)
     _not_asked.set("")
+    _window_outcome.set(None)
 
 
 class _suppress:

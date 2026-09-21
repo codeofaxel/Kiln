@@ -511,7 +511,7 @@ class _SafetyToolsPlugin:
             from kiln import consent_windows
             from kiln.runtime_env import is_hosted_multitenant
 
-            if is_hosted_multitenant():
+            if is_hosted_multitenant() and consent_windows.window_store() is None:
                 return {
                     "success": True,
                     "windows": [],
@@ -530,8 +530,9 @@ class _SafetyToolsPlugin:
                 "note": (
                     "Prints inside a window start without asking; each is still previewed "
                     "first. To close one early, call revoke_consent_window. Only the person "
-                    "can open or extend one — in the approval dialog, or with "
-                    "`kiln consent window --for 2h --printer NAME` at a terminal."
+                    "can open or extend one — in the approval dialog (a length they pick or "
+                    "type, 24 hours at most), or with `kiln consent window --for 2h --printer "
+                    "NAME` at a terminal."
                     if rows
                     else "No standing window is open: every print asks the person first."
                 ),
@@ -562,7 +563,7 @@ class _SafetyToolsPlugin:
             from kiln import consent_windows
             from kiln.runtime_env import is_hosted_multitenant
 
-            if is_hosted_multitenant():
+            if is_hosted_multitenant() and consent_windows.window_store() is None:
                 return {"success": True, "revoked": [], "note": "The hosted server keeps no standing windows."}
             try:
                 if all_windows:

@@ -21,7 +21,9 @@ that carries the note.  The CLI's doors print their own line
 
 Attached on success and on failure alike: the window is a fact about
 the machine's standing permission, not about this one call, and a person
-whose print failed still has a window open.  Never raises.
+whose print failed still has a window open.  On the hosted server the
+account's store answers (``kiln.consent_windows.window_store``), so a web
+user is reminded the same way.  Never raises.
 """
 
 from __future__ import annotations
@@ -35,26 +37,41 @@ logger = logging.getLogger(__name__)
 RESULT_KEY = "standing_window"
 
 
-def _hosted() -> bool:
-    from kiln.runtime_env import is_hosted_multitenant
-
-    return bool(is_hosted_multitenant())
-
-
 def note_for(printer_name: str | None) -> dict[str, Any] | None:
-    """The block for the live window covering *printer_name*, or ``None``.
+    """The block for this result, or ``None``.
 
-    Read straight from the store, so a window opened by the dialog on this
-    very call is reported on this very result — the moment the person
-    most needs to be told what they just opened.
+    Two things it can say.  A window the person asked for on this very
+    call that did NOT open (an unreadable length, one past the cap, a
+    store that could not be written): said first, in the moment, because
+    the next print asking again is the wrong way to find out.  Otherwise
+    the live window covering *printer_name*, read straight from the
+    store, so a window opened by the dialog on this call is reported on
+    this result — the moment the person most needs to be told what they
+    just opened.
     """
     from kiln import consent_windows
+    from kiln.print_consent import take_window_outcome
 
+    outcome = take_window_outcome()
+    if outcome is not None and not outcome.get("opened", False):
+        asked_for = str(outcome.get("asked_for") or "a standing window")
+        reason = str(outcome.get("reason") or "it could not be opened")
+        return {
+            "opened": False,
+            "asked_for": asked_for,
+            "reason": reason,
+            "note": (
+                f"The person asked for a standing window ({asked_for}) and it was NOT opened: "
+                f"{reason}. This print went ahead on their yes; the next print will ask again. "
+                "Tell them, and what to answer next time (a length like 45m, 3h or 1d, 24 hours at most)."
+            ),
+        }
     window = consent_windows.covering(printer_name)
     if window is None:
         return None
     facts = consent_windows.describe(window)
     return {
+        "opened": True,
         "id": facts["id"],
         "printer": facts["scope"],
         "until": facts["until"],
@@ -73,7 +90,7 @@ def note_for(printer_name: str | None) -> dict[str, Any] | None:
 def _attach(inner: Any, ctx: Any, name: str | None, arguments: dict | None) -> None:
     """Mutate one tool result in place; body must never raise outward."""
     try:
-        if not name or _hosted():
+        if not name:
             return
         import kiln.server as _srv
 

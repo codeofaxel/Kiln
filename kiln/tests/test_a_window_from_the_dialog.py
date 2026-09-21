@@ -58,12 +58,22 @@ from kiln.print_consent import (
     CHOICE_REST_OF_TODAY,
     CHOICE_THIS_PRINT,
     DIALOG_CHOICES,
+    FIELD_ANSWER,
+    FIELD_FOR_HOW_LONG,
+    FIELD_WHERE,
+    MAX_WINDOW_SECONDS,
     NOT_ASKED_HOST_CANNOT,
     SOURCE_ELICITED,
+    SOURCE_HOSTED_WINDOW,
     SOURCE_TERMINAL,
     SOURCE_WINDOW,
+    WHERE_EVERY_PRINTER,
+    WHERE_THIS_PRINTER,
     DialogAnswer,
+    answer_from_content,
     consent_for,
+    dialog_schema,
+    grade_of,
     reset_consent,
     why_not_asked,
 )
@@ -92,6 +102,7 @@ def _isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
     monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: name or "bench")
     monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: False)
+    monkeypatch.setattr(consent_windows, "_fleet_tier_allows", lambda: False)
     monkeypatch.setattr("kiln.local_stage.host_renders_apps", lambda *a, **k: False)
     yield
     preview_evidence._reset_for_tests()
@@ -114,14 +125,24 @@ def at_terminal(monkeypatch):
     monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: True)
 
 
+@pytest.fixture
+def business(monkeypatch):
+    """An install whose tier runs several printers at once."""
+    monkeypatch.setattr(consent_windows, "_fleet_tier_allows", lambda: True)
+
+
 class _Host:
     """The CLIENT side of an elicitation: what a host does with the
     server's ``elicitation/create`` request.  ``answer`` is the value the
     person picked on the form; ``action`` the envelope they sent it in.
     Records the message and schema it was shown, like a host would draw."""
 
-    def __init__(self, answer: str | None = None, action: str = "accept", raises: Exception | None = None):
+    def __init__(
+        self, answer: str | None = None, action: str = "accept", raises: Exception | None = None,
+        typed: str = "", where: str | None = None,
+    ):
         self.answer, self.action, self.raises = answer, action, raises
+        self.typed, self.where = typed, where
         self.asked: list[tuple[str, dict]] = []
 
     async def elicit(self, message, schema):
@@ -133,7 +154,10 @@ class _Host:
         # A real host validates against the schema it was sent; a value
         # off the form still has to reach the server as data, which is
         # the case the server must refuse on its own.
-        return types.SimpleNamespace(action="accept", data=types.SimpleNamespace(answer=self.answer))
+        data = {FIELD_ANSWER: self.answer, FIELD_FOR_HOW_LONG: self.typed}
+        if self.where is not None:
+            data[FIELD_WHERE] = self.where
+        return types.SimpleNamespace(action="accept", data=types.SimpleNamespace(**data))
 
 
 class _NeverAsks(_Host):
@@ -186,22 +210,46 @@ def _one_window() -> consent_windows.Window:
 
 
 class TestTheDialog:
-    def test_it_offers_this_print_two_hours_rest_of_today_or_no(self):
+    def test_it_offers_this_print_two_hours_rest_of_today_or_no_and_a_typed_length(self):
         host = _Host(CHOICE_THIS_PRINT)
         _obtain("start_print", {"file_name": "benchy.3mf", "printer_name": "garage"}, host)
         [(message, schema)] = host.asked
-        field = schema["properties"]["answer"]
+        field = schema["properties"][FIELD_ANSWER]
         assert field["enum"] == [CHOICE_THIS_PRINT, CHOICE_NEXT_TWO_HOURS, CHOICE_REST_OF_TODAY, CHOICE_NO]
         assert field["enumNames"] == [label for _, label in DIALOG_CHOICES]
-        assert len(schema["properties"]) == 1
         # The safe default: a reflexive accept starts nothing.
         assert field["default"] == CHOICE_NO
+        # A length the person types, with the cap in the help; nothing required.
+        typed = schema["properties"][FIELD_FOR_HOW_LONG]
+        assert typed["type"] == "string" and typed["default"] == "" and "24 hours" in typed["description"]
+        assert list(schema["properties"]) == [FIELD_ANSWER, FIELD_FOR_HOW_LONG]
+        assert not schema.get("required")
         # The person is told which machine a window would cover and how it closes.
-        assert "garage" in message
+        assert "garage" in message and "24 hours" in message
         assert "kiln consent revoke" in message
-        # Nothing wider or longer is on the form: no fleet, no typed duration.
+        # Every printer is NOT on a plain install's form.
         blob = json.dumps(schema).lower()
-        assert "fleet" not in blob and "seconds" not in blob
+        assert "every printer" not in blob and "fleet" not in blob
+
+    def test_the_fleet_tier_is_offered_every_printer(self, business):
+        host = _Host(CHOICE_THIS_PRINT)
+        _obtain("start_print", {"file_name": "benchy.3mf", "printer_name": "garage"}, host)
+        [(message, schema)] = host.asked
+        assert list(schema["properties"]) == [FIELD_ANSWER, FIELD_FOR_HOW_LONG, FIELD_WHERE]
+        where = schema["properties"][FIELD_WHERE]
+        assert where["enum"] == [WHERE_THIS_PRINTER, WHERE_EVERY_PRINTER]
+        assert where["default"] == WHERE_THIS_PRINTER
+        assert "every printer" in message
+
+    def test_the_form_is_the_same_object_every_surface_draws(self, business):
+        """The hosted wire and a native sheet build the form from
+        ``dialog_schema``; the MCP host is handed the same properties."""
+        host = _Host(CHOICE_THIS_PRINT)
+        _obtain("start_print", {"file_name": "benchy.3mf", "printer_name": "garage"}, host)
+        [(_, shown)] = host.asked
+        assert shown["properties"] == dialog_schema(offer_window=True, offer_fleet=True)["properties"]
+        assert list(dialog_schema(offer_window=True, offer_fleet=False)["properties"]) == [FIELD_ANSWER, FIELD_FOR_HOW_LONG]
+        assert list(dialog_schema(offer_window=False)["properties"]) == [FIELD_ANSWER]
 
     def test_nothing_on_the_form_explains_the_implementation(self):
         host = _Host(CHOICE_THIS_PRINT)
@@ -212,7 +260,7 @@ class TestTheDialog:
              *[f"{v.get('title', '')} {v.get('description', '')} {' '.join(v.get('enumNames', []))}"
                for v in schema["properties"].values()]]
         ).lower()
-        for leak in ("schema", "primitive", "spec", "enum", "elicit", "pydantic", "window_seconds"):
+        for leak in ("schema", "primitive", "spec", "enum", "elicit", "pydantic", "window_seconds", "field"):
             assert leak not in blob, f"the dialog says {leak!r} to the person"
 
     def test_the_form_is_valid_form_mode_on_the_installed_sdk(self):
@@ -228,7 +276,7 @@ class TestTheDialog:
 
         from kiln.mcp_compat import ask_user_to_confirm
 
-        asyncio.run(ask_user_to_confirm(_Ctx(), "Start printing x.3mf?"))
+        asyncio.run(ask_user_to_confirm(_Ctx(), "Start printing x.3mf?", offer_window=True, offer_fleet=True))
         schema = captured["schema"]
         try:
             from mcp.server.elicitation import render_elicitation_schema  # SDK 2
@@ -246,7 +294,8 @@ class TestTheDialog:
         host = _Host(CHOICE_THIS_PRINT)
         _obtain("start_print", {"file_name": "benchy.3mf", "printer_name": "garage"}, host)
         [(message, schema)] = host.asked
-        assert schema["properties"]["answer"]["enum"] == [CHOICE_THIS_PRINT, CHOICE_NO]
+        assert schema["properties"][FIELD_ANSWER]["enum"] == [CHOICE_THIS_PRINT, CHOICE_NO]
+        assert list(schema["properties"]) == [FIELD_ANSWER]
         assert "kiln consent revoke" not in message
 
 
@@ -399,6 +448,358 @@ class TestOnlyARealAnswerOpensOne:
 
 
 # ---------------------------------------------------------------------------
+# A length the person types, and the one cap at every door
+# ---------------------------------------------------------------------------
+
+
+def _result():
+    return types.SimpleNamespace(
+        structuredContent=None, isError=False,
+        content=[types.SimpleNamespace(type="text", text=json.dumps({"success": True, "job": "j1"}))],
+    )
+
+
+def _line_after(tool: str, arguments: dict, host):
+    """Drive the asker, then the result line, in the one context a real
+    call runs in (the line takes what the grant noted)."""
+
+    async def _run():
+        token = await server._obtain_print_consent(tool, arguments, host)
+        try:
+            granted = consent_for(file_name=arguments.get("file_name", ""), printer_name=arguments.get("printer_name"))
+            r = _result()
+            consent_window_note._attach(r, None, tool, arguments)
+            return granted, (r.structuredContent or {}).get(consent_window_note.RESULT_KEY)
+        finally:
+            if token is not None:
+                reset_consent(token)
+
+    return asyncio.run(_run())
+
+
+class TestATypedLength:
+    @pytest.mark.parametrize("choice,typed,seconds", [
+        (CHOICE_THIS_PRINT, "45m", 45 * 60),
+        (CHOICE_NEXT_TWO_HOURS, "3h", 3 * 3600),   # typed wins over the choice
+        (CHOICE_REST_OF_TODAY, "90s", 90),
+        (CHOICE_THIS_PRINT, "1d", 24 * 3600),      # the cap, inclusive
+        (CHOICE_THIS_PRINT, " 0.5 ", 1800),        # a bare number is hours
+    ])
+    def test_a_typed_length_opens_a_window_for_that_long(self, choice, typed, seconds):
+        granted, line = _line_after(
+            "start_print", {"file_name": "jar.stl", "printer_name": "garage"}, _Host(choice, typed=typed),
+        )
+        assert granted is not None
+        w = _one_window()
+        assert w.until - w.set_at == pytest.approx(seconds, abs=1)
+        assert w.scope == ("garage",) and w.source == SOURCE_ELICITED
+        assert line["opened"] is True and line["id"] == w.id
+
+    def test_blank_keeps_the_choice(self):
+        _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, _Host(CHOICE_NEXT_TWO_HOURS, typed="  "))
+        w = _one_window()
+        assert w.until - w.set_at == pytest.approx(7200, abs=1)
+
+    @pytest.mark.parametrize("typed,words", [
+        ("2 hrs-ish", "could not read"),
+        ("25h", "at most 24 hours"),
+        ("2d", "at most 24 hours"),
+        ("0m", "longer than nothing"),
+    ])
+    def test_a_length_kiln_cannot_honour_is_told_in_the_moment_and_the_yes_stands(self, typed, words, audits):
+        """The person said yes to THIS print unambiguously; the window part
+        failed.  The print goes ahead, no window exists, and the result
+        line says so with what to type next time — not the next dialog."""
+        granted, line = _line_after(
+            "start_print", {"file_name": "jar.stl", "printer_name": "garage"}, _Host(CHOICE_THIS_PRINT, typed=typed),
+        )
+        assert granted is not None and granted.source == SOURCE_ELICITED
+        assert consent_windows.live_windows() == []
+        assert line["opened"] is False
+        assert typed in line["asked_for"] and words in line["reason"]
+        assert "next print will ask again" in line["note"] and "24 hours" in line["note"]
+        rec = next(d for _, a, d in audits if a == "consent_window_not_opened")
+        assert words in rec["reason"]
+
+    def test_a_no_with_a_typed_length_is_a_no(self):
+        with pytest.raises(RuntimeError, match="Nothing was sent"):
+            _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, _Host(CHOICE_NO, typed="3h"))
+        assert consent_windows.live_windows() == []
+
+    def test_the_failure_line_is_said_once_and_only_on_that_call(self, monkeypatch):
+        def _boom(_windows):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(consent_windows, "_write", _boom)
+        _, line = _line_after("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, _Host(CHOICE_NEXT_TWO_HOURS))
+        assert line["opened"] is False and "disk full" in line["reason"]
+        monkeypatch.undo()
+        # The next call carries nothing stale — and a plain yes carries nothing at all.
+        _, line = _line_after("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, _Host(CHOICE_THIS_PRINT))
+        assert line is None
+
+    def test_the_cap_is_the_same_at_the_terminal_door(self, at_terminal):
+        with pytest.raises(ValueError, match="at most 24 hours"):
+            consent_windows.open_window(seconds=MAX_WINDOW_SECONDS + 1, scope=("garage",))
+        w = consent_windows.open_window(seconds=MAX_WINDOW_SECONDS, scope=("garage",))
+        with pytest.raises(ValueError, match="at most 24 hours"):
+            consent_windows.extend_window(w.id, seconds=MAX_WINDOW_SECONDS + 1)
+        from kiln.cli.main import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["consent", "window", "--for", "2d", "--printer", "garage"])
+        assert result.exit_code != 0 and "24 hours" in result.output
+        result = runner.invoke(cli, ["consent", "extend", w.id, "--for", "36h"])
+        assert result.exit_code != 0 and "24 hours" in result.output
+        assert len(consent_windows.live_windows()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Every printer, on the tier that runs several
+# ---------------------------------------------------------------------------
+
+
+class TestEveryPrinter:
+    def test_business_can_say_every_printer_from_the_dialog(self, business, audits):
+        _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"},
+                _Host(CHOICE_NEXT_TWO_HOURS, where=WHERE_EVERY_PRINTER))
+        w = _one_window()
+        assert w.scope == consent_windows.SCOPE_FLEET and w.source == SOURCE_ELICITED
+        assert consent_windows.covering("workshop") is not None
+        rec = next(d for _, a, d in audits if a == "consent_window_opened")
+        assert rec["scope"] == "fleet" and "every printer" in rec["asked_for"]
+        # And nobody is asked on the other machine now.
+        never = _NeverAsks()
+        _obtain("start_print", {"file_name": "jar.stl", "printer_name": "workshop"}, never)
+        assert never.asked == []
+
+    def test_this_printer_is_the_default_and_the_typed_length_rides_along(self, business):
+        _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"},
+                _Host(CHOICE_THIS_PRINT, typed="3h", where=WHERE_THIS_PRINTER))
+        w = _one_window()
+        assert w.scope == ("garage",) and w.until - w.set_at == pytest.approx(3 * 3600, abs=1)
+        _obtain("start_print", {"file_name": "jar.stl", "printer_name": "attic"},
+                _Host(CHOICE_THIS_PRINT, typed="3h", where=WHERE_EVERY_PRINTER))
+        assert consent_windows.covering("workshop").scope == consent_windows.SCOPE_FLEET
+
+    def test_below_the_fleet_tier_every_printer_is_not_on_the_form_and_not_honoured(self, audits):
+        """A host that sends it anyway is off the form: not a yes to anything."""
+        _, granted = _obtain(
+            "start_print", {"file_name": "jar.stl", "printer_name": "garage"},
+            _Host(CHOICE_NEXT_TWO_HOURS, where=WHERE_EVERY_PRINTER),
+            observe=lambda: consent_for(file_name="jar.stl", printer_name="garage"),
+        )
+        assert granted is None
+        assert consent_windows.live_windows() == []
+        # And the writer itself refuses it, whichever door: the tier changed
+        # between offer and answer.
+        with pytest.raises(consent_windows.NotTheFleetTier):
+            consent_windows.open_window_from_dialog(
+                DialogAnswer("accept", "", choice=CHOICE_NEXT_TWO_HOURS, where=WHERE_EVERY_PRINTER), printer_name="garage",
+            )
+
+    def test_a_named_list_of_printers_stays_the_terminals(self):
+        """The form offers this printer or every printer, nothing a name
+        can be typed into; a list of printers is the terminal command's."""
+        props = dialog_schema(offer_window=True, offer_fleet=True)["properties"]
+        assert props[FIELD_WHERE]["enum"] == [WHERE_THIS_PRINTER, WHERE_EVERY_PRINTER]
+        assert not {"printers", "printer_names", "printer_name", "scope"} & set(props)
+
+
+# ---------------------------------------------------------------------------
+# The hosted server: the account's store, when kiln-pro registers one
+# ---------------------------------------------------------------------------
+
+
+class _FakeStore(consent_windows.WindowStore):
+    """What kiln-pro's store looks like from here: the account's windows,
+    the account as ``set_by``.  Keeps them in memory."""
+
+    def __init__(self, account: str = "account:acct_123"):
+        self.account = account
+        self.rows: list[consent_windows.Window] = []
+        self.calls: list[str] = []
+
+    def covering(self, printer_name):
+        self.calls.append("covering")
+        return next((w for w in self.rows if w.live() and w.covers(printer_name)), None)
+
+    def live(self):
+        return [w for w in self.rows if w.live()]
+
+    def open(self, *, seconds, scope, source):
+        self.calls.append("open")
+        now = time.time()
+        w = consent_windows.Window(
+            id=f"w_h{len(self.rows)}", set_by=self.account, set_at=now, until=now + seconds, scope=scope, source=source,
+        )
+        self.rows.append(w)
+        return w
+
+    def revoke(self, window_id):
+        self.calls.append("revoke")
+        for i, w in enumerate(self.rows):
+            if w.id == window_id:
+                closed = consent_windows.Window(
+                    id=w.id, set_by=w.set_by, set_at=w.set_at, until=w.until, scope=w.scope,
+                    revoked_at=time.time(), source=w.source,
+                )
+                self.rows[i] = closed
+                return closed
+        raise KeyError(window_id)
+
+
+class TestTheHostedStore:
+    @pytest.fixture
+    def hosted_store(self, monkeypatch):
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        store = _FakeStore()
+        consent_windows.register_window_store(store)
+        yield store
+        consent_windows.register_window_store(None)
+
+    def test_with_a_store_the_web_user_is_offered_the_window_and_it_is_the_accounts(self, monkeypatch, tmp_path, audits):
+        path = _stl(tmp_path / "jar.stl")
+        # The hosted box keeps no preview record; a token there is a fact a
+        # local Kiln carried in — minted before the flag flips, as in
+        # test_a_person_says_go.
+        preview = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        hosted_store = _FakeStore()
+        consent_windows.register_window_store(hosted_store)
+        host = _Host(CHOICE_NEXT_TWO_HOURS)
+        _, granted = _obtain(
+            "start_print", {"file_name": path, "printer_name": "garage"}, host,
+            observe=lambda: consent_for(file_name=path, printer_name="garage"),
+        )
+        [(_, schema)] = host.asked
+        assert list(schema["properties"]) == [FIELD_ANSWER, FIELD_FOR_HOW_LONG]
+        assert granted is not None and granted.source == SOURCE_ELICITED
+        [w] = hosted_store.live()
+        assert w.set_by == "account:acct_123" and w.scope == ("garage",) and w.source == SOURCE_ELICITED
+        # Nothing touched the shared disk.
+        assert not consent_windows._path().exists()
+        rec = next(d for _, a, d in audits if a == "consent_window_opened")
+        assert rec["by"] == "account:acct_123"
+        # Inside it: nobody asked, and the gate takes it as the account's — grade A.
+        never = _NeverAsks()
+        token, granted = _obtain(
+            "start_print", {"file_name": path, "printer_name": "garage"}, never,
+            observe=lambda: consent_for(file_name=path, printer_name="garage", aimed_at="garage"),
+        )
+        assert never.asked == [] and token is None
+        assert granted.source == SOURCE_HOSTED_WINDOW and grade_of(granted.source) == "A"
+        assert granted.identity == "account:acct_123" and granted.window_id == w.id
+        print_signoff.clear()
+        assert server._preview_gate_error("start_print", path, preview, printer_name="garage") is None
+        assert print_signoff.current().source == SOURCE_HOSTED_WINDOW
+
+    def test_the_web_user_is_reminded_and_closes_it_through_the_agent(self, hosted_store):
+        _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, _Host(CHOICE_NEXT_TWO_HOURS))
+        [w] = hosted_store.live()
+        r = _result()
+        consent_window_note._attach(r, None, "start_print", {"printer_name": "garage"})
+        assert r.structuredContent[consent_window_note.RESULT_KEY]["id"] == w.id
+        out = _tool("consent_window_status")()
+        assert [x["id"] for x in out["windows"]] == [w.id] and out["windows"][0]["set_by"] == "account:acct_123"
+        out = _tool("revoke_consent_window")(window_id=w.id)
+        assert out["success"] and hosted_store.live() == []
+        host = _Host(CHOICE_THIS_PRINT)
+        _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, host)
+        assert len(host.asked) == 1
+
+    def test_every_printer_on_hosted_follows_the_accounts_tier(self, hosted_store, business):
+        host = _Host(CHOICE_NEXT_TWO_HOURS, where=WHERE_EVERY_PRINTER)
+        _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, host)
+        [(_, schema)] = host.asked
+        assert FIELD_WHERE in schema["properties"]
+        assert hosted_store.live()[0].scope == consent_windows.SCOPE_FLEET
+
+    def test_without_a_store_hosted_is_as_before(self, monkeypatch):
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        assert consent_windows.window_store() is None
+        assert server.dialog_offers() == (False, False)
+        assert consent_windows.covering("garage") is None
+        assert _tool("consent_window_status")()["windows"] == []
+
+    def test_a_store_is_never_consulted_for_the_local_users_windows(self, at_terminal):
+        """Locally the file is the store; a hook registered by mistake on a
+        laptop must not become a second opinion."""
+        store = _FakeStore()
+        consent_windows.register_window_store(store)
+        consent_windows.open_window(seconds=600, scope=("garage",))
+        assert consent_windows.covering("garage") is not None
+        assert consent_windows.window_store() is None and store.calls == []
+
+    def test_a_store_that_fails_has_no_window(self, hosted_store, monkeypatch):
+        def _boom(_printer):
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr(hosted_store, "covering", _boom)
+        assert consent_windows.covering("garage") is None
+
+
+# ---------------------------------------------------------------------------
+# The one parser every surface uses — pinned for the hosted wire and the app
+# ---------------------------------------------------------------------------
+
+
+class TestTheParserEverySurfaceShares:
+    """kiln-pro's hosted 'input required' shape and the desktop app's sheet
+    hand the person's filled form to ``answer_from_content`` as a dict.
+    What it means there is what it means in the MCP dialog."""
+
+    def test_the_field_names_are_the_contract(self):
+        assert (FIELD_ANSWER, FIELD_FOR_HOW_LONG, FIELD_WHERE) == ("answer", "for_how_long", "where")
+
+    @pytest.mark.parametrize("content,expect", [
+        ({"answer": "this_print"}, ("accept", "this_print", "", "this_printer")),
+        ({"answer": "next_two_hours", "for_how_long": "45m"}, ("accept", "next_two_hours", "45m", "this_printer")),
+        ({"answer": "no", "for_how_long": "3h"}, ("decline", "", "", "")),
+        ({"answer": "fleet"}, ("unavailable", "", "", "")),
+        ({}, ("unavailable", "", "", "")),
+        ({"answer": "this_print", "where": "every_printer"}, ("unavailable", "", "", "")),  # fleet not offered
+    ])
+    def test_a_dict_from_the_wire_means_the_same_as_the_dialog(self, content, expect):
+        a = answer_from_content("accept", content, offer_window=True, offer_fleet=False)
+        assert (a.action, a.choice, a.typed_duration, a.where) == expect
+
+    def test_where_a_window_is_not_offered_a_length_is_off_the_form(self):
+        assert answer_from_content("accept", {"answer": "this_print", "for_how_long": "3h"}, offer_window=False).action == "unavailable"
+        assert answer_from_content("accept", {"answer": "next_two_hours"}, offer_window=False).action == "unavailable"
+        assert answer_from_content("accept", {"answer": "this_print"}, offer_window=False).accepted
+
+    def test_decline_and_cancel_envelopes(self):
+        assert answer_from_content("decline", None).action == "decline"
+        assert answer_from_content("cancel", {"answer": "this_print"}).action == "cancel"
+        assert answer_from_content("", {"answer": "this_print"}).action == "unavailable"
+
+    def test_the_grant_takes_only_an_accepted_answer(self):
+        with pytest.raises(ValueError):
+            server.consent_from_dialog_answer("start_print", "jar.stl", "garage", DialogAnswer("decline"), aimed="garage")
+        with pytest.raises(ValueError):
+            server.consent_from_dialog_answer("start_print", "jar.stl", "garage", {"action": "accept"}, aimed="garage")
+        assert consent_windows.live_windows() == []
+
+    def test_the_grant_is_what_the_hosted_wire_and_the_app_call(self):
+        """A surface that parsed the person's response records the yes
+        and the window through the one grant; nothing else to remember."""
+
+        async def _run():
+            a = answer_from_content("accept", {"answer": "this_print", "for_how_long": "1h"})
+            token = server.consent_from_dialog_answer("start_print", "jar.stl", "garage", a, aimed="garage")
+            try:
+                return consent_for(file_name="jar.stl", printer_name="garage")
+            finally:
+                reset_consent(token)
+
+        granted = asyncio.run(_run())
+        assert granted is not None and granted.source == SOURCE_ELICITED
+        w = _one_window()
+        assert w.until - w.set_at == pytest.approx(3600, abs=1) and w.scope == ("garage",)
+
+
+# ---------------------------------------------------------------------------
 # Inside a window nobody is asked — at every door — and the preview is still wanted
 # ---------------------------------------------------------------------------
 
@@ -513,12 +914,6 @@ class TestRevokeAndStatusInline:
     def test_every_print_result_names_the_window_while_it_is_open(self, monkeypatch):
         _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, _Host(CHOICE_NEXT_TWO_HOURS))
         w = _one_window()
-
-        def _result():
-            return types.SimpleNamespace(
-                structuredContent=None, isError=False,
-                content=[types.SimpleNamespace(type="text", text=json.dumps({"success": True, "job": "j1"}))],
-            )
 
         for tool in server._CONSENT_FILE_ARG:
             r = _result()
@@ -689,7 +1084,10 @@ def test_no_tool_opens_or_extends_a_window_or_answers_the_dialog():
     reaches an opener, the dialog, or the consent record.  The agent's
     channel is tools/call; if no tool does it, the agent cannot."""
     offenders: list[str] = []
-    forbidden = {*_OPENERS, "ask_user_to_confirm", "set_consent", "DialogAnswer", "_obtain_print_consent"}
+    forbidden = {
+        *_OPENERS, "ask_user_to_confirm", "set_consent", "DialogAnswer", "_obtain_print_consent",
+        "consent_from_dialog_answer", "answer_from_content", "register_window_store",
+    }
     for path in _MODULES:
         tree = ast.parse(path.read_text())
         for fn in ast.walk(tree):
@@ -706,7 +1104,7 @@ def test_no_tool_opens_or_extends_a_window_or_answers_the_dialog():
 
 
 def test_the_doors_are_held_by_exactly_the_functions_that_should_hold_them():
-    callers = _callers_of({*_OPENERS, "ask_user_to_confirm", "_obtain_print_consent", "DialogAnswer"})
+    callers = _callers_of({*_OPENERS, "ask_user_to_confirm", "_obtain_print_consent", "DialogAnswer", "consent_from_dialog_answer"})
     # The terminal door: the command, and nothing else.
     assert callers["open_window"] == {"consent_commands.py::window"}
     assert callers["extend_window"] == {"consent_commands.py::extend"}
@@ -716,8 +1114,12 @@ def test_the_doors_are_held_by_exactly_the_functions_that_should_hold_them():
     # The dialog itself: asked by the asker, which is called by the wrapper.
     assert callers["ask_user_to_confirm"] == {"server.py::_obtain_print_consent"}
     assert callers["_obtain_print_consent"] == {"server.py::_call_tool_with_context"}
-    # An answer is built from the SDK's result, in the shim, and nowhere else.
-    assert callers["DialogAnswer"] == {"mcp_compat.py::ask_user_to_confirm"}
+    # An answer is built by the one parser — from what a host, the hosted
+    # wire or a native sheet handed back — and by the shim only for its own
+    # could-not-ask outcomes.  Nowhere else, and never in a tool.
+    assert callers["DialogAnswer"] == {"print_consent.py::answer_from_content", "mcp_compat.py::ask_user_to_confirm"}
+    # The grant every surface calls is called by the MCP asker alone in this repo.
+    assert callers["consent_from_dialog_answer"] == {"server.py::_obtain_print_consent"}
 
 
 def test_a_flag_or_variable_still_does_not_open_one():

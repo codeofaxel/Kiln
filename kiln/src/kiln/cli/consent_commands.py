@@ -17,12 +17,13 @@ type a flag.  ``revoke`` works from anywhere: closing is the safe
 direction.  Nothing here runs on the hosted server, where the file under
 ``~/.kiln`` is nobody's.  See :mod:`kiln.consent_windows`.
 
-The terminal is one of two doors.  A person who never opens one gets a
+The terminal is one of the doors.  A person who never opens one gets a
 window from the approval dialog their assistant's app draws before a
-print — "yes, and for the next 2 hours on this printer" — and closes it
-by telling the assistant (``revoke_consent_window``).  ``status`` shows
-which door opened each window.  Anything wider or longer than the dialog
-offers — several printers, the fleet, a day — is this command's.
+print — "yes, and for the next 2 hours", a length they type, every
+printer on the fleet tier — and closes it by telling the assistant
+(``revoke_consent_window``).  ``status`` shows which door opened each
+window.  A named list of printers is this command's alone; the cap (24h)
+is the same at every door.
 """
 
 from __future__ import annotations
@@ -106,7 +107,7 @@ def consent() -> None:
 
 
 @consent.command("window")
-@click.option("--for", "duration", required=True, help="How long, like 2h, 30m or 1d.")
+@click.option("--for", "duration", required=True, help="How long, like 2h, 30m or 1d (24h at most).")
 @click.option("--printer", default=None, help="One printer the window covers.")
 @click.option("--printers", default=None, help="Several, comma-separated.")
 @click.option("--fleet", is_flag=True, help="Every printer.")
@@ -163,7 +164,7 @@ def status(json_mode: bool) -> None:
 
 @consent.command("extend")
 @click.argument("window_id")
-@click.option("--for", "duration", required=True, help="Open for this long from now, like 1h.")
+@click.option("--for", "duration", required=True, help="Open for this long from now, like 1h (24h at most).")
 @click.option("--json", "json_mode", is_flag=True, help="Machine-readable output.")
 def extend(window_id: str, duration: str, json_mode: bool) -> None:
     """Keep a window open longer: its end becomes now plus the duration.
