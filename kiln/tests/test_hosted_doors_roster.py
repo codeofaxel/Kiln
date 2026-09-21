@@ -86,6 +86,28 @@ class TestTheRoster:
             "A person who asked for the feature learns nothing when they are demoted."
         )
 
+    def test_a_door_that_claims_to_word_a_miss_actually_does(self):
+        """The roster must not be able to lie.
+
+        Saying ``served_answer`` in the roster is a claim that this module
+        reaches the shared voice.  Without this, a door could be listed as
+        wording a miss, word nothing, and still pass every other check
+        here -- a roster that reads correct and protects nobody.
+        """
+        silent = []
+        for module, (how, _note) in sa.HOSTED_DOORS.items():
+            if how != "served_answer":
+                continue
+            path = _SRC.joinpath(*module.split(".")).with_suffix(".py")
+            if not path.is_file():  # a package, not a module
+                path = _SRC.joinpath(*module.split("."), "__init__.py")
+            if "served_answer" not in path.read_text(encoding="utf-8", errors="replace"):
+                silent.append(module)
+        assert not silent, (
+            f"these doors are listed as wording a miss but never reach the shared voice: {silent}. "
+            "Either word the miss through it, or say on the roster what they really do."
+        )
+
 
 def _lint(text: str, *, where: str) -> None:
     assert text == " ".join(text.split()), f"{where}: stray whitespace: {text!r}"
