@@ -811,6 +811,12 @@ Confirmations are single-use, short-lived, and bound to the file and printer, so
 
 In MCP apps that support confirmation prompts, the approval is a dialog the app shows you directly — your assistant cannot answer it for you. It names the file and covers that one print. Every way of starting a print asks: slicing-and-printing, retries, and monitored prints all pass through the same approval step, and a retry only re-asks when the shape changed.
 
+### Occupied Plate
+
+Kiln remembers what its last print left on the plate. Until you say the plate is empty (`kiln plate clear`, or `plate_clear=True` on `home_axes`), every way of starting a print refuses to start onto it, and every way of slicing refuses to slice onto it. `plate_status` shows what the record says is there and since when.
+
+To print a second part beside the one on the plate, pass a `placement` (a named region such as `back-left` or `centre`, or exact plate coordinates) to any slicing tool. Kiln asks kiln-pro's servers for a clearance verdict for that spot on your printer, and slices there only when the verdict says the print head and gantry clear the part for the whole print. No verdict — offline, signed out, or no answer — means no slice: Kiln says which one stopped it and what to do, rather than guessing.
+
 ### G-code Validation
 
 `validate_gcode()` screens commands before they reach hardware:
