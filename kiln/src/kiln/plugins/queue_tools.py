@@ -73,11 +73,12 @@ def _is_free_tier() -> bool:
 # ---------------------------------------------------------------------------
 # Standalone functions — importable for direct calls and testing.
 #
-# Each function resolves the queue via kiln.server._get_queue() (and reads
-# _event_bus, etc. as module attributes) at call time, so monkeypatching works
-# in tests AND the queue is lazily created if a server context never
-# initialised it (e.g. the REST/local-admin server, which used to leave the raw
-# _queue global None and crash every queue tool with AttributeError).
+# Each function resolves the queue via kiln.server._get_queue() and the bus
+# via kiln.server._get_event_bus() at call time, so monkeypatching works in
+# tests AND both are lazily created if a server context never initialised
+# them (e.g. the REST/local-admin server, which used to leave the raw _queue
+# global None and crash every queue tool with AttributeError; a first
+# submit_job with the raw _event_bus still None crashed the same way).
 # ---------------------------------------------------------------------------
 
 
@@ -185,7 +186,7 @@ def submit_job(
                     "No duplicate was queued."
                 ),
             }
-        _srv._event_bus.publish(
+        _srv._get_event_bus().publish(
             Event(
                 type=EventType.JOB_QUEUED,
                 data={"job_id": job.id, "file_name": file_name, "printer_name": printer_name},
@@ -409,7 +410,7 @@ def cancel_queued_job(job_id: str) -> dict:
                 code="PRINT_IN_PROGRESS",
             )
         job = _srv._get_queue().cancel(job_id)
-        _srv._event_bus.publish(
+        _srv._get_event_bus().publish(
             Event(
                 type=EventType.JOB_CANCELLED,
                 data={"job_id": job_id},
@@ -521,7 +522,7 @@ def cancel_queued_jobs(
         try:
             _srv._get_queue().cancel(job.id)
             cancelled.append(job.id)
-            _srv._event_bus.publish(
+            _srv._get_event_bus().publish(
                 Event(
                     type=EventType.JOB_CANCELLED,
                     data={"job_id": job.id, "bulk": True},
