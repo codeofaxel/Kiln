@@ -605,6 +605,33 @@ def _get_adapter_from_ctx(ctx: click.Context):
     return adapter
 
 
+def _drop_print_records() -> None:
+    """A yes, and the clearance it earned, end with the command that earned
+    them.  Registered on the CLI's own context, so every command closes
+    over it — the one that asked, the one that rode a standing window, and
+    any door added later.
+
+    Both records are ContextVars whose stated life is one call.  The MCP
+    wrapper honours that by resetting its token in a ``finally``; the CLI
+    could not, because the yes is taken in one helper and has to stand for
+    the rest of the command, so it leaned on the process exiting instead.
+    A process that runs two commands then hands the first one's answer to
+    the second: the gate reads a yes for another file, calls it a
+    mismatch, and refuses a print a standing window covers — or, the other
+    way, carries a clearance past the call that earned it.  Never raises:
+    a cleanup that can raise is a cleanup that leaks what it was meant to
+    clear.
+    """
+    try:
+        from kiln import print_signoff
+        from kiln.print_consent import drop_consent
+
+        drop_consent()
+        print_signoff.clear()
+    except Exception:  # noqa: BLE001 — the command is over; nothing to report to
+        logger.debug("print records not dropped at command close", exc_info=True)
+
+
 def cli_gate(
     tool: str,
     file_path: str,
@@ -1404,6 +1431,7 @@ def cli(ctx: click.Context, printer: str | None) -> None:
 
     ctx.ensure_object(dict)
     ctx.obj["printer"] = printer
+    ctx.call_on_close(_drop_print_records)
 
     # Terms-of-use gate (one-time, account-aware).  Once accepted, is_current()
     # short-circuits on the local record so this never prompts again.  Onboarding,
