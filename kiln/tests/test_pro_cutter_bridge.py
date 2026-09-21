@@ -86,6 +86,9 @@ def local_counter(monkeypatch):
     monkeypatch.setitem(sys.modules, "kiln_pro.cutter_intelligence", sub)
     monkeypatch.setitem(sys.modules, "kiln_pro.cutter_intelligence.counter", mod)
     monkeypatch.setattr(bridge, "_declared_model", lambda name: "bambu_a1")
+    # The path each report names is the file itself: an earlier test's
+    # slice-ledger line for a same-named file must not answer for it.
+    monkeypatch.setattr("kiln.monitor_twin.sliced_entry_for", lambda name: None)
     return fake
 
 

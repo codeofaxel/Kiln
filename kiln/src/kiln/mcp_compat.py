@@ -81,6 +81,8 @@ __all__ = [
     "host_can_ask_the_user",
     "lowlevel_server",
     "set_instructions",
+    "set_tool_input_schema",
+    "tool_input_schema",
     "tool_result_blocks",
     "wrap_call_tool_result",
     "wrap_list_tools_result",
@@ -98,6 +100,31 @@ def tool_result_blocks(result: Any) -> Any:
     if isinstance(result, tuple):
         result = result[0]
     return getattr(result, "content", result)
+
+
+_SCHEMA_ATTRS = ("input_schema", "inputSchema")
+
+
+def tool_input_schema(tool: Any) -> Any:
+    """The ``inputSchema`` of a ``Tool`` object, whichever SDK built it.
+
+    SDK 1 keeps the wire name as the attribute; SDK 2 renamed the field
+    ``input_schema`` and kept ``inputSchema`` only as its alias, which
+    attribute access does not see.  ``None`` when the object has neither.
+    """
+    for attr in _SCHEMA_ATTRS:
+        if hasattr(tool, attr):
+            return getattr(tool, attr)
+    return None
+
+
+def set_tool_input_schema(tool: Any, schema: Any) -> None:
+    """Replace a ``Tool`` object's schema under the attribute its SDK uses."""
+    for attr in _SCHEMA_ATTRS:
+        if hasattr(tool, attr):
+            setattr(tool, attr, schema)
+            return
+    raise AttributeError(f"{type(tool).__name__} carries no input schema")
 
 
 def lowlevel_server(mcp: Any) -> Any:

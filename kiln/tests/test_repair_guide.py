@@ -614,7 +614,12 @@ class TestRegistration:
 
         rg.plugin.register(_Mcp())
         assert [fn.__name__ for fn, _ in seen] == ["repair_guide"]
-        assert seen[0][1].readOnlyHint is True
+        annotations = seen[0][1]
+        # 2.x names the field read_only_hint (wire alias readOnlyHint); 1.x readOnlyHint.
+        read_only = getattr(annotations, "read_only_hint", None)
+        if read_only is None:
+            read_only = getattr(annotations, "readOnlyHint", None)
+        assert read_only is True
 
     def test_the_plugin_is_discovered_beside_homing_tools(self):
         from kiln import plugin_loader

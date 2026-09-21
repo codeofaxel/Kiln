@@ -966,7 +966,15 @@ class TestFleetScopeIsTheFleetTiers:
         """Same source of truth as the concurrency gate: the licence's
         printer cap.  Absent kiln-pro the cap is one, so a plain install
         reads as not-the-fleet-tier without guessing."""
-        import kiln.licensing as lic
+        # A plain install has no kiln.licensing at all: that half of the
+        # rule is the fail-closed read below, checked first.
+        import importlib
+
+        try:
+            lic = importlib.import_module("kiln.licensing")
+        except ImportError:
+            assert consent_windows._fleet_tier_allows() is False
+            pytest.skip("kiln-pro's licensing shim is not installed; the closed half is pinned above")
 
         monkeypatch.setattr(lic, "get_tier", lambda: "business", raising=False)
         monkeypatch.setattr(lic, "max_printers_for_tier", lambda t: 20 if t == "business" else 1, raising=False)

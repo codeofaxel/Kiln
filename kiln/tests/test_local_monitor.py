@@ -205,10 +205,16 @@ class TestTheMonitorDocumentComesFromTheCache:
     def test_a_cold_cache_read_raises_and_the_verb_still_stands(self):
         mcp = _fastmcp()
         local_monitor.install(mcp)
-        # The SDK wraps the door's ValueError in its own resource error; the
-        # sentence is the stable part across majors.
-        with pytest.raises(Exception, match="not been downloaded"):
+        # The SDK wraps the door's ValueError in its own resource error --
+        # 1.x quotes the sentence, 2.x says "Error reading resource" and
+        # chains the cause -- so the sentence is looked for down the chain.
+        with pytest.raises(Exception) as excinfo:
             anyio.run(mcp.read_resource, local_monitor.PRINT_MONITOR_RESOURCE_URI)
+        chain, err = [], excinfo.value
+        while err is not None and len(chain) < 8:
+            chain.append(str(err))
+            err = err.__cause__ or err.__context__
+        assert any("not been downloaded" in text for text in chain), chain
         assert "kiln_monitor_snapshot" in mcp._tool_manager._tools
 
 

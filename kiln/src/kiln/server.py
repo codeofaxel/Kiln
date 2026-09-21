@@ -1431,12 +1431,13 @@ def _publish_schemas_without_defaults(tools: list[Any]) -> None:
     ``Tool`` on the wire is given a NEW dict rather than edited in place.
     See ``kiln.tool_args.published_input_schema`` for why the keyword goes.
     """
+    from kiln.mcp_compat import set_tool_input_schema, tool_input_schema
     from kiln.tool_args import published_input_schema
 
     for tool in tools:
-        schema = getattr(tool, "inputSchema", None)
+        schema = tool_input_schema(tool)
         if isinstance(schema, dict):
-            tool.inputSchema = published_input_schema(schema)
+            set_tool_input_schema(tool, published_input_schema(schema))
 
 
 def _install_published_schema() -> None:
@@ -9155,8 +9156,8 @@ def set_fan(percent: int, node: str = "part") -> dict:
     Supported on Bambu Lab, OctoPrint, Moonraker/Klipper printers, and
     Elegoo's Centauri Carbon (FDM). Prusa Link has no raw G-code endpoint, so
     fan control isn't available there (a known limitation of Prusa Link
-    itself). Some Elegoo resin printers (Saturn, Mars) have no part-cooling
-    fan and are refused.
+    itself). Some Elegoo models (Saturn, Mars) have no part-cooling fan and
+    are refused.
 
     Args:
         node: Which fan to set. ``"part"`` (part-cooling / model fan, the
