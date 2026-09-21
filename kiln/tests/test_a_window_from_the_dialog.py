@@ -1211,15 +1211,11 @@ class TestTheWindowIsNeverInvisible:
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         block = server._preview_gate_error("start_print", path, preview, printer_name="garage")
         message = block["error"]["message"]
+        # The account's doors — Approve on the print page, or a delegation
+        # (in this app's dialog, or the account page) — never a terminal.
         assert "kiln consent window" not in message and "kiln print" not in message
-        assert "signed-in account" in message and "Tell the person that plainly" in message
-        assert "standing window" not in message
-        consent_windows.register_window_store(_FakeStore())
-        try:
-            message = server._preview_gate_error("start_print", path, preview, printer_name="garage")["error"]["message"]
-            assert "standing window they opened on their Kiln account" in message
-        finally:
-            consent_windows.register_window_store(None)
+        assert "signed-in person" in message and "delegation" in message
+        assert "approval dialog" in message and "Tell the person that plainly" in message
 
     def test_the_status_tool_note_fits_the_surface(self, at_terminal, monkeypatch):
         consent_windows.open_window(seconds=3600, scope=("garage",))

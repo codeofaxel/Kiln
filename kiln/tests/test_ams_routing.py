@@ -223,7 +223,7 @@ class TestPlanAmsMapping:
         plan = plan_ams_mapping(wanted, loaded_trays(JAR_NIGHT_AMS))
         assert plan.ok
         assert plan.mapping == [0, 3, 1], plan.summary
-        assert plan.summary == "white PLA → slot 1, red PLA → slot 4, black PLA → slot 2"
+        assert plan.summary == "white PLA → slot A1, red PLA → slot A4, black PLA → slot A2"
         assert plan.warnings == []
 
     def test_slot_order_is_not_extruder_order(self):
@@ -325,7 +325,7 @@ class TestResolverRoutesByColour:
         got = _resolve_use_ams("auto", None, self._adapter(), file_path=_gcode(tmp_path))
         assert got["use_ams"] is True
         assert got["ams_mapping"] == [0, 3, 1]
-        assert got["plan"]["summary"].startswith("white PLA → slot 1")
+        assert got["plan"]["summary"].startswith("white PLA → slot A1")
         assert got["selection"]["slot"] == 0
 
     def test_without_the_file_the_old_first_tray_pick_stands(self):
@@ -414,7 +414,7 @@ class TestApprovalDialogSaysTheRouting:
         local = _gcode(tmp_path)
         server._remember_upload("jar.gcode.3mf", local)
         line = server._consent_filament_line("start_print", "jar.gcode.3mf", None)
-        assert line == "white PLA → slot 1, red PLA → slot 4, black PLA → slot 2"
+        assert line == "white PLA → slot A1, red PLA → slot A4, black PLA → slot A2"
 
     def test_a_missing_colour_is_said_loudly(self, tmp_path, monkeypatch):
         from kiln import server

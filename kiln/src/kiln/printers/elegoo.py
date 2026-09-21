@@ -102,11 +102,9 @@ _CMD_CAMERA_STREAM = 386
 # which top-level key the Data.Data payload carries -- LightStatus (the
 # unused _CMD_TOGGLE_LIGHT alias below), TargetFanSpeed, or PrintSpeedPct
 # are all documented under this same command number, not three different
-# commands.  Source: the OpenCentauri SDCP v3 reference
-# (docs.opencentauri.cc/software/api/), cross-checked against two
-# independent reverse-engineering projects (github.com/WalkerFrederick/
-# sdcp-centauri-carbon, github.com/JoergSH/elegoocc) that document the
-# same TargetFanSpeed.{ModelFan,AuxiliaryFan,BoxFan} shape.
+# commands.  Read from the community's protocol reference and
+# cross-checked against two independent reverse-engineering projects that
+# document the same TargetFanSpeed.{ModelFan,AuxiliaryFan,BoxFan} shape.
 _CMD_TOGGLE_LIGHT = 403
 _CMD_UPDATE_SETTINGS = 403
 _CMD_SET_TIMING = 512
@@ -177,9 +175,8 @@ _IDLE_DISCONNECT_ENV = "KILN_ELEGOO_IDLE_DISCONNECT_S"
 # wear cross-check.  These appear on the wire as the integer
 # ``ErrorStatusReason`` field in SDCP V3 status / history messages
 # on Centauri Carbon FDM printers (and successors that share the
-# cbd-tech firmware family).  Source: OpenCentauri SDCP v3 reference
-# at github.com/OpenCentauri/OpenCentauri/blob/main/docs/software/api.md
-# — see "Status.PrintInfo / HistoryDetailList[].ErrorStatusReason".
+# cbd-tech firmware family), as the community's protocol reference
+# documents ``ErrorStatusReason``.
 #
 # Conservative selection: only codes that the firmware itself
 # attributes to filament-path behaviour (jam, runout).  Generic

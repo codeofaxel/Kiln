@@ -1,8 +1,7 @@
 """Prusa Link adapter for the Kiln printer abstraction layer.
 
 Implements :class:`~kiln.printers.base.PrinterAdapter` by talking to the
-`Prusa Link HTTP API <https://github.com/prusa3d/Prusa-Link-Web>`_
-via :mod:`requests`.  Prusa Link is the local API running on Prusa
+Prusa Link HTTP API via :mod:`requests`.  Prusa Link is the local API running on Prusa
 printers (MK4, XL, Mini+), providing REST endpoints for printer control.
 
 Limitations compared to OctoPrint/Moonraker:

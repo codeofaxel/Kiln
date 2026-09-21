@@ -3341,7 +3341,7 @@ class TestValidate3mfFilamentIds:
         issues = adapter_with_mqtt._validate_3mf_filament_ids(str(three_mf), 1)
         assert len(issues) == 1
         assert "index 7" in issues[0]
-        assert "4 slot" in issues[0]
+        assert "4 tray(s) (A1, A2, A3, A4)" in issues[0]
 
     def test_no_metadata_no_issues(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
         """Missing plate metadata returns no issues."""
@@ -4077,9 +4077,8 @@ class TestExternalSpoolMapping:
 
     [0] means AMS unit 0 slot 0, so sending it with ``use_ams: false``
     pointed the firmware at a tray that need not exist — on a machine with
-    no AMS it stalled at the filament-mapping dialog.  Bambu's own
-    networking plugin sends ``use_ams ? "[0]" : "[]"``
-    (open-bamboo-networking src/print_job.cpp:184).
+    no AMS it stalled at the filament-mapping dialog.  The maker's own
+    client sends ``[]`` with AMS off and ``[0]`` with it on.
     """
 
     def _published(self, adapter: BambuAdapter) -> dict[str, Any]:

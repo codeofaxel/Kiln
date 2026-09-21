@@ -688,12 +688,12 @@ class TestBambuLoad:
         assert "no tray is feeding" in result.message
 
     def test_empty_tray_is_refused_before_anything_moves(self, bambu):
-        with pytest.raises(PrinterError, match="tray 2 reports no filament"):
+        with pytest.raises(PrinterError, match=r"tray 2 \(slot A3\) reports no filament"):
             bambu.load_filament(slot=2, temperature=210)
         assert not [p for p in _published(bambu) if p.get("print", {}).get("command") == "ams_change_filament"]
 
     def test_missing_tray_is_refused(self, bambu):
-        with pytest.raises(PrinterError, match="tray 7 is not present"):
+        with pytest.raises(PrinterError, match=r"tray 7 \(slot B4\) is not present"):
             bambu.load_filament(slot=7, temperature=210)
 
     def test_tray_window_beats_the_caller(self, bambu):
@@ -828,8 +828,8 @@ def _hot(adapter, monkeypatch, temp=210.0, cold=138.0):
 class TestBambuFaultReadings:
     """The two namespaces, and the per-unit / per-slot synonyms.
 
-    Every HMS string asserted here is the title of that code's own page on
-    wiki.bambulab.com, read 2026-09-03.
+    Every HMS string asserted here is the title of that code's own page in
+    the maker's fault-code index.
     """
 
     def test_known_hms_code_gets_the_vendors_words_and_a_link(self):
@@ -858,20 +858,21 @@ class TestBambuFaultReadings:
         assert as_hms[0] != as_err[0]
 
     @pytest.mark.parametrize(
-        "code,unit,slot",
+        "code,where",
         [
-            ("0700_7000_0002_0003", "AMS A", "slot 1"),
-            ("0701_7200_0002_0003", "AMS B", "slot 3"),
-            ("0703_7300_0002_0003", "AMS D", "slot 4"),
-            ("1202_2100_0002_0006", "AMS C", "slot 2"),
+            ("0700_7000_0002_0003", "(slot A1)"),
+            ("0701_7200_0002_0003", "(slot B3)"),
+            ("0703_7300_0002_0003", "(slot D4)"),
+            ("1202_2100_0002_0006", "(slot C2)"),
         ],
     )
-    def test_unit_and_slot_variants_share_one_reading(self, code, unit, slot):
-        """Bambu files these as synonyms of one entry; so does Kiln."""
+    def test_unit_and_slot_variants_share_one_reading(self, code, where):
+        """Bambu files these as synonyms of one entry; so does Kiln.  The
+        reading names the slot the way every other door does ("slot B3")."""
         from kiln.printers.bambu import describe_bambu_filament_fault
 
         text, url = describe_bambu_filament_fault(code, kind="hms")
-        assert unit in text and slot in text
+        assert where in text
         # The link points at the canonical unit-A / slot-1 page that exists.
         assert url.endswith(("/0700_7000_0002_0003", "/1200_2000_0002_0006"))
         assert "/en/" in url
@@ -916,9 +917,9 @@ class TestBambuFaultReadings:
         assert '"print_error"' in source and '"hms"' in source
 
     def test_the_namespace_collisions_are_recorded_not_reclassified(self):
-        """Four checked against wiki.bambulab.com/en/hms/home on 2026-09-03;
-        0300-4000 against the vendor's own sentence table on 2026-09-19, when
-        its print_error reading (a failed Z home) joined the table."""
+        """Four checked against the maker's fault-code index; 0300-4000 against
+        the vendor's own sentence table, when its print_error reading (a
+        failed Z home) joined the table."""
         from kiln.printers.bambu import (
             _BAMBU_PRINT_ERROR_FAULTS,
             _HMS_NAMESPACE_COLLISIONS,

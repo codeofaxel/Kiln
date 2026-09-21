@@ -4414,7 +4414,7 @@ class TestResolveUseAms:
         result = _resolve_use_ams("auto", None, adapter)
         assert result["use_ams"] is True
         assert result["ams_mapping"] == [0]
-        assert result["selection"] == {"slot": 0, "type": "PLA", "color": "161616FF"}
+        assert result["selection"] == {"slot": 0, "name": "A1", "type": "PLA", "color": "161616FF"}
 
     def test_selection_record_includes_color(self):
         """The positive branch returns a {slot, type, color} selection record."""
@@ -4429,7 +4429,7 @@ class TestResolveUseAms:
             ]
         }
         result = _resolve_use_ams("auto", None, adapter)
-        assert result["selection"] == {"slot": 0, "type": "PLA", "color": "FF0000FF"}
+        assert result["selection"] == {"slot": 0, "name": "A1", "type": "PLA", "color": "FF0000FF"}
 
     def test_selection_material_matched_tray(self):
         """A material hint routes to the matching tray; selection reflects it."""
@@ -4468,7 +4468,7 @@ class TestResolveUseAms:
             "units": [{"unit_id": 0, "trays": [{"slot": 0, "tray_type": "PLA", "remain": 50}]}]
         }
         result = _resolve_use_ams("auto", None, adapter)
-        assert result["selection"] == {"slot": 0, "type": "PLA", "color": ""}
+        assert result["selection"] == {"slot": 0, "name": "A1", "type": "PLA", "color": ""}
 
 
 class TestWrapGcodeSaysWhetherColoursAreLoaded:

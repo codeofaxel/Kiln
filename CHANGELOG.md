@@ -245,6 +245,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **A spool on a second AMS unit, or in an AMS HT, is now routed, loaded and reported as the tray it really is.** Kiln names every tray the way your printer does.
+
+- **A mid-print material change now reaches a spool on a second AMS unit, or in an AMS HT (Pro+).**
+
 - **A purge or wipe finishes cooling the nozzle even if your assistant stops
   listening.** Kiln used to leave the part fan running if the request was
   abandoned mid-routine; the fan now goes off on its own once the nozzle has

@@ -1,0 +1,9 @@
+# Frozen inventory of research provenance in public comments and
+# docstrings (a third-party repository, a source file:line pin, a vendor
+# or community page, an account or client name, a fetch date), keyed
+# `path :: matched text`.  Read by scripts/audit_moat_comment_leak.py: a
+# pin not listed here fails the gate.  These pre-date the rule and are
+# to be scrubbed or moved to the private evidence; this list may only
+# shrink.  Regenerate with
+#     python3 scripts/audit_moat_comment_leak.py --freeze-source-pins
+# and commit the diff.

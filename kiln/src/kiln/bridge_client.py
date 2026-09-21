@@ -65,14 +65,35 @@ def handle_relay_request(
     carrying a ``cloud_artifact_token`` is resolved HERE — fetch the geometry
     from the cloud to a temp file, then run the normal ``slice_and_print`` on it.
     Every other tool is a straight passthrough.
+
+    The yes: a relayed start may carry ``print_authority`` — the record the
+    hosted server made when a person pressed Approve for these bytes on this
+    printer, or the delegation an agent is printing under.  The local gate
+    needs a person's yes and never takes one from an argument, so the block
+    is taken OUT of the args here and turned into the consent for this one
+    call (see :func:`_consent_from_authority`), and only after the bytes
+    that arrived hash to the bytes that were approved.  Bytes that differ
+    are refused before any tool runs: a consent by file name would let a
+    re-generated model print under the old approval.
     """
     request_id = req.get("request_id")
     tool = str(req.get("tool_name") or "")
     args = dict(req.get("args") or {})
+    reset = None
     try:
         token = args.pop("cloud_artifact_token", None)
+        authority = args.pop("print_authority", None)
         if tool == "slice_and_print" and token:
             args["input_path"] = fetch_artifact(str(token))
+        if authority:
+            consent = _consent_from_authority(
+                authority, file_name=str(args.get("input_path") or args.get("model_path") or ""),
+                printer_name=args.get("printer_name"),
+            )
+            if consent is not None:
+                from kiln.print_consent import set_consent
+
+                reset = set_consent(consent)
         result = call_tool(tool, args)
         return {"request_id": request_id, "ok": True, "result": result}
     except Exception as exc:  # deliberately broad — one call must not kill the ws
@@ -82,6 +103,93 @@ def handle_relay_request(
             "ok": False,
             "error": {"message": str(exc), "tool": tool},
         }
+    finally:
+        if reset is not None:
+            from kiln.print_consent import reset_consent
+
+            reset_consent(reset)
+
+
+class NotTheApprovedBytes(RuntimeError):
+    """The file that arrived is not the file the person approved."""
+
+
+def _sha256_of(path: str) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _consent_from_authority(block: Any, *, file_name: str, printer_name: Any):
+    """The consent a relayed authority block stands for, or ``None``.
+
+    Only two kinds are known — ``approval`` (a person's yes to one print)
+    and ``delegation`` (an account's yes to a named agent for a while) —
+    and each maps to the consent source public Kiln already grades A on
+    the hosted server.  Anything else is dropped, and the call runs with
+    no consent, so the gate refuses it in its own words rather than this
+    module inventing a yes.  Raises :class:`NotTheApprovedBytes` when the
+    approved hash and the fetched bytes disagree, which the caller turns
+    into a refused call.
+    """
+    from kiln.print_consent import (
+        SCOPE_FLEET,
+        SOURCE_HOSTED_APPROVAL,
+        SOURCE_HOSTED_DELEGATION,
+        PrintConsent,
+    )
+
+    if not isinstance(block, dict):
+        return None
+    kind = str(block.get("kind") or "")
+    source = {"approval": SOURCE_HOSTED_APPROVAL, "delegation": SOURCE_HOSTED_DELEGATION}.get(kind)
+    record_id = str(block.get("id") or "")
+    grantor = str(block.get("grantor") or "")
+    if source is None or not record_id or not grantor:
+        return None
+    expected = str(block.get("file_sha256") or "").strip().lower()
+    if file_name and expected:
+        actual = _sha256_of(file_name)
+        shortest = min(len(actual), len(expected))
+        if shortest < 32 or actual[:shortest] != expected[:shortest]:
+            raise NotTheApprovedBytes(
+                "not started: the file that arrived is not the one that was approved "
+                f"({record_id}); approve the print again from the page that shows it."
+            )
+    # The identity is WHO SAID GO, then whose yes it rested on: the person
+    # starting under their own approval is the account; an agent starting
+    # under a delegation — or under the one print the person approved at
+    # its asking — is "agent under account#record", never the person.
+    said_go_by = str(block.get("said_go_by") or grantor)
+    identity = f"{grantor}#{record_id}" if said_go_by == grantor else f"{said_go_by} under {grantor}#{record_id}"
+    if kind == "approval":
+        scope = None
+    else:
+        printers = block.get("printers")
+        if printers == SCOPE_FLEET:
+            scope = SCOPE_FLEET
+        elif isinstance(printers, (list, tuple)) and printers:
+            scope = tuple(str(p) for p in printers)
+        else:
+            scope = None
+    until = block.get("until")
+    # The printer is the one the CALL names, or none: the gate matches a
+    # consent against the name the call used, and the hosted server has
+    # already held the record to the printer it was made for.
+    return PrintConsent(
+        tool="bridge relay",
+        file_name=file_name or str(block.get("file_name") or ""),
+        printer_name=str(printer_name) if printer_name else None,
+        source=source,
+        scope=scope,
+        expires_at=float(until) if isinstance(until, (int, float)) else None,
+        identity=identity,
+        door=str(block.get("door") or ""),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +250,65 @@ def _default_artifact_fetcher(get_bearer: Callable[[], str]) -> ArtifactFetcher:
         return path
 
     return fetch
+
+
+def observe_addresses(
+    api: str, bearer: str, nonce: str, *, post: Callable[[int], bool] | None = None,
+) -> dict[str, bool]:
+    """``POST /api/bridge/observe`` once per address family, each carrying
+    *nonce*.  Returns ``{"v4": bool, "v6": bool}`` — which sides answered.
+    *post* is the per-family request (injected by tests); the default binds
+    a plain HTTPS connection to one family so the relay sees THAT side."""
+    import socket
+
+    do_post = post or (lambda family: _post_observe(api, bearer, nonce, family))
+    shown: dict[str, bool] = {}
+    for label, family in (("v4", socket.AF_INET), ("v6", socket.AF_INET6)):
+        try:
+            shown[label] = bool(do_post(family))
+        except Exception:  # noqa: BLE001 — a family this machine lacks is not an error
+            logger.debug("bridge: no %s route to the relay", label, exc_info=True)
+            shown[label] = False
+    return shown
+
+
+def _post_observe(api: str, bearer: str, nonce: str, family: int) -> bool:
+    """One observe request over one address family.  True on a 2xx."""
+    import http.client
+    import socket
+    import ssl
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(api)
+    host = parts.hostname or ""
+    secure = parts.scheme == "https"
+    port = parts.port or (443 if secure else 80)
+    infos = socket.getaddrinfo(host, port, family, socket.SOCK_STREAM)
+    if not infos:
+        return False
+    sockaddr = infos[0][4]
+
+    class _Bound(http.client.HTTPSConnection if secure else http.client.HTTPConnection):
+        # http.client picks whichever family resolves first; this one is
+        # told which side of the machine to speak from.
+        def connect(self) -> None:
+            raw = socket.socket(family, socket.SOCK_STREAM)
+            raw.settimeout(self.timeout)
+            raw.connect(sockaddr)
+            if secure:
+                context = getattr(self, "_context", None) or ssl.create_default_context()
+                raw = context.wrap_socket(raw, server_hostname=host)
+            self.sock = raw
+
+    conn = _Bound(host, port, timeout=10)
+    try:
+        conn.request(
+            "POST", "/api/bridge/observe", body=json.dumps({"nonce": nonce}),
+            headers={"Authorization": f"Bearer {bearer}", "Content-Type": "application/json"},
+        )
+        return 200 <= conn.getresponse().status < 300
+    finally:
+        conn.close()
 
 
 def _read_license() -> str:
@@ -269,6 +436,37 @@ class BridgeClient:
             "X-Kiln-Client-Version": _running_version(),
         }
 
+    def _dispatch_frame(self, ws, req: Any) -> asyncio.Task | None:
+        """Route one inbound frame: the relay's observe request is answered
+        off to the side; everything else is a tool call.  Each runs as its
+        own task so a slow address family or a slow slice never holds the
+        socket's receive loop."""
+        if not isinstance(req, dict):
+            return None
+        if "observe_nonce" in req:
+            return asyncio.create_task(self._show_addresses(str(req["observe_nonce"])))
+        return asyncio.create_task(self._handle_and_reply(ws, req))
+
+    async def _show_addresses(self, nonce: str) -> None:
+        """Show the relay this machine from each address family it has.
+
+        Why: the relay tells "printing from the web at home" from "from
+        miles away" by whether the browser arrives from the same public
+        address as this machine — and a home usually has an IPv4 and an
+        IPv6 side, while the socket shows only the one it happened to
+        dial out over.  So the relay hands the bridge a nonce, and the
+        bridge makes one small request per family carrying it; the relay
+        records where each request CAME FROM.  Nothing is claimed in the
+        body — an address a client could name is an address a client
+        could forge — and a family this machine cannot reach is simply not
+        shown.  Best-effort throughout; the print path never waits on it.
+        """
+        api = os.environ.get("KILN_API_URL", _DEFAULT_API_URL).rstrip("/")
+        try:
+            await asyncio.to_thread(observe_addresses, api, self._bearer(), nonce)
+        except Exception:  # noqa: BLE001 — a missed observation is a coarser answer, never a fault
+            logger.debug("bridge: address observation failed", exc_info=True)
+
     async def _handle_and_reply(self, ws, req: dict) -> None:
         resp = await asyncio.to_thread(
             handle_relay_request,
@@ -303,7 +501,7 @@ class BridgeClient:
                             req = json.loads(raw)
                         except Exception:
                             continue  # ignore a malformed frame, keep the link
-                        asyncio.create_task(self._handle_and_reply(ws, req))
+                        self._dispatch_frame(ws, req)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

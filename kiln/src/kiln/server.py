@@ -2503,7 +2503,11 @@ def _covered_by_approval(
 def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
     """One sentence: the preview is on record, nobody said go, and the
     places a yes can come from.  None of them is a string an agent can
-    type.
+    type.  On the hosted server the terminal and the window are nobody's,
+    so the sentence there names the account's doors instead: the person's
+    Approve on the print page, or a delegation the person granted this
+    agent — in this app's dialog when it draws one, or on their account
+    page (public Kiln ships the hook; kiln-pro keeps the record).
 
     When this call asked nobody because the HOST cannot show a dialog,
     it says so in as many words: the agent must tell the person that no
@@ -2511,28 +2515,17 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
     standing window — has to be given at a terminal.  An agent left to
     guess tends to promise a dialog it cannot show.
     """
+    from kiln.runtime_env import is_hosted_multitenant
+
     name = os.path.basename(str(file_name or "")) or "this file"
-    hosted = False
-    with contextlib.suppress(Exception):
-        from kiln.runtime_env import is_hosted_multitenant
-
-        hosted = bool(is_hosted_multitenant())
-    if hosted:
-        # There is no terminal on the hosted server for this person, and the
-        # file under ~/.kiln is nobody's: naming `kiln consent window` here
-        # would send them to a door that does not exist for them.
-        from kiln import consent_windows
-
-        windows = (
-            " or a standing window they opened on their Kiln account"
-            if consent_windows.window_store() is not None
-            else ""
-        )
+    if is_hosted_multitenant():
         return (
-            f"{tool_name} refuses to proceed: {name} was shown, but nobody said go — on the "
-            "hosted server a yes comes from the signed-in account's approval (this app's "
-            f"dialog, or the account's own approval page){windows}; an agent cannot supply it. "
-            "Tell the person that plainly."
+            f"{tool_name} refuses to proceed: {name} was shown, but nobody said go — on the hosted "
+            "server a yes is the signed-in person's Approve on the print page for this file on "
+            f"{aimed}, or a delegation the person granted this agent for {aimed} (this app's "
+            "approval dialog when it draws one, or their account page, Delegations); a terminal's "
+            "yes or a standing window is nobody's here, and an agent cannot supply either door "
+            "itself. Tell the person that plainly."
         )
     if why_not_asked() == NOT_ASKED_HOST_CANNOT:
         return (
@@ -6414,35 +6407,72 @@ def _ams_selection_record(
     tray_type: str,
     ams_info: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build a human-readable AMS selection record ``{slot, type, color}``.
+    """Build a human-readable AMS selection record ``{slot, name, type, color}``.
 
-    ``color`` is looked up from the (already-fetched) ``ams_info`` by slot
-    so callers can render "AMS slot 1 — black PLA" without another MQTT
-    round-trip.  Returns ``color=""`` when the tray reports no color.
+    ``slot`` is the printer's own tray id (what ``ams_mapping`` carries) and
+    ``name`` what Bambu Studio calls that tray (``B2``, ``HT-A``), so a
+    caller renders "slot B2 — black PLA" and a person with two units knows
+    which one.  ``color`` is looked up from the (already-fetched)
+    ``ams_info`` without another MQTT round-trip; ``""`` when the tray
+    reports no color.
     """
-    from kiln.ams_routing import TRAYS_PER_UNIT
+    from kiln.bambu_trays import read_tray_id
 
-    # ``slot`` is the printer's tray id (unit * 4 + slot); the trays carry
-    # their unit's own slot, so the id is resolved before it is matched.
-    unit_wanted, slot_wanted = divmod(int(slot), TRAYS_PER_UNIT)
+    # The trays carry their unit's own slot, so the id is resolved before
+    # it is matched.
+    ref = read_tray_id(slot)
     color = ""
-    for position, unit in enumerate(ams_info.get("units", [])):
+    if ref is not None and ref.loaded_tray:
+        for position, unit in enumerate(ams_info.get("units", [])):
+            try:
+                unit_id = int(unit.get("unit_id", position))
+            except (TypeError, ValueError):
+                unit_id = position
+            if unit_id != ref.unit:
+                continue
+            for tray in unit.get("trays", []):
+                try:
+                    if int(tray.get("slot", -1)) == ref.slot:
+                        color = str(tray.get("tray_color", "") or "")
+                        break
+                except (TypeError, ValueError):
+                    continue
+            if color:
+                break
+    return {"slot": int(slot), "name": ref.name if ref is not None else "", "type": tray_type, "color": color}
+
+
+def _ams_tray_rows(ams_result: dict[str, Any]) -> list[tuple[int, str, dict[str, Any]]]:
+    """``(tray_id, name, tray)`` for every tray in an ``ams_status`` reply.
+
+    The one way a door that scans the report itself gets the printer's id
+    for a tray: the adapter's own ``tray_id`` when the reply carries it,
+    else :func:`kiln.bambu_trays.tray_id` from the unit and its slot.  A
+    door that kept the unit's slot (0-3) and sent it as the mapping named
+    unit 0's tray for a spool on unit B, and nothing for an AMS HT.
+    """
+    from kiln.bambu_trays import tray_id as _tray_id
+    from kiln.bambu_trays import tray_name as _tray_name
+
+    rows: list[tuple[int, str, dict[str, Any]]] = []
+    for position, unit in enumerate(ams_result.get("units", []) or []):
+        if not isinstance(unit, dict):
+            continue
         try:
             unit_id = int(unit.get("unit_id", position))
         except (TypeError, ValueError):
             unit_id = position
-        if unit_id != unit_wanted:
-            continue
-        for tray in unit.get("trays", []):
-            try:
-                if int(tray.get("slot", -1)) == slot_wanted:
-                    color = str(tray.get("tray_color", "") or "")
-                    break
-            except (TypeError, ValueError):
+        for tray in unit.get("trays", []) or []:
+            if not isinstance(tray, dict):
                 continue
-        if color:
-            break
-    return {"slot": int(slot), "type": tray_type, "color": color}
+            try:
+                slot = int(tray.get("slot", 0))
+                tid = int(tray["tray_id"]) if tray.get("tray_id") is not None else _tray_id(unit_id, slot)
+                name = str(tray.get("name") or _tray_name(unit_id, slot))
+            except (TypeError, ValueError, KeyError):
+                continue
+            rows.append((tid, name, tray))
+    return rows
 
 
 def _undriven_multi_material_decision(
@@ -6680,7 +6710,7 @@ def _resolve_use_ams(
             "warnings": [
                 f"AMS auto-detect probe failed: {exc}.  Falling back to "
                 "external spool — pass use_ams='true' with an explicit "
-                "ams_mapping=[<slot>] if you want AMS."
+                "ams_mapping=[<tray id>] if you want AMS."
             ],
             "ambiguous": True,
         }
@@ -6727,7 +6757,7 @@ def _resolve_use_ams(
                 "AMS hardware present (ams_exist_bits=%s, tray_exist_bits=%s) "
                 "but no tray state available after retry.  Refusing silent "
                 "external-spool fallthrough.  Pass use_ams='true' with an "
-                "explicit ams_mapping=[<slot>] to force AMS routing.",
+                "explicit ams_mapping=[<tray id>] to force AMS routing.",
                 ams_exist_bits,
                 tray_exist_bits,
             )
@@ -6739,7 +6769,7 @@ def _resolve_use_ams(
                     f"tray_bits={tray_exist_bits}) but no tray state was "
                     "reported after retry.  Routing would silently fall "
                     "through to the external spool — pass use_ams='true' "
-                    "with an explicit ams_mapping=[<slot>] to force AMS, "
+                    "with an explicit ams_mapping=[<tray id>] to force AMS, "
                     "or wait a few seconds for the MQTT cache to refresh."
                 ],
                 "ambiguous": True,
@@ -6749,30 +6779,20 @@ def _resolve_use_ams(
         logger.info("AMS auto-detect: no AMS hardware — external spool.")
         return {"use_ams": False, "ams_mapping": None, "warnings": []}
 
-    # Collect loaded trays.  Trust ``tray_type`` as the loaded-indicator —
-    # the A1/AMS Lite reports ``remain: 0`` even for full spools (RFID
-    # capacity is only tracked on Bambu-branded spools with tag readers),
-    # so requiring ``remain > 0`` would incorrectly reject valid trays
-    # and force a broken external-spool route.
-    #
-    # Bambu's JSON sometimes returns slot IDs as strings (``"0"``) — coerce
-    # here so downstream ``%d`` logging and ``int`` arithmetic don't trip.
-    loaded_trays: list[dict[str, Any]] = []
-    for unit in units:
-        for tray in unit.get("trays", []):
-            tray_type = str(tray.get("tray_type", "") or "").strip()
-            if not tray_type:
-                continue
-            try:
-                slot_idx = int(tray.get("slot", 0))
-            except (TypeError, ValueError):
-                continue
-            loaded_trays.append({
-                "slot": slot_idx,
-                "tray_type": tray_type,
-            })
+    # Collect loaded trays through the one reader every AMS door uses, so a
+    # spool on a second unit (or an AMS HT) is routed by the printer's own
+    # id for it -- this pick used to keep the unit's slot (0-3) and send
+    # THAT as the mapping, which named unit 0's tray.  ``tray_type`` is the
+    # loaded-indicator: the A1/AMS Lite reports ``remain: 0`` even for full
+    # spools (RFID capacity is only tracked on Bambu-branded spools with tag
+    # readers), so requiring ``remain > 0`` would reject valid trays and
+    # force a broken external-spool route.
+    from kiln.ams_routing import loaded_trays as _loaded_trays
+    from kiln.ams_routing import plan_ams_mapping, read_file_filaments
 
-    if not loaded_trays:
+    trays = _loaded_trays(ams_info)
+
+    if not trays:
         logger.warning(
             "AMS present but no trays report loaded filament — routing to "
             "external spool.  If the external-spool feeder is empty the "
@@ -6793,13 +6813,9 @@ def _resolve_use_ams(
     # Colour-aware routing: when the file says which filaments it wants,
     # match each to the loaded tray that is actually that colour.  The
     # legacy single-tray pick below is the N=1 case with no colour to go on.
-    from kiln.ams_routing import loaded_trays as _loaded_trays
-    from kiln.ams_routing import plan_ams_mapping, read_file_filaments
-
     if wanted is None and file_path:
         wanted = read_file_filaments(file_path).filaments
     if wanted and any(getattr(f, "hex6", None) for f in wanted):
-        trays = _loaded_trays(ams_info)
         plan = plan_ams_mapping(list(wanted), trays)
         if plan.ok:
             resolved = list(plan.mapping)
@@ -6842,38 +6858,39 @@ def _resolve_use_ams(
         warnings_out.extend(plan.warnings)
 
     # Material-aware tray selection when caller hints at the material.
+    from kiln.bambu_trays import describe_tray_id
+
     chosen = None
     if material:
         mat_norm = material.strip().upper()
-        for tray in loaded_trays:
-            if tray["tray_type"].upper() == mat_norm:
+        for tray in trays:
+            if tray.material.upper() == mat_norm:
                 chosen = tray
                 break
         if chosen is None:
-            chosen = loaded_trays[0]
+            chosen = trays[0]
             warnings_out.append(
-                f"No AMS tray matches material {material!r}; using tray "
-                f"{chosen['slot']} ({chosen['tray_type']}) instead."
+                f"No AMS tray matches material {material!r}; using "
+                f"{describe_tray_id(chosen.tray_id)} ({chosen.material}) instead."
             )
     else:
-        chosen = loaded_trays[0]
+        chosen = trays[0]
 
     logger.info(
-        "AMS auto-detect: routing to tray %d (%s) — %d loaded slot(s) available.",
-        chosen["slot"],
-        chosen["tray_type"],
-        len(loaded_trays),
+        "AMS auto-detect: routing to %s (%s) — %d loaded slot(s) available.",
+        describe_tray_id(chosen.tray_id),
+        chosen.material,
+        len(trays),
     )
 
     # Auto-generate mapping only if caller didn't provide one
     auto_mapping = None
     if ams_mapping is None:
-        auto_mapping = [chosen["slot"]]  # already coerced to int above
+        auto_mapping = [chosen.tray_id]
 
     # Human-readable selection record so callers can surface
-    # "printing from AMS slot 1 — black PLA" without re-querying.
-    # Recovered from ams_info because loaded_trays kept only slot+type.
-    selection = _ams_selection_record(chosen["slot"], chosen["tray_type"], ams_info)
+    # "printing from slot B2 — black PLA" without re-querying.
+    selection = _ams_selection_record(chosen.tray_id, chosen.material, ams_info)
 
     return {
         "use_ams": True,
@@ -7009,10 +7026,13 @@ def start_print(
               is connected.
             - ``"false"`` / ``False``: Force AMS off.  Use external spool.
 
-        ams_mapping: Slot mapping per extruder (Bambu only).  Defaults to
+        ams_mapping: The tray each extruder feeds from (Bambu only), by
+            the printer's own tray id: ``unit * 4 + slot`` on a chained
+            unit (unit B's first slot is 4), the unit id itself on an AMS
+            HT (HT-A is 128).  ``ams_status()`` lists each tray's
+            ``tray_id`` and its Studio name (``B1``, ``HT-A``).  Defaults to
             ``[0]`` when AMS feeding is on and ``[]`` (external spool) when
-            it is off.  Use ``-1`` for unused positions.  Check
-            ``ams_status()`` to see which slots have filament.
+            it is off.  Use ``-1`` for unused positions.
         timelapse: Record a timelapse video (Bambu only).  Default ``False``.
         bed_leveling: Run automatic bed leveling before print (Bambu only).
             Default ``True``.  Set ``False`` to skip for reprints (~2 min saved).
@@ -8874,12 +8894,19 @@ def ams_status() -> dict:
     Returns what's loaded in each AMS tray: filament type, color, remaining
     percentage, RFID tag, temperature ranges, and humidity.
 
-    The ``tray_now`` field usually shows which tray is currently active
-    (``"255"`` means none / external spool on X1/P1-style reports).  A1 /
-    AMS Lite reports may keep ``tray_now`` at ``"255"`` while exposing
-    loaded AMS trays and selected/target tray fields such as ``tray_pre``
-    or ``tray_tar``.  The ``ams_exist_bits`` and ``tray_exist_bits`` fields
-    are bitmasks showing which AMS units and trays are physically present.
+    Each tray carries its unit's own ``slot`` (0-3), the printer's
+    ``tray_id`` for it (``unit * 4 + slot`` on a chained unit, the unit id
+    itself on an AMS HT) and Studio's ``name`` (``A1``…``D4``, ``HT-A``);
+    each unit carries its ``name`` (``A``, ``HT-B``).  ``feeding`` is the
+    tray feeding the nozzle -- ``{tray_id, unit, slot, name, source}``, or
+    ``None`` when nothing feeds -- and ``feeding_source`` says which field
+    of the printer's report it came from.  The raw ``tray_now`` is kept as
+    sent: ``"254"`` is the external spool,
+    ``"255"`` no tray.  A1 / AMS Lite reports may keep ``tray_now`` at
+    ``"255"`` while exposing loaded AMS trays and selected/target tray
+    fields such as ``tray_pre`` or ``tray_tar``.  The ``ams_exist_bits`` and
+    ``tray_exist_bits`` fields are bitmasks showing which AMS units and
+    trays are physically present.
 
     Use this to check filament levels before printing, verify the correct
     material is loaded, or select the right ``ams_mapping`` for
@@ -9127,9 +9154,9 @@ def set_fan(percent: int, node: str = "part") -> dict:
 
     Supported on Bambu Lab, OctoPrint, Moonraker/Klipper printers, and
     Elegoo's Centauri Carbon (FDM). Prusa Link has no raw G-code endpoint, so
-    fan control isn't available there
-    (https://github.com/prusa3d/Prusa-Link/issues/832). some Elegoo models
-    printers (Saturn, Mars) have no part-cooling fan and are refused.
+    fan control isn't available there (a known limitation of Prusa Link
+    itself). Some Elegoo resin printers (Saturn, Mars) have no part-cooling
+    fan and are refused.
 
     Args:
         node: Which fan to set. ``"part"`` (part-cooling / model fan, the
@@ -11024,26 +11051,27 @@ def register_printer(
         if printer_type == "bambu" and verify_connection:
             try:
                 ams_info = adapter.get_ams_status()
+                # Each loaded tray with the printer's id for it (``tray_id``,
+                # the number ``tray_now`` below is in) and Studio's name,
+                # beside its unit's own slot.
                 loaded_trays: list[dict[str, Any]] = []
-                for unit in ams_info.get("units", []):
-                    if not isinstance(unit, dict):
+                for tid, name, tray in _ams_tray_rows(ams_info):
+                    tray_type = str(tray.get("tray_type", "") or "").strip()
+                    if not tray_type:
                         continue
-                    for tray in unit.get("trays", []):
-                        if not isinstance(tray, dict):
-                            continue
-                        tray_type = str(tray.get("tray_type", "") or "").strip()
-                        if not tray_type:
-                            continue
-                        loaded_trays.append({
-                            "slot": tray.get("slot"),
-                            "tray_type": tray_type,
-                            "tray_color": tray.get("tray_color"),
-                        })
+                    loaded_trays.append({
+                        "slot": tray.get("slot"),
+                        "tray_id": tid,
+                        "name": name,
+                        "tray_type": tray_type,
+                        "tray_color": tray.get("tray_color"),
+                    })
                 result["bambu_ready"] = True
                 result["ams_summary"] = {
                     "units": len(ams_info.get("units", [])),
                     "loaded_tray_count": len(loaded_trays),
                     "loaded_trays": loaded_trays,
+                    "feeding": ams_info.get("feeding"),
                     "tray_now": ams_info.get("tray_now"),
                     "tray_pre": ams_info.get("tray_pre"),
                     "tray_tar": ams_info.get("tray_tar"),
@@ -14401,7 +14429,8 @@ def print_plate_object(
     :param file_path: Path to the .gcode.3mf file.
     :param object_name: Name (or partial name) of the object to print.
     :param use_ams: AMS mode — ``"auto"``, ``"true"``, or ``"false"``.
-    :param ams_mapping: AMS slot mapping (e.g. ``[0]`` for slot 1).
+    :param ams_mapping: The tray per extruder by the printer's tray id
+        (e.g. ``[0]`` for slot A1, ``[5]`` for B2; see ``ams_status``).
     :param bed_leveling: Run bed leveling before print.
     :param flow_cali: Run flow calibration before print.
     :param vibration_cali: Run vibration calibration before print.
@@ -17889,7 +17918,7 @@ def reprint_with_material(
             printer_name="my_bambu",
             printer_id="bambu_a1",
             use_ams=True,
-            ams_mapping="[1]",  # PETG is in AMS slot 1
+            ams_mapping="[1]",  # PETG is in slot A2 (tray id 1)
         )
 
     Requires PrusaSlicer or OrcaSlicer installed locally.
@@ -18173,27 +18202,31 @@ def smart_reprint(
                     }
                     expected_types = mat_aliases.get(mat_lower, [mat_lower.upper()])
 
-                    # Scan AMS trays for a matching material
+                    # Scan AMS trays for a matching material.  ``slot`` is
+                    # the printer's own tray id (what ams_mapping takes);
+                    # ``name`` what Studio calls it.
                     best_slot: int | None = None
+                    best_name: str | None = None
                     best_remain: int = -1
-                    for unit in ams_result.get("units", []):
-                        for tray in unit.get("trays", []):
-                            tray_type = (tray.get("tray_type") or "").strip()
-                            if tray_type in expected_types:
-                                remain = tray.get("remain", 0)
-                                if remain > best_remain:
-                                    best_remain = remain
-                                    best_slot = tray.get("slot", 0)
-                                    # `remain` is a real reading only for an
-                                    # RFID-tagged spool — AMS Lite reports a
-                                    # placeholder, flagged by the adapter.
-                                    remaining_known = bool(tray.get("remaining_known"))
-                                    ams_slot_info = {
-                                        "slot": best_slot,
-                                        "tray_type": tray_type,
-                                        "color": tray.get("tray_color", ""),
-                                        "remain_pct": remain if remaining_known else None,
-                                    }
+                    for tid, name, tray in _ams_tray_rows(ams_result):
+                        tray_type = (tray.get("tray_type") or "").strip()
+                        if tray_type in expected_types:
+                            remain = tray.get("remain") or 0
+                            if remain > best_remain:
+                                best_remain = remain
+                                best_slot = tid
+                                best_name = name
+                                # `remain` is a real reading only for an
+                                # RFID-tagged spool — AMS Lite reports a
+                                # placeholder, flagged by the adapter.
+                                remaining_known = bool(tray.get("remaining_known"))
+                                ams_slot_info = {
+                                    "slot": best_slot,
+                                    "name": best_name,
+                                    "tray_type": tray_type,
+                                    "color": tray.get("tray_color", ""),
+                                    "remain_pct": remain if remaining_known else None,
+                                }
 
                     if best_slot is not None:
                         detected_ams_mapping = _json.dumps([best_slot])
@@ -18203,6 +18236,7 @@ def smart_reprint(
                                 "step": "ams_detection",
                                 "found": True,
                                 "slot": best_slot,
+                                "name": best_name,
                                 "tray_type": ams_slot_info["tray_type"] if ams_slot_info else "",
                                 "remain_pct": ams_slot_info["remain_pct"] if ams_slot_info else None,
                             }
@@ -18674,25 +18708,25 @@ def multi_material_print(
                         expected = mat_type_map.get(mat_id, [mat_id.upper()])
                         req_hex = _normalize_hex(req_color)
                         found_slot: int | None = None
+                        found_name: str | None = None
+                        found_type = ""
+                        # Trays keyed by the printer's own id, so a spool on
+                        # unit B (or an AMS HT) is mapped as itself and two
+                        # units' slot 1 are never one entry.
+                        rows = _ams_tray_rows(ams_result)
                         # First pass: match both material type AND color
-                        for unit in ams_result.get("units", []):
-                            for tray in unit.get("trays", []):
-                                ttype = (tray.get("tray_type") or "").strip()
-                                tray_color = _normalize_hex(tray.get("tray_color") or tray.get("color") or "")
-                                if ttype in expected and tray_color == req_hex and tray.get("slot") not in mapping:
-                                    found_slot = tray.get("slot", 0)
-                                    break
-                            if found_slot is not None:
+                        for tid, name, tray in rows:
+                            ttype = (tray.get("tray_type") or "").strip()
+                            tray_color = _normalize_hex(tray.get("tray_color") or tray.get("color") or "")
+                            if ttype in expected and tray_color == req_hex and tid not in mapping:
+                                found_slot, found_name, found_type = tid, name, ttype
                                 break
                         # Fallback: match material type only (ignore color)
                         if found_slot is None:
-                            for unit in ams_result.get("units", []):
-                                for tray in unit.get("trays", []):
-                                    ttype = (tray.get("tray_type") or "").strip()
-                                    if ttype in expected and tray.get("slot") not in mapping:
-                                        found_slot = tray.get("slot", 0)
-                                        break
-                                if found_slot is not None:
+                            for tid, name, tray in rows:
+                                ttype = (tray.get("tray_type") or "").strip()
+                                if ttype in expected and tid not in mapping:
+                                    found_slot, found_name, found_type = tid, name, ttype
                                     break
                         if found_slot is not None:
                             mapping.append(found_slot)
@@ -18701,7 +18735,8 @@ def multi_material_print(
                                     "material": mat_id,
                                     "color": req_color,
                                     "slot": found_slot,
-                                    "tray_type": (tray.get("tray_type") or "").strip(),
+                                    "name": found_name,
+                                    "tray_type": found_type,
                                 }
                             )
                         else:
@@ -18903,8 +18938,10 @@ def multi_color_copies(
 
     :param model_path: Path to the model file (STL or OBJ).
     :param copies: Number of copies.  Auto-detected from AMS if omitted.
-    :param ams_slots: Explicit AMS slot indices (0-based) per copy.
-        E.g. ``[0, 1, 2, 3]`` for all 4 AMS Lite trays.
+    :param ams_slots: The tray each copy prints from, by the printer's own
+        tray id (``unit * 4 + slot`` on a chained unit, the unit id on an
+        AMS HT; ``ams_status`` lists each tray's ``tray_id``).  E.g.
+        ``[0, 1, 2, 3]`` for all 4 AMS Lite trays, ``[0, 5]`` for A1 and B2.
     :param colors: Hex color strings per copy for slicer preview.
         E.g. ``["#FF0000", "#00FF00", "#0000FF", "#FFFF00"]``.
         Auto-read from AMS if omitted.
@@ -18938,7 +18975,10 @@ def multi_color_copies(
             )
 
         # --- Resolve AMS slots and colors ---
+        # ``resolved_slots`` are the printer's own tray ids, the numbers
+        # ``ams_mapping`` takes; ``resolved_names`` what Studio calls them.
         resolved_slots: list[int] = []
+        resolved_names: dict[int, str] = {}
         resolved_colors: list[str] = []
         ams_warning: str | None = None
 
@@ -18958,18 +18998,23 @@ def multi_color_copies(
             except Exception:
                 ams_check = None
             if ams_check and ams_check.get("success"):
-                loaded_slots = {
-                    int(tray.get("slot", 0))
-                    for unit in ams_check.get("units", [])
-                    for tray in unit.get("trays", [])
+                from kiln.bambu_trays import describe_tray_id
+
+                # Keyed by the printer's own tray id -- the number the
+                # caller passes -- not the unit's slot, which would call
+                # unit B's second spool "1" and refuse a correct 5.
+                loaded = {
+                    tid: name
+                    for tid, name, tray in _ams_tray_rows(ams_check)
                     if (tray.get("tray_type") or "").strip()
                 }
-                missing = sorted(s for s in resolved_slots if s not in loaded_slots)
+                missing = sorted(s for s in resolved_slots if s not in loaded)
                 if missing:
                     return _error_dict(
-                        f"AMS slot(s) {missing} have no filament loaded. "
-                        f"Loaded slots: {sorted(loaded_slots)}. Pick loaded "
-                        f"slots or load filament first.",
+                        f"No filament is loaded in {', '.join(describe_tray_id(m) for m in missing)}. "
+                        f"Loaded: {', '.join(loaded[t] for t in sorted(loaded))} "
+                        f"(tray ids {sorted(loaded)}). Pick loaded trays or load "
+                        f"filament first.",
                         code="NO_MATERIAL",
                     )
             else:
@@ -18987,16 +19032,15 @@ def multi_color_copies(
                         code="AMS_ERROR",
                     )
                 mat_upper = material.upper().strip()
-                for unit in ams_result.get("units", []):
-                    for tray in unit.get("trays", []):
-                        ttype = (tray.get("tray_type") or "").strip().upper()
-                        if ttype == mat_upper or mat_upper in ttype:
-                            slot = int(tray.get("slot", 0))
-                            color_hex = tray.get("tray_color", "000000FF")
-                            # Convert RRGGBBAA to #RRGGBB
-                            if len(color_hex) >= 6:
-                                resolved_slots.append(slot)
-                                resolved_colors.append(f"#{color_hex[:6]}")
+                for tid, name, tray in _ams_tray_rows(ams_result):
+                    ttype = (tray.get("tray_type") or "").strip().upper()
+                    if ttype == mat_upper or mat_upper in ttype:
+                        color_hex = tray.get("tray_color", "000000FF")
+                        # Convert RRGGBBAA to #RRGGBB
+                        if len(color_hex) >= 6:
+                            resolved_slots.append(tid)
+                            resolved_names[tid] = name
+                            resolved_colors.append(f"#{color_hex[:6]}")
             except Exception as exc:
                 return _error_dict(
                     f"AMS query failed: {exc}. Specify ams_slots manually.",
@@ -19141,7 +19185,8 @@ def multi_color_copies(
                 for i, p in enumerate(positioned)
             ]
             result["ams_mapping"] = [
-                {"copy": i + 1, "slot": s, "color": resolved_colors[i]} for i, s in enumerate(resolved_slots)
+                {"copy": i + 1, "slot": s, "name": resolved_names.get(s), "color": resolved_colors[i]}
+                for i, s in enumerate(resolved_slots)
             ]
             result["multi_color_3mf"] = output_3mf
             if compose_result.get("slicer_note"):

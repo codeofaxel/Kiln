@@ -176,6 +176,36 @@ _COMMIT_RULES = (
 )
 
 
+def _commit_provenance_rule() -> Rule:
+    """Research provenance in a commit message: a source file:line pin, a
+    wiki or forum page, a community account or client, a fetch date.
+
+    The public repository's history is as public as its tree; a pin in a
+    message is the same trail a comment is refused for.  A repository link
+    is NOT judged here -- dependency bumps cite the dependency's own repo
+    -- so the account vocabulary carries the research projects by name.
+    The vocabulary is ``kiln.data_note_contract``'s, read from this tree.
+    """
+    accounts = r"\b(?:pellcorp|Guilouz|TheFeralEngineer|artillery3dlab|fpnewton|Doridian|OpenBambuAPI)\b"
+    try:
+        contract = _load_module(
+            "kiln_data_note_contract_for_commit", _ROOT / "kiln" / "src" / "kiln" / "data_note_contract.py",
+        )
+        accounts = str(contract.COMMUNITY_ACCOUNTS)
+    except Exception:
+        pass
+    return Rule(
+        "research provenance",
+        re.compile(
+            r"\b[\w./-]+\.(?:cpp|hpp|cc|c|h)\b(?::\d+|[^\n]{0,40}@ \d+\.\d+)"
+            r"|\b(?:wiki|forum|forums|community|discuss)\.[\w.-]+\.(?:com|org|io|net|dev|cn)/[\w./#?=%-]+"
+            r"|reddit\.com/r/[\w/]+"
+            r"|\bread 20\d\d-\d\d-\d\d\b"
+            r"|" + accounts,
+        ),
+    )
+
+
 def find_violations(
     text: str,
     *,
@@ -184,7 +214,7 @@ def find_violations(
 ) -> list[Finding]:
     """Return public-language violations in ``text``."""
     findings: list[Finding] = []
-    rules = _PUBLIC_RULES + (_COMMIT_RULES if commit_message else ())
+    rules = _PUBLIC_RULES + (_COMMIT_RULES + (_commit_provenance_rule(),) if commit_message else ())
 
     suffix = Path(source).suffix.lower()
 
