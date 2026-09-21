@@ -354,6 +354,55 @@ def dialog_schema(*, offer_window: bool = True, offer_fleet: bool = False) -> di
     return dialog_form(offer_window=offer_window, offer_fleet=offer_fleet).model_json_schema()
 
 
+# ---------------------------------------------------------------------------
+# The same question over a door with no dialog channel (REST)
+# ---------------------------------------------------------------------------
+#
+# A native app and the hosted "call again with the answer" wire have no
+# elicitation channel; the tool's answer has to CARRY the question.  This is
+# the envelope both use, defined here so the desktop sheet, the hosted route
+# and the MCP dialog cannot drift apart.  The person's filled form comes
+# back on the re-call OUT OF BAND from the agent's tool arguments — a header
+# — so nothing a model can put in ``arguments`` is ever read as an answer.
+
+#: The key on a refused tool result that carries the question to put.
+INPUT_REQUIRED_KEY = "input_required"
+#: The error code beside it.
+CODE_CONSENT_REQUIRED = "CONSENT_REQUIRED"
+#: The header the re-call carries the filled form in, as JSON.
+INPUT_RESPONSES_HEADER = "X-Kiln-Input-Responses"
+#: What the envelope is about, so a renderer can pick the right sheet.
+INPUT_KIND_PRINT_CONSENT = "print_consent"
+
+
+def input_required_block(
+    *, message: str, offer_window: bool = True, offer_fleet: bool = False, request_id: str = "",
+) -> dict[str, Any]:
+    """The question, ready to ride a refused tool result over REST.
+
+    ``schema`` is exactly :func:`dialog_schema` for the offer; ``fields``
+    names the properties a sheet fills; ``how_to_answer`` says where the
+    answer goes.  *request_id* lets a surface that seals its asks (the
+    hosted server) bind the answer to the question it answered.
+    """
+    return {
+        "kind": INPUT_KIND_PRINT_CONSENT,
+        "request_id": request_id,
+        "message": message,
+        "schema": dialog_schema(offer_window=offer_window, offer_fleet=offer_fleet),
+        "fields": {
+            "answer": FIELD_ANSWER,
+            "for_how_long": FIELD_FOR_HOW_LONG if offer_window else "",
+            "where": FIELD_WHERE if (offer_window and offer_fleet) else "",
+        },
+        "how_to_answer": (
+            "Show the person the message and the form. Send the filled form as JSON in the "
+            f"{INPUT_RESPONSES_HEADER} header of the same call made again, with the same arguments. "
+            "The answer must come from the person's own screen, never from the agent's arguments."
+        ),
+    }
+
+
 def _field(content: Any, name: str) -> Any:
     if isinstance(content, dict):
         return content.get(name)

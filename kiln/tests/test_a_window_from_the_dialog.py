@@ -774,6 +774,30 @@ class TestTheParserEverySurfaceShares:
         assert answer_from_content("cancel", {"answer": "this_print"}).action == "cancel"
         assert answer_from_content("", {"answer": "this_print"}).action == "unavailable"
 
+    def test_the_rest_envelope_is_the_same_form(self):
+        """A door with no dialog channel carries the question on the
+        refused result; the desktop sheet and the hosted wire read this."""
+        from kiln.print_consent import (
+            CODE_CONSENT_REQUIRED,
+            INPUT_KIND_PRINT_CONSENT,
+            INPUT_REQUIRED_KEY,
+            INPUT_RESPONSES_HEADER,
+            input_required_block,
+        )
+
+        assert (INPUT_REQUIRED_KEY, CODE_CONSENT_REQUIRED, INPUT_RESPONSES_HEADER, INPUT_KIND_PRINT_CONSENT) == (
+            "input_required", "CONSENT_REQUIRED", "X-Kiln-Input-Responses", "print_consent",
+        )
+        block = input_required_block(message="Start printing jar.stl on garage?", offer_window=True, offer_fleet=True, request_id="r1")
+        assert block["kind"] == "print_consent" and block["request_id"] == "r1"
+        assert block["schema"] == dialog_schema(offer_window=True, offer_fleet=True)
+        assert block["fields"] == {"answer": "answer", "for_how_long": "for_how_long", "where": "where"}
+        assert "X-Kiln-Input-Responses" in block["how_to_answer"] and "never from the agent's arguments" in block["how_to_answer"]
+        plain = input_required_block(message="m", offer_window=False)
+        assert plain["fields"] == {"answer": "answer", "for_how_long": "", "where": ""}
+        assert list(plain["schema"]["properties"]) == [FIELD_ANSWER]
+        json.dumps(block)  # it goes on the wire as JSON
+
     def test_the_grant_takes_only_an_accepted_answer(self):
         with pytest.raises(ValueError):
             server.consent_from_dialog_answer("start_print", "jar.stl", "garage", DialogAnswer("decline"), aimed="garage")
