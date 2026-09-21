@@ -43,6 +43,8 @@ kiln_pro.payments.base
 kiln_pro.payments.manager.PaymentManager
 kiln_pro.payments.stripe_provider
 kiln_pro.payments.stripe_provider.StripeProvider
+kiln_pro.placement
+kiln_pro.placement.bridge
 kiln_pro.plugins.git_render_tools
 kiln_pro.plugins.git_render_tools.attach_inspect_bundle
 kiln_pro.print_fix.engine
