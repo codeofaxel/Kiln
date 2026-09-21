@@ -100,6 +100,12 @@ class TestGetStarted:
         # the stamped tool descriptions carry is named here.
         assert "INLINE 3D STAGE" in stage["how_to_find_it"]
 
+    def test_flat_part_workflow_goes_solve_then_compile_unchanged_then_preview(self):
+        wf = get_started()["core_workflows"]["flat_part_from_relationships"]
+        assert wf.index("solve_sketch") < wf.index("compile_scad") < wf.index("visualize_model")
+        assert "unchanged" in wf and "header" in wf
+        assert "left free" in wf
+
     def test_show_a_mesh_file_workflow_names_the_stage_door(self):
         wf = get_started()["core_workflows"]["show_a_mesh_file_in_3d"]
         assert "import_external_mesh" in wf

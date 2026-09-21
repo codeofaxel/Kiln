@@ -864,6 +864,16 @@ class _UtilityToolsPlugin:
                         "visualize_model gives the PNG plus a browser stage "
                         "link when signed in."
                     ),
+                    "flat_part_from_relationships": (
+                        "solve_sketch(sketch=...) → compile_scad(scad_code=<the "
+                        "returned OpenSCAD, unchanged — its first line is a "
+                        "header the sketch tools read back>) → visualize_model. "
+                        "Describe a flat part by how its points and edges "
+                        "RELATE (lengths, angles, parallel, symmetric, a hole "
+                        "so far from an edge) and the solver places every "
+                        "coordinate; it reports what it left free instead of "
+                        "defaulting it. Served by kiln-pro, free."
+                    ),
                     "monitor": "printer_status, printer_snapshot, await_print_completion",
                     "queue_jobs": "submit_job → job_status → queue_summary",
                 },
