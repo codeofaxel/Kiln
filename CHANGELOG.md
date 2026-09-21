@@ -78,6 +78,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Say yes once, for a while — from the approval dialog itself.** Answer
+  "this print only", "the next 2 hours", "the rest of today" or a length you
+  type (24 hours at most), and prints on that printer start without asking
+  until then — every result says the window is open, closing it is one
+  message to your assistant, and every printer at once is Business+.
+
 - **Kiln counts your filament-cutter blade's cuts and tells you when it's
   due.** Every print, load and colour change Kiln can see counts against the
   maker's own number, and a print start says so when the blade wants
