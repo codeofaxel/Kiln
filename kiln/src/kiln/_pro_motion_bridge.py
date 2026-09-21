@@ -35,6 +35,19 @@ Bambu model refuses to home, park or wipe by name and says what to use
 instead; a purge runs in place and says so.  Never a stub that claims
 success.  Nothing here gates a tier; entitlement is the service's.
 
+**Why there is no plan** is kept too.  Four things can stop a served
+plan and each has a different fix -- this computer is offline, Kiln is
+signed out, the service did not answer, the service refused -- so a door
+that has to refuse a motion can say which (:func:`miss_for`, a
+:class:`kiln.served_answer.Miss`).  The line between "did not answer" and
+"refused" is the one that matters to the cache: a transport failure, a
+missing sign-in, and the service's own "try again shortly" (its heartbeat
+table or counter was down) are not rulings on this machine, and a plan
+that was true before one of them is still true after it.  Only an answer
+that rules on the machine -- not paired, no record, over the cap -- drops
+the cached copy.  :mod:`kiln.served_answer` draws that line for every
+served door; nothing here decides it twice.
+
 Plan document (``schema: "motion_plan/1"``), the contract both sides pin:
 
 * ``printer_id``, ``verb`` (``home`` / ``park`` / ``wipe`` / ``purge``),
@@ -67,6 +80,8 @@ import logging
 import time
 from typing import Any
 
+from kiln.served_answer import Miss, classify_answer, classify_transport_error
+
 logger = logging.getLogger(__name__)
 
 SCHEMA = "motion_plan/1"
@@ -78,11 +93,16 @@ VERBS = ("home", "park", "wipe", "purge")
 #: the offline case -- the one the cache exists for -- the slowest of all.
 SERVICE_BACKOFF_S: float = 60.0
 _service_down_until: float = 0.0
+#: Why the service is being left alone, so a door asked during the backoff
+#: hears the same cause the first ask did, not a blank.
+_service_down_miss: Miss | None = None
 _UNREACHABLE_CODES = frozenset({"SERVER_UNREACHABLE", "KILN_API_HTTP_ERROR"})
-#: Answers that are not a ruling on this machine -- nothing to revoke.
-_NOT_ANSWERED_CODES = frozenset({"KILN_ACCOUNT_NOT_PAIRED", "KILN_SIGNIN_REQUIRED", "NOT_SERVED_HERE"})
-#: The service answered, and the answer was no: the cache must not stand in.
-_REFUSED = object()
+
+#: Why the last ask for each request came back without a plan, keyed by
+#: :func:`_key`.  Written by :func:`_served_plan`, cleared by a served
+#: plan, read by :func:`miss_for`.  A cache hit leaves the entry in place:
+#: the door has its plan, and the executor notes where it came from.
+_misses: dict[tuple[str, str, str, str, bool], Miss] = {}
 
 
 def _local_pro() -> Any | None:
@@ -119,14 +139,23 @@ def _machine_request(adapter: Any, verb: str, axes: str, on_plate_ok: bool) -> d
     return {"printer_id": model, "serial": serial, "verb": verb, "axes": axes, "on_plate_ok": bool(on_plate_ok)}
 
 
+def _key(request: dict[str, Any]) -> tuple[str, str, str, str, bool]:
+    return (
+        str(request.get("printer_id") or ""), str(request.get("serial") or ""),
+        str(request.get("verb") or ""), str(request.get("axes") or ""), bool(request.get("on_plate_ok")),
+    )
+
+
 def plan_for(adapter: Any, verb: str, *, axes: str = "XYZ", on_plate_ok: bool = False) -> dict[str, Any] | None:
     """The plan document for *verb* on *adapter*'s machine, or ``None``.
 
     Local kiln-pro first, then the service, then the cache -- see the
     module docstring.  A served plan is written to the cache on the way
-    back; a cached plan is served only for the same machine.  A plan that
-    says ``ok: false`` is still a plan: the record's own refusal reason,
-    handed back for the door to word.
+    back; a cached plan is served only for the same machine, and carries
+    ``from_cache`` and ``cache_because`` (why the service was not the
+    source this time).  A plan that says ``ok: false`` is still a plan:
+    the record's own refusal reason, handed back for the door to word.
+    ``None`` leaves the reason in :func:`miss_for`.
     """
     request = _machine_request(adapter, verb, axes, on_plate_ok)
     if not request["printer_id"]:
@@ -145,55 +174,73 @@ def plan_for(adapter: Any, verb: str, *, axes: str = "XYZ", on_plate_ok: bool = 
     if _is_plan(doc):
         _cache.store(request, doc)
         return doc
-    if doc is _REFUSED:
+    miss = _misses.get(_key(request))
+    if miss is not None and miss.cause == "refused":
         _cache.forget(request)
         return None
     doc = _cache.load(request)
     if _is_plan(doc):
         doc = dict(doc)
         doc["from_cache"] = True
+        if miss is not None:
+            doc["cache_because"] = miss.cause
         return doc
     return None
 
 
-def _served_plan(request: dict[str, Any]) -> dict[str, Any] | object | None:
-    """Ask the hosted service for the plan; ``None`` when it does not answer,
-    :data:`_REFUSED` when it answered no.
+def miss_for(adapter: Any, verb: str, *, axes: str = "XYZ", on_plate_ok: bool = False) -> Miss | None:
+    """Why the last :func:`plan_for` for this request came back without a
+    served plan, or ``None`` when it was served (or never asked)."""
+    return _misses.get(_key(_machine_request(adapter, verb, axes, on_plate_ok)))
+
+
+def _back_off(miss: Miss) -> None:
+    global _service_down_until, _service_down_miss
+    _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+    _service_down_miss = miss
+
+
+def _served_plan(request: dict[str, Any]) -> dict[str, Any] | None:
+    """Ask the hosted service for the plan; ``None`` when it does not answer
+    or answers no, with why in :data:`_misses` either way.
 
     Goes through the same door every served tool uses
     (``kiln.server._pro_api_call``): the user's sign-in, the device
-    fingerprint header, the client version.  A refusal from the service
-    (no sign-in, an unpaired machine, the per-device cap) reads as "no
-    plan" here; the service's own message is logged, and the public floor
-    words the refusal the user sees.
+    fingerprint header, the client version.  The service's own message is
+    kept on the miss for the door to quote; the public floor words the
+    refusal the user sees.
     """
-    global _service_down_until
+    key = _key(request)
     if time.monotonic() < _service_down_until:
+        if _service_down_miss is not None:
+            _misses[key] = _service_down_miss
         return None
     try:
         from kiln.server import _pro_api_call
     except Exception:  # noqa: BLE001
+        _misses[key] = Miss("unanswered", detail="the served door could not be opened on this install")
         return None
     try:
         answer = _pro_api_call("motion_plan", **request)
-    except Exception:  # noqa: BLE001 -- the network is a degrade, never a motion
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a motion
         logger.debug("motion_plan request failed", exc_info=True)
-        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        miss = classify_transport_error(exc)
+        _back_off(miss)
+        _misses[key] = miss
         return None
     if not isinstance(answer, dict):
+        _misses[key] = Miss("unanswered", detail="not an answer")
         return None
     doc = answer.get("plan") if "plan" in answer else answer
     if _is_plan(doc):
+        _misses.pop(key, None)
         return doc
-    if answer.get("error") or answer.get("status") == "error":
-        code = str(answer.get("code") or "")
-        logger.info("motion_plan not served: %s", answer.get("error") or answer.get("message"))
-        if code in _UNREACHABLE_CODES:
-            _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
-            return None
-        if not code or code in _NOT_ANSWERED_CODES:
-            return None  # no ruling on this machine: no sign-in, no route, or an answer with no code
-        return _REFUSED
+    miss = classify_answer(answer) or Miss("unanswered", detail="an answer with no plan in it")
+    if miss.code or miss.detail:
+        logger.info("motion_plan not served (%s): %s", miss.cause, miss.detail or miss.code)
+    if miss.code in _UNREACHABLE_CODES:
+        _back_off(miss)
+    _misses[key] = miss
     return None
 
 

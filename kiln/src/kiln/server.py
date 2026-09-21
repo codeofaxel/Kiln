@@ -10172,8 +10172,11 @@ def preflight_check(
         # One line when the blade is due, past due, or the machine has
         # raised its cutter fault this month.  Never fails the pre-flight:
         # a dull blade is a thing to order, not a reason to refuse a print.
+        # A pre-flight is a checklist, so when Kiln could not ASK (offline,
+        # signed out, no answer) the list says so rather than going quiet
+        # in a way that reads the same as "the blade is fine".
         try:
-            from kiln._pro_cutter_bridge import consult_blade
+            from kiln._pro_cutter_bridge import blade_unchecked, consult_blade
 
             if pf_target:
                 _blade = consult_blade(pf_target, printer_model=_pf_model or None)
@@ -10188,6 +10191,20 @@ def preflight_check(
                             "confidence": _blade["confidence"],
                         }
                     )
+                else:
+                    _gap = blade_unchecked(pf_target)
+                    if _gap is not None:
+                        checks.append(
+                            {
+                                "name": "cutter_blade",
+                                "passed": True,
+                                "checked": False,
+                                "message": _gap["line"],
+                                "advisory": True,
+                                "word": "unchecked",
+                                "why": _gap["why"],
+                            }
+                        )
         except Exception as exc:  # noqa: BLE001
             logger.debug("Blade check skipped: %s", exc)
 
@@ -16333,22 +16350,15 @@ def _anonymous_api_call(tool_name: str, **kwargs) -> dict:
     except urllib.error.HTTPError as exc:
         try:
             body = json.loads(exc.read().decode("utf-8"))
-            if isinstance(body, dict):
-                return body
         except Exception:
-            pass
-        return {
-            "status": "error",
-            "error": f"Kiln API rejected '{tool_name}' (HTTP {exc.code}).",
-            "code": "KILN_API_HTTP_ERROR",
-            "tool": tool_name,
-        }
+            body = None
+        from kiln.served_answer import envelope_for_http
+
+        return envelope_for_http(tool_name, exc.code, body)
     except Exception as exc:
-        return {
-            "status": "error",
-            "error": f"Failed to reach Kiln server: {exc}",
-            "code": "SERVER_UNREACHABLE",
-        }
+        from kiln.served_answer import envelope_for_transport
+
+        return envelope_for_transport(tool_name, exc, host=api_url)
 
 
 def _heartbeat_device_header() -> dict[str, str]:
@@ -16409,6 +16419,7 @@ def _pro_api_call(tool_name: str, _timeout: float = 30.0, **kwargs) -> dict:
             "error": resolved.detail,
             "code": "KILN_SESSION_EXPIRED",
             "tool": tool_name,
+            "why": "signed_out",
             **signin_hint_fields(),
         }
     else:
@@ -16468,6 +16479,7 @@ def _pro_api_call(tool_name: str, _timeout: float = 30.0, **kwargs) -> dict:
             "tool": tool_name,
             "required_tier": required_tier or "free",
             "upgrade_url": "https://kiln3d.com/pricing",
+            "why": "signed_out",
             **signin_hint_fields(),
         }
         # Machine-readable twin of the sentence, for a caller that would rather
@@ -16522,25 +16534,24 @@ def _pro_api_call(tool_name: str, _timeout: float = 30.0, **kwargs) -> dict:
     except urllib.error.HTTPError as exc:
         # Preserve the server's own error body when present — it usually
         # carries a structured ``code`` + ``error`` the agent can act on
-        # (e.g. tier-gate denials, quota-exhaustion messages).
+        # (e.g. tier-gate denials, quota-exhaustion messages).  A body with
+        # no such fields (FastAPI's bare ``detail``, a gateway page) is
+        # worded here, with WHY beside it: signed out, unanswered, refused.
         try:
             body = json.loads(exc.read().decode("utf-8"))
-            if isinstance(body, dict):
-                return body
         except Exception:
-            pass
-        return {
-            "status": "error",
-            "error": f"Kiln API rejected '{tool_name}' (HTTP {exc.code}).",
-            "code": "KILN_API_HTTP_ERROR",
-            "tool": tool_name,
-        }
+            body = None
+        from kiln.served_answer import envelope_for_http
+
+        return envelope_for_http(tool_name, exc.code, body)
     except Exception as exc:
-        return {
-            "status": "error",
-            "error": f"Failed to reach Kiln server: {exc}",
-            "code": "SERVER_UNREACHABLE",
-        }
+        # No HTTP answer at all.  Which of two things that was -- this
+        # computer is offline, or Kiln's servers didn't answer -- decides
+        # the fix the person is told, so it is decided here, once, and the
+        # sentence never carries the exception text (it rides beside).
+        from kiln.served_answer import envelope_for_transport
+
+        return envelope_for_transport(tool_name, exc, host=api_url)
 
 
 def _register_pro_tool_stubs(mcp_instance) -> None:

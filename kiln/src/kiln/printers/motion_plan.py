@@ -198,7 +198,11 @@ def run_home_plan(
         action=action,
     )
     if doc.get("from_cache"):
+        # The plan Kiln kept from its last serve, and why the service was
+        # not the source this time -- said, not silently substituted.
         common["details"] = {"plan_source": "cache"}
+        if doc.get("cache_because"):
+            common["details"]["because"] = str(doc["cache_because"])
     step = options.get("step")
     if options.get("plan_only"):
         return HomeResult(

@@ -78,7 +78,13 @@ def run_home(*, axes: str = "XYZ", printer_name: str | None = None, action: str 
             extra={"outcome": "failed", "printer_model_required": True},
         )
     except HomingUnsupported as exc:
-        return _srv._error_dict(str(exc), code="UNSUPPORTED", extra={"outcome": "failed"})
+        # Why there was no plan (offline, signed out, unanswered, refused)
+        # rides beside the sentence, never inside it.
+        why = getattr(exc, "why_fields", None)
+        return _srv._error_dict(
+            str(exc), code="UNSUPPORTED",
+            extra={"outcome": "failed", **(why if isinstance(why, dict) else {})},
+        )
     except (PrinterError, RuntimeError) as exc:
         return _srv._error_dict(f"Failed to {action}: {exc}", extra={"outcome": "failed"})
     except Exception as exc:

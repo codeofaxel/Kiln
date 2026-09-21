@@ -46,6 +46,13 @@ WIRE_TOOL = "record_cutter_events"
 #: trying.  Same backoff the motion bridge uses.
 SERVICE_BACKOFF_S: float = 300.0
 _service_down_until: float = 0.0
+#: Why the service is being left alone, so a status asked during the
+#: backoff hears the same cause the first ask did.
+_service_down_miss: Any = None
+#: Why the last blade status for each machine had no answer (a
+#: :class:`kiln.served_answer.Miss`), cleared by an answer.  A pre-flight
+#: reads it to say what it could not check.
+_last_miss: dict[str, Any] = {}
 
 #: How much of a sliced file to scan for the slicer's totals comment.
 #: Bambu Studio and Orca write ``; total filament change = N`` in the
@@ -359,25 +366,67 @@ def consult_blade(printer_name: str, *, printer_model: str | None = None) -> dic
 
 
 def _served_status(printer_name: str, model: str | None) -> dict[str, Any] | None:
-    global _service_down_until
+    """The hosted blade status, or ``None`` with why in :data:`_last_miss`."""
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import Miss, classify_answer, classify_transport_error
+
     if time.monotonic() < _service_down_until:
+        if _service_down_miss is not None:
+            _last_miss[printer_name] = _service_down_miss
         return None
     try:
         from kiln.server import _pro_api_call
     except Exception:  # noqa: BLE001
+        _last_miss[printer_name] = Miss("unanswered", detail="the served door could not be opened on this install")
         return None
     kwargs: dict[str, Any] = {"printer_id": printer_name, "recent_faults": recent_faults_for(printer_name)}
     if model:
         kwargs["printer_model"] = model
     try:
         answer = _pro_api_call("cutter_wear_status", _timeout=_CONSULT_TIMEOUT_S, **kwargs)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        miss = classify_transport_error(exc)
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = miss
+        _last_miss[printer_name] = miss
         return None
+    if isinstance(answer, dict) and answer.get("success"):
+        _last_miss.pop(printer_name, None)
+        return answer
+    miss = classify_answer(answer) or Miss("unanswered", detail="an answer with no status in it")
     if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = miss
+    _last_miss[printer_name] = miss
+    return None
+
+
+def blade_unchecked(printer_name: str) -> dict[str, Any] | None:
+    """Why the last blade consult for *printer_name* could not be made, as
+    the line a pre-flight carries, or ``None`` when it was answered.
+
+    ``{"word": "unchecked", "line", "why", "why_code", "why_detail"}``.  A
+    pre-flight is a checklist: a blade it could not ask about is named as
+    such, so "not checked" never reads the same as "fine".  With kiln-pro
+    installed the consult never misses, and this stays ``None``.
+    """
+    if not printer_name or not isinstance(printer_name, str):
         return None
-    return answer if isinstance(answer, dict) and answer.get("success") else None
+    miss = _last_miss.get(printer_name)
+    if miss is None:
+        return None
+    from kiln.served_answer import fields, sentence
+
+    return {
+        "word": "unchecked",
+        "line": sentence(
+            miss, feature="servers",
+            on_the_line="On a printer with a filament cutter, this pre-flight says whether the blade is due",
+            cannot=f"check {printer_name}'s blade", wont="says nothing about it",
+            safe_remedy="Print as usual", then="run the pre-flight again",
+        ),
+        **fields(miss),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +506,7 @@ __all__ = [
     "SERVICE_BACKOFF_S",
     "WIRE_TOOL",
     "available",
+    "blade_unchecked",
     "consult_blade",
     "grams_in_file",
     "local_sliced_path",

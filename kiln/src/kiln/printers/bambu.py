@@ -6497,27 +6497,57 @@ class BambuAdapter(PrinterAdapter):
     # and a purge runs in place and says so.  Never a coordinate this file
     # inferred, never a sibling model's.
 
+    #: The floor's own line when the bridge recorded no reason (a plan was
+    #: asked for and nothing came back, and nothing said why).  In practice
+    #: the bridge always says why; this is the wording for a fake that
+    #: answers ``None`` without one.
     _SERVED_LINE = (
-        "The motion sequence for {model} is served one plan at a time through Kiln's "
-        "hosted service (kiln-pro) for a paired printer, free of charge, and no plan "
-        "answered on this install -- sign in to Kiln, or check the network."
+        "The motion sequence for {model} is served one plan at a time to a signed-in Kiln, "
+        "and no plan answered on this install. Sign in, or reconnect to the internet, and try again."
     )
     _JOG_LINE = (
         " Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, "
         "with your eyes on the plate. The screen's Home button descends the nozzle to the bed "
         "and is the wrong tool with a part on the plate."
     )
+    #: The same guidance as one remedy phrase, for the sentence that says why.
+    _JOG_REMEDY = (
+        "Use the printer's own screen's jog controls instead, Z UP first, then X and Y, with your "
+        "eyes on the plate (the screen's Home button descends the nozzle to the bed and is the "
+        "wrong tool with a part on the plate)"
+    )
+    _WIPE_REMEDY = "Wipe from the printer's own screen, or start a print (its start sequence wipes on the pad)"
+    #: What each motion puts on the line, what Kiln can't do without its
+    #: plan, and what it therefore won't do -- the three slots of the one
+    #: sentence every served door uses (:func:`kiln.served_answer.sentence`).
+    _MOTION_WORDS = {
+        "home": ("Homing moves {model}'s head and presses the nozzle onto the plate",
+                 "get {model}'s own homing sequence", "won't home {model}"),
+        "park": ("Parking moves {model}'s head across the plate to its chute",
+                 "get {model}'s own park sequence", "won't park {model}"),
+        "wipe": ("A wipe runs {model}'s hot nozzle across its wipe pad",
+                 "get {model}'s own wipe sequence", "won't wipe {model}"),
+        "purge": ("A purge runs where {model}'s head is unless it parks over the chute first",
+                  "get {model}'s own park sequence", "purges in place"),
+    }
     #: A plan asked for twice within this window is not fetched twice (a purge
     #: asks once for its placement and once for its scripts).
     _PLAN_MEMO_S: float = 120.0
 
     def _plan_for(self, verb: str, *, axes: str = "XYZ", on_plate_ok: bool = False) -> dict[str, Any] | None:
-        """The plan document for *verb* on this machine, or ``None`` -- memoised briefly."""
+        """The plan document for *verb* on this machine, or ``None`` -- memoised briefly.
+
+        When there is no plan, why (offline, signed out, unanswered,
+        refused) is kept per verb for the refusal to word.
+        """
         from kiln import _pro_motion_bridge as _bridge
 
         memo = getattr(self, "_plan_memo", None)
         if memo is None:
             memo = self._plan_memo = {}
+        misses = getattr(self, "_plan_misses", None)
+        if misses is None:
+            misses = self._plan_misses = {}
         key = (verb, axes, bool(on_plate_ok), str(getattr(self, "_printer_model", "") or ""))
         hit = memo.get(key)
         now = time.monotonic()
@@ -6530,18 +6560,73 @@ class BambuAdapter(PrinterAdapter):
                 return hit[1]
         doc = _bridge.plan_for(self, verb, axes=axes, on_plate_ok=on_plate_ok)
         memo[key] = (now, doc)
+        if doc is None:
+            try:
+                misses[verb] = _bridge.miss_for(self, verb, axes=axes, on_plate_ok=on_plate_ok)
+            except Exception:  # noqa: BLE001 -- the why is a courtesy; the refusal stands without it
+                misses[verb] = None
+        else:
+            misses.pop(verb, None)
         return doc
+
+    def _plan_miss(self, verb: str) -> Any | None:
+        """Why the last ask for *verb* had no plan, or ``None``."""
+        return (getattr(self, "_plan_misses", None) or {}).get(verb)
 
     def _model_name(self) -> str:
         return self._printer_model or "this printer (no printer_model declared in config.yaml)"
 
-    def _served_refusal(self, verb: str, doc: dict[str, Any] | None) -> str:
-        """The refusal for *verb* when no plan, or a plan that says no, answered."""
+    def _no_plan_sentence(self, verb: str, miss: Any, *, safe_remedy: str = "") -> str:
+        """The one served-door sentence for *verb* with no plan: what is on
+        the line, why Kiln can't plan it right now, what it won't do, and
+        the safe way plus the fix."""
+        from kiln.served_answer import sentence
+
         model = self._model_name()
+        on_the_line, cannot, wont = self._MOTION_WORDS[verb]
+        return sentence(
+            miss, feature="servers",
+            on_the_line=on_the_line.format(model=model), cannot=cannot.format(model=model),
+            wont=wont.format(model=model), safe_remedy=safe_remedy,
+        )
+
+    def _no_plan_clause(self, verb: str, miss: Any, *, then: str = "try again") -> str:
+        """The same why as a clause after "because", for an answer that has
+        its own sentence (the purge's placement line)."""
+        from kiln.served_answer import clause
+
+        model = self._model_name()
+        _on_the_line, cannot, _wont = self._MOTION_WORDS[verb]
+        return clause(miss, feature="servers", cannot=cannot.format(model=model), then=then)
+
+    def _served_refusal(self, verb: str, doc: dict[str, Any] | None, *, safe_remedy: str | None = None) -> str:
+        """The refusal for *verb* when no plan, or a plan that says no, answered.
+
+        A plan that says no is refused in the record's own words.  No plan
+        at all is refused with why -- offline, signed out, unanswered, or
+        the service's own refusal quoted whole -- and the safe thing to do
+        instead (*safe_remedy*, the jog line by default).
+        """
+        model = self._model_name()
+        remedy = self._JOG_REMEDY if safe_remedy is None else safe_remedy
         refusal = (doc or {}).get("refusal") if isinstance(doc, dict) else None
         reason = (refusal or {}).get("message") if isinstance(refusal, dict) else None
-        why = reason.rstrip(". ") + "." if reason else self._SERVED_LINE.format(model=model)
-        return f"Kiln will not {verb} {model}: {why}" + self._JOG_LINE
+        if reason:
+            return f"Kiln will not {verb} {model}: {reason.rstrip('. ')}." + (f" {remedy}." if remedy else "")
+        miss = self._plan_miss(verb)
+        if miss is None:
+            return f"Kiln will not {verb} {model}: {self._SERVED_LINE.format(model=model)}" + (f" {remedy}." if remedy else "")
+        return self._no_plan_sentence(verb, miss, safe_remedy=remedy)
+
+    def _unsupported(self, exc_cls: type, verb: str, doc: dict[str, Any] | None, *,
+                     safe_remedy: str | None = None, tail: str = "") -> Exception:
+        """*exc_cls* carrying the refusal sentence, with why beside it for the
+        door's envelope (``why_fields``)."""
+        from kiln.served_answer import fields
+
+        exc = exc_cls(self._served_refusal(verb, doc, safe_remedy=safe_remedy) + tail)
+        exc.why_fields = fields(self._plan_miss(verb)) if doc is None else {}
+        return exc
 
     def _station_supports(self, station: dict[str, Any] | None, capability: str) -> tuple[bool, str]:
         """Whether this install may drive *capability* on this model, and why not.
@@ -6567,7 +6652,12 @@ class BambuAdapter(PrinterAdapter):
         }.get(capability, ("home", "XYZ", False))
         doc = self._plan_for(verb, axes=axes, on_plate_ok=consent)
         if doc is None:
-            return False, self._SERVED_LINE.format(model=model)
+            miss = self._plan_miss(verb)
+            if miss is None:
+                return False, self._SERVED_LINE.format(model=model)
+            if verb == "purge":
+                return False, self._no_plan_clause("purge", miss, then="the next purge parks first")
+            return False, self._no_plan_sentence(verb, miss, safe_remedy=self._WIPE_REMEDY if verb == "wipe" else self._JOG_REMEDY)
         refusal = doc.get("refusal") if isinstance(doc.get("refusal"), dict) else {}
         if capability == "home_z_on_plate":
             return (bool(doc.get("ok")) and bool(doc.get("z_home_on_plate"))), (
@@ -6587,6 +6677,9 @@ class BambuAdapter(PrinterAdapter):
         doc = self._plan_for("purge", axes="XY")
         base = {"status": "in_place", "printer_id": model or None, "position": self._reported_position(), "wiped": None}
         if doc is None:
+            miss = self._plan_miss("purge") if model else None
+            if miss is not None:
+                return {**base, "reason": self._no_plan_clause("purge", miss, then="the next purge parks first")}
             return {**base, "reason": (self._SERVED_LINE.format(model=model) if model else
                                        "no printer_model is declared in config.yaml, so Kiln cannot ask for a plan").rstrip(". ")}
         if not doc.get("ok"):
@@ -7089,10 +7182,7 @@ class BambuAdapter(PrinterAdapter):
         doc = self._plan_for("wipe", axes="XY")
         if doc is None or not doc.get("ok"):
             _exec.note_motion_outcome(self, "wipe", "refused", "no_plan")
-            raise FilamentHandlingUnsupported(
-                self._served_refusal("wipe", doc).replace(self._JOG_LINE, "")
-                + " Wipe from the printer's own screen, or start a print -- its start sequence wipes on the pad."
-            )
+            raise self._unsupported(FilamentHandlingUnsupported, "wipe", doc, safe_remedy=self._WIPE_REMEDY)
         step = plan.options.get("step")
         plan_only = bool(plan.options.get("plan_only"))
         steps = _exec.wipe_steps_of(doc)
@@ -7200,10 +7290,12 @@ class BambuAdapter(PrinterAdapter):
         consent = options.get("plate_clear") is True
         doc = self._plan_for("home", axes=axes, on_plate_ok=consent)
         if doc is None:
-            note_motion_outcome(self, "home", "refused", "no_plan")
-            raise HomingUnsupported(
-                self._served_refusal(action, None) + " On this family the vendor's own sequence raises the "
-                "head before it homes, and a bare G28 from an unknown height is exactly the move it avoids."
+            miss = self._plan_miss("home")
+            note_motion_outcome(self, "home", "refused", f"no_plan_{miss.cause}" if miss is not None else "no_plan")
+            raise self._unsupported(
+                HomingUnsupported, "home", None,
+                tail=(" On this family the vendor's own sequence raises the head before it homes, and a "
+                      "bare G28 from an unknown height is exactly the move it avoids."),
             )
         if not doc.get("ok"):
             refusal = doc.get("refusal") if isinstance(doc.get("refusal"), dict) else {}
@@ -7212,7 +7304,7 @@ class BambuAdapter(PrinterAdapter):
                 # came with the call: the public gate words the ask.
                 self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action=action, touches_plate=True)
             note_motion_outcome(self, "home", "refused", "no_plan")
-            raise HomingUnsupported(self._served_refusal(action, doc))
+            raise self._unsupported(HomingUnsupported, action, doc)
         touches = bool(doc.get("z_home_on_plate")) and "Z" in axes
         detour = self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action=action, touches_plate=touches)
         return run_home_plan(self, doc, axes=axes, options=options, action=action, steps=detour)
@@ -7223,8 +7315,9 @@ class BambuAdapter(PrinterAdapter):
 
         doc = self._plan_for("park", axes="XY")
         if doc is None or not doc.get("ok"):
-            note_motion_outcome(self, "park", "refused", "no_plan")
-            raise HomingUnsupported(self._served_refusal("park", doc))
+            miss = self._plan_miss("park") if doc is None else None
+            note_motion_outcome(self, "park", "refused", f"no_plan_{miss.cause}" if miss is not None else "no_plan")
+            raise self._unsupported(HomingUnsupported, "park", doc)
         detour = self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action="park")
         result = run_home_plan(self, doc, axes="XY", options=options, action="park", steps=detour)
         result.action = "park"
