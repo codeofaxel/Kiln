@@ -15,44 +15,43 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
-#: How a Bambu names a tray in ``tray_now`` / ``tray_pre`` / ``tray_tar``:
-#: the GLOBAL id ``unit * 4 + slot`` (unit 1's first tray is 4, not 0),
-#: 254 for the external spool holder and 255 for "no tray feeding".  The
+#: How a Bambu names a tray in ``tray_now`` / ``tray_pre`` / ``tray_tar`` is
+#: decided in :mod:`kiln.bambu_trays` (unit 1's first tray is 4, an AMS HT's
+#: only tray is its unit id, 254 the external spool, 255 no tray).  The
 #: trays ``get_ams_status`` reports carry their unit's OWN slot id, so a
-#: reading is resolved to ``(unit, slot)`` before it is matched -- the same
-#: arithmetic the shared multi-material record and the adapter's own load
-#: command use.
-_EXTERNAL = "external"
+#: reading is resolved to ``(unit, slot)`` before it is matched.
 
 
-def _global_tray(value: Any) -> tuple[int, int] | str | None:
-    """``(unit, slot)`` for a global tray id, ``"external"`` for 254, else ``None``."""
-    from kiln.multi_material import (
-        BAMBU_EXTERNAL_SPOOL_TRAY,
-        BAMBU_NO_TRAY,
-        BAMBU_TRAYS_PER_UNIT,
-    )
+def _feeding_tray(value: Any) -> tuple[int, int] | None:
+    """``(unit, slot)`` when *value* names a tray on a unit; ``None`` otherwise."""
+    from kiln.bambu_trays import read_tray_id
 
-    if value is None:
+    ref = read_tray_id(value)
+    if ref is None or not ref.loaded_tray:
         return None
-    text = str(value).strip()
-    if not text:
-        return None
-    try:
-        tray_id = int(text)
-    except (TypeError, ValueError):
-        return None
-    if tray_id == BAMBU_EXTERNAL_SPOOL_TRAY:
-        return _EXTERNAL
-    if tray_id < 0 or tray_id >= BAMBU_NO_TRAY:
-        return None
-    return divmod(tray_id, BAMBU_TRAYS_PER_UNIT)
+    return (ref.unit, ref.slot)
 
 
-def _global_id(unit: int, slot: int) -> int:
-    from kiln.multi_material import BAMBU_TRAYS_PER_UNIT
+def _is_external_spool(value: Any) -> bool:
+    from kiln.bambu_trays import read_tray_id
 
-    return unit * BAMBU_TRAYS_PER_UNIT + slot
+    ref = read_tray_id(value)
+    return ref is not None and ref.external
+
+
+def _report_feeding(ams: dict[str, Any]) -> tuple[Any, str]:
+    """``(the id the report says feeds, which field said so)``.
+
+    The adapter's ``feeding`` record wins; a report without the key is
+    read from ``tray_now``.  The id is the printer's own tray id, 254 for
+    the external spool, or ``None``.
+    """
+    if "feeding" in ams:
+        feeding = ams.get("feeding")
+        if isinstance(feeding, dict):
+            return feeding.get("tray_id"), str(feeding.get("source") or "feeding")
+        return None, "feeding"
+    return ams.get("tray_now"), "tray_now"
 
 
 def _iter_ams_trays(ams: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
@@ -132,11 +131,12 @@ class _MaterialToolsPlugin:
             range.  For non-Bambu printers (or printers without AMS), the
             material is reported as ``"unknown"``.
 
-            ``tray_now == "255"`` normally means external spool.  On some
-            A1/AMS Lite reports it can also mean the active slot was not
-            reported even though AMS trays are present; in that case Kiln
-            falls back to selected/target tray metadata or returns the
-            loaded AMS candidates instead of claiming external spool.
+            ``tray_now`` is the printer's own tray id (``unit * 4 + slot``
+            on a chained unit, the unit id itself on an AMS HT); ``254``
+            is the external spool and ``255`` no tray.  An A1 / AMS Lite
+            can report ``255`` with trays loaded; then Kiln falls back to
+            the selected/target tray fields or returns the loaded
+            candidates instead of claiming the external spool.
 
             Args:
                 printer_name: Named printer to query.  Omit to use the
@@ -181,12 +181,14 @@ class _MaterialToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
+            from kiln.bambu_trays import describe_tray_id, tray_id, tray_name
+
             tray_now: str = str(ams.get("tray_now", "255")).strip()
             all_trays = _iter_ams_trays(ams)
             loaded_trays = _loaded_ams_trays(ams)
 
-            resolved = _global_tray(tray_now)
-            if resolved == _EXTERNAL:
+            feeding_id, active_source = _report_feeding(ams)
+            if _is_external_spool(feeding_id):
                 return {
                     "success": True,
                     "material": "unknown",
@@ -194,19 +196,22 @@ class _MaterialToolsPlugin:
                     "tray_now": tray_now,
                     "message": "Active material unknown — the external spool is feeding (no RFID/AMS data).",
                 }
-            active: tuple[int, int] | None = resolved if isinstance(resolved, tuple) else None
-            active_source = "tray_now"
-            if active is None:
+            active = _feeding_tray(feeding_id)
+            # The legacy fields (tray_now, tray_pre, tray_tar) are trusted
+            # only when the report's own feeding field did not speak.
+            block_spoke = str(ams.get("feeding_source") or "") == "extruder"
+            if active is None and not block_spoke:
                 for field in ("active_tray", "tray_pre", "tray_tar"):
-                    candidate = _global_tray(ams.get(field))
-                    if not isinstance(candidate, tuple):
+                    candidate = _feeding_tray(ams.get(field))
+                    if candidate is None:
                         continue
                     if _find_tray(loaded_trays, *candidate) is not None:
                         active = candidate
                         active_source = field
                         break
+            nothing_feeding = active is None and (block_spoke or tray_now == "255")
 
-            if active is None and tray_now == "255" and loaded_trays:
+            if nothing_feeding and loaded_trays:
                 materials = sorted({
                     str(tray.get("tray_type", "") or "").strip()
                     for _unit, tray in loaded_trays
@@ -217,10 +222,14 @@ class _MaterialToolsPlugin:
                     for _unit, tray in loaded_trays
                     if str(tray.get("tray_color", "") or "").strip()
                 ]
+                # The printer's own ids, and Studio's names for them, so a
+                # caller can pass one straight to start_print's ams_mapping.
                 loaded_slots: list[int] = []
+                loaded_slot_names: list[str] = []
                 for unit_id, tray in loaded_trays:
                     try:
-                        loaded_slots.append(_global_id(unit_id, int(tray.get("slot", 0))))
+                        loaded_slots.append(tray_id(unit_id, int(tray.get("slot", 0))))
+                        loaded_slot_names.append(tray_name(unit_id, int(tray.get("slot", 0))))
                     except (TypeError, ValueError):
                         continue
                 material = materials[0] if len(materials) == 1 else "unknown"
@@ -230,6 +239,7 @@ class _MaterialToolsPlugin:
                     "source": "ams_loaded_unknown_slot",
                     "tray_now": tray_now,
                     "loaded_slots": loaded_slots,
+                    "loaded_slot_names": loaded_slot_names,
                     "candidate_materials": materials,
                     "message": (
                         "AMS trays are loaded, but the printer did not report "
@@ -242,7 +252,7 @@ class _MaterialToolsPlugin:
                     result["candidate_colors"] = colors
                 return result
 
-            if active is None and tray_now == "255":
+            if nothing_feeding:
                 # No tray feeding and none loaded: the external spool holder
                 # is the only place filament can be coming from.
                 return {
@@ -261,7 +271,8 @@ class _MaterialToolsPlugin:
                 }
 
             unit_index, tray_index = active
-            slot_index = _global_id(unit_index, tray_index)
+            slot_index = tray_id(unit_index, tray_index)
+            slot_name = tray_name(unit_index, tray_index)
             tray_data = _find_tray(all_trays, unit_index, tray_index)
 
             if tray_data is None:
@@ -270,11 +281,12 @@ class _MaterialToolsPlugin:
                     "material": "unknown",
                     "source": f"ams_slot_{slot_index}",
                     "active_slot": slot_index,
+                    "active_slot_name": slot_name,
                     "active_unit": unit_index,
                     "active_tray": tray_index,
                     "message": (
-                        f"AMS tray {slot_index} (unit {unit_index}, slot {tray_index}) is "
-                        f"active but its tray data is unavailable."
+                        f"AMS {describe_tray_id(slot_index)} is active but its tray "
+                        f"data is unavailable."
                     ),
                 }
 
@@ -294,20 +306,22 @@ class _MaterialToolsPlugin:
                 parts.append(f"color #{color}")
             if remaining is not None and remaining_known:
                 parts.append(f"{remaining}% remaining")
-            where = f"from AMS slot {slot_index}"
-            if unit_index:
-                where += f" (unit {unit_index}, slot {tray_index})"
-            parts.append(where)
+            # "tray 5 (slot B2)": the printer's id first, Studio's name
+            # beside it, so a person with two units is never told "slot 2"
+            # and left to guess which unit's.
+            parts.append(f"from AMS {describe_tray_id(slot_index)}")
             message = f"{', '.join(parts)}."
 
-            # ``active_slot`` is the printer's own (global) tray id -- the one
-            # ``ams_mapping`` on start_print takes; ``active_unit`` /
-            # ``active_tray`` are the unit and its own slot.
+            # ``active_slot`` is the printer's own tray id -- the one
+            # ``ams_mapping`` on start_print takes; ``active_slot_name`` is
+            # what Bambu Studio calls it; ``active_unit`` / ``active_tray``
+            # are the unit and its own slot.
             result: dict[str, Any] = {
                 "success": True,
                 "material": material,
                 "source": f"ams_slot_{slot_index}",
                 "active_slot": slot_index,
+                "active_slot_name": slot_name,
                 "active_unit": unit_index,
                 "active_tray": tray_index,
                 "active_slot_source": active_source,

@@ -890,8 +890,10 @@ def quick_print(
             if ams_plan and len(ams_plan.get("matches") or []) > 1:
                 msg += f" (AMS: {ams_plan.get('summary')})"
             elif ams_selection is not None:
+                # Studio's name for the slot (``B2``) when the record has
+                # one, so two units' "slot 2" are never the same words.
                 msg += (
-                    f" (AMS slot {ams_selection['slot']} — "
+                    f" (AMS slot {ams_selection.get('name') or ams_selection['slot']} — "
                     f"{ams_selection['type']})"
                 )
             return PipelineStep(
@@ -1395,8 +1397,10 @@ def reslice_and_print(
             if ams_plan and len(ams_plan.get("matches") or []) > 1:
                 msg += f" (AMS: {ams_plan.get('summary')})"
             elif ams_selection is not None:
+                # Studio's name for the slot (``B2``) when the record has
+                # one, so two units' "slot 2" are never the same words.
                 msg += (
-                    f" (AMS slot {ams_selection['slot']} — "
+                    f" (AMS slot {ams_selection.get('name') or ams_selection['slot']} — "
                     f"{ams_selection['type']})"
                 )
             return PipelineStep(

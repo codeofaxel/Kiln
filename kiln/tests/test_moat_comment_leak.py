@@ -227,6 +227,111 @@ def test_freezes_dotted_kiln_pro_paths() -> None:
     assert frozen and all(p.startswith("kiln_pro.") for p in frozen)
 
 
+# ── Rule 6: research provenance in comments / docstrings ────────────────────
+
+def _pins_in(rel: str, text: str) -> list[str]:
+    _GATE._FROZEN_PINS_CACHE = set()
+    try:
+        leaks, _ = _GATE.scan_file(rel, text.encode())
+    finally:
+        _GATE._FROZEN_PINS_CACHE = None
+    return [snippet for _p, _l, rule, snippet in leaks if rule == "research provenance"]
+
+
+def test_catches_research_provenance_in_a_comment() -> None:
+    """A source pin in a code comment is the same leak a catalogue note is
+    refused for -- the door 30 pre-existing pins walked through."""
+    text = (
+        "# Studio's own client sends [] (open-bamboo-networking\n"
+        "# src/print_job.cpp:184), and SelectMachine.cpp:1414 carries one -1.\n"
+        "x = 1\n"
+    )
+    found = _pins_in("kiln/src/kiln/printers/bambu.py", text)
+    assert any("src/print_job.cpp:184" in f for f in found)
+    assert any("SelectMachine.cpp:1414" in f for f in found)
+    assert any("open-bamboo-networking" in f for f in found)
+
+
+def test_catches_each_provenance_class() -> None:
+    cases = {
+        "a third-party repository": "# see github.com/prusa3d/PrusaSlicer master\n",
+        "a source file:line pin": "# per gcode/host/M115.cpp:63-75 @ 2.1.2.4\n",
+        "a vendor or community page": "# wiki.bambulab.com/en/general/find-sn says so\n",
+        "a community account or client": "# Doridian documents it\n",
+        "a fetch date": "# read 2026-09-16\n",
+    }
+    for rule, text in cases.items():
+        found = _pins_in("kiln/src/kiln/x.py", text + "x = 1\n")
+        assert any(f.startswith(rule + ":") for f in found), (rule, found)
+    # A docstring is prose too.
+    found = _pins_in("kiln/tests/test_x.py", '"""Checked against wiki.bambulab.com/en/hms/home on 2026-09-03."""\n')
+    assert found
+
+
+def test_allows_kilns_own_hosts_data_strings_and_api_docs() -> None:
+    clean = (
+        "# See https://kiln3d.com/pricing and github.com/codeofaxel/Kiln/issues\n"
+        "# The integration follows docs.octoprint.org/en/master/api/ (its contract)\n"
+        "URL = 'https://github.com/prusa3d/Prusa-Link/issues/832'  # a data string, not prose\n"
+        "NS = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'\n"
+        "x = 1\n"
+    )
+    assert _pins_in("kiln/src/kiln/x.py", clean) == []
+
+
+def test_the_source_pin_inventory_only_shrinks() -> None:
+    """A pin listed in scripts/public_source_pins.txt passes; one that is not
+    fails; the checked-in file names only pins that still exist."""
+    text = "# read from wiki.bambulab.com/en/general/find-sn\nx = 1\n"
+    rel = "kiln/src/kiln/x.py"
+    key = _GATE._pin_key(rel, "wiki.bambulab.com/en/general/find-sn")
+    _GATE._FROZEN_PINS_CACHE = {key}
+    try:
+        leaks, _ = _GATE.scan_file(rel, text.encode())
+    finally:
+        _GATE._FROZEN_PINS_CACHE = None
+    assert [leak for leak in leaks if leak[2] == "research provenance"] == []
+    assert _pins_in(rel, text)  # and without the entry it fails
+
+    frozen = _GATE._load_frozen_pins()
+    live = _GATE._all_pins([(p, (_GATE._ROOT / p).read_bytes()) for p in _GATE._tree_paths() if p.endswith(".py")])
+    stale = frozen - live
+    assert not stale, f"scrubbed pins still listed -- drop them: {sorted(stale)}"
+    assert not (live - frozen), f"new pins in the tree: {sorted(live - frozen)}"
+
+
+def test_the_whole_tracked_tree_is_watched() -> None:
+    """Every text file git would commit is in the gate's scope.  The gate
+    once watched five directories and missed the root-level tests, the
+    plugin, the OctoPrint CLI, the launcher, the policies and the
+    workflows; a new top-level surface must never be unwatched again."""
+    assert _GATE._SURFACES == (".",)
+    unwatched = [
+        p for p in _GATE._tree_paths()
+        if not _GATE._in_scope(p)
+        and p not in _GATE._SELF
+        and not p.startswith(_GATE._SKIP_PREFIXES)
+        and Path(p).suffix.lower() not in _GATE._BINARY_SUFFIXES
+        and not any(part in _GATE._SKIP_DIRS for part in p.split("/"))
+    ]
+    assert unwatched == [], unwatched
+    for must in ("tests/test_paywall_visibility.py", "plugins/kiln", "octoprint-cli/src", "policies/TERMS_OF_USE.md",
+                 ".github/workflows/ci.yml", "kiln/scripts/generate_load_tables.py"):
+        assert any(p.startswith(must) for p in _GATE._tree_paths()), must
+        assert all(_GATE._in_scope(p) for p in _GATE._tree_paths() if p.startswith(must)), must
+
+
+def test_catches_provenance_outside_the_old_surfaces() -> None:
+    assert _pins_in("tests/test_root_level.py", "# per SelectMachine.cpp:1414\nx = 1\n")
+    assert _pins_in("plugins/kiln/x.py", '"""read 2026-09-20 at wiki.creality.com/en/x/y"""\n')
+    assert _pins_in("policies/NOTES.md", "Checked on wiki.bambulab.com/en/hms/home\n")
+    assert _pins_in("octoprint-cli/README.md", "Based on pybambu's reading.\n")
+    # A repository link outside code prose and docs/ names tooling, not a source.
+    assert _pins_in(".github/workflows/x.yml", "uses: github.com/anchore/syft\n") == []
+    assert _pins_in("mcpb/README.md", "Spec: github.com/modelcontextprotocol/mcpb\n") == []
+    assert _pins_in("docs/printers.md", "See github.com/Doridian/OpenBambuAPI\n")
+
+
 # ── Rule 4: the self-label, anywhere in public text ─────────────────────────
 
 def test_catches_moat_label_in_every_public_surface() -> None:
@@ -249,8 +354,10 @@ def test_catches_moat_label_in_every_public_surface() -> None:
     ):
         assert "self-label" in _rules(rel, "the private moat\n"), rel
         assert _rules(rel, "the private tier\n") == [], rel
-    # Surfaces outside the public tree are not this gate's job.
-    assert _rules(".github/workflows/ci.yml", "moat\n") == []
+    # The whole tracked tree is public: a workflow is watched too, and only
+    # the gate's own display name is not a self-label there.
+    assert "self-label" in _rules(".github/workflows/ci.yml", "moat\n")
+    assert _rules(".github/workflows/ci.yml", "      - name: Moat-comment leak gate\n") == []
 
 
 def test_exempts_pattern_owners_only() -> None:

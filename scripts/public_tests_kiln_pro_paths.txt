@@ -5,6 +5,7 @@
 # reviewed diff rather than a side effect.  Regenerate with
 #     python3 scripts/audit_moat_comment_leak.py --freeze-kiln-pro-paths
 # and commit the diff.  Shrinking it needs no ceremony.
+kiln_pro.adhesives
 kiln_pro.bridge
 kiln_pro.bridge.pro_features
 kiln_pro.cutter_intelligence
@@ -25,6 +26,7 @@ kiln_pro.engineering.calibration_coach
 kiln_pro.engineering.running_clearance
 kiln_pro.enterprise
 kiln_pro.enterprise.licensing
+kiln_pro.enterprise.licensing.check_tier
 kiln_pro.enterprise.licensing.verify_license_key
 kiln_pro.fasteners_intelligence
 kiln_pro.hosted_intelligence

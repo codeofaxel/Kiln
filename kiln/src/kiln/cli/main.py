@@ -2582,7 +2582,7 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
     "--ams-mapping",
     type=str,
     default=None,
-    help="AMS slot mapping per extruder, comma-separated (e.g. '0,1'). Implies --use-ams.",
+    help="The AMS tray per extruder by the printer's tray id, comma-separated (e.g. '0,1'; unit B starts at 4, an AMS HT is 128+). Implies --use-ams.",
 )
 @click.option("--no-nozzle-check", is_flag=True, help="Disable nozzle clumping/blob detection (Bambu). Use when prints trigger false HMS 0300-8014 errors.")
 @click.option(
@@ -3549,7 +3549,7 @@ def _wait_for_cooldown(result: dict, json_mode: bool) -> None:
 
 
 @filament.command("load")
-@click.option("--slot", type=int, default=None, help="AMS tray id (Bambu). Omit for the external / single spool.")
+@click.option("--slot", type=int, default=None, help="The printer's tray id (Bambu; unit B starts at 4, an AMS HT is 128+; see `kiln ams`). Omit for the external / single spool.")
 @click.option("--material", default=None, help="Material name, e.g. PLA — picks a temperature when none is given.")
 @click.option("--temp", "temperature", type=float, default=None, help="Hotend target (°C).")
 @click.option("--length", "length_mm", type=float, default=None, help="Feed distance for generic G-code backends (mm).")
@@ -4046,8 +4046,8 @@ def remove(name: str) -> None:
     type=str,
     default=None,
     help=(
-        "AMS slot mapping per copy, comma-separated (e.g. '0,1,2'). "
-        "When --copies matches the number of AMS slots, each copy prints "
+        "The AMS tray per copy by the printer's tray id, comma-separated (e.g. '0,1,2'; "
+        "unit B starts at 4). When --copies matches the number of trays, each copy prints "
         "in a different color. Implies --use-ams."
     ),
 )
@@ -7624,26 +7624,45 @@ def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
                         )
 
         if ams_data and ams_data.get("units"):
-            tray_now = str(ams_data.get("tray_now", "255"))
+            from kiln.bambu_trays import read_tray_id, tray_name
+            from kiln.bambu_trays import tray_id as _tray_id
+
+            # The report's ``feeding`` record is the printer's own tray id;
+            # each tray carries its unit's slot, so the feeding tray is found by
+            # computing the same id -- comparing the slot alone marked unit
+            # A's spool active for a tray feeding from unit B.
+            record = ams_data.get("feeding") if "feeding" in ams_data else None
+            feeding = (
+                read_tray_id(record.get("tray_id")) if isinstance(record, dict)
+                else None if "feeding" in ams_data
+                else read_tray_id(ams_data.get("tray_now"))
+            )
             slots: list[dict] = []
-            for unit in ams_data["units"]:
-                unit_id = int(unit.get("unit_id", 0))
+            for position, unit in enumerate(ams_data["units"]):
+                unit_id = int(unit.get("unit_id", position))
                 humidity = unit.get("humidity")
                 # The adapter flags humidity / remaining unknown on hardware
                 # that can't measure them (AMS Lite, untagged spools); drop
                 # the value rather than show a placeholder as a real reading.
                 humidity_known = bool(unit.get("humidity_known"))
                 for tray in unit.get("trays", []):
-                    slot_num = unit_id * 4 + int(tray.get("slot", 0)) + 1  # 1-indexed
+                    try:
+                        tid = _tray_id(unit_id, int(tray.get("slot", 0)))
+                        name = tray_name(unit_id, int(tray.get("slot", 0)))
+                    except (TypeError, ValueError):
+                        continue
                     color_hex = tray.get("tray_color", "")
                     # Convert RRGGBBAA hex to readable color name or short hex.
                     color_display = f"#{color_hex[:6]}" if len(color_hex) >= 6 else color_hex
                     tray_type = tray.get("tray_type", "")
                     remain = tray.get("remain")
                     remaining_known = tray.get("remaining_known")
-                    is_active = str(tray.get("slot", -1)) == str(tray_now)
+                    is_active = feeding is not None and feeding.tray_id == tid
                     entry = {
-                        "slot": slot_num,
+                        # Studio's name for the slot and the printer's id for
+                        # the tray (what start_print's ams_mapping takes).
+                        "slot": name,
+                        "tray_id": tid,
                         "type": tray_type,
                         "color": color_display,
                         "color_raw": color_hex,
@@ -8375,9 +8394,11 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                     )
                     tray_now = str(ams_data.get("tray_now", "255"))
                     if tray_now == "255":
+                        from kiln.bambu_trays import describe_tray_id
+
                         selected = ams_data.get("tray_pre") or ams_data.get("tray_tar")
                         if selected not in (None, "", "255"):
-                            click.echo(f"  Selected AMS tray: {selected}")
+                            click.echo(f"  Selected AMS: {describe_tray_id(selected)}")
                         else:
                             click.echo("  Active AMS tray not reported yet; start_print auto-routing will use loaded trays.")
                 else:
@@ -12194,11 +12215,27 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
             if not ams_units:
                 click.echo("No AMS units detected.")
             else:
+                from kiln.bambu_trays import describe_tray_id, tray_name, unit_name
+                from kiln.bambu_trays import tray_id as _tray_id
+
                 untracked = False
-                for unit in ams_units:
-                    click.echo(f"AMS #{unit.get('unit_id', unit.get('id', '?'))}:")
+                for position, unit in enumerate(ams_units):
+                    raw_unit = unit.get("unit_id", unit.get("id", position))
+                    try:
+                        unit_id = int(raw_unit)
+                        click.echo(f"AMS {unit_name(unit_id)}:")
+                    except (TypeError, ValueError):
+                        unit_id = None
+                        click.echo(f"AMS #{raw_unit}:")
                     for tray in unit.get("trays", unit.get("tray", [])):
-                        slot = tray.get("slot", tray.get("id", "?"))
+                        raw_slot = tray.get("slot", tray.get("id", "?"))
+                        # Studio's name for the slot, and the printer's id
+                        # for the tray -- the number ams_mapping and
+                        # load_filament take -- beside it.
+                        try:
+                            slot = f"{tray_name(unit_id, int(raw_slot))} (tray {_tray_id(unit_id, int(raw_slot))})"
+                        except (TypeError, ValueError):
+                            slot = str(raw_slot)
                         raw_color = tray.get("tray_color", tray.get("color", ""))
                         color = f"#{raw_color[:6]}" if isinstance(raw_color, str) and len(raw_color) >= 6 else (raw_color or "unknown")
                         material = tray.get("tray_type", tray.get("type", "unknown")) or "unknown"
@@ -12217,13 +12254,17 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
                         "  Tip: remaining % is only known for spools with a "
                         "Bambu RFID tag."
                     )
+            # The report's own answer first, then the raw tray_now.
+            feeding = result.get("feeding") if "feeding" in result else None
             tray_now = result.get("tray_now")
-            if tray_now and tray_now != "255":
-                click.echo(f"Active tray: {tray_now}")
+            if isinstance(feeding, dict):
+                click.echo(f"Active: {describe_tray_id(feeding.get('tray_id'))}")
+            elif "feeding" not in result and tray_now and tray_now != "255":
+                click.echo(f"Active: {describe_tray_id(tray_now)}")
             elif ams_units:
                 selected = result.get("tray_pre") or result.get("tray_tar")
                 if selected not in (None, "", "255"):
-                    click.echo(f"Selected AMS tray: {selected}")
+                    click.echo(f"Selected: {describe_tray_id(selected)}")
                 else:
                     click.echo("Active tray not reported; AMS trays are loaded.")
     except click.ClickException:

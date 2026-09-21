@@ -249,6 +249,7 @@ class TestArrangeThenComposeDoors:
         recorder = _RecordingComposer()
         try:
             with patch("kiln.server._check_auth", side_effect=_no_auth), \
+                    patch("kiln.server.ams_status", return_value={"success": False}), \
                     patch("kiln.multicolor_3mf.compose_multicolor_3mf", recorder):
                 from kiln.server import multi_color_copies
 
