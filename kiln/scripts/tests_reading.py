@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import os
 import re
 import subprocess
@@ -40,7 +41,7 @@ _TESTS = _ROOT / "kiln" / "tests"
 _SRC = Path("kiln") / "src"
 _HUNK = re.compile(r"^@@ -(?P<os>\d+)(?:,(?P<oc>\d+))? \+(?P<ns>\d+)(?:,(?P<nc>\d+))? @@")
 _GENERIC = frozenset({"main", "plugin", "register", "name", "description", "test", "solve", "validate", "profile", "summary", "model", "emit", "arc"})
-_BROAD_PACKAGES = frozenset({"kiln", "kiln.plugins", "kiln.printers", "kiln.cli", "scripts"})
+_BROAD_PACKAGES = frozenset({"kiln", "kiln.plugins", "kiln.printers", "kiln.cli", "kiln.scripts", "scripts"})
 
 
 def _git(*args: str) -> str:
@@ -140,10 +141,8 @@ def changed_symbols(base: str, path: Path) -> set[str]:
     head = (_ROOT / path)
     if head.is_file():
         names |= _top_level_names(head.read_text(encoding="utf-8"), new_lines)
-    try:
+    with contextlib.suppress(subprocess.CalledProcessError):  # a brand-new file
         names |= _top_level_names(_git("show", f"{base}:{path}"), old_lines)
-    except subprocess.CalledProcessError:
-        pass
     # Rosters and constants are worth chasing however they are named; a
     # private helper is its module's own business and that module's tests
     # are already on the list via the dotted path.
