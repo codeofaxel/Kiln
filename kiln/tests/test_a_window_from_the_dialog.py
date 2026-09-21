@@ -64,16 +64,17 @@ from kiln.print_consent import (
     MAX_WINDOW_SECONDS,
     NOT_ASKED_HOST_CANNOT,
     SOURCE_ELICITED,
-    SOURCE_HOSTED_WINDOW,
+    SOURCE_HOSTED_APPROVAL,
     SOURCE_TERMINAL,
     SOURCE_WINDOW,
     WHERE_EVERY_PRINTER,
     WHERE_THIS_PRINTER,
     DialogAnswer,
+    PrintConsent,
     answer_from_content,
     consent_for,
     dialog_schema,
-    grade_of,
+    register_hosted_approval_hook,
     reset_consent,
     why_not_asked,
 )
@@ -650,49 +651,67 @@ class _FakeStore(consent_windows.WindowStore):
 
 
 class TestTheHostedStore:
+    """The hosted server, with kiln-pro's store registered.  The shape
+    agreed with the print-authority work: the dialog door OPENS through
+    the store (a standing permission the account grants the calling
+    agent, Pro and above), the status tool and the result line READ
+    through it, revoke CLOSES through it — and whether a hosted print may
+    start is the hosted approval hook's answer, never the store's."""
+
     @pytest.fixture
     def hosted_store(self, monkeypatch):
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        monkeypatch.setattr(consent_windows, "hosted_window_tier_allows", lambda: True)
         store = _FakeStore()
         consent_windows.register_window_store(store)
         yield store
         consent_windows.register_window_store(None)
+        register_hosted_approval_hook(None)
 
-    def test_with_a_store_the_web_user_is_offered_the_window_and_it_is_the_accounts(self, monkeypatch, tmp_path, audits):
-        path = _stl(tmp_path / "jar.stl")
-        # The hosted box keeps no preview record; a token there is a fact a
-        # local Kiln carried in — minted before the flag flips, as in
-        # test_a_person_says_go.
-        preview = _token_for(path)
-        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
-        hosted_store = _FakeStore()
-        consent_windows.register_window_store(hosted_store)
+    def test_a_pro_web_user_is_offered_the_window_and_it_is_the_accounts(self, hosted_store, audits):
         host = _Host(CHOICE_NEXT_TWO_HOURS)
         _, granted = _obtain(
-            "start_print", {"file_name": path, "printer_name": "garage"}, host,
-            observe=lambda: consent_for(file_name=path, printer_name="garage"),
+            "start_print", {"file_name": "jar.stl", "printer_name": "garage"}, host,
+            observe=lambda: consent_for(file_name="jar.stl", printer_name="garage"),
         )
-        [(_, schema)] = host.asked
+        [(message, schema)] = host.asked
         assert list(schema["properties"]) == [FIELD_ANSWER, FIELD_FOR_HOW_LONG]
+        assert "telling your assistant" in message and "kiln consent" not in message
         assert granted is not None and granted.source == SOURCE_ELICITED
         [w] = hosted_store.live()
         assert w.set_by == "account:acct_123" and w.scope == ("garage",) and w.source == SOURCE_ELICITED
+        assert hosted_store.calls.count("open") == 1
         # Nothing touched the shared disk.
         assert not consent_windows._path().exists()
         rec = next(d for _, a, d in audits if a == "consent_window_opened")
         assert rec["by"] == "account:acct_123"
-        # Inside it: nobody asked, and the gate takes it as the account's — grade A.
+
+    def test_the_hosted_start_is_the_hooks_answer_not_the_stores(self, hosted_store, tmp_path):
+        """The store holds a window; the hook has not said yes.  The gate
+        refuses: on the hosted server the store is read for what is open,
+        never as a second opinion on whether this print may start."""
+        path = _stl(tmp_path / "jar.stl")
+        hosted_store.open(seconds=3600, scope=("garage",), source=SOURCE_ELICITED)
+        assert consent_windows.covering("garage") is not None
+        assert consent_for(file_name=path, printer_name="garage", aimed_at="garage") is None
+        # And the asker asks — a window in the store alone silences nothing.
+        host = _Host(CHOICE_THIS_PRINT)
+        _obtain("start_print", {"file_name": path, "printer_name": "garage"}, host)
+        assert len(host.asked) == 1
+        # When the hook answers (kiln-pro: the account's approval or the
+        # standing permission it granted this agent), nobody is asked and
+        # the gate takes it as grade A.
+        register_hosted_approval_hook(lambda **kw: PrintConsent(
+            tool="start_print", file_name=kw["file_name"], printer_name=kw["printer_name"],
+            source=SOURCE_HOSTED_APPROVAL, identity="agent:a1 under account:acct_123#d7",
+        ))
         never = _NeverAsks()
         token, granted = _obtain(
             "start_print", {"file_name": path, "printer_name": "garage"}, never,
             observe=lambda: consent_for(file_name=path, printer_name="garage", aimed_at="garage"),
         )
         assert never.asked == [] and token is None
-        assert granted.source == SOURCE_HOSTED_WINDOW and grade_of(granted.source) == "A"
-        assert granted.identity == "account:acct_123" and granted.window_id == w.id
-        print_signoff.clear()
-        assert server._preview_gate_error("start_print", path, preview, printer_name="garage") is None
-        assert print_signoff.current().source == SOURCE_HOSTED_WINDOW
+        assert granted.source == SOURCE_HOSTED_APPROVAL and granted.identity.startswith("agent:a1 under")
 
     def test_the_web_user_is_reminded_and_closes_it_through_the_agent(self, hosted_store):
         _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, _Host(CHOICE_NEXT_TWO_HOURS))
@@ -702,11 +721,9 @@ class TestTheHostedStore:
         assert r.structuredContent[consent_window_note.RESULT_KEY]["id"] == w.id
         out = _tool("consent_window_status")()
         assert [x["id"] for x in out["windows"]] == [w.id] and out["windows"][0]["set_by"] == "account:acct_123"
+        assert "Kiln account page" in out["note"]
         out = _tool("revoke_consent_window")(window_id=w.id)
-        assert out["success"] and hosted_store.live() == []
-        host = _Host(CHOICE_THIS_PRINT)
-        _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, host)
-        assert len(host.asked) == 1
+        assert out["success"] and hosted_store.live() == [] and "revoke" in hosted_store.calls
 
     def test_every_printer_on_hosted_follows_the_accounts_tier(self, hosted_store, business):
         host = _Host(CHOICE_NEXT_TWO_HOURS, where=WHERE_EVERY_PRINTER)
@@ -715,8 +732,38 @@ class TestTheHostedStore:
         assert FIELD_WHERE in schema["properties"]
         assert hosted_store.live()[0].scope == consent_windows.SCOPE_FLEET
 
+    def test_a_free_account_is_not_offered_a_hosted_window_and_the_door_refuses_one(self, monkeypatch):
+        """Free is a person's yes at home; a window an agent can use from
+        anywhere is what Pro adds.  Not on the form, and the door refuses
+        it even if a host sends one — the store is never asked."""
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        monkeypatch.setattr(consent_windows, "hosted_window_tier_allows", lambda: False)
+        store = _FakeStore()
+        consent_windows.register_window_store(store)
+        try:
+            assert server.dialog_offers() == (False, False)
+            host = _Host(CHOICE_THIS_PRINT)
+            _obtain("start_print", {"file_name": "jar.stl", "printer_name": "garage"}, host)
+            assert list(host.asked[0][1]["properties"]) == [FIELD_ANSWER]
+            with pytest.raises(consent_windows.NotThisTier, match="Pro"):
+                consent_windows.open_window_from_dialog(
+                    DialogAnswer("accept", "", choice=CHOICE_NEXT_TWO_HOURS), printer_name="garage",
+                )
+            assert store.calls == []
+        finally:
+            consent_windows.register_window_store(None)
+
+    def test_the_tier_read_is_the_licences_own(self, monkeypatch):
+        import kiln.licensing as lic
+
+        monkeypatch.setattr(lic, "get_tier", lambda: "pro", raising=False)
+        assert consent_windows.hosted_window_tier_allows() is True
+        monkeypatch.setattr(lic, "get_tier", lambda: "free", raising=False)
+        assert consent_windows.hosted_window_tier_allows() is False
+
     def test_without_a_store_hosted_is_as_before(self, monkeypatch):
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        monkeypatch.setattr(consent_windows, "hosted_window_tier_allows", lambda: True)
         assert consent_windows.window_store() is None
         assert server.dialog_offers() == (False, False)
         assert consent_windows.covering("garage") is None
@@ -737,6 +784,15 @@ class TestTheHostedStore:
 
         monkeypatch.setattr(hosted_store, "covering", _boom)
         assert consent_windows.covering("garage") is None
+
+    def test_the_store_contract_every_method_kiln_pro_implements(self):
+        """The signatures kiln-pro's implementation is written against."""
+        sig = inspect.signature
+        store = consent_windows.WindowStore
+        assert list(sig(store.covering).parameters) == ["self", "printer_name"]
+        assert list(sig(store.live).parameters) == ["self"]
+        assert list(sig(store.open).parameters) == ["self", "seconds", "scope", "source"]
+        assert list(sig(store.revoke).parameters) == ["self", "window_id"]
 
 
 # ---------------------------------------------------------------------------
@@ -1105,6 +1161,7 @@ class TestTheWindowIsNeverInvisible:
         assert "start on the default printer" in message and "kiln consent revoke" in message
         # On the hosted server the person has no terminal: the only close is to say so.
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        monkeypatch.setattr(consent_windows, "hosted_window_tier_allows", lambda: True)
         consent_windows.register_window_store(_FakeStore())
         try:
             host = _Host(CHOICE_THIS_PRINT)

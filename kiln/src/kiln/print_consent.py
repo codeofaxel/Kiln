@@ -92,10 +92,6 @@ SOURCE_DERIVED = "derived"
 SOURCE_WINDOW = "standing_window"
 #: The hosted server's account approved this file (the hook below).
 SOURCE_HOSTED_APPROVAL = "hosted_account_approval"
-#: The signed-in account's standing window covers this printer — the
-#: hosted server's window store (a hook kiln-pro fills; public Kiln ships
-#: none).  The account's, so grade A, like its approval.
-SOURCE_HOSTED_WINDOW = "hosted_account_window"
 
 GRADE_A = "A"
 GRADE_B = "B"
@@ -110,7 +106,7 @@ def grade_of(source: str) -> str | None:
     """``"A"`` when the host or the account held the pen, ``"B"`` when a
     terminal did, ``None`` for a source that is not a person's yes of its
     own (a derived plate rides its input's; a bypass is not a yes)."""
-    if source in (SOURCE_ELICITED, SOURCE_HOSTED_APPROVAL, SOURCE_HOSTED_WINDOW):
+    if source in (SOURCE_ELICITED, SOURCE_HOSTED_APPROVAL):
         return GRADE_A
     if source in (SOURCE_TERMINAL, SOURCE_WINDOW):
         return GRADE_B
@@ -398,7 +394,9 @@ def input_required_block(
         "how_to_answer": (
             "Show the person the message and the form. Send the filled form as JSON in the "
             f"{INPUT_RESPONSES_HEADER} header of the same call made again, with the same arguments. "
-            "The answer must come from the person's own screen, never from the agent's arguments."
+            "The answer must come from the person's own screen, never from the agent's arguments; "
+            "a server honours the header only from a person's own session (a browser, the desktop "
+            "app on its own machine), never from an agent session or a bare key."
         ),
     }
 
@@ -656,6 +654,16 @@ def consent_for(
     hosted = _ask_hosted_hook(file_name=file_name, printer_name=printer_name)
     if hosted is not None:
         return hosted if hosted.matches(file_name=file_name, printer_name=printer_name) else None
+    # On the hosted server the account's yes — an approval, or a standing
+    # permission it granted the calling agent — is the hook's to answer,
+    # and it just did or did not.  The window store there is read for
+    # what is open (the status tool, the line on a result), never as a
+    # second opinion on whether this print may start.
+    with _suppress():
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            return None
     try:
         from kiln import consent_windows
 
@@ -664,20 +672,12 @@ def consent_for(
         window = None
     if window is None:
         return None
-    # On the hosted server the only windows that exist are the account's
-    # (the store answers for the signed-in account); locally they are the
-    # OS user's.  The grade follows: the account's yes is grade A.
-    hosted = False
-    with _suppress():
-        from kiln.runtime_env import is_hosted_multitenant
-
-        hosted = bool(is_hosted_multitenant())
     return PrintConsent(
         tool="kiln consent window",
         file_name=file_name,
         printer_name=printer_name,
         granted_at=window.set_at,
-        source=SOURCE_HOSTED_WINDOW if hosted else SOURCE_WINDOW,
+        source=SOURCE_WINDOW,
         scope=window.scope,
         expires_at=window.until,
         identity=window.set_by,

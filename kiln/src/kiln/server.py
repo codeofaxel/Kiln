@@ -2357,19 +2357,19 @@ def dialog_offers() -> tuple[bool, bool]:
     what the MCP dialog offers.
 
     A window is offered where one can be honoured: locally always; on the
-    hosted server only when the account's window store is registered.
-    "Every printer" is offered on top of that only when the tier runs
-    several printers at once (a per-request read on the hosted server).
-    Offering what will not open is a form that lies.
+    hosted server only when the account's window store is registered AND
+    the account's tier prints from anywhere (Pro and above — Free is a
+    person's yes at home).  "Every printer" is offered on top of that only
+    when the tier runs several printers at once.  Both tier reads are
+    per-request on the hosted server.  Offering what will not open is a
+    form that lies.
     """
     from kiln import consent_windows
 
-    hosted = False
-    with contextlib.suppress(Exception):
-        from kiln.runtime_env import is_hosted_multitenant
-
-        hosted = bool(is_hosted_multitenant())
-    offer_window = (not hosted) or consent_windows.window_store() is not None
+    hosted = _hosted_now()
+    offer_window = (not hosted) or (
+        consent_windows.window_store() is not None and consent_windows.hosted_window_tier_allows()
+    )
     offer_fleet = offer_window and consent_windows._fleet_tier_allows()
     return offer_window, offer_fleet
 
