@@ -665,3 +665,56 @@ class TestTheProbeAndTheCap:
         out = sentence(Miss("refused", "INVALID_ARGUMENT", "printer_id must name the printer's catalogue model."),
                        feature="servers", on_the_line="X", cannot="do it", wont="did nothing")
         assert "printer_id must name" in out and "Printer_id" not in out
+
+
+# ---------------------------------------------------------------------------
+# the browser stage link speaks the same voice
+# ---------------------------------------------------------------------------
+
+
+class TestTheStageLinkSpeaksTheSameVoice:
+    """The preview link used to explain itself in a second vocabulary, one of
+    whose sentences handed a person a command to type.  Every served cause
+    it can hit now reads as the clause the other doors use; the local
+    conditions (opted out, too large, empty, no httpx) keep their own plain
+    words."""
+
+    @pytest.mark.parametrize(
+        "reason, cause_words, fix_words",
+        [
+            ("offline", "this computer is offline", "reconnect to the internet and try again"),
+            ("signed_out", "Kiln is signed out", "sign in and try again"),
+            ("session_refused", "Kiln is signed out", "sign in and try again"),
+            ("unanswered", "Kiln's servers didn't answer", "wait a minute and try again"),
+            ("transport", "Kiln's servers didn't answer", "wait a minute and try again"),  # older records
+            ("bad_response", "Kiln's servers didn't answer", "wait a minute and try again"),
+            ("http_503", "Kiln's servers didn't answer", "wait a minute and try again"),
+            ("http_401", "Kiln is signed out", "sign in and try again"),
+            ("http_403", "Kiln's servers said no and gave no reason", "wait a minute and try again"),
+        ],
+    )
+    def test_each_served_cause_reads_as_the_shared_clause(self, reason, cause_words, fix_words):
+        from kiln.stage_link import refusal_sentence
+
+        s = refusal_sentence(reason)
+        assert s.startswith("Kiln can't issue a browser link right now (") and cause_words in s and fix_words in s
+        assert not any(bad in s for bad in ("kiln_signin", "link service", "link door", "HTTP", "http_", "_out", "_refused", "_response"))
+        assert s == s.strip() and not s.endswith(".")  # a clause, for the sentence that carries it
+
+    def test_the_local_conditions_keep_plain_words(self):
+        from kiln.stage_link import refusal_sentence
+
+        for reason in ("opted_out", "too_large", "empty", "no_httpx"):
+            s = refusal_sentence(reason)
+            assert "link door" not in s and "link service" not in s and "Kiln can't" not in s
+        assert refusal_sentence(None) == "no browser link was asked for"
+
+    def test_the_result_that_carries_the_clause_still_reads(self):
+        """The still-image fallback embeds the clause after a colon."""
+        from kiln.stage_link import refusal_sentence
+
+        line = f"no browser link could be issued: {refusal_sentence('offline')}. The still image is the floor."
+        assert line == (
+            "no browser link could be issued: Kiln can't issue a browser link right now (this computer is "
+            "offline); reconnect to the internet and try again. The still image is the floor."
+        )

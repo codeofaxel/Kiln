@@ -1159,8 +1159,9 @@ class TestTheLinkRidesUntilAPanelProves:
                        tool_name="compile_scad")
         assert "viewer_url" not in sc
         assert sc["shown"]["door"] == "none"
-        assert "signed out" in sc["shown"]["reason"]
-        assert "kiln_signin" in sc["shown"]["reason"]
+        assert "Kiln is signed out" in sc["shown"]["reason"]
+        assert "sign in and try again" in sc["shown"]["reason"]
+        assert "kiln_signin" not in sc["shown"]["reason"], "a person is never handed a command to type"
         assert "signed_out" not in sc["shown"]["reason"], "a code is not a sentence"
 
     def test_a_restart_forgets_the_proof(self, monkeypatch):

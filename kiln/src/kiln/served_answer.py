@@ -254,19 +254,21 @@ def classify_answer(answer: Any) -> Miss | None:
     return Miss("refused", code, text)
 
 
-def classify_transport_error(exc: BaseException, *, host: str | None = None) -> Miss:
+def classify_transport_error(exc: BaseException, *, host: str | None = None, probe: bool = True) -> Miss:
     """Why a request never got an HTTP answer: ``offline`` or ``unanswered``.
 
     Walks the exception and its ``reason`` / cause chain.  No DNS and no
     route are offline; a refused, reset or half-finished connection is a
     server that did not answer; a timeout is the one ambiguous case, so it
     asks whether this computer can reach *host* at all (:func:`_route_to`)
-    before choosing.  Anything unrecognised reads as unanswered -- the
-    claim that asks the person for the least.
+    before choosing -- unless *probe* is off, when a door that must never
+    open a second socket (a preview link) settles for unanswered.  Anything
+    unrecognised reads as unanswered -- the claim that asks the person for
+    the least.
     """
     cause = _cause_of(exc)
     if cause is None:
-        cause = "unanswered" if _route_to(host) else "offline"
+        cause = "unanswered" if (not probe or _route_to(host)) else "offline"
     return Miss(cause, code="SERVER_UNREACHABLE", detail=str(exc)[:_DETAIL_LIMIT])
 
 
@@ -467,8 +469,8 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln.server": ("served_answer", "the paid-tool manifest stubs and the served door every bridge uses"),
     "kiln._pro_motion_bridge": ("served_answer", "head-motion plans; a miss is worded by the Bambu doors"),
     "kiln._pro_cutter_bridge": ("served_answer", "blade status for the pre-flight; cut reports are fire-and-forget"),
-    "kiln.stage_link": ("own_vocabulary", "browser stage links; refusal_sentence names each reason, the local stage is the floor"),
-    "kiln.stage_cache": ("own_vocabulary", "stage uploads behind stage_link; same reasons"),
+    "kiln.stage_link": ("served_answer", "browser stage links; the four served causes word through here, the local stage is the floor"),
+    "kiln.stage_cache": ("infrastructure", "the stage document upload behind stage_link; its refusals surface through stage_link"),
     "kiln.monitor_twin": ("infrastructure", "print twins pushed best-effort; the local monitor is the floor"),
     "kiln.bridge_client": ("own_vocabulary", "opt-in web control relay; reconnects and reports its state file"),
     "kiln.community_sync": ("infrastructure", "community aggregates; a generation never claims them, local knowledge is the floor"),

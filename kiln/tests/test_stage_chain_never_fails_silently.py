@@ -526,17 +526,33 @@ class TestLinkRefusalsAreSaidOutLoud:
         assert stage_link.last_refusal(mesh) == "http_503"
         assert any("http_503" in line for line in self._refusal_lines(caplog))
 
-    def test_a_transport_failure_is_recorded(self, tmp_path, monkeypatch):
-        _wire_link(monkeypatch)
+    def test_a_transport_failure_is_recorded_as_which_of_two_things(self, tmp_path, monkeypatch):
+        """No route is offline; a server that did not answer is unanswered.
+        The two have different fixes, so the record keeps them apart -- and
+        it never opens a second socket to tell them apart."""
+        import socket
+
         import httpx
 
-        def _boom(*a, **k):
+        _wire_link(monkeypatch)
+
+        def _no_answer(*a, **k):
             raise OSError("network down")
 
-        monkeypatch.setattr(httpx, "post", _boom)
+        monkeypatch.setattr(httpx, "post", _no_answer)
         mesh = _stl(tmp_path / "part.stl")
         assert stage_link.stage_link_for(mesh) is None
-        assert stage_link.last_refusal(mesh) == "transport"
+        assert stage_link.last_refusal(mesh) == "unanswered"
+        assert "didn't answer" in stage_link.refusal_sentence(stage_link.last_refusal(mesh))
+
+        def _no_route(*a, **k):
+            raise httpx.ConnectError("dns") from socket.gaierror(8, "nodename nor servname provided")
+
+        monkeypatch.setattr(httpx, "post", _no_route)
+        offline = _stl(tmp_path / "other.stl")
+        assert stage_link.stage_link_for(offline) is None
+        assert stage_link.last_refusal(offline) == "offline"
+        assert "this computer is offline" in stage_link.refusal_sentence("offline")
 
     def test_a_mesh_never_tried_has_no_refusal(self, tmp_path):
         assert stage_link.last_refusal(_stl(tmp_path / "fresh.stl")) is None

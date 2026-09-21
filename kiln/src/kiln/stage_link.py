@@ -204,45 +204,67 @@ def _refused(path: Path, reason: str) -> None:
         logger.debug("stage link refusal not recorded", exc_info=True)
 
 
-#: The link door's refusal codes, as sentences.  A result carries the
-#: sentence; the code stays in the evidence record for anything that
-#: branches on it.
-_REFUSAL_SENTENCES: dict[str, str] = {
-    "opted_out": "browser stage links are switched off on this install (KILN_NO_STAGE_LINKS)",
-    "signed_out": (
-        "Kiln is signed out on this install, so no browser stage link can be "
-        "issued — run kiln_signin"
-    ),
-    "session_refused": (
-        "Kiln's sign-in on this install has expired or was revoked, so no "
-        "browser stage link can be issued — run kiln_signin"
-    ),
-    "too_large": "the mesh is over the link door's upload limit",
-    "empty": "the mesh file is empty",
-    "no_httpx": "the httpx library is missing on this install, so no browser stage link can be issued",
-    "transport": "the link service could not be reached",
-    "bad_response": "the link service answered with something that was not a link",
+#: Refusals that are this install's own doing, as clauses.  The four that
+#: are Kiln's servers' doing — offline, signed out, didn't answer, said no —
+#: are worded by :mod:`kiln.served_answer`, in the one voice every served
+#: door uses, so a person who hits them here reads the same sentence as at
+#: any other door.  A result carries the clause; the code stays in the
+#: evidence record for anything that branches on it.
+_LOCAL_REFUSALS: dict[str, str] = {
+    "opted_out": "browser links are switched off on this install (KILN_NO_STAGE_LINKS is set)",
+    "too_large": "the part file is over the size a browser link accepts",
+    "empty": "the part file is empty",
+    "no_httpx": "this install is missing the httpx library, so it can't issue a browser link",
 }
+
+#: Recorded reasons that map onto one of the four served causes.
+#: ``transport`` is the word older records carry from before the split
+#: into offline / unanswered; it reads as unanswered, the claim that asks
+#: the least of the person.
+_SERVED_CAUSE_OF: dict[str, str] = {
+    "offline": "offline",
+    "unanswered": "unanswered",
+    "transport": "unanswered",
+    "bad_response": "unanswered",
+    "signed_out": "signed_out",
+    "session_refused": "signed_out",
+}
+
+_CANNOT = "issue a browser link"
 
 
 def refusal_sentence(reason: str | None) -> str:
-    """The link door's refusal *reason* as a sentence a person can act on.
-    ``None`` — no refusal on record — reads as the door never having been
-    asked."""
+    """Why no browser link was issued, as a clause a person can act on
+    (it follows a colon or "because" in the result that carries it).
+    ``None`` — no refusal on record — reads as no link having been asked
+    for."""
+    from kiln.served_answer import Miss, clause
+
     if not reason:
-        return "the link door was not asked"
-    known = _REFUSAL_SENTENCES.get(reason)
-    if known:
-        return known
+        return "no browser link was asked for"
+    local = _LOCAL_REFUSALS.get(reason)
+    if local:
+        return local
+    cause = _SERVED_CAUSE_OF.get(reason)
+    if cause:
+        return clause(Miss(cause), feature="servers", cannot=_CANNOT)
     if reason.startswith("http_"):
-        return f"the link service answered HTTP {reason[len('http_'):]}"
-    return f"the link door refused ({reason})"
+        try:
+            status = int(reason[len("http_"):])
+        except ValueError:
+            status = 0
+        if status == 401:
+            return clause(Miss("signed_out"), feature="servers", cannot=_CANNOT)
+        if status >= 500:
+            return clause(Miss("unanswered"), feature="servers", cannot=_CANNOT)
+        return clause(Miss("refused"), feature="servers", cannot=_CANNOT)
+    return f"no browser link was issued ({reason})"
 
 
 def last_refusal(mesh_path: str | os.PathLike[str]) -> str | None:
     """Why :func:`stage_link_for` last returned ``None`` for *mesh_path*, in
     the door's own word (``opted_out``, ``signed_out``, ``too_large``,
-    ``transport``, ``http_503``, ...) — or ``None`` when no refusal is on
+    ``offline``, ``unanswered``, ``http_503``, ...) — or ``None`` when no refusal is on
     record, or a link was issued for these bytes since.
 
     A read of the evidence record, so a caller that got ``None`` can say
@@ -369,7 +391,12 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
             )
     except Exception as exc:  # noqa: BLE001 — any transport failure is a no-link
         logger.debug("stage link unavailable: %s", exc)
-        _refused(path, "transport")
+        # Which of two things it was decides the fix the person is told:
+        # no route (offline) or a server that did not answer.  No probe
+        # here -- a preview never opens a second socket to find out.
+        from kiln.served_answer import classify_transport_error
+
+        _refused(path, classify_transport_error(exc, probe=False).cause)
         return None
 
     if resp.status_code in (401, 403):

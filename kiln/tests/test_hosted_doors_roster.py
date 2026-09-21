@@ -173,6 +173,18 @@ class TestTheVoice:
             seen.add(gap["line"])
         assert len(seen) == len(_misses())
 
+    def test_the_stage_link(self):
+        from kiln import stage_link
+
+        seen = set()
+        for reason in ("offline", "signed_out", "unanswered", "transport", "http_503", "http_401", "http_403"):
+            text = stage_link.refusal_sentence(reason)
+            assert text.startswith("Kiln can't"), text
+            assert not _CODE_TOKEN.search(text) and not _SYSTEM_WORD.search(text), text
+            assert "right now (" in text and not text.endswith("."), text
+            seen.add(text)
+        assert len(seen) >= 4  # the four causes stay distinct
+
     def test_the_fallback_line_the_bambu_floor_keeps_for_a_reasonless_miss(self):
         from kiln.printers.bambu import BambuAdapter
 

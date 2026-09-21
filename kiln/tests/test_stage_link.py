@@ -501,15 +501,19 @@ class TestAStageNamedMeshWins:
 
 
 class TestRefusalSentences:
-    """``url_refusal: signed_out`` is a code; a result carries a sentence."""
+    """``url_refusal: signed_out`` is a code; a result carries a clause in the
+    one voice every served door uses -- the cause, and the fix, never a
+    command to type."""
 
-    def test_signed_out_reads_as_a_sentence(self):
+    def test_signed_out_reads_as_the_shared_voice(self):
         s = stage_link.refusal_sentence("signed_out")
-        assert "signed out" in s and "kiln_signin" in s
-        assert "signed_out" not in s
+        assert "Kiln is signed out" in s and "sign in and try again" in s
+        assert "signed_out" not in s and "kiln_signin" not in s
 
-    def test_an_http_status_names_the_status(self):
-        assert "503" in stage_link.refusal_sentence("http_503")
+    def test_an_http_status_reads_as_which_of_the_four(self):
+        assert "didn't answer" in stage_link.refusal_sentence("http_503") and "503" not in stage_link.refusal_sentence("http_503")
+        assert "Kiln is signed out" in stage_link.refusal_sentence("http_401")
+        assert "said no" in stage_link.refusal_sentence("http_429")
 
-    def test_an_unknown_reason_is_still_a_sentence(self):
-        assert stage_link.refusal_sentence("wat").startswith("the link door refused")
+    def test_an_unknown_reason_is_still_a_clause(self):
+        assert stage_link.refusal_sentence("wat") == "no browser link was issued (wat)"
