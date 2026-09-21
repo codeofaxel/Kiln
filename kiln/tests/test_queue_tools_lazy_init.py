@@ -36,6 +36,29 @@ def test_queue_summary_succeeds_when_raw_queue_global_is_none(monkeypatch):
     assert "counts" in result
 
 
+def test_a_first_submit_with_no_bus_yet_still_queues_and_publishes(monkeypatch, tmp_path):
+    """The bus has the same lazy accessor as the queue, and the same trap:
+    ``submit_job`` published straight through the raw ``_event_bus`` global,
+    so the first queue tool a fresh server context ran died with
+    ``'NoneType' object has no attribute 'publish'``."""
+    from kiln.events import EventType
+
+    q = _fresh_server_context(monkeypatch)
+    monkeypatch.setattr(mod, "_event_bus", None)
+    monkeypatch.setattr(mod, "_event_subs_wired", True)  # no watchdog wiring in a unit test
+    monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")  # the gate is not the subject here
+    result = queue_tools.submit_job("part.gcode", printer_name="garage")
+    assert result["success"] is True, result
+    bus = mod._get_event_bus()
+    assert mod._event_bus is bus  # created on first use, then shared
+    seen = []
+    bus.subscribe(EventType.JOB_CANCELLED, seen.append)
+    cancelled = queue_tools.cancel_queued_job(result["job_id"])
+    assert cancelled["success"] is True, cancelled
+    assert [e.data["job_id"] for e in seen] == [result["job_id"]]
+    assert q.get_job(result["job_id"]) is not None
+
+
 def test_queue_tools_never_read_the_raw_queue_global():
     """Structural guard: a stray raw ``_srv._queue`` access would reintroduce
     the crash.  ``_srv._get_queue()`` does not contain the substring
@@ -44,4 +67,8 @@ def test_queue_tools_never_read_the_raw_queue_global():
     assert "_srv._queue" not in src, (
         "queue_tools must use the lazy _srv._get_queue() accessor, never the "
         "raw _srv._queue global (None in the REST/local-admin server)."
+    )
+    assert "_srv._event_bus" not in src, (
+        "queue_tools must use the lazy _srv._get_event_bus() accessor, never the "
+        "raw _srv._event_bus global (None until something else asked for it)."
     )

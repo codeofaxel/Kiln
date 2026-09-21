@@ -22,7 +22,6 @@ from typing import Any
 
 from kiln.motion_facts import SOURCE_CLASS_MACHINE, MotionFacts, MotionSource
 
-
 #: Above this fraction of ``position_max`` a physical Z endstop sits at the
 #: far end of the travel: the bed at its lowest, or a CoreXZ head at its top.
 #: In Klipper's frame Z is the nozzle-to-plate distance, so a home that ends
@@ -148,7 +147,7 @@ def _machine_unhomed_policy(config: dict[str, Any]) -> tuple[str, str] | None:
     machine look homed when it is not, and no enum value holds that; the
     cell stays null so the plan text never claims a refusal.
     """
-    for key, section in config.items():
+    for section in config.values():
         if not isinstance(section, dict):
             continue
         body = str(section.get("gcode", "")).upper()

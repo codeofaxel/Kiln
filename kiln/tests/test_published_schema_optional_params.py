@@ -64,10 +64,22 @@ def _registry_properties(name: str) -> dict:
     return server.mcp._tool_manager._tools[name].parameters["properties"]
 
 
+def _schema(tool) -> dict:
+    """The tool's published input schema, whichever SDK major built it:
+    2.x names the field ``input_schema`` (wire alias ``inputSchema``), 1.x
+    named it ``inputSchema``."""
+    return getattr(tool, "input_schema", None) or getattr(tool, "inputSchema")
+
+
+def _is_error(result) -> bool:
+    flag = getattr(result, "is_error", None)
+    return bool(getattr(result, "isError", False) if flag is None else flag)
+
+
 def test_the_symptom_tools_publish_their_optionals_without_a_default():
     wire = _tools_on_the_wire()
 
-    status = wire["printer_status"].inputSchema
+    status = _schema(wire["printer_status"])
     assert "printer_name" not in (status.get("required") or [])
     assert "default" not in status["properties"]["printer_name"]
     assert "default" not in status["properties"]["detail"]
@@ -75,7 +87,7 @@ def test_the_symptom_tools_publish_their_optionals_without_a_default():
     # measured host preserves.
     assert 'Default: "full".' in status["properties"]["detail"]["description"]
 
-    load = wire["load_filament"].inputSchema
+    load = _schema(wire["load_filament"])
     for optional in ("material", "temperature", "length_mm", "printer_name"):
         assert optional not in (load.get("required") or [])
         assert "default" not in load["properties"][optional], optional
@@ -94,12 +106,12 @@ def test_no_published_parameter_carries_the_default_keyword():
     registry_defaults = 0
     offenders: list[str] = []
     for name, tool in wire.items():
-        for pname, prop in (tool.inputSchema.get("properties") or {}).items():
+        for pname, prop in (_schema(tool).get("properties") or {}).items():
             if "default" in _registry_properties(name).get(pname, {}):
                 registry_defaults += 1
             if "default" in prop:
                 offenders.append(f"{name}.{pname}")
-            if pname in (tool.inputSchema.get("required") or []) and (
+            if pname in (_schema(tool).get("required") or []) and (
                 "default" in _registry_properties(name).get(pname, {})
             ):
                 offenders.append(f"{name}.{pname} (required despite a default)")
@@ -113,7 +125,7 @@ def test_an_omitted_optional_reaches_the_tool_at_the_wire():
     validation was never the refuser, so a future regression on this side
     is caught at the same door."""
     result = _call_on_the_wire("get_material", {})
-    assert not result.isError, result.content
+    assert not _is_error(result), result.content
     text = " ".join(getattr(block, "text", "") for block in result.content)
     assert "INVALID_ARGS" not in text
     assert "invalid arguments" not in text
