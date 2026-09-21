@@ -645,6 +645,88 @@ class TestCompileScadCode:
 
 
 # ---------------------------------------------------------------------------
+# A machine-readable header on line 1 survives every door
+# ---------------------------------------------------------------------------
+
+
+_SKETCH_HEADER = '// kiln:sketch/1 {"v": 1, "points": {"A": [0, 0], "B": [40, 0]}}'
+_SKETCH_SCAD = (
+    _SKETCH_HEADER + "\n"
+    "width = 40; // mm\n"
+    "height = 20; // mm\n"
+    "module plate() {\n"
+    "    square([width, height]);\n"
+    "}\n"
+    "plate();\n"
+)
+
+
+class TestHeaderLineSurvivesEveryDoor:
+    """A comment header on line 1 reaches every public door byte-for-byte.
+
+    Tools that hand back OpenSCAD may put a machine-readable header on
+    line 1 and read it back later.  Nothing in public Kiln may strip,
+    move or reformat it: the parser reads past it, the editors leave it,
+    and the compiler writes it to the ``.scad`` file as line 1.
+    """
+
+    def test_parser_reads_past_the_header(self):
+        params = parse_openscad_parameters(_SKETCH_SCAD)
+        assert [p.name for p in params] == ["width", "height"]
+
+    def test_update_parameter_keeps_line_one(self):
+        out = update_openscad_parameter(_SKETCH_SCAD, "width", 50)
+        assert out.splitlines()[0] == _SKETCH_HEADER
+        assert "width = 50; // mm" in out
+
+    def test_module_editors_keep_line_one(self):
+        inserted = insert_into_scad_module(_SKETCH_SCAD, "plate", "circle(3);")
+        assert inserted.splitlines()[0] == _SKETCH_HEADER
+        modified = modify_scad_module(
+            _SKETCH_SCAD, "plate", "module plate() { cube(1); }"
+        )
+        assert modified.splitlines()[0] == _SKETCH_HEADER
+
+    @patch("kiln.generation.openscad.OpenSCADProvider")
+    def test_tweak_hands_the_compiler_line_one(self, MockProvider):
+        instance = MockProvider.return_value
+        instance.generate.return_value = SimpleNamespace(
+            id="job1", status=SimpleNamespace(value="succeeded"), error=None,
+        )
+        instance.download_result.return_value = SimpleNamespace(
+            local_path="/tmp/tweaked.stl",
+        )
+        result = tweak_and_compile(_SKETCH_SCAD, "width", 50)
+        assert result["updated_code"].splitlines()[0] == _SKETCH_HEADER
+        compiled = instance.generate.call_args[0][0]
+        assert compiled.splitlines()[0] == _SKETCH_HEADER
+
+    def test_compile_writes_line_one_to_the_scad_file(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KILN_OPENSCAD_BACKEND", "cgal")
+        written: dict[str, str] = {}
+
+        def fake_run(cmd, *_args, **_kwargs):
+            out_path, scad_path = cmd[2], cmd[-1]
+            with open(scad_path, encoding="utf-8") as fh:
+                written["first_line"] = fh.readline().rstrip("\n")
+            with open(out_path, "wb") as fh:
+                fh.write(b"solid kiln\nendsolid kiln\n")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        with (
+            patch(
+                "kiln.generation.openscad.OpenSCADProvider._require_binary",
+                return_value="openscad",
+            ),
+            patch("kiln.generation.openscad.subprocess.run", side_effect=fake_run),
+        ):
+            stl = compile_scad_code(_SKETCH_SCAD, output_path=str(tmp_path / "plate.stl"))
+
+        assert written["first_line"] == _SKETCH_HEADER
+        assert stl == str(tmp_path / "plate.stl")
+
+
+# ---------------------------------------------------------------------------
 # tweak_and_compile
 # ---------------------------------------------------------------------------
 
