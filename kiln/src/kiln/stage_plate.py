@@ -134,9 +134,11 @@ def attach_stage_plate(
     *,
     mesh_path: str | None = None,
     gcode_path: str | None = None,
+    occupancy: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Stand a ``kiln.mesh.v1`` *payload* on the plate, stamp the plate on,
-    and lay the slicer's own additions around the part.
+    lay the slicer's own additions around the part, and show what the plate
+    already holds.
 
     The single call every payload-producing door makes, so a door added later
     cannot ship a stage with no bed under it — or, the same mistake from the
@@ -160,6 +162,18 @@ def attach_stage_plate(
     passes neither, or a mesh nobody sliced, attaches nothing — the model-
     only payload is byte-identical to one built before extras existed.
 
+    The plate's contents ride here for the same reason.  When the plate
+    record (:mod:`kiln.plate_state`) says the last print is still on the
+    plate, the payload carries an ``occupancy`` block
+    (:data:`kiln.plate_state.OCCUPANCY_KIND`): the occupant's footprint box
+    and height from the record, or — when a door holds a placement verdict
+    and passes its block as *occupancy* — the engine's own reading, with its
+    reserved zones and the proposed spot.  A clear or unrecorded plate
+    carries none.  Rects are in bed millimetres with ``bed_mm`` alongside;
+    the part's own positions have been centred by :func:`stand_on_plate`,
+    so a drawing places the occupant against ``proposed.rect_mm`` when the
+    block has one and against the bed otherwise.
+
     A ``None`` payload (no geometry to show) passes straight through.
     """
     if not isinstance(payload, dict):
@@ -167,7 +181,43 @@ def attach_stage_plate(
     stand_on_plate(payload)
     payload["plate"] = resolve_stage_plate(printer_id)
     attach_slicer_geometry(payload, mesh_path=mesh_path, gcode_path=gcode_path)
+    block = occupancy if isinstance(occupancy, dict) else occupancy_for_plate(payload["plate"])
+    if block:
+        payload["occupancy"] = block
     return payload
+
+
+def occupancy_for_plate(plate: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """The record-box ``occupancy`` block for this install's printer, or ``None``.
+
+    Read from the plate record of the default adapter — the machine whose
+    model named the plate — and only on a person's own machine: the hosted
+    process serves every customer out of one ``~/.kiln``, so its record is
+    nobody's, exactly as its ``printer_model`` is.  *plate* (the resolved
+    plate dict) supplies ``bed_mm``.  ``None`` for a clear or unrecorded
+    plate, and for anything that goes wrong: a stage that cannot say what
+    is on the plate still draws the part.  Never raises.
+    """
+    try:
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            return None
+        from kiln.server import _get_adapter
+
+        adapter = _get_adapter()
+        from kiln.plate_state import read
+
+        state = read(adapter)
+        if not state.occupied:
+            return None
+        bed = None
+        if isinstance(plate, dict) and plate.get("x_mm") and plate.get("y_mm"):
+            bed = [plate["x_mm"], plate["y_mm"]]
+        return state.occupancy(bed)
+    except Exception:  # noqa: BLE001 — what the plate holds is furniture to the stage
+        logger.debug("plate occupancy not resolved", exc_info=True)
+        return None
 
 
 def resolve_sliced_gcode(

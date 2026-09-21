@@ -87,12 +87,14 @@ import logging
 import os
 from typing import Any
 
+from kiln.plate_state import OCCUPANCY_KIND
+
 logger = logging.getLogger(__name__)
 
 SCHEMA = "placement_verdict/1"
 REQUEST_SCHEMA = "placement_request/1"
-OCCUPANCY_KIND = "kiln.plate_occupancy.v1"
 TOOL = "placement_plan"
+__all__ = ["OCCUPANCY_KIND", "REQUEST_SCHEMA", "SCHEMA", "TOOL", "ask", "hosted_form", "request_for", "verdict_for"]
 
 #: Why no verdict came back -- the three causes a refusal can name.
 OFFLINE = "offline"

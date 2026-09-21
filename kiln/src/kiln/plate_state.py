@@ -55,6 +55,10 @@ _SCHEMA_VERSION = 1
 #: gets when nothing trustworthy is on file.
 STATUSES = ("unknown", "occupied", "clear")
 
+#: The block the 3D stage draws an occupied plate from, and the shape the
+#: placement verdict's ``occupancy`` carries (:mod:`kiln._pro_placement_bridge`).
+OCCUPANCY_KIND = "kiln.plate_occupancy.v1"
+
 #: A G-code body longer than this is not scanned for its height: a scan
 #: cut short would report a height that is too LOW, which is the dangerous
 #: direction, so a file over the cap reports no height at all.
@@ -228,6 +232,37 @@ class PlateState:
             who = "a person said so" if self.source == "human" else self.source
             return f"the plate was cleared at {self.since_clock()} ({who})"
         return "Kiln has no record of what is on the plate"
+
+    def occupancy(self, bed_mm: Any = None) -> dict[str, Any] | None:
+        """The :data:`OCCUPANCY_KIND` block from the record's own box, or ``None``
+        when the plate is not occupied.
+
+        Same shape the placement verdict carries, built from the record
+        alone: one occupant -- the job's file, its footprint box and its
+        height as recorded, each ``None`` when Kiln could not derive it from
+        the file (a part of unknown size is still a part) -- no reserved
+        zones, no proposal, ``source: "record_box"``.  *bed_mm* is the
+        plate's ``[x, y]`` when the caller knows it.
+        """
+        if not self.occupied:
+            return None
+        job = self.job
+        try:
+            bed = [float(bed_mm[0]), float(bed_mm[1])] if bed_mm else None
+        except (TypeError, ValueError, IndexError):
+            bed = None
+        return {
+            "kind": OCCUPANCY_KIND,
+            "bed_mm": bed,
+            "occupied": [{
+                "name": os.path.basename(job.file) if job else "a part",
+                "rect_mm": list(job.footprint_mm) if job and job.footprint_mm else None,
+                "top_mm": job.max_z_mm if job else None,
+            }],
+            "reserved": [],
+            "proposed": None,
+            "source": "record_box",
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {

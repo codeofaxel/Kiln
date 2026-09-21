@@ -84,6 +84,7 @@ class _EstimateToolsPlugin:
             profile: str | None = None,
             material: str = "PLA",
             printer_name: str | None = None,
+            placement: str | list[float] | None = None,
         ) -> dict:
             """Primary estimation tool — slice a 3D model and return time, filament, cost, and printability analysis.
 
@@ -111,6 +112,16 @@ class _EstimateToolsPlugin:
                     for the default printer.  An estimate is only as true as
                     the profile behind it, so naming a second machine costs
                     the job on that machine rather than on the default.
+                placement: Where the part goes when the plate still holds the
+                    last print: ``[x, y]`` in mm (the part's footprint
+                    origin), a named region (``"front-left"``, ``"centre"``,
+                    ``"back-right"``, …), or ``"keep"``.  Omitted, an
+                    occupied plate refuses and lists the spots that would
+                    work; a clear plate estimates as before.  The response's
+                    ``placement`` block is the clearance verdict, checked
+                    again on the sliced file.  The clearance verdict is free;
+                    placing and starting a second print on an occupied plate
+                    is a kiln-pro feature (https://kiln3d.com/pricing).
             """
             import kiln.server as _srv
             if err := _srv._check_auth("slicer"):
@@ -139,11 +150,24 @@ class _EstimateToolsPlugin:
                 # helper, same refusal shape, so the two doors cannot differ.
                 from kiln.plugins.slicer_tools import (
                     _apply_bed_fit_gate,
+                    _apply_plate_placement,
+                    _attach_placement,
                     _gate_error_response,
+                    _verify_plate_placement,
                 )
 
+                # The plate may still hold the last print: same placement
+                # gate as the slice doors, so an estimate is of the part
+                # where it will actually print — and refuses where they do.
+                placed_input, place_err, place_info = _apply_plate_placement(
+                    input_path, effective_printer_id=effective_printer_id,
+                    printer_name=printer_name, placement=placement,
+                    profile_path=effective_profile,
+                )
+                if place_err is not None:
+                    return place_err
                 effective_input, gate_err, gate_info = _apply_bed_fit_gate(
-                    input_path, effective_printer_id, True,
+                    placed_input, effective_printer_id, place_info.get("plate") != "occupied",
                 )
                 if gate_err is not None:
                     return _gate_error_response(gate_err)
@@ -152,6 +176,9 @@ class _EstimateToolsPlugin:
                 result = slice_file(
                     effective_input, profile=effective_profile, material=material or None,
                 )
+                verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
+                if verify_err is not None:
+                    return verify_err
 
                 # 3. Parse gcode metadata
                 meta = None
@@ -272,6 +299,7 @@ class _EstimateToolsPlugin:
                     "profile_path": effective_profile,
                     "message": message,
                 }
+                _attach_placement(response, place_info)
                 return response
 
             except SlicerNotFoundError as exc:

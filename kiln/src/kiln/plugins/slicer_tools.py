@@ -10,6 +10,7 @@ no manual imports needed.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -254,6 +255,514 @@ def _apply_bed_fit_gate(
         return input_path, fit, fit
     # Unknown warn-only states (BBOX_UNKNOWN, VOLUME_UNKNOWN) — pass through.
     return input_path, None, fit
+
+
+# ---------------------------------------------------------------------------
+# Placement on an occupied plate
+# ---------------------------------------------------------------------------
+#
+# A slice used to move the new part to the centre of the plate whatever was
+# already there -- onto the part the last print left behind.  The plate
+# record (kiln.plate_state) says when that part is still there; from here
+# every slice door takes a ``placement`` and, on an occupied plate, refuses
+# until a spot is named, asks kiln-pro whether that spot is safe
+# (kiln._pro_placement_bridge), moves the part there in a temp copy, slices,
+# and looks at the sliced file once more before it is handed on.  Nothing
+# here computes clearance: the verdict is the engine's; the doors, the
+# translation and every refusal's wording are public Kiln's.
+
+_PLACEMENT_TIER_NOTE = (
+    "The clearance verdict is free; placing and starting a second print on an "
+    "occupied plate is a kiln-pro feature (https://kiln3d.com/pricing)."
+)
+#: The nine regions a person can name: thirds of the bed in X and Y.  Front
+#: is low Y and left is low X, the way the printer's own screen draws the
+#: plate.  ``center`` spellings are accepted too.
+_REGION_ROWS = ("front", "middle", "back")
+_REGION_COLUMNS = ("left", "centre", "right")
+PLACEMENT_REGIONS = tuple(
+    "centre" if (r, c) == (1, 1) else f"{_REGION_ROWS[r]}-{_REGION_COLUMNS[c]}"
+    for r in range(3)
+    for c in range(3)
+)
+#: Why the bridge came back empty -> (cause, remedy) in the fail-closed sentence.
+_NO_VERDICT_WORDING = {
+    "offline": ("this computer is offline", "reconnect to the internet"),
+    "signed_out": ("Kiln is signed out", "sign in"),
+    "not_answered": ("Kiln's clearance check didn't answer", "wait a minute"),
+}
+_PROFILE_NUMBER_KEYS = ("layer_height", "skirts", "skirt_distance", "brim_width")
+_PLACEABLE_EXTENSIONS = (".stl", ".3mf")
+_MODEL_EXTENSIONS = (".gcode.3mf", ".3mf", ".gcode", ".stl", ".step", ".stp", ".obj", ".amf")
+
+
+def _pretty_job_name(file_name: str | None) -> str:
+    """``jar_v2.gcode.3mf`` -> ``jar v2``: what a sentence calls the part on the plate."""
+    base = os.path.basename(str(file_name or ""))
+    for ext in _MODEL_EXTENSIONS:
+        if base.lower().endswith(ext):
+            base = base[: -len(ext)]
+            break
+    return " ".join(base.replace("_", " ").replace("-", " ").split()) or "the last part"
+
+
+def _plate_holds_sentence(state: Any) -> str:
+    """``The last print, jar v2, is still on the plate (since 18:12, about 42 mm tall).``
+
+    The height clause is dropped, never printed as ``None``, when the record
+    could not read the file's height.
+    """
+    job = getattr(state, "job", None)
+    tall = ""
+    if job is not None and job.max_z_mm is not None:
+        tall = f", about {job.max_z_mm:g} mm tall"
+    name = _pretty_job_name(job.file if job is not None else "")
+    return f"The last print, {name}, is still on the plate (since {state.since_clock()}{tall})."
+
+
+def _no_verdict_sentence(state: Any, reason: str | None) -> str:
+    """The fail-closed refusal, from the plate record and the bridge's reason.
+
+    One helper, so the sentence a person reads when Kiln cannot check the
+    plate is the same at every door: what is there, why the check did not
+    happen (offline / signed out / no answer -- never a code), and the two
+    ways out.
+    """
+    cause, remedy = _NO_VERDICT_WORDING.get(reason or "", _NO_VERDICT_WORDING["not_answered"])
+    return (
+        f"{_plate_holds_sentence(state)} Kiln can't check whether a second part fits safely "
+        f"beside it because {cause}, so it won't slice onto this plate. Clear the plate and "
+        f"say so, or {remedy} and try again."
+    )
+
+
+def _region_cell(name: str) -> tuple[int, int] | None:
+    """``"back-left"`` -> ``(2, 0)``; ``None`` for anything that is not a region."""
+    n = name.strip().lower().replace("_", "-").replace(" ", "-").replace("center", "centre")
+    if n in ("centre", "middle", "middle-centre", "centre-centre"):
+        return (1, 1)
+    parts = n.split("-")
+    if len(parts) != 2 or parts[0] not in _REGION_ROWS or parts[1] not in _REGION_COLUMNS:
+        return None
+    return (_REGION_ROWS.index(parts[0]), _REGION_COLUMNS.index(parts[1]))
+
+
+def _region_name(cell: tuple[int, int]) -> str:
+    return PLACEMENT_REGIONS[cell[0] * 3 + cell[1]]
+
+
+def _cell_of(x: float, y: float, bed: list[float]) -> tuple[int, int]:
+    """Which third-by-third region of *bed* the point ``(x, y)`` falls in."""
+    col = min(2, max(0, int(x // (float(bed[0]) / 3.0))))
+    row = min(2, max(0, int(y // (float(bed[1]) / 3.0))))
+    return (row, col)
+
+
+def _spot_centre(spot: dict[str, Any], part: dict[str, Any] | None) -> tuple[float, float] | None:
+    """The footprint centre of a verdict spot: its rect when it names one,
+    else its origin plus half the part's size (``at_mm`` is the min corner)."""
+    rect = spot.get("footprint_mm")
+    if isinstance(rect, (list, tuple)) and len(rect) == 4:
+        return ((float(rect[0]) + float(rect[2])) / 2.0, (float(rect[1]) + float(rect[3])) / 2.0)
+    at = spot.get("at_mm")
+    if not (isinstance(at, (list, tuple)) and len(at) == 2):
+        return None
+    size = (part or {}).get("size_mm") or [0.0, 0.0]
+    return (float(at[0]) + float(size[0]) / 2.0, float(at[1]) + float(size[1]) / 2.0)
+
+
+def _regions_with_room(spots: list[dict[str, Any]], part: dict[str, Any] | None, bed: list[float]) -> list[str]:
+    cells: set[tuple[int, int]] = set()
+    for spot in spots:
+        centre = _spot_centre(spot, part)
+        if centre is not None:
+            cells.add(_cell_of(centre[0], centre[1], bed))
+    return [_region_name(cell) for cell in sorted(cells)]
+
+
+def _parse_placement(placement: Any) -> tuple[str, Any, str | None]:
+    """``(kind, value, problem)`` -- kind is ``auto`` / ``keep`` / ``spot`` / ``region``.
+
+    A JSON-encoded ``"[x, y]"`` is read as a spot, since a host may hand a
+    list through as its text.  *problem* is the sentence for anything else.
+    """
+    accepted = ", ".join(PLACEMENT_REGIONS)
+    if placement is None:
+        return "auto", "auto", None
+    if isinstance(placement, str):
+        text = placement.strip()
+        if text.startswith("["):
+            try:
+                placement = json.loads(text)
+            except ValueError:
+                return "auto", None, f"placement {placement!r} is not a spot; give [x, y] in mm"
+        else:
+            low = text.lower()
+            if low in ("", "auto"):
+                return "auto", "auto", None
+            if low == "keep":
+                return "keep", "keep", None
+            cell = _region_cell(low)
+            if cell is not None:
+                return "region", cell, None
+            return "auto", None, f'placement {placement!r} is not a spot ([x, y] in mm), "keep", or a region ({accepted})'
+    if isinstance(placement, (list, tuple)) and len(placement) == 2:
+        try:
+            return "spot", [float(placement[0]), float(placement[1])], None
+        except (TypeError, ValueError):
+            pass
+    return "auto", None, f'placement {placement!r} is not a spot ([x, y] in mm), "keep", or a region ({accepted})'
+
+
+def _profile_numbers(profile_path: str | None) -> dict[str, float]:
+    """``layer_height`` / ``skirts`` / ``skirt_distance`` / ``brim_width`` from a
+    slicer profile, when they are trivially readable; ``{}`` otherwise."""
+    out: dict[str, float] = {}
+    if not profile_path:
+        return out
+    try:
+        text = Path(profile_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    if str(profile_path).lower().endswith(".json"):
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return out
+        for key in _PROFILE_NUMBER_KEYS:
+            value = data.get(key) if isinstance(data, dict) else None
+            if isinstance(value, list) and value:
+                value = value[0]
+            try:
+                out[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return out
+    for key in _PROFILE_NUMBER_KEYS:
+        m = re.search(rf"^\s*{key}\s*=\s*([-+]?\d+(?:\.\d+)?)", text, re.MULTILINE)
+        if m:
+            out[key] = float(m.group(1))
+    return out
+
+
+def _part_envelope(input_path: str, profile_path: str | None) -> tuple[dict[str, Any] | None, dict[str, float] | None]:
+    """``(part, bbox)`` for the request: the part's size from its bbox, the
+    layer height and the widest thing the slicer draws around it (skirt or
+    brim) from the profile -- the slicer's own defaults when the profile is
+    silent -- and a tower when the 3MF asks for more than one filament.
+    Colour changes are unknown before slicing.  ``(None, None)`` when the
+    geometry cannot be read."""
+    from kiln.printers.bed_fit import compute_mesh_bbox
+
+    try:
+        bbox = compute_mesh_bbox(input_path)
+    except Exception:  # noqa: BLE001 -- unreadable geometry is "no envelope"
+        bbox = None
+    if not bbox:
+        return None, None
+    numbers = _profile_numbers(profile_path)
+    skirts = numbers.get("skirts", 1.0)
+    skirt_distance = numbers.get("skirt_distance", 6.0)
+    skirt = max(numbers.get("brim_width", 0.0), skirt_distance if skirts > 0 else 0.0)
+    tower: list[float] | None = None
+    if input_path.lower().endswith(".3mf"):
+        try:
+            tower = [30.0, 30.0] if _detect_3mf_multicolor(input_path) else None
+        except Exception:  # noqa: BLE001
+            tower = None
+    part = {
+        "size_mm": [
+            round(bbox["x_max"] - bbox["x_min"], 3),
+            round(bbox["y_max"] - bbox["y_min"], 3),
+            round(bbox["z_max"] - bbox["z_min"], 3),
+        ],
+        "layer_height_mm": numbers.get("layer_height", 0.2),
+        "tower_mm": tower,
+        "colour_changes_at_mm": [],
+        "skirt_mm": skirt,
+    }
+    return part, bbox
+
+
+def _place_copy(input_path: str, bbox: dict[str, float], target_min: list[float]) -> tuple[str | None, str | None]:
+    """A temp copy of *input_path* with its footprint origin at *target_min*,
+    or ``(None, sentence)`` for a format Kiln cannot move without re-exporting."""
+    import tempfile
+
+    ext = os.path.splitext(input_path)[1].lower()
+    if ext not in _PLACEABLE_EXTENSIONS:
+        return None, (
+            f"Kiln can place an STL or a 3MF beside a part on the plate, not {ext or 'this format'}; "
+            "convert it first (import_external_mesh) or clear the plate and say so."
+        )
+    dx = float(target_min[0]) - float(bbox["x_min"])
+    dy = float(target_min[1]) - float(bbox["y_min"])
+    stem = os.path.splitext(os.path.basename(input_path))[0]
+    dst = os.path.join(tempfile.mkdtemp(prefix="kiln_placement_"), f"{stem}_placed{ext}")
+    if ext == ".stl":
+        from kiln.printers.bed_fit import apply_translation_to_stl
+
+        apply_translation_to_stl(input_path, [dx, dy, 0.0], dst)
+    else:
+        from kiln.threemf_placement import translate_3mf
+
+        translate_3mf(input_path, dx, dy, dst)
+    return dst, None
+
+
+def _spots_clause(spots: list[dict[str, Any]]) -> str:
+    named: list[str] = []
+    for spot in spots[:3]:
+        at = spot.get("at_mm") if isinstance(spot, dict) else None
+        if isinstance(at, (list, tuple)) and len(at) == 2:
+            clear = spot.get("clearance_mm")
+            named.append(
+                f"[{float(at[0]):g}, {float(at[1]):g}]"
+                + (f" ({float(clear):g} mm clear)" if isinstance(clear, (int, float)) else "")
+            )
+    return f" Spots with room: {', '.join(named)}." if named else ""
+
+
+def _refusal_sentences(verdict: dict[str, Any]) -> str:
+    sentences = [
+        str(r.get("sentence") or "").strip()
+        for r in (verdict.get("refusals") or [])
+        if isinstance(r, dict) and r.get("sentence")
+    ]
+    return " ".join(s if s.endswith(".") else s + "." for s in sentences) or "the engine named no safe way to place it there."
+
+
+def _placement_refusal(
+    message: str, code: str, *, state: Any, bed: list[float] | None, verdict: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The error dict every placement refusal shares: the record, the spots
+    that would work, the plate as the engine (or the record) sees it."""
+    from kiln.server import _error_dict
+
+    resp = _error_dict(message, code=code)
+    resp["plate"] = state.to_dict()
+    resp["spots"] = list(verdict.get("spots") or []) if isinstance(verdict, dict) else []
+    resp["occupancy"] = (verdict.get("occupancy") if isinstance(verdict, dict) else None) or state.occupancy(bed)
+    if isinstance(verdict, dict):
+        resp["placement"] = verdict
+    resp["regions"] = list(PLACEMENT_REGIONS)
+    resp["tier_note"] = _PLACEMENT_TIER_NOTE
+    return resp
+
+
+def _apply_plate_placement(
+    input_path: str,
+    *,
+    effective_printer_id: str | None,
+    printer_name: str | None,
+    placement: Any,
+    profile_path: str | None = None,
+) -> tuple[str, dict | None, dict]:
+    """Pre-slice gate for a plate that still holds the last print.
+
+    Same return shape as :func:`_apply_bed_fit_gate` --
+    ``(effective_input_path, error_dict_or_None, info)`` -- and called by
+    every slice door BEFORE it, so a part is placed beside the occupant
+    first and checked against the bed second.
+
+    * plate ``clear`` or ``unknown`` (no printer, no record, the hosted
+      process): the input passes through unchanged, ``info["plate"]`` says
+      which;
+    * plate ``occupied`` and no *placement*: refuse
+      (``PLACEMENT_PLATE_OCCUPIED``) with what is there and, when a verdict
+      is obtainable, the spots that would work;
+    * a spot ``[x, y]``, ``"keep"`` or a named region: ask the bridge.  A
+      region is resolved here, never in the engine -- the spots of an
+      ``"auto"`` verdict whose footprint centre falls in that third of the
+      bed, best clearance first -- and refused by name when none does;
+    * refused: the verdict's own sentences, spots and occupancy ride the
+      error;
+    * ok: the part is moved to the verdict's spot in a temp copy (an STL by
+      its vertices, a 3MF by its build items, anything else refused) and
+      that copy is the effective input, with ``info["placement"]`` the
+      verdict and ``approval_carries`` false;
+    * no verdict at all (offline, signed out, nothing answered): REFUSE.
+      The plate holds a part and Kiln cannot check clearance, so nothing is
+      sliced onto it; the sentence says why and what to do.
+
+    The caller runs :func:`_verify_plate_placement` on the sliced file and
+    :func:`_attach_placement` on its success response.
+    """
+    import kiln.server as _srv
+    from kiln import _pro_placement_bridge as bridge
+    from kiln import plate_state
+
+    kind, value, problem = _parse_placement(placement)
+    if problem:
+        return input_path, _srv._error_dict(problem, code="PLACEMENT_INVALID"), {"plate": "unknown"}
+    try:
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            return input_path, None, {"plate": "unknown", "gate": "skipped_hosted"}
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        adapter = _srv._resolve_adapter(printer_name)
+    except Exception:  # noqa: BLE001 -- no printer means no plate record
+        adapter = None
+    if adapter is None:
+        return input_path, None, {"plate": "unknown", "gate": "skipped_no_printer"}
+    state = plate_state.read(adapter)
+    if not state.occupied:
+        return input_path, None, {"plate": state.status}
+
+    from kiln.printers.bed_fit import get_build_volume
+
+    volume = get_build_volume(effective_printer_id)
+    bed = [float(volume[0]), float(volume[1])] if volume else None
+    part, bbox = _part_envelope(input_path, profile_path)
+    pid = effective_printer_id or plate_state.declared_model_of(adapter) or ""
+    holds = _plate_holds_sentence(state)
+    occupied_info = {"plate": "occupied"}
+
+    if kind == "auto":
+        probe, _reason = bridge.ask(bridge.request_for(adapter, pid, placement="auto", part=part))
+        message = (
+            f"{holds} Slicing now would put the new part on top of it. Name a spot beside it "
+            f'(placement=[x, y] in mm, or a region such as "front-left"), or clear the plate and say so.'
+            + (_spots_clause(probe.get("spots") or []) if isinstance(probe, dict) else "")
+        )
+        return input_path, _placement_refusal(message, "PLACEMENT_PLATE_OCCUPIED", state=state, bed=bed, verdict=probe), occupied_info
+
+    if kind == "region":
+        if bed is None:
+            return input_path, _placement_refusal(
+                f"{holds} Kiln does not know this printer's bed size, so it cannot resolve a region; "
+                "name the spot as [x, y] in mm instead.",
+                "PLACEMENT_INVALID", state=state, bed=bed,
+            ), occupied_info
+        probe, reason = bridge.ask(bridge.request_for(adapter, pid, placement="auto", part=part))
+        if probe is None:
+            return input_path, _placement_refusal(_no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed), occupied_info
+        spots = [s for s in (probe.get("spots") or []) if isinstance(s, dict)]
+        in_region = []
+        for spot in spots:
+            centre = _spot_centre(spot, part)
+            if centre is not None and _cell_of(centre[0], centre[1], bed) == value:
+                in_region.append(spot)
+        if not in_region:
+            rooms = _regions_with_room(spots, part, bed)
+            if not rooms:
+                where = "there is no safe spot anywhere beside it"
+            elif len(rooms) == 1:
+                where = f"there is room {rooms[0]}"
+            else:
+                where = f"there is room {', '.join(rooms[:-1])} and {rooms[-1]}"
+            job_name = _pretty_job_name(state.job.file if state.job else "")
+            message = f"There is no safe spot {_region_name(value)} with {job_name} on the plate; {where}."
+            return input_path, _placement_refusal(message, "PLACEMENT_NO_ROOM_IN_REGION", state=state, bed=bed, verdict=probe), occupied_info
+        best = max(in_region, key=lambda s: float(s.get("clearance_mm") or 0.0))
+        request = bridge.request_for(adapter, pid, placement=list(best["at_mm"]), part=part, placed_by="human")
+    elif kind == "keep":
+        if bbox is None:
+            return input_path, _placement_refusal(
+                f"{holds} Kiln could not read where this file puts the part, so it cannot keep it there; "
+                "name a spot as [x, y] in mm or clear the plate and say so.",
+                "PLACEMENT_UNPLACEABLE", state=state, bed=bed,
+            ), occupied_info
+        request = bridge.request_for(adapter, pid, placement="keep", part=part, keep_at=[bbox["x_min"], bbox["y_min"]])
+    else:
+        request = bridge.request_for(adapter, pid, placement=value, part=part, placed_by="agent")
+
+    verdict, reason = bridge.ask(request)
+    if verdict is None:
+        return input_path, _placement_refusal(_no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed), occupied_info
+    if not verdict.get("ok"):
+        spots_clause = _spots_clause(verdict.get("spots") or [])
+        message = (
+            f"Kiln won't slice onto this plate there: {_refusal_sentences(verdict)}"
+            + (spots_clause or " No spot on the plate is safe beside it; clear the plate and say so.")
+        )
+        return input_path, _placement_refusal(message, "PLACEMENT_REFUSED", state=state, bed=bed, verdict=verdict), occupied_info
+
+    if kind == "keep":
+        placed = input_path
+    else:
+        rect = verdict.get("footprint_mm")
+        target = list(rect[:2]) if isinstance(rect, (list, tuple)) and len(rect) == 4 else verdict.get("at_mm")
+        if bbox is None or not (isinstance(target, (list, tuple)) and len(target) == 2):
+            return input_path, _placement_refusal(
+                f"{holds} Kiln could not move the part to the spot the check approved, so it won't slice onto this plate.",
+                "PLACEMENT_UNPLACEABLE", state=state, bed=bed, verdict=verdict,
+            ), occupied_info
+        try:
+            placed, problem = _place_copy(input_path, bbox, [float(target[0]), float(target[1])])
+        except Exception as exc:  # noqa: BLE001 -- a copy that failed is a part that stays unplaced
+            _logger.warning("Placement copy failed for %s: %s", input_path, exc)
+            placed, problem = None, f"{holds} Kiln could not move the part to the approved spot ({exc}), so it won't slice onto this plate."
+        if placed is None:
+            return input_path, _placement_refusal(problem or "", "PLACEMENT_UNPLACEABLE", state=state, bed=bed, verdict=verdict), occupied_info
+        _logger.info("Placed %s beside %s at %s -> %s", os.path.basename(input_path), state.job.file if state.job else "a part", target, placed)
+
+    job_name = _pretty_job_name(state.job.file if state.job else "")
+    info: dict[str, Any] = {
+        "plate": "occupied",
+        "placement": verdict,
+        "placed_input_path": placed,
+        "approval_carries": False,
+        "approval_note": (
+            f"placed beside {job_name}, which is still on the plate, so a yes given on the design "
+            "mesh does not carry; the stage on this result shows the plate as it will print — approve from here"
+        ),
+        "_verify": {"request": request, "state": state, "bed": bed},
+    }
+    return placed, None, info
+
+
+def _verify_plate_placement(gcode_path: str | None, info: dict | None) -> tuple[dict | None, dict]:
+    """Post-slice pass: the file that was just sliced goes back to the engine.
+
+    Called by every slice door right after ``slice_file`` and before any
+    wrap or upload.  The pre-slice verdict was about an envelope; this one
+    is about the real toolpath -- its skirt, its tower, its colour changes.
+    A verdict that is not ok, or no verdict at all, refuses the result: the
+    door returns the error dict and never hands the file on.  Returns
+    ``(error_dict_or_None, info)`` with ``info["placement"]`` replaced by
+    the verified verdict.  A clear-plate *info* passes straight through.
+    """
+    if not isinstance(info, dict) or info.get("plate") != "occupied":
+        return None, info
+    from kiln import _pro_placement_bridge as bridge
+
+    ctx = info.pop("_verify", None) or {}
+    state, bed, request = ctx.get("state"), ctx.get("bed"), ctx.get("request")
+    if state is None or not isinstance(request, dict) or not gcode_path:
+        from kiln.server import _error_dict
+
+        return _error_dict(
+            "Kiln could not check the sliced file against the plate, so it won't hand it on.",
+            code="PLACEMENT_UNVERIFIED",
+        ), info
+    verdict, reason = bridge.ask({**request, "sliced_gcode": {"path": str(gcode_path)}})
+    if verdict is None:
+        return _placement_refusal(_no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed), info
+    if not verdict.get("ok"):
+        message = (
+            f"Kiln checked the sliced file against the plate and won't hand it on: {_refusal_sentences(verdict)}"
+            + (_spots_clause(verdict.get("spots") or []) or " Clear the plate and say so.")
+        )
+        return _placement_refusal(message, "PLACEMENT_REFUSED", state=state, bed=bed, verdict=verdict), info
+    info["placement"] = verdict
+    info["verified_sliced_file"] = True
+    return None, info
+
+
+def _attach_placement(response: dict, info: dict | None) -> None:
+    """Stamp a success response with the verdict and the approval note, on an
+    occupied plate only.  The bed-fit gate's own ``approval_carries`` inside
+    ``bed_fit`` stays as it is for the clear-plate case."""
+    if not isinstance(info, dict) or info.get("plate") != "occupied":
+        return
+    info.pop("_verify", None)
+    response["placement"] = info.get("placement")
+    response["approval_carries"] = False
+    response["approval_note"] = info.get("approval_note")
 
 
 def _auto_wrap_bambu_3mf(
@@ -891,6 +1400,7 @@ class _SlicerToolsPlugin:
             auto_center: bool = True,
             printer_name: str | None = None,
             material: str | None = None,
+            placement: str | list[float] | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
 
@@ -920,6 +1430,18 @@ class _SlicerToolsPlugin:
                     its profile, its bed and its safety limits — without it,
                     a multi-printer install slices everything for whichever
                     printer is the default.
+                placement: Where the part goes when the plate still holds the
+                    last print.  ``[x, y]`` in mm (where the part's footprint
+                    origin lands), a named region (``"front-left"``,
+                    ``"centre"``, ``"back-right"``, …), or ``"keep"`` to leave
+                    it where the file puts it.  Omitted, an occupied plate
+                    refuses and lists the spots that would work; a clear
+                    plate slices as before.  The response's ``placement``
+                    block is the clearance verdict, and the sliced file is
+                    checked against the plate once more before it is handed
+                    on.  The clearance verdict is free; placing and starting
+                    a second print on an occupied plate is a kiln-pro feature
+                    (https://kiln3d.com/pricing).
 
             Returns a JSON object with the output G-code path.  The output file
             can then be uploaded to a printer with ``upload_file`` and printed
@@ -941,8 +1463,21 @@ class _SlicerToolsPlugin:
                 # Bed-fit safety gate (Layer 1).  Blocks off-bed / oversized
                 # geometry before it hits the slicer.  May auto-translate
                 # an origin-centered STL into a bed-centered temp copy.
+                # Placement gate first: a plate that still holds the last
+                # print refuses until a spot is named, and the part is moved
+                # beside the occupant before the bed check sees it.  On an
+                # occupied plate the bed gate must never re-centre — that
+                # would move the part back onto the occupant.
+                placed_input, place_err, place_info = _apply_plate_placement(
+                    input_path, effective_printer_id=effective_printer_id,
+                    printer_name=printer_name, placement=placement,
+                    profile_path=effective_profile,
+                )
+                if place_err is not None:
+                    return place_err
                 effective_input, gate_err, gate_info = _apply_bed_fit_gate(
-                    input_path, effective_printer_id, auto_center,
+                    placed_input, effective_printer_id,
+                    auto_center and place_info.get("plate") != "occupied",
                 )
                 if gate_err is not None:
                     return _gate_error_response(gate_err)
@@ -954,6 +1489,11 @@ class _SlicerToolsPlugin:
                     material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                 )
+                # The sliced file itself goes back to the plate check before
+                # anything is wrapped or recommended.
+                verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
+                if verify_err is not None:
+                    return verify_err
                 response: dict[str, Any] = {
                     "success": True,
                     **result.to_dict(),
@@ -1062,6 +1602,7 @@ class _SlicerToolsPlugin:
                 # in-body count here: it would double-count this tool
                 # while every other path stayed at zero.)
 
+                _attach_placement(response, place_info)
                 return response
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
@@ -1092,6 +1633,7 @@ class _SlicerToolsPlugin:
             auto_center: bool = True,
             printer_name: str | None = None,
             material: str | None = None,
+            placement: str | list[float] | None = None,
         ) -> dict[str, Any]:
             """Reslice a 3D model with custom slicer parameter overrides.
 
@@ -1132,6 +1674,16 @@ class _SlicerToolsPlugin:
                     ``"PETG"``, …); its density is what the slicer weighs
                     the print with.  Omitted, the loaded spool answers,
                     then PLA — the response's ``filament`` block says which.
+                placement: Where the part goes when the plate still holds the
+                    last print: ``[x, y]`` in mm (the part's footprint
+                    origin), a named region (``"front-left"``, ``"centre"``,
+                    ``"back-right"``, …), or ``"keep"``.  Omitted, an
+                    occupied plate refuses and lists the spots that would
+                    work; a clear plate reslices as before.  The response's
+                    ``placement`` block is the clearance verdict, checked
+                    again on the sliced file.  The clearance verdict is free;
+                    placing and starting a second print on an occupied plate
+                    is a kiln-pro feature (https://kiln3d.com/pricing).
             """
             if err := _srv._check_auth("slicer"):
                 return err
@@ -1237,9 +1789,21 @@ class _SlicerToolsPlugin:
                 if has_temp_overrides and effective_printer_id and _target_model:
                     validation_result = validate_profile_for_printer(effective_printer_id, _target_model)
 
+                # -- Placement on an occupied plate, then the bed-fit gate --
+                # The bed gate must not re-centre a part placed beside the
+                # occupant: that would move it back onto the occupant.
+                placed_input, place_err, place_info = _apply_plate_placement(
+                    input_abs, effective_printer_id=effective_printer_id,
+                    printer_name=printer_name, placement=placement,
+                    profile_path=effective_profile,
+                )
+                if place_err is not None:
+                    return place_err
+
                 # -- Bed-fit safety gate (Layer 1) --
                 effective_input, gate_err, gate_info = _apply_bed_fit_gate(
-                    input_abs, effective_printer_id, auto_center,
+                    placed_input, effective_printer_id,
+                    auto_center and place_info.get("plate") != "occupied",
                 )
                 if gate_err is not None:
                     return _gate_error_response(gate_err)
@@ -1253,6 +1817,9 @@ class _SlicerToolsPlugin:
                     material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                 )
+                verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
+                if verify_err is not None:
+                    return verify_err
 
                 response: dict[str, Any] = {
                     "success": True,
@@ -1335,6 +1902,7 @@ class _SlicerToolsPlugin:
                     response["multicolor_flattened"] = mc_block
                     response.setdefault("warnings", []).append(mc_warning)
 
+                _attach_placement(response, place_info)
                 return response
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
@@ -1401,6 +1969,7 @@ class _SlicerToolsPlugin:
             metadata: dict | None = None,
             skip_validation: bool = False,
             preview_token: str | None = None,
+            placement: str | list[float] | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -1450,6 +2019,17 @@ class _SlicerToolsPlugin:
                     mesh (e.g. ``validate_and_prepare`` was just called)
                     or when the input is a pre-sliced 3MF the validator
                     can't introspect.
+                placement: Where the part goes when the plate still holds the
+                    last print: ``[x, y]`` in mm (the part's footprint
+                    origin), a named region (``"front-left"``, ``"centre"``,
+                    ``"back-right"``, …), or ``"keep"``.  Omitted, an
+                    occupied plate refuses before anything is sliced and
+                    lists the spots that would work; a clear plate prints as
+                    before.  The response's ``placement`` block is the
+                    clearance verdict, checked again on the sliced file
+                    before upload.  The clearance verdict is free; placing
+                    and starting a second print on an occupied plate is a
+                    kiln-pro feature (https://kiln3d.com/pricing).
 
             Combines ``slice_model``, ``upload_file``, and ``start_print`` into
             a single action.
@@ -1761,8 +2341,18 @@ class _SlicerToolsPlugin:
                 # orients to fit if it can), and refuses a material the printer
                 # physically can't melt.  May auto-translate an origin-centered
                 # STL to bed-centered.
+                # Placement first: the plate may still hold the last print,
+                # and the bed gate must not re-centre a part placed beside it.
+                placed_input, place_err, place_info = _apply_plate_placement(
+                    input_path, effective_printer_id=effective_printer_id,
+                    printer_name=printer_name, placement=placement,
+                    profile_path=effective_profile,
+                )
+                if place_err is not None:
+                    return place_err
                 effective_input, gate_err, gate_info = _apply_bed_fit_gate(
-                    input_path, effective_printer_id, auto_center,
+                    placed_input, effective_printer_id,
+                    auto_center and place_info.get("plate") != "occupied",
                     material_id=material,
                 )
                 if gate_err is not None:
@@ -1774,6 +2364,11 @@ class _SlicerToolsPlugin:
                     material=declared_material,
                     loaded_material=loaded_material,
                 )
+                # The sliced file goes back to the plate check before any
+                # wrap, upload or start.
+                verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
+                if verify_err is not None:
+                    return verify_err
 
                 adapter = _srv._resolve_adapter(printer_name)
 
@@ -1978,6 +2573,7 @@ class _SlicerToolsPlugin:
                     resp["warnings"] = ams_routing_warnings
                 if cal_used is not None:
                     resp["calibration_used"] = cal_used
+                _attach_placement(resp, place_info)
 
                 # Multicolor-flatten advisory — same wire as slice_model.
                 # The print already started (warn, never block); the user
