@@ -174,7 +174,7 @@ def _parse_comment(
     return unit, description, min_val, max_val
 
 
-def _referenced_params(expression: str, known: list[str]) -> list[str]:
+def _referenced_params(expression: str, known: set[str]) -> list[str]:
     """Known parameter names an expression references, in order of first use."""
     seen: list[str] = []
     for ident in _IDENT_RE.findall(_STRING_RE.sub("", expression)):
@@ -183,39 +183,73 @@ def _referenced_params(expression: str, known: list[str]) -> list[str]:
     return seen
 
 
+def _block_lines(scad_code: str) -> list[str]:
+    """Stripped, non-blank, non-comment lines up to the first geometry line."""
+    lines: list[str] = []
+    for raw_line in scad_code.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("//"):
+            continue
+        first_token = line.split("(")[0].split("{")[0].split(" ")[0]
+        if first_token.rstrip(";") in _STOP_KEYWORDS:
+            break
+        lines.append(line)
+    return lines
+
+
+def _parameter_names(lines: list[str]) -> set[str]:
+    """Every name the block assigns from a literal or from other parameters.
+
+    OpenSCAD top-level assignments are order-independent, so a line may
+    reference a name declared below it.  Literal-numeric names seed the
+    set; a line whose expression references a name already in the set is
+    a derived parameter and adds its own name, until no line adds one.
+    A line that references nothing in the set (a vector, a string, a
+    function of constants) never joins it.
+    """
+    known = {m.group("name") for m in map(_VAR_RE.match, lines) if m}
+    pending = [
+        a for a in map(_ASSIGN_RE.match, lines)
+        if a and a.group("name") not in known
+    ]
+    grew = True
+    while grew and pending:
+        grew = False
+        for a in list(pending):
+            if _referenced_params(a.group("expr"), known):
+                known.add(a.group("name"))
+                pending.remove(a)
+                grew = True
+    return known
+
+
 def parse_openscad_parameters(scad_code: str) -> list[ParameterDef]:
     """Parse OpenSCAD variable declarations at the top of a file.
 
-    Reads lines sequentially until a line is encountered that is not a
-    variable assignment, comment, or blank line.  From each variable
-    line the unit, description, and optional min/max range are extracted
-    from the trailing ``//`` comment.
+    The parameter block runs from the top of the file to the first line
+    of geometry code; blank lines and ``//`` comments inside it are
+    skipped.  From each variable line the unit, description, and optional
+    min/max range are extracted from the trailing ``//`` comment.
 
     A line assigning an expression rather than a literal number, such as
-    ``inner = outer - 2*wall;``, is reported as a derived parameter when
-    the expression references at least one parameter parsed above it
-    (``derived=True``, ``expression``, ``depends_on``, no value or range).
-    An expression line that references no parameter parsed so far ends
-    the block, as any non-literal line always has.
+    ``inner = outer - 2*wall;``, is reported as a derived parameter
+    (``derived=True``, ``expression``, ``depends_on``, no value or range)
+    when the expression references at least one other parameter in the
+    block.  OpenSCAD assignments are order-independent, so the referenced
+    parameter may be declared above or below the line, and may itself be
+    derived; ``depends_on`` lists the names the line references directly.
+    A line that references no parameter at all (a vector, a string, a
+    function of constants) ends the block, as any non-literal line always
+    has.
 
     :param scad_code: Full OpenSCAD source text.
     :returns: List of :class:`ParameterDef` found in the parameter block.
     """
+    lines = _block_lines(scad_code)
+    known = _parameter_names(lines)
     params: list[ParameterDef] = []
-    known: list[str] = []
 
-    for raw_line in scad_code.splitlines():
-        line = raw_line.strip()
-
-        # Skip blank lines and pure comments
-        if not line or line.startswith("//"):
-            continue
-
-        # Check for stop keywords (geometry code begins)
-        first_token = line.split("(")[0].split("{")[0].split(" ")[0]
-        if first_token.rstrip(";") in _STOP_KEYWORDS:
-            break
-
+    for line in lines:
         m = _VAR_RE.match(line)
         if m:
             name = m.group("name")
@@ -231,14 +265,13 @@ def parse_openscad_parameters(scad_code: str) -> list[ParameterDef]:
                     max_value=max_val,
                 )
             )
-            known.append(name)
             continue
 
         a = _ASSIGN_RE.match(line)
         depends_on = (
             _referenced_params(a.group("expr"), known) if a else []
         )
-        if not a or not depends_on:
+        if not depends_on:
             # Non-variable, non-comment, non-blank → end of param block
             break
 
@@ -256,7 +289,6 @@ def parse_openscad_parameters(scad_code: str) -> list[ParameterDef]:
                 depends_on=depends_on,
             )
         )
-        known.append(name)
 
     return params
 

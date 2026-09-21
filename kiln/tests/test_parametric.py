@@ -215,16 +215,20 @@ class TestParseDerivedParameters:
         assert params[2].derived is True
         assert params[2].depends_on == ["inner"]
 
-    def test_reference_to_name_declared_later_is_not_derived(self):
+    def test_reference_to_name_declared_later_is_derived(self):
+        # OpenSCAD top-level assignments are order-independent.
         code = (
             "inner = outer * 2;\n"
             "outer = 30;\n"
         )
         params = parse_openscad_parameters(code)
-        assert not any(p.name == "inner" for p in params)
-        assert params == []
+        assert [p.name for p in params] == ["inner", "outer"]
+        assert params[0].derived is True
+        assert params[0].depends_on == ["outer"]
+        assert params[1].derived is False
+        assert params[1].value == 30.0
 
-    def test_unknown_name_in_expression_is_not_a_dependency(self):
+    def test_name_declared_nowhere_is_not_a_dependency(self):
         code = (
             "wall = 2;\n"
             "inner = outer - 2*wall;\n"
@@ -232,6 +236,52 @@ class TestParseDerivedParameters:
         params = parse_openscad_parameters(code)
         assert params[1].derived is True
         assert params[1].depends_on == ["wall"]
+
+    def test_parameters_after_a_forward_reference_are_kept(self):
+        code = (
+            "inner = outer - 2*wall; // mm inner size\n"
+            "outer = 30; // mm\n"
+            "wall = 2; // mm\n"
+            "height = 12; // mm\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["inner", "outer", "wall", "height"]
+        assert params[0].derived is True
+        assert params[0].depends_on == ["outer", "wall"]
+        assert [p.value for p in params[1:]] == [30.0, 2.0, 12.0]
+
+    def test_forward_reference_to_a_derived_name_is_derived(self):
+        code = (
+            "c = b + 1;\n"
+            "b = a * 2;\n"
+            "a = 10;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["c", "b", "a"]
+        assert params[0].depends_on == ["b"]
+        assert params[1].depends_on == ["a"]
+
+    def test_chained_derived_lists_the_name_the_line_references(self):
+        code = (
+            "a = 10;\n"
+            "b = a * 2;\n"
+            "c = b + 1;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert params[2].derived is True
+        assert params[2].depends_on == ["b"]
+        assert params[1].depends_on == ["a"]
+
+    def test_line_referencing_no_parameter_still_ends_the_block(self):
+        code = (
+            "inner = outer - 1;\n"
+            "outer = 30;\n"
+            "dims = [10, 20, 30];\n"
+            "extra = 5;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["inner", "outer"]
+        assert params[0].depends_on == ["outer"]
 
     def test_vector_literal_stays_ignored(self):
         code = (
