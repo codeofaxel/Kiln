@@ -41,9 +41,9 @@ signed out, the service did not answer, the service refused -- so a door
 that has to refuse a motion can say which (:func:`miss_for`, a
 :class:`kiln.served_answer.Miss`).  The line between "did not answer" and
 "refused" is the one that matters to the cache: a transport failure, a
-missing sign-in, and the service's own "try again shortly" (its heartbeat
-table or counter was down) are not rulings on this machine, and a plan
-that was true before one of them is still true after it.  Only an answer
+missing sign-in, and the service's own "try again shortly" are not
+rulings on this machine, and a plan that was true before one of them is
+still true after it.  Only an answer
 that rules on the machine -- not paired, no record, over the cap -- drops
 the cached copy.  :mod:`kiln.served_answer` draws that line for every
 served door; nothing here decides it twice.

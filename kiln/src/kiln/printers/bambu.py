@@ -6505,12 +6505,8 @@ class BambuAdapter(PrinterAdapter):
         "The motion sequence for {model} is served one plan at a time to a signed-in Kiln, "
         "and no plan answered on this install. Sign in, or reconnect to the internet, and try again."
     )
-    _JOG_LINE = (
-        " Use the printer's own screen's jog controls instead -- Z UP first, then X and Y, "
-        "with your eyes on the plate. The screen's Home button descends the nozzle to the bed "
-        "and is the wrong tool with a part on the plate."
-    )
-    #: The same guidance as one remedy phrase, for the sentence that says why.
+    #: The safe way to move the head without a plan, as one remedy phrase
+    #: for the sentence that says why.
     _JOG_REMEDY = (
         "Use the printer's own screen's jog controls instead, Z UP first, then X and Y, with your "
         "eyes on the plate (the screen's Home button descends the nozzle to the bed and is the "
@@ -6679,7 +6675,10 @@ class BambuAdapter(PrinterAdapter):
         if doc is None:
             miss = self._plan_miss("purge") if model else None
             if miss is not None:
-                return {**base, "reason": self._no_plan_clause("purge", miss, then="the next purge parks first")}
+                from kiln.served_answer import fields
+
+                return {**base, "reason": self._no_plan_clause("purge", miss, then="the next purge parks first"),
+                        **fields(miss)}
             return {**base, "reason": (self._SERVED_LINE.format(model=model) if model else
                                        "no printer_model is declared in config.yaml, so Kiln cannot ask for a plan").rstrip(". ")}
         if not doc.get("ok"):

@@ -203,7 +203,14 @@ def run_filament_op(
             payload["safety"] = MOLTEN_FILAMENT_WARNING
         return payload
     except FilamentHandlingUnsupported as exc:
-        return _srv._error_dict(str(exc), code="UNSUPPORTED", extra={"outcome": "failed"})
+        # Why there was no plan (offline, signed out, unanswered, refused)
+        # rides beside the sentence, never inside it -- the same fields
+        # the homing door carries.
+        why = getattr(exc, "why_fields", None)
+        return _srv._error_dict(
+            str(exc), code="UNSUPPORTED",
+            extra={"outcome": "failed", **(why if isinstance(why, dict) else {})},
+        )
     except PlateClearRequired as exc:
         # The plate record (or the plan's own "this presses the plate")
         # stopped the motion before anything moved: the same envelope the

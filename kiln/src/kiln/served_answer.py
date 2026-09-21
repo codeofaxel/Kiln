@@ -35,6 +35,18 @@ motion, a placement check -- fails CLOSED whichever of the four it was,
 and words its refusal through :func:`sentence` so the person learns which
 of the four things to do.  Nothing here decides a tier, and nothing here
 opens a door: it only says why one stayed shut.
+
+**What is on the line for a manifest tool** is decided by its KIND
+(:func:`kind_of_tool`): a verdict that was not given must never read as a
+yes, a record that was not written must be told again, a copy that did
+not happen leaves the local copy as it was.  The private side's manifest
+generator resolves every served tool to a kind at ship time and refuses
+to generate one it cannot place; the bundled manifest carries the kind,
+and this side derives it the same way when a bundle predates the block.
+
+**Every door to Kiln's servers** in this package is on :data:`HOSTED_DOORS`
+with how it words a miss; a test pins the roster against the source, so a
+new door cannot ship without deciding what an offline person is told.
 """
 
 from __future__ import annotations
@@ -42,6 +54,7 @@ from __future__ import annotations
 import errno
 import http.client
 import json
+import re
 import socket
 import ssl
 from dataclasses import dataclass
@@ -72,8 +85,9 @@ SIGNED_OUT_CODES = frozenset({
 })
 #: Wire codes that are not a ruling on anything: the transport failed, the
 #: route was wrong, or the server said in so many words to try again
-#: shortly (its heartbeat table or its counter was down).  A cached answer
-#: that was true before one of these is still true after it.
+#: shortly.  A cached answer that was true before one of these is still
+#: true after it.  A server that marks its own answer ``retryable`` needs
+#: no entry here; the list covers answers that predate that mark.
 UNANSWERED_CODES = frozenset({
     "SERVER_UNREACHABLE", "KILN_API_HTTP_ERROR", "NOT_SERVED_HERE", "MACHINE_UNVERIFIABLE", "CAP_UNAVAILABLE",
 })
@@ -104,6 +118,96 @@ class Miss:
     def __post_init__(self) -> None:
         if self.cause not in CAUSES:
             raise ValueError(f"not a cause: {self.cause!r}")
+
+
+# ---------------------------------------------------------------------------
+# what a manifest tool puts on the line
+# ---------------------------------------------------------------------------
+
+#: The kinds a served tool can be, each with what it puts on the line and
+#: what "nothing happened" means for it.  ``{tool}`` is the tool's name.
+#: The wording is the floor for that kind: a verdict not given is never a
+#: yes; a record not written must be told again; a copy that did not run
+#: leaves the local copy as it was.
+KINDS: dict[str, tuple[str, str]] = {
+    "verdict": ("The {tool} tool asks Kiln's servers for a verdict",
+                "gave none (treat the answer as unknown, never as a yes)"),
+    "made": ("The {tool} tool makes something on Kiln's servers, not on this computer",
+             "made nothing"),
+    "record": ("The {tool} tool records something on Kiln's servers",
+               "recorded nothing (tell Kiln again once it can reach them)"),
+    "read": ("The {tool} tool reads from Kiln's servers",
+             "has no answer"),
+    "sync": ("The {tool} tool copies between this computer and Kiln's servers",
+             "copied nothing, and your local copy is as it was"),
+    "action": ("The {tool} tool acts through Kiln's servers",
+               "sent nothing to any printer and changed nothing"),
+    "other": ("The {tool} tool runs on Kiln's servers, not on this computer",
+              "did nothing"),
+}
+
+#: Name rules, first match wins.  A tool the rules do not place resolves
+#: to ``""`` here and to ``other`` at run time; the private side's manifest
+#: gate refuses to ship such a tool until someone places it (by name, in
+#: its override table), so the run-time fallback is for a bundle that
+#: predates the block, never a way to skip the question.
+_KIND_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (kind, re.compile(rx))
+    for kind, rx in (
+        ("sync", r"^(cloud_|pull_reflog|push_reflog|push_palettes|sync_)"),
+        ("verdict", r"^(check|verify|assess|may_i|predict|validate|classify|evaluate|analy[sz]e|explain|compare|"
+                    r"diff_|detect|review|audit|food_safety|nozzle_drift|tolerance|estimate|compute|forecast|"
+                    r"advise|recommend|suggest|answer|lookup|design_for|design_hole|describe|resolve_template|"
+                    r"propose_sourcing|drying_advisor|.*_advisor$|"
+                    r"get_(print_confidence|material_warnings|maintenance_prediction|recovery_recommendations|"
+                    r"optimal_settings|auto_tuned_settings|calibration_freshness|calibration_health))"),
+        ("made", r"^(generate|make|apply|smart_|batch_|auto_|build|render|preview|embed|export|regenerate|split|"
+                 r"separate|paint|segment|keep_|recover_texture|derive|prepopulate|hollow|"
+                 r"merge_(design|feature|decoration)|rebase|cherry_pick|iterate|rollback|undo|restore|promote|"
+                 r"attach|import|add_|deboss|decorate|source_merge|wrap_gcode|change_|design_session|"
+                 r"propose_design)"),
+        ("record", r"^(record|set_|save|register|create|delete|rename|archive|unarchive|retire|annotate|reply|"
+                   r"resolve_comment|reopen|dismiss|sign_|ingest|log_|submit|intake|manage|enable|bisect|remove|"
+                   r"revoke|grant|assign|unassign|transfer|backfill|recategorize|prune|cancel_(speed|auto)|"
+                   r"confirm_auto|report_issue|billing_delete|refund|reissue|start_subscription|open_billing|"
+                   r"kiln_spend_caps|apply_role|setup_team|configure|update)"),
+        ("read", r"^(list|get|find|search|show|inspect|read|visualize|visual_diff|fingerprint|tail|summarize|query|"
+                 r"usage_summary|billing_|license_status|check_payment|preview_overage|cutter_wear_status|"
+                 r"nozzle_wear_status|maintenance_due|abrasive_escalation|decoration_history|"
+                 r"design_version_health|github_|best_|cross_|resolve_handle)"),
+        ("action", r"^(fleet_|pause|resume|cancel|revert|plan_|request_|auto_recover|recover_power|"
+                   r"resume_interrupted|emit_test|add_feature_during|decorate_during|deboss_during|"
+                   r"apply_mid_print|plan_mid_print|preview_mid_print|revert_mid_print|start_|stop_|trigger|"
+                   r"home|park|wipe|purge|load|unload|set_speed|set_nozzle|set_telemetry|set_operator|set_hooks|"
+                   r"set_event|set_approval|remove_approval|ams_)"),
+    )
+)
+
+
+def kind_of_tool(name: str, category: str | None = None) -> str:
+    """The kind *name* resolves to by rule, or ``""`` when no rule places it.
+
+    Category first where a category is one kind through and through
+    (``cloud_sync``), then the name rules in :data:`_KIND_RULES` order --
+    a ``check_*`` is a verdict before it is anything else.
+    """
+    name = str(name or "").strip()
+    if not name:
+        return ""
+    if category == "cloud_sync":
+        return "sync"
+    for kind, rx in _KIND_RULES:
+        if rx.match(name):
+            return kind
+    return ""
+
+
+def story_for_tool(name: str, kind: str | None = None, category: str | None = None) -> tuple[str, str]:
+    """``(on_the_line, wont)`` for a manifest tool: the manifest's kind when
+    the bundle carries one, else the kind derived by name, else ``other``."""
+    resolved = kind if kind in KINDS else (kind_of_tool(name, category) or "other")
+    on_the_line, wont = KINDS[resolved]
+    return on_the_line.format(tool=name), wont
 
 
 # ---------------------------------------------------------------------------
@@ -189,29 +293,32 @@ def _cause_of(exc: BaseException | None) -> str | None:
 def _route_to(host: str | None) -> bool:
     """Can this computer resolve *host* and open a socket to it?  Asked only
     after a timeout, to tell a slow server from a dead link; the same host
-    the request just went to, never a third party."""
-    name = _hostname(host)
+    and port the request just went to, never a third party."""
+    name, port = _host_and_port(host)
     if not name:
         return True
     try:
-        with socket.create_connection((name, 443), timeout=_PROBE_TIMEOUT_S):
+        with socket.create_connection((name, port), timeout=_PROBE_TIMEOUT_S):
             return True
     except OSError:
         return False
 
 
-def _hostname(host: str | None) -> str:
+def _host_and_port(host: str | None) -> tuple[str, int]:
     if not host:
-        return ""
+        return "", 443
     from urllib.parse import urlsplit
 
     text = str(host).strip()
     if "://" not in text:
         text = f"https://{text}"
     try:
-        return urlsplit(text).hostname or ""
+        parts = urlsplit(text)
+        name = parts.hostname or ""
+        port = parts.port or (80 if parts.scheme == "http" else 443)
     except ValueError:
-        return ""
+        return "", 443
+    return name, int(port)
 
 
 # ---------------------------------------------------------------------------
@@ -281,13 +388,15 @@ def fields(miss: Miss | None) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def envelope_for_transport(tool_name: str, exc: BaseException, *, host: str | None = None) -> dict[str, Any]:
+def envelope_for_transport(
+    tool_name: str, exc: BaseException, *, host: str | None = None, kind: str | None = None,
+) -> dict[str, Any]:
     """The error envelope for a request that got no HTTP answer at all."""
     miss = classify_transport_error(exc, host=host)
     return {
         "status": "error",
         "success": False,
-        "error": _tool_sentence(tool_name, miss),
+        "error": _tool_sentence(tool_name, miss, kind),
         "code": "SERVER_UNREACHABLE",
         "tool": tool_name,
         **fields(miss),
@@ -295,7 +404,7 @@ def envelope_for_transport(tool_name: str, exc: BaseException, *, host: str | No
     }
 
 
-def envelope_for_http(tool_name: str, status: int, body: Any) -> dict[str, Any]:
+def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | None = None) -> dict[str, Any]:
     """The envelope for an HTTP error answer.
 
     A body that already is an error envelope (a code and a sentence of the
@@ -318,35 +427,79 @@ def envelope_for_http(tool_name: str, status: int, body: Any) -> dict[str, Any]:
         miss = Miss("refused", "ALLOWANCE_USED_UP", detail)
     else:
         miss = Miss("refused", "KILN_API_HTTP_ERROR", detail)
-    return {
+    out: dict[str, Any] = {
         "status": "error",
         "success": False,
-        "error": _tool_sentence(tool_name, miss),
+        "error": _tool_sentence(tool_name, miss, kind),
         "code": miss.code,
         "tool": tool_name,
         "http_status": int(status),
         **fields(miss),
     }
+    if miss.cause == "signed_out":
+        # The same agent-addressed fields every other sign-in refusal carries.
+        from kiln.tiers_and_terms import signin_hint_fields
+
+        out.update(signin_hint_fields())
+    return out
 
 
-def _tool_sentence(tool_name: str, miss: Miss) -> str:
-    return sentence(
-        miss,
-        feature="servers",
-        on_the_line=f"The {tool_name} tool runs on Kiln's servers, not on this computer",
-        cannot="run it",
-        wont="did nothing",
-    )
+def _tool_sentence(tool_name: str, miss: Miss, kind: str | None = None) -> str:
+    on_the_line, wont = story_for_tool(tool_name, kind)
+    return sentence(miss, feature="servers", on_the_line=on_the_line, cannot="run it", wont=wont)
+
+
+# ---------------------------------------------------------------------------
+# the roster of doors to Kiln's servers
+# ---------------------------------------------------------------------------
+
+#: Every module in this package that reaches Kiln's servers, and how it
+#: words a miss.  ``served_answer``: through :func:`sentence` / :func:`clause`
+#: (a feature a person asked for).  ``own_vocabulary``: a door whose reasons
+#: are its own sentences already, reviewed on their own (the sign-in doors
+#: themselves; the browser stage link, whose fallback is the local stage).
+#: ``infrastructure``: best-effort mirrors with a local record as the floor,
+#: where no person is waiting on the answer.  A module that reaches the
+#: servers and is not here fails ``tests/test_hosted_doors_roster.py`` --
+#: the question "what is an offline person told?" is answered at the
+#: moment the door is added, not found later.
+HOSTED_DOORS: dict[str, tuple[str, str]] = {
+    "kiln.server": ("served_answer", "the paid-tool manifest stubs and the served door every bridge uses"),
+    "kiln._pro_motion_bridge": ("served_answer", "head-motion plans; a miss is worded by the Bambu doors"),
+    "kiln._pro_cutter_bridge": ("served_answer", "blade status for the pre-flight; cut reports are fire-and-forget"),
+    "kiln.stage_link": ("own_vocabulary", "browser stage links; refusal_sentence names each reason, the local stage is the floor"),
+    "kiln.stage_cache": ("own_vocabulary", "stage uploads behind stage_link; same reasons"),
+    "kiln.monitor_twin": ("infrastructure", "print twins pushed best-effort; the local monitor is the floor"),
+    "kiln.bridge_client": ("own_vocabulary", "opt-in web control relay; reconnects and reports its state file"),
+    "kiln.community_sync": ("infrastructure", "community aggregates; a generation never claims them, local knowledge is the floor"),
+    "kiln.terms": ("infrastructure", "terms acceptance mirrored to the account; the local record is the only gate"),
+    "kiln.usage_ledger": ("infrastructure", "usage counts flushed later; nothing waits on it"),
+    "kiln.heartbeat": ("infrastructure", "the daily install heartbeat; never user-facing"),
+    "kiln.auth_session": ("own_vocabulary", "token refresh; its states word the sign-in doors"),
+    "kiln.cli.auth_commands": ("own_vocabulary", "kiln signin / pair / signout: the sign-in doors themselves"),
+    "kiln.cli.main": ("own_vocabulary", "kiln register: a sign-in door"),
+    "kiln.cli.spend_caps_commands": ("own_vocabulary", "spend caps CLI: a terminal door with its own errors"),
+    "kiln.plugins.tier_diagnostic_tools": ("infrastructure", "names the host in prose only; reads local state"),
+    "kiln.runtime_env": ("infrastructure", "names the host in prose only"),
+    "kiln.errors": ("infrastructure", "names the host in prose only"),
+    "kiln.api_device": ("infrastructure", "device headers for the served door; sends nothing itself"),
+}
 
 
 # ---------------------------------------------------------------------------
 # small text helpers
 # ---------------------------------------------------------------------------
 
+_IDENTIFIER_FIRST = re.compile(r"^[a-z0-9]+_[a-z0-9_]*\b")
+
 
 def _cap(text: str) -> str:
+    """Capitalise the first letter, unless the sentence opens with an
+    identifier (``printer_id must ...``), which keeps its spelling."""
     text = text.strip()
-    return text[:1].upper() + text[1:] if text else text
+    if not text or _IDENTIFIER_FIRST.match(text):
+        return text
+    return text[:1].upper() + text[1:]
 
 
 def _sentence_of(text: str) -> str:
@@ -356,6 +509,8 @@ def _sentence_of(text: str) -> str:
 
 __all__ = [
     "CAUSES",
+    "HOSTED_DOORS",
+    "KINDS",
     "Miss",
     "SIGNED_OUT_CODES",
     "UNANSWERED_CODES",
@@ -365,5 +520,7 @@ __all__ = [
     "envelope_for_http",
     "envelope_for_transport",
     "fields",
+    "kind_of_tool",
     "sentence",
+    "story_for_tool",
 ]

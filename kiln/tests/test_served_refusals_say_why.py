@@ -202,9 +202,9 @@ def _signed_in(monkeypatch):
 class TestTheBridgeKnowsWhy:
     @pytest.mark.parametrize("code", ["MACHINE_UNVERIFIABLE", "CAP_UNAVAILABLE", "ACCOUNT_REQUIRED"])
     def test_a_try_again_from_the_service_keeps_the_cached_plan(self, no_kiln_pro, monkeypatch, code):
-        """The service's own "try again shortly" (its heartbeat table or
-        counter is down) is not a ruling on this machine.  It used to be read
-        as one, and a paired printer lost its plan for a server blip."""
+        """The service's own "try again shortly" is not a ruling on this
+        machine.  It used to be read as one, and a paired printer lost its
+        plan for a server blip."""
         from kiln import _pro_motion_bridge as bridge
 
         _signed_in(monkeypatch)
@@ -514,3 +514,154 @@ class TestTheSentence:
         assert sa.classify_transport_error(TimeoutError("slow")).cause == "unanswered"
         monkeypatch.setattr(sa, "_route_to", lambda host: False)
         assert sa.classify_transport_error(urllib.error.URLError(TimeoutError("slow"))).cause == "offline"
+
+
+# ---------------------------------------------------------------------------
+# the perfectionist lap: kinds, every door's why, the probe, the loader
+# ---------------------------------------------------------------------------
+
+
+class TestWhatIsOnTheLineForAManifestTool:
+    def test_a_verdict_not_given_never_reads_as_a_yes(self, tmp_path, monkeypatch):
+        _paired(tmp_path, monkeypatch)
+
+        def _dns(_req, timeout):
+            raise urllib.error.URLError(socket.gaierror(8, "no dns"))
+
+        monkeypatch.setattr("urllib.request.urlopen", _dns)
+        out = _pro_api_call()("check_skin_contact_suitability", material="PLA")
+        assert "asks Kiln's servers for a verdict" in out["error"] and "never as a yes" in out["error"]
+
+    def test_the_manifests_kind_wins_over_the_name_rule(self, tmp_path, monkeypatch):
+        import kiln.server as srv
+
+        _paired(tmp_path, monkeypatch)
+        monkeypatch.setitem(srv._PRO_TOOL_OFFLINE_KIND, "generate_coaster", "record")
+
+        def _dns(_req, timeout):
+            raise urllib.error.URLError(socket.gaierror(8, "no dns"))
+
+        monkeypatch.setattr("urllib.request.urlopen", _dns)
+        out = _pro_api_call()("generate_coaster")
+        assert "recorded nothing" in out["error"] and "made nothing" not in out["error"]
+
+    def test_the_stub_loader_reads_only_a_known_kind_of_the_known_version(self, tmp_path, monkeypatch):
+        import kiln.server as srv
+
+        manifest = {"tools": [
+            {"name": "k_verdict", "description": "d", "tier": "free", "parameters": {"properties": {}},
+             "offline": {"schema_version": 1, "kind": "verdict"}},
+            {"name": "k_unknown", "description": "d", "tier": "free", "parameters": {"properties": {}},
+             "offline": {"schema_version": 1, "kind": "wormhole"}},
+            {"name": "k_future", "description": "d", "tier": "free", "parameters": {"properties": {}},
+             "offline": {"schema_version": 2, "kind": "verdict"}},
+            {"name": "k_none", "description": "d", "tier": "free", "parameters": {"properties": {}}},
+        ]}
+        (tmp_path / "pro_tool_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        monkeypatch.setattr(srv, "Path", lambda _p: tmp_path / "kiln")
+        for name in ("_PRO_TOOL_NUDGES", "_PRO_TOOL_TIERS", "_PRO_TOOL_QUOTA", "_PRO_TOOL_OFFLINE_KIND"):
+            monkeypatch.setattr(srv, name, {})
+
+        class _FakeMCP:
+            def tool(self, **_kwargs):
+                return lambda fn: fn
+
+        srv._register_pro_tool_stubs(_FakeMCP())
+        assert srv._PRO_TOOL_OFFLINE_KIND == {"k_verdict": "verdict"}
+
+    def test_a_401_detail_carries_the_sign_in_hints(self, tmp_path, monkeypatch):
+        _paired(tmp_path, monkeypatch)
+
+        def _rejected(req, timeout):
+            raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {},
+                                         io.BytesIO(json.dumps({"detail": "Invalid or missing auth token"}).encode()))
+
+        monkeypatch.setattr("urllib.request.urlopen", _rejected)
+        out = _pro_api_call()("generate_coaster")
+        assert out["why"] == "signed_out" and out["code"] == "KILN_AUTH_REJECTED"
+        assert "Kiln is signed out" in out["error"] and "Sign in and try again" in out["error"]
+        assert out["agent_hint"] and out["setup_hint"]
+
+
+class TestEveryDoorCarriesTheWhy:
+    def test_the_filament_door(self, no_kiln_pro, bambu, monkeypatch):
+        import kiln.server as srv
+        from kiln.plugins.filament_handling_tools import wipe_nozzle
+
+        _offline(monkeypatch)
+        bambu._printer_model = "bambu_a1"
+        bambu._last_status["ams"]["tray_now"] = "0"
+        _hot(bambu, monkeypatch)
+        monkeypatch.setattr(srv, "_resolve_control_target", lambda name: (bambu, "default"))
+        for gate in ("_emergency_latch_error", "_check_auth", "_check_rate_limit", "_check_confirmation"):
+            monkeypatch.setattr(srv, gate, lambda *a, **k: None)
+        out = wipe_nozzle()
+        assert out["success"] is False and out["error"]["code"] == "UNSUPPORTED"
+        assert "this computer is offline" in out["error"]["message"] and out["why"] == "offline"
+
+    def test_the_purge_placement(self, no_kiln_pro, bambu, monkeypatch):
+        _answer(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "wall"})
+        bambu._printer_model = "bambu_a1"
+        bambu._last_status["ams"]["tray_now"] = "0"
+        _hot(bambu, monkeypatch)
+        result = bambu.purge_filament(length_mm=10)
+        station = result.details["purge_station"]
+        assert station["status"] == "in_place" and station["why"] == "signed_out"
+        assert "Kiln is signed out" in station["reason"] and "sign in and the next purge parks first" in station["reason"]
+
+    def test_a_cached_plan_says_where_it_came_from_and_why(self, no_kiln_pro, monkeypatch):
+        from kiln import _pro_motion_bridge as bridge
+
+        _signed_in(monkeypatch)
+        _answer(monkeypatch, {"plan": _plan("park")})
+        bridge.plan_for(_Machine(), "park", axes="XY")
+        _offline(monkeypatch)
+        doc = bridge.plan_for(_Machine(), "park", axes="XY")
+        assert doc["from_cache"] is True and doc["cache_because"] == "offline"
+
+    def test_a_failed_cut_report_tells_the_next_preflight_why(self, monkeypatch):
+        from kiln import _pro_cutter_bridge as bridge
+
+        _hosted_only(monkeypatch)
+        _offline(monkeypatch)
+        bridge._served_report("a1", {"command": "load"})  # the report itself is dropped, quietly
+        assert bridge._service_down_miss.cause == "offline"
+        assert bridge.consult_blade("a1") is None  # the backoff is on, so the status is not asked
+        assert bridge.blade_unchecked("a1")["why"] == "offline"
+
+
+class TestTheProbeAndTheCap:
+    def test_the_probe_dials_the_urls_own_host_and_port(self, monkeypatch):
+        from kiln import served_answer as sa
+
+        dialed = []
+
+        class _Sock:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(socket, "create_connection", lambda addr, timeout: dialed.append(addr) or _Sock())
+        assert sa._route_to("http://localhost:8000") is True
+        assert sa._route_to("https://api.kiln3d.com") is True
+        assert sa._route_to("api.kiln3d.com") is True
+        assert dialed == [("localhost", 8000), ("api.kiln3d.com", 443), ("api.kiln3d.com", 443)]
+        assert sa._route_to("") is True and dialed[-1] == ("api.kiln3d.com", 443)  # no host: nothing dialed
+
+    def test_no_route_reads_as_no_route(self, monkeypatch):
+        from kiln import served_answer as sa
+
+        def _refuse(addr, timeout):
+            raise OSError("no route")
+
+        monkeypatch.setattr(socket, "create_connection", _refuse)
+        assert sa._route_to("https://api.kiln3d.com") is False
+
+    def test_an_identifier_keeps_its_spelling(self):
+        from kiln.served_answer import Miss, sentence
+
+        out = sentence(Miss("refused", "INVALID_ARGUMENT", "printer_id must name the printer's catalogue model."),
+                       feature="servers", on_the_line="X", cannot="do it", wont="did nothing")
+        assert "printer_id must name" in out and "Printer_id" not in out

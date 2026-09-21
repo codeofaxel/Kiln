@@ -282,8 +282,15 @@ def _send(printer_name: str, **payload: Any) -> None:
 
 
 def _served_report(printer_name: str, payload: dict[str, Any]) -> None:
-    """POST the report to the hosted service.  Runs off the calling thread."""
-    global _service_down_until
+    """POST the report to the hosted service.  Runs off the calling thread.
+
+    A report that cannot be delivered starts the same backoff the status
+    consult honours, and records WHY, so a pre-flight asked during the
+    backoff can still say what stopped the blade check.
+    """
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import classify_answer, classify_transport_error
+
     if time.monotonic() < _service_down_until:
         return
     try:
@@ -292,12 +299,14 @@ def _served_report(printer_name: str, payload: dict[str, Any]) -> None:
         return
     try:
         answer = _pro_api_call(WIRE_TOOL, printer_id=printer_name, **payload)
-    except Exception:  # noqa: BLE001 -- the network is a degrade, never a print
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a print
         logger.debug("cutter report not served", exc_info=True)
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = classify_transport_error(exc)
         return
     if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = classify_answer(answer)
 
 
 def _declared_model(printer_name: str) -> str | None:
