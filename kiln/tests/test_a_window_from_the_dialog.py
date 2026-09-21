@@ -738,9 +738,13 @@ class TestTheHostedStore:
         start, by the relay).  Several printers or the fleet stays the
         fleet tier's, judged by the same writer as every door."""
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
-        import kiln.licensing as lic
-
-        monkeypatch.setattr(lic, "get_tier", lambda: "free", raising=False)
+        try:
+            import kiln.licensing as lic
+        except ImportError:  # a plain install has no licence module, and reads as free already
+            lic = None
+        if lic is not None:
+            monkeypatch.setattr(lic, "get_tier", lambda: "free", raising=False)
+        assert consent_windows._fleet_tier_allows() is False
         store = _FakeStore()
         consent_windows.register_window_store(store)
         try:
