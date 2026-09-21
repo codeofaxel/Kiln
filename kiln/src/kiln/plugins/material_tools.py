@@ -42,10 +42,9 @@ def _is_external_spool(value: Any) -> bool:
 def _report_feeding(ams: dict[str, Any]) -> tuple[Any, str]:
     """``(the id the report says feeds, which field said so)``.
 
-    The adapter's ``feeding`` record wins -- on newer firmware it is the
-    extruder block's answer, where ``tray_now`` may be a local slot -- and
-    a report without the key is read from ``tray_now``.  The id is the
-    printer's own tray id, 254 for the external spool, or ``None``.
+    The adapter's ``feeding`` record wins; a report without the key is
+    read from ``tray_now``.  The id is the printer's own tray id, 254 for
+    the external spool, or ``None``.
     """
     if "feeding" in ams:
         feeding = ams.get("feeding")
@@ -198,10 +197,8 @@ class _MaterialToolsPlugin:
                     "message": "Active material unknown — the external spool is feeding (no RFID/AMS data).",
                 }
             active = _feeding_tray(feeding_id)
-            # The report said nothing feeds.  On firmware with an extruder
-            # block the legacy fields (tray_now, tray_pre, tray_tar) can be
-            # a unit's LOCAL slot, so they are trusted only when the block
-            # did not speak.
+            # The legacy fields (tray_now, tray_pre, tray_tar) are trusted
+            # only when the report's own feeding field did not speak.
             block_spoke = str(ams.get("feeding_source") or "") == "extruder"
             if active is None and not block_spoke:
                 for field in ("active_tray", "tray_pre", "tray_tar"):

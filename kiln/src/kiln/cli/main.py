@@ -7627,9 +7627,8 @@ def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
             from kiln.bambu_trays import read_tray_id, tray_name
             from kiln.bambu_trays import tray_id as _tray_id
 
-            # The report's ``feeding`` record is the printer's own tray id
-            # (the extruder block's answer on newer firmware); each tray
-            # carries its unit's slot, so the feeding tray is found by
+            # The report's ``feeding`` record is the printer's own tray id;
+            # each tray carries its unit's slot, so the feeding tray is found by
             # computing the same id -- comparing the slot alone marked unit
             # A's spool active for a tray feeding from unit B.
             record = ams_data.get("feeding") if "feeding" in ams_data else None
@@ -12255,8 +12254,7 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
                         "  Tip: remaining % is only known for spools with a "
                         "Bambu RFID tag."
                     )
-            # The report's own answer first (the extruder block on newer
-            # firmware, where tray_now can be a local slot), then tray_now.
+            # The report's own answer first, then the raw tray_now.
             feeding = result.get("feeding") if "feeding" in result else None
             tray_now = result.get("tray_now")
             if isinstance(feeding, dict):

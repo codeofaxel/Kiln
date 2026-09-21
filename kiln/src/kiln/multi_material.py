@@ -283,10 +283,8 @@ def _bambu_feeding(info: dict[str, Any]) -> tuple[tuple[int, int] | None, bool]:
     """``(feeding, external_spool)`` from a reading.
 
     The adapter's report carries ``feeding`` -- the printer's own tray id
-    read from the extruder block on newer firmware, from ``tray_now`` on
-    older -- or ``None`` when nothing feeds.  A reading without the key
-    (an older adapter, a hand-built one) is read from ``tray_now`` by the
-    same rule.
+    -- or ``None`` when nothing feeds.  A reading without the key (an older
+    adapter, a hand-built one) is read from ``tray_now`` by the same rule.
     """
     if "feeding" in info:
         feeding = info.get("feeding")

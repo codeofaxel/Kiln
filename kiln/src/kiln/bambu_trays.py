@@ -15,22 +15,14 @@ external spool                         --          254
 no tray (and the target that unloads)  --          255
 =====================================  ==========  ==============================
 
-Firmware that speaks the newer status protocol also reports the feeding
-tray per nozzle in ``device.extruder.info[].snow``, packed
-``(unit << 8) | slot``; there ``ams.tray_now`` may be the unit's local
-slot, so a reader prefers the extruder block whenever it is present
-(:func:`read_extruder_slot`) and falls back to ``tray_now`` otherwise.
+Newer firmware also reports the feeding tray per nozzle in the extruder
+block, packed ``(unit << 8) | slot``; a reader prefers that whenever it is
+present (:func:`read_extruder_slot`) and falls back to ``tray_now``.
 
-Names follow the vendor's own: ``A1``-``D4`` for a chained unit's slots,
+Names follow the printer's own: ``A1``-``D4`` for a chained unit's slots,
 ``HT-A``-``HT-H`` for an AMS HT, ``Ext`` for the external spool.
 
-The rule is read from the vendor's own slicer source and its published
-guides and from the community LAN-protocol notes, and cross-checked
-against community status captures from an X1C and an H2D.  It is
-bench-verified only on one A1 with one AMS Lite (unit 0): nothing on a
-second unit, an AMS 2 Pro, an AMS HT or a second nozzle has been seen on
-hardware here.  This module is the only place Kiln computes the id, in
-either direction.
+This module is the only place Kiln computes the id, in either direction.
 """
 
 from __future__ import annotations
@@ -163,8 +155,7 @@ def read_extruder_slot(value: Any) -> TrayRef | None:
     """Resolve a per-nozzle ``snow`` / ``star`` / ``spre`` value; ``None`` when it is not one.
 
     The value packs ``(unit << 8) | slot``.  A slot of 255 is nothing
-    feeding (65535 on an idle single-nozzle machine, 65279 on an idle left
-    nozzle); a unit of 255 or 254 with a real slot is that nozzle's
+    feeding; a unit of 255 or 254 with a real slot is that nozzle's
     external spool; anything else is the tray :func:`tray_id` names.
     """
     value = _as_int(value)

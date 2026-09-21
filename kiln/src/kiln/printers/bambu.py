@@ -1259,15 +1259,12 @@ def _int_or_none(value: Any) -> int | None:
 def _feeding_ref(status: dict[str, Any]) -> tuple[_TrayRef | None, str]:
     """``(what feeds the nozzle, which field said so)`` from a raw status.
 
-    Firmware that speaks the newer status protocol reports the feeding
-    tray per nozzle in ``device.extruder.info[].snow`` -- packed
-    ``(unit << 8) | slot`` -- and there the legacy ``ams.tray_now`` may be
-    the unit's LOCAL slot (a community capture of an H2D reads
-    ``tray_now "0"`` while ``snow`` names HT-A).  The vendor's own parser
-    lets the extruder block win whenever it is present; so does this.  On
-    a two-nozzle machine the current extruder is bits 4-7 of the block's
-    ``state``.  A hand-assembled cache may carry ``tray_now`` at the top
-    level; it is read last.  ``(None, "")`` when nothing has said anything.
+    Newer firmware reports the feeding tray per nozzle in the extruder
+    block, and there the legacy ``ams.tray_now`` is not the printer's tray
+    id; the block wins whenever it is present.  On a two-nozzle machine the
+    current extruder is bits 4-7 of the block's ``state``.  A hand-assembled
+    cache may carry ``tray_now`` at the top level; it is read last.
+    ``(None, "")`` when nothing has said anything.
     """
     device = status.get("device")
     extruder = device.get("extruder") if isinstance(device, dict) else None
@@ -6257,10 +6254,11 @@ class BambuAdapter(PrinterAdapter):
         ``unit_id`` and ``slot`` are the firmware's own ids as it sent them;
         ``tray_id`` is the printer's id for the tray -- the number
         ``tray_now`` reports and ``ams_mapping`` / ``load_filament`` take --
-        and ``name`` what Bambu Studio calls it, both from
-        :mod:`kiln.bambu_trays` (unit B's first slot is tray 4; an AMS HT,
-        unit 128+, is its own tray id).  ``tray_now`` is ``"254"`` for the
-        external spool and ``"255"`` for no tray.
+        and ``name`` what the printer calls it, both from
+        :mod:`kiln.bambu_trays`.  ``feeding`` is the tray feeding the nozzle
+        (``None`` when nothing feeds) and ``feeding_source`` which field said
+        so; the raw ``tray_now`` is kept as sent (``"254"`` the external
+        spool, ``"255"`` no tray).
 
         Returns an empty ``units`` list if no AMS data is available
         (e.g. printer not connected or no AMS attached).
@@ -6486,15 +6484,10 @@ class BambuAdapter(PrinterAdapter):
     #   {"print": {"command": "ams_change_filament",
     #              "target": <tray id>, "curr_temp": N, "tar_temp": N}}
     #
-    # ``target`` is the tray id the status reports in ``tray_now`` -- unit*4
-    # + slot on a chained unit, the unit id itself on an AMS HT (see
-    # ``kiln.bambu_trays`` for the evidence) -- 254 for the external spool,
-    # 255 to unload.  Studio (v02.06) sends ``ams_id`` / ``slot_id`` beside
-    # ``target``, and on firmware that speaks its new AMS protocol asks for
-    # the external spool as target 255 + slot_id 0; Kiln sends ``target``
-    # alone -- bench-verified on the A1 for an AMS tray (2026-09-15); the
-    # 254 and 255 targets and the new-protocol spool form are pinned from
-    # the source, not the bench.  The firmware's routine does the whole job —
+    # ``target`` is the printer's own tray id (see ``kiln.bambu_trays``),
+    # 254 for the external spool, 255 to unload.  An AMS-tray load was
+    # bench-verified on the A1 (2026-09-15); the 254 and 255 targets were
+    # not.  The firmware's routine does the whole job —
     # retract the old filament, feed the new one, purge — which is why
     # "load" here needs no G-code of its own, and why the printer's own
     # purge fault (the touchscreen wizard's HMS 1200-8007 on 2026-09-03) is

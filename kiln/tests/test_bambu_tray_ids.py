@@ -1,6 +1,6 @@
-"""A Bambu tray id is computed in ONE place, the way the vendor's own slicer computes it.
+"""A Bambu tray id is computed in ONE place, the way the printer numbers it.
 
-The vendor numbers a tray by its UNIT TYPE, never by printer model:
+The printer numbers a tray by its UNIT TYPE, never by model:
 
 * a chained unit -- AMS, AMS Lite, AMS 2 Pro; unit ids 0-15 -- names its
   trays ``unit * 4 + slot``;
@@ -10,15 +10,14 @@ The vendor numbers a tray by its UNIT TYPE, never by printer model:
   the load command's ``target``; neither belongs in ``ams_mapping``, where
   an unmapped or external filament is ``-1``;
 * newer firmware names the feeding tray per nozzle in the extruder block,
-  packed ``(unit << 8) | slot``, and there ``tray_now`` may be a local slot.
+  packed ``(unit << 8) | slot``, and that answer wins over ``tray_now``.
 
 The rule lives in :mod:`kiln.bambu_trays`.  Kiln applied the chained rule
 to every id, so an AMS HT feeding the nozzle read as "unit 32", its tray
 was "not present" to the load command, and a spool on a second chained
 unit was auto-routed and colour-checked as unit 0's.  The owner's A1
 carries one AMS Lite (unit 0, trays 0-3), so nothing below is
-bench-verified beyond that unit; every other case is pinned from the
-vendor's own source and from community status captures.
+bench-verified beyond that unit.
 """
 
 from __future__ import annotations
@@ -71,7 +70,7 @@ class TestTheOneHelper:
         assert [tray_id(0, s) for s in range(4)] == [0, 1, 2, 3]
         assert [tray_id(1, s) for s in range(4)] == [4, 5, 6, 7]
         assert tray_id(3, 3) == 15
-        assert tray_id(15, 3) == 63  # Studio's ``ams_id < 16`` ceiling
+        assert tray_id(15, 3) == 63
 
     def test_an_ams_ht_is_addressed_by_its_unit_id(self):
         from kiln.bambu_trays import tray_id
@@ -119,7 +118,7 @@ class TestTheOneHelper:
             assert ref is not None and ref.loaded_tray
             assert tray_id(ref.unit, ref.slot) == tid
 
-    def test_names_are_studios_own(self):
+    def test_names_are_the_printers_own(self):
         from kiln.bambu_trays import read_tray_id, tray_name, unit_name
 
         assert [tray_name(0, s) for s in range(4)] == ["A1", "A2", "A3", "A4"]
@@ -609,32 +608,29 @@ class TestTheSameWordsEverywhereElse:
 
 
 # ---------------------------------------------------------------------------
-# New-protocol firmware: the extruder block names the feeding tray
+# Newer firmware: the extruder block names the feeding tray
 # ---------------------------------------------------------------------------
 
 
-#: Shaped from a community capture of an H2D (firmware 01.01.02.07): the
-#: legacy ``ams.tray_now`` reads the unit's LOCAL slot ("0") while
-#: ``device.extruder.info[0].snow`` = 32768 = unit 128, slot 0 — HT-A is
-#: feeding.  The left nozzle's 65279 (unit 254, slot 255) is "nothing".
+#: A two-nozzle machine whose legacy ``tray_now`` reads "0" while the
+#: extruder block names HT-A (32768 = unit 128, slot 0) on the current
+#: nozzle and nothing (65279) on the other.
 _H2D_STATUS = {
     "gcode_state": "IDLE",
     "ams": {
         "ams": [
-            {"id": "0", "info": "1101", "tray": [
+            {"id": "0", "tray": [
                 {"id": "0", "tray_type": "PLA", "tray_color": "FF0000FF"},
                 {"id": "3", "tray_type": "PETG", "tray_color": "0000FFFF"},
             ]},
-            {"id": "128", "info": "2004", "tray": [{"id": "0", "tray_type": "PA-GF", "tray_color": "111111FF"}]},
+            {"id": "128", "tray": [{"id": "0", "tray_type": "PA-GF", "tray_color": "111111FF"}]},
         ],
-        "ams_exist_bits": "11", "tray_exist_bits": "1000f",
         "tray_now": "0", "tray_tar": "0", "tray_pre": "0",
     },
     "device": {"extruder": {"state": 2, "info": [
-        {"id": 0, "snow": 32768, "spre": 32768, "star": 32768},
-        {"id": 1, "snow": 65279, "spre": 65279, "star": 65279},
+        {"id": 0, "snow": 32768},
+        {"id": 1, "snow": 65279},
     ]}},
-    "vir_slot": [{"id": "254"}, {"id": "255"}],
 }
 
 
@@ -645,11 +641,11 @@ class TestTheExtruderBlockWins:
         assert (read_extruder_slot(32768).unit, read_extruder_slot(32768).slot, read_extruder_slot(32768).tray_id) == (128, 0, 128)
         assert (read_extruder_slot(258).unit, read_extruder_slot(258).slot, read_extruder_slot(258).tray_id) == (1, 2, 6)
         assert read_extruder_slot(0).tray_id == 0
-        assert read_extruder_slot(65535).none          # 0xFFFF: nothing (the X1C capture, idle)
-        assert read_extruder_slot(255).none            # 0x00FF: slot 255 is nothing
-        assert read_extruder_slot(65279).none          # 0xFEFF: nothing on the left nozzle (the H2D capture)
-        assert read_extruder_slot(65280).external      # 0xFF00: the right external spool (an X2D capture)
-        assert read_extruder_slot(65024).external      # 0xFE00: the left external spool
+        assert read_extruder_slot(65535).none          # slot 255: nothing
+        assert read_extruder_slot(255).none
+        assert read_extruder_slot(65279).none
+        assert read_extruder_slot(65280).external      # unit 255, slot 0
+        assert read_extruder_slot(65024).external      # unit 254, slot 0
         for junk in (None, "", "x", -1, 70000, 16 << 8):
             assert read_extruder_slot(junk) is None, junk
 
@@ -699,11 +695,11 @@ class TestTheExtruderBlockWins:
         assert result.success and "tray 128 (slot HT-A) is feeding the nozzle" in result.message
 
     def test_an_idle_new_firmware_report_is_not_read_as_unit_a(self, get_active_material):
-        # The block says nothing feeds (65535) while the legacy fields still
-        # read "0" (a local slot): the door must not answer "PLA in A1", nor
-        # fall back to tray_pre / tray_tar, which are local slots here too.
+        # The block says nothing feeds while the legacy fields still read
+        # "0": the door must not answer "PLA in A1", nor fall back to
+        # tray_pre / tray_tar.
         idle = {**_H2D_STATUS, "ams": {**_H2D_STATUS["ams"], "tray_now": "0", "tray_pre": "0", "tray_tar": "0"},
-                "device": {"extruder": {"state": 2, "info": [{"id": 0, "snow": 65535, "spre": 65535, "star": 65535}]}}}
+                "device": {"extruder": {"state": 2, "info": [{"id": 0, "snow": 65535}]}}}
         adapter = _adapter()
         adapter._last_status = idle
         status = adapter.get_ams_status()
