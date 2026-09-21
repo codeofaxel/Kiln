@@ -70,9 +70,21 @@ class TestTheRoster:
             assert how in ("served_answer", "own_vocabulary", "infrastructure"), (module, how)
             assert isinstance(note, str) and len(note.split()) >= 3, (module, note)
 
-    def test_the_served_answer_doors_are_the_ones_that_word_a_miss(self):
+    def test_a_door_that_words_a_miss_is_never_quietly_demoted(self):
+        """Adding a served_answer door is free; taking one away is not.
+
+        These three tell a person WHY a feature they asked for has no
+        answer.  Moving one to ``infrastructure`` or ``own_vocabulary``
+        would silence that sentence, and the silence is the whole defect
+        this roster exists to prevent -- so the set may only grow.
+        """
         served = {m for m, (how, _) in sa.HOSTED_DOORS.items() if how == "served_answer"}
-        assert served == {"kiln.server", "kiln._pro_motion_bridge", "kiln._pro_cutter_bridge"}
+        must_word_a_miss = {"kiln.server", "kiln._pro_motion_bridge", "kiln._pro_cutter_bridge"}
+        demoted = sorted(must_word_a_miss - served)
+        assert not demoted, (
+            f"these doors must keep wording a miss through served_answer, and were moved: {demoted}. "
+            "A person who asked for the feature learns nothing when they are demoted."
+        )
 
 
 def _lint(text: str, *, where: str) -> None:
