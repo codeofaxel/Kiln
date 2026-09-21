@@ -171,6 +171,12 @@ class SkillManifest:
                 "visualize_model(output) — show the carve (MANDATORY)",
                 "Look-alikes: generate_decorated_product / generate_wall_plaque are PHOTO-relief pipelines (a picture as coin relief), not logo tools; apply_decoration replays a decoration you SAVED earlier and carves nothing new; resolve_template_decoration(template_id) resolves the same face/settings as decorate_next",
             ],
+            "flat_part_from_relationships": [
+                "solve_sketch(sketch=\"...\") — describe a flat part by the relationships between its points and edges (lengths, angles, parallel, symmetric); returns solved coordinates as OpenSCAD (served by kiln-pro, free)",
+                "compile_scad(scad_code=<the returned OpenSCAD>) — compile it locally; pass the text through unchanged, its first line is a header the sketch tools read back",
+                "visualize_model(stl_path) — show a preview image (MANDATORY)",
+                "iterate: restate the relationship that was wrong, solve_sketch again, recompile, show a fresh preview",
+            ],
             "monitor_active_print": [
                 "monitor_print() — full report with progress, temps, cost, snapshot",
                 "Read the snapshot image file and display it inline to user",
