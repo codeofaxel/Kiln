@@ -10,7 +10,7 @@ import pathlib
 import pytest
 
 from kiln import print_consent
-from kiln.bridge_client import handle_relay_request
+from kiln.bridge_client import handle_relay_request, observe_addresses
 from kiln.print_consent import SOURCE_HOSTED_APPROVAL, SOURCE_HOSTED_DELEGATION
 
 
@@ -378,3 +378,60 @@ def test_a_malformed_authority_is_dropped_not_trusted(tmp_path):
     assert resp["ok"] is True
     assert "print_authority" not in seen[0][1]
     assert seen[0][2] is None
+
+
+# ---------------------------------------------------------------------------
+# Showing the relay this machine's other side
+# ---------------------------------------------------------------------------
+
+
+def test_the_bridge_shows_each_address_family_it_has_and_shrugs_at_the_rest():
+    import socket
+
+    asked = []
+
+    def post(family):
+        asked.append(family)
+        if family == socket.AF_INET6:
+            raise OSError("no IPv6 here")
+        return True
+
+    shown = observe_addresses("https://api.example", "bearer", "nonce-1", post=post)
+    assert asked == [socket.AF_INET, socket.AF_INET6]
+    assert shown == {"v4": True, "v6": False}
+
+
+def test_the_relay_observe_frame_is_answered_off_to_the_side_never_as_a_tool(monkeypatch):
+    import asyncio
+
+    from kiln import bridge_client
+    from kiln.bridge_client import BridgeClient
+
+    observed = []
+    monkeypatch.setattr(
+        bridge_client, "observe_addresses",
+        lambda api, bearer, nonce, **kw: observed.append((api, bearer, nonce)) or {"v4": True, "v6": False},
+    )
+    ran = []
+    sent = []
+
+    class _WS:
+        async def send(self, text):
+            sent.append(text)
+
+    client = BridgeClient(
+        license_key="bearer-x",
+        call_tool=lambda name, args: ran.append(name) or {"ok": True},
+        fetch_artifact=_never_fetch,
+    )
+
+    async def scenario():
+        t1 = client._dispatch_frame(_WS(), {"observe_nonce": "nonce-1"})
+        t2 = client._dispatch_frame(_WS(), {"request_id": "r1", "tool_name": "printer_status", "args": {}})
+        assert client._dispatch_frame(_WS(), ["not", "a", "frame"]) is None
+        await asyncio.gather(t1, t2)
+
+    asyncio.run(scenario())
+    assert observed == [("https://api.kiln3d.com", "bearer-x", "nonce-1")]
+    assert ran == ["printer_status"]
+    assert len(sent) == 1  # the tool's reply; the observation sends nothing down the socket

@@ -252,6 +252,65 @@ def _default_artifact_fetcher(get_bearer: Callable[[], str]) -> ArtifactFetcher:
     return fetch
 
 
+def observe_addresses(
+    api: str, bearer: str, nonce: str, *, post: Callable[[int], bool] | None = None,
+) -> dict[str, bool]:
+    """``POST /api/bridge/observe`` once per address family, each carrying
+    *nonce*.  Returns ``{"v4": bool, "v6": bool}`` — which sides answered.
+    *post* is the per-family request (injected by tests); the default binds
+    a plain HTTPS connection to one family so the relay sees THAT side."""
+    import socket
+
+    do_post = post or (lambda family: _post_observe(api, bearer, nonce, family))
+    shown: dict[str, bool] = {}
+    for label, family in (("v4", socket.AF_INET), ("v6", socket.AF_INET6)):
+        try:
+            shown[label] = bool(do_post(family))
+        except Exception:  # noqa: BLE001 — a family this machine lacks is not an error
+            logger.debug("bridge: no %s route to the relay", label, exc_info=True)
+            shown[label] = False
+    return shown
+
+
+def _post_observe(api: str, bearer: str, nonce: str, family: int) -> bool:
+    """One observe request over one address family.  True on a 2xx."""
+    import http.client
+    import socket
+    import ssl
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(api)
+    host = parts.hostname or ""
+    secure = parts.scheme == "https"
+    port = parts.port or (443 if secure else 80)
+    infos = socket.getaddrinfo(host, port, family, socket.SOCK_STREAM)
+    if not infos:
+        return False
+    sockaddr = infos[0][4]
+
+    class _Bound(http.client.HTTPSConnection if secure else http.client.HTTPConnection):
+        # http.client picks whichever family resolves first; this one is
+        # told which side of the machine to speak from.
+        def connect(self) -> None:
+            raw = socket.socket(family, socket.SOCK_STREAM)
+            raw.settimeout(self.timeout)
+            raw.connect(sockaddr)
+            if secure:
+                context = getattr(self, "_context", None) or ssl.create_default_context()
+                raw = context.wrap_socket(raw, server_hostname=host)
+            self.sock = raw
+
+    conn = _Bound(host, port, timeout=10)
+    try:
+        conn.request(
+            "POST", "/api/bridge/observe", body=json.dumps({"nonce": nonce}),
+            headers={"Authorization": f"Bearer {bearer}", "Content-Type": "application/json"},
+        )
+        return 200 <= conn.getresponse().status < 300
+    finally:
+        conn.close()
+
+
 def _read_license() -> str:
     """The bearer this machine presents to the relay, or ``""`` if there is none.
 
@@ -377,6 +436,37 @@ class BridgeClient:
             "X-Kiln-Client-Version": _running_version(),
         }
 
+    def _dispatch_frame(self, ws, req: Any) -> asyncio.Task | None:
+        """Route one inbound frame: the relay's observe request is answered
+        off to the side; everything else is a tool call.  Each runs as its
+        own task so a slow address family or a slow slice never holds the
+        socket's receive loop."""
+        if not isinstance(req, dict):
+            return None
+        if "observe_nonce" in req:
+            return asyncio.create_task(self._show_addresses(str(req["observe_nonce"])))
+        return asyncio.create_task(self._handle_and_reply(ws, req))
+
+    async def _show_addresses(self, nonce: str) -> None:
+        """Show the relay this machine from each address family it has.
+
+        Why: the relay tells "printing from the web at home" from "from
+        miles away" by whether the browser arrives from the same public
+        address as this machine — and a home usually has an IPv4 and an
+        IPv6 side, while the socket shows only the one it happened to
+        dial out over.  So the relay hands the bridge a nonce, and the
+        bridge makes one small request per family carrying it; the relay
+        records where each request CAME FROM.  Nothing is claimed in the
+        body — an address a client could name is an address a client
+        could forge — and a family this machine cannot reach is simply not
+        shown.  Best-effort throughout; the print path never waits on it.
+        """
+        api = os.environ.get("KILN_API_URL", _DEFAULT_API_URL).rstrip("/")
+        try:
+            await asyncio.to_thread(observe_addresses, api, self._bearer(), nonce)
+        except Exception:  # noqa: BLE001 — a missed observation is a coarser answer, never a fault
+            logger.debug("bridge: address observation failed", exc_info=True)
+
     async def _handle_and_reply(self, ws, req: dict) -> None:
         resp = await asyncio.to_thread(
             handle_relay_request,
@@ -411,7 +501,7 @@ class BridgeClient:
                             req = json.loads(raw)
                         except Exception:
                             continue  # ignore a malformed frame, keep the link
-                        asyncio.create_task(self._handle_and_reply(ws, req))
+                        self._dispatch_frame(ws, req)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
