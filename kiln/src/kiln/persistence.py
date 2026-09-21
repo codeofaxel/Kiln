@@ -3661,6 +3661,15 @@ _db: KilnDB | None = None
 _db_lock = threading.Lock()
 
 
+def _db_path_in_force() -> str:
+    """The database path the environment names right now, as the constructor resolves it."""
+    return _redirect_if_test_runner(os.environ.get("KILN_DB_PATH", _DEFAULT_DB_PATH))
+
+
+def _stale(db: KilnDB | None, wanted: str) -> bool:
+    return db is None or db._db_path != wanted
+
+
 def get_db() -> KilnDB:
     """Return the module-level :class:`KilnDB` singleton.
 
@@ -3670,10 +3679,18 @@ def get_db() -> KilnDB:
     ``KilnDB`` and run schema setup on the same file, and the loser gets
     "database is locked" — a failure that lands in whichever feature
     happened to be on the background thread.
+
+    The instance answers for the path the environment names NOW.  A
+    background thread that starts building the singleton just before
+    ``KILN_DB_PATH`` changes finishes after it, and the caller who changed
+    the path (a test binding its own file, or one that reset the singleton
+    while that build was in flight) would otherwise be handed a database
+    bound to the old path and read nothing it wrote.
     """
     global _db
-    if _db is None:
+    wanted = _db_path_in_force()
+    if _stale(_db, wanted):
         with _db_lock:
-            if _db is None:
+            if _stale(_db, wanted):
                 _db = KilnDB()
     return _db
