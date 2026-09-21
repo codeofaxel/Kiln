@@ -117,6 +117,7 @@ import logging
 import math
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -561,7 +562,11 @@ def _drop_unload_strokes(buckets: dict[str, _ClassBucket]) -> None:
         bucket.z_max = max(keep_seg[2::3])
 
 
-def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
+def parse_slicer_features(
+    gcode_path: str | os.PathLike[str],
+    *,
+    on_move: Callable[[str, float, float, float, float, float, float, bool, int, int], None] | None = None,
+) -> ParsedFeatures:
     """One streaming pass over *gcode_path*: extra-class segments, the
     model footprint, and the labels the file used.
 
@@ -569,6 +574,14 @@ def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
     XY.  Retract/unretract-in-place, travels, and Z-only moves are not
     toolpaths and are never counted.  Arcs (``G2``/``G3`` with ``I``/``J``)
     are expanded to chords so a skirt fitted with arcs stays a loop.
+
+    *on_move*, when given, hears EVERY XY move the head makes, extruding
+    or not — ``(cls, x0, y0, z0, x1, y1, z1, extruding, layer, tool)`` in
+    bed coordinates, arcs already chorded — so a caller that needs the
+    whole path (a clearance check sweeps travels as well as toolpaths)
+    reads it off this one pass instead of keeping a second parser that
+    would drift from this one.  A callback that raises stops the pass
+    with its own exception; the stage's own readers pass none.
 
     Raises ``FileNotFoundError`` for a missing file; never raises on
     content — a malformed line is skipped, not fatal.
@@ -749,7 +762,9 @@ def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
                 ne = e + ne_word
 
             moved = abs(nx - x) > _XY_EPS or abs(ny - y) > _XY_EPS
-            if de > _E_EPS and moved:
+            extruding = de > _E_EPS and moved
+            pts: list[tuple[float, float, float]] | None = None
+            if moved and (extruding or on_move is not None):
                 if head in ("G2", "G3", "G02", "G03"):
                     pts = _arc_points(
                         x, y, z, nx, ny, nz,
@@ -758,6 +773,7 @@ def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
                     )
                 else:
                     pts = [(x, y, z), (nx, ny, nz)]
+            if extruding and pts is not None:
                 if not layer_markers and last_extrude_z is not None and nz > last_extrude_z + 1e-4:
                     layer += 1
                 last_extrude_z = nz
@@ -765,6 +781,9 @@ def parse_slicer_features(gcode_path: str | os.PathLike[str]) -> ParsedFeatures:
                     note_model(pts)
                 elif cur_cls != "ignore":
                     note_extra(cur_cls, cur_label or cur_cls, pts)
+            if on_move is not None and pts is not None:
+                for (ax, ay, az), (bx, by, bz) in zip(pts, pts[1:], strict=False):
+                    on_move(cur_cls, ax, ay, az, bx, by, bz, extruding, layer, tool)
             x, y, z, e = nx, ny, nz, ne
 
     if not math.isinf(model_zmin):
