@@ -55,6 +55,17 @@ The rules, in plain language
    (or ``recursive-exclude tests *``) so the test suite never ships in
    the PyPI sdist.  Checked in full-tree mode, and in ``--staged`` mode
    only when the manifest or ``pyproject.toml`` is part of the commit.
+6. **Research provenance** (comments / docstrings, src AND tests): a
+   third-party repository, a source file:line pin into someone else's
+   code, a vendor or community page path, a community account or client
+   name, or a fetch date.  A public catalogue note has never been allowed
+   to carry these (``kiln.data_note_contract``); a code comment is the
+   same page with a different door, and it read as a research trail a
+   copycat can follow.  Kiln's own hosts (``kiln3d.com``, its GitHub) are
+   not provenance.  Pre-existing pins are inventoried in
+   ``scripts/public_source_pins.txt`` -- a list that may only shrink -- and
+   a pin not listed there fails the gate (``--freeze-source-pins``
+   rewrites the file from the current tree; commit the diff).
 
 Internal persona / process phrases are ``scripts/check_public_language.py``'s
 rule — it scans the whole tracked tree and commit messages — not this
@@ -96,6 +107,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 _MANIFEST = _ROOT / "kiln" / "MANIFEST.in"
 _FROZEN_PATHS_FILE = _ROOT / "scripts" / "public_tests_kiln_pro_paths.txt"
+_FROZEN_PINS_FILE = _ROOT / "scripts" / "public_source_pins.txt"
 
 # Repo-relative prefixes the gate walks.  ``kiln/src/kiln`` and
 # ``kiln/tests`` get the code rules; everything here gets the text rules.
@@ -438,6 +450,104 @@ def _new_pro_paths(found: set[str], frozen: set[str]) -> set[str]:
     return found - frozen
 
 
+# ── Rule 6: research provenance in comments / docstrings ────────────────────
+# Kiln's own hosts are contract, not provenance: a pricing link in a tool
+# docstring or a pointer at Kiln's own issue tracker stays.
+_OWN_HOSTS = ("kiln3d.com", "github.com/codeofaxel", "codeofaxel/")
+
+
+def _note_contract_pattern(label: str, fallback: str) -> str:
+    """The note contract's regex for *label*, so the vocabulary has one home.
+
+    ``label`` is a ``PROVENANCE_PATTERNS`` entry name, or the name of a
+    module-level pattern constant (``COMMUNITY_ACCOUNTS``).
+    """
+    try:
+        import importlib.util
+
+        path = _ROOT / "kiln" / "src" / "kiln" / "data_note_contract.py"
+        spec = importlib.util.spec_from_file_location("kiln_data_note_contract_for_gate", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        constant = getattr(module, label, None)
+        if isinstance(constant, str):
+            return constant
+        for name, pattern in module.PROVENANCE_PATTERNS:
+            if name == label:
+                return pattern
+    except Exception:
+        pass
+    return fallback
+
+
+_RESEARCH_PINS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "a third-party repository",
+        re.compile(r"(?:github\.com|raw\.githubusercontent\.com|gitlab\.com)/[\w.-]+/[\w.-]+"),
+    ),
+    (
+        "a source file:line pin",
+        re.compile(r"\b[\w./-]+\.(?:cpp|hpp|cc|c|h)\b(?::\d+|[^\n]{0,40}@ \d+\.\d+)"),
+    ),
+    (
+        # A wiki / forum page path is where a fact was READ; an integration
+        # target's API documentation (docs., help.) is the contract itself.
+        "a vendor or community page",
+        re.compile(
+            r"\b(?:wiki|forum|forums|community|discuss)\.[\w.-]+\.(?:com|org|io|net|dev|cn)/[\w./#?=%-]+"
+            r"|reddit\.com/r/[\w/]+"
+        ),
+    ),
+    (
+        "a community account or client",
+        re.compile(_note_contract_pattern(
+            "COMMUNITY_ACCOUNTS",
+            r"\b(?:pellcorp|Guilouz|TheFeralEngineer|artillery3dlab|fpnewton|Doridian|OpenBambuAPI)\b",
+        )),
+    ),
+    (
+        "a fetch date",
+        re.compile(_note_contract_pattern("a fetch date", r"\bread 20\d\d-\d\d-\d\d\b")),
+    ),
+)
+_PIN_PREFILTER = re.compile(
+    r"github\.com|githubusercontent|gitlab\.com|\.(?:cpp|hpp|cc|c|h)\b|reddit\.com/r/|"
+    r"(?:wiki|forum|forums|community|discuss)\.[\w.-]+\.(?:com|org|io|net|dev|cn)/|read 20\d\d-|"
+    r"pellcorp|Guilouz|TheFeralEngineer|artillery3dlab|fpnewton|Doridian|OpenBambuAPI|open-bamboo|ha-bambulab|"
+    r"pybambu|bambuddy|bambino|OpenCentauri",
+    re.IGNORECASE,
+)
+
+
+def _is_prose_block(block: str) -> bool:
+    """A comment block or a docstring -- never a data string literal (a
+    fixture URL, an XML namespace, a checkout link a test asserts on)."""
+    stripped = block.lstrip()
+    return stripped.startswith("#") or stripped.lstrip("rbuRBU").startswith(('"""', "'''"))
+
+
+def _research_pins(block: str) -> list[tuple[str, str]]:
+    """``(rule, matched text)`` for every research pin in one comment block."""
+    found: list[tuple[str, str]] = []
+    if not _is_prose_block(block):
+        return found
+    for rule, rx in _RESEARCH_PINS:
+        for m in rx.finditer(block):
+            text = m.group(0)
+            if any(own in text for own in _OWN_HOSTS):
+                continue
+            found.append((rule, text))
+    return found
+
+
+def _pin_key(rel: str, text: str) -> str:
+    return f"{rel} :: {text}"
+
+
+def _load_frozen_pins(path: Path = _FROZEN_PINS_FILE) -> set[str]:
+    return _load_frozen_paths(path)
+
+
 # ── Rule 4: self-label ──────────────────────────────────────────────────────
 def _is_moat_label(line: str) -> bool:
     if not _MOAT_LABEL.search(line):
@@ -529,6 +639,15 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
                 hit(line, "overlay narration", block)
             elif reason is None and _is_pro_mirror_note(block):
                 hit(line, "Pro-data mirror note", block)
+
+    # Research provenance — comments and docstrings of src and test .py,
+    # tokenized only when the file carries a candidate substring at all.
+    if is_py and (is_src or is_test) and rel not in _SELF and _PIN_PREFILTER.search(text):
+        frozen_pins = _frozen_pins_cached()
+        for line, block in _blocks_from_bytes(data):
+            for rule, matched in _research_pins(block):
+                if _pin_key(rel, matched) not in frozen_pins:
+                    hit(line, "research provenance", f"{rule}: {matched}")
 
     # Shipped-data rules — data JSON (and test JSON fixtures) line by line.
     if is_shipped_json:
@@ -672,6 +791,49 @@ def _occurrences(content: list[tuple[str, bytes]], needles: set[str]) -> dict[st
     return where
 
 
+_FROZEN_PINS_CACHE: set[str] | None = None
+
+
+def _frozen_pins_cached() -> set[str]:
+    global _FROZEN_PINS_CACHE
+    if _FROZEN_PINS_CACHE is None:
+        _FROZEN_PINS_CACHE = _load_frozen_pins()
+    return _FROZEN_PINS_CACHE
+
+
+def _all_pins(content: list[tuple[str, bytes]]) -> set[str]:
+    found: set[str] = set()
+    for rel, data in content:
+        if not (rel.endswith(".py") and (rel.startswith("kiln/src/kiln/") or rel.startswith("kiln/tests/"))):
+            continue
+        if rel in _SELF:
+            continue
+        text = _decode(data) or ""
+        if not _PIN_PREFILTER.search(text):
+            continue
+        for _line, block in _blocks_from_bytes(data):
+            for _rule, matched in _research_pins(block):
+                found.add(_pin_key(rel, matched))
+    return found
+
+
+def _freeze_pins(content: list[tuple[str, bytes]]) -> int:
+    found = _all_pins(content)
+    header = (
+        "# Frozen inventory of research provenance in public comments and\n"
+        "# docstrings (a third-party repository, a source file:line pin, a vendor\n"
+        "# or community page, an account or client name, a fetch date), keyed\n"
+        "# `path :: matched text`.  Read by scripts/audit_moat_comment_leak.py: a\n"
+        "# pin not listed here fails the gate.  These pre-date the rule and are\n"
+        "# to be scrubbed or moved to the private evidence; this list may only\n"
+        "# shrink.  Regenerate with\n"
+        "#     python3 scripts/audit_moat_comment_leak.py --freeze-source-pins\n"
+        "# and commit the diff.\n"
+    )
+    _FROZEN_PINS_FILE.write_text(header + "".join(f"{p}\n" for p in sorted(found)), encoding="utf-8")
+    return len(found)
+
+
 def _freeze_paths(content: list[tuple[str, bytes]]) -> int:
     found: set[str] = set()
     for rel, data in content:
@@ -702,6 +864,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--freeze-kiln-pro-paths", action="store_true",
         help="rewrite scripts/public_tests_kiln_pro_paths.txt from the scanned tree and exit",
     )
+    parser.add_argument(
+        "--freeze-source-pins", action="store_true",
+        help="rewrite scripts/public_source_pins.txt from the scanned tree and exit",
+    )
     return parser.parse_args(argv)
 
 
@@ -726,6 +892,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.freeze_kiln_pro_paths:
         n = _freeze_paths(content)
         print(f"Froze {n} kiln_pro path(s) into {_FROZEN_PATHS_FILE.relative_to(_ROOT)}")
+        return 0
+    if args.freeze_source_pins:
+        n = _freeze_pins(content)
+        print(f"Froze {n} source pin(s) into {_FROZEN_PINS_FILE.relative_to(_ROOT)}")
         return 0
 
     leaks, stats = run(content, broad=args.sweep, check_manifest=check_manifest)
@@ -770,7 +940,13 @@ def main(argv: list[str] | None = None) -> int:
         "values / path (keep the math + the 'exposed for the kiln-pro overlay' "
         "contract).  A NEW kiln_pro dotted path is added to "
         "scripts/public_tests_kiln_pro_paths.txt on purpose; a genuinely "
-        "contract-only block gets a (filename, marker) entry in _ALLOWLIST."
+        "contract-only block gets a (filename, marker) entry in _ALLOWLIST.  "
+        "Research provenance in a comment or docstring (a repository, a "
+        "file:line pin, a wiki or forum page, an account, a fetch date) is "
+        "reworded to the source CLASS ('the maker's own client', 'the "
+        "firmware's own source') with the trail kept in kiln-pro's evidence; "
+        "an integration target's API reference that must stay gets an "
+        "_ALLOWLIST entry."
     )
     return 2
 

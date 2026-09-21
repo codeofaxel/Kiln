@@ -26,6 +26,15 @@ from typing import Any
 #: A motion note is a sentence or three, never a page.
 MAX_MOTION_NOTE_CHARS = 420
 
+#: Community accounts and client projects a fact may have been read from.
+#: One list, shared with the comment-leak gate (``scripts/
+#: audit_moat_comment_leak.py``), which applies it to code comments and
+#: docstrings the same way this contract applies it to bundled notes.
+COMMUNITY_ACCOUNTS = (
+    r"\b(?:pellcorp|Guilouz|TheFeralEngineer|artillery3dlab|fpnewton|Doridian|OpenBambuAPI|"
+    r"open-bamboo-networking|ha-bambulab|pybambu|bambuddy|bambino|OpenCentauri)\b"
+)
+
 #: Markers of research provenance or process.  Each is a thing a public note
 #: has no business saying; the Kiln Pro overlay keeps the full text.
 PROVENANCE_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -36,7 +45,7 @@ PROVENANCE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("a download id", r"\bDrive\b|\b(?=[A-Za-z0-9_-]{25,}\b)(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]+\b"),
     ("a research step", r"\blap[- ]?\d|\blaps?\b|\bassembler|\bthe brief\b|\bper the brief\b|\bbrief rule|\bthe report\b|\breport's\b|\bfetch(?:ed|es|ing)?\b|\bre-fetched\b|\bdownload(?:ed)?\b|\bgrep\b|\b\d+ hits?\b|\bmy reading\b|\bI \b"),
     ("an API endpoint or header", r"api\.github|raw\.githubusercontent|Content-Disposition|HEAD request|per_page"),
-    ("a community account", r"\b(?:pellcorp|Guilouz|TheFeralEngineer|artillery3dlab|fpnewton|Doridian|OpenBambuAPI)\b|\bdiscourse\b|\breddit\b|\bforum\b"),
+    ("a community account", COMMUNITY_ACCOUNTS + r"|\bdiscourse\b|\breddit\b|\bforum\b"),
     ("a repository path", r"\bgithub\b|CrealityOfficial|VoronDesign|QIDITECH|eufymake"),
     ("a fetch date", r"\bread 20\d\d-\d\d-\d\d\b"),
     ("a private path or repository", r"/Users/|scratchpad|kiln-pro|kiln_pro"),

@@ -433,11 +433,9 @@ def _is_nozzle_clump_error(error_code: int) -> bool:
 # mid-print extrusion signals that correlate with bore widening /
 # tip wear / filament-path friction.
 #
-# Source: Bambu Lab HMS wiki (wiki.bambulab.com/en/x1/troubleshooting/hms)
-# plus cross-reference with the community-maintained code list at
-# github.com/Doridian/BambuStudio/wiki/HMS-codes.  Conservatism is
-# the right call here — false positives on flow-anomaly tagging
-# poison the wear-rate signal more than missed positives.
+# Read from the maker's published fault codes.  Conservatism is the
+# right call here — false positives on flow-anomaly tagging poison the
+# wear-rate signal more than missed positives.
 _FLOW_ANOMALY_ERROR_PREFIXES: tuple[str, ...] = (
     "03008003",   # Filament feeding abnormal (P1/X1) — extruder can't pull
     "03008005",   # Filament broken at extruder
@@ -5164,18 +5162,10 @@ class BambuAdapter(PrinterAdapter):
             # their AMS.
             #
             # The external-spool wire shape is an EMPTY array, not a magic
-            # slot number.  Bambu's own networking plugin sends exactly
-            # ``use_ams ? "[0]" : "[]"`` (open-bamboo-networking
-            # src/print_job.cpp:184), and its comment there records that
-            # firmware treats [] the same as the field not being provided.
-            # Genuine BambuStudio traffic also carries one -1 per 3MF
-            # filament (SelectMachine.cpp:1414); both are accepted, and [] is
-            # the smaller change with the plugin-parity citation.
-            #
-            # 254 and 255 do NOT belong in this field.  255 is the virtual
-            # external tray in ``ams_mapping2`` ({"ams_id": 255, "slot_id":
-            # 0}) and in the ``tray_now`` status field; putting either here
-            # conflates a tray identifier with a slot index.
+            # slot number: the maker's own client sends [] (or one -1 per
+            # filament) and the firmware treats [] as the field not being
+            # provided.  254 and 255 do NOT belong in this field; putting
+            # either here conflates a tray identifier with a slot index.
             #
             # An explicitly passed [] is preserved, not rewritten — callers
             # already send one (kiln_pro material routing normalises with
@@ -6476,10 +6466,7 @@ class BambuAdapter(PrinterAdapter):
     # Filament handling: AMS-aware load / unload, purge as the clog test
     # ------------------------------------------------------------------
     #
-    # Wire shapes, from the community-documented LAN protocol
-    # (github.com/Doridian/OpenBambuAPI, mqtt.md) and BambuStudio's own
-    # ``MachineObject::command_ams_change_filament`` /
-    # ``command_ams_switch``:
+    # Wire shape, as the maker's own client sends it:
     #
     #   {"print": {"command": "ams_change_filament",
     #              "target": <tray id>, "curr_temp": N, "tar_temp": N}}

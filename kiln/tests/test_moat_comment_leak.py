@@ -227,6 +227,79 @@ def test_freezes_dotted_kiln_pro_paths() -> None:
     assert frozen and all(p.startswith("kiln_pro.") for p in frozen)
 
 
+# ── Rule 6: research provenance in comments / docstrings ────────────────────
+
+def _pins_in(rel: str, text: str) -> list[str]:
+    _GATE._FROZEN_PINS_CACHE = set()
+    try:
+        leaks, _ = _GATE.scan_file(rel, text.encode())
+    finally:
+        _GATE._FROZEN_PINS_CACHE = None
+    return [snippet for _p, _l, rule, snippet in leaks if rule == "research provenance"]
+
+
+def test_catches_research_provenance_in_a_comment() -> None:
+    """A source pin in a code comment is the same leak a catalogue note is
+    refused for -- the door 30 pre-existing pins walked through."""
+    text = (
+        "# Studio's own client sends [] (open-bamboo-networking\n"
+        "# src/print_job.cpp:184), and SelectMachine.cpp:1414 carries one -1.\n"
+        "x = 1\n"
+    )
+    found = _pins_in("kiln/src/kiln/printers/bambu.py", text)
+    assert any("src/print_job.cpp:184" in f for f in found)
+    assert any("SelectMachine.cpp:1414" in f for f in found)
+    assert any("open-bamboo-networking" in f for f in found)
+
+
+def test_catches_each_provenance_class() -> None:
+    cases = {
+        "a third-party repository": "# see github.com/prusa3d/PrusaSlicer master\n",
+        "a source file:line pin": "# per gcode/host/M115.cpp:63-75 @ 2.1.2.4\n",
+        "a vendor or community page": "# wiki.bambulab.com/en/general/find-sn says so\n",
+        "a community account or client": "# Doridian documents it\n",
+        "a fetch date": "# read 2026-09-16\n",
+    }
+    for rule, text in cases.items():
+        found = _pins_in("kiln/src/kiln/x.py", text + "x = 1\n")
+        assert any(f.startswith(rule + ":") for f in found), (rule, found)
+    # A docstring is prose too.
+    found = _pins_in("kiln/tests/test_x.py", '"""Checked against wiki.bambulab.com/en/hms/home on 2026-09-03."""\n')
+    assert found
+
+
+def test_allows_kilns_own_hosts_data_strings_and_api_docs() -> None:
+    clean = (
+        "# See https://kiln3d.com/pricing and github.com/codeofaxel/Kiln/issues\n"
+        "# The integration follows docs.octoprint.org/en/master/api/ (its contract)\n"
+        "URL = 'https://github.com/prusa3d/Prusa-Link/issues/832'  # a data string, not prose\n"
+        "NS = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'\n"
+        "x = 1\n"
+    )
+    assert _pins_in("kiln/src/kiln/x.py", clean) == []
+
+
+def test_the_source_pin_inventory_only_shrinks() -> None:
+    """A pin listed in scripts/public_source_pins.txt passes; one that is not
+    fails; the checked-in file names only pins that still exist."""
+    text = "# read from wiki.bambulab.com/en/general/find-sn\nx = 1\n"
+    rel = "kiln/src/kiln/x.py"
+    key = _GATE._pin_key(rel, "wiki.bambulab.com/en/general/find-sn")
+    _GATE._FROZEN_PINS_CACHE = {key}
+    try:
+        leaks, _ = _GATE.scan_file(rel, text.encode())
+    finally:
+        _GATE._FROZEN_PINS_CACHE = None
+    assert [leak for leak in leaks if leak[2] == "research provenance"] == []
+    assert _pins_in(rel, text)  # and without the entry it fails
+
+    frozen = _GATE._load_frozen_pins()
+    live = _GATE._all_pins([(p, (_GATE._ROOT / p).read_bytes()) for p in _GATE._tree_paths() if p.endswith(".py")])
+    stale = frozen - live
+    assert not stale, f"scrubbed pins still listed -- drop them: {sorted(stale)}"
+    assert not (live - frozen), f"new pins in the tree: {sorted(live - frozen)}"
+
+
 # ── Rule 4: the self-label, anywhere in public text ─────────────────────────
 
 def test_catches_moat_label_in_every_public_surface() -> None:
