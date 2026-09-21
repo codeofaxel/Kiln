@@ -306,7 +306,8 @@ def _stageable(file_path: str, design_mesh: str | None) -> bool:
 
 
 def stage_unavailable_reason(
-    file_path: str | os.PathLike[str], *, host_renders: bool | None, design_mesh: str | None = None,
+    file_path: str | os.PathLike[str], *, host_renders: bool | None,
+    design_mesh: str | None = None, panel_proven: bool | None = None,
 ) -> str | None:
     """Why the inline stage cannot show *file_path* right now — or ``None``
     when it can, which is the answer that refuses a PNG-only sign-off.
@@ -314,6 +315,14 @@ def stage_unavailable_reason(
     *host_renders* is what the connected host declared (or proved by
     reading the stage document).  ``None`` means nobody asked — a CLI
     process, say — and reads as "no panel", because there is none.
+
+    *panel_proven* is whether a panel has actually fetched geometry from
+    this server since it started (:func:`kiln.local_stage.panel_proven`).
+    A host that declared the panel and never fetched is holding a tool
+    list it cached before a restart: it draws no panel, whatever it said.
+    ``False`` says so; ``None`` means the caller did not look, and the
+    declaration stands.  Without this, 2026-09-21's exact state — stale
+    host plus signed out — had no door the gate would accept.
     """
     try:
         from kiln import local_stage
@@ -324,6 +333,13 @@ def stage_unavailable_reason(
         return "the inline stage is not installed here"
     if not host_renders:
         return "this host draws no MCP Apps panel"
+    if panel_proven is False:
+        return (
+            "this host declared the MCP Apps panel, but no panel has fetched "
+            "geometry from this server since it started — a host holding a "
+            "tool list cached before a restart_server draws none; reconnect "
+            "the Kiln MCP server in the host, or open a new chat"
+        )
     if not _stageable(str(file_path), design_mesh):
         return "neither this file nor a design mesh Kiln sliced it from can be staged"
     return None
@@ -344,6 +360,7 @@ def _age(facts: dict[str, Any]) -> str:
 
 def judge(
     file_path: str | os.PathLike[str], door: str, *, host_renders: bool | None,
+    panel_proven: bool | None = None,
 ) -> tuple[dict[str, str] | None, dict[str, Any]]:
     """Check a caller's claim that *door* previewed *file_path*.
 
@@ -428,7 +445,9 @@ def judge(
             "issue_preview_token again with door='url'.",
             CODE_SKIPPED,
         ), verdict
-    no_stage = stage_unavailable_reason(path, host_renders=host_renders, design_mesh=ev["design_mesh"])
+    no_stage = stage_unavailable_reason(
+        path, host_renders=host_renders, design_mesh=ev["design_mesh"], panel_proven=panel_proven,
+    )
     if no_stage is None:
         return _refusal(
             f"PNG renders are the last resort and the inline 3D stage is available on this "
@@ -456,9 +475,11 @@ def judge(
             "painter is available, or hand the user a link (door='url').",
             CODE_NOT_USED,
         ), verdict
+    from kiln.stage_link import refusal_sentence
+
     verdict["skipped"] = {
         DOOR_STAGE: no_stage,
-        DOOR_URL: f"the link door refused: {refusal.get('reason', 'unknown')}",
+        DOOR_URL: refusal_sentence(refusal.get("reason")),
     }
     verdict["evidence"][DOOR_PNG] = ev[DOOR_PNG]
     return None, verdict

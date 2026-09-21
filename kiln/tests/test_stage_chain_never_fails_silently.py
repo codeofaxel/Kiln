@@ -129,6 +129,17 @@ def _reset(monkeypatch, tmp_path):
     monkeypatch.delenv(local_stage._DIAGNOSTICS_ENV, raising=False)
     monkeypatch.delenv("KILN_STAGE_INLINE_GEOMETRY", raising=False)
     monkeypatch.delenv(stage_link._OPT_OUT_ENV, raising=False)
+    # The link door is signed OUT by default: the hook now tries the link
+    # whenever the panel is unproven, and a real bearer here would upload a
+    # test mesh to the live service.  Tests that want a link wire one.
+    monkeypatch.setattr(
+        "kiln.auth_session.resolve_api_bearer",
+        lambda *a, **k: type("B", (), {"token": "", "state": "signed_out"})(),
+    )
+    from kiln import stage_link as _stage_link
+
+    _stage_link._cache.clear()
+    _stage_link._REFUSED_BEARER = None
     stage_link._cache.clear()
     stage_link._REFUSED_BEARER = None
     local_stage._reset_for_tests()
@@ -243,20 +254,22 @@ def _fetch(token):
 
 
 class TestAPanelThatCannotFetchFallsBackToTheLink:
-    def test_a_mint_nobody_fetched_puts_the_link_on_the_next_result(
+    def test_a_mint_nobody_fetched_keeps_the_link_riding(
         self, tmp_path, monkeypatch, clock, caplog
     ):
         """THE INCIDENT.  The host declared apps, the panel opened, the
-        fetch never came.  The next result must carry the browser stage
-        link — the user gets a stage either way — and the log must say
-        why."""
+        fetch never came.  The FIRST result already carries the link — no
+        panel has proved itself yet (2026-09-21: the first make after a
+        restart rode alone) — and once the grace judges the mint unfetched
+        the next result says WHY the link rides, and the log says so."""
         calls = _wire_link(monkeypatch)
         caplog.set_level(logging.INFO, logger="kiln.local_stage")
 
         first = _make(_apps_host(), _real_cube(tmp_path / "a.stl"))
         assert first["artifact"]["artifact_token"]
-        assert "viewer_url" not in first, "nothing is known yet — the panel may still fetch"
-        assert calls == [], "uploaded before anything had gone wrong"
+        assert first.get("viewer_url"), "no panel has proved itself: the first make rode alone"
+        assert first["shown"]["door"] == "panel" and "stage_fallback" not in first
+        assert len(calls) == 1
 
         clock.advance(local_stage._FETCH_GRACE_S + 1.0)
 
@@ -268,6 +281,9 @@ class TestAPanelThatCannotFetchFallsBackToTheLink:
             "the tool's own output must survive the fallback"
         )
         assert "stage_fallback" in second, "the result must say WHY the link rides"
+        assert second["shown"]["door"] == "link"
+        # b.stl is byte-identical to a.stl: the content-addressed cache
+        # answers the second link, so the service saw one upload.
         assert len(calls) == 1
         assert local_stage.panel_fetches_stalled() is True
         assert any(
@@ -282,6 +298,7 @@ class TestAPanelThatCannotFetchFallsBackToTheLink:
         must cost nothing extra."""
         calls = _wire_link(monkeypatch)
         first = _make(_apps_host(), _real_cube(tmp_path / "a.stl"))
+        assert len(calls) == 1, "the first make rides with the link until a panel proves itself"
         served = _fetch(first["artifact"]["artifact_token"])
         assert served.get("success") is not False, served
 
@@ -289,7 +306,7 @@ class TestAPanelThatCannotFetchFallsBackToTheLink:
 
         second = _make(_apps_host(), _real_cube(tmp_path / "b.stl"))
         assert "viewer_url" not in second
-        assert calls == [], "a working panel paid for an upload"
+        assert len(calls) == 1, "a proven panel paid for a second upload"
         assert local_stage.panel_fetches_stalled() is False
 
     def test_a_successful_fetch_clears_the_flag(self, tmp_path, monkeypatch, clock):
@@ -304,24 +321,28 @@ class TestAPanelThatCannotFetchFallsBackToTheLink:
         served = _fetch(second["artifact"]["artifact_token"])
         assert served.get("success") is not False, served
         assert local_stage.panel_fetches_stalled() is False
+        assert local_stage.panel_proven() is True
 
         clock.advance(local_stage._FETCH_GRACE_S + 1.0)
         third = _make(_apps_host(), _real_cube(tmp_path / "c.stl"))
         assert "viewer_url" not in third, "the flag stuck after a fetch arrived"
-        assert len(calls) == 1
+        assert len(calls) == 1, "identical cubes share one upload; the third rode lean"
 
-    def test_a_host_that_never_declared_apps_behaves_as_before(
+    def test_a_host_that_never_declared_apps_gets_the_link_as_its_stage(
         self, tmp_path, monkeypatch, clock
     ):
-        """No panel was ever expected, so no fetch is missing.  The hook
-        attaches the token and nothing else, exactly as it did."""
+        """No panel was ever expected, so no fetch is missing and nothing
+        stalls — and a host with no panel never proves one, so for it the
+        browser link is the stage, on every result."""
         calls = _wire_link(monkeypatch)
-        _make(_silent_host(), _real_cube(tmp_path / "a.stl"))
+        first = _make(_silent_host(), _real_cube(tmp_path / "a.stl"))
+        assert first.get("viewer_url") and first["shown"]["door"] == "link"
         clock.advance(local_stage._FETCH_GRACE_S + 1.0)
         second = _make(_silent_host(), _real_cube(tmp_path / "b.stl"))
         assert second["artifact"]["artifact_token"]
-        assert "viewer_url" not in second
-        assert calls == []
+        assert second.get("viewer_url")
+        assert "stage_fallback" not in second, "nothing stalled — no panel was promised"
+        assert len(calls) == 1, "identical cubes share one upload"
         assert local_stage.panel_fetches_stalled() is False
 
     def test_a_tool_that_opens_no_panel_is_not_a_missing_fetch(
@@ -330,11 +351,13 @@ class TestAPanelThatCannotFetchFallsBackToTheLink:
         """An unstamped tool (list_materials is on no roster) opens no panel,
         so its token going unfetched proves nothing about the panel."""
         calls = _wire_link(monkeypatch)
-        _make(_apps_host(), _real_cube(tmp_path / "a.stl"), tool_name="list_materials")
+        first = _make(_apps_host(), _real_cube(tmp_path / "a.stl"), tool_name="list_materials")
+        assert first is None or "artifact" not in first, "an unstamped tool minted a token"
+        assert calls == []
         clock.advance(local_stage._FETCH_GRACE_S + 1.0)
         second = _make(_apps_host(), _real_cube(tmp_path / "b.stl"))
-        assert "viewer_url" not in second
-        assert calls == []
+        assert "stage_fallback" not in second, "an unfetched mint nobody expected read as a stall"
+        assert local_stage.panel_fetches_stalled() is False
 
     def test_a_fetch_answered_by_a_sibling_server_is_not_a_stall(
         self, tmp_path, monkeypatch, clock
@@ -346,14 +369,16 @@ class TestAPanelThatCannotFetchFallsBackToTheLink:
         calls = _wire_link(monkeypatch)
         mesh = _real_cube(tmp_path / "a.stl")
         _make(_apps_host(), mesh)
+        assert len(calls) == 1, "unproven: the first make rides with the link"
         # The sibling server served the panel: its record, not ours.
         preview_evidence.record("stage", mesh, via="panel_fetch")
 
         clock.advance(local_stage._FETCH_GRACE_S + 1.0)
         second = _make(_apps_host(), _real_cube(tmp_path / "b.stl"))
         assert "viewer_url" not in second, "a working panel was called broken"
-        assert calls == []
+        assert len(calls) == 1
         assert local_stage.panel_fetches_stalled() is False
+        assert local_stage.panel_proven() is True, "a sibling's fetch proves the panel"
 
     def test_the_hook_never_waits_for_the_fetch(self, tmp_path, monkeypatch, clock):
         """The grace is measured between calls, never slept through inside

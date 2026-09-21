@@ -103,7 +103,7 @@ class PipelineResult:
     total_duration_seconds: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "pipeline": self.pipeline,
             "success": self.success,
             "message": self.message,
@@ -111,6 +111,14 @@ class PipelineResult:
             "total_duration_seconds": round(self.total_duration_seconds, 2),
             "steps": [s.to_dict() for s in self.steps],
         }
+        # The slice step buries the mesh the stage should show two levels
+        # down, where the stage's one-level scan cannot see it.  Lift it.
+        for step in self.steps:
+            staged = (step.data or {}).get("stage_mesh_path")
+            if staged:
+                d["stage_mesh_path"] = staged
+                break
+        return d
 
 
 def _start_print_step_message(verdict: Any, remote_name: str) -> str:
@@ -432,6 +440,9 @@ def _loaded_material(adapter: Any, material: str | None) -> str | None:
 def _slice_step_data(result: Any) -> dict[str, Any]:
     """What a slice step records: the file, the slicer, and the filament it was weighed with."""
     data: dict[str, Any] = {"output_path": result.output_path, "slicer": result.slicer}
+    staged = getattr(result, "stage_mesh_path", None)
+    if staged:
+        data["stage_mesh_path"] = staged
     filament = getattr(result, "filament", None)
     if filament is not None:
         data["filament"] = filament.to_dict()

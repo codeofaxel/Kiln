@@ -204,6 +204,41 @@ def _refused(path: Path, reason: str) -> None:
         logger.debug("stage link refusal not recorded", exc_info=True)
 
 
+#: The link door's refusal codes, as sentences.  A result carries the
+#: sentence; the code stays in the evidence record for anything that
+#: branches on it.
+_REFUSAL_SENTENCES: dict[str, str] = {
+    "opted_out": "browser stage links are switched off on this install (KILN_NO_STAGE_LINKS)",
+    "signed_out": (
+        "Kiln is signed out on this install, so no browser stage link can be "
+        "issued — run kiln_signin"
+    ),
+    "session_refused": (
+        "Kiln's sign-in on this install has expired or was revoked, so no "
+        "browser stage link can be issued — run kiln_signin"
+    ),
+    "too_large": "the mesh is over the link door's upload limit",
+    "empty": "the mesh file is empty",
+    "no_httpx": "the httpx library is missing on this install, so no browser stage link can be issued",
+    "transport": "the link service could not be reached",
+    "bad_response": "the link service answered with something that was not a link",
+}
+
+
+def refusal_sentence(reason: str | None) -> str:
+    """The link door's refusal *reason* as a sentence a person can act on.
+    ``None`` — no refusal on record — reads as the door never having been
+    asked."""
+    if not reason:
+        return "the link door was not asked"
+    known = _REFUSAL_SENTENCES.get(reason)
+    if known:
+        return known
+    if reason.startswith("http_"):
+        return f"the link service answered HTTP {reason[len('http_'):]}"
+    return f"the link door refused ({reason})"
+
+
 def last_refusal(mesh_path: str | os.PathLike[str]) -> str | None:
     """Why :func:`stage_link_for` last returned ``None`` for *mesh_path*, in
     the door's own word (``opted_out``, ``signed_out``, ``too_large``,
@@ -418,11 +453,23 @@ def _looks_like_mesh_key(key: str) -> bool:
     return any(part in _OUTPUT_MARKERS for part in parts)
 
 
+#: ...and a key that names THE STAGE says exactly which file the stage
+#: shows, over any inference from the rest.  A slice result names the mesh
+#: it was handed (an input, disqualified) and the file it wrote — raw
+#: G-code, or a Bambu ``.gcode.3mf`` that ranks as the product — and
+#: neither is the plate as it will print: that is the sliced mesh, dressed
+#: in the slice's own skirt and tower.  So ``slice_file`` says which
+#: (``stage_mesh_path``), and the door that knows is believed.
+_STAGE_MARKERS = ("stage", "staged")
+
+
 def _key_rank(key: str) -> int | None:
     """Preference for a mesh-shaped key: higher wins, ``None`` disqualifies."""
     parts = set(key.lower().split("_"))
     if parts & set(_INPUT_MARKERS):
         return None
+    if parts & set(_STAGE_MARKERS):
+        return 2
     return 1 if parts & set(_OUTPUT_MARKERS) else 0
 
 

@@ -146,13 +146,30 @@ STAGE_DESCRIPTION_CLAUSE = (
 #: Every tool wired to the preview chokepoint belongs here unless the
 #: downstream stage-coverage ledger records a reason otherwise, and a new
 #: mesh-returning tool on neither list fails that coverage gate at
-#: conception.  The reasons a tool sits OUT: its output is a print or
-#: gcode artifact rather than a design mesh; it is a bookkeeping act on
+#: conception.  The reasons a tool sits OUT: it is a bookkeeping act on
 #: geometry the user has already seen (branch/save/sign ceremonies keep
-#: their PNG receipt, not a panel); it is an N-result batch; or the value it
-#: changes does not survive into the stage payload (a colored result shown
-#: gray reads as failure — the color tools sat out on exactly that until
-#: the encoder learned to bake per-part 3MF colors into vertex colors).
+#: their PNG receipt, not a panel); it is an N-result batch or a fleet
+#: door (N stages is spam, and those doors are the paid half); or the
+#: value it changes does not survive into the stage payload (a colored
+#: result shown gray reads as failure — the color tools sat out on exactly
+#: that until the encoder learned to bake per-part 3MF colors into vertex
+#: colors).
+#:
+#: THE SLICE DOORS ARE IN.  They sat out under an inline-era rule — "its
+#: output is a print or gcode artifact rather than a design mesh" — whose
+#: real reason was cost: ``slice_model`` echoing the path it just sliced
+#: shipped megabytes of base64 no panel would draw.  Only a token rides a
+#: result now, so that cost is gone, and the exclusion outlived it.  What
+#: a slice decides is exactly what no design-mesh stage ever showed: the
+#: bed position (the fit gate may have moved the part), which filament
+#: each colour maps to and whether the paint survived the slicer, and the
+#: slicer's own additions — supports, brim, a prime tower.  Measured
+#: 2026-09-21 on a re-sliced three-colour jar: a 30 mm prime tower and a
+#: centring, decided and shown to nobody.  A slice door's result names the
+#: mesh the slicer was handed (``stage_mesh_path``; see
+#: :func:`kiln.stage_link.find_mesh_path`), and the stage dresses it in
+#: the slice's own skirt and tower from this machine's ledger.  The start
+#: token stays the only wall: nothing here gates ``upload_file``.
 VIEWER_TOOLS: frozenset[str] = frozenset(
     {
         "add_feature_during_print",
@@ -187,8 +204,10 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
         "decorate_during_print",
         "decorate_surface",
         "design_session",
+        "design_to_gcode_pipeline",
         "download_generated_model",
         "extract_model_from_3mf",
+        "generate_and_print",
         "generate_ashtray",
         "generate_bookmark",
         "generate_coaster",
@@ -240,12 +259,17 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
         "repair_mesh",
         "repair_mesh_advanced",
         "rescale_model",
+        "reslice_with_overrides",
         "rollback_design_version",
         "rollback_feature",
         "rotate_model",
+        "run_reslice_and_print",
         "scale_mesh_to_fit",
         "separate_overlapping_parts",
         "simplify_mesh_model",
+        "slice_and_estimate",
+        "slice_and_print",
+        "slice_model",
         "smart_decorate",
         "smart_generate_from_template",
         "splice_mesh_at_z",
@@ -311,6 +335,20 @@ _awaiting_fetch: dict[str, tuple[str, float, float]] = {}
 #: Sticky until a fetch lands.  Read by the result hook and by
 #: ``visualize_model``; it never blocks anything.
 _fetches_stalled = False
+
+#: Set once a rendered panel has fetched geometry — from this process, or
+#: from a sibling server this process learned of through the shared record.
+#: Until then the panel is DECLARED, not proven: a host holding a tool list
+#: it cached before a restart_server declares the panel and cannot draw it,
+#: and the first make after such a restart used to ride alone — the link
+#: arrived only on the NEXT result, once the grace had judged the first
+#: mint unfetched (2026-09-21: a re-sliced jar, shown to nobody).  So the
+#: browser link rides beside the token until a fetch lands, and the result
+#: goes lean again after.  A host that draws no panel never proves one, so
+#: for it the link is simply the stage.  Never sticky across a restart: the
+#: fresh process starts unproven, and restart_server forgets it before the
+#: exec so a restart that fails to exec is not a restart that lied.
+_panel_proven = False
 
 #: What every door says while the panel is not fetching — the make results
 #: and ``visualize_model`` carry this same sentence, so an agent reading
@@ -499,10 +537,27 @@ def _expect_fetch(token: str, mesh_path: str) -> None:
 
 def _fetch_arrived(token: str) -> None:
     """The panel fetched: whatever was feared, fetches are arriving."""
-    global _fetches_stalled
+    global _fetches_stalled, _panel_proven
     with _lock:
         _awaiting_fetch.pop(token, None)
         _fetches_stalled = False
+        _panel_proven = True
+
+
+def panel_proven() -> bool:
+    """Whether a rendered panel has fetched geometry since this server
+    started — the one fact that separates a panel the host can draw from
+    one it merely declared."""
+    return _panel_proven
+
+
+def forget_panel_proof() -> None:
+    """The next result must prove the panel again.  Called before a
+    restart, whose fresh process starts unproven anyway; saying it here
+    keeps THIS process honest if the exec never happens."""
+    global _panel_proven
+    with _lock:
+        _panel_proven = False
 
 
 def _fetched_by_any_server(mesh_path: str, since_wall: float) -> bool:
@@ -536,7 +591,7 @@ def panel_fetches_stalled() -> bool:
     fetched flips the flag.  Sticky until a fetch lands, and read on the
     NEXT result — this never waits for anything.
     """
-    global _fetches_stalled
+    global _fetches_stalled, _panel_proven
     now = _now()
     with _lock:
         due = {
@@ -555,6 +610,9 @@ def panel_fetches_stalled() -> bool:
     with _lock:
         was = _fetches_stalled
         _fetches_stalled = bool(unfetched)
+        if len(unfetched) < len(due):
+            # A sibling served at least one of these: the panel is real.
+            _panel_proven = True
     if unfetched and not was:
         logger.warning(
             "inline stage: the panel's fetch for %s never arrived within %.0fs — "
@@ -659,7 +717,10 @@ def _log_signal_once(mcp: Any, renders: bool, ctx: Any = None) -> None:
     elif inline_geometry_enabled():
         route = "inlined into the result (KILN_STAGE_INLINE_GEOMETRY opt-in)"
     else:
-        route = "panel fetches it via kiln_viewer_payload"
+        # About the HOST's declaration, not about this call: whether the
+        # panel actually fetches is a separate fact (``panel_proven``),
+        # and every result says which door it took in ``shown``.
+        route = "panel fetches it via kiln_viewer_payload (unproven until a fetch lands)"
     logger.info(
         "inline stage: host=%s declared=%s read_stage=%s -> geometry %s",
         who,
@@ -1077,6 +1138,72 @@ def _tool_opens_stage(mcp: Any, name: str | None) -> bool:
         return True
 
 
+def _registry_knows(mcp: Any, name: str | None) -> bool:
+    """Whether *name* is a tool this server registered — the difference
+    between "stamped, and its result names no mesh" and "a request shape
+    whose name could not be read", which fails open above."""
+    if not name:
+        return False
+    try:
+        registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
+        return isinstance(registry, dict) and name in registry
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _shown(*, opens: bool, stalled: bool, proven: bool, linked: bool, mesh: str) -> dict[str, str]:
+    """Which door this result took, and why, in a sentence.
+
+    ``door`` is the best door the result carries — ``panel`` (the host
+    draws it and fetches are arriving), ``link`` (a ``viewer_url`` is the
+    stage today) or ``none`` (neither; the still image is the floor).
+    The still door writes its own ``shown`` (``still``) — one vocabulary
+    across every door, so an agent reads the same field whichever tool
+    it came through, and a refusal is always a sentence, never a code.
+    """
+    from kiln.stage_link import last_refusal, refusal_sentence
+
+    def _no_link() -> str:
+        return refusal_sentence(last_refusal(mesh) if mesh else None)
+
+    file = Path(mesh).name if mesh else ""
+    if opens and not stalled:
+        if proven:
+            reason = (
+                "the host draws Kiln's inline 3D panel and has fetched "
+                "geometry from this server before"
+            )
+        elif linked:
+            reason = (
+                "the host draws Kiln's inline 3D panel; no panel has fetched "
+                "from this server yet, so the browser link rides too — hand "
+                "the user the viewer_url if no panel appears"
+            )
+        else:
+            reason = (
+                "the host draws Kiln's inline 3D panel; no panel has fetched "
+                f"from this server yet, and no browser link could ride: {_no_link()}"
+            )
+        return {"door": "panel", "file": file, "reason": reason}
+    if linked:
+        reason = (
+            PANEL_FETCH_FALLBACK_NOTE if opens else
+            "this host draws no MCP Apps panel, so the browser link is the "
+            "stage: hand the user the viewer_url"
+        )
+        return {"door": "link", "file": file, "reason": reason}
+    base = (
+        "the inline panel is not fetching geometry on this connection"
+        if opens else "this host draws no MCP Apps panel"
+    )
+    return {
+        "door": "none",
+        "file": file,
+        "reason": f"{base}, and no browser link could be issued: {_no_link()}. "
+                  "The still image is the floor.",
+    }
+
+
 def _install_result_hook(mcp: Any) -> bool:
     """Attach the token (and, for a panel that will open, the geometry).
 
@@ -1094,14 +1221,18 @@ def _install_result_hook(mcp: Any) -> bool:
     the geometry lands in the model's context and truncates the tool's own
     output there — see the module docstring.
 
-    The browser stage link rides too — but only while the panel is not
-    fetching (``panel_fetches_stalled``): a host that declared the panel
-    and then never came back for a mint's geometry gets, on the next
-    result, exactly what a host with no panel gets.  A host that never
-    declared apps is untouched: no panel was promised, so no fetch is
-    missing, and its results carry the token and nothing else, as before.
-    The upload goes to a thread (``attach_stage_link_async``), so the
-    server keeps serving while it runs.
+    The browser stage link rides too, whenever the panel is not KNOWN to
+    work: while no panel has fetched from this server (``panel_proven``),
+    while fetches have stopped arriving (``panel_fetches_stalled``), and
+    always for a host that declared no panel — for it the link is the
+    stage.  Once a fetch lands the result goes lean again.  The upload
+    goes to a thread (``attach_stage_link_async``), so the server keeps
+    serving while it runs, and the content-addressed cache means a mesh
+    already linked costs nothing.
+
+    Only a tool whose declaration opens the stage is touched at all: a
+    token on any other result is a dead handle.  Every touched result
+    says which door it took and why (``shown``), in a sentence.
     """
     async def _attach(inner: Any, ctx: Any, name: str | None) -> None:
         """Mutate one tool result in place.  Deliberately knows no SDK detail —
@@ -1114,9 +1245,11 @@ def _install_result_hook(mcp: Any) -> bool:
             # Judged BEFORE this call mints, so the grace runs between
             # results and a result never counts against itself.
             stalled = panel_fetches_stalled()
-            token = token_for_call_result(inner)
-            if not token:
+            if not _tool_opens_stage(mcp, name):
+                # No panel opens for this tool.  A token here would be a
+                # dead handle — a ledger write and a promise nothing keeps.
                 return
+            token = token_for_call_result(inner)
             sc = getattr(inner, "structuredContent", None)
             if not isinstance(sc, dict):
                 # The tool had none.  Seed it from the result the tool
@@ -1128,14 +1261,27 @@ def _install_result_hook(mcp: Any) -> bool:
                 sc = _result_as_dict(inner) or {}
             else:
                 sc = dict(sc)
+            if not token:
+                if _registry_knows(mcp, name) and sc.get("success") is not False:
+                    # A stamped tool whose success names no mesh on disk:
+                    # the host opens the panel on nothing.  Say so.
+                    sc["shown"] = {
+                        "door": "none",
+                        "reason": (
+                            "this result names no mesh the stage can show, "
+                            "so the panel the host opens has nothing to draw"
+                        ),
+                    }
+                    inner.structuredContent = sc
+                return
             artifact = dict(sc.get("artifact") or {})
             artifact["artifact_token"] = token
             sc["artifact"] = artifact
             renders = host_renders_apps(mcp, ctx)
             _log_signal_once(mcp, renders, ctx)
             # A panel opens for this result only when the host draws panels
-            # AND this tool's declaration points at the stage.
-            opens = renders and _tool_opens_stage(mcp, name)
+            # (the tool's own stamp was checked above).
+            opens = renders
             mesh = resolve(token) or ""
             # Opt-in FIRST: with inline geometry off — the default — there is
             # nothing to decide and no mesh to read off disk, so the ordinary
@@ -1162,15 +1308,21 @@ def _install_result_hook(mcp: Any) -> bool:
                 # Lean: the panel must come back for this mesh.  Noted, so
                 # the NEXT result can tell whether it did.
                 _expect_fetch(token, mesh)
-            if stalled and opens:
-                # The panel is not fetching.  This result gets the link a
-                # panel-less host would get — the upload runs in a thread,
-                # and the note says why the link is the stage today.
+            proven = _panel_proven
+            if not opens or stalled or not proven:
+                # The panel is not known to work for this host — none was
+                # declared, fetches stopped, or none has landed yet.  The
+                # link rides: the upload runs in a thread, and the note
+                # says why the link is the stage today.
                 from kiln.stage_link import attach_stage_link_async
 
                 await attach_stage_link_async(sc, mesh_path=mesh or None)
-                if sc.get("viewer_url"):
+                if sc.get("viewer_url") and opens and stalled:
                     sc["stage_fallback"] = PANEL_FETCH_FALLBACK_NOTE
+            sc["shown"] = _shown(
+                opens=opens, stalled=stalled, proven=proven,
+                linked=bool(sc.get("viewer_url")), mesh=mesh,
+            )
             inner.structuredContent = sc
         except Exception:  # noqa: BLE001
             logger.debug("local stage token not attached", exc_info=True)
@@ -1222,9 +1374,10 @@ def install(mcp: Any) -> dict[str, Any]:
 
 
 def _reset_for_tests() -> None:
-    global _host_read_the_stage, _signal_logged, _fetches_stalled
+    global _host_read_the_stage, _signal_logged, _fetches_stalled, _panel_proven
     _tokens.clear()
     _awaiting_fetch.clear()
     _fetches_stalled = False
+    _panel_proven = False
     _host_read_the_stage = False
     _signal_logged = False

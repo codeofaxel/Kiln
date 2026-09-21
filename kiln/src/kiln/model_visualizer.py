@@ -1149,6 +1149,7 @@ def visualize_model(
             # pixels in a file has nobody to hand a URL to, so that upload
             # would be a network round-trip — and a copy of the user's
             # model leaving the machine — bought for a field nothing reads.
+            result["shown"] = _shown_by_the_still_door(result, file_path)
             return result
 
         from kiln.stage_link import attach_stage_link
@@ -1166,12 +1167,44 @@ def visualize_model(
             note = None
         if note:
             result["stage_fallback"] = note
+        result["shown"] = _shown_by_the_still_door(result, file_path)
         return result
 
     finally:
         if is_wrapper:
             with contextlib.suppress(OSError):
                 os.unlink(scad_path)
+
+
+def _shown_by_the_still_door(result: dict, file_path: str) -> dict[str, str]:
+    """The same ``shown`` field the stage's make results carry, from the
+    still door's point of view: a link when one rode, else the still —
+    and whether that still is the stage's own look (which signs off a
+    print) or a raw render (which only inspects).  One vocabulary."""
+    from pathlib import Path as _Path
+
+    file = _Path(file_path).name
+    if result.get("viewer_url"):
+        return {
+            "door": "link", "file": file,
+            "reason": "a browser stage link was issued for these bytes: hand the user the viewer_url",
+        }
+    if not result.get("success"):
+        return {"door": "none", "file": file, "reason": "no render succeeded"}
+    from kiln.preview_evidence import STAGE_RENDERERS
+
+    renderer = result.get("renderer") or "unknown"
+    if renderer in STAGE_RENDERERS:
+        reason = (
+            f"static renders in the stage's own look ({renderer}); they sign "
+            "off a print only when neither the panel nor a link is possible"
+        )
+    else:
+        reason = (
+            f"static renders from the raw {renderer} renderer — inspection "
+            "only, not a sign-off"
+        )
+    return {"door": "still", "file": file, "reason": reason}
 
 
 # ---------------------------------------------------------------------------

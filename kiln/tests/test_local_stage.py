@@ -93,6 +93,17 @@ def _reset(monkeypatch, tmp_path):
     monkeypatch.delenv(local_stage._DIAGNOSTICS_ENV, raising=False)
     local_stage._reset_for_tests()
     stage_cache._reset_for_tests()
+    # The link door is signed OUT by default: the hook now tries the link
+    # whenever the panel is unproven, and a real bearer here would upload a
+    # test mesh to the live service.  Tests that want a link wire one.
+    monkeypatch.setattr(
+        "kiln.auth_session.resolve_api_bearer",
+        lambda *a, **k: type("B", (), {"token": "", "state": "signed_out"})(),
+    )
+    from kiln import stage_link as _stage_link
+
+    _stage_link._cache.clear()
+    _stage_link._REFUSED_BEARER = None
     yield
     local_stage._reset_for_tests()
     stage_cache._reset_for_tests()
@@ -624,16 +635,15 @@ class TestPayloadFollowsTheStamp:
                        tool_name="compile_scad")
         assert sc["kiln_viewer"]["kind"] == "kiln.mesh.v1"
 
-    def test_an_unstamped_tool_gets_the_token_but_not_the_geometry(self, tmp_path):
+    def test_an_unstamped_tool_gets_neither_token_nor_geometry(self, tmp_path):
         # list_materials registers in the harness and is NOT on the roster,
-        # so install() leaves it unstamped — no panel opens for its results.
+        # so install() leaves it unstamped — no panel opens for its results,
+        # and a token on them would be a dead handle (2026-09-21).
         sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
                        tool_name="list_materials")
-        assert sc["artifact"]["artifact_token"], "the token is cheap and always rides"
-        assert "kiln_viewer" not in sc, (
-            "geometry attached for a tool whose declaration opens no panel"
+        assert sc is None or ("artifact" not in sc and "kiln_viewer" not in sc), (
+            "the hook touched a result no panel opens"
         )
-        assert sc["success"] is True, "the tool's own output must survive the gate"
 
     def test_an_unreadable_name_fails_open(self, tmp_path):
         # tool_name=None mimics a request shape the name extraction cannot
@@ -1184,8 +1194,9 @@ class TestNoDeadHandles:
     def test_an_unstamped_tool_gets_no_token(self, tmp_path):
         sc = _run_hook(_Host(_Caps(extensions={self.UI: {}})),
                        _real_cube(tmp_path / "c.stl"), tool_name="list_materials")
-        assert "artifact" not in sc, "a token was minted for a tool that opens no panel"
-        assert sc["success"] is True
+        assert sc is None or "artifact" not in sc, (
+            "a token was minted for a tool that opens no panel"
+        )
 
     def test_a_stamped_result_that_names_no_mesh_says_so(self, tmp_path):
         """The panel would open on nothing; the result says why."""

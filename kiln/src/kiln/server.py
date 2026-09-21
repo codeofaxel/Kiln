@@ -10566,7 +10566,11 @@ def issue_preview_token(
             renders = local_stage.host_renders_apps(mcp)
         except Exception:  # noqa: BLE001 — no session reads as no panel
             renders = False
-        refusal, verdict = preview_evidence.judge(file_path, door, host_renders=renders)
+        # ...and whether that panel has ever fetched from this server: a
+        # declared panel that never has is a stale host, not a stage.
+        refusal, verdict = preview_evidence.judge(
+            file_path, door, host_renders=renders, panel_proven=local_stage.panel_proven(),
+        )
         if refusal is not None:
             _audit(
                 "issue_preview_token",
@@ -11558,6 +11562,14 @@ def restart_server(clean_env: bool = True) -> dict:
     # In the calling thread, before the exec races the log: the server's
     # own record of what this restart costs the sessions it cannot see.
     logger.warning("restart_server: %s", _RESTART_OPEN_SESSIONS_NOTE)
+    # The panel must prove itself again after a restart — the fresh process
+    # starts unproven, and so does this one if the exec never happens.
+    try:
+        from kiln import local_stage as _local_stage
+
+        _local_stage.forget_panel_proof()
+    except Exception:  # noqa: BLE001 — never fail a restart over the stage
+        logger.debug("stage proof not forgotten", exc_info=True)
     threading.Thread(target=_do_restart, daemon=True).start()
     msg = f"Kiln server restarting in ~0.3s — {relaunch_note}."
     if stripped:

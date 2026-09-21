@@ -200,7 +200,7 @@ class TestWhichDoor:
         assert refusal is None, refusal
         assert verdict["door"] == "png"
         assert "panel" in verdict["skipped"]["stage"]
-        assert "signed_out" in verdict["skipped"]["url"]
+        assert "signed out" in verdict["skipped"]["url"], "the refusal is a sentence, not a code"
 
     def test_png_without_a_render_on_record_is_refused(self, tmp_path):
         path = _stl(tmp_path / "jar.stl")

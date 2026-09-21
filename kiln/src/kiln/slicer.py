@@ -163,6 +163,12 @@ class SliceResult:
     #: The density the slicer was handed and where it came from, so every
     #: door's response can say which (see :mod:`kiln.slicer_filament`).
     filament: SliceFilament | None = None
+    #: The mesh the slicer was handed, absolute — the file Kiln's 3D stage
+    #: shows for this slice, dressed in the slice's own additions.  Every
+    #: slice door spreads or nests this dict, so this is the one place to
+    #: say it; the key's name is what the stage looks for
+    #: (:func:`kiln.stage_link.find_mesh_path`).
+    stage_mesh_path: str | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -171,6 +177,8 @@ class SliceResult:
             "slicer": self.slicer,
             "message": self.message,
         }
+        if self.stage_mesh_path:
+            d["stage_mesh_path"] = self.stage_mesh_path
         if self.filament is not None:
             d["filament"] = self.filament.to_dict()
         if self.stderr:
@@ -1030,6 +1038,7 @@ def slice_file(
             multicolor=multicolor,
         )
         result.filament = filament
+        result.stage_mesh_path = input_abs
         if multicolor_switched:
             result.message += (
                 f" (multicolor 3MF: auto-selected "
@@ -1105,6 +1114,7 @@ def slice_file(
         stdout=(result.stdout or "").strip(),
         stderr=(result.stderr or "").strip(),
         filament=filament,
+        stage_mesh_path=input_abs,
     )
 
 

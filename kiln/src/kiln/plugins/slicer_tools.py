@@ -11,6 +11,7 @@ no manual imports needed.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 import time
@@ -188,6 +189,13 @@ def _apply_bed_fit_gate(
         return input_path, None, fit
 
     fit = validate_mesh_for_printer(input_path, effective_printer_id)
+    # Whether a yes given on the DESIGN mesh still describes what will print.
+    # The gate slices a moved or rotated COPY when it has to, and the ledger
+    # records the copy — so the design's approval silently never reached the
+    # print file.  Silent was the bug: the two transforms below say so, and
+    # by how much, and the stage on the slice result shows the plate as it
+    # will print so that is what gets approved.
+    fit["approval_carries"] = True
     if fit["ok"]:
         return input_path, None, fit
     if fit["error_code"] == "EXCEEDS_BED":
@@ -198,6 +206,12 @@ def _apply_bed_fit_gate(
             ofit = validate_mesh_for_printer(oriented, effective_printer_id)
             ofit["auto_oriented"] = True
             ofit["oriented_input_path"] = oriented
+            ofit["approval_carries"] = False
+            ofit["approval_note"] = (
+                "rotated to fit the bed, so a yes given on the design mesh "
+                "does not carry; the stage on this result shows the plate as "
+                "it will print — approve from here"
+            )
             return oriented, None, ofit
         _attach_fit_enrichment(fit, input_path, effective_printer_id, material_id)
         return input_path, fit, fit
@@ -219,6 +233,14 @@ def _apply_bed_fit_gate(
                 )
                 fit["auto_centered"] = True
                 fit["centered_input_path"] = centered_path
+                fit["approval_carries"] = False
+                _dx, _dy = (list(fit["suggested_translate"]) + [0.0, 0.0])[:2]
+                fit["approval_note"] = (
+                    f"moved {math.hypot(float(_dx), float(_dy)):.0f} mm to fit "
+                    "the bed, so a yes given on the design mesh does not carry; "
+                    "the stage on this result shows the plate as it will print "
+                    "— approve from here"
+                )
                 return centered_path, None, fit
             except Exception as exc:  # noqa: BLE001
                 _logger.warning("Auto-center failed: %s", exc)
@@ -320,6 +342,17 @@ def _auto_wrap_bambu_3mf(
             "Auto-wrapped %s as Bambu 3MF (with Bambu init) at %s",
             os.path.basename(gcode_path), threemf_path,
         )
+        # The printer will know this job by the WRAP's name.  Join it to the
+        # slice in the ledger, as the adapter's own wrap door does — without
+        # this, the design mesh's approval never reached the file that was
+        # uploaded, and the stage had no slice to dress the wrap in (0 of 8
+        # ledger rows carried ``wrapped``, measured 2026-09-21).
+        try:
+            from kiln.monitor_twin import note_wrapped
+
+            note_wrapped(gcode_path, threemf_path)
+        except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
+            _logger.debug("monitor-twin wrap note failed", exc_info=True)
         # A successful wrap can still hand back a file whose startup sequence
         # belongs to another machine.  That used to be a log line only, which
         # is invisible to the agent holding the 3MF — and it stopped being a
@@ -365,7 +398,9 @@ def _steer_to_wrapped_upload(
 
         if bambu_archive_problems(threemf_path):
             complete_bambu_archive(threemf_path)
-            response["preview_completed"] = True
+            # The 3MF's thumbnail tiles were filled in.  Not "a preview
+            # was seen" — the stage's ``shown`` says that, and only that.
+            response["thumbnails_completed"] = True
     except Exception as exc:  # noqa: BLE001 — the upload door still refuses an incomplete file
         _logger.warning("Bambu preview completion failed for %s: %s", threemf_path, exc)
         response.setdefault("warnings", []).append(f"Preview completion failed: {exc}")
@@ -417,7 +452,7 @@ def _steer_to_complete_gcode(
         complete_gcode_for_printer(
             gcode_path, printer_model=effective_printer_id, model_path=model_path,
         )
-        response["preview_completed"] = True
+        response["thumbnails_completed"] = True
     except Exception as exc:  # noqa: BLE001 — the upload door still refuses an incomplete file
         _logger.warning("G-code completion failed for %s: %s", gcode_path, exc)
         response.setdefault("warnings", []).append(f"Preview completion failed: {exc}")
