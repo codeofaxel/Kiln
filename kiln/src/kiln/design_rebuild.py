@@ -295,7 +295,7 @@ def _apply_parameters_to_scad(
 
     :returns: ``(updated_code, applied, not_in_source, skipped)``
     """
-    from kiln.parametric import update_openscad_parameter
+    from kiln.parametric import DerivedParameterError, update_openscad_parameter
 
     applied: dict[str, Any] = {}
     not_in_source: list[str] = []
@@ -310,6 +310,8 @@ def _apply_parameters_to_scad(
         try:
             scad_code = update_openscad_parameter(scad_code, name, float(value))
             applied[name] = value
+        except DerivedParameterError as exc:
+            skipped[name] = str(exc)
         except ValueError:
             not_in_source.append(name)
     return scad_code, applied, not_in_source, skipped

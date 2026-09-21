@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 _logger = logging.getLogger(__name__)
@@ -20,6 +20,18 @@ _VAR_RE = re.compile(
     r"^(?P<name>[a-zA-Z_]\w*)\s*=\s*(?P<value>-?\d+(?:\.\d+)?)\s*;"
     r"(?:\s*//\s*(?P<comment>.*))?$"
 )
+
+# Any top-level assignment, literal or not:
+#   variable_name = <expression>;  // optional comment
+# A line matching this but not _VAR_RE is a derived-parameter candidate.
+_ASSIGN_RE = re.compile(
+    r"^(?P<name>[a-zA-Z_]\w*)\s*=\s*(?P<expr>[^;]+?)\s*;"
+    r"(?:\s*//\s*(?P<comment>.*))?$"
+)
+
+# Identifiers inside an expression, once string literals are removed.
+_IDENT_RE = re.compile(r"[a-zA-Z_]\w*")
+_STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
 
 # Lines that signal "end of parameter block" — actual geometry code begins.
 _STOP_KEYWORDS = frozenset(
@@ -50,14 +62,24 @@ _RANGE_RE = re.compile(
 
 @dataclass
 class ParameterDef:
-    """A single parsed OpenSCAD parameter definition."""
+    """A single parsed OpenSCAD parameter definition.
+
+    A literal parameter (``wall = 2;``) carries its ``value``.  A derived
+    parameter (``inner = outer - 2*wall;``) has ``derived=True``, no
+    ``value``, the source ``expression`` and the parameter names it
+    ``depends_on``; it moves when any of those change and cannot be set
+    directly.
+    """
 
     name: str
-    value: float
+    value: float | None
     unit: str = "mm"
     description: str = ""
     min_value: float | None = None
     max_value: float | None = None
+    derived: bool = False
+    expression: str = ""
+    depends_on: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -65,12 +87,20 @@ class ParameterDef:
             "value": self.value,
             "unit": self.unit,
             "description": self.description,
+            "derived": self.derived,
         }
         if self.min_value is not None:
             d["min_value"] = self.min_value
         if self.max_value is not None:
             d["max_value"] = self.max_value
+        if self.derived:
+            d["expression"] = self.expression
+            d["depends_on"] = list(self.depends_on)
         return d
+
+
+class DerivedParameterError(ValueError):
+    """Raised when a caller tries to set a derived parameter directly."""
 
 
 @dataclass
@@ -103,6 +133,56 @@ def _humanize(name: str) -> str:
     return name.replace("_", " ")
 
 
+def _parse_comment(
+    name: str, comment: str,
+) -> tuple[str, str, float | None, float | None]:
+    """Split a trailing ``// comment`` into (unit, description, min, max)."""
+    unit = "mm"
+    description = _humanize(name)
+    if comment:
+        parts = comment.split(None, 1)
+        if parts:
+            candidate = parts[0].rstrip(",;:()")
+            if candidate.isalpha() or candidate in ("mm", "cm", "m", "in"):
+                unit = candidate
+                description = parts[1].strip() if len(parts) > 1 else _humanize(name)
+            else:
+                description = comment
+
+    min_val: float | None = None
+    max_val: float | None = None
+
+    mm = _MINMAX_RE.search(comment)
+    if mm:
+        if mm.group("min"):
+            min_val = float(mm.group("min"))
+        if mm.group("max"):
+            max_val = float(mm.group("max"))
+        # Strip the range from description
+        desc_clean = _MINMAX_RE.sub("", description).strip().rstrip(",;: ")
+        if desc_clean:
+            description = desc_clean
+    else:
+        rm = _RANGE_RE.search(comment)
+        if rm:
+            min_val = float(rm.group("lo"))
+            max_val = float(rm.group("hi"))
+            desc_clean = _RANGE_RE.sub("", description).strip().rstrip(",;: ")
+            if desc_clean:
+                description = desc_clean
+
+    return unit, description, min_val, max_val
+
+
+def _referenced_params(expression: str, known: list[str]) -> list[str]:
+    """Known parameter names an expression references, in order of first use."""
+    seen: list[str] = []
+    for ident in _IDENT_RE.findall(_STRING_RE.sub("", expression)):
+        if ident in known and ident not in seen:
+            seen.append(ident)
+    return seen
+
+
 def parse_openscad_parameters(scad_code: str) -> list[ParameterDef]:
     """Parse OpenSCAD variable declarations at the top of a file.
 
@@ -111,10 +191,18 @@ def parse_openscad_parameters(scad_code: str) -> list[ParameterDef]:
     line the unit, description, and optional min/max range are extracted
     from the trailing ``//`` comment.
 
+    A line assigning an expression rather than a literal number, such as
+    ``inner = outer - 2*wall;``, is reported as a derived parameter when
+    the expression references at least one parameter parsed above it
+    (``derived=True``, ``expression``, ``depends_on``, no value or range).
+    An expression line that references no parameter parsed so far ends
+    the block, as any non-literal line always has.
+
     :param scad_code: Full OpenSCAD source text.
     :returns: List of :class:`ParameterDef` found in the parameter block.
     """
     params: list[ParameterDef] = []
+    known: list[str] = []
 
     for raw_line in scad_code.splitlines():
         line = raw_line.strip()
@@ -129,60 +217,46 @@ def parse_openscad_parameters(scad_code: str) -> list[ParameterDef]:
             break
 
         m = _VAR_RE.match(line)
-        if not m:
+        if m:
+            name = m.group("name")
+            comment = (m.group("comment") or "").strip()
+            unit, description, min_val, max_val = _parse_comment(name, comment)
+            params.append(
+                ParameterDef(
+                    name=name,
+                    value=float(m.group("value")),
+                    unit=unit,
+                    description=description,
+                    min_value=min_val,
+                    max_value=max_val,
+                )
+            )
+            known.append(name)
+            continue
+
+        a = _ASSIGN_RE.match(line)
+        depends_on = (
+            _referenced_params(a.group("expr"), known) if a else []
+        )
+        if not a or not depends_on:
             # Non-variable, non-comment, non-blank → end of param block
             break
 
-        name = m.group("name")
-        value = float(m.group("value"))
-        comment = (m.group("comment") or "").strip()
-
-        # Parse unit — first word in comment
-        unit = "mm"
-        description = _humanize(name)
-        if comment:
-            parts = comment.split(None, 1)
-            if parts:
-                candidate = parts[0].rstrip(",;:()")
-                if candidate.isalpha() or candidate in ("mm", "cm", "m", "in"):
-                    unit = candidate
-                    description = parts[1].strip() if len(parts) > 1 else _humanize(name)
-                else:
-                    description = comment
-
-        # Parse min/max from comment
-        min_val: float | None = None
-        max_val: float | None = None
-
-        mm = _MINMAX_RE.search(comment)
-        if mm:
-            if mm.group("min"):
-                min_val = float(mm.group("min"))
-            if mm.group("max"):
-                max_val = float(mm.group("max"))
-            # Strip the range from description
-            desc_clean = _MINMAX_RE.sub("", description).strip().rstrip(",;: ")
-            if desc_clean:
-                description = desc_clean
-        else:
-            rm = _RANGE_RE.search(comment)
-            if rm:
-                min_val = float(rm.group("lo"))
-                max_val = float(rm.group("hi"))
-                desc_clean = _RANGE_RE.sub("", description).strip().rstrip(",;: ")
-                if desc_clean:
-                    description = desc_clean
-
+        name = a.group("name")
+        comment = (a.group("comment") or "").strip()
+        unit, description, _, _ = _parse_comment(name, comment)
         params.append(
             ParameterDef(
                 name=name,
-                value=value,
+                value=None,
                 unit=unit,
                 description=description,
-                min_value=min_val,
-                max_value=max_val,
+                derived=True,
+                expression=a.group("expr").strip(),
+                depends_on=depends_on,
             )
         )
+        known.append(name)
 
     return params
 
@@ -205,8 +279,18 @@ def update_openscad_parameter(
     :param param_name: Variable name to update.
     :param new_value: New numeric value.
     :returns: Modified source text.
+    :raises DerivedParameterError: If the parameter is derived from others;
+        the message names its formula and the parameters to change instead.
     :raises ValueError: If the parameter is not found.
     """
+    for p in parse_openscad_parameters(scad_code):
+        if p.name == param_name and p.derived:
+            raise DerivedParameterError(
+                f"Parameter '{param_name}' is derived "
+                f"({param_name} = {p.expression}) and cannot be set directly; "
+                f"change {', '.join(p.depends_on)} instead"
+            )
+
     # Build a pattern that matches this specific variable assignment
     pat = re.compile(
         r"^(?P<pre>" + re.escape(param_name) + r"\s*=\s*)"
@@ -243,7 +327,8 @@ def validate_openscad_parameters(
        knowledge base (when *material* is provided).
 
     Heuristic name matching maps parameters to the appropriate design
-    limit based on keywords in the variable name.
+    limit based on keywords in the variable name.  Derived parameters
+    carry no value of their own and are skipped.
 
     :param scad_code: Full OpenSCAD source text.
     :param material: Optional material ID (e.g. ``"pla"``) for limit lookup.
@@ -271,6 +356,9 @@ def validate_openscad_parameters(
             )
 
     for p in params:
+        if p.derived or p.value is None:
+            continue
+
         # Check comment-declared min/max
         if p.min_value is not None and p.value < p.min_value:
             warnings.append(

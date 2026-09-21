@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from kiln.parametric import (
+    DerivedParameterError,
     ParameterDef,
     ParameterWarning,
     ScadModule,
@@ -168,6 +169,122 @@ class TestParseOpenscadParameters:
         assert parse_openscad_parameters("// just a comment\n// another") == []
 
 
+class TestParseDerivedParameters:
+    """parse_openscad_parameters surfaces parameters computed from others."""
+
+    def test_derived_line_surfaced_with_expression_and_depends_on(self):
+        code = (
+            "outer = 30; // mm\n"
+            "wall = 2; // mm\n"
+            "inner = outer - 2*wall; // mm inner size\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["outer", "wall", "inner"]
+        inner = params[2]
+        assert inner.derived is True
+        assert inner.value is None
+        assert inner.expression == "outer - 2*wall"
+        assert inner.depends_on == ["outer", "wall"]
+        assert inner.unit == "mm"
+        assert inner.description == "inner size"
+        assert inner.min_value is None
+        assert inner.max_value is None
+
+    def test_literal_lines_are_not_derived(self):
+        params = parse_openscad_parameters("wall = 2; // mm")
+        assert params[0].derived is False
+        assert params[0].expression == ""
+        assert params[0].depends_on == []
+
+    def test_depends_on_orders_by_first_use_without_repeats(self):
+        code = (
+            "a = 1;\n"
+            "b = 2;\n"
+            "c = b + a * b;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert params[2].depends_on == ["b", "a"]
+
+    def test_derived_may_depend_on_another_derived(self):
+        code = (
+            "outer = 30;\n"
+            "inner = outer - 4;\n"
+            "half = inner / 2;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert params[2].derived is True
+        assert params[2].depends_on == ["inner"]
+
+    def test_reference_to_name_declared_later_is_not_derived(self):
+        code = (
+            "inner = outer * 2;\n"
+            "outer = 30;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert not any(p.name == "inner" for p in params)
+        assert params == []
+
+    def test_unknown_name_in_expression_is_not_a_dependency(self):
+        code = (
+            "wall = 2;\n"
+            "inner = outer - 2*wall;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert params[1].derived is True
+        assert params[1].depends_on == ["wall"]
+
+    def test_vector_literal_stays_ignored(self):
+        code = (
+            "size = 10;\n"
+            "dims = [10, 20, 30];\n"
+            "extra = 5;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["size"]
+
+    def test_string_mentioning_a_param_stays_ignored(self):
+        code = (
+            "wall = 2;\n"
+            'label = "the wall";\n'
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["wall"]
+
+    def test_function_of_nothing_known_stays_ignored(self):
+        code = (
+            "wall = 2;\n"
+            "twist = sin(45) * 3;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["wall"]
+
+    def test_block_still_stops_at_module(self):
+        code = (
+            "outer = 30;\n"
+            "wall = 2;\n"
+            "inner = outer - 2*wall;\n"
+            "module box() {\n"
+            "  deeper = inner + 1;\n"
+            "}\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["outer", "wall", "inner"]
+
+    def test_derived_to_dict_carries_new_fields(self):
+        code = "outer = 30;\ninner = outer - 4;\n"
+        d = parse_openscad_parameters(code)[1].to_dict()
+        assert d["derived"] is True
+        assert d["value"] is None
+        assert d["expression"] == "outer - 4"
+        assert d["depends_on"] == ["outer"]
+
+    def test_literal_to_dict_omits_expression_keys(self):
+        d = parse_openscad_parameters("wall = 2;")[0].to_dict()
+        assert d["derived"] is False
+        assert "expression" not in d
+        assert "depends_on" not in d
+
+
 # ---------------------------------------------------------------------------
 # update_openscad_parameter
 # ---------------------------------------------------------------------------
@@ -213,6 +330,29 @@ class TestUpdateOpenscadParameter:
         result = update_openscad_parameter(code, "size", 10.0)
         assert "size = 10;" in result
 
+    def test_refuses_derived_param_naming_formula_and_inputs(self):
+        code = (
+            "outer = 30; // mm\n"
+            "wall = 2; // mm\n"
+            "inner = outer - 2*wall;\n"
+        )
+        with pytest.raises(
+            DerivedParameterError,
+            match=r"inner = outer - 2\*wall.*change outer, wall instead",
+        ):
+            update_openscad_parameter(code, "inner", 20)
+
+    def test_derived_refusal_is_a_value_error(self):
+        code = "outer = 30;\ninner = outer - 4;\n"
+        with pytest.raises(ValueError, match="derived"):
+            update_openscad_parameter(code, "inner", 20)
+
+    def test_inputs_of_a_derived_param_still_update(self):
+        code = "outer = 30;\ninner = outer - 4;\n"
+        result = update_openscad_parameter(code, "outer", 50)
+        assert "outer = 50;" in result
+        assert "inner = outer - 4;" in result
+
 
 # ---------------------------------------------------------------------------
 # validate_openscad_parameters
@@ -221,6 +361,18 @@ class TestUpdateOpenscadParameter:
 
 class TestValidateOpenscadParameters:
     """validate_openscad_parameters checks values against limits."""
+
+    @patch("kiln.design_intelligence.get_material_profile")
+    def test_derived_params_are_skipped(self, mock_profile):
+        mock_profile.return_value = SimpleNamespace(
+            design_limits={"min_wall_thickness_mm": 1.2},
+        )
+        code = (
+            "wall = 0.5; // mm\n"
+            "inner_wall = wall * 2; // mm\n"
+        )
+        warnings = validate_openscad_parameters(code, material="pla")
+        assert [w.parameter_name for w in warnings] == ["wall"]
 
     def test_no_material_returns_empty_when_in_range(self):
         code = "wall = 2; // mm (min: 1, max: 5)"
