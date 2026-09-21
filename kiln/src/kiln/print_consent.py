@@ -39,7 +39,13 @@ Where a yes can come from, graded by who is holding the pen:
 
 * **Grade A** — the host drew the dialog (``user_elicited``), or the
   hosted server's account approval (``hosted_account_approval``, a hook
-  kiln-pro fills; public Kiln ships no implementation).
+  kiln-pro fills; public Kiln ships no implementation), or a delegation
+  that account granted to a named agent for a bounded window
+  (``hosted_delegation``, the same hook).  A delegation is the hosted
+  twin of the standing window below: a person opened it on purpose, it
+  names its printers and its end, and the agent printing under it is
+  recorded as itself — ``agent:<id> under account:<id>#<delegation>`` —
+  never as the person.
 * **Grade B** — a person at a terminal typed yes (``user_terminal``), or
   a person at a terminal opened a standing window (``standing_window``,
   see :mod:`kiln.consent_windows`).  A terminal is a fact about the
@@ -51,8 +57,10 @@ name a wider scope — a list of printers, or the fleet — and ``matches()``
 honours it; the default is the one printer.  A yes never becomes a
 window: a window is a separate record a person opens on purpose.
 
-Identity is recorded as what it is: ``os_user:<name>`` locally, the
-hook's account on the hosted server, and nothing where nothing is known.
+Identity is recorded as what it is: ``os_user:<name>`` locally; on the
+hosted server the hook's account (``account:<id>#<approval>``), or the
+agent that said go and whose yes it rested on (``agent:<id> under
+account:<id>#<record>``); and nothing where nothing is known.
 """
 
 from __future__ import annotations
@@ -78,6 +86,12 @@ SOURCE_DERIVED = "derived"
 SOURCE_WINDOW = "standing_window"
 #: The hosted server's account approved this file (the hook below).
 SOURCE_HOSTED_APPROVAL = "hosted_account_approval"
+#: An agent started this under a delegation the hosted server's account
+#: granted it — the account's yes, for a while, to a named agent, on
+#: named printers (the same hook answers; kiln-pro keeps the record).
+SOURCE_HOSTED_DELEGATION = "hosted_delegation"
+#: What the hook may answer with.  Anything else it returns is not a yes.
+HOSTED_SOURCES = (SOURCE_HOSTED_APPROVAL, SOURCE_HOSTED_DELEGATION)
 
 GRADE_A = "A"
 GRADE_B = "B"
@@ -92,7 +106,7 @@ def grade_of(source: str) -> str | None:
     """``"A"`` when the host or the account held the pen, ``"B"`` when a
     terminal did, ``None`` for a source that is not a person's yes of its
     own (a derived plate rides its input's; a bypass is not a yes)."""
-    if source in (SOURCE_ELICITED, SOURCE_HOSTED_APPROVAL):
+    if source in (SOURCE_ELICITED, *HOSTED_SOURCES):
         return GRADE_A
     if source in (SOURCE_TERMINAL, SOURCE_WINDOW):
         return GRADE_B
@@ -181,9 +195,12 @@ class PrintConsent:
 
 #: ``hook(*, file_name, file_hash, printer_name) -> PrintConsent | None``.
 #: The hosted server registers one that asks its own store whether the
-#: signed-in account approved these bytes; public Kiln ships none.  The
-#: hook resolves the account itself from the request it is serving —
-#: the gate does not know accounts, and must not guess one.
+#: signed-in account approved these bytes — or, when the caller is an
+#: agent, whether that account delegated this printer to it for a while
+#: (``source`` names which: :data:`HOSTED_SOURCES`); public Kiln ships
+#: none.  The hook resolves the calling principal itself from the request
+#: it is serving — the gate does not know accounts or agents, and must not
+#: guess either.
 _hosted_hook = None
 
 
@@ -213,7 +230,7 @@ def _ask_hosted_hook(*, file_name: str, printer_name: str | None) -> PrintConsen
         answer = hook(file_name=file_name, file_hash=file_hash, printer_name=printer_name)
     except Exception:  # noqa: BLE001 — a hook that fails has not said yes
         return None
-    if not isinstance(answer, PrintConsent) or answer.source != SOURCE_HOSTED_APPROVAL:
+    if not isinstance(answer, PrintConsent) or answer.source not in HOSTED_SOURCES:
         return None
     return answer
 

@@ -38,6 +38,7 @@ from kiln.preview_gate import PreviewGate
 from kiln.print_consent import (
     SOURCE_ELICITED,
     SOURCE_HOSTED_APPROVAL,
+    SOURCE_HOSTED_DELEGATION,
     SOURCE_TERMINAL,
     SOURCE_WINDOW,
     PrintConsent,
@@ -706,6 +707,79 @@ class TestHosted:
 
     def test_public_kiln_ships_no_hook(self):
         assert print_consent.hosted_approval_hook() is None
+
+    # -- a delegation: the hosted twin of a standing window, answered by
+    # the same hook, for an agent a person named -------------------------
+
+    def _delegation(self, file_name, *, scope=("garage",), expires_in=3600.0):
+        return PrintConsent(
+            tool="start_print", file_name=file_name, printer_name="garage",
+            source=SOURCE_HOSTED_DELEGATION,
+            identity="agent:openclaw-7 under account:acct_123#dlg_1",
+            scope=scope, expires_at=time.time() + expires_in,
+        )
+
+    def test_a_delegation_from_the_hook_is_the_hosted_yes(self, tmp_path, monkeypatch, audits):
+        """An agent printing under a delegation a person granted: grade A,
+        accepted on the hosted server, and the audit line names the agent,
+        the account, and the delegation it rests on."""
+        path = _stl(tmp_path / "jar.stl")
+        token = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        register_hosted_approval_hook(lambda **kw: self._delegation(kw["file_name"]))
+        assert _gate(path, token) is None
+        clearance = print_signoff.current()
+        assert clearance.source == SOURCE_HOSTED_DELEGATION
+        assert clearance.identity == "agent:openclaw-7 under account:acct_123#dlg_1"
+        assert clearance.scope == ("garage",)
+        assert print_consent.grade_of(SOURCE_HOSTED_DELEGATION) == print_consent.GRADE_A
+        rec = next(d for _, a, d in audits if a == "preview_gate_satisfied")
+        assert rec["consent"] == SOURCE_HOSTED_DELEGATION
+        assert rec["identity"] == "agent:openclaw-7 under account:acct_123#dlg_1"
+        assert rec["scope"] == ["garage"]
+
+    def test_a_delegation_for_another_printer_is_not_a_yes(self, tmp_path, monkeypatch):
+        path = _stl(tmp_path / "jar.stl")
+        token = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        register_hosted_approval_hook(
+            lambda **kw: self._delegation(kw["file_name"], scope=("workshop",))
+        )
+        assert _gate(path, token) is not None
+
+    def test_a_run_out_delegation_is_not_a_yes(self, tmp_path, monkeypatch):
+        path = _stl(tmp_path / "jar.stl")
+        token = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        register_hosted_approval_hook(
+            lambda **kw: self._delegation(kw["file_name"], expires_in=-1.0)
+        )
+        assert _gate(path, token) is not None
+
+    def test_the_hosted_refusal_names_the_account_doors_not_the_terminal(self, tmp_path, monkeypatch):
+        """With a token and no yes, the sentence an agent reads on the
+        hosted server names the two doors that exist there — the person's
+        Approve on the print page, or a delegation — and not the terminal
+        or the window, which are nobody's on that box."""
+        path = _stl(tmp_path / "jar.stl")
+        token = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        block = _gate(path, token)
+        assert block is not None
+        message = block["error"]["message"]
+        assert "Approve on the print page" in message
+        assert "delegation" in message
+        assert "kiln consent window" not in message
+        assert "`kiln print" not in message
+
+    def test_a_fleet_delegation_covers_every_printer(self, tmp_path, monkeypatch):
+        path = _stl(tmp_path / "jar.stl")
+        token = _token_for(path)
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        register_hosted_approval_hook(
+            lambda **kw: self._delegation(kw["file_name"], scope=print_consent.SCOPE_FLEET)
+        )
+        assert _gate(path, token, printer_name="workshop") is None
 
 
 # ---------------------------------------------------------------------------

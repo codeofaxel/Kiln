@@ -2353,9 +2353,22 @@ def _covered_by_approval(
 
 def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
     """One sentence: the preview is on record, nobody said go, and the
-    three places a yes can come from.  None of them is a string an agent
-    can type."""
+    places a yes can come from.  None of them is a string an agent can
+    type.  On the hosted server the terminal and the window are nobody's,
+    so the sentence there names the account's two doors instead: the
+    person's Approve on the print page, or a delegation the person granted
+    this agent (public Kiln ships the hook; kiln-pro keeps the record)."""
+    from kiln.runtime_env import is_hosted_multitenant
+
     name = os.path.basename(str(file_name or "")) or "this file"
+    if is_hosted_multitenant():
+        return (
+            f"{tool_name} refuses to proceed: {name} was shown, but nobody said go — on the hosted "
+            "server a yes is the signed-in person's Approve on the print page for this file on "
+            f"{aimed}, or a delegation the person granted this agent for {aimed} (their account "
+            "page, Delegations); a terminal's yes or a standing window is nobody's here, and an "
+            "agent cannot supply either door itself."
+        )
     return (
         f"{tool_name} refuses to proceed: {name} was shown, but nobody said go — a yes "
         "comes from the host's approval dialog (a host that asks shows one; the person "

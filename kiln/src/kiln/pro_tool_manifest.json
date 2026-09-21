@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-09-18T23:09:40.778418+00:00",
-  "tool_count": 424,
+  "generated": "2026-09-21T04:58:25.572310+00:00",
+  "tool_count": 425,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -12540,6 +12540,31 @@
           }
         },
         "title": "maintenance_dueArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "may_i_print",
+      "description": "May the caller start a print on this printer right now, and on whose say-so?",
+      "tier": "free",
+      "access": "free",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printer_name": {
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "file_hash": {
+            "default": "",
+            "title": "File Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_name"
+        ],
+        "title": "may_i_printArguments",
         "type": "object"
       }
     },
