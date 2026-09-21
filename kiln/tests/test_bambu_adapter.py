@@ -4077,9 +4077,8 @@ class TestExternalSpoolMapping:
 
     [0] means AMS unit 0 slot 0, so sending it with ``use_ams: false``
     pointed the firmware at a tray that need not exist — on a machine with
-    no AMS it stalled at the filament-mapping dialog.  Bambu's own
-    networking plugin sends ``use_ams ? "[0]" : "[]"``
-    (open-bamboo-networking src/print_job.cpp:184).
+    no AMS it stalled at the filament-mapping dialog.  The maker's own
+    client sends ``[]`` with AMS off and ``[0]`` with it on.
     """
 
     def _published(self, adapter: BambuAdapter) -> dict[str, Any]:

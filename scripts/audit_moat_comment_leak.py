@@ -111,7 +111,12 @@ _FROZEN_PINS_FILE = _ROOT / "scripts" / "public_source_pins.txt"
 
 # Repo-relative prefixes the gate walks.  ``kiln/src/kiln`` and
 # ``kiln/tests`` get the code rules; everything here gets the text rules.
-_SURFACES = ("kiln/src/kiln", "kiln/tests", "docs", "README.md", "scripts")
+# The whole tracked tree is the public surface.  The gate once watched five
+# directories and missed the root-level tests, the plugin, the OctoPrint
+# CLI, the launcher, the policies and the workflows -- a comment is public
+# wherever it sits.  Anything a competitor can read from the repository is
+# in scope; only third-party vendored code is not.
+_SURFACES = (".",)
 # Third-party text inside a surface (vendored OpenSCAD libraries).
 _SKIP_PREFIXES = ("kiln/src/kiln/data/scad_libraries/",)
 _SKIP_DIRS = frozenset({"node_modules", "__pycache__", ".venv", "dist", ".astro", "build"})
@@ -135,12 +140,17 @@ _SELF = frozenset({
     "kiln/tests/test_moat_comment_leak.py",
     # The served-surface gate carries `\bmoat\b` and a kiln_pro path regex.
     "scripts/audit_served_surface_leak.py",
+    # The inventories list the very literals the rules catch.
+    "scripts/public_tests_kiln_pro_paths.txt",
+    "scripts/public_source_pins.txt",
 })
 # A gate's own file NAME is not a self-label: CI, .gitignore, and sibling gates
 # have to be able to reference it in ordinary prose.
 _SELF_NAME_TOKENS = (
     "audit_moat_comment_leak",
     "test_moat_comment_leak",
+    # The gate's own display name, as CI and .gitignore call it.
+    "moat-comment leak gate",
 )
 
 # A comment/docstring that names the private overlay surface.
@@ -304,6 +314,7 @@ _ALLOWLIST: tuple[tuple[str, str], ...] = (
     ("original_design.py", "Run a harsh audit of an original design"),
     ("slicer_tools.py", "Attach Pro+ enrichment to an EXCEEDS_BED"),
     ("print_recovery.py", "Stamp gcode_path so kiln-pro's resume engine"),
+    ("generate_load_tables.py", "kiln-pro pins them against its own"),
 )
 
 
@@ -526,12 +537,19 @@ def _is_prose_block(block: str) -> bool:
     return stripped.startswith("#") or stripped.lstrip("rbuRBU").startswith(('"""', "'''"))
 
 
-def _research_pins(block: str) -> list[tuple[str, str]]:
-    """``(rule, matched text)`` for every research pin in one comment block."""
+def _research_pins(block: str, *, prose_only: bool = True, repos: bool = True) -> list[tuple[str, str]]:
+    """``(rule, matched text)`` for every research pin in one comment block.
+
+    ``repos=False`` skips the third-party-repository rule: in a workflow, a
+    manifest or a launcher's README a repository link names a tool the
+    build depends on, not a source a fact was read from.
+    """
     found: list[tuple[str, str]] = []
-    if not _is_prose_block(block):
+    if prose_only and not _is_prose_block(block):
         return found
     for rule, rx in _RESEARCH_PINS:
+        if rule == "a third-party repository" and not repos:
+            continue
         for m in rx.finditer(block):
             text = m.group(0)
             if any(own in text for own in _OWN_HOSTS):
@@ -554,7 +572,7 @@ def _is_moat_label(line: str) -> bool:
         return False
     scrubbed = line
     for tok in _SELF_NAME_TOKENS:
-        scrubbed = scrubbed.replace(tok, "")
+        scrubbed = re.sub(re.escape(tok), "", scrubbed, flags=re.IGNORECASE)
     return bool(_MOAT_LABEL.search(scrubbed))
 
 
@@ -588,7 +606,7 @@ def _in_scope(rel: str) -> bool:
         return False
     if Path(rel).suffix.lower() in _BINARY_SUFFIXES:
         return False
-    return rel == "README.md" or any(rel.startswith(s + "/") for s in _SURFACES if s != "README.md")
+    return True
 
 
 def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak], set[str]]:
@@ -607,8 +625,7 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
 
     name = rel.rsplit("/", 1)[-1]
     is_py = rel.endswith(".py")
-    is_test = rel.startswith("kiln/tests/")
-    is_src = rel.startswith("kiln/src/kiln/")
+    is_test = _is_test_path(rel) or ("tests" in rel.split("/")[:-1])
     is_shipped_json = rel.endswith(".json") and (rel.startswith("kiln/src/kiln/data/") or is_test)
 
     def hit(line: int, rule: str, snippet: str) -> None:
@@ -632,7 +649,7 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
     # Comment / docstring rules — src and test .py, tokenized only when the
     # file mentions the private tier at all (a block can't trip otherwise).
     # Self-label and private-path reasons are already reported line by line.
-    if is_py and (is_src or is_test) and (_PRO_MENTION.search(text) or broad):
+    if is_py and (_PRO_MENTION.search(text) or broad):
         for line, block in _blocks_from_bytes(data):
             reason = _leak_reason(block, broad=broad)
             if reason in ("strategy", "provenance", "broad"):
@@ -642,10 +659,19 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
 
     # Research provenance — comments and docstrings of src and test .py,
     # tokenized only when the file carries a candidate substring at all.
-    if is_py and (is_src or is_test) and rel not in _SELF and _PIN_PREFILTER.search(text):
+    if rel not in _SELF and _PIN_PREFILTER.search(text):
         frozen_pins = _frozen_pins_cached()
-        for line, block in _blocks_from_bytes(data):
-            for rule, matched in _research_pins(block):
+        if is_py:
+            blocks = _blocks_from_bytes(data)
+        else:
+            # Every line of a non-Python text file is prose: docs, policies,
+            # workflows, configs, a launcher's README.
+            blocks = ((i, ln) for i, ln in enumerate(text.splitlines(), 1))
+        # A repository link is research provenance in code prose and in the
+        # product docs; elsewhere (CI, manifests, READMEs) it names tooling.
+        repos = is_py or rel.startswith("docs/")
+        for line, block in blocks:
+            for rule, matched in _research_pins(block, prose_only=is_py, repos=repos):
                 if _pin_key(rel, matched) not in frozen_pins:
                     hit(line, "research provenance", f"{rule}: {matched}")
 
@@ -688,16 +714,10 @@ def _tree_paths() -> list[str]:
     not-ignored.  Respects .gitignore (a developer's local, ignored scripts
     are not public).  Falls back to a plain walk outside a git checkout."""
     try:
-        raw = _git("ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *_SURFACES)
+        raw = _git("ls-files", "-z", "--cached", "--others", "--exclude-standard")
         names = [n.decode("utf-8", "surrogateescape") for n in raw.split(b"\0") if n]
     except (OSError, subprocess.CalledProcessError):
-        names = []
-        for surface in _SURFACES:
-            base = _ROOT / surface
-            if base.is_file():
-                names.append(surface)
-            elif base.is_dir():
-                names.extend(p.relative_to(_ROOT).as_posix() for p in base.rglob("*") if p.is_file())
+        names = [p.relative_to(_ROOT).as_posix() for p in _ROOT.rglob("*") if p.is_file() and ".git" not in p.parts]
     return sorted(set(n for n in names if (_ROOT / n).is_file()))
 
 
@@ -782,7 +802,7 @@ def _occurrences(content: list[tuple[str, bytes]], needles: set[str]) -> dict[st
     if not needles:
         return where
     for rel, data in content:
-        if not rel.startswith("kiln/tests/"):
+        if not _is_test_path(rel):
             continue
         for i, ln in enumerate((_decode(data) or "").splitlines(), 1):
             for p in _DOTTED_PRO_PATH.findall(ln):
@@ -804,15 +824,15 @@ def _frozen_pins_cached() -> set[str]:
 def _all_pins(content: list[tuple[str, bytes]]) -> set[str]:
     found: set[str] = set()
     for rel, data in content:
-        if not (rel.endswith(".py") and (rel.startswith("kiln/src/kiln/") or rel.startswith("kiln/tests/"))):
+        if not _in_scope(rel) or rel in _SELF:
             continue
-        if rel in _SELF:
+        text = _decode(data)
+        if text is None or not _PIN_PREFILTER.search(text):
             continue
-        text = _decode(data) or ""
-        if not _PIN_PREFILTER.search(text):
-            continue
-        for _line, block in _blocks_from_bytes(data):
-            for _rule, matched in _research_pins(block):
+        is_py = rel.endswith(".py")
+        blocks = _blocks_from_bytes(data) if is_py else ((i, ln) for i, ln in enumerate(text.splitlines(), 1))
+        for _line, block in blocks:
+            for _rule, matched in _research_pins(block, prose_only=is_py, repos=is_py or rel.startswith("docs/")):
                 found.add(_pin_key(rel, matched))
     return found
 
@@ -834,10 +854,15 @@ def _freeze_pins(content: list[tuple[str, bytes]]) -> int:
     return len(found)
 
 
+def _is_test_path(rel: str) -> bool:
+    parts = rel.split("/")
+    return rel.endswith(".py") and ("tests" in parts[:-1] or parts[-1].startswith("test_"))
+
+
 def _freeze_paths(content: list[tuple[str, bytes]]) -> int:
     found: set[str] = set()
     for rel, data in content:
-        if rel.startswith("kiln/tests/") and rel.endswith(".py") and rel not in _SELF:
+        if _is_test_path(rel) and rel not in _SELF:
             found |= _dotted_pro_paths(_decode(data) or "")
     header = (
         "# Frozen inventory of dotted kiln_pro.<module> references in kiln/tests/.\n"

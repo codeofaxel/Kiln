@@ -116,12 +116,9 @@ def _decode_paint_states(encoded: str) -> tuple[dict[int, float], bool] | None:
     special side and its ``yy + 1`` children follow depth-first, each
     encoded the same way.
 
-    Sources (read 2026-08-02): github.com/prusa3d/PrusaSlicer master —
-    ``TriangleSelector::serialize`` / ``decode_leaf_state`` and
-    ``FacetsAnnotation::get_triangle_as_string`` /
-    ``set_triangle_from_string``; github.com/SoftFever/OrcaSlicer main
-    carries the identical encoding for states 0–16 (no 17–255 extended
-    form), and its ``FacetsAnnotation`` string codec is byte-identical.
+    Read from PrusaSlicer's own source; OrcaSlicer carries the identical
+    encoding for states 0–16 (no 17–255 extended form) and a byte-identical
+    string codec.
 
     Returns ``(weights, is_split)``: *weights* maps each leaf state to its
     approximate area fraction — every split divides the parent's weight

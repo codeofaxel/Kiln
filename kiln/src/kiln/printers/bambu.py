@@ -301,9 +301,8 @@ _KNOWN_PRINT_ERRORS: dict[int, str] = {
 # These are NOT the lidar first-layer inspection (which uses 0C00 prefix).
 # The full HMS code is 0300-xxxx; the ``print_error`` decimal varies per
 # firmware version, so we match on the descriptive prefix pattern.
-# Error-code page: wiki.bambulab.com/en/a1-mini/troubleshooting/hmscode/0300_1A00_0002_0001
-# Probe schedule + behaviour: wiki.bambulab.com/en "A1 Series Nozzle Clumping
-# Detection" — the authoritative source for WHEN it probes.  A1 / A1 mini only.
+# The maker's own fault-code page and its nozzle-clumping guide are the
+# source for WHAT the code means and WHEN it probes.  A1 / A1 mini only.
 _NOZZLE_CLUMP_ERROR_PREFIXES: tuple[str, ...] = (
     "03008014",   # Nozzle clumping detection by probing (A1 series)
     "03001A00",   # Nozzle wrapped in filament / plate placement
@@ -495,13 +494,11 @@ _BAMBU_HMS_INDEX_URL = "https://wiki.bambulab.com/en/hms/home"
 #
 #   HMS          the ``hms`` array's {attr, code} pairs, 16 hex digits,
 #                shown on screen as XXXX-XXXX-XXXX-XXXX.  Every one has a
-#                published wiki page.  Verified 2026-09-03 against
-#                wiki.bambulab.com/en/hms/home (402 entries).
+#                published page in the maker's own fault-code index.
 #   print_error  the ``print_error`` field, 32 bits, shown on screen as
 #                XXXX-XXXX followed by a decimal serial (e.g.
-#                "1200-8007 031520").  Bambu publishes NO wiki page for
-#                these: 1200-8007 appears nowhere in the HMS index, and
-#                /hmscode/1200_8007 is a 404.  Both checked 2026-09-03.
+#                "1200-8007 031520").  The maker publishes NO page for
+#                these: 1200-8007 appears nowhere in the fault-code index.
 #
 # So a print_error never gets an HMS link, and its reading says where the
 # reading came from rather than borrowing the HMS namespace's authority.
@@ -1194,10 +1191,8 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "Bambu Lab H2D Pro": "h2d_pro",
     "Bambu Lab H2S": "h2s",
     "Bambu Lab P1P": "p1p",
-    # Serial number prefixes (first 3 chars of Bambu serial).
-    # All verified against wiki.bambulab.com/en/general/find-sn
-    # (2026-06; re-verified 2026-08-09, when the X2D/H2C/H2D/H2D Pro
-    # rows were added from the same page).
+    # Serial number prefixes (first 3 chars of Bambu serial), from the
+    # maker's own published prefix table.
     "030": "a1_mini",
     "039": "a1",
     "00M": "x1c",
@@ -2120,9 +2115,9 @@ class BambuAdapter(PrinterAdapter):
         agree:
 
         1. The serial-number prefix, mapped through
-           :data:`_BAMBU_MODEL_FAMILIES` — Bambu's own documented
-           scheme (wiki.bambulab.com/en/general/find-sn), deterministic
-           and available even when the printer is powered off.  This is
+           :data:`_BAMBU_MODEL_FAMILIES` — the maker's own documented
+           scheme, deterministic and available even when the printer is
+           powered off.  This is
            the primary channel.
         2. ``product_name`` from the cached ``get_version`` firmware
            modules — the printer's exact model string, e.g. ``"Bambu

@@ -300,6 +300,38 @@ def test_the_source_pin_inventory_only_shrinks() -> None:
     assert not (live - frozen), f"new pins in the tree: {sorted(live - frozen)}"
 
 
+def test_the_whole_tracked_tree_is_watched() -> None:
+    """Every text file git would commit is in the gate's scope.  The gate
+    once watched five directories and missed the root-level tests, the
+    plugin, the OctoPrint CLI, the launcher, the policies and the
+    workflows; a new top-level surface must never be unwatched again."""
+    assert _GATE._SURFACES == (".",)
+    unwatched = [
+        p for p in _GATE._tree_paths()
+        if not _GATE._in_scope(p)
+        and p not in _GATE._SELF
+        and not p.startswith(_GATE._SKIP_PREFIXES)
+        and Path(p).suffix.lower() not in _GATE._BINARY_SUFFIXES
+        and not any(part in _GATE._SKIP_DIRS for part in p.split("/"))
+    ]
+    assert unwatched == [], unwatched
+    for must in ("tests/test_paywall_visibility.py", "plugins/kiln", "octoprint-cli/src", "policies/TERMS_OF_USE.md",
+                 ".github/workflows/ci.yml", "kiln/scripts/generate_load_tables.py"):
+        assert any(p.startswith(must) for p in _GATE._tree_paths()), must
+        assert all(_GATE._in_scope(p) for p in _GATE._tree_paths() if p.startswith(must)), must
+
+
+def test_catches_provenance_outside_the_old_surfaces() -> None:
+    assert _pins_in("tests/test_root_level.py", "# per SelectMachine.cpp:1414\nx = 1\n")
+    assert _pins_in("plugins/kiln/x.py", '"""read 2026-09-20 at wiki.creality.com/en/x/y"""\n')
+    assert _pins_in("policies/NOTES.md", "Checked on wiki.bambulab.com/en/hms/home\n")
+    assert _pins_in("octoprint-cli/README.md", "Based on pybambu's reading.\n")
+    # A repository link outside code prose and docs/ names tooling, not a source.
+    assert _pins_in(".github/workflows/x.yml", "uses: github.com/anchore/syft\n") == []
+    assert _pins_in("mcpb/README.md", "Spec: github.com/modelcontextprotocol/mcpb\n") == []
+    assert _pins_in("docs/printers.md", "See github.com/Doridian/OpenBambuAPI\n")
+
+
 # ── Rule 4: the self-label, anywhere in public text ─────────────────────────
 
 def test_catches_moat_label_in_every_public_surface() -> None:
@@ -322,8 +354,10 @@ def test_catches_moat_label_in_every_public_surface() -> None:
     ):
         assert "self-label" in _rules(rel, "the private moat\n"), rel
         assert _rules(rel, "the private tier\n") == [], rel
-    # Surfaces outside the public tree are not this gate's job.
-    assert _rules(".github/workflows/ci.yml", "moat\n") == []
+    # The whole tracked tree is public: a workflow is watched too, and only
+    # the gate's own display name is not a self-label there.
+    assert "self-label" in _rules(".github/workflows/ci.yml", "moat\n")
+    assert _rules(".github/workflows/ci.yml", "      - name: Moat-comment leak gate\n") == []
 
 
 def test_exempts_pattern_owners_only() -> None:

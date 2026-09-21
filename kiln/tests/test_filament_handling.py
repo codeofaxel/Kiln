@@ -828,8 +828,8 @@ def _hot(adapter, monkeypatch, temp=210.0, cold=138.0):
 class TestBambuFaultReadings:
     """The two namespaces, and the per-unit / per-slot synonyms.
 
-    Every HMS string asserted here is the title of that code's own page on
-    wiki.bambulab.com, read 2026-09-03.
+    Every HMS string asserted here is the title of that code's own page in
+    the maker's fault-code index.
     """
 
     def test_known_hms_code_gets_the_vendors_words_and_a_link(self):
@@ -917,9 +917,9 @@ class TestBambuFaultReadings:
         assert '"print_error"' in source and '"hms"' in source
 
     def test_the_namespace_collisions_are_recorded_not_reclassified(self):
-        """Four checked against wiki.bambulab.com/en/hms/home on 2026-09-03;
-        0300-4000 against the vendor's own sentence table on 2026-09-19, when
-        its print_error reading (a failed Z home) joined the table."""
+        """Four checked against the maker's fault-code index; 0300-4000 against
+        the vendor's own sentence table, when its print_error reading (a
+        failed Z home) joined the table."""
         from kiln.printers.bambu import (
             _BAMBU_PRINT_ERROR_FAULTS,
             _HMS_NAMESPACE_COLLISIONS,

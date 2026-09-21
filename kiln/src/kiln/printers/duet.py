@@ -30,8 +30,8 @@ Sources consulted when writing this adapter (all opened directly):
 * ``Developer-documentation/OpenAPI.yaml`` in Duet3D/RepRapFirmware at
   ``3.6-dev`` -- the machine-readable definition of every ``rr_*`` endpoint,
   its parameters and its response fields.
-* https://github.com/Duet3D/RepRapFirmware/wiki/HTTP-requests -- session
-  handling, the 401 contract, and the ``X-Session-Key`` header.
+* the firmware's published HTTP-request notes -- session handling, the
+  401 contract, and the ``X-Session-Key`` header.
 * ``src/Platform/RepRap.cpp`` -- the authoritative status tables (see
   :data:`_RRF3_STATUS_MAP` / :data:`_RRF2_STATUS_MAP`).
 * ``src/GCodes/GCodes2.cpp`` -- ``M0`` semantics (see :meth:`cancel_print`).

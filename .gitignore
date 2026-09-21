@@ -70,7 +70,7 @@ scripts/*
 !scripts/public_source_pins.txt
 # …and for the public SME-table leak gate, which is run by a CI-collected
 # test so public source can never ship a curated cross-vendor capability /
-# SME table (the moat belongs in the private tier or a pro overlay).
+# SME table (curated depth belongs in the private tier or a pro overlay).
 !scripts/audit_public_sme_leak.py
 # …and for the public-language gate, which checks tracked text and new
 # commit messages for private editorial context before it reaches GitHub.
