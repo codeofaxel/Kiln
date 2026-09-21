@@ -75,17 +75,27 @@ def _install_local_pro(monkeypatch, build_verdict):
     monkeypatch.setitem(sys.modules, "kiln_pro.placement.bridge", mod)
 
 
+def _miss(result):
+    """The miss of a ``(None, miss)`` answer, asserting there was no verdict."""
+    verdict, miss = result
+    assert verdict is None
+    from kiln.served_answer import Miss
+
+    assert isinstance(miss, Miss)
+    return miss
+
+
 class TestTheSources:
     def test_no_source_means_no_verdict_and_a_reason(self):
         assert bridge.verdict_for(_request()) is None
-        assert bridge.ask(_request()) == (None, bridge.UNANSWERED)
+        assert _miss(bridge.ask(_request())).cause == bridge.UNANSWERED
 
     def test_an_undeclared_model_asks_nobody(self, monkeypatch):
         import kiln.server as srv
 
         asked: list = []
         monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: asked.append(tool) or {"verdict": _verdict()})
-        assert bridge.ask(_request(printer_id="")) == (None, bridge.UNANSWERED)
+        assert _miss(bridge.ask(_request(printer_id=""))).cause == bridge.UNANSWERED
         assert asked == []
 
     def test_local_kiln_pro_answers_and_the_service_is_not_asked(self, monkeypatch):
@@ -134,40 +144,64 @@ class TestTheSources:
 
         for bad in ({"verdict": {"schema": "other", "ok": True}}, {"verdict": "yes"}, {"schema": bridge.SCHEMA, "ok": "yes"}, "ok", None):
             monkeypatch.setattr(srv, "_pro_api_call", lambda tool, _bad=bad, **kw: _bad)
-            assert bridge.ask(_request()) == (None, bridge.UNANSWERED)
+            assert _miss(bridge.ask(_request())).cause == bridge.UNANSWERED
 
 
 class TestTheReasons:
-    """The door words one sentence from these; the codes never leave the bridge."""
+    """Every miss is classified by the shared voice (:mod:`kiln.served_answer`),
+    the same way every served door classifies it; the door words one
+    sentence from the miss, and the code rides beside it."""
 
-    def test_the_network_raising_is_offline(self, monkeypatch):
+    def test_no_route_is_offline(self, monkeypatch):
+        import socket
+
         import kiln.server as srv
 
         def _boom(tool, **kw):
-            raise OSError("dns")
+            raise socket.gaierror("dns")
 
         monkeypatch.setattr(srv, "_pro_api_call", _boom)
-        assert bridge.ask(_request()) == (None, bridge.OFFLINE)
+        miss = _miss(bridge.ask(_request()))
+        assert miss.cause == bridge.OFFLINE and miss.code == "SERVER_UNREACHABLE"
 
-    def test_the_door_reporting_unreachable_is_offline(self, monkeypatch):
+    def test_a_server_that_hung_up_did_not_answer(self, monkeypatch):
+        import kiln.server as srv
+
+        def _boom(tool, **kw):
+            raise ConnectionResetError("reset")
+
+        monkeypatch.setattr(srv, "_pro_api_call", _boom)
+        assert _miss(bridge.ask(_request())).cause == bridge.UNANSWERED
+
+    def test_the_door_reporting_unreachable_is_not_a_ruling(self, monkeypatch):
+        """An envelope saying the servers were unreachable is "didn't answer"
+        by the shared rule -- offline is decided from the fault itself."""
         import kiln.server as srv
 
         monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: {"status": "error", "code": "SERVER_UNREACHABLE", "error": "timeout"})
-        assert bridge.ask(_request()) == (None, bridge.OFFLINE)
+        assert _miss(bridge.ask(_request())).cause == bridge.UNANSWERED
 
-    @pytest.mark.parametrize("code", ["KILN_ACCOUNT_NOT_PAIRED", "KILN_SIGNIN_REQUIRED", "KILN_SESSION_EXPIRED"])
+    @pytest.mark.parametrize("code", ["KILN_ACCOUNT_NOT_PAIRED", "KILN_SESSION_EXPIRED", "ACCOUNT_REQUIRED", "KILN_AUTH_REJECTED"])
     def test_no_sign_in_is_signed_out(self, monkeypatch, code):
         import kiln.server as srv
 
         monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: {"status": "error", "code": code, "error": "sign in"})
-        assert bridge.ask(_request()) == (None, bridge.SIGNED_OUT)
+        miss = _miss(bridge.ask(_request()))
+        assert miss.cause == bridge.SIGNED_OUT and miss.code == code
 
-    def test_a_refusal_for_this_machine_or_an_http_error_is_not_answered(self, monkeypatch):
+    def test_a_refusal_for_this_machine_keeps_the_servers_own_words(self, monkeypatch):
         import kiln.server as srv
 
-        for code in ("MACHINE_NOT_PAIRED", "KILN_API_HTTP_ERROR", "NOT_SERVED_HERE", ""):
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: {"status": "error", "code": "MACHINE_NOT_PAIRED", "error": "Register the printer first."})
+        miss = _miss(bridge.ask(_request()))
+        assert miss.cause == bridge.REFUSED and miss.detail == "Register the printer first."
+
+    def test_an_http_error_or_no_code_is_not_answered(self, monkeypatch):
+        import kiln.server as srv
+
+        for code in ("KILN_API_HTTP_ERROR", "NOT_SERVED_HERE", ""):
             monkeypatch.setattr(srv, "_pro_api_call", lambda tool, _c=code, **kw: {"status": "error", "code": _c, "error": "no"})
-            assert bridge.ask(_request()) == (None, bridge.UNANSWERED)
+            assert _miss(bridge.ask(_request())).cause == bridge.UNANSWERED
 
 
 class TestNoCache:
@@ -182,7 +216,7 @@ class TestNoCache:
         # The plate may have changed since the last answer: an unreachable
         # service is "no verdict", never the previous verdict.
         monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: {"status": "error", "code": "SERVER_UNREACHABLE", "error": "off"})
-        assert bridge.ask(_request()) == (None, bridge.OFFLINE)
+        assert _miss(bridge.ask(_request())).cause == bridge.UNANSWERED
         assert not hasattr(bridge, "_cache") and "cache" not in {n.lower() for n in dir(bridge)}
 
 

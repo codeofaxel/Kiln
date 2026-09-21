@@ -88,6 +88,7 @@ import logging
 import os
 from typing import Any
 
+from kiln import served_answer
 from kiln.plate_state import OCCUPANCY_KIND
 
 logger = logging.getLogger(__name__)
@@ -97,21 +98,22 @@ REQUEST_SCHEMA = "placement_request/1"
 TOOL = "placement_plan"
 __all__ = ["OCCUPANCY_KIND", "REQUEST_SCHEMA", "SCHEMA", "TOOL", "ask", "hosted_form", "request_for", "verdict_for"]
 
-#: Why no verdict came back -- the three causes a refusal can name.  Decided
-#: in ONE place (:func:`reason_for` for an answer, :func:`_served` for a
-#: transport fault); slated to become ``kiln.served_answer.classify_answer``
-#: / ``classify_transport_error`` once that shared helper lands on main.
+#: Why no verdict came back: the causes a miss can have, in the shared
+#: voice's own words (:data:`kiln.served_answer.CAUSES`).  Decided in ONE
+#: place -- ``served_answer.classify_answer`` for an answer with no verdict
+#: in it, ``classify_transport_error`` for a request that never got one --
+#: and the door hands the :class:`~kiln.served_answer.Miss` straight to
+#: ``served_answer.sentence``, so the code rides beside the sentence and
+#: never inside it.
 OFFLINE = "offline"
 SIGNED_OUT = "signed_out"
 UNANSWERED = "unanswered"
-REASONS = (OFFLINE, SIGNED_OUT, UNANSWERED)
+REFUSED = "refused"
+REASONS = served_answer.CAUSES
 
 #: The hosted form carries a G-code body gzipped; over this it is dropped
 #: (sent as ``null``) and the engine falls back to the record's box.
 MAX_GZ_BYTES = 8 * 1024 * 1024
-
-_OFFLINE_CODES = frozenset({"SERVER_UNREACHABLE"})
-_SIGNED_OUT_CODES = frozenset({"KILN_ACCOUNT_NOT_PAIRED", "KILN_SIGNIN_REQUIRED", "KILN_SESSION_EXPIRED"})
 _GCODE_FIELDS = ("occupant_gcode", "sliced_gcode")
 
 
@@ -160,19 +162,18 @@ def verdict_for(request: dict[str, Any]) -> dict[str, Any] | None:
     return ask(request)[0]
 
 
-def ask(request: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
-    """``(verdict, None)`` when a source answered, else ``(None, reason)``.
+def ask(request: dict[str, Any]) -> tuple[dict[str, Any] | None, served_answer.Miss | None]:
+    """``(verdict, None)`` when a source answered, else ``(None, miss)``.
 
-    *reason* is one of :data:`REASONS`, read off the service's own answer
-    the way the motion bridge reads it: a network fault is
-    :data:`OFFLINE`; no sign-in, an unpaired account or an expired session
-    is :data:`SIGNED_OUT`; anything else -- a refusal for this machine, a
-    malformed document, an answer with no code -- is :data:`UNANSWERED`.
-    Never raises.
+    *miss* is the shared voice's :class:`~kiln.served_answer.Miss` -- why
+    there is no verdict (offline, signed out, unanswered, or a refusal in
+    the server's own words), classified by ``served_answer`` the same way
+    every served door classifies it, so the door words one sentence from
+    it and the code rides beside that sentence, never inside.  Never raises.
     """
     try:
         if not isinstance(request, dict) or not request.get("printer_id"):
-            return None, UNANSWERED
+            return None, served_answer.Miss(UNANSWERED, detail="no printer declared")
         pro = _local_pro()
         if pro is not None and hasattr(pro, "build_verdict"):
             try:
@@ -182,29 +183,9 @@ def ask(request: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
             except Exception:  # noqa: BLE001 -- a local builder fault falls through to the service
                 logger.debug("kiln_pro.placement.bridge.build_verdict raised; asking the service", exc_info=True)
         return _served(request)
-    except Exception:  # noqa: BLE001 -- the bridge never raises into a slice door
+    except Exception as exc:  # noqa: BLE001 -- the bridge never raises into a slice door
         logger.debug("placement bridge failed", exc_info=True)
-        return None, UNANSWERED
-
-
-def reason_for(answer: Any) -> str:
-    """The three-way reason for a service answer that carried no verdict.
-
-    The one place the mapping lives: an answer whose code says the door
-    could not be reached is :data:`OFFLINE`; one that says there is no
-    usable sign-in is :data:`SIGNED_OUT`; everything else -- a refusal for
-    this machine, an HTTP rejection, a malformed document, no code at all
-    -- is :data:`UNANSWERED`.  (To be replaced by
-    ``kiln.served_answer.classify_answer`` when that helper lands.)
-    """
-    if not isinstance(answer, dict):
-        return UNANSWERED
-    code = str(answer.get("code") or "")
-    if code in _OFFLINE_CODES:
-        return OFFLINE
-    if code in _SIGNED_OUT_CODES:
-        return SIGNED_OUT
-    return UNANSWERED
+        return None, served_answer.Miss(UNANSWERED, detail=str(exc)[:200])
 
 
 def _call_local(build_verdict: Any, request: dict[str, Any]) -> Any:
@@ -216,32 +197,34 @@ def _call_local(build_verdict: Any, request: dict[str, Any]) -> Any:
         return build_verdict(**request)
 
 
-def _served(request: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
-    """Ask the hosted service; ``(verdict, None)`` or ``(None, reason)``.
+def _served(request: dict[str, Any]) -> tuple[dict[str, Any] | None, served_answer.Miss | None]:
+    """Ask the hosted service; ``(verdict, None)`` or ``(None, miss)``.
 
     Goes through the same door every served tool uses
     (``kiln.server._pro_api_call``): the user's sign-in, the device
-    fingerprint header, the client version.  The service's own message is
-    logged; the door words what the user sees.
+    fingerprint header, the client version.  A request that never got an
+    answer is classified from the fault itself (no route is offline; a
+    server that hung up did not answer); an answer with no verdict in it
+    is classified from the envelope, in the shared voice's own terms.  The
+    service's own message is logged; the door words what the user sees.
     """
     try:
-        from kiln.server import _pro_api_call
+        import kiln.server as srv
     except Exception:  # noqa: BLE001
-        return None, UNANSWERED
+        return None, served_answer.Miss(UNANSWERED, detail="the served door is not importable")
     try:
-        answer = _pro_api_call(TOOL, **hosted_form(request))
-    except Exception:  # noqa: BLE001 -- the network is a degrade, never a slice onto a part
-        # A transport fault (slated for kiln.served_answer.classify_transport_error).
+        answer = srv._pro_api_call(TOOL, **hosted_form(request))
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a slice onto a part
         logger.debug("placement_plan request failed", exc_info=True)
-        return None, OFFLINE
+        return None, served_answer.classify_transport_error(exc, host=getattr(srv, "_HOSTED_KILN_API_URL", None))
     if not isinstance(answer, dict):
-        return None, UNANSWERED
+        return None, served_answer.Miss(UNANSWERED, detail="not an answer")
     doc = answer.get("verdict") if "verdict" in answer else answer
     if is_verdict(doc):
         return doc, None
     if answer.get("error") or answer.get("status") == "error":
         logger.info("placement_plan not served: %s", answer.get("error") or answer.get("message"))
-    return None, reason_for(answer)
+    return None, served_answer.classify_answer(answer) or served_answer.Miss(UNANSWERED, detail="no verdict in the answer")
 
 
 # ---------------------------------------------------------------------------

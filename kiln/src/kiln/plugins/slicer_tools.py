@@ -300,11 +300,6 @@ PLACEMENT_REGIONS = tuple(
 #: separate strings, as the assembly keeps its four parts apart, so the
 #: sentence can move to ``kiln.served_answer.sentence(...)`` in one commit
 #: once that shared helper lands on main.
-_NO_VERDICT_WORDING = {
-    "offline": ("this computer is offline", "reconnect to the internet"),
-    "signed_out": ("Kiln is signed out", "sign in"),
-    "unanswered": ("Kiln's clearance check didn't answer", "wait a minute"),
-}
 _PROFILE_NUMBER_KEYS = ("layer_height", "skirts", "skirt_distance", "brim_width")
 _PLACEABLE_EXTENSIONS = (".stl", ".3mf")
 
@@ -314,22 +309,29 @@ def _plate_holds_sentence(state: Any) -> str:
     return state.holds_sentence()
 
 
-def _no_verdict_sentence(state: Any, reason: str | None) -> str:
-    """The fail-closed refusal, from the plate record and the bridge's reason.
+def _no_verdict_sentence(state: Any, miss: Any) -> str:
+    """The fail-closed refusal, in the shared voice of every served door.
 
-    One helper, so the sentence a person reads when Kiln cannot check the
-    plate is the same at every door: what is there, why the check did not
-    happen (offline / signed out / no answer -- never a code), and the two
-    ways out.
+    What is on the line is the plate record's own opening; the cause and
+    the fix are :func:`kiln.served_answer.sentence`'s, so this door says
+    "this computer is offline" in exactly the words the motion and blade
+    doors say it, and a refusal in the server's own words is appended
+    whole.  *miss* is the bridge's :class:`~kiln.served_answer.Miss`; a
+    bare cause string or nothing at all reads as "didn't answer".
     """
-    cause, remedy = _NO_VERDICT_WORDING.get(reason or "", _NO_VERDICT_WORDING["unanswered"])
-    # Four parts, one assembly -- the shape kiln.served_answer.sentence(
-    # on_the_line=, cannot=, wont=, safe_remedy=) will take over.
-    on_the_line = _plate_holds_sentence(state)
-    cannot = f"Kiln can't check whether a second part fits safely beside it because {cause}"
-    wont = "so it won't slice onto this plate"
-    safe_remedy = f"Clear the plate and say so, or {remedy} and try again"
-    return f"{on_the_line} {cannot}, {wont}. {safe_remedy}."
+    from kiln import served_answer
+
+    if not isinstance(miss, served_answer.Miss):
+        cause = miss if isinstance(miss, str) and miss in served_answer.CAUSES else "unanswered"
+        miss = served_answer.Miss(cause)
+    return served_answer.sentence(
+        miss,
+        feature="clearance check",
+        on_the_line=_plate_holds_sentence(state),
+        cannot="check whether a second part fits safely beside it",
+        wont="won't slice onto this plate",
+        safe_remedy="clear the plate and say so",
+    )
 
 
 def _region_cell(name: str) -> tuple[int, int] | None:
@@ -530,12 +532,18 @@ def _refusal_sentences(verdict: dict[str, Any]) -> str:
 
 def _placement_refusal(
     message: str, code: str, *, state: Any, bed: list[float] | None, verdict: dict[str, Any] | None = None,
+    miss: Any = None,
 ) -> dict[str, Any]:
     """The error dict every placement refusal shares: the record, the spots
-    that would work, the plate as the engine (or the record) sees it."""
+    that would work, the plate as the engine (or the record) sees it, and
+    -- when the refusal is a miss -- the shared voice's ``why`` fields
+    beside the sentence (never inside it)."""
+    from kiln import served_answer
     from kiln.server import _error_dict
 
     resp = _error_dict(message, code=code)
+    if isinstance(miss, served_answer.Miss):
+        resp.update(served_answer.fields(miss))
     resp["plate"] = state.to_dict()
     resp["spots"] = list(verdict.get("spots") or []) if isinstance(verdict, dict) else []
     resp["occupancy"] = (verdict.get("occupancy") if isinstance(verdict, dict) else None) or state.occupancy(bed)
@@ -642,7 +650,7 @@ def _apply_plate_placement(
             ), occupied_info
         probe, reason = bridge.ask(bridge.request_for(adapter, pid, placement="auto", part=part))
         if probe is None:
-            return input_path, _placement_refusal(_no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed), occupied_info
+            return input_path, _placement_refusal(_no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed, miss=reason), occupied_info
         spots = [s for s in (probe.get("spots") or []) if isinstance(s, dict)]
         in_region = []
         for spot in spots:
@@ -675,7 +683,7 @@ def _apply_plate_placement(
 
     verdict, reason = bridge.ask(request)
     if verdict is None:
-        return input_path, _placement_refusal(_no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed), occupied_info
+        return input_path, _placement_refusal(_no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed, miss=reason), occupied_info
     if not verdict.get("ok"):
         spots_clause = _spots_clause(verdict.get("spots") or [])
         message = (
@@ -745,7 +753,7 @@ def _verify_plate_placement(gcode_path: str | None, info: dict | None) -> tuple[
         ), info
     verdict, reason = bridge.ask({**request, "sliced_gcode": {"path": str(gcode_path)}})
     if verdict is None:
-        return _placement_refusal(_no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed), info
+        return _placement_refusal(_no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed, miss=reason), info
     if not verdict.get("ok"):
         message = (
             f"Kiln checked the sliced file against the plate and won't hand it on: {_refusal_sentences(verdict)}"

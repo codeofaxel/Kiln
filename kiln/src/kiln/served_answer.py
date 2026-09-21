@@ -470,6 +470,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_motion_bridge": ("served_answer", "head-motion plans; a miss is worded by the Bambu doors"),
     "kiln._pro_cutter_bridge": ("served_answer", "blade status for the pre-flight; cut reports are fire-and-forget"),
     "kiln._pro_nozzle_bridge": ("served_answer", "the pre-print nozzle-life verdict for the pre-flight, a start and a slice"),
+    "kiln._pro_placement_bridge": ("served_answer", "the plate-clearance verdict for slicing beside a part left on the plate"),
     "kiln.stage_link": ("served_answer", "browser stage links; the four served causes word through here, the local stage is the floor"),
     "kiln.stage_cache": ("infrastructure", "the stage document upload behind stage_link; its refusals surface through stage_link"),
     "kiln.monitor_twin": ("infrastructure", "print twins pushed best-effort; the local monitor is the floor"),

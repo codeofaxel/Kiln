@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import re
 import struct
 import sys
 from pathlib import Path
@@ -44,6 +45,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kiln import _pro_placement_bridge as bridge
+from kiln import served_answer as sa
 from kiln.plate_state import PlateJob, PlateState, mark_clear, mark_occupied
 from kiln.printers.bed_fit import compute_mesh_bbox
 from kiln.slicer import SliceResult
@@ -302,7 +304,10 @@ class TestEveryDoor:
         assert resp["placement"]["ok"] is False and len(resp["spots"]) == 2
         assert not spy.called
 
-    @pytest.mark.parametrize("reason", [bridge.OFFLINE, bridge.SIGNED_OUT, bridge.UNANSWERED])
+    @pytest.mark.parametrize("reason", [
+        sa.Miss("offline"), sa.Miss("signed_out"), sa.Miss("unanswered"),
+        sa.Miss("refused", "MACHINE_NOT_PAIRED", "This device has not reported that printer; register it and ask again."),
+    ])
     def test_no_verdict_fails_closed(self, door, registry, extra, tmp_path, machine, monkeypatch, reason):
         from kiln.plugins.slicer_tools import _no_verdict_sentence
 
@@ -316,6 +321,9 @@ class TestEveryDoor:
         from kiln import plate_state
 
         assert resp["error"]["message"] == _no_verdict_sentence(plate_state.read(machine), reason)
+        # The shared voice's why fields ride beside the sentence, never inside it.
+        assert resp["why"] == reason.cause and resp["why_code"] == reason.code
+        assert not reason.code or reason.code not in resp["error"]["message"]
         assert resp["occupancy"]["source"] == "record_box"
         assert not spy.called
 
@@ -421,10 +429,10 @@ class TestNamedRegions:
         from kiln.plugins.slicer_tools import _no_verdict_sentence
 
         _occupy(machine)
-        monkeypatch.setattr(bridge, "ask", _Bridge((None, bridge.SIGNED_OUT)))
+        monkeypatch.setattr(bridge, "ask", _Bridge((None, sa.Miss("signed_out"))))
         _placed, err, _info = _gate(_cube(tmp_path / "part.stl"), "centre")
         assert err["error"]["code"] == "PLACEMENT_NO_VERDICT"
-        assert err["error"]["message"] == _no_verdict_sentence(plate_state.read(machine), bridge.SIGNED_OUT)
+        assert err["error"]["message"] == _no_verdict_sentence(plate_state.read(machine), sa.Miss("signed_out"))
 
     @pytest.mark.parametrize("spelling, cell", [
         ("front-left", (0, 0)), ("Front Left", (0, 0)), ("front_left", (0, 0)), ("front-center", (0, 1)),
@@ -456,6 +464,18 @@ class TestNamedRegions:
 
 
 class TestTheFailClosedSentence:
+    """The fail-closed refusal speaks in the one voice every served door
+    speaks in (:mod:`kiln.served_answer`): the plate record's own opening,
+    then the shared cause and fix, and a refusal in the server's own words
+    appended whole.  Pinned word for word, and linted the way the roster
+    lints every served door's sentences."""
+
+    _CODE_TOKEN = re.compile(r"\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b")
+    _SYSTEM_WORD = re.compile(
+        r"\b(API|endpoint|bridge|kiln-pro|kiln_pro|hosted service|HTTP|urlopen|Errno|traceback|exception|"
+        r"backoff|envelope|payload)\b", re.IGNORECASE,
+    )
+
     def _state(self, max_z: float | None, file: str = "jar_v2.gcode.3mf") -> PlateState:
         return PlateState(machine="m", status="occupied", source="kiln_started_print", since="2026-09-21T18:12:00",
                           job=PlateJob(file=file, footprint_mm=None, max_z_mm=max_z))
@@ -466,34 +486,58 @@ class TestTheFailClosedSentence:
         state = self._state(42.0)
         monkeypatch.setattr(PlateState, "since_clock", lambda self: "18:12")
         head = "The last print, jar v2, is still on the plate (since 18:12, about 42 mm tall). "
-        assert _no_verdict_sentence(state, bridge.OFFLINE) == (
-            head + "Kiln can't check whether a second part fits safely beside it because this computer is offline, "
-            "so it won't slice onto this plate. Clear the plate and say so, or reconnect to the internet and try again."
+        assert _no_verdict_sentence(state, sa.Miss("offline")) == (
+            head + "Kiln can't check whether a second part fits safely beside it right now because this computer is "
+            "offline, so it won't slice onto this plate. Clear the plate and say so, or reconnect to the internet and try again."
         )
-        assert _no_verdict_sentence(state, bridge.SIGNED_OUT) == (
-            head + "Kiln can't check whether a second part fits safely beside it because Kiln is signed out, "
+        assert _no_verdict_sentence(state, sa.Miss("signed_out")) == (
+            head + "Kiln can't check whether a second part fits safely beside it right now because Kiln is signed out, "
             "so it won't slice onto this plate. Clear the plate and say so, or sign in and try again."
         )
-        for reason in (bridge.UNANSWERED, None, "something else"):
+        for reason in (sa.Miss("unanswered"), "unanswered", None, "something else"):
             assert _no_verdict_sentence(state, reason) == (
-                head + "Kiln can't check whether a second part fits safely beside it because Kiln's clearance check "
-                "didn't answer, so it won't slice onto this plate. Clear the plate and say so, or wait a minute and try again."
+                head + "Kiln can't check whether a second part fits safely beside it right now because Kiln's clearance "
+                "check didn't answer, so it won't slice onto this plate. Clear the plate and say so, or wait a minute and try again."
             )
+        refused = sa.Miss("refused", "MACHINE_NOT_PAIRED", "This device has not reported that printer; register it and ask again.")
+        assert _no_verdict_sentence(state, refused) == (
+            head + "Kiln can't check whether a second part fits safely beside it right now because Kiln's clearance "
+            "check said no, so it won't slice onto this plate. This device has not reported that printer; register it "
+            "and ask again. Clear the plate and say so."
+        )
 
     def test_an_unknown_height_drops_the_clause_rather_than_printing_none(self, monkeypatch):
         from kiln.plugins.slicer_tools import _no_verdict_sentence, _plate_holds_sentence
 
         monkeypatch.setattr(PlateState, "since_clock", lambda self: "Sep 20 09:03")
         assert _plate_holds_sentence(self._state(None)) == "The last print, jar v2, is still on the plate (since Sep 20 09:03)."
-        assert "None" not in _no_verdict_sentence(self._state(None), bridge.OFFLINE)
+        assert "None" not in _no_verdict_sentence(self._state(None), sa.Miss("offline"))
         assert _plate_holds_sentence(self._state(18.5)) == "The last print, jar v2, is still on the plate (since Sep 20 09:03, about 18.5 mm tall)."
 
-    def test_no_codes_inside_any_sentence(self, monkeypatch):
+    def test_every_cause_reads_in_the_one_shape_with_no_code_or_system_word(self, monkeypatch):
+        """The roster's own lint, applied to this door: every cause, one
+        distinct sentence each, the shape's anchors present, no wire code
+        and no system word inside."""
         from kiln.plugins.slicer_tools import _no_verdict_sentence
 
-        for reason in (bridge.OFFLINE, bridge.SIGNED_OUT, bridge.UNANSWERED):
-            text = _no_verdict_sentence(self._state(42.0), reason)
-            assert "_" not in text and "SERVER" not in text and "KILN_" not in text
+        monkeypatch.setattr(PlateState, "since_clock", lambda self: "18:12")
+        misses = [
+            sa.Miss("offline", "SERVER_UNREACHABLE", "no route"),
+            sa.Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED", "wall"),
+            sa.Miss("unanswered", "SERVER_UNREACHABLE", "timed out"),
+            sa.Miss("refused", "MACHINE_NOT_PAIRED", "This device has not reported that printer; register it and ask again."),
+            sa.Miss("refused", "WEIRD_CODE", ""),
+        ]
+        seen = set()
+        for miss in misses:
+            text = _no_verdict_sentence(self._state(42.0), miss)
+            assert text == " ".join(text.split()) and text.endswith(".")
+            assert not self._CODE_TOKEN.search(text), text
+            assert not self._SYSTEM_WORD.search(text), text
+            for anchor in ("Kiln can't", "right now because", ", so it"):
+                assert anchor in text, text
+            seen.add(text)
+        assert len(seen) == len(misses)
 
     def test_the_job_name_is_prettified_the_same_way_everywhere(self):
         """One prettifier in public Kiln, on the record; its list matches
