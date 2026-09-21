@@ -164,7 +164,10 @@ class TestTheCache:
         files = list((tmp_path / "kiln-home" / "motion_plans").glob("*.plan"))
         assert len(files) == 1
         raw = files[0].read_bytes()
-        assert b"G91" not in raw and b"bambu_a1" not in raw and b"ran" not in raw
+        # The file is a base64 token, so a bare word CAN appear in it by
+        # chance; the plaintext's quoted JSON strings never can.
+        assert b'"G91"' not in raw and b'"bambu_a1"' not in raw and b'"ran"' not in raw
+        assert b'"' not in raw and b"{" not in raw
         assert oct(files[0].stat().st_mode & 0o777) == "0o600"
         assert cache.load(request)["summary"] == "ran"
 

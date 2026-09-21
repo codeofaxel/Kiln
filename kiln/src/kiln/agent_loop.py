@@ -363,6 +363,8 @@ def _ensure_tool_cache() -> dict[str, Any]:
     if _tool_cache is not None:
         return _tool_cache
 
+    from kiln.mcp_compat import tool_input_schema
+
     mcp_server = _get_mcp_server()
 
     # FastMCP.list_tools() is async -- run it in a fresh event loop if
@@ -390,7 +392,7 @@ def _ensure_tool_cache() -> dict[str, Any]:
             "function": {
                 "name": tool.name,
                 "description": tool.description or "",
-                "parameters": tool.inputSchema,
+                "parameters": tool_input_schema(tool),
             },
         }
         cache[tool.name] = {
