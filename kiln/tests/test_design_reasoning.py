@@ -940,10 +940,17 @@ class TestSolveConstraintsDegreesOfFreedom:
         assert result.defaults_applied == {
             "width": 40.0, "height": 10.0, "depth": 15, "wall": 2,
         }
-        assert result.free[0] == "width: bounded (min 40) but not pinned, left at 40.0"
-        assert result.free[1] == "height: bounded (max 10) but not pinned, left at 10.0"
+        assert result.free[0] == (
+            "width: bounded (min 40) but no value chosen; the bound moved it "
+            "from the template default 30 to 40"
+        )
+        assert result.free[1] == (
+            "height: bounded (max 10) but no value chosen; the bound moved it "
+            "from the template default 20 to 10"
+        )
         assert result.free[2] == (
-            "depth: bounded (min 5, max 20) but not pinned, left at 15.0"
+            "depth: bounded (min 5, max 20) but no value chosen, left at the "
+            "template default 15"
         )
 
     def test_ratio_pins_dependent_param_only(self):
@@ -958,6 +965,31 @@ class TestSolveConstraintsDegreesOfFreedom:
         result = self._solve({"height": {"ratio": ["nope", 0.5]}})
         assert result.dof == 4
         assert "height" in result.defaults_applied
+        assert result.free[1] == (
+            "height: ratio to unknown parameter 'nope' applied nothing, "
+            "left at the template default 20"
+        )
+
+    def test_ratio_to_string_param_does_not_pin(self):
+        result = self._solve({"height": {"ratio": ["label", 0.5]}})
+        assert result.solved_params["height"] == 20
+        assert result.dof == 4
+        assert "height" in result.defaults_applied
+        assert result.free[1] == (
+            "height: ratio to non-numeric parameter 'label' applied nothing, "
+            "left at the template default 20"
+        )
+
+    def test_string_valued_template_parameter_gets_no_sentence(self):
+        # A real template with a string-valued parameter (no patched data).
+        result = solve_constraints("wall_plate_cover", {})
+        assert result.solved_params["style"] == "single_toggle"
+        assert "style" not in result.defaults_applied
+        assert not any(sentence.startswith("style:") for sentence in result.free)
+        assert result.dof == 3
+        assert result.free[0] == (
+            "plate_width: not constrained, left at the template default 70"
+        )
 
     def test_unknown_constraint_name_does_not_change_dof(self):
         result = self._solve({"nope": {"equals": 1}})
@@ -971,6 +1003,41 @@ class TestSolveConstraintsDegreesOfFreedom:
         assert d["defaults_applied"] == {"height": 20, "depth": 15, "wall": 2}
         assert len(d["free"]) == 3
         assert all(isinstance(s, str) for s in d["free"])
+
+
+class TestSolveTemplateConstraintsDoor:
+    """The MCP door returns dof / free / defaults_applied, not just solved_params."""
+
+    @staticmethod
+    def _tools() -> dict:
+        from kiln.plugins.design_reasoning_tools import plugin
+
+        tools: dict = {}
+
+        class FakeMCP:
+            def tool(self_mcp, **_kwargs):
+                def decorator(fn):
+                    tools[fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        plugin.register(FakeMCP())
+        return tools
+
+    def test_door_surfaces_degrees_of_freedom(self):
+        door = self._tools()["solve_template_constraints"]
+        with patch("json.load", return_value=_DOF_TEMPLATES):
+            result = door("box", '{"width": {"equals": 40}}')
+        assert result["success"] is True
+        assert result["solved_params"]["width"] == 40.0
+        assert result["dof"] == 3
+        assert result["defaults_applied"] == {"height": 20, "depth": 15, "wall": 2}
+        assert result["free"] == [
+            "height: not constrained, left at the template default 20",
+            "depth: not constrained, left at the template default 15",
+            "wall: not constrained, left at the template default 2",
+        ]
 
 
 # ---------------------------------------------------------------------------

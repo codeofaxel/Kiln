@@ -3496,7 +3496,8 @@ def _constraint_pins(constraint: Any, known_params: dict[str, Any]) -> bool:
         return True
     ratio_spec = constraint.get("ratio")
     if isinstance(ratio_spec, list) and len(ratio_spec) == 2:
-        return ratio_spec[0] in known_params
+        other = known_params.get(ratio_spec[0])
+        return isinstance(other, (int, float)) and not isinstance(other, bool)
     return False
 
 
@@ -3508,6 +3509,54 @@ def _describe_bounds(constraint: dict[str, Any]) -> str:
     if "max" in constraint:
         parts.append(f"max {constraint['max']}")
     return ", ".join(parts)
+
+
+def _describe_idle_ratio(constraint: dict[str, Any], known_params: dict[str, Any]) -> str:
+    """Why a ``ratio`` constraint chose nothing: its other parameter is unknown or not a number."""
+    ratio_spec = constraint.get("ratio")
+    if not (isinstance(ratio_spec, list) and len(ratio_spec) == 2):
+        return ""
+    other = ratio_spec[0]
+    kind = "unknown" if other not in known_params else "non-numeric"
+    return f"ratio to {kind} parameter {other!r} applied nothing"
+
+
+def _plain_number(val: float) -> str:
+    """Render a value the way a person says it: ``15.0`` is ``15``, ``2.5`` stays."""
+    return str(int(val)) if float(val).is_integer() else str(val)
+
+
+def _free_sentence(
+    pname: str,
+    val: float,
+    default: Any,
+    constraint: Any,
+    known_params: dict[str, Any],
+) -> str:
+    """One plain sentence for a numeric parameter no constraint chose a value for."""
+    shown = _plain_number(val)
+    bounds = _describe_bounds(constraint) if isinstance(constraint, dict) else ""
+    idle_ratio = (
+        _describe_idle_ratio(constraint, known_params)
+        if isinstance(constraint, dict) else ""
+    )
+    if bounds:
+        what = f"bounded ({bounds}) but no value chosen"
+    elif idle_ratio:
+        what = idle_ratio
+    else:
+        return f"{pname}: not constrained, left at the template default {shown}"
+    moved = (
+        isinstance(default, (int, float))
+        and not isinstance(default, bool)
+        and abs(float(default) - float(val)) > 0.01
+    )
+    if moved:
+        return (
+            f"{pname}: {what}; the bound moved it from the template default "
+            f"{_plain_number(default)} to {shown}"
+        )
+    return f"{pname}: {what}, left at the template default {shown}"
 
 
 def solve_constraints(
@@ -3564,6 +3613,7 @@ def solve_constraints(
             }
         else:
             solved[pname] = pdef
+    defaults: dict[str, Any] = dict(solved)
 
     # Apply constraints iteratively
     max_iter = 10
@@ -3673,15 +3723,9 @@ def solve_constraints(
         if _constraint_pins(constraint, solved):
             continue
         result.defaults_applied[pname] = val
-        bounds = _describe_bounds(constraint) if isinstance(constraint, dict) else ""
-        if bounds:
-            result.free.append(
-                f"{pname}: bounded ({bounds}) but not pinned, left at {val}"
-            )
-        else:
-            result.free.append(
-                f"{pname}: not constrained, left at the template default {val}"
-            )
+        result.free.append(
+            _free_sentence(pname, val, defaults.get(pname), constraint, solved)
+        )
     result.dof = len(result.defaults_applied)
 
     return result
