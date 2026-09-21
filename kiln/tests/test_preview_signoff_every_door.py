@@ -877,3 +877,52 @@ class TestTheHostedDeployKeepsNoRecord:
         mesh = _stl(tmp_path / "jar.stl")
         assert preview_evidence.record(preview_evidence.DOOR_PNG, mesh) is not None
         assert preview_evidence.evidence_for(mesh)[preview_evidence.DOOR_PNG] is not None
+
+
+class TestTheGateHasNoDeadlock:
+    """2026-09-21, live: the host held a tool list cached before a restart
+    (declared the panel, could not draw it) and the install was signed
+    out.  The stage door had no evidence, the link door had refused, and
+    the PNG door was refused because "the stage is available on this
+    host".  No door accepted.  A panel that has never fetched from this
+    server is not available, and the gate says so in the server's words."""
+
+    def _staged_still_and_refused_link(self, tmp_path):
+        path = _stl(tmp_path / "jar.stl")
+        preview_evidence.record("png", path, renderer="stage", shown_sha="abc")
+        preview_evidence.record_url_refusal(path, "signed_out")
+        return path
+
+    def test_png_is_accepted_when_the_panel_is_declared_but_never_fetched(self, tmp_path):
+        path = self._staged_still_and_refused_link(tmp_path)
+        refusal, verdict = preview_evidence.judge(
+            path, "png", host_renders=True, panel_proven=False,
+        )
+        assert refusal is None, refusal
+        assert "fetched" in verdict["skipped"]["stage"]
+        assert "signed out" in verdict["skipped"]["url"]
+        assert "signed_out" not in verdict["skipped"]["url"], "a code is not a sentence"
+
+    def test_png_is_still_refused_once_a_panel_has_proved_itself(self, tmp_path):
+        path = self._staged_still_and_refused_link(tmp_path)
+        refusal, _ = preview_evidence.judge(
+            path, "png", host_renders=True, panel_proven=True,
+        )
+        assert refusal is not None
+        assert "stage" in refusal["message"]
+
+    def test_the_tool_reads_the_proof_from_the_stage_itself(self, tmp_path, monkeypatch):
+        """Through the real door: a declared host, no fetch this process,
+        signed out — tonight's exact state — has an accepted door."""
+        from kiln import local_stage
+
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        preview_evidence._reset_for_tests()
+        local_stage._reset_for_tests()
+        path = self._staged_still_and_refused_link(tmp_path)
+        monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr(local_stage, "host_renders_apps", lambda *_a, **_k: True)
+        out = server.issue_preview_token(path, door="png")
+        assert out.get("success") is True, out
+        assert out["door"] == "png"
+        assert "fetched" in out["skipped"]["stage"]

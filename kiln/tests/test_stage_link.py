@@ -455,3 +455,53 @@ class TestRefusedBearerMemory:
 
 def _stl_at(tmp_path, name):
     return _stl(tmp_path / name)
+
+
+class TestAStageNamedMeshWins:
+    """A slice result names the mesh it sliced (``input_path``, disqualified
+    as an input) and the file it wrote (``output_path`` — raw G-code, or a
+    Bambu ``.gcode.3mf`` that ranks as the product).  Neither is what the
+    stage should show: the plate as it will print is the mesh the slicer
+    was handed, dressed in the slice's own skirt and tower.  A tool that
+    says which file the stage shows is believed over any inference."""
+
+    def test_stage_mesh_path_beats_the_wrapped_output(self):
+        assert stage_link.find_mesh_path({
+            "output_path": "/x/jar.gcode.3mf",
+            "stage_mesh_path": "/x/jar.3mf",
+        }) == "/x/jar.3mf"
+
+    def test_regardless_of_dict_order(self):
+        assert stage_link.find_mesh_path({
+            "stage_mesh_path": "/x/jar.3mf",
+            "output_3mf_path": "/x/jar.gcode.3mf",
+            "output_path": "/x/jar.gcode.3mf",
+        }) == "/x/jar.3mf"
+
+    def test_a_raw_gcode_output_leaves_only_the_staged_mesh(self):
+        assert stage_link.find_mesh_path({
+            "input_path": "/x/part.stl",
+            "output_path": "/x/part.gcode",
+            "stage_mesh_path": "/x/part_bedcentered.stl",
+        }) == "/x/part_bedcentered.stl"
+
+    def test_nested_one_level_as_the_slice_doors_nest_it(self):
+        assert stage_link.find_mesh_path({
+            "success": True,
+            "slice": {"output_path": "/x/part.gcode", "stage_mesh_path": "/x/part.stl"},
+        }) == "/x/part.stl"
+
+
+class TestRefusalSentences:
+    """``url_refusal: signed_out`` is a code; a result carries a sentence."""
+
+    def test_signed_out_reads_as_a_sentence(self):
+        s = stage_link.refusal_sentence("signed_out")
+        assert "signed out" in s and "kiln_signin" in s
+        assert "signed_out" not in s
+
+    def test_an_http_status_names_the_status(self):
+        assert "503" in stage_link.refusal_sentence("http_503")
+
+    def test_an_unknown_reason_is_still_a_sentence(self):
+        assert stage_link.refusal_sentence("wat").startswith("the link door refused")

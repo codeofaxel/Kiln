@@ -1331,3 +1331,35 @@ class TestCalibrateSendsWholeCommands:
         assert ["G29"] in sent
         for arg in sent:
             assert isinstance(arg, list), f"send_gcode was handed {arg!r}, not a list of lines"
+
+
+class TestThePipelineLiftsTheStagedMesh:
+    """A pipeline result buries its slice two levels down (``steps[].data``),
+    where the stage's one-level scan cannot see it.  The result lifts the
+    staged mesh to the top, from the step that recorded it."""
+
+    def test_the_slice_steps_data_carries_the_staged_mesh(self):
+        from kiln.pipelines import _slice_step_data
+        from kiln.slicer import SliceResult
+
+        data = _slice_step_data(SliceResult(
+            success=True, output_path="/x/part.gcode", slicer="prusa-slicer",
+            stage_mesh_path="/x/part.stl",
+        ))
+        assert data["stage_mesh_path"] == "/x/part.stl"
+
+    def test_to_dict_lifts_it_to_the_top(self):
+        result = PipelineResult(
+            pipeline="reslice_and_print", success=True,
+            steps=[
+                PipelineStep(name="validate", success=True),
+                PipelineStep(name="slice", success=True,
+                             data={"output_path": "/x/part.gcode", "stage_mesh_path": "/x/part.stl"}),
+            ],
+        )
+        assert result.to_dict()["stage_mesh_path"] == "/x/part.stl"
+
+    def test_no_slice_step_lifts_nothing(self):
+        result = PipelineResult(pipeline="test", success=True,
+                                steps=[PipelineStep(name="validate", success=True)])
+        assert "stage_mesh_path" not in result.to_dict()

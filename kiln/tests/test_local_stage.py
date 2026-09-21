@@ -998,3 +998,235 @@ class TestAHostedTokenReachesTheLocalMesh:
 
         assert set(local_stage._tokens) == before, "a re-bind evicted something"
         assert local_stage.resolve("hosted-stable") == mesh
+
+
+# ---------------------------------------------------------------------------
+# A slice shows itself (2026-09-21)
+# ---------------------------------------------------------------------------
+
+
+def _wire_link_door(monkeypatch, token="bearer-abc"):
+    """A signed-in install and a link service that answers — the stage
+    link's furniture, so a hook test can see whether the link rode."""
+    from kiln import stage_link
+
+    stage_link._cache.clear()
+    stage_link._REFUSED_BEARER = None
+    monkeypatch.delenv(stage_link._OPT_OUT_ENV, raising=False)
+    monkeypatch.setattr(
+        "kiln.auth_session.resolve_api_bearer",
+        lambda *a, **k: type("B", (), {"token": token, "state": "license"})(),
+    )
+    calls: list[dict] = []
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"viewer_url": "https://app.kiln3d.com/view#v=tok", "expires_in": 1800}
+
+    def _post(url, **kw):
+        calls.append({"url": url})
+        return _Resp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "post", _post)
+    return calls
+
+
+class TestASliceShowsItself:
+    """The slice doors open the stage.  They sat off the roster because the
+    inline-era payload cost megabytes for a panel no host drew; the cost
+    left with the lean result, and the exclusion outlived its cause — on
+    2026-09-21 a re-sliced jar's prime tower, placement and colour mapping
+    were decided and never shown to anyone."""
+
+    SLICE_DOORS = (
+        "slice_model",
+        "slice_and_estimate",
+        "reslice_with_overrides",
+        "run_reslice_and_print",
+        "slice_and_print",
+        "design_to_gcode_pipeline",
+        "generate_and_print",
+    )
+
+    def test_every_slice_door_is_on_the_roster(self):
+        missing = sorted(set(self.SLICE_DOORS) - local_stage.VIEWER_TOOLS)
+        assert not missing, missing
+
+    def test_a_slice_tool_is_stamped_to_open_the_stage(self):
+        from kiln.mcp_compat import FastMCP
+
+        mcp = FastMCP("test")
+
+        @mcp.tool(name="slice_model")
+        def slice_model() -> dict:
+            """Slice a model."""
+            return {"success": True}
+
+        _cache_the_stage()
+        local_stage.install(mcp)
+        tool = mcp._tool_manager._tools["slice_model"]
+        assert (tool.meta or {}).get("ui", {}).get("resourceUri") == (
+            local_stage.MESH_VIEWER_RESOURCE_URI
+        )
+        assert local_stage.STAGE_DESCRIPTION_CLAUSE in (tool.description or "")
+
+    def test_batch_fleet_and_upload_doors_stay_out(self):
+        """The paid half and the upload door are untouched: N stages is
+        spam, and the start token stays the only wall."""
+        for name in (
+            "batch_generate_products", "fleet_submit_job", "multi_copy_print",
+            "multi_color_copies", "route_print_job", "upload_file",
+        ):
+            assert name not in local_stage.VIEWER_TOOLS, name
+
+
+class TestTheLinkRidesUntilAPanelProves:
+    """No silent first miss.  A rendered panel proves itself by fetching;
+    until one has, the browser link rides beside the token, so the first
+    make after a restart — the one a stale host cannot draw — is never a
+    result with nothing to show.  After a fetch lands, lean again."""
+
+    UI = local_stage.MCP_APPS_EXTENSION_ID
+
+    def _apps_host(self):
+        return _Host(_Caps(extensions={self.UI: {}}))
+
+    def test_the_first_stamped_result_carries_the_link(self, tmp_path, monkeypatch):
+        calls = _wire_link_door(monkeypatch)
+        sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
+                       tool_name="compile_scad")
+        assert sc["artifact"]["artifact_token"]
+        assert sc["viewer_url"], "the first mint after a start rode alone"
+        assert len(calls) == 1
+        assert sc["shown"]["door"] == "panel"
+        assert "link" in sc["shown"]["reason"]
+
+    def test_after_a_fetch_lands_the_result_is_lean_again(self, tmp_path, monkeypatch):
+        calls = _wire_link_door(monkeypatch)
+        first = _run_hook(self._apps_host(), _real_cube(tmp_path / "a.stl"),
+                          tool_name="compile_scad")
+        local_stage._fetch_arrived(first["artifact"]["artifact_token"])
+        assert local_stage.panel_proven() is True
+        second = _run_hook(self._apps_host(), _real_cube(tmp_path / "b.stl"),
+                           tool_name="compile_scad")
+        assert "viewer_url" not in second, "a proven panel does not need the link"
+        assert len(calls) == 1
+        assert second["shown"]["door"] == "panel"
+
+    def test_a_sibling_servers_fetch_proves_the_panel_too(self, tmp_path, monkeypatch):
+        """A desktop host routes the fetch over whichever session it holds
+        (measured 2026-09-01); the minting process learns of it from the
+        shared record, and that counts."""
+        _wire_link_door(monkeypatch)
+        mesh = _real_cube(tmp_path / "a.stl")
+        sc = _run_hook(self._apps_host(), mesh, tool_name="compile_scad")
+        from kiln.preview_evidence import record
+
+        record("stage", mesh, via="panel_fetch")
+        clock = [local_stage._now()]
+        monkeypatch.setattr(local_stage, "_now", lambda: clock[0])
+        clock[0] += local_stage._FETCH_GRACE_S + 1
+        assert local_stage.panel_fetches_stalled() is False
+        assert local_stage.panel_proven() is True
+
+    def test_a_host_with_no_panel_gets_the_link_as_the_stage(self, tmp_path, monkeypatch):
+        _wire_link_door(monkeypatch)
+        sc = _run_hook(_Host(_Caps()), _real_cube(tmp_path / "c.stl"),
+                       tool_name="compile_scad")
+        assert sc["viewer_url"]
+        assert sc["shown"]["door"] == "link"
+
+    def test_a_signed_out_install_says_so_in_words(self, tmp_path, monkeypatch):
+        _wire_link_door(monkeypatch, token="")
+        sc = _run_hook(_Host(_Caps()), _real_cube(tmp_path / "c.stl"),
+                       tool_name="compile_scad")
+        assert "viewer_url" not in sc
+        assert sc["shown"]["door"] == "none"
+        assert "signed out" in sc["shown"]["reason"]
+        assert "kiln_signin" in sc["shown"]["reason"]
+        assert "signed_out" not in sc["shown"]["reason"], "a code is not a sentence"
+
+    def test_a_restart_forgets_the_proof(self, monkeypatch):
+        """restart_server already reports open_sessions_lose_stage; the
+        fresh process must start unproven, and so must this one if the
+        exec never happens."""
+        import threading
+
+        from kiln import server
+
+        local_stage._fetch_arrived("t")
+        assert local_stage.panel_proven() is True
+
+        class _NoThread:
+            def __init__(self, *a, **k):
+                pass
+
+            def start(self):
+                pass
+
+        monkeypatch.setattr(threading, "Thread", _NoThread)
+        out = server.restart_server(clean_env=False)
+        assert out["open_sessions_lose_stage"] is True
+        assert local_stage.panel_proven() is False
+
+
+class TestNoDeadHandles:
+    """A stage token on a result no panel opens is a dead handle: it costs a
+    ledger write and reads as a promise.  Only a stamped tool mints."""
+
+    UI = local_stage.MCP_APPS_EXTENSION_ID
+
+    def test_an_unstamped_tool_gets_no_token(self, tmp_path):
+        sc = _run_hook(_Host(_Caps(extensions={self.UI: {}})),
+                       _real_cube(tmp_path / "c.stl"), tool_name="list_materials")
+        assert "artifact" not in sc, "a token was minted for a tool that opens no panel"
+        assert sc["success"] is True
+
+    def test_a_stamped_result_that_names_no_mesh_says_so(self, tmp_path):
+        """The panel would open on nothing; the result says why."""
+        import anyio
+
+        from kiln.mcp_compat import MCP_SDK_MAJOR, lowlevel_server
+
+        _cache_the_stage()
+        mcp = _fastmcp()
+        result = _Result({"success": True, "message": "sliced", "output_path": "/x/part.gcode"})
+        server = lowlevel_server(mcp)
+        host = _Host(_Caps(extensions={self.UI: {}}))
+        if MCP_SDK_MAJOR >= 2:
+            from mcp.types import CallToolRequestParams
+
+            entry = server.get_request_handler("tools/call")
+
+            async def _base(_ctx, _params):
+                return result
+
+            server.add_request_handler("tools/call", entry.params_type, _base)
+            local_stage.install(mcp)
+            handler = server.get_request_handler("tools/call").handler
+            anyio.run(handler, host._mcp_server.request_context,
+                      CallToolRequestParams(name="compile_scad", arguments={}))
+        else:
+            from mcp.server.lowlevel.server import request_ctx
+            from mcp.types import CallToolRequest, CallToolRequestParams
+
+            async def _base_v1(_req):
+                return type("R", (), {"root": result})()
+
+            server.request_handlers[CallToolRequest] = _base_v1
+            local_stage.install(mcp)
+            req = CallToolRequest(method="tools/call",
+                                  params=CallToolRequestParams(name="compile_scad", arguments={}))
+            tok = request_ctx.set(host._mcp_server.request_context)
+            try:
+                anyio.run(server.request_handlers[CallToolRequest], req)
+            finally:
+                request_ctx.reset(tok)
+        sc = result.structuredContent
+        assert sc["shown"]["door"] == "none"
+        assert "no mesh" in sc["shown"]["reason"]

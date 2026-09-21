@@ -790,3 +790,35 @@ class TestRealBinariesClassifyCorrectly:
         if not os.path.isfile(app):
             pytest.skip(f"{os.path.basename(app)} not installed")
         assert slicer_cli_family(find_slicer(app)) == "bambu"
+
+
+class TestTheSliceNamesTheMeshItStaged:
+    """Every slice door spreads or nests ``SliceResult.to_dict()``, so the
+    one place to say which mesh the stage shows is here: the mesh the
+    slicer was handed, absolute — the centred copy when the bed-fit gate
+    moved it, the painted 3MF when that is what was sliced."""
+
+    def test_the_result_carries_stage_mesh_path(self, tmp_path):
+        stl = tmp_path / "benchy.stl"
+        stl.write_bytes(b"solid test\nendsolid test\n")
+        out_dir = tmp_path / "output"
+        expected_out = out_dir / "benchy.gcode"
+        mock_run = MagicMock()
+        mock_run.returncode = 0
+        mock_run.stdout = "Done"
+        mock_run.stderr = ""
+
+        def fake_slicer_run(*args, **kwargs):
+            expected_out.write_text("; gcode")
+            return mock_run
+
+        with patch("kiln.slicer.find_slicer") as mock_find:
+            mock_find.return_value = SlicerInfo(
+                path="/usr/bin/prusa-slicer", name="prusa-slicer", version="2.7.1"
+            )
+            with patch("subprocess.run", side_effect=fake_slicer_run):
+                out_dir.mkdir()
+                result = slice_file(str(stl), output_dir=str(out_dir))
+
+        assert result.stage_mesh_path == str(stl.resolve())
+        assert result.to_dict()["stage_mesh_path"] == str(stl.resolve())

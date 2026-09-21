@@ -332,3 +332,41 @@ class TestStartGcodeSubstitutionIsAudible:
         assert result.start_gcode_model == "bambu_a1"
         assert result.requested_model == "bambu_h2d"
         assert "start_gcode_warning" in result.to_dict()
+
+
+class TestTheAutoWrapJoinsTheLedger:
+    """``note_wrapped`` ran only in the adapter's own wrap door; the slice
+    doors' auto-wrap skipped it, so 0 of 8 ledger rows carried ``wrapped``
+    (measured 2026-09-21) and approval of the design mesh never reached
+    the file that was uploaded."""
+
+    def test_design_mesh_for_the_wrap_is_the_mesh_that_was_sliced(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        from kiln import monitor_twin
+        from kiln.preview_evidence import design_mesh_for
+
+        d = tmp_path / "twin"
+        monkeypatch.setattr(monitor_twin, "_TWIN_DIR", d)
+        monkeypatch.setattr(monitor_twin, "_SLICES_FILE", d / "slices.json")
+        monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", d / "active.json")
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+
+        mesh = tmp_path / "jar.3mf"
+        mesh.write_bytes(b"PK\x03\x04painted")
+        gcode = _write_dummy_gcode(tmp_path)
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+
+        import kiln.printers.bambu_3mf as _b3mf
+
+        def fake_build(body, dst, **kwargs):
+            Path(dst).write_bytes(b"PK\x03\x04fake3mf")
+
+        monkeypatch.setattr(_b3mf, "build_bambu_3mf", fake_build)
+        threemf, _warning = _auto_wrap_bambu_3mf(
+            str(gcode), effective_printer_id="bambu_a1", stl_path=None,
+        )
+        assert threemf is not None
+        entry = monitor_twin.sliced_entry_for(Path(threemf).name)
+        assert entry is not None and entry["wrapped"] == str(Path(threemf).resolve())
+        assert design_mesh_for(threemf) == str(mesh.resolve())

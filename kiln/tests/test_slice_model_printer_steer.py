@@ -118,3 +118,88 @@ def test_bambu_adapter_still_declares_3mf_first():
         "Bambu must declare .3mf first — the recommendation and the "
         "docstring both rest on that ordering being meaningful"
     )
+
+
+# ---------------------------------------------------------------------------
+# Honest fields (2026-09-21): a filled-in thumbnail is not a preview a person
+# saw, and a slice the gate moved does not inherit the design's yes.
+# ---------------------------------------------------------------------------
+
+
+def test_the_wrapped_steer_reports_thumbnails_not_a_preview(tmp_path, monkeypatch):
+    """``preview_completed`` read as "someone saw a preview"; it meant the
+    3MF's thumbnail tiles were filled in.  Say that."""
+    import kiln.printers.bambu_3mf as _b3mf
+    from kiln.plugins.slicer_tools import _steer_to_wrapped_upload
+
+    monkeypatch.setattr(_b3mf, "bambu_archive_problems", lambda p: ["no tiles"])
+    monkeypatch.setattr(_b3mf, "complete_bambu_archive", lambda p: None)
+    threemf = tmp_path / "part.gcode.3mf"
+    threemf.write_bytes(b"PK\x03\x04")
+    resp = {"message": "Sliced"}
+    _steer_to_wrapped_upload(resp, str(threemf), "bambu_a1")
+    assert resp["thumbnails_completed"] is True
+    assert "preview_completed" not in resp
+
+
+def test_the_gcode_steer_uses_the_same_word(tmp_path, monkeypatch):
+    from kiln.plugins.slicer_tools import _steer_to_complete_gcode
+
+    monkeypatch.setattr(
+        "kiln.printers.gcode_complete.complete_gcode_for_printer", lambda *a, **k: None,
+    )
+    gcode = tmp_path / "part.gcode"
+    gcode.write_text("; gcode\n")
+    resp = {"message": "Sliced"}
+    _steer_to_complete_gcode(resp, str(gcode), "prusa_mk4", None)
+    assert resp["thumbnails_completed"] is True
+    assert "preview_completed" not in resp
+
+
+def _off_bed(*_a, **_k):
+    return {
+        "ok": False, "error_code": "OFF_BED_GEOMETRY", "error_message": "off bed",
+        "bbox": None, "build_volume": None, "suggested_translate": [12.0, 5.0, 0.0],
+    }
+
+
+def _on_bed(*_a, **_k):
+    return {"ok": True, "error_code": None, "error_message": None,
+            "bbox": None, "build_volume": None, "suggested_translate": None}
+
+
+def test_an_auto_centred_slice_says_the_design_yes_does_not_carry(tmp_path, monkeypatch):
+    """The gate slices a moved COPY and the ledger records the copy, so a
+    yes given on the design mesh silently never reached the print file.
+    Silent is the bug; the result now says so, and by how much."""
+    from pathlib import Path
+
+    from kiln.plugins import slicer_tools
+
+    monkeypatch.setattr("kiln.printers.bed_fit.validate_mesh_for_printer", _off_bed)
+    monkeypatch.setattr(
+        "kiln.printers.bed_fit.apply_translation_to_stl",
+        lambda src, t, dst: Path(dst).write_bytes(b"solid p\nendsolid p\n"),
+    )
+    monkeypatch.setattr(slicer_tools, "_material_temp_block", lambda *a, **k: None)
+    stl = tmp_path / "part.stl"
+    stl.write_bytes(b"solid p\nendsolid p\n")
+    effective, err, info = slicer_tools._apply_bed_fit_gate(str(stl), "bambu_a1", True)
+    assert err is None
+    assert info["auto_centered"] is True and effective != str(stl)
+    assert info["approval_carries"] is False
+    assert "13 mm" in info["approval_note"]
+    assert "design" in info["approval_note"]
+
+
+def test_a_slice_that_moved_nothing_carries_the_yes(tmp_path, monkeypatch):
+    from kiln.plugins import slicer_tools
+
+    monkeypatch.setattr("kiln.printers.bed_fit.validate_mesh_for_printer", _on_bed)
+    monkeypatch.setattr(slicer_tools, "_material_temp_block", lambda *a, **k: None)
+    stl = tmp_path / "part.stl"
+    stl.write_bytes(b"solid p\nendsolid p\n")
+    effective, err, info = slicer_tools._apply_bed_fit_gate(str(stl), "bambu_a1", True)
+    assert err is None and effective == str(stl)
+    assert info["approval_carries"] is True
+    assert "approval_note" not in info

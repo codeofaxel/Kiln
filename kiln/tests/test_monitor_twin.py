@@ -311,3 +311,25 @@ class TestMultiPrinterAndCaps:
         out = monitor_twin.publish("p1")
         assert out["success"] is False
         assert out["code"] == "TWIN_TOO_LARGE"
+
+
+class TestTheWrapFindsItsSlice:
+    """On a Bambu the file the stage names may be the wrap itself.  The
+    extras door (``sliced_output_for``) joined only on ``input``, so a
+    ``.gcode.3mf`` had no skirt and no tower — and the sign-off's
+    ``design_mesh_for`` found no design mesh behind it."""
+
+    def test_sliced_output_for_answers_for_the_wrap(self, twin_dir, tmp_path):
+        mesh, gcode = _make_files(tmp_path)
+        wrapped = tmp_path / "part.gcode.3mf"
+        wrapped.write_bytes(b"PK\x03\x04not-really-a-zip")
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_wrapped(str(gcode), str(wrapped))
+        assert monitor_twin.sliced_output_for(str(wrapped)) == str(gcode.resolve())
+
+    def test_a_wrap_the_ledger_never_saw_answers_nothing(self, twin_dir, tmp_path):
+        mesh, gcode = _make_files(tmp_path)
+        stranger = tmp_path / "other.gcode.3mf"
+        stranger.write_bytes(b"PK\x03\x04")
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        assert monitor_twin.sliced_output_for(str(stranger)) is None
