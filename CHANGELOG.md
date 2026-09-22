@@ -5,6 +5,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Kiln won't slice onto a part left on the plate.** It says what's there and how many spots beside it would fit.
+
+- **Print a second part beside one that's still on the plate (Pro).** The head goes over it; the printer's own start routine would drive straight through it. See https://kiln3d.com/pricing.
+
 ### Changed
 
 - **When Kiln can't reach its servers, it says so in plain words.** Every feature that leans on them names which of four things happened — this computer is offline, you're signed out, the servers didn't answer, or they said no — and what to do next.

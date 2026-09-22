@@ -857,3 +857,49 @@ class TestTheDoors:
         assert req["plate"]["job"]["file"] == "coaster.gcode.3mf", "the last part, the shape the wire always carried"
         assert req["plate"]["fingerprint"] == fingerprint(read(machine))
         assert all(j["gcode"] is None for j in req["plate"]["jobs"]), "nothing in the ledger, so the record's boxes"
+
+
+class TestWhereItFitsIsThePaidHalf:
+    """Below the plan's tier the refusal still says room exists and what it
+    takes to use it, and never where: a spot a person cannot print at is a
+    list read out through glass.  The refusal itself is the floor and is
+    free."""
+
+    def test_the_count_is_named_when_the_places_are_withheld(self):
+        from kiln.plugins.slicer_tools import _spots_clause
+
+        assert _spots_clause({"spots": [], "spots_found": 3}) == (
+            " 3 spots beside it would fit; printing around what is on the plate is a kiln-pro feature "
+            "(https://kiln3d.com/pricing)."
+        )
+        assert " 1 spot beside it would fit;" in _spots_clause({"spots": [], "spots_found": 1}), "singular reads right"
+        assert _spots_clause({"spots": [], "spots_found": 0}) == "", "no room, nothing to sell"
+        assert _spots_clause({"spots": [], "spots_found": None}) == ""
+        assert _spots_clause(None) == "" and _spots_clause({}) == ""
+
+    def test_the_places_are_named_when_they_are_this_accounts_to_use(self):
+        from kiln.plugins.slicer_tools import _spots_clause
+
+        paid = {"spots": [{"at_mm": [40.0, 40.0], "clearance_mm": 12.0}, {"at_mm": [40.0, 200.0]}], "spots_found": 2}
+        assert _spots_clause(paid) == " Spots with room: [40, 40] (12 mm clear), [40, 200]."
+        assert "kiln3d.com" not in _spots_clause(paid), "no nudge when there is nothing to unlock"
+
+    def test_a_bare_list_still_reads_as_the_places(self):
+        from kiln.plugins.slicer_tools import _spots_clause
+
+        assert _spots_clause([{"at_mm": [10.0, 20.0]}]) == " Spots with room: [10, 20]."
+
+    def test_the_door_says_the_count_on_an_occupied_plate(self, tmp_path, machine, monkeypatch):
+        from kiln.plugins.slicer_tools import _apply_plate_placement
+
+        mark_occupied(machine, JAR)
+        withheld = _verdict(ok=False, spots=[])
+        withheld["spots_found"] = 3
+        monkeypatch.setattr("kiln._pro_placement_bridge.ask", _Bridge((withheld, None)))
+        _placed, err, _info = _apply_plate_placement(
+            _cube(tmp_path / "part.stl"), effective_printer_id="bambu_a1", printer_name=None,
+            placement=None, adapter=machine,
+        )
+        message = err["error"]["message"]
+        assert "3 spots beside it would fit" in message and "kiln3d.com/pricing" in message
+        assert "[" not in message.split("would fit")[1], "no coordinates once the places are withheld"
