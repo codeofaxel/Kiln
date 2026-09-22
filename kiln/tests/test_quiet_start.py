@@ -153,7 +153,7 @@ class TestThePlateHoldsMoreThanOnePart:
         assert [j.file for j in state.jobs] == ["jar_v2.gcode.3mf", "coaster.gcode.3mf"]
         assert state.job == COASTER, "the last part is the job every reader knew"
         assert state.tallest_mm == 42.0
-        assert [o["name"] for o in state.occupancy([256, 256])["occupied"]] == ["jar_v2.gcode.3mf", "coaster.gcode.3mf"]
+        assert [o["name"] for o in state.occupancy([256, 256])["occupied"]] == ["jar v2", "coaster"], "as a person says them"
 
     def test_an_ordinary_start_replaces_what_was_there(self):
         m = _machine()
@@ -271,7 +271,7 @@ class TestTheContractAndTheStartGate:
             "This file was planned for a different plate than the one Kiln has on record now, so it won't start it. "
             "Slice it again beside what is there, or clear the plate and say so."
         )
-        assert block["occupancy"]["occupied"][1]["name"] == "coaster.gcode.3mf"
+        assert block["occupancy"]["occupied"][1]["name"] == "coaster"
 
     def test_a_file_planned_for_another_machine_refuses(self, tmp_path):
         m = _machine()
