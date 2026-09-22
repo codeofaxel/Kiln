@@ -1898,6 +1898,20 @@ class TestPerModelTemplateSelection:
         for model in bambu:
             assert _select_start_gcode(model, 0.4)[1] == model
 
+    def test_every_bambu_the_catalogue_knows_has_its_own_end_sequence(self):
+        """The end block wipes, parks and rolls the bed with a finished part
+        on the plate.  No printer Kiln lists borrows another machine's."""
+        import json
+
+        from kiln.printers.bambu_3mf import _DATA_DIR, _MODEL_END_GCODE_FILES, _select_end_gcode
+
+        catalogue = json.loads((_DATA_DIR / "printer_intelligence.json").read_text())
+        bambu = sorted(k for k in catalogue if k.startswith("bambu_"))
+        missing = [m for m in bambu if m not in _MODEL_END_GCODE_FILES]
+        assert missing == [], f"no end sequence of its own for {missing}"
+        for model in bambu:
+            assert _select_end_gcode(model)[1] == model
+
     def test_the_a2l_keeps_to_its_own_envelope_not_the_a1s(self):
         """The A2L is an open bed-slinger like the A1, but its own warm-up
         never goes left of X-20; the A1's goes to X-48.2 with the soft
@@ -2034,17 +2048,34 @@ class TestNoUnresolvedPlaceholderEverShips:
         _assert_fully_resolved(_load_a1_start_gcode(), source="a1 start")
 
     def test_build_refuses_an_unresolvable_template(self, tmp_path, monkeypatch):
-        """The guard is wired into build_bambu_3mf, not just available to it."""
+        """A value Kiln does not have is refused by name before a file is
+        written: the expander reads ``[name]`` placeholders now, and one it
+        has no value for stops the build there."""
         import kiln.printers.bambu_3mf as mod
 
         monkeypatch.setattr(
             mod, "_select_end_gcode",
             lambda model: ("M104 S[nozzle_temperature_initial_layer]\n", "bambu_fake"),
         )
+        out = tmp_path / "o.3mf"
+        with pytest.raises(ValueError, match="needs 'nozzle_temperature_initial_layer'"):
+            build_bambu_3mf(MINIMAL_GCODE_BODY, str(out), printer_model="bambu_fake")
+        assert not out.exists()
+
+    def test_the_final_guard_is_wired_into_the_build(self, tmp_path, monkeypatch):
+        """And a placeholder the expander does not read at all still meets
+        the last check before the file is written -- the guard is wired into
+        build_bambu_3mf, not just available to it."""
+        import kiln.printers.bambu_3mf as mod
+
+        monkeypatch.setattr(
+            mod, "_select_end_gcode",
+            lambda model: ("M104 S[NOZZLE_temperature]\n", "bambu_fake"),
+        )
+        out = tmp_path / "o.3mf"
         with pytest.raises(ValueError, match="Unresolved gcode placeholder"):
-            build_bambu_3mf(
-                MINIMAL_GCODE_BODY, str(tmp_path / "o.3mf"), printer_model="bambu_fake",
-            )
+            build_bambu_3mf(MINIMAL_GCODE_BODY, str(out), printer_model="bambu_fake")
+        assert not out.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -2137,10 +2168,71 @@ class TestEndTemplateExpansion:
             _eval_template_expr("24/20", {})
 
     def test_unsupported_syntax_is_refused(self):
+        """``max``/``min`` of numbers are the only calls; any other function,
+        and ``max`` of something that is not a number, is refused."""
         from kiln.printers.bambu_3mf import _eval_template_expr
 
         with pytest.raises(ValueError, match="Unsupported syntax"):
-            _eval_template_expr("min(1, 2)", {})
+            _eval_template_expr("abs(-1)", {})
+        with pytest.raises(ValueError, match="Unsupported syntax"):
+            _eval_template_expr("max(1, 2, key=3)", {})
+        with pytest.raises(ValueError, match="other than numbers"):
+            _eval_template_expr('max(1, "2")', {})
+        with pytest.raises(ValueError, match="other than numbers"):
+            _eval_template_expr("max(1, flag)", {"flag": True})
+
+    def test_max_and_min_of_numbers(self):
+        """The H2C's end works out its AMS retraction speed with ``max``."""
+        from kiln.printers.bambu_3mf import _eval_template_expr
+
+        variables = {"flush_volumetric_speeds": [12.0], "current_filament_id": 0}
+        expr = "max((flush_volumetric_speeds[current_filament_id]/2.4053*60), 200)"
+        assert _eval_template_expr(expr, variables) == pytest.approx(299.3389, abs=1e-3)
+        assert _eval_template_expr("max(1.5, 200)", {}) == 200
+        assert _eval_template_expr("min(1.5, 200)", {}) == 1.5
+
+    def test_a_bracket_placeholder_is_a_plain_variable_or_a_refusal(self):
+        from kiln.printers.bambu_3mf import _expand_end_template
+
+        out = _expand_end_template("M620.11 P0 I[current_filament_id] B[current_hotend] E0",
+                                   {"current_filament_id": 0, "current_hotend": -1})
+        assert out == "M620.11 P0 I0 B-1 E0"
+        with pytest.raises(ValueError, match="current_hotend"):
+            _expand_end_template("M620.11 B[current_hotend]", {})
+
+    def test_an_indented_guard_leaves_its_own_indentation_as_bambustudio_does(self):
+        from kiln.printers.bambu_3mf import _expand_end_template
+
+        template = "A\n    {if flag}\n    B\n    {endif}\n{if flag}\nC\n{endif}"
+        assert _expand_end_template(template, {"flag": True}).split("\n") == [
+            "A", "    ", "    B", "    ", "", "C", "",
+        ]
+
+    def test_the_h2c_end_expands_to_bambustudios_own_output_line_for_line(self):
+        """The H2C's ground truth, the way the A1's is its proven capture:
+        BambuStudio 02.08.02.61's own end block from the slice the H2C's start
+        capture was taken from (a 20 mm cube, Generic PLA at 220C), kept in
+        kiln/tests/data so the check runs without BambuStudio installed.  The
+        shipped template, expanded with exactly the values a real print gets,
+        must reproduce it -- whitespace included."""
+        from kiln.printers.bambu_3mf import _end_template_variables, _expand_end_template, _select_end_gcode
+
+        template, source = _select_end_gcode("bambu_h2c")
+        assert source == "bambu_h2c"
+        body = template[template.index(";===== machine: H2C end"):]
+        expanded = _expand_end_template(body, _end_template_variables(20.0, "bambu_h2c"))
+        truth = (Path(__file__).parent / "data" / "bambu_h2c_end_bambustudio_z20.gcode").read_text()
+        assert expanded.rstrip("\n").split("\n") == truth.rstrip("\n").split("\n")
+
+    def test_the_h2cs_ams_values_never_move_the_head(self):
+        """Every X, Y and Z in the H2C's end is the part's height: the AMS
+        values only say how far and how fast the filament is pulled back."""
+        from kiln.printers.bambu_3mf import _MODEL_END_VALUES, _select_end_gcode
+
+        template, _ = _select_end_gcode("bambu_h2c")
+        motion = [line for line in template.split("\n") if re.match(r"^\s*G[0-3]\b", line)]
+        for name in _MODEL_END_VALUES["bambu_h2c"]:
+            assert not any(name in line for line in motion), f"{name} reaches a motion line"
 
     def test_negation_does_not_mangle_not_equal(self):
         from kiln.printers.bambu_3mf import _eval_template_expr

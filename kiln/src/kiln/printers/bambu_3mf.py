@@ -228,12 +228,34 @@ _MODEL_END_GCODE_FILES: dict[str, str] = {
     "bambu_h2d": "bambu_h2d_end_gcode.gcode",
     "bambu_h2d_pro": "bambu_h2d_pro_end_gcode.gcode",
     "bambu_x2d": "bambu_x2d_end_gcode.gcode",
-    # No bambu_h2c: its end template reads six values BambuStudio computes
-    # while slicing (the current filament and hotend, the flush speed, the
-    # cut retraction), the same kind that makes start G-code a capture.  An
-    # end block cannot be captured instead -- its lifts are the part's own
-    # height -- so the H2C keeps the A1's end sequence, and
-    # Bambu3MFResult.end_gcode_warning says so.
+    # The H2C's template also reads the AMS values in _MODEL_END_VALUES.
+    "bambu_h2c": "bambu_h2c_end_gcode.gcode",
+}
+
+#: Values an end template reads besides the part's height, per model.
+#:
+#: The H2C's end pulls the filament back into the AMS, and its template asks
+#: how: which filament and hotend, how far, how fast.  None of these moves the
+#: head -- every X, Y and Z in the block is the part's own height, which Kiln
+#: already has.  They are read from the BambuStudio 02.08.02.61 slice the
+#: H2C's start capture was taken from (Generic PLA at 220C on a textured
+#: plate): ``M620.11 P1 I0 B-1 E-14 F299.339`` in that slice's own end block.
+#: Expanding the template with them at that slice's height reproduces its end
+#: block line for line, which ``kiln/tests/data`` pins.  Like the flush values
+#: inside every start capture, they are Generic PLA's: filament 0 because a
+#: multi-colour H2C file is refused before it is built, hotend -1 because that
+#: is what BambuStudio writes for one filament, and the 12 mm3/s flush speed
+#: and 14 mm cut retraction the Generic PLA preset gives the H2C.
+_MODEL_END_VALUES: dict[str, dict[str, Any]] = {
+    "bambu_h2c": {
+        "current_filament_id": 0,
+        "current_hotend": -1,
+        "long_retraction_when_cut": True,
+        "retraction_distance_when_cut": 14,
+        "long_retraction_when_ec": False,
+        "retraction_distance_when_ec": 0,
+        "flush_volumetric_speeds": [12.0],
+    },
 }
 
 # Lazy cache for the per-model files, keyed by filename.
@@ -830,6 +852,9 @@ _TPL_IF_RE = re.compile(r"^\s*\{if\s+(?P<cond>.+)\}\s*$")
 _TPL_ELSE_RE = re.compile(r"^\s*\{else\}\s*$")
 _TPL_ENDIF_RE = re.compile(r"^\s*\{endif\}\s*$")
 _TPL_EXPR_RE = re.compile(r"\{(?P<expr>[^{}]*)\}")
+#: BambuStudio's plain-variable placeholder, ``[current_hotend]``.  Only a
+#: lower-case name is one: the end templates' comments carry no brackets.
+_TPL_VAR_RE = re.compile(r"\[(?P<name>[a-z_][a-z0-9_]*)\]")
 
 # Slicing flags the templates branch on.  Constants for Kiln: this pipeline
 # slices one plate, layer by layer, and never in vase mode.  Both readings are
@@ -894,7 +919,9 @@ def _eval_template_expr(expr: str, variables: dict[str, Any]) -> Any:
     """Evaluate one BambuStudio template expression.
 
     Supports only what the end templates contain: arithmetic, comparison,
-    ``&&`` / ``||`` / ``!``, string equality, and indexing a known list.  A
+    ``&&`` / ``||`` / ``!``, string equality, indexing a known list, and
+    ``max``/``min`` of plain numbers (the H2C's end works out its AMS
+    retraction speed as ``max(<flush speed>/2.4053*60, 200)``).  A
     name it was not given, or any other syntax, raises — this text ends up on
     a printer, so an expression we do not fully understand must not produce a
     number anyway.
@@ -969,6 +996,18 @@ def _eval_template_expr(expr: str, variables: dict[str, Any]) -> Any:
                     )
                     raise ValueError(msg)
                 return left / right
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in ("max", "min")
+            and len(node.args) >= 2
+            and not node.keywords
+        ):
+            args = [visit(a) for a in node.args]
+            if not all(isinstance(a, (int, float)) and not isinstance(a, bool) for a in args):
+                msg = f"{node.func.id}() of something other than numbers in gcode template expression {expr!r}"
+                raise ValueError(msg)
+            return max(args) if node.func.id == "max" else min(args)
         elif isinstance(node, ast.Compare) and len(node.ops) == 1:
             left = visit(node.left)
             right = visit(node.comparators[0])
@@ -994,13 +1033,27 @@ def _eval_template_expr(expr: str, variables: dict[str, Any]) -> Any:
     return visit(tree)
 
 
+def _indent_of(line: str) -> str:
+    """The leading whitespace BambuStudio leaves where a guard line was."""
+    return line[: len(line) - len(line.lstrip())]
+
+
+def _template_variable(name: str, variables: dict[str, Any], line: str) -> str:
+    """A ``[name]`` placeholder's value, or a refusal naming it."""
+    if name not in variables:
+        msg = f"Gcode template line {line.strip()!r} needs {name!r}, which Kiln has no value for."
+        raise ValueError(msg)
+    return _format_template_number(variables[name])
+
+
 def _expand_end_template(template: str, variables: dict[str, Any]) -> str:
     """Expand a BambuStudio end-gcode template's conditionals and expressions.
 
-    Whitespace follows BambuStudio's own output, which the A1 ground-truth
-    diff pins exactly: an ``{if}`` or ``{endif}`` guard becomes a blank line,
-    an ``{else}`` and every line of the branch not taken disappear, and the
-    branch that is taken keeps its original indentation.
+    Whitespace follows BambuStudio's own output, which the A1 and H2C
+    ground-truth diffs pin exactly: an ``{if}`` or ``{endif}`` guard becomes a
+    blank line that keeps the guard's own indentation, an ``{else}`` and every
+    line of the branch not taken disappear, and the branch that is taken keeps
+    its original indentation.  ``[name]`` is a plain variable.
 
     A template with no braces — the proven A1 capture — comes back unchanged.
 
@@ -1021,7 +1074,7 @@ def _expand_end_template(template: str, variables: dict[str, Any]) -> str:
             active = bool(_eval_template_expr(if_match.group("cond"), variables)) if parent else False
             stack.append((active, parent))
             if parent:
-                out.append("")
+                out.append(_indent_of(line))
             continue
         if _TPL_ELSE_RE.match(line):
             if not stack:
@@ -1036,23 +1089,42 @@ def _expand_end_template(template: str, variables: dict[str, Any]) -> str:
                 raise ValueError(msg)
             _, parent = stack.pop()
             if parent:
-                out.append("")
+                out.append(_indent_of(line))
             continue
         if not emitting():
             continue
-        out.append(
-            _TPL_EXPR_RE.sub(
-                lambda m: _format_template_number(
-                    _eval_template_expr(m.group("expr"), variables)
-                ),
-                line,
-            )
+        expanded = _TPL_EXPR_RE.sub(
+            lambda m: _format_template_number(
+                _eval_template_expr(m.group("expr"), variables)
+            ),
+            line,
         )
+        out.append(_TPL_VAR_RE.sub(
+            lambda m, whole=line: _template_variable(m.group("name"), variables, whole), expanded,
+        ))
 
     if stack:
         msg = f"Gcode template has {len(stack)} unclosed {{if}} block(s)"
         raise ValueError(msg)
     return "\n".join(out)
+
+
+def _end_template_variables(max_z: float, printer_model: str | None) -> dict[str, Any]:
+    """Everything an end template may read, for one print on one model: the
+    part's height, the two slicing flags that are constants for Kiln, the bed
+    centre where the model has one on record, and the model's own entries in
+    :data:`_MODEL_END_VALUES`."""
+    variables: dict[str, Any] = {
+        "max_layer_z": float(max_z),
+        "spiral_mode": _KILN_SPIRAL_MODE,
+        "print_sequence": _KILN_PRINT_SEQUENCE,
+        **_MODEL_END_VALUES.get(_normalize_model(printer_model), {}),
+    }
+    center = _bed_center(printer_model) if printer_model else None
+    if center is not None:
+        # BambuStudio indexes this as a point; the templates only read [1].
+        variables["first_layer_center_no_wipe_tower"] = [center[0], center[1]]
+    return variables
 
 
 def _resolve_end_gcode(
@@ -1085,17 +1157,7 @@ def _resolve_end_gcode(
     :param printer_model: Declared model, used only to look up the bed centre
         for templates that park on it.
     """
-    variables: dict[str, Any] = {
-        "max_layer_z": float(max_z),
-        "spiral_mode": _KILN_SPIRAL_MODE,
-        "print_sequence": _KILN_PRINT_SEQUENCE,
-    }
-    center = _bed_center(printer_model) if printer_model else None
-    if center is not None:
-        # BambuStudio indexes this as a point; the templates only read [1].
-        variables["first_layer_center_no_wipe_tower"] = [center[0], center[1]]
-
-    expanded = _expand_end_template(template, variables)
+    expanded = _expand_end_template(template, _end_template_variables(max_z, printer_model))
 
     safe_z = max_z + 5.0
     resolved = re.sub(
