@@ -106,6 +106,16 @@ class TestTheMemory:
         assert nm.last_rung("a1") is None and nm.is_flagged("a1") is False
         assert not (tmp_path / "kiln-home" / "nozzle_milestones.json").exists()
 
+    def test_an_unreadable_hosted_predicate_remembers_nothing(self, monkeypatch):
+        """The memory is keyed by a name the caller picks, so "am I the
+        shared deploy?" must fail closed: unknown means remember nothing."""
+        import kiln.runtime_env as re_mod
+
+        monkeypatch.setattr(re_mod, "is_hosted_multitenant", lambda: (_ for _ in ()).throw(RuntimeError("no env")))
+        assert nm._hosted() is True
+        assert nm.notice_for("a1", _verdict("approaching")) is not None  # still said
+        assert nm.last_rung("a1") is None  # but nothing written
+
     def test_a_record_that_cannot_be_written_still_lets_the_notice_through(self, monkeypatch):
         monkeypatch.setattr(nm, "_write_all", lambda data: (_ for _ in ()).throw(RuntimeError("disk")))
         assert nm.notice_for("a1", _verdict("approaching")) is not None

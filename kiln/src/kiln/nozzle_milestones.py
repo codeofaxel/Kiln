@@ -76,12 +76,21 @@ def _rank(rung: str | None) -> int:
 
 
 def _hosted() -> bool:
+    """Whether this process is the shared multi-tenant deploy.
+
+    Fails CLOSED: a predicate that cannot be read is treated as hosted, so
+    the answer to "may this machine remember something keyed by a name the
+    caller picked?" is no whenever it is unknown.  The cost of being wrong
+    that way is noise -- a local install says every crossing instead of
+    the first -- and the cost of being wrong the other way is one tenant's
+    memory read as another's.
+    """
     try:
         from kiln.runtime_env import is_hosted_multitenant
 
         return bool(is_hosted_multitenant())
-    except Exception:  # noqa: BLE001
-        return False
+    except Exception:  # noqa: BLE001 -- unknown is hosted; see above
+        return True
 
 
 def _path() -> Path:
