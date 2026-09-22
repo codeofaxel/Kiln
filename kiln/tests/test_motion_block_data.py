@@ -242,6 +242,10 @@ class TestThePublicNoteIsAProductSurface:
             ("CrealityOfficial/K2_Series_Klipper config/F016", "a repository path"),
             ("read 2026-09-16", "a fetch date"),
             ("see the kiln-pro overlay", "a private path or repository"),
+            ("Source: BambuStudio 02.08.02.61 vendor profile bundle", "a slicer build named as a source"),
+            ("its A1 0.4 nozzle template machine_end_gcode.json", "a slicer profile-bundle path"),
+            ("each preset is flattened first", "a capture method"),
+            ("harvested from the HMS index on 2026-09-03", "a research date"),
         ):
             assert any(f.startswith(kind) for f in provenance_findings(text)), (text, provenance_findings(text))
         clean = "`[stepper_z] position_max: 270.1` in the vendor printer.cfg; `Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN` (L513)."

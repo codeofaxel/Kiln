@@ -24,6 +24,9 @@ What the gate scans
   ``kiln/src/kiln/data/scad_libraries/`` are not ours to police and are
   skipped, as are the sibling leak gates, which have to spell out the
   literals they catch (``_SELF``).
+* ``*.gcode`` — every line; a G-code file's comments are prose, and the
+  bundled start and end sequences carry a header that says where they
+  came from.
 * ``kiln/MANIFEST.in`` — the sdist recipe.
 
 The rules, in plain language
@@ -66,6 +69,14 @@ The rules, in plain language
    ``scripts/public_source_pins.txt`` -- a list that may only shrink -- and
    a pin not listed there fails the gate (``--freeze-source-pins``
    rewrites the file from the current tree; commit the diff).
+   The same rule refuses CAPTURE provenance, with no inventory: a slicer
+   build named as the source of a sequence, a path inside a slicer's
+   profile bundle, the method a capture was made with, the date research
+   was done.  A public file says a sequence is the maker's own and carries
+   the licence line; how it was got is the private half.  These are read
+   across a wrapped line -- a block's comment markers dropped and its
+   lines joined -- because a build number split over two lines is the
+   same sentence.
 
 Internal persona / process phrases are ``scripts/check_public_language.py``'s
 rule — it scans the whole tracked tree and commit messages — not this
@@ -96,6 +107,7 @@ the *map* to the private tree.
 from __future__ import annotations
 
 import argparse
+import bisect
 import io
 import os
 import re
@@ -125,7 +137,7 @@ _BINARY_SUFFIXES = frozenset({
     ".tar", ".gz", ".tgz", ".xz", ".bz2", ".7z", ".dmg", ".so", ".dylib",
     ".a", ".o", ".bin", ".woff", ".woff2", ".ttf", ".otf", ".eot", ".mp3",
     ".mp4", ".mov", ".wav", ".webm", ".pyc", ".stl", ".3mf", ".step", ".stp",
-    ".gcode", ".svg",
+    ".svg",
 })
 
 # A leak gate has to spell out the literal it catches, so the gates and their
@@ -530,6 +542,103 @@ _PIN_PREFILTER = re.compile(
 )
 
 
+def _capture_rules() -> tuple[tuple[str, re.Pattern[str]], ...]:
+    """The note contract's capture-provenance patterns, compiled.
+
+    No fallback: a gate that cannot read its vocabulary must fail, not pass
+    everything quietly.
+    """
+    import importlib.util
+
+    path = _ROOT / "kiln" / "src" / "kiln" / "data_note_contract.py"
+    spec = importlib.util.spec_from_file_location("kiln_data_note_contract_for_capture", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple((name, re.compile(pattern)) for name, pattern in module.CAPTURE_PROVENANCE_PATTERNS)
+
+
+_CAPTURE_RULES = _capture_rules()
+# A cheap superset of the capture rules, so a file that cannot trip them is
+# never read block by block for them: a profile-bundle path or template
+# field name, "flatten", a template field or file, a slicer build (its name
+# and number possibly split by a wrapped comment line), or a research verb
+# together with a date or a command line.  Literal tokens are checked on the
+# lowered text first; a regex runs only where its words are present.
+_WRAP = r"[\s#:;/*>]+"
+_CAPTURE_LITERALS = (
+    "profiles/", ".app/contents", "machine_start_gcode", "machine_end_gcode", "machine_pause_gcode",
+    "change_filament_gcode", "layer_change_gcode", "time_lapse_gcode", "flatten",
+)
+_TEMPLATE_FIELD = re.compile(r"template" + _WRAP + r"(?:fields?|files?)", re.IGNORECASE)
+_SLICER_WORDS = ("studio", "slicer", "cura", "creality")
+_SLICER_BUILD_ANCHOR = re.compile(
+    r"(?:Studio|Slicer|Print|Cura)(?:['’]s)?" + _WRAP + r"v?\d{1,2}\.\d{1,2}\.\d", re.IGNORECASE
+)
+_CAPTURE_VERB_WORDS = (
+    "captured", "harvested", "extracted", "fetched", "pulled", "copied", "scraped", "lifted", "came", "taken",
+)
+_CAPTURE_CONTEXT = re.compile(
+    r"\b20\d\d-\d\d-\d\d\b|\bcommand[\s#:;/*>-]+line\b|\bCLI\b|\bheadless\b", re.IGNORECASE
+)
+
+
+def _may_carry_capture(text: str) -> bool:
+    low = text.lower()
+    if any(token in low for token in _CAPTURE_LITERALS):
+        return True
+    if "template" in low and _TEMPLATE_FIELD.search(text):
+        return True
+    if any(word in low for word in _SLICER_WORDS) and _SLICER_BUILD_ANCHOR.search(text):
+        return True
+    return any(verb in low for verb in _CAPTURE_VERB_WORDS) and bool(_CAPTURE_CONTEXT.search(text))
+
+
+# A comment or quote marker at the start of a line, and the indent before it.
+_LINE_MARKER = re.compile(r"^\s*(?:#+:?|;+|//+|\*+|>+)?\s*")
+
+
+def _flattened(block: str) -> tuple[str, list[int]]:
+    """*block* as the sentence a reader sees -- each line's comment marker
+    dropped, the lines joined by spaces -- and where each line starts in it,
+    so a rule reads across a wrapped line and still reports the line."""
+    parts: list[str] = []
+    starts: list[int] = []
+    at = 0
+    for raw in block.split("\n"):
+        line = _LINE_MARKER.sub("", raw, count=1).rstrip()
+        starts.append(at)
+        parts.append(line)
+        at += len(line) + 1
+    return " ".join(parts), starts
+
+
+def _capture_provenance(block: str) -> list[tuple[int, str, str]]:
+    """``(line offset, rule, matched text)`` for every capture-provenance
+    marker in one comment block, docstring or paragraph."""
+    text, starts = _flattened(block)
+    found: list[tuple[int, str, str]] = []
+    for rule, rx in _CAPTURE_RULES:
+        for m in rx.finditer(text):
+            found.append((bisect.bisect_right(starts, m.start()) - 1, rule, m.group(0)))
+    return found
+
+
+def _paragraphs(text: str):
+    """Yield ``(start_line, text)`` for each run of non-blank lines."""
+    block: list[str] = []
+    start = 0
+    for i, line in enumerate(text.splitlines(), 1):
+        if line.strip():
+            if not block:
+                start = i
+            block.append(line)
+        elif block:
+            yield start, "\n".join(block)
+            block = []
+    if block:
+        yield start, "\n".join(block)
+
+
 def _is_prose_block(block: str) -> bool:
     """A comment block or a docstring -- never a data string literal (a
     fixture URL, an XML namespace, a checkout link a test asserts on)."""
@@ -632,6 +741,14 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
         if not _allowlisted(name, snippet):
             leaks.append((rel, line, rule, snippet.strip()))
 
+    tokenized: dict[str, list[tuple[int, str]]] = {}
+
+    def py_blocks() -> list[tuple[int, str]]:
+        """The file's comment blocks and docstrings, tokenized once."""
+        if "blocks" not in tokenized:
+            tokenized["blocks"] = list(_blocks_from_bytes(data))
+        return tokenized["blocks"]
+
     # Text rules — every line of every scanned file (skipped wholesale when
     # the file contains no candidate substring at all).
     if _LINE_PREFILTER.search(text):
@@ -650,7 +767,7 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
     # file mentions the private tier at all (a block can't trip otherwise).
     # Self-label and private-path reasons are already reported line by line.
     if is_py and (_PRO_MENTION.search(text) or broad):
-        for line, block in _blocks_from_bytes(data):
+        for line, block in py_blocks():
             reason = _leak_reason(block, broad=broad)
             if reason in ("strategy", "provenance", "broad"):
                 hit(line, "overlay narration", block)
@@ -662,7 +779,7 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
     if rel not in _SELF and _PIN_PREFILTER.search(text):
         frozen_pins = _frozen_pins_cached()
         if is_py:
-            blocks = _blocks_from_bytes(data)
+            blocks = py_blocks()
         else:
             # Every line of a non-Python text file is prose: docs, policies,
             # workflows, configs, a launcher's README.
@@ -674,6 +791,17 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
             for rule, matched in _research_pins(block, prose_only=is_py, repos=repos):
                 if _pin_key(rel, matched) not in frozen_pins:
                     hit(line, "research provenance", f"{rule}: {matched}")
+
+    # Capture provenance — the same prose, read a block or paragraph at a
+    # time so a sentence wrapped over two lines is still one sentence.  No
+    # inventory: nothing of this kind is grandfathered.
+    if rel not in _SELF and _may_carry_capture(text):
+        blocks = py_blocks() if is_py else _paragraphs(text)
+        for line, block in blocks:
+            if is_py and not _is_prose_block(block):
+                continue
+            for offset, rule, matched in _capture_provenance(block):
+                hit(line + offset, "research provenance", f"{rule}: {matched}")
 
     # Shipped-data rules — data JSON (and test JSON fixtures) line by line.
     if is_shipped_json:

@@ -35,6 +35,52 @@ COMMUNITY_ACCOUNTS = (
     r"open-bamboo-networking|ha-bambulab|pybambu|bambuddy|bambino|OpenCentauri)\b"
 )
 
+#: A slicer by name, and a slicer build: the name followed by a three- or
+#: four-part version.
+_SLICER_APP = (
+    r"(?:Bambu ?Studio|Orca ?Slicer|Prusa ?Slicer|Super ?Slicer|Creality Print|Elegoo ?Slicer|"
+    r"QIDI ?Studio|Anycubic Slicer|(?:UltiMaker )?Cura)"
+)
+_SLICER_BUILD = _SLICER_APP + r"(?:['’]s)?\s+v?\d{1,2}\.\d{1,2}\.\d{1,3}(?:\.\d{1,3})?\b"
+_RESEARCH_VERB = r"(?:captured|harvested|extracted|fetched|pulled|copied|scraped|lifted)"
+
+#: How a vendor sequence or value was captured, as opposed to what it is.
+#: A public file may say a value is the maker's own -- its source CLASS --
+#: and carry the licence line; the build it was read from, the path inside
+#: the slicer's profile bundle, the capture method and the date the work was
+#: done are the private half.  One list, shared with the comment-leak gate,
+#: which applies it to comments, docstrings, docs and G-code headers, and
+#: with the commit-message audit.  Every pattern is scoped case-insensitive
+#: so the list can be joined into one alternation.
+CAPTURE_PROVENANCE_PATTERNS: tuple[tuple[str, str], ...] = (
+    (
+        "a slicer build named as a source",
+        r"(?i:(?:\b(?:sourced? from|captured|copied|harvested|extracted|lifted|taken from|"
+        r"read (?:off|from))\b|\bsource:)[^\n]{0,70}?" + _SLICER_BUILD
+        + r"|\bfrom (?:the |its |an? )?" + _SLICER_BUILD
+        + r"|" + _SLICER_BUILD + r"[^\n]{0,50}?\b(?:vendor profile bundle|profile bundle|slice the|"
+        r"capture|captured|read off)\b)",
+    ),
+    (
+        "a slicer profile-bundle path",
+        r"(?i:\bprofiles/[\w .<>-]+/(?:machine|process|filament)\b|\btemplate (?:machine_start_gcode|"
+        r"machine_end_gcode|change_filament_gcode|layer_change_gcode|time_lapse_gcode|"
+        r"machine_pause_gcode)\.json|\.app/Contents/Resources/profiles\b)",
+    ),
+    (
+        "a capture method",
+        r"(?i:\b(?:came from|captured from|captured with|taken from|captured)\b[^\n]{0,70}?"
+        r"\b(?:command line|command-line|CLI|headless)\b|\bpresets?\b[^\n]{0,25}?\bflatten(?:ed|s|ing)?\b"
+        r"|\bflatten(?:ed|s|ing)?\b[^\n]{0,25}?\bpresets?\b|\btemplate (?:fields?|files?)\b[^\n]{0,25}?"
+        r"\bmerged\b|\bmerg(?:e|es|ed|ing)\b[^\n]{0,25}?\btemplate (?:fields?|files?)\b)",
+    ),
+    (
+        "a research date",
+        r"(?i:\b" + _RESEARCH_VERB + r"\b[^\n]{0,50}?\bfrom\b[^\n]{0,60}?\b20\d\d-\d\d-\d\d\b"
+        r"|\b" + _RESEARCH_VERB + r"\b[^\n]{0,20}?\b20\d\d-\d\d-\d\d\b[^\n]{0,30}?\bfrom\b)",
+    ),
+)
+
 #: Markers of research provenance or process.  Each is a thing a public note
 #: has no business saying; the Kiln Pro overlay keeps the full text.
 PROVENANCE_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -49,7 +95,7 @@ PROVENANCE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("a repository path", r"\bgithub\b|CrealityOfficial|VoronDesign|QIDITECH|eufymake"),
     ("a fetch date", r"\bread 20\d\d-\d\d-\d\d\b"),
     ("a private path or repository", r"/Users/|scratchpad|kiln-pro|kiln_pro"),
-)
+) + CAPTURE_PROVENANCE_PATTERNS
 
 #: The one place a bundled catalogue carries links on purpose: where a
 #: material can be bought, keyed under ``sources`` in the material catalogue.

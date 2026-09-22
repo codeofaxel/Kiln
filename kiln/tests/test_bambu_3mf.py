@@ -2372,10 +2372,9 @@ class TestEndTemplateExpansion:
         ]
 
     def test_the_h2c_end_expands_to_bambustudios_own_output_line_for_line(self):
-        """The H2C's ground truth, the way the A1's is its proven capture:
-        BambuStudio 02.08.02.61's own end block from the slice the H2C's start
-        capture was taken from (a 20 mm cube, Generic PLA at 220C), kept in
-        kiln/tests/data so the check runs without BambuStudio installed.  The
+        """The H2C's ground truth, the way the A1's is its proven capture: the
+        maker's own slicer's end block for a 20 mm cube, kept in
+        kiln/tests/data so the check runs without that slicer installed.  The
         shipped template, expanded with exactly the values a real print gets,
         must reproduce it -- whitespace included."""
         from kiln.printers.bambu_3mf import _end_template_variables, _expand_end_template, _select_end_gcode

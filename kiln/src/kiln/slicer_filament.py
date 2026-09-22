@@ -32,7 +32,7 @@ The density always comes from the one materials table Kiln already has,
 -- the same lookup the after-the-fact fill uses, so the two can never
 disagree about what a spool weighs.
 
-How each slicer takes it, read off the binaries on this machine:
+How each slicer takes it:
 
 * PrusaSlicer 2.9.4 ``--help-fff``: ``--filament-density N`` "Enter your
   filament density here. This is only for statistical information ...
@@ -46,10 +46,9 @@ How each slicer takes it, read off the binaries on this machine:
 * OrcaSlicer 2.3.2 ``--help`` lists no such flag; the FILAMENT preset it
   loads with ``--load-filaments`` carries ``"filament_density": ["1.24"]``
   (one entry per extruder) beside ``filament_diameter`` and
-  ``filament_type``, exactly as its own bundled
-  ``profiles/BBL/filament/fdm_filament_pla.json`` does.  Verified: a preset
-  carrying ``["1.27"]`` made the cube leave with ``; filament used [g] =
-  4.23``.  :mod:`kiln.slicer_orca` serializes the same three keys.
+  ``filament_type``, exactly as its own bundled PLA preset does.  Verified:
+  a preset carrying ``["1.27"]`` made the cube leave with ``; filament used
+  [g] = 4.23``.  :mod:`kiln.slicer_orca` serializes the same three keys.
 """
 
 from __future__ import annotations

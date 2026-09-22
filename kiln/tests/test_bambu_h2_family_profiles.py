@@ -161,9 +161,8 @@ def test_x2d_keeps_the_lower_hotend_ceiling_of_its_own_class():
 
 # --- BambuStudio model_id detection ---------------------------------------
 #
-# Read from the installed BambuStudio's own machine profiles
-# (Contents/Resources/profiles/BBL/machine/*.json, field "model_id"), which is
-# the same source the map's own comment cites.
+# Per the maker's own machine profiles, the same source the map's own comment
+# cites.
 
 
 @pytest.mark.parametrize(
@@ -234,10 +233,7 @@ def test_every_new_machine_is_reachable_by_all_three_identifier_kinds(model: str
 
 # --- per-material temperatures -------------------------------------------
 #
-# Derived from BambuStudio's own machine-specific filament profiles
-# (profiles/BBL/filament/"<filament> @BBL <TAG>[ 0.4 nozzle]".json, following
-# each profile's `inherits` chain).  The method was validated by rebuilding
-# the H2S map Kiln already ships: hotend matched 10/11 and bed 10/11.  Fan is
+# Per the maker's own machine-specific filament profiles.  Fan is
 # NOT taken from the vendor profile -- it is a per-material constant in Kiln,
 # identical across every Bambu machine in the catalogue, so it is read from
 # that existing convention rather than re-derived.

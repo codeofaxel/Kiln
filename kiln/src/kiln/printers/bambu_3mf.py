@@ -25,23 +25,22 @@ The proven pipeline:
 
 Tested and verified on the Bambu Lab A1 Combo (firmware 01.08.03.00).
 
-Where the templates come from, and why start and end differ
+Where the sequences come from, and why start and end differ
 -----------------------------------------------------------
-BambuStudio ships its start/end G-code per model as template files in
-``profiles/BBL/machine/"Bambu Lab <MODEL> <NOZZLE> nozzle template
-machine_{start,end}_gcode.json"``.  Those templates are UNRESOLVED: they
-carry BambuStudio's own expression language --- ``[bed_temperature_initial_layer_single]``,
+Every sequence here is Bambu Lab's own, as the maker's slicer ships it for
+that machine.  The end sequences are the maker's TEMPLATES, copied verbatim:
+they carry the slicer's own expression language ---
+``[bed_temperature_initial_layer_single]``,
 ``{nozzle_temperature_initial_layer[initial_extruder]}``, and
-``{if ...}{else}{endif}`` blocks.
+``{if ...}{else}{endif}`` blocks --- which this module resolves at build time.
 
-``bambu_a1_start_gcode.gcode`` and ``bambu_a1_end_gcode.gcode`` are NOT those
-templates.  They are post-expansion captures taken from a real BambuStudio
-slice of the same bundle version (both carry the bundle's own
-``;===== date:`` stamps), which is why they hold literal values and no
-placeholders, and why they are 20-odd lines longer than the templates: they
-also contain the slicer's injected preamble (``M201``/``M203`` machine limits,
-``M73`` progress) and postamble (``; MACHINE_END_GCODE_END``, spaghetti
-detector).  They are the A1-proven artifacts and are left exactly as they are.
+``bambu_a1_start_gcode.gcode`` and ``bambu_a1_end_gcode.gcode`` are NOT
+templates.  They are what a real slice with the maker's own profile wrote,
+which is why they hold literal values and no placeholders, and why they are
+20-odd lines longer than the templates: they also contain the slicer's
+injected preamble (``M201``/``M203`` machine limits, ``M73`` progress) and
+postamble (``; MACHINE_END_GCODE_END``, spaghetti detector).  They are the
+A1-proven artifacts and are left exactly as they are.
 
 The end capture is no longer what an A1 receives, though.  A capture holds
 the numbers of the one print it was taken from, and two of the end block's
@@ -49,13 +48,13 @@ lifts are the part's own height: this one froze "100 mm above the part" as
 ``Z165``/``Z163``, so after any A1 print taller than about 188 mm the end
 sequence lifted clear and then drove the gantry back down, and the X rail --
 25 mm above the nozzle, across the plate -- came down on the part.  The A1
-is now served ``bambu_a1_end_template.gcode``: Bambu's template stamped
-20231229, the one the capture was taken from, inside the capture's own
-slicer lines.  Filled in at 65 mm it is the capture byte for byte; at every
-other height it is Bambu's own routine.  The capture stays, as the reference
-that pins exactly that.
+is now served ``bambu_a1_end_template.gcode``: Bambu's own A1 end template,
+the same version as the capture, inside the capture's own slicer lines.
+Filled in at 65 mm it is the capture byte for byte; at every other height it
+is Bambu's own routine.  The capture stays, as the reference that pins
+exactly that.
 
-That provenance is what splits start from end here:
+That is what splits start from end here:
 
 * **End G-code is per model.**  Across every model's end template the only
   variable is ``max_layer_z`` --- a value this module already computes from
@@ -64,32 +63,11 @@ That provenance is what splits start from end here:
   each supported model ships its own end template and
   :func:`_resolve_end_gcode` expands it at build time.
 * **Start G-code is per model too, and is captured rather than resolved.**
-  The start templates carry ~10 values BambuStudio *computes during slicing*
-  and stores nowhere --- the AMS flush temperature and volumetric speed are
-  emitted into ``M620.10``, and ``min_vitrification_temperature``,
-  ``overall_chamber_temperature`` and ``hold_chamber_temp_for_flat_print``
-  choose between chamber-cooling, bed-levelling and heating branches.  Those
-  cannot be resolved from the bundle: they are absent from the machine and
-  filament JSON and from every ``inherits`` parent.  So they are not resolved.
-  Each model's sequence is captured post-expansion from a real BambuStudio
-  slice, the same provenance as the A1 files, and BambuStudio itself picks the
-  flush values and the branches.  No number here was chosen by hand.
-
-  The captures taken 2026-09-22 (A2L, H2D, H2D Pro, H2C, X2D) came from
-  BambuStudio 02.08.02.61's own command line rather than its window, and the
-  command line needs two things the window does for itself.  It does not merge
-  the ``"<machine> template <field>.json"`` files, so a system preset handed
-  to it slices with a two-line generic start (``G28`` and a lift) and reports
-  success.  And it does not follow ``inherits`` for a preset it is handed as a
-  file, so it falls back to built-in defaults: a blank ``printer_model``, a
-  2 mm3/s flow limit, halved machine limits.  So each preset is flattened
-  first -- the ``inherits`` chain walked inside the BBL directory, merged
-  parent-first -- and the template fields are merged in, Generic PLA at 220C
-  on a textured plate, as every earlier capture was.  Checked against the
-  window: the H2S captured this way matches the shipped H2S capture line for
-  line, bar one remaining-time estimate; the A1 mini matches but for the
-  time estimates and one ``M201`` that BambuStudio's own engine lowered from
-  the preset's 20000 to 6000.
+  The start templates depend on values the slicer works out while it slices
+  and stores nowhere, and those pick the flush and the chamber, levelling
+  and heating branches.  So each model's start is the sequence the maker's
+  own slicer wrote for it: the slicer itself picks the flush values and the
+  branches, and no number here was chosen by hand.
 
   What that buys is not cosmetic.  The A1 and A1 mini are bed-slingers whose
   startup drives X negative --- 54 and 33 such moves --- with ``M211 X0 Y0 Z0``
@@ -98,7 +76,7 @@ That provenance is what splits start from end here:
   the P1P/P1S around X65 Y230).  Wrapping a P2S print in the A1 sequence sent
   a CoreXY machine off the front of its own bed with the endstops off.
 
-Nozzle size is where start and end differ.  The bundle publishes end G-code at
+Nozzle size is where start and end differ.  The maker publishes end G-code at
 the 0.4 nozzle only --- one file per model, no per-nozzle variant --- so the end
 template a 0.6 owner gets is the only one that exists rather than a 0.4 file
 standing in for theirs.  Start G-code is the opposite: P1P, P1S, X1 Carbon and
@@ -188,8 +166,6 @@ _MODEL_START_GCODE_FILES: dict[tuple[str, str], str] = {
     ("bambu_x1c", "0.4"): "bambu_x1c_start_gcode.gcode",
     ("bambu_x1e", "0.4"): "bambu_x1e_start_gcode.gcode",
     ("bambu_h2s", "0.4"): "bambu_h2s_start_gcode.gcode",
-    # Captured 2026-09-22 from BambuStudio 02.08.02.61's own command line (see
-    # the module docstring for how, and how the method was checked).
     ("bambu_a2l", "0.4"): "bambu_a2l_start_gcode.gcode",
     ("bambu_h2d", "0.4"): "bambu_h2d_start_gcode.gcode",
     ("bambu_h2d_pro", "0.4"): "bambu_h2d_pro_start_gcode.gcode",
@@ -208,9 +184,7 @@ _MODEL_START_GCODE_FILES: dict[tuple[str, str], str] = {
 # That somewhere is a PER-MODEL FACT and it is not the same on two machines:
 # the A1 cuts and drops into a chute off the plate's LEFT edge at X-48.2, the
 # A1 mini's is at X-13.5, and the X1/P1 family has no single point at all --
-# the vendor's own ``change_filament_gcode`` purges across
-# ``M620.1 X[travel_point_1_x] Y[travel_point_1_y]`` placeholders that only
-# BambuStudio can fill.
+# the vendor's own colour change purges at points only its slicer works out.
 #
 # WHY THERE IS ONE ENTRY.  Kiln's block is not the vendor's block.  The A1's
 # vendor block purges on the RIGHT, at X267 Y128, and only then travels to the
@@ -259,15 +233,14 @@ _MODEL_END_GCODE_FILES: dict[str, str] = {
 #: The H2C's end pulls the filament back into the AMS, and its template asks
 #: how: which filament and hotend, how far, how fast.  None of these moves the
 #: head -- every X, Y and Z in the block is the part's own height, which Kiln
-#: already has.  They are read from the BambuStudio 02.08.02.61 slice the
-#: H2C's start capture was taken from (Generic PLA at 220C on a textured
-#: plate): ``M620.11 P1 I0 B-1 E-14 F299.339`` in that slice's own end block.
-#: Expanding the template with them at that slice's height reproduces its end
-#: block line for line, which ``kiln/tests/data`` pins.  Like the flush values
-#: inside every start capture, they are Generic PLA's: filament 0 because a
-#: multi-colour H2C file is refused before it is built, hotend -1 because that
-#: is what BambuStudio writes for one filament, and the 12 mm3/s flush speed
-#: and 14 mm cut retraction the Generic PLA preset gives the H2C.
+#: already has.  They are what the maker's own slicer writes for the H2C with
+#: the same filament as its start sequence, and expanding the template with
+#: them reproduces that slicer's own end block line for line, which
+#: ``kiln/tests/data`` pins.  Like the flush values inside every start
+#: sequence, they are Generic PLA's: filament 0 because a multi-colour H2C
+#: file is refused before it is built, hotend -1 because that is what the
+#: slicer writes for one filament, and the 12 mm3/s flush speed and 14 mm cut
+#: retraction the Generic PLA preset gives the H2C.
 _MODEL_END_VALUES: dict[str, dict[str, Any]] = {
     "bambu_h2c": {
         "current_filament_id": 0,
@@ -671,7 +644,7 @@ def _assert_fully_resolved(gcode: str, *, source: str) -> None:
 # Only 220°C (PLA print temp) and 65°C (PLA bed temp) are parametric.
 
 
-_CAPTURE_HOTEND_TEMP = 220  # every capture was taken with Generic PLA at 220C
+_CAPTURE_HOTEND_TEMP = 220  # every start sequence here holds PLA's 220C
 
 #: What a settings field falls back to when neither the caller nor the
 #: G-code says: PLA on the A1, the values every capture was taken with.
@@ -680,9 +653,8 @@ _FALLBACK_BED_TEMP = 65
 _FALLBACK_FILAMENT_TYPE = "PLA"
 
 #: The filament types Bambu's firmware is written to -- every distinct
-#: ``filament_type`` across the 1,575 filament presets bundled with Bambu
-#: Studio 02.06.00.51 (profiles 02.06.00.01, read off this machine's app
-#: bundle 2026-09-20).  ``M1002 set_filament_type:`` in the start sequence
+#: ``filament_type`` across the filament presets the maker's own slicer
+#: ships.  ``M1002 set_filament_type:`` in the start sequence
 #: and ``<filament type="…">`` in ``slice_info.config`` are read by the
 #: machine, so a word outside this list is mapped onto it or, failing that,
 #: sent as ``PLA`` -- what every Kiln wrap told the printer before the type

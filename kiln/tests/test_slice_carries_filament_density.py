@@ -10,7 +10,7 @@ printer and named no filament.  OrcaSlicer 2.3.2 did the same
 the length; that repair stays as the safety net, and these tests pin that
 a Kiln-sliced file no longer needs it.
 
-How each slicer takes the density, read off the binaries here:
+How each slicer takes the density:
 
 * PrusaSlicer 2.9.4 ``--help-fff``: ``--filament-density N`` "(g/cm³,
   default: 0)", ``--filament-diameter N`` "(mm, default: 1.75)",
@@ -19,7 +19,7 @@ How each slicer takes the density, read off the binaries here:
   G-code footer (``; filament_density = 1.27``).
 * OrcaSlicer 2.3.2: no such flag on ``--help``; the FILAMENT preset
   carries ``"filament_density": ["1.24"]``, one entry per extruder, as
-  its own ``profiles/BBL/filament/fdm_filament_pla.json`` does.
+  its own bundled PLA preset does.
 """
 
 from __future__ import annotations

@@ -165,6 +165,34 @@ def test_a_commit_message_carrying_research_provenance_is_refused() -> None:
         assert [f.rule for f in findings] == ["research provenance"], text
 
 
+def test_a_commit_message_naming_how_a_sequence_was_captured_is_refused() -> None:
+    """The history is as public as the tree: which slicer build a sequence
+    was read from, the file inside its profile bundle, the capture method
+    and the date the work was done are the same trail in a message."""
+    for text in (
+        "Captured from BambuStudio 02.08.02.61's own command line",
+        'Source: "Bambu Lab H2C 0.4 nozzle template machine_end_gcode.json"',
+        "Each preset is flattened first, then the template fields are merged in",
+        "harvested from the HMS index on 2026-09-03",
+    ):
+        findings = _GATE.find_violations(text, source="abcd123", commit_message=True)
+        assert [f.rule for f in findings] == ["research provenance"], text
+    # A body wraps at 72 columns; a build split over two lines is one
+    # sentence, reported once, on the line it starts on.
+    wrapped = "Pin the H2C end.\n\nThe values are read from the BambuStudio\n02.08.02.61 slice the start came from.\n"
+    findings = _GATE.find_violations(wrapped, source="abcd123", commit_message=True)
+    assert [(f.line, f.rule) for f in findings] == [(3, "research provenance")]
+
+
+def test_a_commit_may_say_whose_a_sequence_is() -> None:
+    for text in (
+        "Every Bambu printer now starts and finishes each print the way Bambu designed it",
+        "OrcaSlicer 2.3.2 and BambuStudio 02.06.00.51 both reject --export-gcode",
+        "The end sequence is the maker's own, expanded at the part's height",
+    ):
+        assert _GATE.find_violations(text, source="abcd123", commit_message=True) == [], text
+
+
 def test_a_dependency_bump_and_kilns_own_links_pass_the_commit_rule() -> None:
     for text in (
         "Bumps stripe from 15.6.0 to 15.6.1 (https://github.com/stripe/stripe-python)",

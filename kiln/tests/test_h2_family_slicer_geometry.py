@@ -14,9 +14,8 @@ uncited claims about someone else's hardware.  This file makes the
 machine-specific subset explicit, so adding a printer by copying one again
 fails here rather than at somebody's nozzle.
 
-Values below are read from the vendor's own shipped machine profiles
-(BambuStudio ``resources/profiles/BBL/machine/<model> 0.4 nozzle.json``)
-and from each model's published specifications.
+Values below are read from the vendor's own shipped machine profiles and
+from each model's published specifications.
 """
 from __future__ import annotations
 

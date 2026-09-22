@@ -14,6 +14,7 @@ pre-push hook; this file only closes the commit-time door.
 from __future__ import annotations
 
 import argparse
+import bisect
 import os
 import re
 import subprocess
@@ -178,7 +179,10 @@ _COMMIT_RULES = (
 
 def _commit_provenance_rule() -> Rule:
     """Research provenance in a commit message: a source file:line pin, a
-    wiki or forum page, a community account or client, a fetch date.
+    wiki or forum page, a community account or client, a fetch date, and
+    how a vendor sequence was captured -- the slicer build it was read
+    from, the path inside the slicer's profile bundle, the capture method,
+    the date the work was done.
 
     The public repository's history is as public as its tree; a pin in a
     message is the same trail a comment is refused for.  A repository link
@@ -187,12 +191,14 @@ def _commit_provenance_rule() -> Rule:
     The vocabulary is ``kiln.data_note_contract``'s, read from this tree.
     """
     accounts = r"\b(?:pellcorp|Guilouz|TheFeralEngineer|artillery3dlab|fpnewton|Doridian|OpenBambuAPI)\b"
+    capture = ""
     try:
         contract = _load_module(
             "kiln_data_note_contract_for_commit", _ROOT / "kiln" / "src" / "kiln" / "data_note_contract.py",
         )
         accounts = str(contract.COMMUNITY_ACCOUNTS)
-    except Exception:
+        capture = "".join("|" + pattern for _name, pattern in contract.CAPTURE_PROVENANCE_PATTERNS)
+    except Exception:  # noqa: BLE001 -- a tree without the contract has nothing to judge by
         pass
     return Rule(
         "research provenance",
@@ -201,9 +207,34 @@ def _commit_provenance_rule() -> Rule:
             r"|\b(?:wiki|forum|forums|community|discuss)\.[\w.-]+\.(?:com|org|io|net|dev|cn)/[\w./#?=%-]+"
             r"|reddit\.com/r/[\w/]+"
             r"|\bread 20\d\d-\d\d-\d\d\b"
-            r"|" + accounts,
+            r"|" + accounts + capture,
         ),
     )
+
+
+def _wrapped_findings(text: str, source: str, rule: Rule, found: list[Finding]) -> list[Finding]:
+    """*rule* read a paragraph at a time.  A commit body wraps at 72 columns,
+    and a slicer build split over two lines is still one sentence; a match
+    the line-by-line pass already reported is not reported twice."""
+    seen = {(f.line, f.rule) for f in found}
+    lines = text.splitlines()
+    extra: list[Finding] = []
+    start = 0
+    for end in range(len(lines) + 1):
+        if end < len(lines) and lines[end].strip():
+            continue
+        if end - start > 1:
+            joined, offsets = "", []
+            for line in lines[start:end]:
+                offsets.append(len(joined))
+                joined += line.strip() + " "
+            for match in rule.pattern.finditer(joined):
+                line_number = start + bisect.bisect_right(offsets, match.start())
+                if (line_number, rule.name) not in seen:
+                    seen.add((line_number, rule.name))
+                    extra.append(Finding(source, line_number, rule.name, match.group(0)))
+        start = end + 1
+    return extra
 
 
 def find_violations(
@@ -214,7 +245,8 @@ def find_violations(
 ) -> list[Finding]:
     """Return public-language violations in ``text``."""
     findings: list[Finding] = []
-    rules = _PUBLIC_RULES + (_COMMIT_RULES + (_commit_provenance_rule(),) if commit_message else ())
+    provenance = _commit_provenance_rule() if commit_message else None
+    rules = _PUBLIC_RULES + (_COMMIT_RULES + (provenance,) if provenance is not None else ())
 
     suffix = Path(source).suffix.lower()
 
@@ -230,6 +262,8 @@ def find_violations(
                 findings.append(
                     Finding(source, line_number, rule.name, line.strip())
                 )
+    if provenance is not None:
+        findings.extend(_wrapped_findings(text, source, provenance, findings))
     return findings
 
 

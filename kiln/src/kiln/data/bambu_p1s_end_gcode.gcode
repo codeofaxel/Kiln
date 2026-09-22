@@ -1,7 +1,7 @@
 ; Bambu Lab P1S end G-code.
 ;
-; Source: BambuStudio 02.06.00.51 vendor profile bundle, file
-;   profiles/BBL/machine/"Bambu Lab P1S 0.4 nozzle template machine_end_gcode.json".
+; Source: Bambu Lab's own end sequence for this machine, from the vendor
+; profile bundle its slicer ships.
 ; BambuStudio is licensed AGPL-3.0 and Kiln is licensed AGPL-3.0, so
 ; redistributing this sequence here is license-compatible.
 ;

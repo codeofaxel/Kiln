@@ -268,6 +268,63 @@ def test_catches_each_provenance_class() -> None:
     assert found
 
 
+def test_catches_how_a_vendor_sequence_was_captured() -> None:
+    """The bundled end sequences named the slicer build and the file inside
+    its profile bundle they came from, and a docstring gave the capture
+    method step by step -- a recipe in a header.  A sequence may say it is
+    the maker's own; how it was got stays private."""
+    cases = {
+        "a slicer build named as a source": (
+            "kiln/src/kiln/data/bambu_x_end_gcode.gcode",
+            "; Bambu Lab X end G-code.\n;\n; Source: BambuStudio 02.08.02.61 vendor profile bundle, file\nM400\n",
+        ),
+        "a slicer profile-bundle path": (
+            "kiln/src/kiln/data/bambu_x_end_gcode.gcode",
+            ';   profiles/BBL/machine/"Bambu Lab X 0.4 nozzle template machine_end_gcode.json".\nM400\n',
+        ),
+        "a capture method": (
+            "kiln/src/kiln/printers/x.py",
+            '"""The captures came from the slicer\'s own command line, so each\npreset is flattened first."""\n',
+        ),
+        "a research date": ("kiln/src/kiln/printers/x.py", "# harvested from the HMS index on 2026-09-03\nx = 1\n"),
+    }
+    for rule, (rel, text) in cases.items():
+        found = _pins_in(rel, text)
+        assert any(f.startswith(rule + ":") for f in found), (rule, found)
+    # A build number wrapped onto the next comment line is the same sentence,
+    # and the finding names the line it starts on.
+    wrapped = "x = 1\n#: every preset bundled with Bambu\n#: Studio 02.06.00.51 (read off this machine's app bundle)\n"
+    leaks, _ = _GATE.scan_file("kiln/src/kiln/x.py", wrapped.encode())
+    assert [(line, text.split(":")[0]) for _p, line, _r, text in leaks] == [(2, "a slicer build named as a source")]
+    # So is a markdown paragraph.
+    assert _pins_in("kiln/tests/data/README.md", "- the end block BambuStudio\n  02.08.02.61 wrote, from the slice the start came from.\n")
+
+
+def test_a_sequence_may_say_whose_it_is_and_a_version_may_bound_a_claim() -> None:
+    """The source CLASS, the licence line, a version that bounds a behaviour
+    and a bench measurement are not a capture trail; nor is a path the code
+    itself reads."""
+    clean = {
+        "kiln/src/kiln/data/bambu_x_end_gcode.gcode": (
+            "; Bambu Lab X end G-code: the maker's own sequence.\n"
+            "; BambuStudio is licensed AGPL-3.0 and Kiln is licensed AGPL-3.0.\nM400 ; wait\n"
+        ),
+        "kiln/src/kiln/slicer.py": "# OrcaSlicer 2.3.2 and BambuStudio 02.06.00.51: both die in\n# the same place.\nx = 1\n",
+        "kiln/src/kiln/x.py": "# Measured 2026-09-19 on an A1: PrusaSlicer 2.9.4 sliced a cube.\nx = 1\n",
+        "kiln/tests/test_x.py": 'BUNDLE = "/Applications/BambuStudio.app/Contents/Resources/profiles/BBL/machine"\n',
+        "docs/printers.md": "Kiln builds each print with the maker's own start and end sequences.\n",
+    }
+    for rel, text in clean.items():
+        assert _pins_in(rel, text) == [], (rel, _pins_in(rel, text))
+
+
+def test_gcode_is_read_as_text() -> None:
+    """The bundled sequences were outside the gate as ``binary``; a G-code
+    file is text and its comments are prose."""
+    assert ".gcode" not in _GATE._BINARY_SUFFIXES
+    assert _GATE._in_scope("kiln/src/kiln/data/bambu_a1_end_gcode.gcode")
+
+
 def test_allows_kilns_own_hosts_data_strings_and_api_docs() -> None:
     clean = (
         "# See https://kiln3d.com/pricing and github.com/codeofaxel/Kiln/issues\n"

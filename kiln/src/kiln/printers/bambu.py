@@ -548,9 +548,8 @@ def normalize_bambu_hms(code: str) -> tuple[str, int | None, int | None]:
 
 # HMS readings, keyed by the canonical 16-hex code.  Each row is
 # ``(reading, wiki path)``: the reading is the title of that code's own
-# page on wiki.bambulab.com and the path is the page's REAL location,
-# both harvested from the HMS index on 2026-09-03.  The path is stored
-# rather than templated because the model segment is part of a code's
+# page on wiki.bambulab.com and the path is the page's REAL location.  The
+# path is stored rather than templated because the model segment is part of a code's
 # identity -- ``/x1/.../0300_1A00_0002_0002`` is a 404 while
 # ``/a1-mini/.../0300_1A00_0002_0002`` is the page, so a templated
 # "/x1/" link would have been wrong for every A1-only code, which is
@@ -1147,9 +1146,8 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "BBL-A1M": "a1_mini",
     "BBL-A1": "a1",
     "BL-A001": "a1",
-    # BL-P001 is the X1 CARBON and BL-P002 the non-Carbon X1, read from
-    # BambuStudio's own machine profiles (profiles/BBL/machine/*.json,
-    # "model_id").  BL-P001 was mapped to "p1s" here, which is the same class
+    # BL-P001 is the X1 CARBON and BL-P002 the non-Carbon X1, per the maker's
+    # own machine profiles.  BL-P001 was mapped to "p1s" here, which is the same class
     # of error as the "01S" serial row below: a 3MF sliced for an X1 Carbon
     # announced itself as a P1S and the mismatch check answered on the wrong
     # machine.  The P1S's real id is C12.  The plain X1 keeps the x1c family
