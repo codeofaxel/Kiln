@@ -850,7 +850,12 @@ class _DesignReasoningToolsPlugin:
             :param constraints: JSON object mapping param names to constraint dicts.
                 Example: ``{"width": {"min": 20, "max": 50}, "height": {"equals": 30}}``
                 Supported keys: min, max, equals, ratio (e.g. ``{"ratio": ["width", 0.5]}``).
-            :returns: Dict with solved_params, satisfied/violated constraints.
+            :returns: Dict with solved_params, satisfied/violated constraints,
+                plus ``dof`` (how many parameters no constraint pinned),
+                ``free`` (one sentence per unpinned parameter and the value it
+                was left at) and ``defaults_applied``.  Tell the person what
+                was left free rather than silently accepting a default:
+                ``min``/``max`` bound a parameter without choosing it.
             """
             _srv._check_auth("design:optimize")
             import json as _json

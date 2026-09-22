@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-09-21T21:49:05.750528+00:00",
-  "tool_count": 425,
+  "generated": "2026-09-22T02:21:53.587630+00:00",
+  "tool_count": 426,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3964,6 +3964,35 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      }
+    },
+    {
+      "name": "solve_sketch",
+      "description": "Turn a 2D sketch of stated relationships into solved coordinates and OpenSCAD.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_session",
+      "parameters": {
+        "properties": {
+          "sketch": {
+            "title": "Sketch",
+            "type": "string"
+          },
+          "extrude_height": {
+            "default": 0.0,
+            "title": "Extrude Height",
+            "type": "number"
+          }
+        },
+        "required": [
+          "sketch"
+        ],
+        "title": "solve_sketchArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
       }
     },
     {

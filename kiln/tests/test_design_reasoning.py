@@ -15,7 +15,7 @@ Coverage areas:
 - Composition plan from natural language description
 - Template search by keyword
 - Cross-section at plane
-- Constraint solver
+- Constraint solver (including degrees of freedom left unpinned)
 - Merge STL files
 - Edge cases: empty inputs, missing files, invalid planes
 """
@@ -882,6 +882,162 @@ class TestSolveConstraints:
         d = cs.to_dict()
         assert d["template_id"] == "test"
         assert d["solved_params"] == {"w": 20.0}
+
+
+_DOF_TEMPLATES = {
+    "box": {
+        "parameters": {
+            "width": {"default": 30, "min": 10, "max": 100},
+            "height": {"default": 20, "min": 5, "max": 60},
+            "depth": {"default": 15, "min": 5, "max": 50},
+            "wall": {"default": 2, "min": 1, "max": 5},
+            "label": {"default": "hello"},
+        }
+    }
+}
+
+
+class TestSolveConstraintsDegreesOfFreedom:
+    """dof / free / defaults_applied report what no constraint pinned."""
+
+    def _solve(self, constraints):
+        with patch("json.load", return_value=_DOF_TEMPLATES):
+            return solve_constraints("box", constraints)
+
+    def test_no_constraints_leaves_every_numeric_param_free(self):
+        result = self._solve({})
+        assert result.dof == 4
+        assert result.defaults_applied == {
+            "width": 30, "height": 20, "depth": 15, "wall": 2,
+        }
+        assert "label" not in result.defaults_applied
+        assert result.free == [
+            "width: not constrained, left at the template default 30",
+            "height: not constrained, left at the template default 20",
+            "depth: not constrained, left at the template default 15",
+            "wall: not constrained, left at the template default 2",
+        ]
+
+    def test_pinning_k_of_n_reports_n_minus_k(self):
+        result = self._solve({
+            "width": {"equals": 40},
+            "height": {"ratio": ["width", 0.5]},
+        })
+        assert result.success is True
+        assert result.dof == 2
+        assert set(result.defaults_applied) == {"depth", "wall"}
+        assert result.defaults_applied["depth"] == 15
+        assert [s.split(":")[0] for s in result.free] == ["depth", "wall"]
+
+    def test_min_max_alone_does_not_pin(self):
+        result = self._solve({
+            "width": {"min": 40},
+            "height": {"max": 10},
+            "depth": {"min": 5, "max": 20},
+        })
+        assert result.success is True
+        assert result.dof == 4
+        assert result.defaults_applied == {
+            "width": 40.0, "height": 10.0, "depth": 15, "wall": 2,
+        }
+        assert result.free[0] == (
+            "width: bounded (min 40) but no value chosen; the bound moved it "
+            "from the template default 30 to 40"
+        )
+        assert result.free[1] == (
+            "height: bounded (max 10) but no value chosen; the bound moved it "
+            "from the template default 20 to 10"
+        )
+        assert result.free[2] == (
+            "depth: bounded (min 5, max 20) but no value chosen, left at the "
+            "template default 15"
+        )
+
+    def test_ratio_pins_dependent_param_only(self):
+        result = self._solve({"height": {"ratio": ["width", 0.5]}})
+        assert result.solved_params["height"] == 15.0
+        assert result.dof == 3
+        assert "height" not in result.defaults_applied
+        assert "width" in result.defaults_applied
+        assert result.free[0] == "width: not constrained, left at the template default 30"
+
+    def test_ratio_to_unknown_param_does_not_pin(self):
+        result = self._solve({"height": {"ratio": ["nope", 0.5]}})
+        assert result.dof == 4
+        assert "height" in result.defaults_applied
+        assert result.free[1] == (
+            "height: ratio to unknown parameter 'nope' applied nothing, "
+            "left at the template default 20"
+        )
+
+    def test_ratio_to_string_param_does_not_pin(self):
+        result = self._solve({"height": {"ratio": ["label", 0.5]}})
+        assert result.solved_params["height"] == 20
+        assert result.dof == 4
+        assert "height" in result.defaults_applied
+        assert result.free[1] == (
+            "height: ratio to non-numeric parameter 'label' applied nothing, "
+            "left at the template default 20"
+        )
+
+    def test_string_valued_template_parameter_gets_no_sentence(self):
+        # A real template with a string-valued parameter (no patched data).
+        result = solve_constraints("wall_plate_cover", {})
+        assert result.solved_params["style"] == "single_toggle"
+        assert "style" not in result.defaults_applied
+        assert not any(sentence.startswith("style:") for sentence in result.free)
+        assert result.dof == 3
+        assert result.free[0] == (
+            "plate_width: not constrained, left at the template default 70"
+        )
+
+    def test_unknown_constraint_name_does_not_change_dof(self):
+        result = self._solve({"nope": {"equals": 1}})
+        assert result.success is False
+        assert result.dof == 4
+
+    def test_to_dict_carries_dof_fields(self):
+        result = self._solve({"width": {"equals": 40}})
+        d = result.to_dict()
+        assert d["dof"] == 3
+        assert d["defaults_applied"] == {"height": 20, "depth": 15, "wall": 2}
+        assert len(d["free"]) == 3
+        assert all(isinstance(s, str) for s in d["free"])
+
+
+class TestSolveTemplateConstraintsDoor:
+    """The MCP door returns dof / free / defaults_applied, not just solved_params."""
+
+    @staticmethod
+    def _tools() -> dict:
+        from kiln.plugins.design_reasoning_tools import plugin
+
+        tools: dict = {}
+
+        class FakeMCP:
+            def tool(self_mcp, **_kwargs):
+                def decorator(fn):
+                    tools[fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        plugin.register(FakeMCP())
+        return tools
+
+    def test_door_surfaces_degrees_of_freedom(self):
+        door = self._tools()["solve_template_constraints"]
+        with patch("json.load", return_value=_DOF_TEMPLATES):
+            result = door("box", '{"width": {"equals": 40}}')
+        assert result["success"] is True
+        assert result["solved_params"]["width"] == 40.0
+        assert result["dof"] == 3
+        assert result["defaults_applied"] == {"height": 20, "depth": 15, "wall": 2}
+        assert result["free"] == [
+            "height: not constrained, left at the template default 20",
+            "depth: not constrained, left at the template default 15",
+            "wall: not constrained, left at the template default 2",
+        ]
 
 
 # ---------------------------------------------------------------------------

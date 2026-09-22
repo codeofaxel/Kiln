@@ -1377,7 +1377,10 @@ class _DesignToolsPlugin:
             ranges (if annotated in comments).
 
             Use this after generating OpenSCAD code to discover which
-            parameters can be adjusted.
+            parameters can be adjusted. A parameter computed from others
+            (``inner = outer - 2*wall;``) is returned with ``derived: true``,
+            its ``expression`` and ``depends_on``; it moves when those
+            change and cannot be set directly.
 
             Args:
                 scad_code: OpenSCAD source code string.
@@ -1406,7 +1409,9 @@ class _DesignToolsPlugin:
 
             Finds the named variable declaration and replaces its value,
             preserving comments and formatting. Use this to tweak dimensions
-            without regenerating the entire model.
+            without regenerating the entire model. A derived parameter is
+            refused with a message naming its formula and the parameters to
+            change instead.
 
             Args:
                 scad_code: OpenSCAD source code string.

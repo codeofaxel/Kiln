@@ -91,6 +91,13 @@ class TestSkillManifest:
         assert isinstance(d["interfaces"], list)
         assert isinstance(d["safety_levels"], list)
 
+    def test_workflow_takes_a_flat_part_from_relationships_to_a_preview(self):
+        steps = SkillManifest().to_dict()["workflows"]["flat_part_from_relationships"]
+        order = [next(tool for tool in ("solve_sketch", "compile_scad", "visualize_model")
+                      if tool in step) for step in steps[:3]]
+        assert order == ["solve_sketch", "compile_scad", "visualize_model"]
+        assert "unchanged" in steps[1]
+
 
 # ===================================================================
 # Version and tool count helpers

@@ -3461,6 +3461,12 @@ class ConstraintSolution:
     iterations: int = 0
     success: bool = False
     notes: list[str] = field(default_factory=list)
+    # Degrees of freedom: numeric template parameters no constraint pinned.
+    # ``equals`` pins a parameter and ``ratio`` pins the dependent one;
+    # ``min``/``max`` alone bound a range without choosing a value.
+    dof: int = 0
+    free: list[str] = field(default_factory=list)
+    defaults_applied: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -3471,7 +3477,86 @@ class ConstraintSolution:
             "iterations": self.iterations,
             "success": self.success,
             "notes": list(self.notes),
+            "dof": self.dof,
+            "free": list(self.free),
+            "defaults_applied": dict(self.defaults_applied),
         }
+
+
+def _constraint_pins(constraint: Any, known_params: dict[str, Any]) -> bool:
+    """Whether a constraint dict chooses a value rather than bounding one.
+
+    ``equals`` pins.  ``ratio`` pins when it names a known template
+    parameter (``[other_param, factor]``); a ratio to nothing applies
+    nothing.  ``min``/``max`` alone do not pin — a range is not a value.
+    """
+    if not isinstance(constraint, dict):
+        return False
+    if "equals" in constraint:
+        return True
+    ratio_spec = constraint.get("ratio")
+    if isinstance(ratio_spec, list) and len(ratio_spec) == 2:
+        other = known_params.get(ratio_spec[0])
+        return isinstance(other, (int, float)) and not isinstance(other, bool)
+    return False
+
+
+def _describe_bounds(constraint: dict[str, Any]) -> str:
+    """Plain-English ``min``/``max`` summary for a bounded-but-unpinned param."""
+    parts = []
+    if "min" in constraint:
+        parts.append(f"min {constraint['min']}")
+    if "max" in constraint:
+        parts.append(f"max {constraint['max']}")
+    return ", ".join(parts)
+
+
+def _describe_idle_ratio(constraint: dict[str, Any], known_params: dict[str, Any]) -> str:
+    """Why a ``ratio`` constraint chose nothing: its other parameter is unknown or not a number."""
+    ratio_spec = constraint.get("ratio")
+    if not (isinstance(ratio_spec, list) and len(ratio_spec) == 2):
+        return ""
+    other = ratio_spec[0]
+    kind = "unknown" if other not in known_params else "non-numeric"
+    return f"ratio to {kind} parameter {other!r} applied nothing"
+
+
+def _plain_number(val: float) -> str:
+    """Render a value the way a person says it: ``15.0`` is ``15``, ``2.5`` stays."""
+    return str(int(val)) if float(val).is_integer() else str(val)
+
+
+def _free_sentence(
+    pname: str,
+    val: float,
+    default: Any,
+    constraint: Any,
+    known_params: dict[str, Any],
+) -> str:
+    """One plain sentence for a numeric parameter no constraint chose a value for."""
+    shown = _plain_number(val)
+    bounds = _describe_bounds(constraint) if isinstance(constraint, dict) else ""
+    idle_ratio = (
+        _describe_idle_ratio(constraint, known_params)
+        if isinstance(constraint, dict) else ""
+    )
+    if bounds:
+        what = f"bounded ({bounds}) but no value chosen"
+    elif idle_ratio:
+        what = idle_ratio
+    else:
+        return f"{pname}: not constrained, left at the template default {shown}"
+    moved = (
+        isinstance(default, (int, float))
+        and not isinstance(default, bool)
+        and abs(float(default) - float(val)) > 0.01
+    )
+    if moved:
+        return (
+            f"{pname}: {what}; the bound moved it from the template default "
+            f"{_plain_number(default)} to {shown}"
+        )
+    return f"{pname}: {what}, left at the template default {shown}"
 
 
 def solve_constraints(
@@ -3488,7 +3573,10 @@ def solve_constraints(
     :param constraints: Dict mapping param names to constraint dicts.
         Supported constraint keys: ``min``, ``max``, ``equals``, ``ratio``
         (``ratio`` specifies a ratio to another param, e.g. ``{"ratio": ["width", 0.5]}``).
-    :returns: ``ConstraintSolution`` with solved parameters.
+    :returns: ``ConstraintSolution`` with solved parameters.  ``dof`` counts
+        the numeric template parameters no constraint pinned, ``free``
+        names each one with the value it was left at, and
+        ``defaults_applied`` maps those names to the values used.
     """
     import json as _json
 
@@ -3525,6 +3613,7 @@ def solve_constraints(
             }
         else:
             solved[pname] = pdef
+    defaults: dict[str, Any] = dict(solved)
 
     # Apply constraints iteratively
     max_iter = 10
@@ -3625,5 +3714,18 @@ def solve_constraints(
     result.constraints_satisfied = satisfied
     result.constraints_violated = violated
     result.success = len(violated) == 0
+
+    # Degrees of freedom: which numeric parameters did nothing pin?
+    for pname, val in result.solved_params.items():
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            continue
+        constraint = constraints.get(pname)
+        if _constraint_pins(constraint, solved):
+            continue
+        result.defaults_applied[pname] = val
+        result.free.append(
+            _free_sentence(pname, val, defaults.get(pname), constraint, solved)
+        )
+    result.dof = len(result.defaults_applied)
 
     return result
