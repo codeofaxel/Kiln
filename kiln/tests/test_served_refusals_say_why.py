@@ -923,3 +923,44 @@ def _preflight_with_file(monkeypatch, file_path: str):
         from kiln.server import preflight_check
 
         return preflight_check(file_path=file_path)
+
+
+# ---------------------------------------------------------------------------
+# no test inherits another's reason
+# ---------------------------------------------------------------------------
+
+
+class TestAReasonNeverCrossesATest:
+    """Two tests, in declaration order, so this is deterministic.
+
+    Each bridge remembers WHY its last served answer did not arrive, and a
+    reason left behind changes the SENTENCE the next test's door produces:
+    a door faked to answer "no plan" reads the neighbour's reason instead
+    of its own floor.  Measured on a 27-file run, green on either file
+    alone.  The runner's own fixture clears all three bridges between
+    tests; these pin that it still does.
+    """
+
+    def test_one_records_a_reason(self, no_kiln_pro, monkeypatch):
+        from kiln import _pro_cutter_bridge as cutter
+        from kiln import _pro_motion_bridge as motion
+        from kiln import _pro_nozzle_bridge as nozzle
+
+        _offline(monkeypatch)
+        machine = _Machine()
+        assert motion.plan_for(machine, "home") is None
+        assert motion.miss_for(machine, "home") is not None
+        monkeypatch.setattr(cutter, "_declared_model", lambda name: "bambu_a1")
+        monkeypatch.setattr(cutter, "recent_faults_for", lambda name, days=30: [])
+        cutter._served_status("a1", "bambu_a1")
+        nozzle._served_capacity("a1", 10.0, "PLA", "bambu_a1")
+        assert cutter._last_miss and nozzle._last_miss
+
+    def test_two_starts_with_none_of_it(self):
+        from kiln import _pro_cutter_bridge as cutter
+        from kiln import _pro_motion_bridge as motion
+        from kiln import _pro_nozzle_bridge as nozzle
+
+        assert motion.miss_for(_Machine(), "home") is None
+        assert cutter._last_miss == {} and nozzle._last_miss == {}
+        assert cutter.blade_unchecked("a1") is None and nozzle.nozzle_unchecked("a1") is None

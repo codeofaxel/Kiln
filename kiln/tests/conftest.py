@@ -1140,3 +1140,40 @@ def _no_routine_thread_crosses_a_test():
     _settle_routine_threads()
     yield
     _settle_routine_threads()
+
+
+def _forget_served_misses() -> None:
+    """Drop every bridge's memory of why a served answer was missing."""
+    import sys
+
+    for module, attr in (
+        ("kiln._pro_motion_bridge", "_misses"),
+        ("kiln._pro_cutter_bridge", "_last_miss"),
+        ("kiln._pro_nozzle_bridge", "_last_miss"),
+    ):
+        record = getattr(sys.modules.get(module), attr, None)
+        if isinstance(record, dict):
+            record.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_served_miss_crosses_a_test():
+    """No test inherits another's reason for a missing served answer.
+
+    Each bridge to Kiln's servers remembers WHY its last answer did not
+    arrive -- offline, signed out, unanswered, refused -- so a door can
+    word the refusal a person reads.  In a process that serves one user
+    that memory is per machine and self-clearing; in a runner it is shared
+    state, and a reason left behind by one test changes the SENTENCE the
+    next test's door produces.  Measured: a test that fakes "no plan"
+    directly, and therefore expects the floor's own fallback line, read a
+    neighbour's leftover reason instead and asserted against the wrong
+    wording -- green alone, red after a file that had recorded one.
+
+    Same species and same place as the routine-thread settle above, and
+    free for any test that never asks: an unimported bridge has no dict to
+    clear.
+    """
+    _forget_served_misses()
+    yield
+    _forget_served_misses()
