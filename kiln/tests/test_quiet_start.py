@@ -405,10 +405,14 @@ class TestTheWrap:
         assert any(line.strip().startswith("G1 X0 Y128") for line in end.split("\n")), "the vendor's path is kept"
         assert "G1 X-48 Y180 F3600" in end, "and its park"
 
-    def test_a_floor_without_the_plan_writes_no_file_and_says_the_two_doors(self, tmp_path):
+    def test_a_floor_without_the_plan_writes_no_file_and_says_to_clear_the_plate(self, tmp_path):
         """A floor means a part is on the plate.  Without the plan, a file
         with the vendor's start would home Z onto that part from the
-        printer's own screen -- so Kiln writes nothing and says what to do."""
+        printer's own screen -- so Kiln writes nothing and says what to do.
+        It names no tier: the wrap cannot tell a plan the caller's tier
+        withheld from one no tier would give (a printer Kiln has not seen
+        start quietly, a lift its travel cannot reach), and the verdict's
+        own start sentence on the same response says which."""
         from kiln.plate_state import PRINT_AROUND_SENTENCE
 
         out = str(tmp_path / "floor.gcode.3mf")
@@ -420,7 +424,7 @@ class TestTheWrap:
             )
         assert str(caught.value) == PRINT_AROUND_SENTENCE == (
             "Kiln won't write a printer file while the plate still holds the last print: clear the plate and say so "
-            "to print again, or print around it on Kiln Pro (https://kiln3d.com/pricing)."
+            "to print again."
         )
         assert not os.path.exists(out)
         from kiln.plugins.slicer_tools import _auto_wrap_bambu_3mf
@@ -804,6 +808,29 @@ class TestTheDoors:
         assert resp["success"] is False and resp["error"]["code"] == START_NOT_YET_CODE
         assert resp["start"]["allowed"] is False and "Kiln Pro" in resp["start"]["why"]
 
+    def test_a_plan_that_refuses_on_its_own_is_said_as_itself_and_never_sold(self, tmp_path, machine, monkeypatch):
+        """A caller on the plan's own tier whose plan refuses by itself --
+        here a lift the machine's travel cannot reach -- is told why, and
+        nothing on the slice result tells them to buy the tier they are on:
+        not the wrap's refusal, not the start line."""
+        import json
+
+        mark_occupied(machine, JAR)
+        verdict = _plan_verdict(machine)
+        why = "to print beside jar v2 the head has to lift 257 mm clear of it, and the Bambu Lab A1 only has 256 mm of travel"
+        verdict["start"] = {**verdict["start"], "ok": False, "refusals": [{"code": "PLACEMENT_LIFT_EXCEEDS_TRAVEL", "sentence": why}]}
+        verdict["record"]["quiet_start"] = False
+        monkeypatch.setattr("kiln._pro_placement_bridge.ask", _Bridge((_verdict(ok=True), None), (verdict, None)))
+        slicer, _gcode = _fake_slice(tmp_path)
+        monkeypatch.setattr("kiln.slicer.slice_file", slicer)
+        resp = _slicer_tools()["slice_model"](
+            input_path=_cube(tmp_path / "part.stl"), printer_id="bambu_a1", placement=[200.0, 20.0],
+        )
+        assert resp["start"] == {"allowed": False, "mode": "quiet_start", "why": why + "."}
+        assert any("Kiln won't write a printer file while the plate still holds the last print" in w for w in resp.get("warnings", []))
+        text = json.dumps(resp)
+        assert "Kiln Pro" not in text and "kiln3d.com" not in text
+
     def test_every_wrap_call_site_hands_the_plan_on(self):
         """Every call that wraps a placed slice into a 3MF names the plan and
         the floor; a door that wraps without them would write the vendor's
@@ -860,22 +887,35 @@ class TestTheDoors:
 
 
 class TestWhereItFitsIsThePaidHalf:
-    """Below the plan's tier the refusal still says room exists and what it
-    takes to use it, and never where: a spot a person cannot print at is a
-    list read out through glass.  The refusal itself is the floor and is
-    free."""
+    """Below the plan's tier the refusal still says room exists, and never
+    where: a spot a person cannot print at is a list read out through glass.
+    It names the plan's tier only where the verdict says a print could start
+    there on it (``record.quiet_start``).  The refusal itself is the floor
+    and is free."""
 
     def test_the_count_is_named_when_the_places_are_withheld(self):
         from kiln.plugins.slicer_tools import _spots_clause
 
-        assert _spots_clause({"spots": [], "spots_found": 3}) == (
+        stands = {"record": {"printer_id": "bambu_a1", "quiet_start": True}}
+        assert _spots_clause({"spots": [], "spots_found": 3, **stands}) == (
             " 3 spots beside it would fit; printing around what is on the plate is a kiln-pro feature "
             "(https://kiln3d.com/pricing)."
         )
-        assert " 1 spot beside it would fit;" in _spots_clause({"spots": [], "spots_found": 1}), "singular reads right"
-        assert _spots_clause({"spots": [], "spots_found": 0}) == "", "no room, nothing to sell"
-        assert _spots_clause({"spots": [], "spots_found": None}) == ""
+        assert " 1 spot beside it would fit;" in _spots_clause({"spots": [], "spots_found": 1, **stands}), "singular reads right"
+        assert _spots_clause({"spots": [], "spots_found": 0, **stands}) == "", "no room, nothing to sell"
+        assert _spots_clause({"spots": [], "spots_found": None, **stands}) == ""
         assert _spots_clause(None) == "" and _spots_clause({}) == ""
+
+    @pytest.mark.parametrize("record", [
+        {"printer_id": "anker_m5", "measured": False, "source": "vendor_profile", "quiet_start": False},
+        {"printer_id": "anker_m5", "measured": False, "source": "vendor_profile"},   # a service older than the field
+        None,
+    ])
+    def test_no_tier_is_named_beside_the_count_where_no_tier_would_start_the_print(self, record):
+        from kiln.plugins.slicer_tools import _spots_clause
+
+        assert _spots_clause({"spots": [], "spots_found": 3, "record": record}) == " 3 spots beside it would fit."
+        assert _spots_clause({"spots": [], "spots_found": 1, "record": record}) == " 1 spot beside it would fit."
 
     def test_the_places_are_named_when_they_are_this_accounts_to_use(self):
         from kiln.plugins.slicer_tools import _spots_clause
@@ -895,6 +935,7 @@ class TestWhereItFitsIsThePaidHalf:
         mark_occupied(machine, JAR)
         withheld = _verdict(ok=False, spots=[])
         withheld["spots_found"] = 3
+        withheld["record"]["quiet_start"] = True
         monkeypatch.setattr("kiln._pro_placement_bridge.ask", _Bridge((withheld, None)))
         _placed, err, _info = _apply_plate_placement(
             _cube(tmp_path / "part.stl"), effective_printer_id="bambu_a1", printer_name=None,
@@ -903,6 +944,43 @@ class TestWhereItFitsIsThePaidHalf:
         message = err["error"]["message"]
         assert "3 spots beside it would fit" in message and "kiln3d.com/pricing" in message
         assert "[" not in message.split("would fit")[1], "no coordinates once the places are withheld"
+
+    @pytest.mark.parametrize("placement", [None, [100.0, 100.0]])
+    def test_the_door_names_no_tier_where_no_tier_would_start_the_print(self, tmp_path, machine, monkeypatch, placement):
+        """A printer whose quiet start Kiln has not seen run: room beside the
+        part is still room, said plainly -- never "no spot is safe", which
+        would be false, and never a tier, which would sell a start that
+        paying does not buy."""
+        from kiln.plugins.slicer_tools import _apply_plate_placement
+
+        mark_occupied(machine, JAR)
+        withheld = _verdict(ok=False, spots=[])
+        withheld["spots_found"] = 3
+        withheld["record"]["quiet_start"] = False
+        monkeypatch.setattr("kiln._pro_placement_bridge.ask", _Bridge((withheld, None)))
+        _placed, err, _info = _apply_plate_placement(
+            _cube(tmp_path / "part.stl"), effective_printer_id="bambu_a1", printer_name=None,
+            placement=placement, adapter=machine,
+        )
+        message = err["error"]["message"]
+        assert message.endswith(" 3 spots beside it would fit."), message
+        assert "No spot on the plate is safe" not in message, "room exists; only a start beside it does not"
+        assert "kiln3d.com" not in message and "kiln-pro" not in message
+        assert err["tier_note"] == "The clearance verdict is free on every tier."
+
+    def test_the_tier_note_names_the_tier_only_where_it_would_start_the_print(self, machine):
+        from kiln.plugins.slicer_tools import _placement_refusal
+
+        mark_occupied(machine, JAR)
+        state = read(machine)
+        stands, refuses, older = (_verdict(ok=False, spots=[]) for _ in range(3))
+        stands["record"]["quiet_start"] = True
+        refuses["record"]["quiet_start"] = False
+        note = _placement_refusal("x", "PLACEMENT_REFUSED", state=state, bed=None, verdict=stands)["tier_note"]
+        assert "kiln3d.com/pricing" in note
+        for verdict in (refuses, older, None):
+            note = _placement_refusal("x", "PLACEMENT_REFUSED", state=state, bed=None, verdict=verdict)["tier_note"]
+            assert note == "The clearance verdict is free on every tier.", verdict
 
 
 # ---------------------------------------------------------------------------

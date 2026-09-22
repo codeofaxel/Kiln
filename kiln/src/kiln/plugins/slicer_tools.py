@@ -285,6 +285,20 @@ _PLACEMENT_TIER_NOTE = (
     "The clearance verdict is free; placing and starting a second print on an "
     "occupied plate is a kiln-pro feature (https://kiln3d.com/pricing)."
 )
+#: The note where the verdict does not say a quiet start would stand on this
+#: plate: no tier is named on a plate where paying would start nothing.
+_PLACEMENT_FREE_NOTE = "The clearance verdict is free on every tier."
+
+
+def _quiet_start_would_stand(verdict: Any) -> bool:
+    """Whether the verdict says a print could start beside what is on this
+    plate on the plan's tier (``record.quiet_start``).  A verdict that does
+    not say -- no verdict, no record, a service older than the field --
+    reads as no: a tier is named only where it would start the print."""
+    record = verdict.get("record") if isinstance(verdict, dict) else None
+    return isinstance(record, dict) and record.get("quiet_start") is True
+
+
 #: The nine regions a person can name: thirds of the bed in X and Y.  Front
 #: is low Y and left is low X, the way the printer's own screen draws the
 #: plate.  ``center`` spellings are accepted too.
@@ -508,8 +522,11 @@ def _spots_clause(verdict: dict[str, Any] | list[dict[str, Any]] | None) -> str:
 
     With the places in hand (the plan's own tier), the best few are named.
     Without them, the COUNT still is -- the verdict carries ``spots_found``
-    on every tier -- so a person is told room exists and what it takes to
-    use it, rather than being handed a list they cannot print at.
+    on every tier -- so a person is told room exists, rather than being
+    handed a list they cannot print at.  The plan's tier is named beside
+    the count only where the verdict says a print could start there on it
+    (:func:`_quiet_start_would_stand`); elsewhere the count is said plainly,
+    because paying would buy no start on that plate.
     """
     if isinstance(verdict, list):
         verdict = {"spots": verdict, "spots_found": len(verdict)}
@@ -529,10 +546,10 @@ def _spots_clause(verdict: dict[str, Any] | list[dict[str, Any]] | None) -> str:
         return f" Spots with room: {', '.join(named)}."
     found = verdict.get("spots_found")
     if isinstance(found, int) and found > 0:
-        return (
-            f" {found} spot{'s' if found != 1 else ''} beside it would fit; printing around what is on the "
-            "plate is a kiln-pro feature (https://kiln3d.com/pricing)."
-        )
+        count = f" {found} spot{'s' if found != 1 else ''} beside it would fit"
+        if _quiet_start_would_stand(verdict):
+            return count + "; printing around what is on the plate is a kiln-pro feature (https://kiln3d.com/pricing)."
+        return count + "."
     return ""
 
 
@@ -565,7 +582,7 @@ def _placement_refusal(
     if isinstance(verdict, dict):
         resp["placement"] = verdict
     resp["regions"] = list(PLACEMENT_REGIONS)
-    resp["tier_note"] = _PLACEMENT_TIER_NOTE
+    resp["tier_note"] = _PLACEMENT_TIER_NOTE if _quiet_start_would_stand(verdict) else _PLACEMENT_FREE_NOTE
     return resp
 
 
