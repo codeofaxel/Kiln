@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **A look at the camera now settles what's on the plate.** Kiln already showed you the feed; now what you see goes on the record, so it stops asking and prints can start again.
+
+- **No job goes to a printer whose plate isn't free (Business+).** Kiln checks every plate in the fleet before it routes, says which printers have room, and turns a job down as you submit it rather than at the printer. See https://kiln3d.com/pricing.
+
 - **Kiln won't slice onto a part left on the plate.** It says what's there and how many spots beside it would fit.
 
 - **Print a second part beside one that's still on the plate (Pro).** The head goes over it; the printer's own start routine would drive straight through it. See https://kiln3d.com/pricing.
