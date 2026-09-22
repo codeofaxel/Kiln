@@ -269,7 +269,15 @@ def run_plate(*, printer_name: str | None = None, action: str = "status", note: 
                 "The plate could not be recorded as clear: " + (state.note or "the record did not take."),
                 code="PLATE_RECORD_FAILED", extra={"plate": state.to_dict()},
             )
-        return {"success": True, "printer_name": target_name, "plate": state.to_dict()}
+        from kiln.plate_state import camera_of
+
+        return {
+            "success": True, "printer_name": target_name, "plate": state.to_dict(),
+            # Whether this machine could settle an unknown plate by itself.
+            # A refusal that has a camera to offer should never tell someone
+            # to walk to the printer.
+            "camera": camera_of(adapter),
+        }
     except Exception as exc:
         _logger.exception("Unexpected error in plate %s", action)
         return _srv._error_dict(f"Unexpected error reading the plate record: {exc}", code="INTERNAL_ERROR")
@@ -282,9 +290,11 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
     started puts a part there (``occupied``, with the file and, where Kiln
     could read it, the part's height); a print seen ending leaves it there;
     a PERSON says it is empty (``plate_clear=true`` on ``home_axes``, or
-    ``kiln plate clear`` at the command line).  Anything else -- no record,
-    a torn record, a print started at the printer's own screen -- reads as
-    ``unknown``.
+    ``kiln plate clear`` at the command line); and a LOOK through the
+    machine's camera settles it either way (``look_at_plate``).  Anything
+    else -- no record, a torn record, a print started at the printer's own
+    screen -- reads as ``unknown``, and the answer then says whether a
+    camera could settle it.
 
     Why it matters: ``home_axes`` and ``park_head`` start with the vendor's
     raise and then cross the head's row a few millimetres up -- and a
@@ -295,22 +305,110 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
     record cannot see a print started from the printer's own screen, and
     that press is the one motion a stale record must never answer for.
 
-    There is deliberately no tool that marks the plate clear: that is a
-    person's statement, made at the machine or the command line, never on
-    their behalf.
+    There is deliberately no tool that marks the plate clear from nothing:
+    that is a statement someone has to make, at the machine, at the command
+    line, or by looking through the camera and saying what they see.
 
     Args:
         printer_name: Which printer.  Omit for the default one.
 
     Returns ``plate`` with ``status`` (``unknown`` / ``occupied`` /
     ``clear``), ``source``, ``since``, ``job`` (``file``, ``footprint_mm``,
-    ``max_z_mm``, ``printer_id``) and a one-line ``description``.
+    ``max_z_mm``, ``printer_id``), ``from_camera`` and ``looked_by`` when a
+    look wrote it, and a one-line ``description``; plus ``camera``, whether
+    this machine has one that could settle an unknown plate.
     """
     import kiln.server as _srv
 
     if err := _srv._check_auth("read"):
         return err
     return run_plate(printer_name=printer_name, action="status")
+
+
+def look_at_plate(
+    printer_name: str | None = None,
+    seen: str | None = None,
+) -> dict[str, Any]:
+    """Look at the build plate through the machine's camera, and record what is there.
+
+    Two steps, one tool.  Called WITHOUT ``seen`` it fetches a frame and
+    hands it back for you to look at: ``image_b64`` is the picture, and
+    nothing is recorded.  Look at it, then call again with ``seen="clear"``
+    (nothing on the plate) or ``seen="occupied"`` (something is), and that
+    answer becomes the plate record with you named as the one who looked.
+
+    Kiln ships no vision model and judges nothing here.  The eyes are
+    yours; this tool is the camera and the pen.  Say what you actually see:
+    a plate you are not sure about is ``occupied``, because the cost of a
+    wrong "clear" is a print driven into a part and the cost of a wrong
+    "occupied" is one question.
+
+    Works on any printer with a camera Kiln can read -- the machine's own,
+    or one registered against it with ``camera_snapshot_url``, which works
+    on every printer type including those with no camera of their own.
+    A machine with neither says so and stays ``unknown``.
+
+    Args:
+        printer_name: Which printer.  Omit for the default one.
+        seen: Omit to fetch the picture.  ``"clear"`` or ``"occupied"`` to
+            record what you saw in the picture you were just given.
+
+    Returns the ``plate`` record and a ``look`` block saying whether a
+    frame was available and which camera it came from.
+    """
+    import kiln.server as _srv
+    from kiln import plate_state
+    from kiln.registry import PrinterNotFoundError
+
+    if err := _srv._check_auth("control"):
+        return err
+    try:
+        try:
+            adapter, target_name = _srv._resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _srv._unknown_printer_error(printer_name, "plate")
+
+        if seen is None:
+            found = plate_state.look(adapter)
+            if not found.available:
+                return _srv._error_dict(
+                    f"Kiln could not get a picture of {target_name}'s plate: {found.why}.",
+                    code="PLATE_LOOK_UNAVAILABLE",
+                    extra={"look": found.to_dict(), "plate": plate_state.read(adapter).to_dict()},
+                )
+            return {
+                "success": True,
+                "printer_name": target_name,
+                "look": found.to_dict(),
+                "image_b64": found.image_b64,
+                "media_type": found.media_type,
+                "plate": plate_state.read(adapter).to_dict(),
+                "next": (
+                    "Look at the picture, then call look_at_plate again with seen=\"clear\" if the plate is "
+                    "empty or seen=\"occupied\" if anything is on it. If you cannot tell, say occupied."
+                ),
+            }
+
+        if seen not in ("clear", "occupied"):
+            return _srv._error_dict(
+                'seen must be "clear" (nothing on the plate) or "occupied" (something is on it).',
+                code="INVALID_INPUT",
+            )
+        # An agent is calling this tool, so an agent is what did the looking.
+        # A person's own statement has its own doors (`kiln plate clear`,
+        # plate_clear=true on home_axes) and is recorded as theirs.
+        status = plate_state.mark_from_camera(adapter, seen=seen, judged_by="agent")
+        state = plate_state.read(adapter)
+        if status is None or state.status != seen:
+            return _srv._error_dict(
+                "What you saw could not be recorded against this printer: "
+                + (state.note or "the record did not take."),
+                code="PLATE_RECORD_FAILED", extra={"plate": state.to_dict()},
+            )
+        return {"success": True, "printer_name": target_name, "plate": state.to_dict()}
+    except Exception as exc:
+        _logger.exception("Unexpected error in look_at_plate")
+        return _srv._error_dict(f"Unexpected error looking at the plate: {exc}", code="INTERNAL_ERROR")
 
 
 class _HomingToolsPlugin:
@@ -320,6 +418,7 @@ class _HomingToolsPlugin:
         - home_axes
         - park_head
         - plate_status
+        - look_at_plate
     """
 
     @property
@@ -338,6 +437,7 @@ class _HomingToolsPlugin:
         mcp.tool()(home_axes)
         mcp.tool()(park_head)
         mcp.tool()(plate_status)
+        mcp.tool()(look_at_plate)
 
 
 plugin = _HomingToolsPlugin()

@@ -9,9 +9,31 @@ cannot report: **is there a part on the plate, and how tall is it?**
 
 This module is the record that answers it.  Written at the two moments
 Kiln can be sure of -- a print Kiln started (the plate now holds a part),
-and a print seen ending (the part is still there) -- and by a person who
+and a print seen ending (the part is still there) -- by a person who
 says the plate is empty (``plate_clear=True`` on ``home_axes``, or
-``kiln plate clear``).  Read by every door that moves the head:
+``kiln plate clear``), and by a LOOK through the machine's camera
+(:func:`look`, :func:`mark_from_camera`).
+
+**The camera is a source here, not an afterthought.**  A machine with a
+camera -- the printer's own, or one the person registered against it
+(``camera_snapshot_url``), which works on every adapter -- can answer
+"is there a part on the plate" without anyone walking to it.  Kiln fetches
+the frame and screens it for usability; the LOOKING is done by eyes that
+can see, the agent's or the person's, and their answer lands here with
+who did the looking recorded in ``source``.  Kiln ships no local vision
+model and does not pretend to: a camera with nobody to look through it
+leaves the record ``unknown`` and says a camera could settle it.
+
+The two directions are deliberately not symmetric, for the same reason
+the default is ``unknown``.  A look that says "something is there" is
+acted on immediately -- it can only ever stop a motion, never start one --
+and it overrides a ``clear`` record, because a stale ``clear`` is how the
+head meets a part.  A look that says "empty" is recorded as ``clear``
+with the camera as its source, which is what lets a fleet route onto it;
+the one motion that must never act on a look, the Z home that presses the
+nozzle onto the plate, asks on its own call every time regardless of the
+record (see :meth:`~kiln.printers.base.PrinterAdapter._plate_gate`), so
+it is unaffected.  Read by every door that moves the head:
 :meth:`~kiln.printers.base.PrinterAdapter.home_axes`,
 :meth:`~kiln.printers.base.PrinterAdapter.park_head`, the ``plate_status``
 tool, ``kiln plate`` and ``kiln doctor`` -- and, because the file a print
@@ -58,6 +80,14 @@ _SCHEMA_VERSION = 1
 #: The three things the record can say.  ``unknown`` is what every reader
 #: gets when nothing trustworthy is on file.
 STATUSES = ("unknown", "occupied", "clear")
+
+#: What wrote a record that came from a look, and who did the looking.
+#: ``source`` carries ``camera:<judged_by>`` so a reader can tell a person
+#: at the machine from an agent reading a frame, and weigh it accordingly.
+CAMERA_SOURCE_PREFIX = "camera:"
+#: Who may be recorded as having looked.  An unknown judge is refused
+#: rather than written as an anonymous look.
+CAMERA_JUDGES = ("agent", "human")
 
 #: The block the 3D stage draws an occupied plate from, and the shape the
 #: placement verdict's ``occupancy`` carries (:mod:`kiln._pro_placement_bridge`).
@@ -259,6 +289,18 @@ class PlateState:
     def clear(self) -> bool:
         return self.status == "clear"
 
+    @property
+    def from_camera(self) -> bool:
+        """True when a look through the machine's camera wrote this record."""
+        return self.source.startswith(CAMERA_SOURCE_PREFIX)
+
+    @property
+    def looked_by(self) -> str | None:
+        """Who did the looking (``agent`` / ``human``), or ``None`` if nobody did."""
+        if not self.from_camera:
+            return None
+        return self.source[len(CAMERA_SOURCE_PREFIX):] or None
+
     def since_clock(self) -> str:
         """``18:12`` for today, ``Sep 15 18:12`` otherwise, the raw stamp when unparsable."""
         if not self.since:
@@ -281,7 +323,12 @@ class PlateState:
                 height = "height unknown"
             return f"{what} since {self.since_clock()}, {height}"
         if self.status == "clear":
-            who = "a person said so" if self.source == "human" else self.source
+            if self.source == "human":
+                who = "a person said so"
+            elif self.from_camera:
+                who = f"seen empty through the camera by {'a person' if self.looked_by == 'human' else 'an agent'}"
+            else:
+                who = self.source
             return f"the plate was cleared at {self.since_clock()} ({who})"
         return "Kiln has no record of what is on the plate"
 
@@ -362,6 +409,12 @@ class PlateState:
             "fingerprint": fingerprint(self) if self.occupied else None,
             "note": self.note,
             "description": self.describe(),
+            # Whether a look wrote this, and whose eyes.  A reader that
+            # weighs a camera answer differently from a person at the
+            # machine needs both, and neither is derivable from `source`
+            # without knowing this module's spelling.
+            "from_camera": self.from_camera,
+            "looked_by": self.looked_by,
         }
 
     @classmethod
@@ -613,6 +666,154 @@ def mark_clear(adapter: Any, source: str, *, note: str = "") -> None:
     :meth:`~kiln.printers.base.PrinterAdapter._plate_gate`).
     """
     _write_state(adapter, status="clear", source=source, job=None, note=note)
+
+
+# ---------------------------------------------------------------------------
+# The look: what the machine's camera can settle
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PlateLook:
+    """What Kiln can offer of a look at one machine's plate, right now.
+
+    ``available`` is whether a frame was obtained and is worth looking at.
+    ``camera`` is where it came from (``user_supplied`` for a camera the
+    person registered against this printer, ``printer`` for the machine's
+    own, ``None`` for a machine with neither).  ``image_b64`` is the frame
+    for eyes that can see it; ``why`` says, in one sentence, what stopped a
+    look when one could not be offered.  Kiln judges nothing here.
+    """
+
+    available: bool
+    camera: str | None = None
+    image_b64: str | None = None
+    media_type: str | None = None
+    why: str = ""
+
+    @property
+    def possible(self) -> bool:
+        """Whether this machine could answer the question if someone looked."""
+        return self.camera is not None
+
+    def to_dict(self) -> dict[str, Any]:
+        # The frame is deliberately NOT in here: this dict rides answers and
+        # logs, and a base64 JPEG in either is noise at best.  A caller that
+        # wants the frame takes `image_b64` off the object.
+        return {
+            "available": self.available,
+            "possible": self.possible,
+            "camera": self.camera,
+            "media_type": self.media_type,
+            "why": self.why,
+        }
+
+
+def camera_of(adapter: Any) -> str | None:
+    """Which camera this machine has (``user_supplied`` / ``printer``), or ``None``.
+
+    Asked before a refusal is worded, so a machine that COULD answer the
+    question is never told to go and look by hand.  Never raises.
+    """
+    try:
+        source = adapter.snapshot_source()
+    except Exception:  # noqa: BLE001 -- a machine that cannot say has no camera Kiln can use
+        return None
+    return str(source) if source else None
+
+
+def look(adapter: Any) -> PlateLook:
+    """Fetch a frame of this machine's plate for someone to look at.
+
+    Kiln's whole part in a look: get the frame, screen it for whether it is
+    worth looking at, hand it over.  The judging is done by eyes -- the
+    agent's or the person's -- and their answer comes back through
+    :func:`mark_from_camera`.  Never raises, never moves a head, never
+    writes the record.
+    """
+    camera = camera_of(adapter)
+    if camera is None:
+        return PlateLook(False, None, why="this printer has no camera Kiln can read, and none is registered for it")
+    try:
+        frame = adapter.get_snapshot()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("plate look: snapshot failed", exc_info=True)
+        return PlateLook(False, camera, why=f"the camera did not answer ({str(exc)[:120]})")
+    if not frame:
+        return PlateLook(False, camera, why="the camera answered with no image")
+    try:
+        from kiln.snapshot_analysis import analyze_snapshot, image_dimensions
+
+        size = image_dimensions(frame)
+        # The dimensions matter here specifically: a thumbnail cannot show
+        # whether a part is on the bed, and the screen skips that check
+        # when it is not told the size.
+        verdict = analyze_snapshot(frame, width=size[0] if size else None, height=size[1] if size else None)
+        if not verdict.valid or not verdict.usable_quality:
+            # The camera is there and answering, but the frame cannot settle
+            # anything -- lens capped, light off, too small to read.  Saying
+            # which is the difference between "fix your camera" and "go look".
+            why = "; ".join(verdict.warnings) if verdict.warnings else "the picture is not clear enough to judge"
+            return PlateLook(False, camera, why=why)
+    except Exception:  # noqa: BLE001 -- the screen is a courtesy; a frame still beats none
+        logger.debug("plate look: snapshot screening failed", exc_info=True)
+    import base64 as _base64
+
+    return PlateLook(
+        True, camera, image_b64=_base64.b64encode(frame).decode("ascii"),
+        media_type="image/png" if frame[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg",
+    )
+
+
+def mark_from_camera(
+    adapter: Any, *, seen: str, judged_by: str, note: str = "", job: PlateJob | None = None,
+) -> str | None:
+    """Record what a look saw.  Returns the new status, or ``None`` when refused.
+
+    *seen* is ``"clear"`` (the plate is empty) or ``"occupied"`` (something is
+    on it); *judged_by* is ``"agent"`` or ``"human"`` -- who actually looked.
+    An unrecognised value for either is refused rather than written, because
+    a record nobody can attribute is worse than no record.
+
+    The asymmetry this module's docstring states lives here.  ``occupied``
+    is written whatever the record said before: a look that sees a part can
+    only stop a motion, and a stale ``clear`` is exactly what it exists to
+    catch.  ``clear`` is written as a camera-sourced record, which reads as
+    clear to every door that weighs the record -- and the Z home that
+    presses the nozzle onto the plate asks on its own call regardless, so
+    the one motion that must not act on a look does not.
+    """
+    if seen not in ("clear", "occupied") or judged_by not in CAMERA_JUDGES:
+        logger.debug("plate look refused: seen=%r judged_by=%r", seen, judged_by)
+        return None
+    source = f"{CAMERA_SOURCE_PREFIX}{judged_by}"
+    try:
+        if seen == "occupied":
+            previous = read(adapter)
+            # A look cannot say WHICH part is there or how tall it is.  When
+            # the record already names parts, they are kept -- the look
+            # confirms them, it does not replace them with a blank.
+            jobs = list(previous.jobs) if previous.occupied and job is None else ([job] if job is not None else [])
+            _write_state(adapter, status="occupied", source=source, job=jobs[-1] if jobs else None, jobs=jobs, note=note)
+            return "occupied"
+        _write_state(adapter, status="clear", source=source, job=None, note=note)
+        return "clear"
+    except Exception:  # noqa: BLE001 -- bookkeeping never breaks the door that called it
+        logger.debug("mark_from_camera failed", exc_info=True)
+        return None
+
+
+def camera_could_settle(adapter: Any) -> str | None:
+    """One clause a refusal can append when a camera could answer instead.
+
+    ``None`` when the machine has no camera, so a refusal that has nothing
+    to offer does not offer it.
+    """
+    camera = camera_of(adapter)
+    if camera is None:
+        return None
+    whose = "the camera you registered for it" if camera == "user_supplied" else "this printer's own camera"
+    return f"or look through {whose} and tell Kiln what you see"
 
 
 def mark_unknown(adapter: Any, why: str) -> None:
