@@ -73,7 +73,7 @@ Verdict (``schema: "placement_verdict/1"``)::
      "switched_off": {name: how}, "spots": [{"at_mm", "clearance_mm"}],
      "occupancy": {"kind": "kiln.plate_occupancy.v1", "bed_mm", "occupied",
                    "proposed", "source": "gcode"|"record_box"},
-     "record": {"printer_id", "measured", "source"},
+     "record": {"printer_id", "measured", "source", "quiet_start"},
      "start": {"mode": "quiet_start", "ok", "available", "refusals",
                "clear_z_mm", "lift_floor_mm", "travel_to_mm", "first_layer_z_mm",
                "approach_mm", "home_xy_gcode", "flags", "switched_off",
@@ -84,9 +84,13 @@ Verdict (``schema: "placement_verdict/1"``)::
 way beside the first), each with its own file when the ledger has it;
 ``plate.fingerprint`` is the record's own hash of them.  ``start`` rides an
 ok verdict on the sliced file: the quiet start's plan -- the paid half --
-or, below its tier, ``available: false`` with the tier it needs and the
-lift floor alone.  The slicing door hands the plan to the wrap, which
-writes it into the file under a contract the start gate judges live.
+or, below its tier, ``available: false`` and the lift floor alone, with
+the tier it needs when the plan would stand, and the plan's own refusal
+and no tier when it would not.  The slicing door hands the plan to the
+wrap, which writes it into the file under a contract the start gate
+judges live.  ``record.quiet_start`` says whether a print could start
+beside what is on this plate on the plan's tier; a door names that tier
+only when it is true, and reads a verdict without it as false.
 
 ``at_mm`` is where the part's own footprint origin (its min corner) goes,
 the same corner ``keep_at_mm`` names; ``footprint_mm`` is the placed rect.

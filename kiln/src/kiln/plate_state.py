@@ -99,15 +99,17 @@ START_NOT_YET_CODE = "PLATE_OCCUPIED_START_NOT_YET"
 #: A quiet-start file planned for a plate that is not this one any more:
 #: something was printed, cleared or moved since the plan was made.
 PLATE_CHANGED_CODE = "PLATE_CHANGED_SINCE_PLAN"
-#: What a person is told when the plate holds a part and there is no quiet
-#: start for it on their plan: the two doors, one sentence.  The wrap says
-#: it when it refuses to write a printer file (a file with the printer's own
-#: start would home Z onto the part); the served verdict's own sentence names
-#: the part as well.  Printing around what is on the plate is a kiln-pro
-#: feature (https://kiln3d.com/pricing).
+#: What a person is told when the plate holds a part and the file has no
+#: quiet-start plan to open with.  The wrap says it when it refuses to write
+#: a printer file (a file with the printer's own start would home Z onto the
+#: part).  It names no tier: the plan can be missing because the caller's
+#: tier does not include it, or because no tier would start this print (a
+#: printer Kiln has not seen start quietly, a lift its travel cannot reach),
+#: and the wrap cannot tell which.  The verdict's own start sentence, on the
+#: same response, says which (``kiln.plugins.slicer_tools._attach_placement``).
 PRINT_AROUND_SENTENCE = (
     "Kiln won't write a printer file while the plate still holds the last print: clear the plate and say so to "
-    "print again, or print around it on Kiln Pro (https://kiln3d.com/pricing)."
+    "print again."
 )
 
 #: What a sentence strips before it names the part on the plate.  The one
