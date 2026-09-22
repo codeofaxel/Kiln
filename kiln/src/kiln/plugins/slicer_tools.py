@@ -299,6 +299,17 @@ def _quiet_start_would_stand(verdict: Any) -> bool:
     return isinstance(record, dict) and record.get("quiet_start") is True
 
 
+def _places_withheld(verdict: Any) -> bool:
+    """Whether the verdict counted spots beside the part but did not say
+    where (below the plan's tier ``spots`` is emptied and ``spots_found``
+    still counts).  A region is resolved from the places, so without them
+    it cannot be -- and "no room" would be false."""
+    if not isinstance(verdict, dict) or verdict.get("spots"):
+        return False
+    found = verdict.get("spots_found")
+    return isinstance(found, int) and found > 0
+
+
 #: The nine regions a person can name: thirds of the bed in X and Y.  Front
 #: is low Y and left is low X, the way the printer's own screen draws the
 #: plate.  ``center`` spellings are accepted too.
@@ -581,7 +592,9 @@ def _placement_refusal(
     resp["occupancy"] = (verdict.get("occupancy") if isinstance(verdict, dict) else None) or state.occupancy(bed)
     if isinstance(verdict, dict):
         resp["placement"] = verdict
-    resp["regions"] = list(PLACEMENT_REGIONS)
+    # The names a region may be given -- none where the places, and so any
+    # region, cannot be resolved.
+    resp["regions"] = [] if _places_withheld(verdict) else list(PLACEMENT_REGIONS)
     resp["tier_note"] = _PLACEMENT_TIER_NOTE if _quiet_start_would_stand(verdict) else _PLACEMENT_FREE_NOTE
     return resp
 
@@ -666,9 +679,12 @@ def _apply_plate_placement(
 
     if kind == "auto":
         probe, _reason = bridge.ask(bridge.request_for(adapter, pid, placement="auto", part=part))
+        # A region is offered only where one can be resolved: without the
+        # places, naming one could only be refused.
+        ways = "placement=[x, y] in mm" if _places_withheld(probe) else 'placement=[x, y] in mm, or a region such as "front-left"'
         message = (
             f"{holds} Slicing now would put the new part on top of it. Name a spot beside it "
-            f'(placement=[x, y] in mm, or a region such as "front-left"), or clear the plate and say so.'
+            f"({ways}), or clear the plate and say so."
             + (_spots_clause(probe) if isinstance(probe, dict) else "")
         )
         return input_path, _placement_refusal(message, "PLACEMENT_PLATE_OCCUPIED", state=state, bed=bed, verdict=probe), occupied_info
@@ -683,6 +699,16 @@ def _apply_plate_placement(
         probe, reason = bridge.ask(bridge.request_for(adapter, pid, placement="auto", part=part))
         if probe is None:
             return input_path, _placement_refusal(_no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed, miss=reason), occupied_info
+        if _places_withheld(probe):
+            # Room exists; where is the plan's tier's answer, and a region
+            # cannot be resolved without it.  Never "no room" -- that would
+            # be false -- and the tier only where paying would start the
+            # print (_spots_clause).
+            message = (
+                f"{holds}{_spots_clause(probe)} Kiln can't tell whether one is {_region_name(value)} without "
+                "where they are: name a spot as [x, y] in mm to check it, or clear the plate and say so."
+            )
+            return input_path, _placement_refusal(message, "PLACEMENT_REGION_UNRESOLVED", state=state, bed=bed, verdict=probe), occupied_info
         spots = [s for s in (probe.get("spots") or []) if isinstance(s, dict)]
         in_region = []
         for spot in spots:

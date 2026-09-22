@@ -1020,6 +1020,78 @@ class TestWhereItFitsIsThePaidHalf:
         assert "kiln3d.com" not in message and "kiln-pro" not in message
         assert err["tier_note"] == "The clearance verdict is free on every tier."
 
+    @pytest.mark.parametrize("stands", [True, False, None])
+    def test_a_named_region_below_the_tier_says_room_exists_and_why_it_cannot_pick_one(
+        self, tmp_path, machine, monkeypatch, stands
+    ):
+        """A region is resolved from the places, and below the plan's tier the
+        places are withheld.  The door cannot say there is no room front-left
+        -- it does not know -- and must never say there is no room anywhere
+        while the verdict counts spots.  It says what it knows: the count,
+        the tier only where paying would start the print, and what a person
+        can do instead."""
+        from kiln.plugins.slicer_tools import _apply_plate_placement
+
+        mark_occupied(machine, JAR)
+        withheld = _verdict(ok=False, spots=[])
+        withheld["spots_found"] = 3
+        if stands is None:
+            withheld["record"].pop("quiet_start", None)   # a service older than the field
+        else:
+            withheld["record"]["quiet_start"] = stands
+        monkeypatch.setattr("kiln._pro_placement_bridge.ask", _Bridge((withheld, None)))
+        _placed, err, _info = _apply_plate_placement(
+            _cube(tmp_path / "part.stl"), effective_printer_id="bambu_a1", printer_name=None,
+            placement="front-left", adapter=machine,
+        )
+        message = err["error"]["message"]
+        assert err["error"]["code"] == "PLACEMENT_REGION_UNRESOLVED", err["error"]
+        assert "no safe spot" not in message, "room exists, and whether it is front-left is not known"
+        assert "3 spots beside it would fit" in message
+        assert message.endswith(
+            "Kiln can't tell whether one is front-left without where they are: name a spot as [x, y] in mm to "
+            "check it, or clear the plate and say so."
+        ), message
+        assert ("kiln3d.com/pricing" in message) is (stands is True), "a tier only where paying would start the print"
+
+    def test_a_named_region_with_no_room_anywhere_still_says_so(self, tmp_path, machine, monkeypatch):
+        from kiln.plugins.slicer_tools import _apply_plate_placement
+
+        mark_occupied(machine, JAR)
+        none = _verdict(ok=False, spots=[])
+        none["spots_found"] = 0
+        monkeypatch.setattr("kiln._pro_placement_bridge.ask", _Bridge((none, None)))
+        _placed, err, _info = _apply_plate_placement(
+            _cube(tmp_path / "part.stl"), effective_printer_id="bambu_a1", printer_name=None,
+            placement="front-left", adapter=machine,
+        )
+        assert err["error"]["code"] == "PLACEMENT_NO_ROOM_IN_REGION"
+        assert err["error"]["message"].endswith("there is no safe spot anywhere beside it."), "the floor is free and true"
+
+    def test_the_occupied_plate_offers_a_region_only_where_one_can_be_resolved(self, tmp_path, machine, monkeypatch):
+        """Asked with no placement, the refusal suggests the ways to name a
+        spot.  Below the tier a region cannot be resolved, so it is not
+        offered there -- a suggestion that can only refuse is not help."""
+        from kiln.plugins.slicer_tools import _apply_plate_placement
+
+        mark_occupied(machine, JAR)
+        withheld = _verdict(ok=False, spots=[])
+        withheld["spots_found"] = 3
+        places = _verdict(ok=False, spots=[{"at_mm": [10.0, 10.0], "clearance_mm": 30.0}])
+        places["spots_found"] = 1
+        said, offered = {}, {}
+        for name, verdict in (("withheld", withheld), ("places", places)):
+            monkeypatch.setattr("kiln._pro_placement_bridge.ask", _Bridge((verdict, None)))
+            _placed, err, _info = _apply_plate_placement(
+                _cube(tmp_path / f"{name}.stl"), effective_printer_id="bambu_a1", printer_name=None,
+                placement=None, adapter=machine,
+            )
+            said[name], offered[name] = err["error"]["message"], err["regions"]
+        assert "placement=[x, y] in mm" in said["withheld"] and "front-left" not in said["withheld"], said["withheld"]
+        assert offered["withheld"] == [], "no region names for an agent to try where none can resolve"
+        assert 'a region such as "front-left"' in said["places"], said["places"]
+        assert "front-left" in offered["places"] and len(offered["places"]) == 9
+
     def test_the_tier_note_names_the_tier_only_where_it_would_start_the_print(self, machine):
         from kiln.plugins.slicer_tools import _placement_refusal
 
