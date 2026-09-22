@@ -429,6 +429,27 @@ def _cli_start_refusal(
         _cli_placement_refuse(block, json_mode)
 
 
+def _cli_quiet_start_why(placement_info: Any) -> str:
+    """Why a file for an occupied plate has no quiet start, in the verdict's
+    own words, as a sentence to follow a refusal.
+
+    Read from the start line every slice door stamps on its result
+    (:func:`kiln.plugins.slicer_tools._attach_placement`), never worded
+    here, so the tier is named exactly where the verdict names it -- only
+    where paying would start the print.  Empty when that line does not
+    refuse, or there is none.
+    """
+    from kiln.plugins.slicer_tools import _attach_placement
+
+    line: dict[str, Any] = {}
+    if isinstance(placement_info, dict):
+        # A copy: stamping a result pops the placement info's private keys.
+        _attach_placement(line, dict(placement_info))
+    start = line.get("start")
+    why = str(start.get("why") or "") if isinstance(start, dict) and start.get("allowed") is False else ""
+    return f" {why[:1].upper()}{why[1:]}" if why else ""
+
+
 def _cli_placement_refuse(err: dict[str, Any], json_mode: bool) -> None:
     detail = err.get("error") if isinstance(err.get("error"), dict) else {}
     click.echo(
@@ -4443,12 +4464,29 @@ def slice(
                     click.echo(f"Bambu 3MF: {upload_path}")
             except Exception as exc:
                 if wrap_kwargs.get("quiet_start") is not None or wrap_kwargs.get("lift_floor_mm") is not None:
-                    # A raw file would carry no plan and no floor onto the occupied plate.
-                    click.echo(format_error(
-                        f"Kiln could not write the file for a start beside what is on the plate ({exc}), so it "
-                        "won't upload one. Clear the plate and say so, then slice and print the ordinary way.",
-                        code="QUIET_START_WRAP_FAILED", json_mode=json_mode,
-                    ))
+                    # A raw file would carry no plan and no floor onto the
+                    # occupied plate.  Why there was no plan is the verdict's
+                    # own start line, the one the slice result carries.
+                    from kiln.plate_state import PRINT_AROUND_SENTENCE
+
+                    why = _cli_quiet_start_why(placement_info)
+                    if why and str(exc) == PRINT_AROUND_SENTENCE:
+                        # The wrap refused for want of a plan, and the start
+                        # line says why in full: say it once.  The tier's own
+                        # sentence already says what to do; a plan's reason
+                        # does not, so the ordinary way follows it.
+                        start = ((placement_info or {}).get("placement") or {}).get("start") or {}
+                        message = "Kiln won't upload this file." + why + (
+                            "" if start.get("tier_required")
+                            else " Clear the plate and say so, then slice and print the ordinary way."
+                        )
+                    else:
+                        message = (
+                            f"Kiln could not write the file for a start beside what is on the plate ({exc}), so it "
+                            "won't upload one. Clear the plate and say so, then slice and print the ordinary way."
+                            + why
+                        )
+                    click.echo(format_error(message, code="QUIET_START_WRAP_FAILED", json_mode=json_mode))
                     sys.exit(1)
                 logger.warning("Bambu 3MF wrapping failed: %s", exc)
                 if not json_mode:
