@@ -92,6 +92,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Describe a flat part by its rules and Kiln works out the shape.** Say where the holes sit relative to the edges and each other, and Kiln finds the exact geometry, tells you plainly what is still loose, and warns you when two rules can't both hold or a hole would break through.
 
+- **A flat part you described exports as real CAD.** Its holes and rounded corners arrive as true circles and arcs at exactly the size you asked for, so the file a machinist opens matches your dimensions instead of approximating them.
+
 - **Say yes once, for a while — from the approval dialog itself.** Answer
   "this print only", "the next 2 hours", "the rest of today" or a length you
   type (24 hours at most), and prints on that printer start without asking
