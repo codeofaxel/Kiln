@@ -1137,6 +1137,64 @@ def build_resume_preamble(
     return commands
 
 
+def build_quiet_start_preamble(
+    *,
+    hotend_temp: int,
+    bed_temp: int,
+    clear_z_mm: float,
+    travel_to_mm: tuple[float, float],
+    first_layer_z_mm: float,
+    approach_mm: float = 5.0,
+    home_xy_gcode: str = "G28 X Y",
+    prime_mm: float = 5.0,
+) -> list[str]:
+    """The quiet start: the print beside a part still on the plate.
+
+    Never the vendor's start (a Z home on the plate, a bed probe, a purge
+    line drawn across it).  In this order, and the order is the safety:
+
+    1. heaters set, no wait -- nothing moves yet;
+    2. absolute mode, then ONE absolute Z move to *clear_z_mm*: above
+       everything on the plate plus the margin.  Absolute, not relative,
+       because after a finished print the head rests at the end block's
+       park height, and a relative lift from there would over-travel;
+       from any resting height this move ends above every part -- if the
+       head is higher it descends straight down where it is, never onto a
+       top, because the clear height is above every top;
+    3. the firmware's X/Y home at that height -- the bed may roll its
+       whole length; every part passes under a head that clears it;
+    4. a travel to the new part's own footprint centre, still at the
+       clear height;
+    5. the waits for the bed and the hotend, over the new footprint, so
+       the ooze of heating falls on clean plate;
+    6. a descent over the new footprint only, to *approach_mm* above the
+       first layer -- the body's first move takes it the rest of the way;
+    7. the prime, so the E counter is defined before the first extrusion.
+
+    Pure: the numbers come from the placement verdict's plan, the words
+    on each line say why it is there.
+    """
+    cx, cy = float(travel_to_mm[0]), float(travel_to_mm[1])
+    return [
+        f"M140 S{int(bed_temp)}  ; bed target, no wait: nothing moves yet",
+        f"M104 S{int(hotend_temp)}  ; hotend target, no wait",
+        "G21  ; millimetres",
+        "G90  ; absolute positioning: the lift below is a height, not a distance",
+        "M83  ; relative extrusion, as the body was sliced",
+        f"G1 Z{clear_z_mm:.2f} F{_LIFT_FEEDRATE}  ; clear of everything on the plate, wherever the head rests",
+        f"{home_xy_gcode}  ; home X and Y at that height; never Z with parts on the plate",
+        f"G1 X{cx:.2f} Y{cy:.2f} F{_TRAVEL_FEEDRATE}  ; over the new part's own footprint, still clear",
+        f"M190 S{int(bed_temp)}  ; wait for the bed",
+        f"M109 S{int(hotend_temp)}  ; wait for the hotend",
+        f"G1 Z{float(first_layer_z_mm) + float(approach_mm):.2f} F{_LIFT_FEEDRATE}  ; down over the new footprint only",
+        "; --- Extruder prime on quiet start ---",
+        "G92 E0  ; the E counter is undefined after the last print ended",
+        f"G1 E{prime_mm:g} F60  ; prime",
+        "G92 E0  ; re-anchor E so the first build move starts from 0",
+        "G4 P500  ; let the prime settle",
+    ]
+
+
 def build_safe_abort_sequence(
     *,
     lift_mm: float = 10.0,

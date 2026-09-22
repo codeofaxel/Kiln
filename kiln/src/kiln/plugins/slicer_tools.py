@@ -718,8 +718,44 @@ def _apply_plate_placement(
         ),
         "_verify": {"request": request, "state": state, "bed": bed},
         "_state": state,
+        "_machine": _contract_machine_id(adapter),
     }
     return placed, None, info
+
+
+def _contract_machine_id(adapter: Any) -> str:
+    """The identity a quiet-start file is bound to: the same one the
+    pre-print gate reads back (:func:`kiln.printers.print_gate.same_bed_machine_id`)."""
+    try:
+        from kiln.printers.print_gate import same_bed_machine_id
+
+        return same_bed_machine_id(adapter)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _quiet_start_plan(info: dict[str, Any]) -> dict[str, Any] | None:
+    """The verdict's start plan, bound to this machine, when the verdict
+    carries one that is ok and available; else ``None``."""
+    verdict = info.get("placement") if isinstance(info, dict) else None
+    start = verdict.get("start") if isinstance(verdict, dict) else None
+    if not isinstance(start, dict) or not start.get("ok") or not start.get("available"):
+        return None
+    machine = str(info.get("_machine") or "")
+    if not machine or not start.get("plate_fingerprint"):
+        return None
+    return {**start, "planned_for_machine": machine}
+
+
+def _lift_floor_of(info: dict[str, Any]) -> float | None:
+    """The lift floor the wrap raises every lift to, on every tier."""
+    verdict = info.get("placement") if isinstance(info, dict) else None
+    start = verdict.get("start") if isinstance(verdict, dict) else None
+    floor = start.get("lift_floor_mm") if isinstance(start, dict) else None
+    try:
+        return float(floor) if floor is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _verify_plate_placement(gcode_path: str | None, info: dict | None) -> tuple[dict | None, dict]:
@@ -767,13 +803,31 @@ def _attach_placement(response: dict, info: dict | None) -> None:
     if not isinstance(info, dict) or info.get("plate") != "occupied":
         return
     info.pop("_verify", None)
+    info.pop("_machine", None)
     state = info.pop("_state", None)
     response["placement"] = info.get("placement")
     response["approval_carries"] = False
     response["approval_note"] = info.get("approval_note")
-    # A slice beside the occupant is still not a print beside it: the file's
-    # own start sequence crosses the plate.  Said here, on the slice result,
-    # so an agent does not go on to start it by hand and meet the refusal.
+    # How this file starts beside the occupant, said on the slice result so
+    # an agent knows before it reaches for a start: the quiet way when the
+    # verdict's plan is this account's to use, else why not -- the plan's
+    # own sentence (the tier, an unverified printer, a lift that does not
+    # fit) or the record's, that the file's start sequence crosses the plate.
+    verdict = info.get("placement") if isinstance(info.get("placement"), dict) else {}
+    start = verdict.get("start") if isinstance(verdict, dict) else None
+    if isinstance(start, dict) and start.get("ok") and start.get("available"):
+        response["start"] = {
+            "allowed": True, "mode": "quiet_start",
+            "why": (
+                "This file starts the quiet way: no Z home, no probe and no purge line across the plate; the head "
+                f"lifts to {float(start['clear_z_mm']):g} mm clear of what is there before it moves, and the printer "
+                "is asked whether it is homed and idle at the moment of the start."
+            ),
+        }
+        return
+    if isinstance(start, dict) and start.get("refusals"):
+        response["start"] = {"allowed": False, "mode": "quiet_start", "why": _refusal_sentences(start)}
+        return
     if state is not None:
         response["start"] = {"allowed": False, "why": state.start_refusal_sentence()}
 
@@ -801,8 +855,11 @@ def _placed_slice(
     called as ``slicer(path, profile=profile_path, **slice_kwargs)`` and
     must return a ``SliceResult``.  ``info`` carries ``placement`` (the
     plate gate's info, for :func:`_attach_placement`), ``bed_fit`` (the bed
-    gate's block, or ``None``) and ``effective_input`` (the file that was
-    sliced).  Raises whatever the slicer raises; each door words that.
+    gate's block, or ``None``), ``effective_input`` (the file that was
+    sliced), and -- on an occupied plate -- ``quiet_start`` (the start plan
+    the wrap writes into the file, or ``None``) and ``lift_floor_mm`` (the
+    height every lift in the file rises to).  Raises whatever the slicer
+    raises; each door words that.
     """
     placed, err, place_info = _apply_plate_placement(
         input_path, effective_printer_id=effective_printer_id, printer_name=printer_name,
@@ -831,6 +888,12 @@ def _placed_slice(
     info["placement"] = place_info
     if verify_err is not None:
         return None, verify_err, info
+    # The quiet start's plan and the lift floor, for whichever door wraps
+    # the file next: the plan when the verdict carries one this account may
+    # use, the floor whenever there is one (it is a safety number, and the
+    # wrap honours it on every tier).
+    info["quiet_start"] = _quiet_start_plan(place_info)
+    info["lift_floor_mm"] = _lift_floor_of(place_info)
     return result, None, info
 
 
@@ -838,6 +901,9 @@ def _auto_wrap_bambu_3mf(
     gcode_path: str,
     effective_printer_id: str | None,
     stl_path: str | None,
+    *,
+    quiet_start: dict[str, Any] | None = None,
+    lift_floor_mm: float | None = None,
 ) -> tuple[str | None, str | None]:
     """If the effective printer is a Bambu Lab, repackage the sliced
     G-code into a 3MF so it can actually start (Bambu firmware ignores
@@ -874,7 +940,10 @@ def _auto_wrap_bambu_3mf(
             thumbnail_inputs_for_model,
         )
 
-        threemf_path = gcode_path.rsplit(".", 1)[0] + ".gcode.3mf"
+        stem = gcode_path.rsplit(".", 1)[0]
+        if quiet_start is not None and not stem.endswith("_quiet"):
+            stem += "_quiet"
+        threemf_path = stem + ".gcode.3mf"
         # Shared with every other door that wraps gcode, so a format one
         # of them learns to preview is previewable from all of them.
         stl_paths, source_3mf = thumbnail_inputs_for_model(stl_path)
@@ -911,6 +980,10 @@ def _auto_wrap_bambu_3mf(
             settings=settings,
             source_3mf_path=source_3mf,
             stl_paths=stl_paths,
+            # A part is on the plate: the plan becomes the file's prologue and
+            # contract, and the floor lifts every colour change and the end.
+            quiet_start=quiet_start,
+            lift_floor_mm=lift_floor_mm,
             # The profile id the caller asked for, or the configured
             # printer_model when they did not — a declaration either way, and
             # already what chose the slicer profile.  Selects the per-model
@@ -1568,6 +1641,7 @@ class _SlicerToolsPlugin:
                 if _gcode_path:
                     threemf_path, warning = _auto_wrap_bambu_3mf(
                         _gcode_path, effective_printer_id, effective_input,
+                        quiet_start=sinfo.get("quiet_start"), lift_floor_mm=sinfo.get("lift_floor_mm"),
                     )
                     if threemf_path:
                         response["output_3mf_path"] = threemf_path
@@ -1881,6 +1955,7 @@ class _SlicerToolsPlugin:
                 if _gcode_path:
                     threemf_path, warning = _auto_wrap_bambu_3mf(
                         _gcode_path, effective_printer_id, effective_input,
+                        quiet_start=sinfo.get("quiet_start"), lift_floor_mm=sinfo.get("lift_floor_mm"),
                     )
                     _wrap_path = threemf_path
                     if threemf_path:
@@ -2399,7 +2474,11 @@ class _SlicerToolsPlugin:
                 # which drives the head across the plate.  Refused here,
                 # before the upload, with the slice and its verdict attached
                 # so the work is not lost.
-                if block := _plate_state.start_refusal(adapter):
+                quiet_plan = sinfo.get("quiet_start")
+                # A placed slice with a plan is not refused here: the file it
+                # becomes carries the plan, and the start gate judges it
+                # against the printer at the moment of the start.
+                if quiet_plan is None and (block := _plate_state.start_refusal(adapter)):
                     block["slice"] = result.to_dict()
                     _attach_placement(block, place_info)
                     return block
@@ -2417,7 +2496,15 @@ class _SlicerToolsPlugin:
                     stl_paths=(
                         [effective_input] if effective_input.lower().endswith(".stl") else None
                     ),
+                    quiet_start=quiet_plan,
+                    lift_floor_mm=sinfo.get("lift_floor_mm"),
                 )
+                if quiet_plan is not None and (
+                    block := _plate_state.start_refusal(adapter, file_name=os.path.basename(upload_path), local_path=upload_path)
+                ):
+                    block["slice"] = result.to_dict()
+                    _attach_placement(block, place_info)
+                    return block
 
                 # Post-wrap safety verification — refuse to upload a 3MF
                 # that has no homing sequence or off-bed coordinates.
@@ -2541,6 +2628,15 @@ class _SlicerToolsPlugin:
                 # when the 3MF explicitly declares multiple filaments).
                 if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):
                     print_kwargs["local_file_path"] = upload_path
+                if quiet_plan is not None:
+                    # Every switch the plan names, off -- the adapter template
+                    # sends them off from the file's contract anyway; said
+                    # here too so the command the tool audits is the one sent.
+                    print_kwargs.update({name: False for name in (quiet_plan.get("flags") or {})})
+                    for how in (quiet_plan.get("switched_off") or {}).values():
+                        flag = str(how).split("=", 1)[0].strip()
+                        if flag:
+                            print_kwargs[flag] = False
 
                 # ``sent_at`` is what lets the verdict below tell a reading
                 # about THIS command from the printer's last word about the
@@ -2560,6 +2656,7 @@ class _SlicerToolsPlugin:
                 base_name = os.path.basename(input_path)
                 verdict = resolve_print_start(
                     adapter, print_result, sent_at=sent_at, file_name=base_name,
+                    vendor_start_block=quiet_plan is None,
                 )
                 if verdict.confirmed:
                     outer_message = f"Sliced, uploaded, and started printing {base_name}."

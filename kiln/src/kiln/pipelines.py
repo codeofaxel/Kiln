@@ -465,12 +465,16 @@ def _refused_step(name: str, err: dict[str, Any], step_start: float) -> Pipeline
     )
 
 
-def _start_refused_step(adapter: Any, step_start: float) -> PipelineStep | None:
+def _start_refused_step(
+    adapter: Any, step_start: float, *, file_name: str | None = None, local_path: str | None = None,
+) -> PipelineStep | None:
     """The start step's plate gate: a plate that still holds the last print
-    is never started onto (:func:`kiln.plate_state.start_refusal`)."""
+    is never started onto (:func:`kiln.plate_state.start_refusal`).  A file
+    wrapped with the quiet-start plan for this very plate passes here and
+    is judged by the pre-print gate against the printer, live."""
     from kiln.plate_state import start_refusal
 
-    block = start_refusal(adapter) if adapter is not None else None
+    block = start_refusal(adapter, file_name=file_name, local_path=local_path) if adapter is not None else None
     return _refused_step("start_print", block, step_start) if block else None
 
 
@@ -503,6 +507,10 @@ def _slice_step(
         return _refused_step("slice", err, step_start), None
     data = _slice_step_data(result)
     _attach_placement(data, info["placement"])
+    # The quiet start's plan and the lift floor ride the step for the
+    # upload step to wrap with; every pipeline copies them into its ctx.
+    data["quiet_start"] = info.get("quiet_start")
+    data["lift_floor_mm"] = info.get("lift_floor_mm")
     step = PipelineStep(
         name="slice",
         success=True,
@@ -770,6 +778,8 @@ def quick_print(
                 material=material,
                 loaded_material=_loaded_material(ctx.get("adapter"), material),
             )
+            ctx["quiet_start"] = (step.data or {}).get("quiet_start")
+            ctx["lift_floor_mm"] = (step.data or {}).get("lift_floor_mm")
             return step
         except Exception as exc:
             return PipelineStep(
@@ -829,10 +839,13 @@ def quick_print(
                 adapter,
                 ctx["gcode_path"],
                 stl_paths=[model] if model.lower().endswith(".stl") else None,
+                quiet_start=ctx.get("quiet_start"),
+                lift_floor_mm=ctx.get("lift_floor_mm"),
             )
             upload_result = adapter.upload_file(upload_path)
             remote_name = getattr(upload_result, "file_name", None) or os.path.basename(upload_path)
             ctx["remote_name"] = remote_name
+            ctx["local_3mf_path"] = upload_path if wrapped else None
             return PipelineStep(
                 name="upload",
                 success=True,
@@ -881,8 +894,11 @@ def quick_print(
         try:
             adapter = ctx["adapter"]
             remote_name = ctx["remote_name"]
-            # A plate that still holds the last print is never started onto.
-            if refused := _start_refused_step(adapter, step_start):
+            # A plate that still holds the last print is never started onto;
+            # a file planned beside it the quiet way is judged at the gate.
+            if refused := _start_refused_step(
+                adapter, step_start, file_name=remote_name, local_path=ctx.get("local_3mf_path"),
+            ):
                 return refused
             if adapter is None or remote_name is None:
                 return PipelineStep(
@@ -901,6 +917,8 @@ def quick_print(
             from kiln.server import _resolve_use_ams
 
             start_kwargs: dict[str, Any] = {}
+            if ctx.get("local_3mf_path"):
+                start_kwargs["local_file_path"] = ctx["local_3mf_path"]
             ams_decision = _resolve_use_ams(
                 "auto" if use_ams is None else use_ams,
                 ams_mapping,
@@ -948,6 +966,7 @@ def quick_print(
             print_result = adapter.start_print(remote_name, **start_kwargs)
             verdict = resolve_print_start(
                 adapter, print_result, sent_at=sent_at, file_name=remote_name,
+                vendor_start_block=ctx.get("quiet_start") is None,
             )
 
             step_data: dict[str, Any] = {
@@ -1260,6 +1279,8 @@ def reslice_and_print(
                 material=material,
                 loaded_material=_loaded_material(adapter, material),
             )
+            ctx["quiet_start"] = (step.data or {}).get("quiet_start")
+            ctx["lift_floor_mm"] = (step.data or {}).get("lift_floor_mm")
             return step
         except Exception as exc:
             return PipelineStep(
@@ -1322,6 +1343,8 @@ def reslice_and_print(
                 ctx["gcode_path"],
                 hotend_temp=int(_hot) if _hot else None,
                 bed_temp=int(_bed) if _bed else None,
+                quiet_start=ctx.get("quiet_start"),
+                lift_floor_mm=ctx.get("lift_floor_mm"),
             )
 
             upload_result = adapter.upload_file(upload_path)
@@ -1377,8 +1400,11 @@ def reslice_and_print(
         try:
             adapter = ctx["adapter"]
             remote_name = ctx["remote_name"]
-            # A plate that still holds the last print is never started onto.
-            if refused := _start_refused_step(adapter, step_start):
+            # A plate that still holds the last print is never started onto;
+            # a file planned beside it the quiet way is judged at the gate.
+            if refused := _start_refused_step(
+                adapter, step_start, file_name=remote_name, local_path=ctx.get("local_3mf_path"),
+            ):
                 return refused
             if adapter is None or remote_name is None:
                 return PipelineStep(
@@ -1462,6 +1488,7 @@ def reslice_and_print(
             print_result = adapter.start_print(remote_name, **start_kwargs)
             verdict = resolve_print_start(
                 adapter, print_result, sent_at=sent_at, file_name=remote_name,
+                vendor_start_block=ctx.get("quiet_start") is None,
             )
             step_data: dict[str, Any] = {
                 "file_name": remote_name,

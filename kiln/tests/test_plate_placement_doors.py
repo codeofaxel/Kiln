@@ -1187,9 +1187,12 @@ class TestEveryDoorThatStartsAPrint:
         resp = srv.start_print(file_name="part.gcode")
         assert resp["success"] is False and resp["error"]["code"] == "PLATE_OCCUPIED_START_NOT_YET"
         seen: list = []
-        monkeypatch.setattr(plate_state, "start_refusal", lambda adapter, resume=False: seen.append(resume) or None)
+        monkeypatch.setattr(
+            plate_state, "start_refusal",
+            lambda adapter, resume=False, file_name=None, local_path=None: seen.append((resume, file_name)) or None,
+        )
         srv.start_print(file_name="part.gcode", resume_from_paused=True)
-        assert seen == [True], "the tool tells the gate a resume is a resume"
+        assert seen == [(True, "part.gcode")], "the tool tells the gate a resume is a resume, and names the file"
 
     def test_start_monitored_print_refuses(self, machine, monkeypatch):
         from kiln.plugins import monitoring_tools

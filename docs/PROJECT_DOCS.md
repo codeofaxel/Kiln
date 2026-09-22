@@ -817,6 +817,8 @@ Kiln remembers what its last print left on the plate. Until you say the plate is
 
 To print a second part beside the one on the plate, pass a `placement` (a named region such as `back-left` or `centre`, or exact plate coordinates) to any slicing tool. Kiln asks kiln-pro's servers for a clearance verdict for that spot on your printer, and slices there only when the verdict says the print head and gantry clear the part for the whole print. No verdict — offline, signed out, or no answer — means no slice: Kiln says which one stopped it and what to do, rather than guessing.
 
+The sliced file then starts **the quiet way**: instead of the printer's own start routine (a Z home on the plate, a bed probe, a purge line drawn across it), the file opens with Kiln's own prologue — an absolute lift to a height clear of everything on the plate, the X/Y home at that height, a travel over the new part's own footprint, and the descent there — and every colour change and the end block lift to the same floor before the head moves sideways. The file carries a contract naming the machine and the plate it was planned for; at the moment of the start Kiln reads it back and asks the printer whether it is homed and idle, refuses if the plate record has changed since the plan, and sends bed levelling, flow and vibration calibration, timelapse, first-layer inspection and the nozzle-clog probe switched off. The clearance verdict is free on every tier; the quiet start is served by kiln-pro (https://kiln3d.com/pricing), and below its tier the file is sliced beside the part but starts only once the plate is clear.
+
 ### G-code Validation
 
 `validate_gcode()` screens commands before they reach hardware:

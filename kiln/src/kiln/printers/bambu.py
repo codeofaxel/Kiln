@@ -4372,6 +4372,8 @@ class BambuAdapter(PrinterAdapter):
         filament_types: list[str] | None = None,
         stl_paths: list[str] | None = None,
         resume_mode: bool = False,
+        quiet_start: dict[str, Any] | None = None,
+        lift_floor_mm: float | None = None,
     ) -> str:
         """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF.
 
@@ -4402,6 +4404,14 @@ class BambuAdapter(PrinterAdapter):
         :param filament_types: List of filament type strings per filament.
         :param stl_paths: Optional STL paths for auto-generating thumbnails
             when no source_3mf_path is provided.
+        :param quiet_start: The placement verdict's start plan for a print
+            beside a part still on the plate; the file then opens with
+            Kiln's own prologue under a contract header instead of the
+            vendor's start, and is named ``<stem>_quiet.3mf`` so the
+            resume convention never matches it.  See
+            :func:`kiln.printers.bambu_3mf.build_bambu_3mf`.
+        :param lift_floor_mm: Other parts on the plate: every Kiln-owned
+            lift in the file rises to at least this height.
         :returns: Path to the output 3MF file.
         :raises FileNotFoundError: If the gcode file doesn't exist.
         :raises ValueError: If the gcode has no layer changes.
@@ -4414,6 +4424,8 @@ class BambuAdapter(PrinterAdapter):
 
         gcode_body = Path(abs_path).read_text(encoding="utf-8")
         stem = Path(abs_path).stem
+        if quiet_start is not None and not stem.endswith("_quiet"):
+            stem = f"{stem}_quiet"
         output_path = os.path.join(os.path.dirname(abs_path), f"{stem}.3mf")
 
         # Nothing declared: ask the machine what is actually loaded rather
@@ -4446,6 +4458,8 @@ class BambuAdapter(PrinterAdapter):
             # serial/firmware probes stay telemetry.  Empty when the owner
             # never declared one, which keeps the historical A1 templates.
             printer_model=self._printer_model,
+            quiet_start=quiet_start,
+            lift_floor_mm=lift_floor_mm,
         )
         # The printer will know this job by the WRAP's name, but the layer
         # viewer wants the raw G-code inside — keep the two joined in the

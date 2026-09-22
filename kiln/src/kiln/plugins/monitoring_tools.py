@@ -1464,11 +1464,14 @@ class _MonitoringToolsPlugin:
                 adapter = _srv._resolve_adapter(printer_name)
 
                 # A plate that still holds the last print is never started
-                # onto: the file's own start sequence crosses the plate.
-                from kiln.plate_state import start_refusal
+                # onto: the file's own start sequence crosses the plate.  A
+                # file planned beside it the quiet way (its wrap is behind
+                # the name in the slice ledger) passes to the pre-print gate.
+                from kiln.plate_state import quiet_start_contract_for, start_refusal
 
-                if block := start_refusal(adapter):
+                if block := start_refusal(adapter, file_name=file_name):
                     return block
+                quiet_file = quiet_start_contract_for(file_name) is not None
 
                 # -- Automatic pre-flight safety gate (mandatory) --
                 pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
@@ -1505,6 +1508,7 @@ class _MonitoringToolsPlugin:
                 # running sends the same file again onto an occupied bed.
                 verdict = resolve_print_start(
                     adapter, print_result, sent_at=sent_at, file_name=file_name,
+                    vendor_start_block=not quiet_file,
                 )
                 if not verdict.ok:
                     return {

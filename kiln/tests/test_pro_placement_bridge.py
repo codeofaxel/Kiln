@@ -293,7 +293,7 @@ class TestTheRequest:
 
     def test_a_clear_or_unrecorded_plate_carries_no_occupant(self):
         req = bridge.request_for(_machine(), "bambu_a1", placement="auto", part=None)
-        assert req["plate"] == {"status": "unknown", "job": None, "since": None}
+        assert req["plate"] == {"status": "unknown", "job": None, "jobs": [], "fingerprint": "", "since": None}
         assert req["occupant_gcode"] is None
 
     def test_the_post_slice_pass_names_the_sliced_file(self, tmp_path):

@@ -376,6 +376,8 @@ class _SmartPrintToolsPlugin:
             from kiln.plugins.slicer_tools import (
                 _apply_plate_placement,
                 _attach_placement,
+                _lift_floor_of,
+                _quiet_start_plan,
                 _verify_plate_placement,
             )
 
@@ -417,9 +419,14 @@ class _SmartPrintToolsPlugin:
             # started onto: the file carries the maker's own start sequence.
             # Refused before the wrap and the upload, with the slice and its
             # verdict attached so the work is not lost.
+            # A slice the verdict plans a quiet start for goes on: the wrap
+            # writes the plan into the file and the pre-print gate judges it
+            # against the printer at the moment of the start.
             from kiln.plate_state import start_refusal
 
-            if block := start_refusal(adapter):
+            quiet_plan = _quiet_start_plan(place_info)
+            lift_floor = _lift_floor_of(place_info)
+            if quiet_plan is None and (block := start_refusal(adapter)):
                 block["slice"] = slice_result.to_dict()
                 _attach_placement(block, place_info)
                 return block
@@ -445,9 +452,19 @@ class _SmartPrintToolsPlugin:
                         slice_result.output_path,
                         stl_paths=_stl_paths,
                         source_3mf_path=_source_3mf,
+                        quiet_start=quiet_plan,
+                        lift_floor_mm=lift_floor,
                     )
                     _logger.info("Wrapped gcode as Bambu 3MF: %s", upload_path)
-                except Exception:
+                except Exception as exc:
+                    if quiet_plan is not None or lift_floor is not None:
+                        # A raw file, or one without the plan, would carry
+                        # the vendor's start onto the occupied plate.
+                        return _srv._error_dict(
+                            f"Kiln could not write the file for a start beside what is on the plate ({exc}), "
+                            "so it won't hand a file on. Clear the plate and say so, then retry.",
+                            code="QUIET_START_WRAP_FAILED",
+                        )
                     _logger.warning(
                         "Bambu 3MF wrapping failed, uploading raw gcode",
                         exc_info=True,
@@ -503,8 +520,17 @@ class _SmartPrintToolsPlugin:
                         "retry_print_with_fix", file_name, printer_name,
                         source=print_signoff.SOURCE_PRIOR_APPROVAL,
                     )
+                if quiet_plan is not None and (
+                    block := start_refusal(adapter, file_name=file_name, local_path=upload_path)
+                ):
+                    block["slice"] = slice_result.to_dict()
+                    _attach_placement(block, place_info)
+                    return block
                 sent_at = time.monotonic()
-                print_result = adapter.start_print(file_name)
+                start_kwargs: dict[str, Any] = {}
+                if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):
+                    start_kwargs["local_file_path"] = upload_path
+                print_result = adapter.start_print(file_name, **start_kwargs)
             except Exception as exc:
                 return _srv._error_dict(
                     f"Failed to start print: {exc}", code="PRINT_ERROR"
@@ -529,6 +555,7 @@ class _SmartPrintToolsPlugin:
                 msg_parts.append(f"Applied overrides: {override_summary}.")
             verdict = resolve_print_start(
                 adapter, print_result, sent_at=sent_at, file_name=model_name,
+                vendor_start_block=quiet_plan is None,
             )
             if verdict.confirmed:
                 msg_parts.append(f"Re-sliced and started printing {model_name}.")

@@ -405,16 +405,26 @@ def _cli_placed_slice(
     )
     if err is not None:
         _cli_placement_refuse(err, json_mode)
-    return result, info["placement"]
+    placement_info = info["placement"]
+    if isinstance(placement_info, dict):
+        # The quiet start's plan and the lift floor ride the placement info
+        # to the command's wrap, the way the tools' own doors carry them.
+        placement_info["quiet_start"] = info.get("quiet_start")
+        placement_info["lift_floor_mm"] = info.get("lift_floor_mm")
+    return result, placement_info
 
 
-def _cli_start_refusal(adapter: Any, json_mode: bool) -> None:
+def _cli_start_refusal(
+    adapter: Any, json_mode: bool, *, file_name: str | None = None, local_path: str | None = None,
+) -> None:
     """The start gate every CLI door that starts a print calls first: a plate
     that still holds the last print is never started onto
-    (:func:`kiln.plate_state.start_refusal`).  Refuses and exits non-zero."""
+    (:func:`kiln.plate_state.start_refusal`).  A file wrapped with the
+    quiet-start plan for this very plate passes, and the pre-print gate
+    judges it against the printer.  Refuses and exits non-zero."""
     from kiln.plate_state import start_refusal
 
-    block = start_refusal(adapter)
+    block = start_refusal(adapter, file_name=file_name, local_path=local_path)
     if block is not None:
         _cli_placement_refuse(block, json_mode)
 
@@ -3081,8 +3091,9 @@ def print_cmd(
                     print_kwargs["local_file_path"] = os.path.abspath(f)
 
             # A plate that still holds the last print is never started onto:
-            # the file's own start sequence crosses the plate.
-            _cli_start_refusal(adapter, json_mode)
+            # the file's own start sequence crosses the plate.  A file
+            # planned beside it the quiet way is judged at the gate.
+            _cli_start_refusal(adapter, json_mode, file_name=file_name, local_path=print_kwargs.get("local_file_path"))
             result = adapter.start_print(file_name, **print_kwargs)
             click.echo(format_action("start", _with_window(result.to_dict(), window), json_mode=json_mode))
 
@@ -4414,8 +4425,16 @@ def slice(
                         "#44FF44", "#4444FF", "#FFAA00", "#AA00FF",
                     ]
                     wrap_kwargs["filament_colors"] = default_colors[:copies]
+                quiet_plan = placement_info.get("quiet_start") if isinstance(placement_info, dict) else None
+                lift_floor = placement_info.get("lift_floor_mm") if isinstance(placement_info, dict) else None
+                if quiet_plan is not None:
+                    wrap_kwargs["quiet_start"] = quiet_plan
+                if lift_floor is not None:
+                    wrap_kwargs["lift_floor_mm"] = lift_floor
                 if not json_mode:
-                    if multicolor_mode:
+                    if quiet_plan is not None:
+                        click.echo("Wrapping gcode as a Bambu 3MF that starts the quiet way beside what is on the plate...")
+                    elif multicolor_mode:
                         click.echo("Wrapping gcode as multi-color Bambu 3MF...")
                     else:
                         click.echo("Wrapping gcode as Bambu 3MF...")
@@ -4423,14 +4442,23 @@ def slice(
                 if not json_mode:
                     click.echo(f"Bambu 3MF: {upload_path}")
             except Exception as exc:
+                if wrap_kwargs.get("quiet_start") is not None or wrap_kwargs.get("lift_floor_mm") is not None:
+                    # A raw file would carry no plan and no floor onto the occupied plate.
+                    click.echo(format_error(
+                        f"Kiln could not write the file for a start beside what is on the plate ({exc}), so it "
+                        "won't upload one. Clear the plate and say so, then slice and print the ordinary way.",
+                        code="QUIET_START_WRAP_FAILED", json_mode=json_mode,
+                    ))
+                    sys.exit(1)
                 logger.warning("Bambu 3MF wrapping failed: %s", exc)
                 if not json_mode:
                     click.echo(f"Warning: Bambu 3MF wrapping failed ({exc}), uploading raw gcode")
 
         # A plate that still holds the last print is never started onto:
         # the file's own start sequence crosses the plate.  Refused before
-        # the upload; the slice on disk is kept.
-        _cli_start_refusal(adapter, json_mode)
+        # the upload; the slice on disk is kept.  A file wrapped with the
+        # quiet-start plan for this plate passes to the gate.
+        _cli_start_refusal(adapter, json_mode, file_name=os.path.basename(upload_path), local_path=upload_path)
 
         if not json_mode:
             click.echo(f"Uploading {upload_path}...")
@@ -4450,6 +4478,10 @@ def slice(
 
         # Build print kwargs (AMS mapping, etc.)
         print_kwargs: dict[str, Any] = {}
+        if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):
+            # The local copy, so the pre-print gate reads the file's own
+            # contract before the printer is told to start.
+            print_kwargs["local_file_path"] = os.path.abspath(upload_path)
         if isinstance(adapter, BambuAdapter):
             if parsed_ams_mapping:
                 print_kwargs["ams_mapping"] = parsed_ams_mapping
@@ -9659,7 +9691,7 @@ def generate_and_print_cmd(
             # A plate that still holds the last print is never started
             # onto: the file's own start sequence crosses the plate.  The
             # upload above stays; only the start is refused.
-            _cli_start_refusal(adapter, json_mode)
+            _cli_start_refusal(adapter, json_mode, file_name=remote, local_path=slice_result.output_path)
             window = cli_gate(
                 "kiln generate-and-print --auto-print", result.local_path, None,
                 printer_name=ctx.obj.get("printer"), json_mode=json_mode,
@@ -9675,7 +9707,11 @@ def generate_and_print_cmd(
                 source=cleared.source if cleared else "unrecorded",
                 door=cleared.door if cleared else "",
             )
-            adapter.start_print(remote)
+            _local = slice_result.output_path
+            adapter.start_print(
+                remote,
+                **({"local_file_path": os.path.abspath(_local)} if str(_local).lower().endswith(".3mf") and os.path.isfile(_local) else {}),
+            )
             if not json_mode:
                 click.echo(f"Printing started: {remote}")
 

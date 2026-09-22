@@ -904,7 +904,9 @@ class _GenerationAIToolsPlugin:
                 from kiln.plugins.slicer_tools import (
                     _apply_plate_placement,
                     _attach_placement,
+                    _lift_floor_of,
                     _loaded_material_for,
+                    _quiet_start_plan,
                     _verify_plate_placement,
                 )
 
@@ -931,8 +933,19 @@ class _GenerationAIToolsPlugin:
                 # Same door as the control verbs: config.yaml fallback included.
                 adapter = _srv._resolve_adapter(printer_name)
 
-                upload = adapter.upload_file(slice_result.output_path)
-                file_name = upload.file_name or os.path.basename(slice_result.output_path)
+                # The same upload step every slicing door uses: a printer
+                # whose files Kiln wraps gets the 3MF -- with the quiet
+                # start's plan and the lift floor when a part is on the plate.
+                from kiln.printers.upload_prep import prepare_upload_for_adapter
+
+                quiet_plan = _quiet_start_plan(place_info)
+                upload_path, _wrapped = prepare_upload_for_adapter(
+                    adapter, slice_result.output_path,
+                    stl_paths=[placed_path] if str(placed_path).lower().endswith(".stl") else None,
+                    quiet_start=quiet_plan, lift_floor_mm=_lift_floor_of(place_info),
+                )
+                upload = adapter.upload_file(upload_path)
+                file_name = upload.file_name or os.path.basename(upload_path)
 
                 # Use pipeline results for response (already computed above)
                 gen_validation = pipeline_result if pipeline_result else None
@@ -968,7 +981,7 @@ class _GenerationAIToolsPlugin:
                     # verdict and the upload receipt ride the refusal.
                     from kiln.plate_state import start_refusal
 
-                    if block := start_refusal(adapter):
+                    if block := start_refusal(adapter, file_name=file_name, local_path=upload_path):
                         block["slice"] = slice_result.to_dict()
                         block["upload"] = upload.to_dict()
                         _attach_placement(block, place_info)
@@ -1012,11 +1025,14 @@ class _GenerationAIToolsPlugin:
                         source=print_signoff.SOURCE_STANDING_OPT_IN,
                     )
                     sent_at = time.monotonic()
-                    print_result = adapter.start_print(file_name)
+                    start_kwargs: dict[str, Any] = {}
+                    if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):
+                        start_kwargs["local_file_path"] = upload_path
+                    print_result = adapter.start_print(file_name, **start_kwargs)
                     _srv._note_print_started(adapter)
                     print_verdict = resolve_print_start(
                         adapter, print_result, sent_at=sent_at,
-                        file_name=file_name,
+                        file_name=file_name, vendor_start_block=quiet_plan is None,
                     )
                     print_data = print_verdict.to_dict()
                     auto_printed = True

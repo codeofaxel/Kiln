@@ -733,6 +733,45 @@ HOMED_UNKNOWN_SENTENCE = (
     "reslice and print normally"
 )
 
+# ---------------------------------------------------------------------------
+# The quiet start: a print started beside a part still on the plate.
+#
+# The file was sliced beside what the plate record holds and checked by the
+# placement verdict; its prologue is Kiln's own -- an ABSOLUTE lift to a
+# height above everything on the plate before any sideways move, an X/Y
+# home at that height, a travel over the new part's own footprint, and a
+# descent there -- and never the vendor's start, which homes Z on the
+# plate, probes it and draws a purge line across it.  The file carries a
+# contract, read and judged against the machine, live, in this order:
+#
+#   (a) the file carries Kiln's quiet-start header, whole;
+#   (b) it was planned for the machine being started;
+#   (c) it was planned for the plate as the record reads it NOW -- the same
+#       parts, footprints and heights (kiln.plate_state.fingerprint);
+#   (d) no emergency latch on that machine;
+#   (e) the machine is not printing or paused;
+#   (f) the firmware, asked now, reports X, Y and Z homed (an absolute Z
+#       move on an unhomed Z is a guess; a power cycle unhomes);
+#   (g) the start command switches off every routine the contract names
+#       (levelling, calibration, timelapse, inspection, the clog probe).
+#
+# Same shape as the same-bed retry above; a different contract, and two
+# more conditions -- the plate and the switches.
+# ---------------------------------------------------------------------------
+QUIET_START_HEADER_START = "; --- Kiln quiet start ---"
+QUIET_START_HEADER_END = "; --- End Kiln quiet start ---"
+QUIET_START_MOTION_CONTRACT = "absolute_z_first"
+QUIET_START_POLICY_VERSION = "1"
+QUIET_START_REQUIRED_KEYS = (
+    "quiet_start_policy_version",
+    "motion_contract",
+    "planned_for_machine",
+    "planned_for_plate",
+    "clear_z_mm",
+    "lift_floor_mm",
+    "switched_off",
+)
+
 
 def same_bed_machine_id(adapter: Any) -> str:
     """The identity a same-bed retry is bound to, or ``""`` when there is none.
@@ -823,6 +862,221 @@ def read_same_bed_contract(path: str) -> dict[str, str] | None:
         if sep and key.strip() and " " not in key.strip():
             fields.setdefault(key.strip(), value.strip())
     return fields
+
+
+def read_quiet_start_contract(path: str) -> dict[str, str] | None:
+    """The ``; key: value`` lines of Kiln's quiet-start header, or ``None``
+    when the file carries no such header.  A present but incomplete header
+    still comes back, so the refusal can name the missing line."""
+    return _read_contract(path, QUIET_START_HEADER_START, QUIET_START_HEADER_END)
+
+
+def _read_contract(path: str, start_marker: str, end_marker: str) -> dict[str, str] | None:
+    head = _gcode_head(path, _SAME_BED_HEADER_MAX_LINES)
+    if not head:
+        return None
+    start = next(
+        (i for i, line in enumerate(head[:_SAME_BED_HEADER_SCAN_LINES]) if line.strip() == start_marker),
+        None,
+    )
+    if start is None:
+        return None
+    fields: dict[str, str] = {}
+    for line in head[start + 1:]:
+        stripped = line.strip()
+        if stripped == end_marker:
+            break
+        if not stripped.startswith(";"):
+            continue
+        body = stripped[1:].strip()
+        key, sep, value = body.partition(":")
+        if sep and key.strip() and " " not in key.strip():
+            fields.setdefault(key.strip(), value.strip())
+    return fields
+
+
+def evaluate_quiet_start(adapter: Any, job_path: str, kwargs: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Judge a quiet-start file against the machine and the plate, live.
+
+    Conditions (a)-(g) in the module comment above, in that order; the
+    first that fails is the verdict, with its remedy, and later ones are
+    not read.  ``accepted=True`` with ``blocked=False`` when all hold.
+    ``homed_evidence`` is filled the moment (f) is consulted.  *kwargs* are
+    the start command's own, for (g).
+    """
+    name = os.path.basename(str(job_path))
+    contract = read_quiet_start_contract(job_path)
+    machine = same_bed_machine_id(adapter)
+    verdict: dict[str, Any] = {
+        "ok": False, "blocked": True, "accepted": False, "code": None, "condition": None, "reason": "",
+        "contract": contract, "machine": machine, "homed_evidence": None, "kind": "quiet_start",
+    }
+
+    def refuse(code: str, condition: str, reason: str) -> dict[str, Any]:
+        verdict.update(code=code, condition=condition, reason=reason)
+        _audit_quiet_start(verdict, name)
+        return verdict
+
+    remedy = " Slice it again beside what is on the plate, or clear the plate and say so, then print it the ordinary way."
+    if contract is None:
+        return refuse("QUIET_START_NO_CONTRACT", "contract", f"{name} carries no Kiln quiet-start header." + remedy)
+    missing = [k for k in QUIET_START_REQUIRED_KEYS if not contract.get(k)]
+    if missing:
+        return refuse(
+            "QUIET_START_NO_CONTRACT", "contract",
+            f"{name} carries an incomplete Kiln quiet-start header: missing {', '.join(missing)}." + remedy,
+        )
+    if contract["motion_contract"] != QUIET_START_MOTION_CONTRACT:
+        return refuse(
+            "QUIET_START_NO_CONTRACT", "contract",
+            f"{name}'s motion_contract is '{contract['motion_contract']}', not '{QUIET_START_MOTION_CONTRACT}'; only a "
+            "prologue that lifts clear of the plate before it moves sideways may start beside a part." + remedy,
+        )
+    if contract["quiet_start_policy_version"] != QUIET_START_POLICY_VERSION:
+        return refuse(
+            "QUIET_START_NO_CONTRACT", "contract",
+            f"{name} was planned under quiet-start policy {contract['quiet_start_policy_version']}; this Kiln "
+            f"reads version {QUIET_START_POLICY_VERSION}." + remedy,
+        )
+    planned_for = contract["planned_for_machine"]
+    if not machine:
+        return refuse(
+            "QUIET_START_WRONG_MACHINE", "machine",
+            f"Kiln cannot identify this printer (it reports no serial, no address and no registered name), so it "
+            f"cannot confirm {name} was planned for it (planned for {planned_for})." + remedy,
+        )
+    if planned_for != machine:
+        return refuse(
+            "QUIET_START_WRONG_MACHINE", "machine",
+            f"{name} was planned for {planned_for} and is being started on {machine}; the plate it was planned "
+            "around is not this one." + remedy,
+        )
+    from kiln.plate_state import fingerprint, read
+
+    state = read(adapter)
+    now = fingerprint(state) if state.occupied else ""
+    if not state.occupied:
+        return refuse(
+            "QUIET_START_PLATE_NOT_OCCUPIED", "plate",
+            f"{name} was planned beside a part on the plate, and the record now says the plate is "
+            f"{state.status}; a quiet start skips the printer's own homing and levelling, which an empty plate "
+            "should have. Slice it again and print it the ordinary way.",
+        )
+    if contract["planned_for_plate"] != now:
+        return refuse(
+            "QUIET_START_PLATE_CHANGED", "plate",
+            f"{name} was planned for a plate holding "
+            f"{', '.join(os.path.basename(j.file) for j in state.jobs) or 'another part'} as it stood then; the "
+            "record has changed since." + remedy,
+        )
+    printer_name = _registered_name(adapter)
+    status = _latch_status(printer_name)
+    if status and bool(status.get("latched")):
+        blockers = status.get("critical_interlocks_pending") or []
+        pending = " Critical interlocks pending: " + ", ".join(str(x) for x in blockers) + "." if blockers else ""
+        return refuse(
+            "QUIET_START_EMERGENCY_LATCHED", "emergency_latch",
+            f"Emergency latch is active for printer '{printer_name}'.{pending} Resolve hazards, acknowledge, then "
+            "clear via clear_emergency_stop(), and start again.",
+        )
+    try:
+        state_now = adapter.get_state()
+    except Exception as exc:  # noqa: BLE001
+        return refuse(
+            "QUIET_START_STATE_READ_FAILED", "printer_state",
+            f"could not read the printer's state before the quiet start ({exc}); try again in a moment.",
+        )
+    from kiln.printers.base import PrinterStatus, effective_state_of
+
+    run_state = effective_state_of(state_now)
+    if run_state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+        return refuse(
+            "QUIET_START_PRINTER_BUSY", "printer_state",
+            f"the printer reports it is {run_state.value}; a quiet start begins only on an idle machine. Wait for "
+            "that job to end, then start again.",
+        )
+    from datetime import datetime, timezone
+
+    try:
+        axes = adapter.homed_axes_now()
+    except Exception as exc:  # noqa: BLE001
+        return refuse(
+            "QUIET_START_HOMED_READ_FAILED", "homed_axes",
+            f"could not read which axes are homed from the printer ({exc}); try again in a moment.",
+        )
+    try:
+        field = adapter.homed_axes_field()
+    except Exception:  # noqa: BLE001
+        field = None
+    verdict["homed_evidence"] = {
+        "axes": None if axes is None else sorted(str(a).lower() for a in axes),
+        "field": field,
+        "read_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "backend": getattr(adapter, "name", None) or type(adapter).__name__,
+    }
+    if axes is None:
+        return refuse(
+            "QUIET_START_HOMED_UNKNOWN", "homed_axes",
+            f"{name} was not started: this printer cannot report whether it is homed, and a quiet start lifts to "
+            "an absolute height before it moves; clear the plate and print it the ordinary way.",
+        )
+    reported = set(verdict["homed_evidence"]["axes"])
+    not_homed = sorted({"x", "y", "z"} - reported)
+    if not_homed:
+        return refuse(
+            "QUIET_START_NOT_HOMED", "homed_axes",
+            f"the printer reports homed axes: {','.join(sorted(reported)) or 'none'} — {','.join(not_homed)} not "
+            "homed (it has been switched off since the last print), and a quiet start never homes Z with a part "
+            "on the plate. Clear the plate, home the printer (home_axes), then print it the ordinary way.",
+        )
+    wanted = [n.strip() for n in contract["switched_off"].split(",") if n.strip()]
+    given = kwargs or {}
+    still_on = [n for n in wanted if bool(given.get(n, _START_FLAG_DEFAULTS.get(n, True)))]
+    if still_on:
+        return refuse(
+            "QUIET_START_SWITCH_ON", "switches",
+            f"{name} must start with {', '.join(still_on)} switched off -- each one drives the head across the "
+            "plate -- and the start command left them on.",
+        )
+    verdict.update(
+        ok=True, blocked=False, accepted=True, code="QUIET_START_ACCEPTED", condition=None,
+        reason=(
+            f"quiet start accepted on {machine}: the file carries Kiln's absolute-lift-first contract for the plate "
+            "as it stands, and the printer reports x,y,z homed and idle."
+        ),
+    )
+    _audit_quiet_start(verdict, name)
+    return verdict
+
+
+#: What each start switch means when a start command leaves it unsaid --
+#: the adapter's own defaults, so an absent flag is judged as the adapter
+#: would send it.
+_START_FLAG_DEFAULTS: dict[str, bool] = {
+    "bed_leveling": True,
+    "flow_cali": False,
+    "vibration_cali": False,
+    "timelapse": False,
+    "layer_inspect": False,
+    "nozzle_clog_detect": True,
+}
+
+
+def _audit_quiet_start(verdict: dict[str, Any], name: str) -> None:
+    """One line per decision, with the evidence the decision rested on."""
+    evidence = verdict.get("homed_evidence") or {}
+    axes = evidence.get("axes")
+    _logger.info(
+        "print_gate: quiet start %s on %s (%s): plate=%s axes=%s field=%s read_at=%s code=%s",
+        "accepted" if verdict.get("accepted") else "refused",
+        verdict.get("machine") or "-",
+        name,
+        (verdict.get("contract") or {}).get("planned_for_plate") or "-",
+        ",".join(axes) if axes else ("none" if axes is not None else "-"),
+        evidence.get("field") or "-",
+        evidence.get("read_at") or "-",
+        verdict.get("code"),
+    )
 
 
 def _latch_status(printer_name: str) -> dict[str, Any] | None:
@@ -1095,6 +1349,13 @@ def run_adapter_gate(
             return _read_back_refusal(file_name, printer_id, str(exc), override)
     inspected = job if job is not None else fetched
     material_id = _resolve_material(kwargs)
+    if inspected and read_quiet_start_contract(inspected) is not None:
+        quiet = evaluate_quiet_start(adapter, inspected, kwargs)
+        if quiet.get("blocked"):
+            return {
+                "ok": False, "blocked": True, "code": quiet["code"], "reason": quiet["reason"],
+                "condition": quiet["condition"], "homed_evidence": quiet["homed_evidence"], "quiet_start": quiet,
+            }
     try:
         verdict = evaluate_pre_print_gate(
             inspected,

@@ -66,6 +66,9 @@ OCCUPANCY_KIND = "kiln.plate_occupancy.v1"
 #: The code every door that starts a print refuses with while the plate
 #: still holds the last one (:func:`start_refusal`).
 START_NOT_YET_CODE = "PLATE_OCCUPIED_START_NOT_YET"
+#: A quiet-start file planned for a plate that is not this one any more:
+#: something was printed, cleared or moved since the plan was made.
+PLATE_CHANGED_CODE = "PLATE_CHANGED_SINCE_PLAN"
 
 #: What a sentence strips before it names the part on the plate.  The one
 #: prettifier in public Kiln; its list matches kiln-pro's own, so the two
@@ -218,13 +221,29 @@ class PlateState:
     status: str = "unknown"
     source: str = "no_record"
     since: str | None = None
+    #: The print that put the LAST part there; ``jobs`` holds every part,
+    #: first to last, when a second one was started the quiet way beside
+    #: the first.  ``job`` is always ``jobs[-1]``.
     job: PlateJob | None = None
     note: str = ""
     details: dict[str, Any] = field(default_factory=dict)
+    jobs: tuple[PlateJob, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.jobs and self.job is not None:
+            object.__setattr__(self, "jobs", (self.job,))
+        elif self.jobs and self.job is None:
+            object.__setattr__(self, "job", self.jobs[-1])
 
     @property
     def occupied(self) -> bool:
         return self.status == "occupied"
+
+    @property
+    def tallest_mm(self) -> float | None:
+        """The tallest recorded part, or ``None`` when no height is known."""
+        heights = [j.max_z_mm for j in self.jobs if j.max_z_mm is not None]
+        return max(heights) if heights else None
 
     @property
     def clear(self) -> bool:
@@ -263,10 +282,23 @@ class PlateState:
         height clause is dropped, never printed as ``None``, when the record
         could not read the file's height.
         """
+        if len(self.jobs) > 1:
+            names = [pretty_job_name(j.file) for j in self.jobs]
+            listed = ", ".join(names[:-1]) + f" and {names[-1]}"
+            tallest = self.tallest_mm
+            tall = f", the tallest about {tallest:g} mm" if tallest is not None else ""
+            return f"The last prints, {listed}, are still on the plate (since {self.since_clock()}{tall})."
         job = self.job
         tall = f", about {job.max_z_mm:g} mm tall" if job is not None and job.max_z_mm is not None else ""
         name = pretty_job_name(job.file if job is not None else "")
         return f"The last print, {name}, is still on the plate (since {self.since_clock()}{tall})."
+
+    def plate_changed_sentence(self) -> str:
+        """Why a quiet-start file planned for another plate does not start."""
+        return (
+            f"{self.holds_sentence()} This file was planned for a different plate than the one Kiln has on "
+            "record now, so it won't start it. Slice it again beside what is there, or clear the plate and say so."
+        )
 
     def start_refusal_sentence(self) -> str:
         """Why no print starts while the plate holds the last one."""
@@ -289,19 +321,22 @@ class PlateState:
         """
         if not self.occupied:
             return None
-        job = self.job
         try:
             bed = [float(bed_mm[0]), float(bed_mm[1])] if bed_mm else None
         except (TypeError, ValueError, IndexError):
             bed = None
+        occupied = [
+            {
+                "name": os.path.basename(job.file),
+                "rect_mm": list(job.footprint_mm) if job.footprint_mm else None,
+                "top_mm": job.max_z_mm,
+            }
+            for job in self.jobs
+        ] or [{"name": "a part", "rect_mm": None, "top_mm": None}]
         return {
             "kind": OCCUPANCY_KIND,
             "bed_mm": bed,
-            "occupied": [{
-                "name": os.path.basename(job.file) if job else "a part",
-                "rect_mm": list(job.footprint_mm) if job and job.footprint_mm else None,
-                "top_mm": job.max_z_mm if job else None,
-            }],
+            "occupied": occupied,
             "proposed": None,
             "source": "record_box",
         }
@@ -313,6 +348,8 @@ class PlateState:
             "source": self.source,
             "since": self.since,
             "job": self.job.to_dict() if self.job else None,
+            "jobs": [j.to_dict() for j in self.jobs],
+            "fingerprint": fingerprint(self) if self.occupied else None,
             "note": self.note,
             "description": self.describe(),
         }
@@ -323,12 +360,20 @@ class PlateState:
         if not isinstance(data, dict) or data.get("status") not in STATUSES:
             return cls(machine=machine)
         since = data.get("since")
+        listed = data.get("jobs")
+        jobs: list[PlateJob] = []
+        if isinstance(listed, list):
+            jobs = [j for j in (PlateJob.from_dict(entry) for entry in listed) if j is not None]
+        if not jobs:
+            job = PlateJob.from_dict(data.get("job"))
+            jobs = [job] if job is not None else []
         return cls(
             machine=machine,
             status=str(data["status"]),
             source=str(data.get("source") or "unknown"),
             since=since if isinstance(since, str) else None,
-            job=PlateJob.from_dict(data.get("job")),
+            job=jobs[-1] if jobs else None,
+            jobs=tuple(jobs),
             note=str(data.get("note") or ""),
         )
 
@@ -361,7 +406,9 @@ def read(adapter: Any) -> PlateState:
         return PlateState(machine=machine)
 
 
-def start_refusal(adapter: Any, *, resume: bool = False) -> dict[str, Any] | None:
+def start_refusal(
+    adapter: Any, *, resume: bool = False, file_name: str | None = None, local_path: str | None = None,
+) -> dict[str, Any] | None:
     """The one gate every door that starts a print calls, before the start.
 
     ``None`` when the plate is clear or unrecorded; otherwise the refusal
@@ -372,7 +419,17 @@ def start_refusal(adapter: Any, *, resume: bool = False) -> dict[str, Any] | Non
     file a print starts from carries the maker's own start sequence, which
     drives the head across the plate at a few millimetres, so a part left
     there is hit before the first layer.  A *resume* is that same job,
-    still on the plate where it paused, and passes.  Never raises.
+    still on the plate where it paused, and passes.
+
+    A QUIET-START file passes too, when its contract names this plate as
+    it stands now: *file_name* (the printer-side name, joined to Kiln's
+    own copy through the slice ledger) or *local_path* (the file itself)
+    is read for Kiln's quiet-start header, and a header whose plate
+    fingerprint and machine match the record hands the decision to the
+    live judge every start passes through
+    (:func:`kiln.printers.print_gate.evaluate_quiet_start`), which asks
+    the printer itself.  A header for a plate that has changed since the
+    plan refuses with :data:`PLATE_CHANGED_CODE`.  Never raises.
     """
     if resume:
         return None
@@ -382,12 +439,98 @@ def start_refusal(adapter: Any, *, resume: bool = False) -> dict[str, Any] | Non
         return None
     if not state.occupied:
         return None
+    contract = quiet_start_contract_for(file_name, local_path=local_path)
+    if contract is not None:
+        planned_plate = str(contract.get("planned_for_plate") or "")
+        planned_machine = str(contract.get("planned_for_machine") or "")
+        if planned_plate == fingerprint(state) and planned_machine and planned_machine == _machine_contract_id(adapter):
+            return None
+        return {
+            "success": False,
+            "error": {"code": PLATE_CHANGED_CODE, "message": state.plate_changed_sentence(), "retryable": False},
+            "plate": state.to_dict(),
+            "occupancy": state.occupancy(None),
+        }
     return {
         "success": False,
         "error": {"code": START_NOT_YET_CODE, "message": state.start_refusal_sentence(), "retryable": False},
         "plate": state.to_dict(),
         "occupancy": state.occupancy(None),
     }
+
+
+def fingerprint(state: PlateState) -> str:
+    """What the record says is on this plate, as one short hash: the
+    machine and every part's file, footprint and top.  A quiet-start file
+    carries the fingerprint of the plate it was planned for, and starts
+    only while the record still reads the same.  ``since`` is left out on
+    purpose: a print seen ending re-stamps the moment, not the parts.
+    """
+    import hashlib
+
+    parts: list[str] = [state.machine]
+    for job in state.jobs:
+        rect = ",".join(f"{v:.1f}" for v in job.footprint_mm) if job.footprint_mm else "-"
+        top = f"{job.max_z_mm:.1f}" if job.max_z_mm is not None else "-"
+        parts.append(f"{os.path.basename(job.file)}|{rect}|{top}")
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _machine_contract_id(adapter: Any) -> str:
+    """The identity a quiet-start file is bound to -- the same one the
+    same-bed retry binds to, so one gate reads both."""
+    try:
+        from kiln.printers.print_gate import same_bed_machine_id
+
+        return same_bed_machine_id(adapter)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def quiet_start_contract_for(file_name: str | None, *, local_path: str | None = None) -> dict[str, str] | None:
+    """Kiln's quiet-start header from the file behind *file_name*, or ``None``.
+
+    *local_path* wins when given; else the slice ledger joins the
+    printer-side name to the wrap Kiln wrote, and a bare path that exists
+    is read as itself.  Never raises.
+    """
+    try:
+        from kiln.printers.print_gate import read_quiet_start_contract
+
+        for candidate in _local_candidates(file_name, local_path):
+            contract = read_quiet_start_contract(candidate)
+            if contract is not None:
+                return contract
+    except Exception:  # noqa: BLE001 -- an unreadable file carries no contract
+        logger.debug("quiet-start contract lookup failed", exc_info=True)
+    return None
+
+
+def _local_candidates(file_name: str | None, local_path: str | None) -> list[str]:
+    out: list[str] = []
+    if isinstance(local_path, str) and local_path and os.path.isfile(local_path):
+        out.append(local_path)
+    if isinstance(file_name, str) and file_name:
+        if os.path.isfile(file_name):
+            out.append(file_name)
+        try:
+            from kiln.monitor_twin import sliced_entry_for
+
+            entry = sliced_entry_for(file_name)
+            for key in ("wrapped", "output"):
+                path = entry.get(key) if isinstance(entry, dict) else None
+                if isinstance(path, str) and os.path.isfile(path):
+                    out.append(path)
+        except Exception:  # noqa: BLE001
+            logger.debug("slice ledger lookup failed", exc_info=True)
+    return out
+
+
+def quiet_start_flags(contract: dict[str, str]) -> dict[str, bool]:
+    """The start-command switches the contract says are off, as the kwargs
+    every start door hands the adapter."""
+    names = [n.strip() for n in str(contract.get("switched_off") or "").split(",") if n.strip()]
+    return {name: False for name in names}
 
 
 def plate_occupancy(adapter: Any) -> PlateState:
@@ -401,17 +544,22 @@ def plate_occupancy(adapter: Any) -> PlateState:
     return read(adapter)
 
 
-def _write_state(adapter: Any, *, status: str, source: str, job: PlateJob | None, note: str) -> None:
+def _write_state(
+    adapter: Any, *, status: str, source: str, job: PlateJob | None, note: str,
+    jobs: tuple[PlateJob, ...] | list[PlateJob] | None = None,
+) -> None:
     machine = machine_id(adapter)
     if not machine:
         return
+    all_jobs = list(jobs) if jobs else ([job] if job is not None else [])
     try:
         store = _read_store() or {"machines": {}}
         store.setdefault("machines", {})[machine] = {
             "status": status,
             "source": source,
             "since": _now_iso(),
-            "job": job.to_dict() if job else None,
+            "job": all_jobs[-1].to_dict() if all_jobs else None,
+            "jobs": [j.to_dict() for j in all_jobs],
             "note": note,
         }
         _write_store(store)
@@ -419,20 +567,29 @@ def _write_state(adapter: Any, *, status: str, source: str, job: PlateJob | None
         logger.debug("plate-state write failed", exc_info=True)
 
 
-def mark_occupied(adapter: Any, job: PlateJob | dict[str, Any] | None, *, source: str = "kiln_started_print", note: str = "") -> None:
+def mark_occupied(
+    adapter: Any, job: PlateJob | dict[str, Any] | None, *, source: str = "kiln_started_print", note: str = "",
+    keep_previous: bool = False,
+) -> None:
     """The plate holds a part.
 
     *job* may be ``None`` when the caller knows only that something is there
-    (a print seen ending that Kiln did not start); then the job already on
-    record, if any, is kept -- the part has not changed, only the moment.
+    (a print seen ending that Kiln did not start); then the jobs already on
+    record, if any, are kept -- the parts have not changed, only the moment.
+    *keep_previous* is a print started the quiet way BESIDE what was there:
+    the earlier parts stay on record and this one joins them.
     """
     try:
         if isinstance(job, dict):
             job = PlateJob.from_dict(job)
+        previous = read(adapter)
         if job is None:
-            previous = read(adapter)
-            job = previous.job if previous.occupied else None
-        _write_state(adapter, status="occupied", source=source, job=job, note=note)
+            jobs = list(previous.jobs) if previous.occupied else []
+        elif keep_previous and previous.occupied:
+            jobs = [*previous.jobs, job]
+        else:
+            jobs = [job]
+        _write_state(adapter, status="occupied", source=source, job=jobs[-1] if jobs else None, jobs=jobs, note=note)
     except Exception:  # noqa: BLE001
         logger.debug("mark_occupied failed", exc_info=True)
 
@@ -635,10 +792,19 @@ def declared_model_of(adapter: Any) -> str | None:
     return str(declared or "").strip().lower() or None
 
 
-def mark_occupied_by_start(adapter: Any, file_name: str, *, plate_number: int | None = None) -> None:
-    """A print Kiln started: the plate now holds *file_name*.  Never raises."""
+def mark_occupied_by_start(
+    adapter: Any, file_name: str, *, plate_number: int | None = None, beside: bool = False,
+) -> None:
+    """A print Kiln started: the plate now holds *file_name*.  Never raises.
+
+    *beside* is a quiet start: the part joins what the record already holds
+    instead of replacing it.
+    """
     try:
-        mark_occupied(adapter, job_for_start(adapter, file_name, plate_number=plate_number), source="kiln_started_print")
+        mark_occupied(
+            adapter, job_for_start(adapter, file_name, plate_number=plate_number),
+            source="kiln_started_print", keep_previous=beside,
+        )
     except Exception:  # noqa: BLE001
         logger.debug("plate-state start note failed", exc_info=True)
 

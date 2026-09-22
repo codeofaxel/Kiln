@@ -34,6 +34,29 @@ logger = logging.getLogger(__name__)
 _IDLE_SETUP_LOCK = threading.Lock()
 
 
+def _quiet_start_contract(file_name: str, kwargs: dict[str, Any]) -> dict[str, str] | None:
+    """Kiln's quiet-start header from the file about to start, or ``None``.
+
+    The local copy is whichever the door named (``local_file_path`` and
+    its siblings), the name itself when it is a path, or the slice
+    ledger's wrap behind the printer-side name.  Never raises: a file
+    that cannot be read carries no contract, and is judged as any other.
+    """
+    try:
+        from kiln.plate_state import quiet_start_contract_for
+
+        local = next(
+            (
+                kwargs[k] for k in ("local_file_path", "source_path", "local_path", "gcode_path", "file_path", "threemf_path")
+                if isinstance(kwargs.get(k), str) and kwargs[k]
+            ),
+            None,
+        )
+        return quiet_start_contract_for(file_name, local_path=local)
+    except Exception:  # noqa: BLE001 — bookkeeping never decides a start
+        return None
+
+
 def is_resume_mode_3mf(file_name: str) -> bool:
     """Return True if ``file_name`` looks like a mid-print resume 3MF.
 
@@ -2958,6 +2981,18 @@ class PrinterAdapter(ABC):
         Raises:
             PrinterError: If the printer cannot start the job.
         """
+        # A quiet start -- a file planned beside a part still on the plate
+        # -- decides its own start switches: the contract in the file names
+        # every routine that must be off (levelling, calibration, timelapse,
+        # inspection, the clog probe), and this template sends them off
+        # whichever door started it, so no door has to know.  The gate below
+        # then judges the file against the machine, live; for such a file a
+        # gate that cannot run is a refusal, never a pass.
+        quiet_contract = _quiet_start_contract(file_name, kwargs)
+        if quiet_contract is not None:
+            from kiln.plate_state import quiet_start_flags
+
+            kwargs = {**kwargs, **quiet_start_flags(quiet_contract)}
         try:
             from kiln.printers.print_gate import run_adapter_gate
 
@@ -2969,6 +3004,14 @@ class PrinterAdapter(ABC):
                 "pre-print gate raised; allowing print", exc_info=True
             )
             blocked = None
+            if quiet_contract is not None:
+                blocked = {
+                    "reason": (
+                        f"{file_name} was planned beside a part on the plate, and the safety gate that "
+                        "judges such a start against the printer could not run; it was not started. "
+                        "Try again in a moment, or clear the plate and say so, then print it the ordinary way."
+                    ),
+                }
         if blocked is not None:
             hint = blocked.get("override_hint", "")
             reason = blocked.get("reason", "Print blocked by the pre-print safety gate.")
@@ -3065,7 +3108,8 @@ class PrinterAdapter(ABC):
                 from kiln.plate_state import mark_occupied_by_start
 
                 mark_occupied_by_start(
-                    self, file_name, plate_number=kwargs.get("plate_number")
+                    self, file_name, plate_number=kwargs.get("plate_number"),
+                    beside=quiet_contract is not None,
                 )
             except Exception:  # noqa: BLE001 — the plate record never blocks a print
                 import logging as _logging

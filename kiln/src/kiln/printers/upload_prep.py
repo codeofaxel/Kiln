@@ -77,15 +77,23 @@ def prepare_upload_for_adapter(
     stl_paths: list[str] | None = None,
     hotend_temp: int | None = None,
     bed_temp: int | None = None,
+    quiet_start: dict[str, Any] | None = None,
+    lift_floor_mm: float | None = None,
 ) -> tuple[str, bool]:
     """``(upload_path, wrapped)`` — the file to upload for this adapter.
 
     Wraps ``gcode_path`` into a 3MF when the adapter needs one.  A wrap
     failure logs and falls back to the raw file so an upload is never lost
     to a thumbnail problem; the caller's post-wrap safety verification still
-    runs on whatever comes back.
+    runs on whatever comes back.  With a *quiet_start* plan or a
+    *lift_floor_mm* (a part is still on the plate) there is no fallback: a
+    raw file, or one wrapped without the plan, would carry the vendor's
+    start onto the occupied plate, so the wrap error is raised instead.
     """
     if not adapter_wraps_gcode(adapter) or not gcode_path.lower().endswith(".gcode"):
+        if quiet_start is not None:
+            msg = "the quiet start needs a printer whose files Kiln wraps; this one starts raw G-code"
+            raise ValueError(msg)
         _complete_raw_gcode(adapter, gcode_path, stl_paths)
         return gcode_path, False
     kwargs: dict[str, Any] = {}
@@ -95,9 +103,15 @@ def prepare_upload_for_adapter(
         kwargs["hotend_temp"] = int(hotend_temp)
     if bed_temp is not None:
         kwargs["bed_temp"] = int(bed_temp)
+    if quiet_start is not None:
+        kwargs["quiet_start"] = quiet_start
+    if lift_floor_mm is not None:
+        kwargs["lift_floor_mm"] = float(lift_floor_mm)
     try:
         wrapped = adapter.wrap_gcode_as_3mf(gcode_path, **kwargs)
     except Exception:  # noqa: BLE001 — never lose the upload to the wrap
+        if quiet_start is not None or lift_floor_mm is not None:
+            raise
         logger.warning("Bambu 3MF wrapping failed, uploading raw gcode", exc_info=True)
         return gcode_path, False
     logger.info("Wrapped gcode as Bambu 3MF: %s", wrapped)

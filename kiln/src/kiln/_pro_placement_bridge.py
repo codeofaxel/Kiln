@@ -45,6 +45,8 @@ Request (``schema: "placement_request/1"``)::
      "plate": {"status": "occupied"|"clear"|"unknown",
                "job": {"file", "footprint_mm": [x0,y0,x1,y1]|null, "max_z_mm",
                        "printer_id": str|null}|null,
+               "jobs": [{...job, "gcode": {"path"}|{"name","gz_b64"}|null}],
+               "fingerprint": str,
                "since": str|null},
      "occupant_gcode": {"path"} | {"name", "gz_b64"} | null,
      "part": {"size_mm": [x,y,z], "layer_height_mm", "tower_mm": [x,y]|null,
@@ -72,7 +74,19 @@ Verdict (``schema: "placement_verdict/1"``)::
      "occupancy": {"kind": "kiln.plate_occupancy.v1", "bed_mm", "occupied",
                    "proposed", "source": "gcode"|"record_box"},
      "record": {"printer_id", "measured", "source"},
+     "start": {"mode": "quiet_start", "ok", "available", "refusals",
+               "clear_z_mm", "lift_floor_mm", "travel_to_mm", "first_layer_z_mm",
+               "approach_mm", "home_xy_gcode", "flags", "switched_off",
+               "plate_fingerprint"} | null,
      "tier": {"verdict": "free", "plan": "pro"}}
+
+``plate.jobs`` is every part on the plate (a second one started the quiet
+way beside the first), each with its own file when the ledger has it;
+``plate.fingerprint`` is the record's own hash of them.  ``start`` rides an
+ok verdict on the sliced file: the quiet start's plan -- the paid half --
+or, below its tier, ``available: false`` with the tier it needs and the
+lift floor alone.  The slicing door hands the plan to the wrap, which
+writes it into the file under a contract the start gate judges live.
 
 ``at_mm`` is where the part's own footprint origin (its min corner) goes,
 the same corner ``keep_at_mm`` names; ``footprint_mm`` is the placed rect.
@@ -317,20 +331,31 @@ def request_for(
 
     state = plate_state.read(adapter)
     job = state.job
+
+    def _job_dict(j: Any) -> dict[str, Any]:
+        return {
+            "file": j.file,
+            "footprint_mm": list(j.footprint_mm) if j.footprint_mm else None,
+            "max_z_mm": j.max_z_mm,
+            # The model the print was STARTED on, so the engine can refuse
+            # a printer re-declared since -- as the motion planner does.
+            "printer_id": j.printer_id,
+        }
+
+    # Every part on the plate, first to last, each with its own file when
+    # the ledger has it; ``job`` and ``occupant_gcode`` beside them are the
+    # last one, the shape the wire has always carried.  The fingerprint is
+    # the record's own (:func:`kiln.plate_state.fingerprint`); the engine
+    # echoes it into the start plan and the file carries it, so a start is
+    # judged against the plate as it stands then.
     plate: dict[str, Any] = {
         "status": state.status,
-        "job": (
-            {
-                "file": job.file,
-                "footprint_mm": list(job.footprint_mm) if job.footprint_mm else None,
-                "max_z_mm": job.max_z_mm,
-                # The model the print was STARTED on, so the engine can refuse
-                # a printer re-declared since -- as the motion planner does.
-                "printer_id": job.printer_id,
-            }
-            if job is not None
-            else None
-        ),
+        "job": _job_dict(job) if job is not None else None,
+        "jobs": [
+            {**_job_dict(j), "gcode": occupant_gcode_for(j.file) if state.occupied else None}
+            for j in state.jobs
+        ],
+        "fingerprint": plate_state.fingerprint(state) if state.occupied else "",
         "since": state.since,
     }
     if isinstance(placement, (list, tuple)):

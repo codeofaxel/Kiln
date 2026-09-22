@@ -263,6 +263,10 @@ class Bambu3MFResult:
     # today is every model but the A1.
     start_gcode_model: str = "bambu_a1"
     requested_model: str | None = None
+    #: A quiet start: the file opens with Kiln's own prologue instead of
+    #: the vendor's start, and every Kiln-owned lift in it rises to the floor.
+    quiet_start: bool = False
+    lift_floor_mm: float | None = None
     #: What the printer is told -- the filament type in Bambu's vocabulary
     #: and the temperatures the start sequence heats to -- after the
     #: caller's word, the G-code's own, and the fallback were reconciled.
@@ -913,6 +917,7 @@ def _resolve_end_gcode(
     *,
     max_z: float = 65.0,
     printer_model: str | None = None,
+    lift_floor_mm: float | None = None,
 ) -> str:
     """Resolve an end gcode template with print-specific values.
 
@@ -926,6 +931,13 @@ def _resolve_end_gcode(
        Kiln lifts ``max_z + 5.0`` where Bambu's own template asks for
        ``max_layer_z + 0.5``; the larger clearance is the A1-proven behaviour
        and is applied to every model so there is one rule, not eight.
+
+    With a *lift_floor_mm* -- the plate holds OTHER parts, and the floor is
+    above the tallest of them -- every absolute Z the block commands is
+    raised to at least the floor, and none is lowered: the vendor's lines
+    stay in the vendor's order, only the heights change.  The end block
+    travels to the plate's centre and rolls the bed to park, and a part
+    beside the finished one is in that path at the vendor's own height.
 
     :param printer_model: Declared model, used only to look up the bed centre
         for templates that park on it.
@@ -943,12 +955,41 @@ def _resolve_end_gcode(
     expanded = _expand_end_template(template, variables)
 
     safe_z = max_z + 5.0
-    return re.sub(
+    resolved = re.sub(
         r"(G1 Z)\d+\.?\d*( F900)",
         rf"\g<1>{safe_z:.1f}\2",
         expanded,
         count=1,
     )
+    if lift_floor_mm is None:
+        return resolved
+    return _raise_absolute_z_to_floor(resolved, float(lift_floor_mm))
+
+
+_Z_ONLY_MOVE_RE = re.compile(r"^(\s*G[01]\s+)Z(-?\d+\.?\d*)(\b.*)$")
+
+
+def _raise_absolute_z_to_floor(gcode: str, floor_mm: float) -> str:
+    """Every absolute ``G0``/``G1`` line that moves only Z, raised to at
+    least *floor_mm*; nothing lowered, nothing else touched.  Relative
+    stretches (``G91`` .. ``G90``) are left alone: a relative Z is a
+    distance, and a floor is a height."""
+    out: list[str] = []
+    absolute = True
+    for line in gcode.split("\n"):
+        code = line.split(";", 1)[0].strip().upper()
+        if code == "G91":
+            absolute = False
+        elif code == "G90":
+            absolute = True
+        if absolute:
+            m = _Z_ONLY_MOVE_RE.match(line)
+            if m and not re.search(r"[XYE]-?\d", m.group(3).split(";", 1)[0]):
+                z = float(m.group(2))
+                if z < floor_mm:
+                    line = f"{m.group(1)}Z{floor_mm:.2f}{m.group(3)}"
+        out.append(line)
+    return "\n".join(out)
 
 
 # ---------------------------------------------------------------------------
@@ -1436,6 +1477,7 @@ def _wrap_tool_changes(
     *,
     hotend_temp: int = 220,
     filament_type: str = "PLA",
+    lift_floor_mm: float | None = None,
 ) -> str:
     """Wrap PrusaSlicer ``T`` commands in Bambu M620/M621 AMS load blocks.
 
@@ -1446,14 +1488,40 @@ def _wrap_tool_changes(
 
     Only wraps T0–T15 (real extruder indices).  Leaves T255 (retract)
     and T1000 (virtual tool) untouched.
+
+    With a *lift_floor_mm* (other parts on the plate) the block is Kiln's
+    lifted one: before the head goes left to the cutter it rises to the
+    floor -- never less than 3 mm above the layer, the vendor's own lift
+    -- and after the flush it travels back to where it left from at that
+    height and only then descends to the layer.  The plate is crossed
+    above everything on it, and the descent is over the part.
     """
     lines = gcode.split("\n")
     result: list[str] = []
     # Track the initial T0 from start gcode — don't double-wrap it
     saw_m620 = False
+    layer_z: float | None = None
+    last_z: float | None = None
+    last_xy: tuple[float | None, float | None] = (None, None)
 
     for line in lines:
         stripped = line.strip()
+        if lift_floor_mm is not None:
+            if stripped.startswith(";Z:"):
+                with contextlib.suppress(ValueError):
+                    layer_z = float(stripped[3:])
+            elif stripped.startswith(("G0", "G1")):
+                code = stripped.split(";", 1)[0]
+                mz = re.search(r"\bZ(-?\d+\.?\d*)", code)
+                if mz:
+                    last_z = float(mz.group(1))
+                mx = re.search(r"\bX(-?\d+\.?\d*)", code)
+                my = re.search(r"\bY(-?\d+\.?\d*)", code)
+                if mx or my:
+                    last_xy = (
+                        float(mx.group(1)) if mx else last_xy[0],
+                        float(my.group(1)) if my else last_xy[1],
+                    )
         # Track if we're inside an M620/M621 block already
         if stripped.startswith("M620 "):
             saw_m620 = True
@@ -1470,6 +1538,10 @@ def _wrap_tool_changes(
             n = int(m.group(1))
             if 0 <= n < 16:
                 flush_temp = min(hotend_temp + 30, 260)
+                here_z = last_z if last_z is not None else layer_z
+                if lift_floor_mm is not None and here_z is not None:
+                    lifted = max(float(lift_floor_mm), here_z + 3.0)
+                    result.append(f"G1 Z{lifted:.2f} F600  ; Kiln: lift clear of everything on the plate before the cutter")
                 result.append(f"M620 S{n}A   ; AMS switch to filament {n}")
                 result.append("    M1002 gcode_claim_action : 4")
                 result.append("    M400")
@@ -1488,6 +1560,11 @@ def _wrap_tool_changes(
                 result.append("    M400")
                 result.append(f"    M1002 set_filament_type:{filament_type}")
                 result.append(f"M621 S{n}A")
+                if lift_floor_mm is not None and here_z is not None:
+                    lx, ly = last_xy
+                    if lx is not None and ly is not None:
+                        result.append(f"G1 X{lx:.3f} Y{ly:.3f} F6000  ; Kiln: back over the part, still lifted")
+                    result.append(f"G1 Z{here_z:.2f} F600  ; Kiln: down to the layer, over the part")
                 continue
         result.append(line)
 
@@ -1799,6 +1876,103 @@ def _declared_filament_colors(plate_json: str | None) -> list[str] | None:
 #: ``plate_no_light_1.png`` instead, which Bambu Studio writes only when it
 #: drew the pictures itself.
 KILN_PREVIEW_MARKER = "Metadata/kiln_preview.json"
+
+#: The quiet-start plan a file was built to, kept in the archive beside the
+#: G-code that carries the same numbers in its contract header.
+KILN_QUIET_START_MARKER = "Metadata/kiln_quiet_start.json"
+_QUIET_PLAN_KEYS = ("clear_z_mm", "lift_floor_mm", "travel_to_mm", "first_layer_z_mm", "planned_for_machine", "plate_fingerprint")
+
+
+def _check_quiet_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """The plan with every number it must carry, read as numbers; a plan
+    missing one is refused here, before any line is written."""
+    if not isinstance(plan, dict):
+        msg = "quiet_start must be the placement verdict's start plan"
+        raise ValueError(msg)
+    missing = [k for k in _QUIET_PLAN_KEYS if plan.get(k) in (None, "")]
+    if missing:
+        msg = f"quiet_start plan is missing {', '.join(missing)}"
+        raise ValueError(msg)
+    out = dict(plan)
+    for key in ("clear_z_mm", "lift_floor_mm", "first_layer_z_mm"):
+        out[key] = float(plan[key])
+    travel = plan["travel_to_mm"]
+    if not isinstance(travel, (list, tuple)) or len(travel) != 2:
+        msg = "quiet_start.travel_to_mm must be [x, y]"
+        raise ValueError(msg)
+    out["travel_to_mm"] = [float(travel[0]), float(travel[1])]
+    if out["clear_z_mm"] > out["lift_floor_mm"] + 1e-6:
+        msg = "quiet_start.clear_z_mm cannot be above lift_floor_mm: the floor includes what is there now"
+        raise ValueError(msg)
+    return out
+
+
+def _quiet_start_header(plan: dict[str, Any]) -> str:
+    """The contract the pre-print gate reads back from the file
+    (:func:`kiln.printers.print_gate.read_quiet_start_contract`): which
+    machine and which plate it was planned for, the two heights, and every
+    start switch that must be off."""
+    from kiln.printers.print_gate import (
+        QUIET_START_HEADER_END,
+        QUIET_START_HEADER_START,
+        QUIET_START_MOTION_CONTRACT,
+        QUIET_START_POLICY_VERSION,
+    )
+
+    off = list(plan.get("flags") or {}) if isinstance(plan.get("flags"), dict) else []
+    for name, how in (plan.get("switched_off") or {}).items():
+        flag = str(how).split("=", 1)[0].strip() if "=" in str(how) else str(name)
+        if flag and flag not in off:
+            off.append(flag)
+    lines = [
+        QUIET_START_HEADER_START,
+        f"; quiet_start_policy_version: {QUIET_START_POLICY_VERSION}",
+        f"; motion_contract: {QUIET_START_MOTION_CONTRACT}",
+        f"; planned_for_machine: {plan['planned_for_machine']}",
+        f"; planned_for_plate: {plan['plate_fingerprint']}",
+        f"; clear_z_mm: {float(plan['clear_z_mm']):.2f}",
+        f"; lift_floor_mm: {float(plan['lift_floor_mm']):.2f}",
+        f"; switched_off: {','.join(off)}",
+        "; no Z home, no bed probe and no purge line is emitted by this file; the lift below is absolute",
+        QUIET_START_HEADER_END,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+_FORBIDDEN_IN_QUIET = ("M620 M", "G29", "G380", "G28 Z")
+
+
+def _assert_quiet_start_file(gcode: str, plan: dict[str, Any]) -> None:
+    """Refuse this build's own output if a vendor motion slipped in: the
+    only homing is the X/Y home, no probe, no motor init, and the first
+    motion after the header is the absolute lift to the clear height."""
+    from kiln.printers.print_gate import QUIET_START_HEADER_END
+
+    home = str(plan.get("home_xy_gcode") or "G28 X Y").strip().upper()
+    seen_end = False
+    first_motion: str | None = None
+    for raw in gcode.split("\n"):
+        stripped = raw.strip()
+        if stripped == QUIET_START_HEADER_END:
+            seen_end = True
+            continue
+        code = stripped.split(";", 1)[0].strip()
+        upper = code.upper()
+        if not upper:
+            continue
+        for bad in _FORBIDDEN_IN_QUIET:
+            if upper.startswith(bad.upper()):
+                msg = f"quiet-start build carries the vendor motion {bad!r}; refusing to write it"
+                raise ValueError(msg)
+        if upper.startswith("G28") and upper != home:
+            msg = f"quiet-start build carries a homing line other than {home!r}: {code!r}; refusing to write it"
+            raise ValueError(msg)
+        if seen_end and first_motion is None and upper.startswith(("G0", "G1")) and re.search(r"[XYZ]-?\d", upper):
+            first_motion = code
+    expected = f"G1 Z{float(plan['clear_z_mm']):.2f}"
+    if first_motion is None or not first_motion.upper().startswith(expected.upper()):
+        msg = f"quiet-start build's first motion is {first_motion!r}, not the absolute lift {expected!r}; refusing to write it"
+        raise ValueError(msg)
 
 #: The slots the printer and Studio draw from.  Measured on the A1
 #: (firmware 01.07.02.00, 2026-09-19): the file-list tile is
@@ -2201,6 +2375,8 @@ def build_bambu_3mf(
     stl_paths: list[str] | None = None,
     resume_mode: bool = False,
     printer_model: str | None = None,
+    quiet_start: dict[str, Any] | None = None,
+    lift_floor_mm: float | None = None,
 ) -> Bambu3MFResult:
     """Build a Bambu-compatible 3MF from PrusaSlicer gcode body.
 
@@ -2226,6 +2402,18 @@ def build_bambu_3mf(
         empty string, or a model with no template of its own all get the A1
         files, which is what every Bambu print used before this parameter
         existed.
+    :param quiet_start: The placement verdict's start plan for a print
+        beside a part still on the plate (``clear_z_mm``,
+        ``lift_floor_mm``, ``travel_to_mm``, ``first_layer_z_mm``,
+        ``approach_mm``, ``home_xy_gcode``, ``switched_off``,
+        ``planned_for_machine``, ``plate_fingerprint``).  The file then
+        opens with Kiln's own prologue (:func:`kiln.printers.safe_motion.
+        build_quiet_start_preamble`) under a contract header the pre-print
+        gate judges live, never the vendor's start, and the plan's floor is
+        this build's *lift_floor_mm*.  Exclusive with *resume_mode*.
+    :param lift_floor_mm: Other parts stand on the plate: every Kiln-owned
+        lift in the file -- a colour change, the end block -- rises to at
+        least this height before the head moves sideways.
     :returns: :class:`Bambu3MFResult` with output path and metadata.
     :raises FileNotFoundError: If the start/end gcode data files are missing.
     :raises ValueError: If the gcode body has no layer changes, or if a
@@ -2233,6 +2421,12 @@ def build_bambu_3mf(
     """
     if settings is None:
         settings = BambuPrintSettings()
+    if quiet_start is not None:
+        if resume_mode:
+            msg = "a quiet start and a resume are two different prologues; pass one"
+            raise ValueError(msg)
+        quiet_start = _check_quiet_plan(quiet_start)
+        lift_floor_mm = float(quiet_start["lift_floor_mm"])
     # The caller's word, else the G-code's own, else PLA on the A1 -- read
     # here, at the one place every wrapping door passes through, so a door
     # that slices PETG and wraps with the defaults no longer tells the
@@ -2333,6 +2527,7 @@ def build_bambu_3mf(
         end_template,
         max_z=max_z,
         printer_model=end_source,
+        lift_floor_mm=lift_floor_mm,
     )
     _assert_fully_resolved(end_gcode, source=f"{end_source} end gcode")
 
@@ -2368,6 +2563,7 @@ def build_bambu_3mf(
             processed_body,
             hotend_temp=settings.hotend_temp,
             filament_type=settings.filament_type,
+            lift_floor_mm=lift_floor_mm,
         )
 
     # Build the header.
@@ -2392,7 +2588,29 @@ def build_bambu_3mf(
     initial_m73 = f"M73 P0 R{est_minutes_with_startup}\n"
 
     # Assemble complete gcode.
-    if resume_mode:
+    if quiet_start is not None:
+        # The quiet start: Kiln's contract header and prologue in place of
+        # the vendor's start and the initial M73 -- no Z home on the plate,
+        # no probe, no purge line across it.  The pre-print gate reads the
+        # header back from this very file before the printer is told to
+        # start, and asks the machine whether it is homed and idle.
+        from kiln.printers.safe_motion import build_quiet_start_preamble
+
+        preamble = build_quiet_start_preamble(
+            hotend_temp=int(settings.hotend_temp),
+            bed_temp=int(settings.bed_temp),
+            clear_z_mm=float(quiet_start["clear_z_mm"]),
+            travel_to_mm=(float(quiet_start["travel_to_mm"][0]), float(quiet_start["travel_to_mm"][1])),
+            first_layer_z_mm=float(quiet_start["first_layer_z_mm"]),
+            approach_mm=float(quiet_start.get("approach_mm", 5.0)),
+            home_xy_gcode=str(quiet_start.get("home_xy_gcode") or "G28 X Y"),
+        )
+        complete_gcode = (
+            header + _quiet_start_header(quiet_start) + "\n".join(preamble) + "\n\n"
+            + processed_body + "\n" + end_gcode
+        )
+        _assert_quiet_start_file(complete_gcode, quiet_start)
+    elif resume_mode:
         # Resume-mode: suppress Bambu's proprietary start sequence and initial
         # M73.  The resume gcode body carries its own safety preamble (heat →
         # Z+5 lift → G28 X Y only → travel Z → optional filament prime →
@@ -2529,6 +2747,8 @@ def build_bambu_3mf(
             json.dumps({"filament_sequence": filament_seq}),
         )
         zf.writestr("Metadata/project_settings.config", "{}")
+        if quiet_start is not None:
+            zf.writestr(KILN_QUIET_START_MARKER, json.dumps(quiet_start, sort_keys=True))
         for name, data in thumbnails.items():
             zf.writestr(name, data)
         if rendered_here and "Metadata/plate_1.png" in thumbnails:
@@ -2570,6 +2790,8 @@ def build_bambu_3mf(
         filament_type=str(settings.filament_type),
         hotend_temp=int(settings.hotend_temp),
         bed_temp=int(settings.bed_temp),
+        quiet_start=quiet_start is not None,
+        lift_floor_mm=lift_floor_mm,
     )
 
 

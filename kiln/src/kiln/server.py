@@ -7187,10 +7187,14 @@ def start_print(
         # A plate that still holds the last print is never started onto:
         # the file carries the maker's own start sequence, which drives the
         # head across the plate.  A resume is that same job, and passes.
-        from kiln.plate_state import start_refusal
+        from kiln.plate_state import quiet_start_contract_for, start_refusal
 
-        if block := start_refusal(adapter, resume=bool(resume_from_paused or is_resume_3mf)):
+        if block := start_refusal(adapter, resume=bool(resume_from_paused or is_resume_3mf), file_name=file_name):
             return block
+        # A file planned beside a part on the plate opens with Kiln's own
+        # prologue, not the vendor's start; the verdict below must not
+        # describe moves that file will not make.
+        is_quiet_file = quiet_start_contract_for(file_name) is not None
 
         # Snapshot pre-start temperature targets BEFORE the cancel/start
         # so we can re-assert them after the MQTT start command kicks
@@ -7510,7 +7514,7 @@ def start_print(
         # will make.
         out = resolve_print_start(
             adapter, result, sent_at=sent_at, file_name=file_name,
-            vendor_start_block=not is_resume_3mf,
+            vendor_start_block=not (is_resume_3mf or is_quiet_file),
         ).to_dict()
         # Say which machine took the job.  With more than one printer on the
         # bench, "started" on its own does not tell the caller where to look.
@@ -11980,7 +11984,7 @@ def download_and_upload(
             # refusal so it is not lost.
             from kiln.plate_state import start_refusal
 
-            if block := start_refusal(adapter):
+            if block := start_refusal(adapter, file_name=file_name, local_path=local_path):
                 block["upload"] = upload_result.to_dict()
                 block["file_name"] = file_name
                 block["local_path"] = local_path
