@@ -78,19 +78,30 @@ def _rank(rung: str | None) -> int:
 def _hosted() -> bool:
     """Whether this process is the shared multi-tenant deploy.
 
-    Fails CLOSED: a predicate that cannot be read is treated as hosted, so
+    Fails CLOSED: a predicate that cannot be READ is treated as hosted, so
     the answer to "may this machine remember something keyed by a name the
     caller picked?" is no whenever it is unknown.  The cost of being wrong
     that way is noise -- a local install says every crossing instead of
     the first -- and the cost of being wrong the other way is one tenant's
-    memory read as another's.
+    memory read as another's, which silences the notice the second tenant
+    should have heard.
+
+    The import is guarded and the CALL is not, deliberately.  A broad
+    handler around a guard is the shape that turns a refusal back into an
+    ordinary failure, and kiln-pro's tenant-state gate rejects it on sight
+    -- with cause, since that is how a blocked write became a silent one
+    elsewhere.  A predicate that raises therefore aborts the whole notice
+    path instead of being read as an answer: the caller's own handler
+    catches it, no notice is shown and, more to the point, nothing is
+    written.  Reading an env var cannot fail in practice; if it ever does,
+    losing a notice is the acceptable half of the trade and a shared disk
+    written under a caller-chosen key is not.
     """
     try:
         from kiln.runtime_env import is_hosted_multitenant
-
-        return bool(is_hosted_multitenant())
-    except Exception:  # noqa: BLE001 -- unknown is hosted; see above
+    except ImportError:  # a partial or circular import: unknown is hosted
         return True
+    return bool(is_hosted_multitenant())
 
 
 def _path() -> Path:
