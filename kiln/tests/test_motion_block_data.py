@@ -242,12 +242,18 @@ class TestThePublicNoteIsAProductSurface:
             ("CrealityOfficial/K2_Series_Klipper config/F016", "a repository path"),
             ("read 2026-09-16", "a fetch date"),
             ("see the kiln-pro overlay", "a private path or repository"),
-            ("Source: BambuStudio 02.08.02.61 vendor profile bundle", "a slicer build named as a source"),
-            ("its A1 0.4 nozzle template machine_end_gcode.json", "a slicer profile-bundle path"),
-            ("each preset is flattened first", "a capture method"),
-            ("harvested from the HMS index on 2026-09-03", "a research date"),
+            ("Source: PrusaSlicer 9.9.9 vendor profile bundle", "a slicer build named as a source"),
+            ("its Acme 0.4 nozzle template widget_gcode.json", "a slicer profile-bundle path"),
+            ("captured from the slicer's own command line", "a capture method"),
+            ("harvested from the vendor index on 2030-01-02", "a research date"),
+            ("the vendor config says so (L149)", "a line pin"),
+            ("per the firmware, lines 12-14", "a line pin"),
+            ("as widget.cpp has it", "a source file named"),
+            ("set in acme_common.json", "a source file named"),
         ):
             assert any(f.startswith(kind) for f in provenance_findings(text)), (text, provenance_findings(text))
-        clean = "`[stepper_z] position_max: 270.1` in the vendor printer.cfg; `Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN` (L513)."
+        clean = "`[stepper_z] position_max: 270.1` in the vendor printer.cfg; `Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN` is on."
         assert provenance_findings(clean) == []
+        # The quoted vendor line is the fact: a G-code parameter is not a line pin.
+        assert provenance_findings("the vendor start G-code runs `M1009 Q1 L1` then `G28 Z`") == []
         assert motion_note_findings("x" * 421) == ["421 chars, over 420"]
