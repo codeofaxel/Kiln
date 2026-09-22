@@ -2091,24 +2091,21 @@ class TestEndTemplateExpansion:
         proven = _load_a1_end_gcode()
         assert _expand_end_template(proven, {"max_layer_z": 65.0}) == proven
 
-    @pytest.mark.skipif(
-        not BUNDLE_MACHINE_DIR.is_dir(),
-        reason="BambuStudio not installed — the ground-truth template is unavailable",
-    )
-    def test_bundle_a1_template_expands_to_the_proven_capture(self):
-        """Expanding the vendor A1 end template must reproduce our proven file.
+    def test_the_a1_template_the_proven_file_came_from_expands_to_it(self):
+        """Expanding Bambu's A1 end template must reproduce our proven file.
 
         This is the only check available without hardware that the expander
         agrees with BambuStudio itself: same conditionals taken, same numbers,
-        same blank lines where the guards were.  ``max_layer_z=65`` and bed
-        centre 128 are read back out of the capture's own resolved values.
+        same blank lines where the guards were.  The template is the one the
+        proven file was captured from (stamped 20231229), kept in
+        kiln/tests/data so the check runs everywhere, not only on a machine
+        that happens to have that BambuStudio installed.  ``max_layer_z=65``
+        and bed centre 128 are read back out of the capture's own values.
         """
         from kiln.printers.bambu_3mf import _expand_end_template, _load_a1_end_gcode
 
-        source = BUNDLE_MACHINE_DIR / (
-            "Bambu Lab A1 0.4 nozzle template machine_end_gcode.json"
-        )
-        template = json.loads(source.read_text(encoding="utf-8"))["machine_end_gcode"]
+        template = (Path(__file__).parent / "data" / "bambu_a1_end_template_20231229.gcode").read_text()
+        assert ";===== date: 20231229" in template
         expanded = _expand_end_template(
             template,
             {
@@ -2126,6 +2123,42 @@ class TestEndTemplateExpansion:
             proven.index(";===== date: 20231229") : proven.index("M73 P100 R0")
         ]
         assert expanded.rstrip("\n") == middle.rstrip("\n")
+
+    @pytest.mark.skipif(
+        not BUNDLE_MACHINE_DIR.is_dir(),
+        reason="BambuStudio not installed — nothing to compare the proven A1 end against",
+    )
+    def test_the_installed_bambu_studio_still_ships_the_a1_end_kiln_was_proven_on(self):
+        """A drift report, not a gate.  When Bambu ships a new A1 end, this
+        says so and what moved, rather than failing: Kiln keeps the file that
+        was run on the owner's A1 until a bench print says otherwise."""
+        import difflib
+
+        from kiln.printers.bambu_3mf import _expand_end_template
+
+        installed = json.loads((BUNDLE_MACHINE_DIR / (
+            "Bambu Lab A1 0.4 nozzle template machine_end_gcode.json"
+        )).read_text(encoding="utf-8"))["machine_end_gcode"]
+        installed = installed if isinstance(installed, str) else "\n".join(installed)
+        proven_on = (Path(__file__).parent / "data" / "bambu_a1_end_template_20231229.gcode").read_text()
+        stamp = re.search(r";===== date: (\d+)", installed)
+        stamp = stamp.group(1) if stamp else "unstamped"
+        if stamp == "20231229":
+            assert installed.rstrip("\n") == proven_on.rstrip("\n"), "same stamp, different text: Bambu edited in place"
+            return
+        variables = {"max_layer_z": 65.0, "spiral_mode": False, "print_sequence": "by layer",
+                     "first_layer_center_no_wipe_tower": [128.0, 128.0]}
+        moved = [
+            line for line in difflib.unified_diff(
+                _expand_end_template(proven_on, variables).split("\n"),
+                _expand_end_template(installed, variables).split("\n"), lineterm="", n=0)
+            if line[:1] in "+-" and not line.startswith(("+++", "---"))
+        ]
+        pytest.skip(
+            f"Bambu moved the A1 end template to {stamp}: {len(moved)} expanded lines differ from the "
+            "20231229 template Kiln's proven A1 end was captured from. Kiln keeps the proven file until "
+            "a bench print on an A1 says otherwise."
+        )
 
     def test_taller_print_takes_the_other_branch(self):
         """A print near the Z ceiling must clamp, not lift through the lid."""
