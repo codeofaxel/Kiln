@@ -344,3 +344,58 @@ def test_render_never_claims_a_picture_for_gcode(tmp_path):
     assert print_gate.render_for_terminal(str(g)) == ([], None)
     assert print_gate.render_for_terminal("") == ([], None)
     assert print_gate.render_for_terminal(str(tmp_path / "missing.stl")) == ([], None)
+
+
+# ---------------------------------------------------------------------------
+# A yes ends with the command that earned it
+# ---------------------------------------------------------------------------
+
+
+def test_a_yes_does_not_outlive_the_command_that_took_it(cli_env, audits, monkeypatch, tmp_path):
+    """A consent record lives exactly as long as the call it belongs to.
+
+    The terminal yes is taken in one helper and has to stand for the rest
+    of the command, so it used to lean on the process exiting to end.  A
+    process that runs two commands then handed the first one's answer to
+    the second: the gate read a yes for ANOTHER file, called it a
+    mismatch, and stopped there -- before it ever asked whether a standing
+    window covered the printer.  A print a person had opened a window for
+    was refused because of a yes they had given to something else.
+
+    Both halves are pinned: nothing is left in the record, and the next
+    command in the same process starts on its own window.
+    """
+    from kiln import consent_windows
+
+    runner, printer = cli_env
+    monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda *_a, **_k: "garage")
+
+    # Command one: a person at the terminal, shown the print, says yes.
+    mesh, _ = _mesh_with_png_on_record(tmp_path, monkeypatch)
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: True)
+    assert runner.invoke(cli, ["print", str(mesh)], input="y\n").exit_code == 0
+    assert printer.started == ["plate.3mf"]
+
+    # Nothing of that yes is left behind for the next command to inherit.
+    assert consent_for(file_name=str(mesh), printer_name=None) is None
+    assert print_signoff.current() is None
+
+    # Command two: nobody at the terminal, a different file whose preview
+    # is on record, and a standing window over this printer.  The window
+    # is the only yes here, and it is the one the gate must find.
+    gcode = tmp_path / "part.gcode"
+    gcode.write_text("G28\n")
+    preview_evidence.record("png", str(gcode), renderer="stage", shown_sha="abc")
+    preview_evidence.record_url_refusal(str(gcode), "signed_out")
+    token = server.issue_preview_token(str(gcode), door="png")["token"]
+    monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: True)
+    consent_windows.open_window(seconds=3600, scope=("garage",))
+    monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: False)
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: False)
+
+    result = runner.invoke(cli, ["print", str(gcode), "--json", "--preview-token", token])
+
+    assert result.exit_code == 0, result.output
+    assert printer.started == ["plate.3mf", "part.gcode"]
+    rec = next(d for _, a, d in audits if a == "consent_granted")
+    assert rec["consent"] == SOURCE_TERMINAL  # command one's, and it ended there

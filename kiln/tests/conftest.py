@@ -1095,3 +1095,48 @@ def _reset_fastener_content_keys():
     reset_emitted_content_keys()
     yield
     reset_emitted_content_keys()
+
+
+def _settle_routine_threads() -> None:
+    """Bring ``kiln.printers.routine_ledger`` back to rest, quietly."""
+    try:
+        from kiln.printers import routine_ledger
+    except ImportError:  # pragma: no cover — module absent
+        return
+    if not routine_ledger._threads and not routine_ledger._holds:
+        return
+    with contextlib.suppress(Exception):
+        routine_ledger.drain("test isolation")
+    with contextlib.suppress(Exception):
+        routine_ledger.wait_settled(5.0)
+
+
+@pytest.fixture(autouse=True)
+def _no_routine_thread_crosses_a_test():
+    """No test inherits or leaks a background routine thread.
+
+    ``kiln.printers.routine_ledger`` runs a served finish — fan on, wait
+    for the hand-off temperature, fan off — in a thread that deliberately
+    outlives the request that started it.  That is right in a server and
+    wrong in a runner that hosts thousands of requests in one process: the
+    watch polls through the plain ``time`` module, so a thread still
+    running when the NEXT test installs its own fake clock calls THAT
+    test's ``time.sleep`` — and in these suites the fake sleep is what
+    moves the thermistor mock.  Measured: a leftover watch heated the
+    nozzle of a wipe test that had set it cold, the cold-nozzle refusal
+    that test pins did not fire, and the extruder move went out.  Order-
+    and timing-dependent, so it only ever showed up under ``-n auto``, on
+    some Python versions, on some runs.
+
+    Settled on BOTH sides, so neither inheriting one nor leaking one is
+    possible: the same reason the HOME move at the top of this file is
+    here rather than in the dozen suites that would each have to remember
+    it.  Free for every test that starts no routine (both ledgers empty is
+    an immediate return), and the teardown runs after ``monkeypatch`` has
+    put the real clock back — which is what lets a watch reach its
+    deadline and stop instead of being joined against a clock that no
+    longer moves.
+    """
+    _settle_routine_threads()
+    yield
+    _settle_routine_threads()

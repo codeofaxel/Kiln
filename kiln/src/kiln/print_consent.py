@@ -756,13 +756,28 @@ def describe_print_request(
     return "\n".join(lines)
 
 
-def _reset_for_tests() -> None:
-    """Drop any consent left in this context.  The CLI's terminal yes is
-    set for the life of the command and dropped with the process; a test
-    runner that hosts many commands in one process needs this."""
+def drop_consent() -> None:
+    """Drop everything this context holds — the yes, the not-asked note and
+    the window outcome.
+
+    For a door that cannot carry a reset token across its own span.  The
+    MCP wrapper can: it sets the consent and resets the token in the
+    ``finally`` of the one call.  The CLI cannot — the yes is taken in one
+    helper (:func:`kiln.cli.print_gate.confirm_print_at_terminal`) and has
+    to stand for the rest of the command, which ends somewhere else
+    entirely — so the CLI drops the record when the command that earned it
+    closes.  Leaving it to the process exiting is the same rule with a
+    hole in it: a process that runs a second command hands the first
+    command's answer to it.
+    """
     _current.set(None)
     _not_asked.set("")
     _window_outcome.set(None)
+
+
+def _reset_for_tests() -> None:
+    """Drop any consent left in this context."""
+    drop_consent()
 
 
 class _suppress:
