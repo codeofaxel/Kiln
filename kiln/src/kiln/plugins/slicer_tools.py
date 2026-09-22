@@ -503,7 +503,19 @@ def _place_copy(input_path: str, bbox: dict[str, float], target_min: list[float]
     return dst, None
 
 
-def _spots_clause(spots: list[dict[str, Any]]) -> str:
+def _spots_clause(verdict: dict[str, Any] | list[dict[str, Any]] | None) -> str:
+    """What the refusal says about room beside the part.
+
+    With the places in hand (the plan's own tier), the best few are named.
+    Without them, the COUNT still is -- the verdict carries ``spots_found``
+    on every tier -- so a person is told room exists and what it takes to
+    use it, rather than being handed a list they cannot print at.
+    """
+    if isinstance(verdict, list):
+        verdict = {"spots": verdict, "spots_found": len(verdict)}
+    if not isinstance(verdict, dict):
+        return ""
+    spots = verdict.get("spots") or []
     named: list[str] = []
     for spot in spots[:3]:
         at = spot.get("at_mm") if isinstance(spot, dict) else None
@@ -513,7 +525,15 @@ def _spots_clause(spots: list[dict[str, Any]]) -> str:
                 f"[{float(at[0]):g}, {float(at[1]):g}]"
                 + (f" ({float(clear):g} mm clear)" if isinstance(clear, (int, float)) else "")
             )
-    return f" Spots with room: {', '.join(named)}." if named else ""
+    if named:
+        return f" Spots with room: {', '.join(named)}."
+    found = verdict.get("spots_found")
+    if isinstance(found, int) and found > 0:
+        return (
+            f" {found} spot{'s' if found != 1 else ''} beside it would fit; printing around what is on the "
+            "plate is a kiln-pro feature (https://kiln3d.com/pricing)."
+        )
+    return ""
 
 
 def _refusal_sentences(verdict: dict[str, Any]) -> str:
@@ -632,7 +652,7 @@ def _apply_plate_placement(
         message = (
             f"{holds} Slicing now would put the new part on top of it. Name a spot beside it "
             f'(placement=[x, y] in mm, or a region such as "front-left"), or clear the plate and say so.'
-            + (_spots_clause(probe.get("spots") or []) if isinstance(probe, dict) else "")
+            + (_spots_clause(probe) if isinstance(probe, dict) else "")
         )
         return input_path, _placement_refusal(message, "PLACEMENT_PLATE_OCCUPIED", state=state, bed=bed, verdict=probe), occupied_info
 
@@ -680,7 +700,7 @@ def _apply_plate_placement(
     if verdict is None:
         return input_path, _placement_refusal(_no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed, miss=reason), occupied_info
     if not verdict.get("ok"):
-        spots_clause = _spots_clause(verdict.get("spots") or [])
+        spots_clause = _spots_clause(verdict)
         message = (
             f"Kiln won't slice onto this plate there: {_refusal_sentences(verdict)}"
             + (spots_clause or " No spot on the plate is safe beside it; clear the plate and say so.")
@@ -788,7 +808,7 @@ def _verify_plate_placement(gcode_path: str | None, info: dict | None) -> tuple[
     if not verdict.get("ok"):
         message = (
             f"Kiln checked the sliced file against the plate and won't hand it on: {_refusal_sentences(verdict)}"
-            + (_spots_clause(verdict.get("spots") or []) or " Clear the plate and say so.")
+            + (_spots_clause(verdict) or " Clear the plate and say so.")
         )
         return _placement_refusal(message, "PLACEMENT_REFUSED", state=state, bed=bed, verdict=verdict), info
     info["placement"] = verdict
