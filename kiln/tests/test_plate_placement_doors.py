@@ -224,6 +224,9 @@ def _assert_estimates_the_part_on_an_empty_plate(resp: dict, spy: Any) -> None:
     assert spy.called, "an estimate that answers has sliced something"
     assert not str(spy.call_args.args[0]).endswith("_placed.stl"), "the fallback estimates the part unplaced"
     assert "placement" not in resp, "an estimate on an empty plate claims no spot beside the part"
+    if "message" in resp:
+        # The summary is what gets read: the caveat rides it, not only a side key.
+        assert resp["message"].endswith(EMPTY_PLATE_ESTIMATE_NOTE), resp["message"]
 
 
 def _call(door: str, registry, extra: dict, **kwargs) -> dict:

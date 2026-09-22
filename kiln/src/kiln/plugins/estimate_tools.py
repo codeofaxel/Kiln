@@ -49,10 +49,8 @@ def _format_time(seconds: int | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Plugin class
+# The estimate's slice: never refused because of the plate
 # ---------------------------------------------------------------------------
-
-
 
 #: What an estimate says when the plate still holds the last print and the
 #: part could not be placed beside it: the number is real, for the part on an
@@ -72,8 +70,8 @@ def _estimate_slice(input_path: str, **kwargs: Any) -> tuple[Any, dict | None, d
     THERE -- and when the step refuses because the plate is occupied, slice
     again without the plate gate and say, in ``info["plate_note"]``, that
     this is the part on an empty plate.  Every other refusal stands: a part
-    that does not fit the bed, and a placement argument that cannot be read,
-    are the caller's to hear about.
+    that does not fit the bed (on a door that checks it), and a placement
+    argument that cannot be read, are the caller's to hear about.
 
     The one caller of the shared step allowed to switch the plate gate off;
     a test holds that to this function, so a door that prints cannot borrow it.
@@ -100,6 +98,11 @@ def _estimate_slice(input_path: str, **kwargs: Any) -> tuple[Any, dict | None, d
     if err is None:
         info["plate_note"] = EMPTY_PLATE_ESTIMATE_NOTE
     return result, err, info
+
+
+# ---------------------------------------------------------------------------
+# Plugin class
+# ---------------------------------------------------------------------------
 
 
 class _EstimateToolsPlugin:
@@ -334,7 +337,11 @@ class _EstimateToolsPlugin:
                 }
                 _attach_placement(response, place_info)
                 if sinfo.get("plate_note"):
+                    # In the summary as well as beside it: the summary is what
+                    # gets read, and a number without its caveat is a number
+                    # someone will plan a plate around.
                     response["plate_note"] = sinfo["plate_note"]
+                    response["message"] = f"{message} {sinfo['plate_note']}"
                 return response
 
             except SlicerNotFoundError as exc:

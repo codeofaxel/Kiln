@@ -872,8 +872,9 @@ def _placed_slice(
     is for a door whose output is never printed -- an estimate.  The plate
     gate exists because a file sliced onto an occupied plate would be
     started onto it; a number about how long a part takes is started onto
-    nothing.  The bed-fit gate still runs: a part that does not fit the bed
-    has no honest estimate on any plate.
+    nothing.  The bed-fit gate is untouched by it: *auto_center* decides that
+    gate exactly as before, and a part that does not fit the bed has no
+    honest estimate on any plate.
 
     Returns ``(result, error_dict_or_None, info)``.  *auto_center* ``None``
     means the door never had a bed-fit gate and keeps not having one; a
