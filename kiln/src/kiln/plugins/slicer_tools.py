@@ -2025,6 +2025,12 @@ class _SlicerToolsPlugin:
                                 "narrative": _nozzle_verdict.get("narrative", ""),
                                 "advisory": True,
                             }
+                        elif _nozzle_verdict is None:
+                            # Kiln could not ask: the slice says so rather
+                            # than reading as a nozzle with life to spare.
+                            _nz_gap = _pro_nozzle_bridge.nozzle_unchecked(_printer_for_nozzle)
+                            if _nz_gap is not None:
+                                resp["nozzle_check"] = _nz_gap
                 except Exception:
                     pass  # Nozzle bridge unavailable — silently skip.
 

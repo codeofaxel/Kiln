@@ -34,7 +34,26 @@ Used by:
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+#: The hosted door for the pre-print capacity verdict, asked when kiln-pro
+#: is not installed here -- the same way the blade consult asks for its
+#: status.  A print start must not wait on a slow network for it.
+WIRE_TOOL = "check_nozzle_capacity_for_print"
+_CONSULT_TIMEOUT_S: float = 4.0
+#: After the service fails to answer, how long it is left alone.  Same
+#: backoff the cutter bridge uses.
+SERVICE_BACKOFF_S: float = 300.0
+_service_down_until: float = 0.0
+_service_down_miss: Any = None
+#: Why the last capacity consult for each machine had no verdict (a
+#: :class:`kiln.served_answer.Miss`), cleared by an answer.  A pre-flight
+#: and a start read it to say what was not checked.
+_last_miss: dict[str, Any] = {}
 
 
 def available() -> bool:
@@ -54,11 +73,13 @@ def consult_capacity(
 ) -> dict[str, Any] | None:
     """Run the pre-print nozzle-capacity verdict for the active printer.
 
-    Returns the verdict dict from
-    ``kiln_pro.plugins.nozzle_tools.check_nozzle_capacity_for_print``
-    when kiln-pro is present, else ``None``.  Caller decides whether
-    to surface the verdict's narrative + status alongside the
-    existing preflight signals.
+    The verdict dict (``status``, ``narrative``, ``percent_used``, ...):
+    from kiln-pro locally when it is installed, else from the hosted
+    door, the same one the blade consult uses, with a short timeout.
+    ``None`` when nothing answered -- and then :func:`nozzle_unchecked`
+    says why, so a pre-flight or a start can say what it could not
+    check instead of going quiet.  Caller decides whether to surface
+    the verdict's narrative + status alongside the existing signals.
     """
     if not printer_id or not isinstance(printer_id, str):
         return None
@@ -73,7 +94,8 @@ def consult_capacity(
             resolve_state_or_factory_default,
         )
     except ImportError:
-        return None
+        return _served_capacity(printer_id, planned_grams, filament_material, printer_model)
+    _last_miss.pop(printer_id, None)
 
     backend, _nudge = resolve_backend(tool_name="preflight_capacity")
     if backend is None:
@@ -99,6 +121,93 @@ def consult_capacity(
         planned_grams=float(planned_grams or 0),
         baseline=baseline,
     )
+
+
+def _declared_model(printer_id: str) -> str | None:
+    try:
+        from kiln.printer_model_resolver import resolve_printer_model_for
+
+        return (resolve_printer_model_for(printer_id) or "").strip().lower() or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _served_capacity(
+    printer_id: str, planned_grams: float, filament_material: str, printer_model: str,
+) -> dict[str, Any] | None:
+    """The hosted capacity verdict, or ``None`` with why in :data:`_last_miss`."""
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import Miss, classify_answer, classify_transport_error
+
+    if time.monotonic() < _service_down_until:
+        if _service_down_miss is not None:
+            _last_miss[printer_id] = _service_down_miss
+        return None
+    try:
+        from kiln.server import _pro_api_call
+    except Exception:  # noqa: BLE001
+        _last_miss[printer_id] = Miss("unanswered", detail="the served door could not be opened on this install")
+        return None
+    kwargs: dict[str, Any] = {
+        "printer_id": printer_id,
+        "planned_grams": float(planned_grams or 0),
+        "filament_material": (filament_material or "").strip(),
+    }
+    model = (printer_model or "").strip() or _declared_model(printer_id)
+    if model:
+        kwargs["printer_model"] = model
+    try:
+        answer = _pro_api_call(WIRE_TOOL, _timeout=_CONSULT_TIMEOUT_S, **kwargs)
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a print
+        logger.debug("nozzle capacity not served", exc_info=True)
+        miss = classify_transport_error(exc)
+        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = miss
+        _last_miss[printer_id] = miss
+        return None
+    if isinstance(answer, dict) and answer.get("success") and answer.get("status"):
+        _last_miss.pop(printer_id, None)
+        return answer
+    miss = classify_answer(answer) or Miss("unanswered", detail="an answer with no verdict in it")
+    if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
+        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = miss
+    _last_miss[printer_id] = miss
+    return None
+
+
+def nozzle_unchecked(printer_id: str, *, at: str = "preflight") -> dict[str, Any] | None:
+    """Why the last capacity consult for *printer_id* could not be made, as
+    the line a pre-flight (or a start) carries, or ``None`` when it was
+    answered.
+
+    ``{"word": "unchecked", "line", "why", "why_code", "why_detail"}``.  A
+    nozzle whose life could not be checked is named as such, so "not
+    checked" never reads the same as "fine".  With kiln-pro installed the
+    consult never misses, and this stays ``None``.
+    """
+    if not printer_id or not isinstance(printer_id, str):
+        return None
+    miss = _last_miss.get(printer_id)
+    if miss is None:
+        return None
+    from kiln.served_answer import fields, sentence
+
+    if at == "start":
+        line = sentence(
+            miss, feature="servers",
+            on_the_line="Before a print starts, Kiln checks the nozzle has the life left for it",
+            cannot=f"check {printer_id}'s nozzle", wont="started this one without that check",
+            then="have it checked before the next print",
+        )
+    else:
+        line = sentence(
+            miss, feature="servers",
+            on_the_line="This pre-flight says whether the nozzle has the life left for this print",
+            cannot=f"check {printer_id}'s nozzle", wont="says nothing about it",
+            safe_remedy="Print as usual", then="run the pre-flight again",
+        )
+    return {"word": "unchecked", "line": line, **fields(miss)}
 
 
 def consult_clumping_detection(
@@ -244,8 +353,11 @@ def record_print_odometer(
 
 
 __all__ = [
+    "SERVICE_BACKOFF_S",
+    "WIRE_TOOL",
     "available",
     "consult_capacity",
+    "nozzle_unchecked",
     "consult_abrasive_escalation",
     "consult_nozzle_summary",
     "record_print_odometer",

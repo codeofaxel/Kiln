@@ -718,3 +718,205 @@ class TestTheStageLinkSpeaksTheSameVoice:
             "no browser link could be issued: Kiln can't issue a browser link right now (this computer is "
             "offline); reconnect to the internet and try again. The still image is the floor."
         )
+
+
+# ---------------------------------------------------------------------------
+# the nozzle-life verdict is served, and a miss is named at every door
+# ---------------------------------------------------------------------------
+
+
+def _hosted_only_nozzle(monkeypatch):
+    from kiln import _pro_nozzle_bridge as bridge
+
+    for name in ("kiln_pro", "kiln_pro.data_overlays", "kiln_pro.nozzle_intelligence",
+                 "kiln_pro.nozzle_intelligence.capacity", "kiln_pro.nozzle_intelligence.store_resolver"):
+        monkeypatch.setitem(sys.modules, name, None)
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+    monkeypatch.setattr(bridge, "_service_down_miss", None)
+    monkeypatch.setattr(bridge, "_last_miss", {})
+    monkeypatch.setattr(bridge, "_declared_model", lambda pid: "bambu_a1")
+    return bridge
+
+
+_VERDICT = {"success": True, "status": "exceeded_p90", "narrative": "93% of the brass budget on this CF filament.",
+            "percent_used": 93.0, "tool": "check_nozzle_capacity_for_print"}
+
+
+class TestTheNozzleVerdictIsServed:
+    def test_without_kiln_pro_the_hosted_door_is_asked_with_a_short_timeout(self, monkeypatch):
+        bridge = _hosted_only_nozzle(monkeypatch)
+        import kiln.server as srv
+
+        seen = {}
+
+        def _call(tool, _timeout=30.0, **kw):
+            seen.update({"tool": tool, "timeout": _timeout, **kw})
+            return dict(_VERDICT)
+
+        monkeypatch.setattr(srv, "_pro_api_call", _call)
+        out = bridge.consult_capacity(printer_id="a1", planned_grams=340.0, filament_material="PLA-CF")
+        assert out["status"] == "exceeded_p90" and out["percent_used"] == 93.0
+        assert seen["tool"] == "check_nozzle_capacity_for_print" and seen["timeout"] == bridge._CONSULT_TIMEOUT_S
+        assert seen["printer_id"] == "a1" and seen["planned_grams"] == 340.0
+        assert seen["filament_material"] == "PLA-CF" and seen["printer_model"] == "bambu_a1"
+        assert bridge.nozzle_unchecked("a1") is None
+
+    def test_a_miss_is_named_and_never_a_verdict(self, monkeypatch):
+        bridge = _hosted_only_nozzle(monkeypatch)
+        _offline(monkeypatch)
+        assert bridge.consult_capacity(printer_id="a1", planned_grams=340.0) is None
+        gap = bridge.nozzle_unchecked("a1")
+        assert gap["why"] == "offline" and "this computer is offline" in gap["line"] and "Print as usual" in gap["line"]
+        start = bridge.nozzle_unchecked("a1", at="start")
+        assert "started this one without that check" in start["line"] and "before the next print" in start["line"]
+
+    def test_a_signed_out_install_is_told_to_sign_in(self, monkeypatch):
+        bridge = _hosted_only_nozzle(monkeypatch)
+        _answer(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "wall"})
+        assert bridge.consult_capacity(printer_id="a1", planned_grams=10.0) is None
+        assert bridge.nozzle_unchecked("a1")["why"] == "signed_out"
+
+    def test_a_served_answer_with_no_record_is_an_answer_not_a_miss(self, monkeypatch):
+        bridge = _hosted_only_nozzle(monkeypatch)
+        _answer(monkeypatch, {"success": True, "status": "unknown_nozzle", "narrative": "no record"})
+        out = bridge.consult_capacity(printer_id="a1", planned_grams=10.0)
+        assert out["status"] == "unknown_nozzle" and bridge.nozzle_unchecked("a1") is None
+
+    def test_an_unreachable_service_backs_off_and_remembers_why(self, monkeypatch):
+        bridge = _hosted_only_nozzle(monkeypatch)
+        import kiln.server as srv
+
+        calls = []
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, _timeout=30.0, **kw: calls.append(tool) or {
+            "status": "error", "code": "SERVER_UNREACHABLE", "why": "offline", "error": "no route"})
+        for _ in range(3):
+            assert bridge.consult_capacity(printer_id="a1", planned_grams=10.0) is None
+        assert len(calls) == 1 and bridge.nozzle_unchecked("a1")["why"] == "offline"
+
+    def test_with_kiln_pro_installed_the_servers_are_never_asked(self, monkeypatch):
+        import types
+
+        import kiln.server as srv
+        from kiln import _pro_nozzle_bridge as bridge
+
+        pkg = types.ModuleType("kiln_pro")
+        ov = types.ModuleType("kiln_pro.data_overlays")
+        ni = types.ModuleType("kiln_pro.nozzle_intelligence")
+        cap = types.ModuleType("kiln_pro.nozzle_intelligence.capacity")
+        res = types.ModuleType("kiln_pro.nozzle_intelligence.store_resolver")
+        ov.load_overlay = lambda name: None
+        cap.resolve_capacity_baseline = lambda **k: {"p50_grams": 100.0, "p90_grams": 200.0}
+        cap.compute_print_capacity_for_nozzle = lambda **k: {"status": "safe", "narrative": "local"}
+
+        class _State:
+            material = types.SimpleNamespace(value="brass")
+
+        res.resolve_backend = lambda tool_name: (object(), None)
+        res.resolve_state_or_factory_default = lambda backend, printer_id, printer_model=None: _State()
+        for name, mod in (("kiln_pro", pkg), ("kiln_pro.data_overlays", ov), ("kiln_pro.nozzle_intelligence", ni),
+                          ("kiln_pro.nozzle_intelligence.capacity", cap), ("kiln_pro.nozzle_intelligence.store_resolver", res)):
+            monkeypatch.setitem(sys.modules, name, mod)
+        monkeypatch.setattr(bridge, "_last_miss", {})
+        asked = []
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: asked.append(tool) or {})
+        assert bridge.consult_capacity(printer_id="a1", planned_grams=10.0)["status"] == "safe"
+        assert asked == [] and bridge.nozzle_unchecked("a1") is None
+
+
+class TestTheNozzleDoors:
+    def _gcode(self, tmp_path):
+        path = tmp_path / "part.gcode"
+        path.write_text("G28\nG1 X10 Y10 Z0.2 E1\n; filament used [g] = 340.0\n")
+        return path
+
+    def test_the_preflight_reads_the_grams_from_the_file_and_carries_the_verdict(self, tmp_path, monkeypatch):
+        """The pre-flight's nozzle check could never fire: nothing produced the
+        grams field it read.  Now the file's own grams line feeds it."""
+        _hosted_only_nozzle(monkeypatch)
+        seen = {}
+
+        def _call(tool, _timeout=30.0, **kw):
+            seen.update(kw)
+            return dict(_VERDICT)
+
+        import kiln.server as srv
+
+        monkeypatch.setattr(srv, "_pro_api_call", _call)
+        monkeypatch.setattr("kiln._pro_cutter_bridge.consult_blade", lambda name, printer_model=None: None)
+        result = _preflight_with_file(monkeypatch, str(self._gcode(tmp_path)))
+        nozzle = [c for c in result["checks"] if c["name"] == "nozzle_capacity"]
+        assert len(nozzle) == 1 and nozzle[0]["status"] == "exceeded_p90" and nozzle[0]["advisory"] is True
+        assert nozzle[0]["passed"] is False and "brass budget" in nozzle[0]["message"]
+        assert seen["planned_grams"] == 340.0 and seen["printer_id"] == "a1"
+
+    def test_the_preflight_lists_the_nozzle_as_not_checked_when_offline(self, tmp_path, monkeypatch):
+        _hosted_only_nozzle(monkeypatch)
+        _offline(monkeypatch)
+        monkeypatch.setattr("kiln._pro_cutter_bridge.consult_blade", lambda name, printer_model=None: None)
+        result = _preflight_with_file(monkeypatch, str(self._gcode(tmp_path)))
+        nozzle = [c for c in result["checks"] if c["name"] == "nozzle_capacity"]
+        assert len(nozzle) == 1 and nozzle[0]["checked"] is False and nozzle[0]["why"] == "offline"
+        assert "this computer is offline" in nozzle[0]["message"] and nozzle[0]["passed"] is True
+
+    def test_the_start_refuses_a_served_exceeded_nozzle_the_same_as_a_local_one(self, monkeypatch):
+        import os
+        from unittest.mock import patch
+
+        import kiln.server as srv
+        from kiln.printers.base import PrinterFile
+
+        from .test_every_start_says_so import _two_printers
+
+        _hosted_only_nozzle(monkeypatch)
+        garage, _ = _two_printers(monkeypatch)
+        monkeypatch.setattr(srv, "_check_rate_limit", lambda *a, **k: None)  # two starts in one process
+        monkeypatch.setattr(garage, "list_files", lambda: [PrinterFile(name="part.gcode", path="part.gcode", filament_used_mm=5000.0)])
+        _answer(monkeypatch, dict(_VERDICT))
+        monkeypatch.setattr("kiln._pro_cutter_bridge.consult_blade", lambda name, printer_model=None: None)
+        with patch.dict(os.environ, {"KILN_SKIP_PREFLIGHT": "1", "KILN_SKIP_PREVIEW_GATE": "1", "KILN_SKIP_NOZZLE_CHECK": ""}):
+            out = srv.start_print(file_name="part.gcode", printer_name="garage")
+        assert out["success"] is False and out["error"]["code"] == "NOZZLE_CAPACITY_EXCEEDED"
+        assert garage.started == []
+
+    def test_the_start_goes_ahead_and_says_the_nozzle_was_not_checked(self, monkeypatch):
+        import os
+        from unittest.mock import patch
+
+        import kiln.server as srv
+        from kiln.printers.base import PrinterFile
+
+        from .test_every_start_says_so import _two_printers
+
+        _hosted_only_nozzle(monkeypatch)
+        garage, _ = _two_printers(monkeypatch)
+        monkeypatch.setattr(srv, "_check_rate_limit", lambda *a, **k: None)  # two starts in one process
+        monkeypatch.setattr(garage, "list_files", lambda: [PrinterFile(name="part.gcode", path="part.gcode", filament_used_mm=5000.0)])
+        _offline(monkeypatch)
+        monkeypatch.setattr("kiln._pro_cutter_bridge.consult_blade", lambda name, printer_model=None: None)
+        with patch.dict(os.environ, {"KILN_SKIP_PREFLIGHT": "1", "KILN_SKIP_PREVIEW_GATE": "1"}):
+            out = srv.start_print(file_name="part.gcode", printer_name="garage")
+        assert out.get("success") is not False, out
+        assert garage.started == ["part.gcode"]
+        assert out["nozzle_check"]["why"] == "offline" and "started this one without that check" in out["nozzle_check"]["line"]
+
+
+def _preflight_with_file(monkeypatch, file_path: str):
+    from unittest.mock import MagicMock, patch
+
+    state = MagicMock()
+    state.connected = True
+    state.state = PrinterStatus.IDLE
+    state.tool_temp_actual = 25.0
+    state.tool_temp_target = 0.0
+    state.bed_temp_actual = 25.0
+    state.bed_temp_target = 0.0
+    with patch("kiln.server._get_adapter") as adapter, patch("kiln.server._get_temp_limits", return_value=(280.0, 120.0)), \
+            patch("kiln.server.get_db") as db, patch("kiln.server._registry") as registry:
+        adapter.return_value.get_state.return_value = state
+        registry.count = 1
+        registry.list_names.return_value = ["a1"]
+        db.return_value.get_printer_learning_insights.return_value = {"total_outcomes": 0}
+        monkeypatch.setattr("kiln.server._resolve_control_target", lambda name: (adapter.return_value, "a1"))
+        from kiln.server import preflight_check
+
+        return preflight_check(file_path=file_path)

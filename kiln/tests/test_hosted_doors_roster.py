@@ -173,6 +173,20 @@ class TestTheVoice:
             seen.add(gap["line"])
         assert len(seen) == len(_misses())
 
+    def test_the_nozzle_line(self, monkeypatch):
+        from kiln import _pro_nozzle_bridge as nozzle
+
+        monkeypatch.setattr(nozzle, "_last_miss", {})
+        for at in ("preflight", "start"):
+            seen = set()
+            for miss in _misses():
+                nozzle._last_miss["a1"] = miss
+                gap = nozzle.nozzle_unchecked("a1", at=at)
+                _lint(gap["line"], where=f"nozzle/{at}/{miss.cause}")
+                assert gap["why"] == miss.cause and gap["word"] == "unchecked"
+                seen.add(gap["line"])
+            assert len(seen) == len(_misses())
+
     def test_the_stage_link(self):
         from kiln import stage_link
 

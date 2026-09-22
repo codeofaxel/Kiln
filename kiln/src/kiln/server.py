@@ -7340,104 +7340,112 @@ def start_print(
         #   can surface it without blocking.
         # - unknown_* or absent -> silent skip.
         nozzle_advisory: dict[str, Any] | None = None
+        nozzle_unchecked_line: dict[str, Any] | None = None
         try:
             from kiln import _pro_nozzle_bridge
 
-            if _pro_nozzle_bridge.available():
-                # The machine about to print, not whichever name the
-                # registry happens to list first — nozzle wear is a
-                # property of one hotend, and consulting a sibling's
-                # wear record answers for the wrong nozzle.  Same key
-                # space (the registered name) the listing used.  The
-                # registry-populated guard stays: with no registry there
-                # is no wear record to consult, and inventing a key here
-                # would start refusing prints that used to be skipped.
-                _printer_id = ""
-                if _get_registry().count > 0:
-                    _printer_id = target_name
+            # Asked whether or not kiln-pro is installed here: the bridge
+            # answers locally when it is and from Kiln's servers when it is
+            # not, and says why when neither could.  A gate on a local
+            # install here is how this check ran for almost nobody.
+            # The machine about to print, not whichever name the
+            # registry happens to list first — nozzle wear is a
+            # property of one hotend, and consulting a sibling's
+            # wear record answers for the wrong nozzle.  Same key
+            # space (the registered name) the listing used.  The
+            # registry-populated guard stays: with no registry there
+            # is no wear record to consult, and inventing a key here
+            # would start refusing prints that used to be skipped.
+            _printer_id = ""
+            if _get_registry().count > 0:
+                _printer_id = target_name
 
-                _planned_grams = 0.0
-                _filament_material = ""
-                try:
-                    _files_for_nozzle = adapter.list_files()
-                    for _pf in _files_for_nozzle:
-                        if (
-                            _pf.name.lower() == file_name.lower()
-                            or _pf.path.lower() == file_name.lower()
-                        ):
-                            if _pf.filament_used_mm:
-                                import math as _m
+            _planned_grams = 0.0
+            _filament_material = ""
+            try:
+                _files_for_nozzle = adapter.list_files()
+                for _pf in _files_for_nozzle:
+                    if (
+                        _pf.name.lower() == file_name.lower()
+                        or _pf.path.lower() == file_name.lower()
+                    ):
+                        if _pf.filament_used_mm:
+                            import math as _m
 
-                                # 1.75 mm filament, PLA density
-                                # 0.00124 g/mm^3 — same baseline used
-                                # in slice_and_print's gcode metadata
-                                # parser (see _filament_weight_g logic).
-                                _vol_mm3 = (
-                                    _m.pi
-                                    * (1.75 / 2) ** 2
-                                    * _pf.filament_used_mm
-                                )
-                                _planned_grams = _vol_mm3 * 0.00124
-                            if _pf.material:
-                                _filament_material = _pf.material
-                            break
-                except Exception:
-                    pass
-
-                if _printer_id and _planned_grams > 0:
-                    _nozzle_verdict = _pro_nozzle_bridge.consult_capacity(
-                        printer_id=_printer_id,
-                        planned_grams=_planned_grams,
-                        filament_material=_filament_material,
-                    )
-                    if _nozzle_verdict is not None:
-                        _nz_status = _nozzle_verdict.get("status")
-                        if _nz_status == "exceeded_p90":
-                            _skip_nozzle = os.environ.get(
-                                "KILN_SKIP_NOZZLE_CHECK", ""
-                            ).strip() in ("1", "true", "yes")
-                            if not _skip_nozzle:
-                                _audit(
-                                    "start_print",
-                                    "nozzle_capacity_blocked",
-                                    details={
-                                        "file": file_name,
-                                        "printer": target_name,
-                                        "status": _nz_status,
-                                        "narrative": _nozzle_verdict.get(
-                                            "narrative", ""
-                                        ),
-                                    },
-                                )
-                                return _error_dict(
-                                    "Nozzle wear exceeds population p90: "
-                                    f"{_nozzle_verdict.get('narrative', 'nozzle capacity exceeded')}. "
-                                    "Replace the nozzle before starting "
-                                    "this print, or set "
-                                    "KILN_SKIP_NOZZLE_CHECK=1 to override.",
-                                    code="NOZZLE_CAPACITY_EXCEEDED",
-                                )
-                            logger.warning(
-                                "KILN_SKIP_NOZZLE_CHECK is set — proceeding "
-                                "with start_print(%s) despite exceeded_p90 "
-                                "wear: %s",
-                                file_name,
-                                _nozzle_verdict.get("narrative", ""),
+                            # 1.75 mm filament, PLA density
+                            # 0.00124 g/mm^3 — same baseline used
+                            # in slice_and_print's gcode metadata
+                            # parser (see _filament_weight_g logic).
+                            _vol_mm3 = (
+                                _m.pi
+                                * (1.75 / 2) ** 2
+                                * _pf.filament_used_mm
                             )
-                        if _nz_status in (
-                            "approaching",
-                            "exceeded_p50",
-                            "exceeded_p90",
-                        ):
-                            nozzle_advisory = {
-                                "status": _nz_status,
-                                "narrative": _nozzle_verdict.get(
-                                    "narrative", ""
-                                ),
-                                "percent_used": _nozzle_verdict.get(
-                                    "percent_used"
-                                ),
-                            }
+                            _planned_grams = _vol_mm3 * 0.00124
+                        if _pf.material:
+                            _filament_material = _pf.material
+                        break
+            except Exception:
+                pass
+
+            if _printer_id and _planned_grams > 0:
+                _nozzle_verdict = _pro_nozzle_bridge.consult_capacity(
+                    printer_id=_printer_id,
+                    planned_grams=_planned_grams,
+                    filament_material=_filament_material,
+                )
+                if _nozzle_verdict is None:
+                    # The gate did not run because Kiln could not ask:
+                    # the start says so beside its result (below).
+                    nozzle_unchecked_line = _pro_nozzle_bridge.nozzle_unchecked(_printer_id, at="start")
+                if _nozzle_verdict is not None:
+                    _nz_status = _nozzle_verdict.get("status")
+                    if _nz_status == "exceeded_p90":
+                        _skip_nozzle = os.environ.get(
+                            "KILN_SKIP_NOZZLE_CHECK", ""
+                        ).strip() in ("1", "true", "yes")
+                        if not _skip_nozzle:
+                            _audit(
+                                "start_print",
+                                "nozzle_capacity_blocked",
+                                details={
+                                    "file": file_name,
+                                    "printer": target_name,
+                                    "status": _nz_status,
+                                    "narrative": _nozzle_verdict.get(
+                                        "narrative", ""
+                                    ),
+                                },
+                            )
+                            return _error_dict(
+                                "Nozzle wear exceeds population p90: "
+                                f"{_nozzle_verdict.get('narrative', 'nozzle capacity exceeded')}. "
+                                "Replace the nozzle before starting "
+                                "this print, or set "
+                                "KILN_SKIP_NOZZLE_CHECK=1 to override.",
+                                code="NOZZLE_CAPACITY_EXCEEDED",
+                            )
+                        logger.warning(
+                            "KILN_SKIP_NOZZLE_CHECK is set — proceeding "
+                            "with start_print(%s) despite exceeded_p90 "
+                            "wear: %s",
+                            file_name,
+                            _nozzle_verdict.get("narrative", ""),
+                        )
+                    if _nz_status in (
+                        "approaching",
+                        "exceeded_p50",
+                        "exceeded_p90",
+                    ):
+                        nozzle_advisory = {
+                            "status": _nz_status,
+                            "narrative": _nozzle_verdict.get(
+                                "narrative", ""
+                            ),
+                            "percent_used": _nozzle_verdict.get(
+                                "percent_used"
+                            ),
+                        }
         except Exception as exc:
             logger.debug("Nozzle capacity check skipped: %s", exc)
 
@@ -7521,6 +7529,8 @@ def start_print(
             out["preheat_reasserted"] = reasserted
         if nozzle_advisory is not None:
             out["nozzle_advisory"] = nozzle_advisory
+        if nozzle_unchecked_line is not None:
+            out["nozzle_check"] = nozzle_unchecked_line
         # One line about the filament-cutter blade, only when it wants
         # attention (due, past due, or the machine has raised its cutter
         # fault this month).  Never blocks, never waits long, says nothing
@@ -10137,8 +10147,8 @@ def preflight_check(
         # When kiln-pro is installed and the active printer has a
         # confirmed nozzle state, project the planned print against the
         # nozzle's lifetime envelope.  Free-tier installs without
-        # kiln-pro silently skip this check (bridge.available() returns
-        # False).  When the verdict surfaces, it joins the checks list
+        # kiln-pro are asked through Kiln's servers, and told why when
+        # nothing answered (a check the list names as not made).  When the verdict surfaces, it joins the checks list
         # as advisory — never blocks ready=True on its own.  The user
         # decides whether to swap the nozzle or proceed.
         try:
@@ -10147,6 +10157,14 @@ def preflight_check(
             _planned_grams = 0.0
             if file_result is not None:
                 _planned_grams = float(file_result.get("filament_grams") or 0)
+            if not _planned_grams and file_path:
+                # The file itself says what it will use: the slicer's own
+                # grams line, read the way the cutter count reads it.  The
+                # validation result never carried a figure, so this check
+                # could not fire for anyone until it read the file.
+                from kiln._pro_cutter_bridge import grams_in_file
+
+                _planned_grams = float(grams_in_file(str(file_path)) or 0)
             # The machine this pre-flight was aimed at, never the first one
             # registered: an unaimed check resolves to the default the same way.
             _printer_id = pf_target or ""
@@ -10155,16 +10173,35 @@ def preflight_check(
                     printer_id=_printer_id,
                     planned_grams=_planned_grams,
                     filament_material=expected_material or "",
+                    printer_model=_pf_model or "",
                 )
-                if _nozzle_verdict is not None and _nozzle_verdict.get("status") not in (None, "unknown_baseline", "unknown_nozzle", "invalid_input"):
-                    checks.append(
-                        {
-                            "name": "nozzle_capacity",
-                            "passed": _nozzle_verdict["status"] != "exceeded_p90",
-                            "message": _nozzle_verdict.get("narrative", ""),
-                            "advisory": True,
-                        }
-                    )
+                if _nozzle_verdict is not None and _nozzle_verdict.get("status") not in (None, "unknown_baseline", "unknown_nozzle", "unknown_usage", "invalid_input"):
+                    _nz_check: dict[str, Any] = {
+                        "name": "nozzle_capacity",
+                        "passed": _nozzle_verdict["status"] != "exceeded_p90",
+                        "message": _nozzle_verdict.get("narrative", ""),
+                        "advisory": True,
+                        "status": _nozzle_verdict["status"],
+                    }
+                    if _nozzle_verdict.get("upgrade_hint"):
+                        _nz_check["upgrade_hint"] = _nozzle_verdict["upgrade_hint"]
+                    checks.append(_nz_check)
+                elif _nozzle_verdict is None:
+                    # Kiln could not ASK: the list says so, the same way it
+                    # does for the blade, rather than reading as "fine".
+                    _nz_gap = _pro_nozzle_bridge.nozzle_unchecked(_printer_id)
+                    if _nz_gap is not None:
+                        checks.append(
+                            {
+                                "name": "nozzle_capacity",
+                                "passed": True,
+                                "checked": False,
+                                "message": _nz_gap["line"],
+                                "advisory": True,
+                                "word": "unchecked",
+                                "why": _nz_gap["why"],
+                            }
+                        )
         except Exception as exc:
             logger.debug("Nozzle capacity check skipped: %s", exc)
 
