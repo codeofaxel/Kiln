@@ -84,6 +84,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Describe a flat part by its rules and Kiln works out the shape.** Say where the holes sit relative to the edges and each other, and Kiln finds the exact geometry, tells you plainly what is still loose, and warns you when two rules can't both hold or a hole would break through.
+
 - **Say yes once, for a while — from the approval dialog itself.** Answer
   "this print only", "the next 2 hours", "the rest of today" or a length you
   type (24 hours at most), and prints on that printer start without asking
