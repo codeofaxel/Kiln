@@ -810,6 +810,7 @@ class TestTheNozzleVerdictIsServed:
 
         class _State:
             material = types.SimpleNamespace(value="brass")
+            grams_through = 0.0
 
         res.resolve_backend = lambda tool_name: (object(), None)
         res.resolve_state_or_factory_default = lambda backend, printer_id, printer_model=None: _State()
@@ -878,7 +879,10 @@ class TestTheNozzleDoors:
         assert out["success"] is False and out["error"]["code"] == "NOZZLE_CAPACITY_EXCEEDED"
         assert garage.started == []
 
-    def test_the_start_goes_ahead_and_says_the_nozzle_was_not_checked(self, monkeypatch):
+    def test_the_start_goes_ahead_quietly_for_a_nozzle_never_flagged(self, monkeypatch):
+        """A miss never blocks.  It is named at a start only for a nozzle
+        already flagged as wearing (pinned in test_nozzle_milestones); for
+        one never flagged, a per-print "not checked" would be noise."""
         import os
         from unittest.mock import patch
 
@@ -896,8 +900,7 @@ class TestTheNozzleDoors:
         with patch.dict(os.environ, {"KILN_SKIP_PREFLIGHT": "1", "KILN_SKIP_PREVIEW_GATE": "1"}):
             out = srv.start_print(file_name="part.gcode", printer_name="garage")
         assert out.get("success") is not False, out
-        assert garage.started == ["part.gcode"]
-        assert out["nozzle_check"]["why"] == "offline" and "started this one without that check" in out["nozzle_check"]["line"]
+        assert garage.started == ["part.gcode"] and "nozzle_check" not in out
 
 
 def _preflight_with_file(monkeypatch, file_path: str):

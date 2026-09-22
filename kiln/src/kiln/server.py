@@ -7394,12 +7394,19 @@ def start_print(
                     planned_grams=_planned_grams,
                     filament_material=_filament_material,
                 )
-                if _nozzle_verdict is None:
-                    # The gate did not run because Kiln could not ask:
-                    # the start says so beside its result (below).
+                from kiln.nozzle_milestones import is_flagged, notice_for
+
+                if _nozzle_verdict is None and is_flagged(_printer_id):
+                    # The gate did not run because Kiln could not ask.  Said
+                    # only for a nozzle already named as wearing: for one
+                    # never flagged, a per-print "not checked" is noise.
                     nozzle_unchecked_line = _pro_nozzle_bridge.nozzle_unchecked(_printer_id, at="start")
                 if _nozzle_verdict is not None:
                     _nz_status = _nozzle_verdict.get("status")
+                    # Said once per rung per nozzle, never per print: the
+                    # record advances here, before the refusal below, so a
+                    # nozzle at the budget is remembered as such.
+                    nozzle_advisory = notice_for(_printer_id, _nozzle_verdict)
                     if _nz_status == "exceeded_p90":
                         _skip_nozzle = os.environ.get(
                             "KILN_SKIP_NOZZLE_CHECK", ""
@@ -7424,6 +7431,7 @@ def start_print(
                                 "this print, or set "
                                 "KILN_SKIP_NOZZLE_CHECK=1 to override.",
                                 code="NOZZLE_CAPACITY_EXCEEDED",
+                                extra={"nozzle_advisory": nozzle_advisory} if nozzle_advisory else None,
                             )
                         logger.warning(
                             "KILN_SKIP_NOZZLE_CHECK is set — proceeding "
@@ -7432,20 +7440,6 @@ def start_print(
                             file_name,
                             _nozzle_verdict.get("narrative", ""),
                         )
-                    if _nz_status in (
-                        "approaching",
-                        "exceeded_p50",
-                        "exceeded_p90",
-                    ):
-                        nozzle_advisory = {
-                            "status": _nz_status,
-                            "narrative": _nozzle_verdict.get(
-                                "narrative", ""
-                            ),
-                            "percent_used": _nozzle_verdict.get(
-                                "percent_used"
-                            ),
-                        }
         except Exception as exc:
             logger.debug("Nozzle capacity check skipped: %s", exc)
 

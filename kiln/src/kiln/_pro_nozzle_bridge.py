@@ -116,11 +116,17 @@ def consult_capacity(
         nozzle_material=state.material.value,
         overlay=overlay,
     )
-    return compute_print_capacity_for_nozzle(
+    verdict = compute_print_capacity_for_nozzle(
         state=state,
         planned_grams=float(planned_grams or 0),
         baseline=baseline,
     )
+    if isinstance(verdict, dict):
+        # The same identity the hosted verdict carries, so a milestone is
+        # remembered per NOZZLE wherever the verdict came from.
+        verdict.setdefault("nozzle_material", state.material.value)
+        verdict.setdefault("nozzle_grams_through_before", state.grams_through)
+    return verdict
 
 
 def _declared_model(printer_id: str) -> str | None:

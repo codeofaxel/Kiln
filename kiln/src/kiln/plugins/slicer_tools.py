@@ -2017,17 +2017,17 @@ class _SlicerToolsPlugin:
                             planned_grams=_planned_grams,
                             filament_material=material or "",
                         )
-                        if _nozzle_verdict is not None and _nozzle_verdict.get("status") in (
-                            "exceeded_p50", "exceeded_p90", "approaching",
-                        ):
-                            resp["nozzle_capacity_advisory"] = {
-                                "status": _nozzle_verdict["status"],
-                                "narrative": _nozzle_verdict.get("narrative", ""),
-                                "advisory": True,
-                            }
-                        elif _nozzle_verdict is None:
-                            # Kiln could not ask: the slice says so rather
-                            # than reading as a nozzle with life to spare.
+                        from kiln.nozzle_milestones import is_flagged, notice_for
+
+                        if _nozzle_verdict is not None:
+                            # Once per rung per nozzle, never per slice.
+                            _nz_notice = notice_for(_printer_for_nozzle, _nozzle_verdict)
+                            if _nz_notice is not None:
+                                resp["nozzle_capacity_advisory"] = {**_nz_notice, "advisory": True}
+                        elif is_flagged(_printer_for_nozzle):
+                            # Kiln could not ask, and this nozzle was already
+                            # named as wearing: say so rather than reading as
+                            # a nozzle with life to spare.
                             _nz_gap = _pro_nozzle_bridge.nozzle_unchecked(_printer_for_nozzle)
                             if _nz_gap is not None:
                                 resp["nozzle_check"] = _nz_gap

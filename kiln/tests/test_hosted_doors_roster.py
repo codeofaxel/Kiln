@@ -187,6 +187,20 @@ class TestTheVoice:
                 seen.add(gap["line"])
             assert len(seen) == len(_misses())
 
+    def test_the_milestone_notices(self, tmp_path, monkeypatch):
+        from kiln import nozzle_milestones as nm
+
+        monkeypatch.setenv("KILN_HOME", str(tmp_path))
+        for rung in sorted(nm.NOTICED):
+            notice = nm.notice_for("a1", {"status": rung, "narrative": "62% of the brass budget on this filament",
+                                          "nozzle_material": "brass", "nozzle_grams_through_before": 400.0})
+            assert notice is not None, rung
+            text = notice["line"]
+            assert text == " ".join(text.split()) and text.endswith("."), text
+            assert not _CODE_TOKEN.search(text) and not _SYSTEM_WORD.search(text), text
+            assert "Your nozzle" in text and "62% of the brass budget" in text
+            nm.forget("a1")
+
     def test_the_stage_link(self):
         from kiln import stage_link
 

@@ -21,6 +21,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Importing the bridge eagerly registers ``kiln._pro_nozzle_bridge`` in
+# sys.modules so the kiln package's lazy ``__getattr__`` resolves the
+# attribute access that ``unittest.mock.patch`` needs.
+import kiln._pro_nozzle_bridge  # noqa: F401
 from kiln.printers.base import (
     PrinterFile,
     PrinterState,
@@ -28,11 +32,6 @@ from kiln.printers.base import (
     PrintResult,
 )
 from kiln.printers.octoprint import OctoPrintAdapter
-
-# Importing the bridge eagerly registers ``kiln._pro_nozzle_bridge`` in
-# sys.modules so the kiln package's lazy ``__getattr__`` resolves the
-# attribute access that ``unittest.mock.patch`` needs.
-import kiln._pro_nozzle_bridge  # noqa: F401
 from kiln.server import start_print as server_start_print
 
 
@@ -47,6 +46,9 @@ def _fake_registry() -> MagicMock:
 def _make_adapter(*, filament_used_mm: float | None = 5000.0) -> MagicMock:
     """Mock adapter with idle state + one file carrying gcode metadata."""
     adapter = MagicMock(spec=OctoPrintAdapter)
+    # A real name: the start files its bookkeeping -- and now the nozzle's
+    # milestone memory -- under it, and a memory is never keyed by a mock.
+    adapter.name = "test_printer"
     adapter.start_print.return_value = PrintResult(
         success=True, message="Started printing benchy.gcode."
     )
@@ -76,6 +78,13 @@ def env_skip_preview():
     """Bypass the preview-token gate for these unit tests."""
     with patch.dict("os.environ", {"KILN_SKIP_PREVIEW_GATE": "1"}):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _own_milestone_memory(tmp_path, monkeypatch):
+    """A milestone is said once per nozzle, remembered under KILN_HOME: every
+    test starts with a nozzle nothing has been said about."""
+    monkeypatch.setenv("KILN_HOME", str(tmp_path / "kiln-home"))
 
 
 @pytest.fixture(autouse=True)
@@ -129,7 +138,15 @@ class TestNozzleAdvisoryAttached:
         assert result["success"] is True, f"unexpected refusal: {result}"
         advisory = result.get("nozzle_advisory")
         assert advisory is not None
-        assert advisory["status"] == "approaching"
+        assert advisory["status"] == "approaching" and advisory["crossed"] is True
+        # The same rung on the next print is not news: said once per nozzle.
+        with patch(
+            "kiln._pro_nozzle_bridge.available", return_value=True
+        ), patch(
+            "kiln._pro_nozzle_bridge.consult_capacity", return_value=verdict
+        ):
+            again = server_start_print("benchy.gcode")
+        assert again["success"] is True and "nozzle_advisory" not in again
         assert advisory["percent_used"] == pytest.approx(0.62)
         assert "planning window" in advisory["narrative"]
 
