@@ -405,19 +405,31 @@ class TestTheWrap:
         assert any(line.strip().startswith("G1 X0 Y128") for line in end.split("\n")), "the vendor's path is kept"
         assert "G1 X-48 Y180 F3600" in end, "and its park"
 
-    def test_the_floor_alone_lifts_the_blocks_under_the_vendors_start(self, tmp_path):
+    def test_a_floor_without_the_plan_writes_no_file_and_says_the_two_doors(self, tmp_path):
+        """A floor means a part is on the plate.  Without the plan, a file
+        with the vendor's start would home Z onto that part from the
+        printer's own screen -- so Kiln writes nothing and says what to do."""
+        from kiln.plate_state import PRINT_AROUND_SENTENCE
+
         out = str(tmp_path / "floor.gcode.3mf")
-        result = build_bambu_3mf(
-            _body(layers=4, change_at=1), out, settings=BambuPrintSettings(num_filaments=2, filament_colors=["#FFFFFF", "#FF0000"]),
-            lift_floor_mm=30.0, printer_model="bambu_a1",
+        with pytest.raises(ValueError) as caught:
+            build_bambu_3mf(
+                _body(layers=4, change_at=1), out,
+                settings=BambuPrintSettings(num_filaments=2, filament_colors=["#FFFFFF", "#FF0000"]),
+                lift_floor_mm=30.0, printer_model="bambu_a1",
+            )
+        assert str(caught.value) == PRINT_AROUND_SENTENCE == (
+            "Kiln won't write a printer file while the plate still holds the last print: clear the plate and say so "
+            "to print again, or print around it on Kiln Pro (https://kiln3d.com/pricing)."
         )
-        assert result.quiet_start is False and result.lift_floor_mm == 30.0
-        gcode = _gcode_of(out)
-        assert "M620 M" in gcode, "an ordinary start keeps the vendor's start"
-        lines = [line.split(";", 1)[0].strip() for line in gcode.split("\n")]
-        assert lines[lines.index("M620 S1A") - 1] == "G1 Z30.00 F600"
-        end = gcode.split("; filament used [g]")[1]
-        assert min(float(mm.group(1)) for mm in re.finditer(r"^\s*G1 Z(\d+\.?\d*)", end, re.MULTILINE)) >= 30.0
+        assert not os.path.exists(out)
+        from kiln.plugins.slicer_tools import _auto_wrap_bambu_3mf
+
+        gcode = tmp_path / "part.gcode"
+        gcode.write_text(_body())
+        threemf, warning = _auto_wrap_bambu_3mf(str(gcode), "bambu_a1", None, lift_floor_mm=30.0)
+        assert threemf is None and PRINT_AROUND_SENTENCE in str(warning)
+        assert not list(tmp_path.glob("*.3mf"))
 
     def test_raising_absolute_z_leaves_relative_stretches_and_xy_lines_alone(self):
         text = "G90\nG1 Z5.5 F900\nG1 X0 Y128 F18000\nG91\nG1 Z2 F600\nG90\nG1 Z165 F600\nG1 Z163\nG1 X-48 Y180 F3600\nG0 Z1 ; comment\n"

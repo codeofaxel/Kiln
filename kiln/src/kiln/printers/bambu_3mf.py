@@ -2425,7 +2425,10 @@ def build_bambu_3mf(
         this build's *lift_floor_mm*.  Exclusive with *resume_mode*.
     :param lift_floor_mm: Other parts stand on the plate: every Kiln-owned
         lift in the file -- a colour change, the end block -- rises to at
-        least this height before the head moves sideways.
+        least this height before the head moves sideways.  Given without a
+        *quiet_start*, the build refuses (``ValueError`` with
+        :data:`kiln.plate_state.PRINT_AROUND_SENTENCE`): a vendor-start file
+        for an occupied plate is not written by Kiln at all.
     :returns: :class:`Bambu3MFResult` with output path and metadata.
     :raises FileNotFoundError: If the start/end gcode data files are missing.
     :raises ValueError: If the gcode body has no layer changes, or if a
@@ -2439,6 +2442,13 @@ def build_bambu_3mf(
             raise ValueError(msg)
         quiet_start = _check_quiet_plan(quiet_start)
         lift_floor_mm = float(quiet_start["lift_floor_mm"])
+    elif lift_floor_mm is not None and not resume_mode:
+        # A floor means a part is on the plate.  Without the plan there is no
+        # honest file: one with the vendor's start homes Z onto that part the
+        # moment someone starts it from the printer's own screen.
+        from kiln.plate_state import PRINT_AROUND_SENTENCE
+
+        raise ValueError(PRINT_AROUND_SENTENCE)
     # The caller's word, else the G-code's own, else PLA on the A1 -- read
     # here, at the one place every wrapping door passes through, so a door
     # that slices PETG and wraps with the defaults no longer tells the

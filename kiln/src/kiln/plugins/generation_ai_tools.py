@@ -939,11 +939,19 @@ class _GenerationAIToolsPlugin:
                 from kiln.printers.upload_prep import prepare_upload_for_adapter
 
                 quiet_plan = _quiet_start_plan(place_info)
-                upload_path, _wrapped = prepare_upload_for_adapter(
-                    adapter, slice_result.output_path,
-                    stl_paths=[placed_path] if str(placed_path).lower().endswith(".stl") else None,
-                    quiet_start=quiet_plan, lift_floor_mm=_lift_floor_of(place_info),
-                )
+                try:
+                    upload_path, _wrapped = prepare_upload_for_adapter(
+                        adapter, slice_result.output_path,
+                        stl_paths=[placed_path] if str(placed_path).lower().endswith(".stl") else None,
+                        quiet_start=quiet_plan, lift_floor_mm=_lift_floor_of(place_info),
+                    )
+                except ValueError as exc:
+                    # No printer file for an occupied plate without the plan;
+                    # the slice and its verdict ride the refusal.
+                    block = _srv._error_dict(str(exc), code="PLACEMENT_START_NOT_YET")
+                    block["slice"] = slice_result.to_dict()
+                    _attach_placement(block, place_info)
+                    return block
                 upload = adapter.upload_file(upload_path)
                 file_name = upload.file_name or os.path.basename(upload_path)
 
