@@ -79,10 +79,13 @@ account:<id>#<record>``); and nothing where nothing is known.
 
 from __future__ import annotations
 
+import logging
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 #: How the approval was obtained, recorded on every print it authorises so
 #: the audit trail says which rung of the ladder was actually used.
@@ -556,6 +559,54 @@ def register_hosted_approval_hook(hook) -> None:
     """Install (or, with ``None``, remove) the hosted account-approval hook."""
     global _hosted_hook  # noqa: PLW0603
     _hosted_hook = hook
+
+
+# ---------------------------------------------------------------------------
+# What the file IS — a hook, not an implementation
+# ---------------------------------------------------------------------------
+
+#: ``hook(*, file_name, local_path) -> str | None``: one line about the
+#: file the person is approving, in the words of the record it was made
+#: from — what was drawn, how thick, whether a CAD export is exact.  The
+#: dialog describes a job it cannot show; this is the one line that can say
+#: what the job IS rather than what it is called.  Public Kiln ships no
+#: implementation: the design record and its words live with the served
+#: side (kiln-pro), and the dialog only shows the line it is handed.
+#: ``file_name`` is the tool's file argument as given (a printer-side name
+#: or a local path); ``local_path`` is a readable copy when one is known.
+_description_hook = None
+
+
+def register_print_description_hook(hook) -> None:
+    """Install (or, with ``None``, remove) the hook that describes the file."""
+    global _description_hook  # noqa: PLW0603
+    _description_hook = hook
+
+
+def print_description_hook():
+    return _description_hook
+
+
+def describe_file_for_approval(*, file_name: str, local_path: str | None = None) -> str | None:
+    """The served side's one line about the file, or ``None``.
+
+    One line, always: a hook that hands back several is folded onto one,
+    because the dialog's ``extra`` rows are single lines.  A hook that
+    raises, or answers with anything but text, contributes nothing — a
+    dialog that fails to open would be worse than one with a row missing.
+    """
+    hook = _description_hook
+    if hook is None:
+        return None
+    try:
+        line = hook(file_name=file_name, local_path=local_path)
+    except Exception:  # noqa: BLE001 — the dialog must still open
+        logger.debug("print description hook failed for %s", file_name, exc_info=True)
+        return None
+    if not isinstance(line, str):
+        return None
+    line = " ".join(line.split())
+    return line or None
 
 
 def hosted_approval_hook():

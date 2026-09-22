@@ -82,6 +82,7 @@ from kiln.print_consent import (
     SOURCE_ELICITED,
     PrintConsent,
     consent_for,
+    describe_file_for_approval,
     describe_print_request,
     note_not_asked,
     note_window_outcome,
@@ -2319,6 +2320,11 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             "material": arguments.get("material"),
             "printer model": arguments.get("printer_id"),
             "filament slots": _consent_filament_line(tool_name, file_value, printer_name),
+            # What the file IS, when the served side can say (a design drawn
+            # as a sketch: its outline, holes, thickness, CAD exactness).
+            "built": describe_file_for_approval(
+                file_name=file_value, local_path=_local_copy_of(file_value),
+            ),
         },
         window_printer=aimed if offer_window else None,
         fleet_offered=offer_fleet,

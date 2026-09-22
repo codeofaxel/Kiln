@@ -595,3 +595,68 @@ async def print_consent_ask(ctx):
     from kiln.mcp_compat import ask_user_to_confirm
 
     return await ask_user_to_confirm(ctx, "Start printing x.3mf?")
+
+
+# ---------------------------------------------------------------------------
+# What the file IS: the served side's line, shown and never trusted to open
+# ---------------------------------------------------------------------------
+
+
+def test_the_served_sides_line_about_the_file_reaches_the_person(monkeypatch):
+    """A design drawn as a sketch can say what it is — outline, holes,
+    thickness — and the dialog shows that line when the served side hands
+    it one.  The dialog only displays; the words are not its business."""
+    seen: dict = {}
+
+    def _hook(*, file_name, local_path):
+        seen["asked_about"] = (file_name, local_path)
+        return "40×20 outline, 2 holes ⌀3.4, 3 mm thick, fully constrained, STEP exact"
+
+    print_consent.register_print_description_hook(_hook)
+    try:
+        _ask(monkeypatch, "accept")
+    finally:
+        print_consent.register_print_description_hook(None)
+    assert seen["asked_about"][0] == "benchy.3mf"
+    assert "Built: 40×20 outline, 2 holes ⌀3.4, 3 mm thick, fully constrained, STEP exact" in _ask.last_message
+
+
+def test_a_file_the_served_side_cannot_describe_gets_no_built_row(monkeypatch):
+    print_consent.register_print_description_hook(lambda *, file_name, local_path: None)
+    try:
+        _ask(monkeypatch, "accept")
+    finally:
+        print_consent.register_print_description_hook(None)
+    assert "Built:" not in _ask.last_message
+    assert "benchy.3mf" in _ask.last_message
+
+
+def test_a_describing_hook_that_fails_does_not_stop_the_question(monkeypatch):
+    """A dialog that fails to open would be worse than one with a row
+    missing: the person still has to be asked."""
+
+    def _boom(*, file_name, local_path):
+        raise RuntimeError("no record")
+
+    print_consent.register_print_description_hook(_boom)
+    try:
+        token, _ = _ask(monkeypatch, "accept")
+    finally:
+        print_consent.register_print_description_hook(None)
+    assert token is not None
+    assert "Built:" not in _ask.last_message
+
+
+def test_the_served_line_is_folded_onto_one_row():
+    """The dialog's rows are single lines; a hook that hands back a
+    paragraph is shown as one line, not as a second dialog."""
+    print_consent.register_print_description_hook(
+        lambda *, file_name, local_path: "  40×20 outline,\n  2 holes  \n"
+    )
+    try:
+        assert print_consent.describe_file_for_approval(file_name="x.3mf") == "40×20 outline, 2 holes"
+        print_consent.register_print_description_hook(lambda *, file_name, local_path: 42)
+        assert print_consent.describe_file_for_approval(file_name="x.3mf") is None
+    finally:
+        print_consent.register_print_description_hook(None)
+    assert print_consent.describe_file_for_approval(file_name="x.3mf") is None
