@@ -1145,6 +1145,31 @@ def _expand_end_template(template: str, variables: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
+def _machine_top_mm(printer_model: str | None) -> float | None:
+    """How high this machine's Z goes, from the public catalogue: the
+    firmware's own travel limit where it is on record, else the build
+    volume's height.  ``None`` for a machine the catalogue does not know --
+    no ceiling is invented for it, least of all the A1's, whose end sequence
+    an unknown machine borrows but whose height it need not share."""
+    if not printer_model:
+        return None
+    from kiln.printers.bed_fit import _load_printer_intelligence, _printer_id_candidates, get_build_volume
+
+    catalogue = _load_printer_intelligence()
+    for candidate in _printer_id_candidates(_normalize_model(printer_model)):
+        entry = catalogue.get(candidate)
+        if not isinstance(entry, dict):
+            continue
+        motion = entry.get("motion")
+        travel = motion.get("z_travel_limit_mm") if isinstance(motion, dict) else None
+        with contextlib.suppress(TypeError, ValueError):
+            if travel is not None and float(travel) > 0:
+                return float(travel)
+        volume = get_build_volume(candidate)
+        return float(volume[2]) if volume else None
+    return None
+
+
 def _end_template_variables(max_z: float, printer_model: str | None) -> dict[str, Any]:
     """Everything an end template may read, for one print on one model: the
     part's height, the two slicing flags that are constants for Kiln, the bed
@@ -1169,6 +1194,7 @@ def _resolve_end_gcode(
     max_z: float = 65.0,
     printer_model: str | None = None,
     lift_floor_mm: float | None = None,
+    z_top_mm: float | None = None,
 ) -> str:
     """Resolve an end gcode template with print-specific values.
 
@@ -1191,10 +1217,19 @@ def _resolve_end_gcode(
 
     :param printer_model: Declared model, used only to look up the bed centre
         for templates that park on it.
+    :param z_top_mm: How high the machine the file is for can go
+        (:func:`_machine_top_mm` of the DECLARED model, not of the model whose
+        template this is): the first lift is ``max_z + 5`` but never past it.
+        ``None`` leaves the lift uncapped.
     """
     expanded = _expand_end_template(template, _end_template_variables(max_z, printer_model))
 
     safe_z = max_z + 5.0
+    if z_top_mm is not None:
+        # Never past the machine's own top: the A1, H2 and P2S warm-ups leave
+        # the soft endstops off, so nothing else would stop an over-travel.
+        # Never below the part either, whatever the catalogue says.
+        safe_z = min(safe_z, max(float(z_top_mm), max_z))
     resolved = re.sub(
         r"(G1 Z)\d+\.?\d*( F900)",
         rf"\g<1>{safe_z:.1f}\2",
@@ -2811,6 +2846,7 @@ def build_bambu_3mf(
         max_z=max_z,
         printer_model=end_source,
         lift_floor_mm=lift_floor_mm,
+        z_top_mm=_machine_top_mm(printer_model),
     )
     _assert_fully_resolved(end_gcode, source=f"{end_source} end gcode")
 
