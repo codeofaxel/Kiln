@@ -12,6 +12,7 @@ lint (in ``test_hosted_doors_roster``).
 from __future__ import annotations
 
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -104,6 +105,30 @@ class TestTheMemory:
         assert nm.notice_for("a1", _verdict("approaching")) is not None
         assert nm.notice_for("a1", _verdict("approaching")) is not None  # said again: no per-tenant memory here
         assert nm.last_rung("a1") is None and nm.is_flagged("a1") is False
+        assert not (tmp_path / "kiln-home" / "nozzle_milestones.json").exists()
+
+    def test_a_deployment_it_cannot_read_is_read_as_the_shared_server(self, tmp_path, monkeypatch):
+        """The guard fails CLOSED: unreadable means "assume shared".
+
+        Every other test here reaches past ``_hosted`` by replacing it, so
+        what the predicate does when it cannot be READ was never pinned --
+        and it answered "not the shared server", which turns the memory back
+        ON there.  One disk serves every account, the key is a printer name
+        the CALLER chose, so two accounts that both call their machine
+        "default" share a record: the first is told about the crossing and
+        the second is silenced by it.  Being told twice is noise; not being
+        told is a nozzle past its budget that nobody mentioned.
+        """
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        # A partial or circular import during startup, as the machinery sees it.
+        monkeypatch.setitem(sys.modules, "kiln.runtime_env", None)
+        assert nm._hosted() is True
+
+        first_account = nm.notice_for("default", _verdict("approaching"))
+        second_account = nm.notice_for("default", _verdict("approaching"))
+        assert first_account is not None
+        assert second_account is not None, "silenced by another account's record"
+        assert nm.last_rung("default") is None and nm.is_flagged("default") is False
         assert not (tmp_path / "kiln-home" / "nozzle_milestones.json").exists()
 
     def test_an_unreadable_hosted_predicate_remembers_nothing(self, monkeypatch):
