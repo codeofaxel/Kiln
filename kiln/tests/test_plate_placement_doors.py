@@ -699,7 +699,7 @@ class TestTheStage:
         assert payload["occupancy"] == {
             "kind": "kiln.plate_occupancy.v1",
             "bed_mm": [256.0, 256.0],
-            "occupied": [{"name": "jar_v2.gcode.3mf", "rect_mm": [90.0, 90.0, 160.0, 160.0], "top_mm": 42.0}],
+            "occupied": [{"name": "jar v2", "rect_mm": [90.0, 90.0, 160.0, 160.0], "top_mm": 42.0}],
             "proposed": None,
             "source": "record_box",
         }
@@ -737,7 +737,7 @@ class TestTheStage:
         state = PlateState(machine="m", status="occupied", job=PlateJob(file="/x/jar.3mf", footprint_mm=None, max_z_mm=None))
         assert state.occupancy(None) == {
             "kind": "kiln.plate_occupancy.v1", "bed_mm": None,
-            "occupied": [{"name": "jar.3mf", "rect_mm": None, "top_mm": None}],
+            "occupied": [{"name": "jar", "rect_mm": None, "top_mm": None}],
             "proposed": None, "source": "record_box",
         }
         assert PlateState(machine="m", status="clear").occupancy([256, 256]) is None
