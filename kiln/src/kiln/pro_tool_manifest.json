@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-22T02:21:53.587630+00:00",
+  "generated": "2026-09-22T08:36:48.947380+00:00",
   "tool_count": 426,
   "categories": {
     "product_generators": {
@@ -5612,7 +5612,7 @@
     },
     {
       "name": "detect_merge_conflicts",
-      "description": "Three-way mesh-fingerprint diff: identify conflicts before merging.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Three-way diff of two branches: identify conflicts before merging.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
