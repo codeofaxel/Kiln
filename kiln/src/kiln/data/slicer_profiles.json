@@ -994,7 +994,7 @@
     "tool_change": {
       "tool_change_seconds": 75,
       "tool_changer": "mmu2s",
-      "tool_change_notes": "Prusa MMU2S: PrusaSlicer bundled profiles use 15s load + 12s unload = 27s mechanical + ~48s purge. Capped at MMU3 FW 3.0.3 (no speed boost). High variance. Source: PrusaSlicer PrusaResearch.ini."
+      "tool_change_notes": "Prusa MMU2S: PrusaSlicer bundled profiles use 15s load + 12s unload = 27s mechanical + ~48s purge. Capped at MMU3 FW 3.0.3 (no speed boost). High variance. Source: PrusaSlicer's own bundled profiles."
     }
   },
   "prusa_mk4": {
@@ -1117,7 +1117,7 @@
     "tool_change": {
       "tool_change_seconds": 97,
       "tool_changer": "ams",
-      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge (default 400mm³). Source: BambuStudio fdm_machine_common.json + X1C 0.4 nozzle.json."
+      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge (default 400mm³). Source: Bambu Studio's own machine profile."
     }
   },
   "bambu_x1e": {
@@ -1160,7 +1160,7 @@
     "tool_change": {
       "tool_change_seconds": 97,
       "tool_changer": "ams",
-      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge (default 400mm³). Source: BambuStudio fdm_machine_common.json + X1C 0.4 nozzle.json."
+      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge (default 400mm³). Source: Bambu Studio's own X1C machine profile."
     }
   },
   "bambu_p1s": {
@@ -1203,7 +1203,7 @@
     "tool_change": {
       "tool_change_seconds": 97,
       "tool_changer": "ams",
-      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge. Same AMS as X1C. Source: BambuStudio P1S 0.4 nozzle.json."
+      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge. Same AMS as X1C. Source: Bambu Studio's own machine profile."
     }
   },
   "bambu_p2s": {
@@ -1290,7 +1290,7 @@
     "tool_change": {
       "tool_change_seconds": 94,
       "tool_changer": "ams_lite",
-      "tool_change_notes": "Bambu AMS Lite: 29s unload + 25s load = 54s mechanical + ~40s purge. Shorter PTFE path than AMS. Source: BambuStudio A1 0.4 nozzle.json."
+      "tool_change_notes": "Bambu AMS Lite: 29s unload + 25s load = 54s mechanical + ~40s purge. Shorter PTFE path than AMS. Source: Bambu Studio's own machine profile."
     }
   },
   "bambu_a2l": {
@@ -1417,7 +1417,7 @@
     "tool_change": {
       "tool_change_seconds": 45,
       "tool_changer": "ercf",
-      "tool_change_notes": "ERCF V2 + Happy Hare: all-time avg 63s, single-job avg 36-42s. Using 45s as middle estimate. Source: Happy Hare mmu.py statistics + wiki examples."
+      "tool_change_notes": "ERCF V2 + Happy Hare: all-time avg 63s, single-job avg 36-42s. Using 45s as middle estimate. Source: Happy Hare statistics + wiki examples."
     }
   },
   "voron_trident": {
@@ -1457,7 +1457,7 @@
     "tool_change": {
       "tool_change_seconds": 45,
       "tool_changer": "ercf",
-      "tool_change_notes": "ERCF V2 + Happy Hare: all-time avg 63s, single-job avg 36-42s. Using 45s as middle estimate. Source: Happy Hare mmu.py statistics + wiki examples."
+      "tool_change_notes": "ERCF V2 + Happy Hare: all-time avg 63s, single-job avg 36-42s. Using 45s as middle estimate. Source: Happy Hare statistics + wiki examples."
     }
   },
   "elegoo_neptune4": {
@@ -2262,7 +2262,7 @@
     "tool_change": {
       "tool_change_seconds": 97,
       "tool_changer": "ams",
-      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge. Same AMS as X1C. Source: BambuStudio P1P 0.4 nozzle.json."
+      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge. Same AMS as X1C. Source: Bambu Studio's own machine profile."
     }
   },
   "bambu_a1_mini": {
@@ -2305,7 +2305,7 @@
     "tool_change": {
       "tool_change_seconds": 102,
       "tool_changer": "ams_lite",
-      "tool_change_notes": "Bambu AMS Lite: 34s unload + 28s load = 62s mechanical + ~40s purge. Slower than A1 despite same AMS Lite. Source: BambuStudio A1 Mini 0.4 nozzle.json."
+      "tool_change_notes": "Bambu AMS Lite: 34s unload + 28s load = 62s mechanical + ~40s purge. Slower than A1 despite same AMS Lite. Source: Bambu Studio's own machine profile."
     }
   },
   "klipper_generic": {

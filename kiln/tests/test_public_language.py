@@ -170,16 +170,16 @@ def test_a_commit_message_naming_how_a_sequence_was_captured_is_refused() -> Non
     was read from, the file inside its profile bundle, the capture method
     and the date the work was done are the same trail in a message."""
     for text in (
-        "Captured from BambuStudio 02.08.02.61's own command line",
-        'Source: "Bambu Lab H2C 0.4 nozzle template machine_end_gcode.json"',
-        "Each preset is flattened first, then the template fields are merged in",
-        "harvested from the HMS index on 2026-09-03",
+        "Captured from PrusaSlicer 9.9.9's own command line",
+        'Source: "Acme 0.4 nozzle template widget_gcode.json"',
+        "harvested from the vendor index on 2030-01-02",
+        "the reader matches it in widget.cpp L12",
     ):
         findings = _GATE.find_violations(text, source="abcd123", commit_message=True)
         assert [f.rule for f in findings] == ["research provenance"], text
     # A body wraps at 72 columns; a build split over two lines is one
     # sentence, reported once, on the line it starts on.
-    wrapped = "Pin the H2C end.\n\nThe values are read from the BambuStudio\n02.08.02.61 slice the start came from.\n"
+    wrapped = "Pin the end.\n\nThe values are read from the PrusaSlicer\n9.9.9 slice the start came from.\n"
     findings = _GATE.find_violations(wrapped, source="abcd123", commit_message=True)
     assert [(f.line, f.rule) for f in findings] == [(3, "research provenance")]
 

@@ -203,7 +203,7 @@ def _commit_provenance_rule() -> Rule:
     return Rule(
         "research provenance",
         re.compile(
-            r"\b[\w./-]+\.(?:cpp|hpp|cc|c|h)\b(?::\d+|[^\n]{0,40}@ \d+\.\d+)"
+            r"\b[\w./-]+\.(?:cpp|hpp|cc|c|h)\b(?::\d+|[`'\")]*\s*\(?\s*(?:L|lines?\s+)\d+|[^\n]{0,40}@ \d+\.\d+)"
             r"|\b(?:wiki|forum|forums|community|discuss)\.[\w.-]+\.(?:com|org|io|net|dev|cn)/[\w./#?=%-]+"
             r"|reddit\.com/r/[\w/]+"
             r"|\bread 20\d\d-\d\d-\d\d\b"

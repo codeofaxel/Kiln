@@ -11,9 +11,10 @@ This module is the one definition of the line between the two, read by the
 data test, by the commit-time public-language audit, and by the tooling
 that writes notes.  It is deliberately a list of things a public note must
 NOT contain plus, for the motion block, a length: a note that names a URL,
-a file hash, a download id, a research step or a community account is
-carrying the private half by another door -- which is exactly how 440
-motion notes shipped on a branch on 2026-09-17 before this file existed.
+a file hash, a download id, a research step, a community account, or the
+file and line a fact was read from is carrying the private half by another
+door -- which is exactly how 440 motion notes shipped on a branch on
+2026-09-17 before this file existed.
 """
 from __future__ import annotations
 
@@ -63,16 +64,13 @@ CAPTURE_PROVENANCE_PATTERNS: tuple[tuple[str, str], ...] = (
     ),
     (
         "a slicer profile-bundle path",
-        r"(?i:\bprofiles/[\w .<>-]+/(?:machine|process|filament)\b|\btemplate (?:machine_start_gcode|"
-        r"machine_end_gcode|change_filament_gcode|layer_change_gcode|time_lapse_gcode|"
-        r"machine_pause_gcode)\.json|\.app/Contents/Resources/profiles\b)",
+        r"(?i:\bprofiles/[\w .<>-]+/(?:machine|process|filament)\b|\btemplate [a-z_]+_gcode\.json"
+        r"|\.app/Contents/Resources/profiles\b)",
     ),
     (
         "a capture method",
         r"(?i:\b(?:came from|captured from|captured with|taken from|captured)\b[^\n]{0,70}?"
-        r"\b(?:command line|command-line|CLI|headless)\b|\bpresets?\b[^\n]{0,25}?\bflatten(?:ed|s|ing)?\b"
-        r"|\bflatten(?:ed|s|ing)?\b[^\n]{0,25}?\bpresets?\b|\btemplate (?:fields?|files?)\b[^\n]{0,25}?"
-        r"\bmerged\b|\bmerg(?:e|es|ed|ing)\b[^\n]{0,25}?\btemplate (?:fields?|files?)\b)",
+        r"\b(?:command line|command-line|CLI|headless)\b)",
     ),
     (
         "a research date",
@@ -80,6 +78,17 @@ CAPTURE_PROVENANCE_PATTERNS: tuple[tuple[str, str], ...] = (
         r"|\b" + _RESEARCH_VERB + r"\b[^\n]{0,20}?\b20\d\d-\d\d-\d\d\b[^\n]{0,30}?\bfrom\b)",
     ),
 )
+
+#: A pin into someone else's file: a line number, or a firmware source file,
+#: slicer profile or ini named as where a fact was read.  A note says what the
+#: vendor's firmware, config or slicer profile does; which file and which line
+#: say so is the trail, and the Kiln Pro overlay keeps it.  A line pin is
+#: judged outside backticks only -- the quoted vendor line is the fact, and
+#: ``M1009 Q1 L1`` carries a parameter, not a line -- while a file name is a
+#: citation wherever it sits, quoted or not.
+LINE_PIN = r"\bL\d+(?:\s*[-\u2013]\s*L?\d+)?\b|\blines? \d+(?:\s*[-\u2013]\s*\d+)?\b"
+SOURCE_FILE = r"\b[A-Za-z_][\w.-]*\.(?:cpp|hpp|cc|c|h|py|json|ini)\b"
+_QUOTED = re.compile(r"`{1,2}[^`]*`{1,2}")
 
 #: Markers of research provenance or process.  Each is a thing a public note
 #: has no business saying; the Kiln Pro overlay keeps the full text.
@@ -111,6 +120,12 @@ def provenance_findings(text: str, *, allow_links: bool = False) -> list[str]:
         match = re.search(pattern, text)
         if match:
             findings.append(f"{name}: {match.group(0)!r}")
+    line_pin = re.search(LINE_PIN, _QUOTED.sub(" ", text))
+    if line_pin:
+        findings.append(f"a line pin: {line_pin.group(0)!r}")
+    source_file = re.search(SOURCE_FILE, text)
+    if source_file:
+        findings.append(f"a source file named: {source_file.group(0)!r}")
     return findings
 
 

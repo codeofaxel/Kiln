@@ -276,28 +276,28 @@ def test_catches_how_a_vendor_sequence_was_captured() -> None:
     cases = {
         "a slicer build named as a source": (
             "kiln/src/kiln/data/bambu_x_end_gcode.gcode",
-            "; Bambu Lab X end G-code.\n;\n; Source: BambuStudio 02.08.02.61 vendor profile bundle, file\nM400\n",
+            "; Acme end G-code.\n;\n; Source: PrusaSlicer 9.9.9 vendor profile bundle, file\nM400\n",
         ),
         "a slicer profile-bundle path": (
             "kiln/src/kiln/data/bambu_x_end_gcode.gcode",
-            ';   profiles/BBL/machine/"Bambu Lab X 0.4 nozzle template machine_end_gcode.json".\nM400\n',
+            ';   profiles/Acme/machine/"Acme 0.4 nozzle template widget_gcode.json".\nM400\n',
         ),
         "a capture method": (
             "kiln/src/kiln/printers/x.py",
-            '"""The captures came from the slicer\'s own command line, so each\npreset is flattened first."""\n',
+            '"""The captures came from the\nslicer\'s own command line."""\n',
         ),
-        "a research date": ("kiln/src/kiln/printers/x.py", "# harvested from the HMS index on 2026-09-03\nx = 1\n"),
+        "a research date": ("kiln/src/kiln/printers/x.py", "# harvested from the vendor index on 2030-01-02\nx = 1\n"),
     }
     for rule, (rel, text) in cases.items():
         found = _pins_in(rel, text)
         assert any(f.startswith(rule + ":") for f in found), (rule, found)
     # A build number wrapped onto the next comment line is the same sentence,
     # and the finding names the line it starts on.
-    wrapped = "x = 1\n#: every preset bundled with Bambu\n#: Studio 02.06.00.51 (read off this machine's app bundle)\n"
+    wrapped = "x = 1\n#: every preset bundled with Prusa\n#: Slicer 9.9.9 (read off this machine's app bundle)\n"
     leaks, _ = _GATE.scan_file("kiln/src/kiln/x.py", wrapped.encode())
     assert [(line, text.split(":")[0]) for _p, line, _r, text in leaks] == [(2, "a slicer build named as a source")]
     # So is a markdown paragraph.
-    assert _pins_in("kiln/tests/data/README.md", "- the end block BambuStudio\n  02.08.02.61 wrote, from the slice the start came from.\n")
+    assert _pins_in("kiln/tests/data/README.md", "- the end block PrusaSlicer\n  9.9.9 wrote, from the slice the start came from.\n")
 
 
 def test_a_sequence_may_say_whose_it_is_and_a_version_may_bound_a_claim() -> None:
@@ -311,7 +311,7 @@ def test_a_sequence_may_say_whose_it_is_and_a_version_may_bound_a_claim() -> Non
         ),
         "kiln/src/kiln/slicer.py": "# OrcaSlicer 2.3.2 and BambuStudio 02.06.00.51: both die in\n# the same place.\nx = 1\n",
         "kiln/src/kiln/x.py": "# Measured 2026-09-19 on an A1: PrusaSlicer 2.9.4 sliced a cube.\nx = 1\n",
-        "kiln/tests/test_x.py": 'BUNDLE = "/Applications/BambuStudio.app/Contents/Resources/profiles/BBL/machine"\n',
+        "kiln/tests/test_x.py": 'BUNDLE = "/Applications/Acme.app/Contents/Resources/profiles/Acme/machine"\n',
         "docs/printers.md": "Kiln builds each print with the maker's own start and end sequences.\n",
     }
     for rel, text in clean.items():
