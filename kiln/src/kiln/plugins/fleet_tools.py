@@ -16,6 +16,60 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _survey_plates(
+    file_path: str, names: list[str], adapters: dict[str, Any] | None,
+) -> tuple[dict[str, dict[str, Any]] | None, dict[str, Any] | None]:
+    """``(plates, None)`` -- one plate block per named printer from kiln-pro's
+    fleet survey -- or ``(None, error_dict)``.
+
+    The survey is kiln-pro's (``kiln.placement_fleet.for_fleet``): the
+    single-machine placement verdict asked once per machine, each plate read
+    as Kiln reads its own candidates.  This door reads the job's envelope
+    from the file (public Kiln's own reader) and hands it over; the tier
+    gate is the survey's, one gate, and its refusal is relayed as it is.
+    """
+    import kiln.server as _srv
+    from kiln import _pro_placement_bridge as bridge
+
+    try:
+        from kiln.placement_fleet import for_fleet
+    except ImportError:
+        return None, _srv._error_dict(
+            "Fleet plate placement requires kiln-pro, which is not installed on this server "
+            "or is older than this Kiln release.",
+            code="ROUTING_UNAVAILABLE",
+        )
+    survey = for_fleet(bridge.job_envelope(file_path), names, adapters=adapters)
+    if not isinstance(survey, dict) or not survey.get("ok"):
+        gate = survey.get("gate") if isinstance(survey, dict) else None
+        if isinstance(gate, dict):
+            return None, dict(gate)
+        return None, _srv._error_dict("Kiln could not survey the fleet's plates.", code="ROUTING_ERROR")
+    plates = survey.get("plates")
+    return (dict(plates) if isinstance(plates, dict) else {}), None
+
+
+def _no_room_refusal(plates: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    """The refusal when no surveyed plate has room, with each machine's own
+    sentences; ``None`` when at least one does."""
+    import kiln.server as _srv
+
+    if not plates or any(isinstance(b, dict) and b.get("has_room") for b in plates.values()):
+        return None
+    per_machine = {
+        name: list(block.get("refusals") or []) or ["no room for this part on the plate as it stands"]
+        for name, block in plates.items() if isinstance(block, dict)
+    }
+    rows = "; ".join(f"{name}: {' '.join(why)}" for name, why in per_machine.items())
+    resp = _srv._error_dict(
+        f"No printer in the fleet can take this print as the plates stand -- {rows}. Nothing was queued.",
+        code="NO_ROOM",
+    )
+    resp["per_machine"] = per_machine
+    resp["plates"] = {name: dict(block) for name, block in plates.items() if isinstance(block, dict)}
+    return resp
+
+
 class _FleetToolsPlugin:
     """Fleet analytics, site grouping, routing, and orchestration tools.
 
@@ -233,7 +287,14 @@ class _FleetToolsPlugin:
 
             Scores each registered printer on material match, availability,
             queue depth, and historical success rate, then recommends the
-            best assignment with scored alternatives.
+            best assignment with scored alternatives.  Every candidate also
+            carries a ``plate`` block -- whether the plate as it stands has
+            room for this part and how a print there would start.  A machine
+            with no room, or a plate Kiln has no record of, is never
+            recommended; when none has room the answer is a refusal
+            (``NO_ROOM``) with each machine's own sentence.  A print that
+            would start the quiet way beside a part still on the plate is
+            scored lower unless ``priority`` is high.
 
             Args:
                 file_path: Path to the file to print.
@@ -270,6 +331,16 @@ class _FleetToolsPlugin:
                 return _srv._error_dict(
                     "Fleet routing requires kiln-pro, which is not installed "
                     "on this server.",
+                    code="ROUTING_UNAVAILABLE",
+                )
+            # The same rule for the plate survey: kiln-pro's, or an honest
+            # refusal.  Never a routing answer that ignored the plates.
+            try:
+                import kiln.placement_fleet  # noqa: F401
+            except ImportError:
+                return _srv._error_dict(
+                    "Fleet routing requires kiln-pro, which is not installed "
+                    "on this server or is older than this Kiln release.",
                     code="ROUTING_UNAVAILABLE",
                 )
 
@@ -310,6 +381,16 @@ class _FleetToolsPlugin:
                         code="NO_ELIGIBLE_PRINTERS",
                     )
 
+                # Each candidate's plate, as it stands: the fleet survey is
+                # kiln-pro's, and the router reads the block it writes.
+                plates, plate_err = _survey_plates(
+                    file_path, [str(c["printer_id"]) for c in candidates], adapters,
+                )
+                if plate_err is not None:
+                    return plate_err
+                for candidate in candidates:
+                    candidate["plate"] = (plates or {}).get(str(candidate["printer_id"]))
+
                 # quality picks how much the score favours reliability;
                 # priority picks how much it favours getting started fast.
                 # Both map onto the router's 1-5 weight knobs, defaulting
@@ -327,7 +408,17 @@ class _FleetToolsPlugin:
                 return {"success": True, "routing": result.to_dict()}
             except RoutingValidationError as exc:
                 # A recommendation the engine cannot back with scores is
-                # not downgraded to a guess — the refusal carries why.
+                # not downgraded to a guess — the refusal carries why.  No
+                # room anywhere is its own refusal, with each machine's
+                # sentences beside it.
+                per_machine = getattr(exc, "per_machine", None)
+                if isinstance(per_machine, dict):
+                    resp = _srv._error_dict(f"{exc}. Nothing was routed.", code="NO_ROOM")
+                    resp["per_machine"] = {k: list(v) for k, v in per_machine.items()}
+                    resp["plates"] = {
+                        str(c["printer_id"]): c["plate"] for c in candidates if isinstance(c.get("plate"), dict)
+                    }
+                    return resp
                 return _srv._error_dict(str(exc), code="ROUTING_ERROR")
             except Exception as exc:
                 _logger.exception("Error in route_print_job")
@@ -352,6 +443,11 @@ class _FleetToolsPlugin:
 
             If no printer is specified, the orchestrator auto-assigns to the best
             available printer. Tracks the job through completion.
+
+            Before anything is queued, every candidate plate is surveyed as it
+            stands (the named printer's, or the whole fleet's): a job no plate
+            has room for is refused here, with each machine's own sentence
+            (``NO_ROOM``), never queued to be refused at the printer later.
 
             Args:
                 file_path: Path to the file to print.
@@ -381,6 +477,27 @@ class _FleetToolsPlugin:
                 "fleet_submit_job", file_path, preview_token, printer_name=printer_name,
             ):
                 return block
+
+            # The plates, before the sign-off is spent: a refusal here leaves
+            # the person's yes standing for the retry that clears a plate.
+            try:
+                registry = _srv._get_registry()
+                names = [printer_name] if printer_name else list(registry.list_names())
+                adapters: dict[str, Any] = {}
+                for name in names:
+                    try:
+                        adapters[name] = registry.get(name)
+                    except Exception:  # noqa: BLE001 -- the survey says "not registered" in its own row
+                        continue
+            except Exception:  # noqa: BLE001
+                names, adapters = ([printer_name] if printer_name else []), {}
+            if names:
+                plates, plate_err = _survey_plates(file_path, names, adapters)
+                if plate_err is not None:
+                    return plate_err
+                if refusal := _no_room_refusal(plates or {}):
+                    return refusal
+
             from kiln import print_signoff
 
             signoff = print_signoff.record_for(print_signoff.current())
@@ -412,6 +529,7 @@ class _FleetToolsPlugin:
                     "success": True,
                     "job": job.to_dict(),
                     "submission": "replayed" if replayed else "queued",
+                    "plates": plates if names else {},
                     **(
                         {
                             "message": (
