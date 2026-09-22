@@ -291,6 +291,11 @@ class Bambu3MFResult:
     # the caller asked for.  They differ whenever a template is missing, which
     # today is every model but the A1.
     start_gcode_model: str = "bambu_a1"
+    #: The nozzle size that start sequence was captured for, and the size the
+    #: print was sliced for.  They differ when this machine has no capture at
+    #: the fitted size and its own capture at another size was used.
+    start_gcode_nozzle: str = "0.4"
+    requested_nozzle: str | None = None
     #: The model whose END sequence this file carries.  Separate from the
     #: start: a model can have one capture and not the other, and the end
     #: block is the one that parks the head over a finished plate.
@@ -320,6 +325,15 @@ class Bambu3MFResult:
         """
         requested = _normalize_model(self.requested_model)
         if not requested or requested == self.start_gcode_model:
+            if self.requested_nozzle and self.requested_nozzle != self.start_gcode_nozzle:
+                return (
+                    f"This file's warm-up is {self.start_gcode_model}'s own, captured for a "
+                    f"{self.start_gcode_nozzle} mm nozzle, not the {self.requested_nozzle} mm one this "
+                    f"print is sliced for: Kiln has no {self.requested_nozzle} mm capture of it. The "
+                    f"head goes only where this machine's own warm-up goes, but the purge and the "
+                    f"flow calibration are tuned for {self.start_gcode_nozzle} mm. Watch the purge "
+                    f"line and the first layer."
+                )
             return None
         return (
             f"This file carries the {self.start_gcode_model} startup sequence, not "
@@ -360,6 +374,7 @@ class Bambu3MFResult:
             "md5": self.md5,
             "est_print_time_sec": self.est_print_time_sec,
             "start_gcode_model": self.start_gcode_model,
+            "start_gcode_nozzle": self.start_gcode_nozzle,
             "end_gcode_model": self.end_gcode_model,
         }
         if self.start_gcode_warning:
@@ -422,50 +437,77 @@ def _nozzle_key(nozzle_diameter: float | str | None) -> str:
         return ""
 
 
-def _select_start_gcode(
+def _start_gcode_choice(
     printer_model: str | None,
     nozzle_diameter: float | str | None = 0.4,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """Pick the start gcode for a DECLARED printer model and nozzle.
 
-    Returns ``(gcode_text, source_model)``.  ``source_model`` is the model the
-    sequence actually came from, which is what the caller should believe the
-    file is flavoured for --- it is not always the model asked for.
+    Returns ``(gcode_text, source_model, source_nozzle)`` -- the machine and
+    the nozzle size the sequence was actually captured for, which is what the
+    caller should believe the file is flavoured for.
 
-    Keyed on the nozzle as well as the model, because the vendor's own start
-    templates branch on ``nozzle_diameter`` and differ per size.  A nozzle with
-    no capture of its own falls back rather than borrowing another size's
-    sequence, and says so.
+    Three cases, in order:
 
-    The fallback is the A1's, and it is a real substitution rather than a
-    near-miss: the A1 and A1 mini are bed-slingers whose startup drives X
-    negative with soft endstops disabled, while every enclosed model here makes
-    no negative-X move at all.  So it is logged once per model per process, and
-    :attr:`Bambu3MFResult.start_gcode_warning` carries it to the caller.
+    1. **This machine, this nozzle** -- a capture of its own.
+    2. **This machine, another nozzle** -- the machine's OWN capture at the
+       size it was taken.  The vendor's start templates differ by nozzle size,
+       but only in how much they extrude: across Bambu's own 0.2/0.4/0.6/0.8
+       variants of the X1C and P1S the head visits the same box (X 18-240,
+       Y -3 to 265) and treats the soft endstops the same, and every waypoint
+       one size adds lies inside the box another size already visits.  So a
+       borrowed size can mis-tune the purge and the flow calibration; it
+       cannot send the head anywhere this machine's own warm-up does not go.
+       The A1's sequence -- the fallback this case used to take -- disables
+       the soft endstops and drives X to -48.2, which on an enclosed CoreXY
+       is the frame.  The substitution is logged once and carried to the
+       caller by :attr:`Bambu3MFResult.start_gcode_warning`.
+    3. **A machine with no capture at all** -- the A1's, as it always has
+       been.  It is a real substitution rather than a near-miss (the A1 and
+       A1 mini are bed-slingers whose startup drives X negative with the soft
+       endstops disabled, while every enclosed model here makes no
+       negative-X move at all), so it is logged once per model per process
+       and :attr:`Bambu3MFResult.start_gcode_warning` carries it too.
     """
     model = _normalize_model(printer_model)
     nozzle = _nozzle_key(nozzle_diameter)
     filename = _MODEL_START_GCODE_FILES.get((model, nozzle))
     if filename is not None:
-        return _load_model_template(filename), model
+        return _load_model_template(filename), model, nozzle
+
+    own = sorted(n for m, n in _MODEL_START_GCODE_FILES if m == model)
+    if own:
+        captured = "0.4" if "0.4" in own else own[0]
+        if ("start", model, nozzle) not in _fallback_warned:
+            _fallback_warned.add(("start", model, nozzle))
+            logger.warning(
+                "No start gcode for %s at a %s nozzle — using %s's own %s sequence.  The head "
+                "goes only where this machine's own warm-up goes; the purge and the flow "
+                "calibration are tuned for a %s nozzle.",
+                model, nozzle or "unknown", model, captured, captured,
+            )
+        return _load_model_template(_MODEL_START_GCODE_FILES[(model, captured)]), model, captured
 
     if model and ("start", model, nozzle) not in _fallback_warned:
         _fallback_warned.add(("start", model, nozzle))
-        known = sorted({n for m, n in _MODEL_START_GCODE_FILES if m == model})
-        detail = (
-            f"only the {', '.join(known)} nozzle is captured for {model}"
-            if known
-            else f"no start sequence is captured for {model}"
-        )
         logger.warning(
-            "No start gcode for %s at a %s nozzle (%s) — using the Bambu A1 "
-            "sequence, which is flavoured for the A1: its bed coordinates, purge "
-            "and calibration moves, including moves to negative X with the soft "
-            "endstops disabled.  The print will be wrapped and can start, but the "
-            "startup sequence is not this model's own.",
-            model, nozzle or "unknown", detail,
+            "No start gcode for %s at a %s nozzle (no start sequence is captured for %s) — "
+            "using the Bambu A1 sequence, which is flavoured for the A1: its bed coordinates, "
+            "purge and calibration moves, including moves to negative X with the soft "
+            "endstops disabled.  The print will be wrapped and can start, but the startup "
+            "sequence is not this model's own.",
+            model, nozzle or "unknown", model,
         )
-    return _load_a1_start_gcode(), "bambu_a1"
+    return _load_a1_start_gcode(), "bambu_a1", "0.4"
+
+
+def _select_start_gcode(
+    printer_model: str | None,
+    nozzle_diameter: float | str | None = 0.4,
+) -> tuple[str, str]:
+    """``(gcode_text, source_model)`` from :func:`_start_gcode_choice`."""
+    text, source_model, _source_nozzle = _start_gcode_choice(printer_model, nozzle_diameter)
+    return text, source_model
 
 
 def flush_station_for(printer_model: str | None) -> tuple[float | None, float | None] | None:
@@ -2620,7 +2662,7 @@ def build_bambu_3mf(
     # strings are then checked for surviving placeholders: this text is
     # copied into the 3MF and sent to the printer verbatim, so a template we
     # could not fully resolve must stop the build rather than reach a machine.
-    start_template, start_source = _select_start_gcode(
+    start_template, start_source, start_nozzle = _start_gcode_choice(
         printer_model, settings.nozzle_diameter,
     )
     start_gcode = _resolve_start_gcode(
@@ -2897,6 +2939,8 @@ def build_bambu_3mf(
         md5=file_md5,
         est_print_time_sec=est_time_sec_with_startup,
         start_gcode_model=start_source,
+        start_gcode_nozzle=start_nozzle,
+        requested_nozzle=_nozzle_key(settings.nozzle_diameter) or None,
         end_gcode_model=end_source,
         requested_model=printer_model,
         filament_type=str(settings.filament_type),
