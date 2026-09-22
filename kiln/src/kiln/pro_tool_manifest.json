@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-22T08:36:48.947380+00:00",
+  "generated": "2026-09-22T21:21:52.446142+00:00",
   "tool_count": 426,
   "categories": {
     "product_generators": {
@@ -5612,23 +5612,47 @@
     },
     {
       "name": "detect_merge_conflicts",
-      "description": "Three-way diff of two branches: identify conflicts before merging.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Three-way diff of two branches: what merges, and what must be decided.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
       "parameters": {
         "properties": {
           "ancestor_version_id": {
-            "title": "Ancestor Version Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ancestor Version Id"
           },
           "source_version_id": {
-            "title": "Source Version Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Version Id"
           },
           "target_version_id": {
-            "title": "Target Version Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Version Id"
           },
           "source_lines": {
             "anyOf": [
@@ -5655,13 +5679,45 @@
             ],
             "default": null,
             "title": "Target Lines"
+          },
+          "source_branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Branch Id"
+          },
+          "target_branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Branch Id"
+          },
+          "resolutions": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolutions"
           }
         },
-        "required": [
-          "ancestor_version_id",
-          "source_version_id",
-          "target_version_id"
-        ],
         "title": "detect_merge_conflictsArguments",
         "type": "object"
       },
@@ -6871,8 +6927,16 @@
             "type": "string"
           },
           "merged_version_id": {
-            "title": "Merged Version Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merged Version Id"
           },
           "ancestor_version_id": {
             "anyOf": [
@@ -6931,8 +6995,7 @@
         },
         "required": [
           "source_branch_id",
-          "target_branch_id",
-          "merged_version_id"
+          "target_branch_id"
         ],
         "title": "merge_design_branchesArguments",
         "type": "object"
