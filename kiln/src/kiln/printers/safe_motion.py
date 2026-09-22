@@ -1214,9 +1214,20 @@ def build_quiet_start_preamble(
     return lines + prime
 
 
-def _chute_move(purge_at_mm: tuple[float | None, float | None] | None) -> str | None:
+def chute_move(
+    purge_at_mm: tuple[float | None, float | None] | None,
+    *,
+    feedrate: int = _TRAVEL_FEEDRATE,
+) -> str | None:
     """The travel to the chute as one absolute move, or ``None`` without a
-    chute; an axis given as ``None`` is kept where the home left it."""
+    chute; an axis given as ``None`` is kept where the head already is.
+
+    Every door that sends the head to a printer's waste chute spells the
+    move here -- the quiet start before it heats, and the AMS block before
+    it flushes -- so a chute that is off the plate's left edge on one
+    machine and behind the plate on another is written the same way, from
+    the same figure, once.
+    """
     if not purge_at_mm:
         return None
     x, y = purge_at_mm
@@ -1227,7 +1238,11 @@ def _chute_move(purge_at_mm: tuple[float | None, float | None] | None) -> str | 
         words.append(f"Y{float(y):.2f}")
     if not words:
         return None
-    return "G1 " + " ".join(words) + f" F{_TRAVEL_FEEDRATE}"
+    return "G1 " + " ".join(words) + f" F{feedrate}"
+
+
+#: The old private spelling, kept so nothing that imported it breaks.
+_chute_move = chute_move
 
 
 def build_safe_abort_sequence(

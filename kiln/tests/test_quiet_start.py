@@ -393,7 +393,7 @@ class TestTheWrap:
         j = lines.index("M621 S1A")
         assert lines[j + 1] == "G1 X200.000 Y50.000 F6000", "back over the part at the floor"
         assert lines[j + 2] == "G1 Z0.40 F600", "then down to the layer it left"
-        assert "G1 X-48.2 F3000" in lines[i:j], "the vendor's own cutter travel, in the vendor's order"
+        assert "G1 X-48.20 F3000" in lines[i:j], "the A1's own chute, spelled by the one shared helper"
 
     def test_the_end_block_never_dips_below_the_floor(self, tmp_path):
         m = _machine()
@@ -449,12 +449,12 @@ class TestTheWrap:
 
     def test_the_tool_change_wrapper_tracks_the_layer_it_left(self):
         body = ";LAYER_CHANGE\n;Z:0.6\nG1 Z0.8 F24000\nG1 X10 Y20\nG1 Z0.6\nG1 X30 Y20 E1\nT1\nG1 X10 Y20 E1\n"
-        out = _wrap_tool_changes(body, hotend_temp=220, filament_type="PLA", lift_floor_mm=2.0).split("\n")
+        out = _wrap_tool_changes(body, printer_model="bambu_a1", hotend_temp=220, filament_type="PLA", lift_floor_mm=2.0).split("\n")
         i = out.index("M620 S1A   ; AMS switch to filament 1")
         assert out[i - 1].startswith("G1 Z3.60 F600"), "never less than the vendor's own 3 mm above the layer"
         j = next(k for k, line in enumerate(out) if line.startswith("M621 S1A"))
         assert out[j + 1].startswith("G1 X30.000 Y20.000 F6000") and out[j + 2].startswith("G1 Z0.60 F600")
-        assert not any("Kiln:" in line for line in _wrap_tool_changes(body, hotend_temp=220, filament_type="PLA").split("\n"))
+        assert not any("Kiln:" in line for line in _wrap_tool_changes(body, printer_model="bambu_a1", hotend_temp=220, filament_type="PLA").split("\n"))
 
     def test_a_plan_missing_a_number_or_contradicting_itself_is_refused_before_a_line_is_written(self, tmp_path):
         m = _machine()
@@ -903,3 +903,101 @@ class TestWhereItFitsIsThePaidHalf:
         message = err["error"]["message"]
         assert "3 spots beside it would fit" in message and "kiln3d.com/pricing" in message
         assert "[" not in message.split("would fit")[1], "no coordinates once the places are withheld"
+
+
+# ---------------------------------------------------------------------------
+# The AMS block goes to THIS machine's chute, or Kiln does not write the file
+# ---------------------------------------------------------------------------
+
+
+_TWO_COLOUR_BODY = ";LAYER_CHANGE\n;Z:0.4\nG1 Z0.4 F24000\nG1 X30 Y20 E1\nT1\nG1 X10 Y20 E1\n"
+
+
+class TestTheAmsBlockGoesToThisMachinesChute:
+    def test_the_a1s_block_goes_to_the_a1s_own_chute(self):
+        from kiln.printers.bambu_3mf import flush_station_for
+
+        assert flush_station_for("bambu_a1") == (-48.2, None), "the position that was run and watched"
+        out = _wrap_tool_changes(_TWO_COLOUR_BODY, printer_model="bambu_a1").split("\n")
+        i = out.index("M620 S1A   ; AMS switch to filament 1")
+        j = next(k for k, line in enumerate(out) if line.startswith("M621 S1A"))
+        travels = [line.strip() for line in out[i:j] if line.strip().startswith("G1 X")]
+        assert travels == ["G1 X-48.20 F3000"], "one travel, to the A1's chute, before the flush"
+        assert out.index("    M620.1 E F299.339 T250") > i + travels.index("G1 X-48.20 F3000")
+
+    @pytest.mark.parametrize(
+        "printer_model",
+        ["bambu_x1c", "bambu_x1e", "bambu_p1s", "bambu_p1p", "bambu_p2s", "bambu_h2s", "bambu_h2d", "bambu_h2d_pro"],
+    )
+    def test_a_model_with_no_chute_on_record_is_refused_never_sent_to_the_a1s(self, printer_model):
+        """X-48.2 is 48 mm past the leftmost point any of these machines'
+        own sequences ever command.  Kiln will not write it."""
+        with pytest.raises(ValueError) as caught:
+            _wrap_tool_changes(_TWO_COLOUR_BODY, printer_model=printer_model)
+        said = str(caught.value)
+        assert printer_model in said and "no waste chute on record" in said
+        assert "bambu_a1" in said, "the refusal names what it CAN do"
+        assert "-48.2" not in said, "a refusal never leaks another machine's position as a suggestion"
+
+    def test_an_undeclared_printer_is_refused_too(self):
+        with pytest.raises(ValueError, match="undeclared printer"):
+            _wrap_tool_changes(_TWO_COLOUR_BODY, printer_model=None)
+
+    def test_a_single_colour_print_is_untouched_on_every_model(self):
+        """The refusal is about the AMS block, not about the machine: a file
+        that never changes tool has no chute to go to and builds fine."""
+        body = ";LAYER_CHANGE\n;Z:0.4\nG1 X30 Y20 E1\n"
+        for printer_model in (None, "bambu_x1c", "bambu_h2d"):
+            assert _wrap_tool_changes(body, printer_model=printer_model) == body
+
+    def test_the_whole_file_refuses_rather_than_carrying_the_wrong_chute(self, tmp_path):
+        from kiln.printers.bambu_3mf import BambuPrintSettings, build_bambu_3mf
+
+        out = str(tmp_path / "two.gcode.3mf")
+        with pytest.raises(ValueError, match="no waste chute on record"):
+            build_bambu_3mf(
+                _body(layers=4, change_at=1), out,
+                settings=BambuPrintSettings(num_filaments=2, filament_colors=["#FFFFFF", "#FF0000"]),
+                printer_model="bambu_x1c",
+            )
+        assert not Path(out).exists(), "no half-written file is left behind"
+
+    def test_one_helper_spells_the_chute_for_every_door(self):
+        """The quiet start and the AMS block send the head to the same place
+        the same way — a chute off the left edge on one machine and behind
+        the plate on another is one figure, written once."""
+        from kiln.printers.safe_motion import chute_move
+
+        assert chute_move((-48.2, None), feedrate=3000) == "G1 X-48.20 F3000"
+        assert chute_move((60.0, 265.0)) == "G1 X60.00 Y265.00 F6000"
+        assert chute_move(None) is None and chute_move((None, None)) is None
+
+
+class TestTheEndSequenceSaysWhoseItIs:
+    def test_a_model_with_no_end_capture_carries_the_a1s_and_says_so(self, tmp_path):
+        """The H2D has no end capture, so it gets the A1's — a deliberate,
+        long-standing fallback.  What was missing is that the start said so
+        and the end did not: the end block is the one that wipes, parks and
+        rolls the bed with a finished part on it."""
+        from kiln.printers.bambu_3mf import _MODEL_END_GCODE_FILES, BambuPrintSettings, build_bambu_3mf
+
+        assert "bambu_h2d" not in _MODEL_END_GCODE_FILES
+        result = build_bambu_3mf(
+            _body(), str(tmp_path / "h2d.gcode.3mf"),
+            settings=BambuPrintSettings(), printer_model="bambu_h2d",
+        )
+        assert result.end_gcode_model == "bambu_a1" and result.requested_model == "bambu_h2d"
+        said = result.end_gcode_warning
+        assert said and "bambu_a1 end sequence" in said and "bambu_h2d" in said
+        assert result.to_dict()["end_gcode_model"] == "bambu_a1"
+        assert "end_gcode_warning" in result.to_dict()
+
+    def test_a_model_with_its_own_end_capture_says_nothing(self, tmp_path):
+        from kiln.printers.bambu_3mf import BambuPrintSettings, build_bambu_3mf
+
+        result = build_bambu_3mf(
+            _body(), str(tmp_path / "x1c.gcode.3mf"),
+            settings=BambuPrintSettings(), printer_model="bambu_x1c",
+        )
+        assert result.end_gcode_model == "bambu_x1c" and result.end_gcode_warning is None
+        assert "end_gcode_warning" not in result.to_dict()

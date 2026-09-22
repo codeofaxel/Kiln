@@ -160,6 +160,35 @@ _MODEL_START_GCODE_FILES: dict[tuple[str, str], str] = {
 }
 
 # End G-code, one file per model we ship a template for.
+# ---------------------------------------------------------------------------
+# Where the AMS block flushes
+# ---------------------------------------------------------------------------
+#
+# Kiln slices with PrusaSlicer, which emits a bare ``T0``/``T1``; the Bambu
+# firmware wants that wrapped in an M620/M621 AMS block, and the block has to
+# take the head somewhere off the plate before it purges 50 mm of filament.
+# That somewhere is a PER-MODEL FACT and it is not the same on two machines:
+# the A1 cuts and drops into a chute off the plate's LEFT edge at X-48.2, the
+# A1 mini's is at X-13.5, and the X1/P1 family has no single point at all --
+# the vendor's own ``change_filament_gcode`` purges across
+# ``M620.1 X[travel_point_1_x] Y[travel_point_1_y]`` placeholders that only
+# BambuStudio can fill.
+#
+# WHY THERE IS ONE ENTRY.  Kiln's block is not the vendor's block.  The A1's
+# vendor block purges on the RIGHT, at X267 Y128, and only then travels to the
+# cutter at X-48.2; Kiln's block purges AT the cutter, which is a
+# simplification that was run on the owner's own A1 and watched.  That makes
+# it a bench fact about one machine, not a rule about Bambu printers -- so it
+# cannot be carried to a sibling by analogy, however similar the frame looks.
+# A model earns a line here when its own flush position has been run and
+# watched, and until then :func:`_wrap_tool_changes` refuses to write the
+# file rather than send a head to another machine's chute.
+_MODEL_FLUSH_STATION: dict[str, tuple[float | None, float | None]] = {
+    # Run on the owner's A1 Combo; ``None`` in Y keeps the head's own row.
+    "bambu_a1": (-48.2, None),
+}
+
+
 _MODEL_END_GCODE_FILES: dict[str, str] = {
     "bambu_a1": "bambu_a1_end_gcode.gcode",
     "bambu_a1_mini": "bambu_a1_mini_end_gcode.gcode",
@@ -262,6 +291,10 @@ class Bambu3MFResult:
     # the caller asked for.  They differ whenever a template is missing, which
     # today is every model but the A1.
     start_gcode_model: str = "bambu_a1"
+    #: The model whose END sequence this file carries.  Separate from the
+    #: start: a model can have one capture and not the other, and the end
+    #: block is the one that parks the head over a finished plate.
+    end_gcode_model: str = "bambu_a1"
     requested_model: str | None = None
     #: A quiet start: the file opens with Kiln's own prologue instead of
     #: the vendor's start, and every Kiln-owned lift in it rises to the floor.
@@ -296,6 +329,28 @@ class Bambu3MFResult:
             f"X negative and disables soft endstops. Watch the first layer."
         )
 
+    @property
+    def end_gcode_warning(self) -> str | None:
+        """Say so when the END sequence is not this machine's own.
+
+        The start's substitution has been carried to the caller since it was
+        found; the end's was logged and nowhere else, which is the same gap
+        one door along.  The end block is the one that runs with a finished
+        part on the plate -- it wipes, parks and travels the bed's full
+        length -- so a machine printing another model's end moves is a fact
+        the person pressing print is entitled to.
+        """
+        requested = _normalize_model(self.requested_model)
+        if not requested or requested == self.end_gcode_model:
+            return None
+        return (
+            f"This file carries the {self.end_gcode_model} end sequence, not "
+            f"{requested}'s: Kiln ships no validated end G-code for {requested}. "
+            f"The print will finish, but the wipe, park and presenting moves are "
+            f"the {self.end_gcode_model}'s and are aimed at its plate, not this one's. "
+            f"Watch the head after the last layer."
+        )
+
     def to_dict(self) -> dict[str, Any]:
         d = {
             "output_path": self.output_path,
@@ -305,9 +360,12 @@ class Bambu3MFResult:
             "md5": self.md5,
             "est_print_time_sec": self.est_print_time_sec,
             "start_gcode_model": self.start_gcode_model,
+            "end_gcode_model": self.end_gcode_model,
         }
         if self.start_gcode_warning:
             d["start_gcode_warning"] = self.start_gcode_warning
+        if self.end_gcode_warning:
+            d["end_gcode_warning"] = self.end_gcode_warning
         return d
 
 
@@ -408,6 +466,13 @@ def _select_start_gcode(
             model, nozzle or "unknown", detail,
         )
     return _load_a1_start_gcode(), "bambu_a1"
+
+
+def flush_station_for(printer_model: str | None) -> tuple[float | None, float | None] | None:
+    """Where this model's AMS block takes the head to flush, or ``None`` when
+    no position for it has been run and watched.  ``None`` is a refusal the
+    caller must act on, never a cue to reach for a sibling's figure."""
+    return _MODEL_FLUSH_STATION.get(_normalize_model(printer_model))
 
 
 def _select_end_gcode(printer_model: str | None) -> tuple[str, str]:
@@ -1475,6 +1540,7 @@ def _postprocess_prusa_body(
 def _wrap_tool_changes(
     gcode: str,
     *,
+    printer_model: str | None = None,
     hotend_temp: int = 220,
     filament_type: str = "PLA",
     lift_floor_mm: float | None = None,
@@ -1489,13 +1555,25 @@ def _wrap_tool_changes(
     Only wraps T0–T15 (real extruder indices).  Leaves T255 (retract)
     and T1000 (virtual tool) untouched.
 
+    The block takes the head to THIS MODEL'S chute before it flushes, from
+    :data:`_MODEL_FLUSH_STATION`.  A model with no chute on record raises:
+    the position is what keeps 50 mm of purged filament off the plate, and
+    one machine's chute is another machine's frame.
+
     With a *lift_floor_mm* (other parts on the plate) the block is Kiln's
-    lifted one: before the head goes left to the cutter it rises to the
-    floor -- never less than 3 mm above the layer, the vendor's own lift
-    -- and after the flush it travels back to where it left from at that
-    height and only then descends to the layer.  The plate is crossed
-    above everything on it, and the descent is over the part.
+    lifted one: before the head goes to the chute it rises to the floor --
+    never less than 3 mm above the layer, the vendor's own lift -- and
+    after the flush it travels back to where it left from at that height
+    and only then descends to the layer.  The plate is crossed above
+    everything on it, and the descent is over the part.
+
+    :raises ValueError: if *gcode* changes tool on a model whose chute is
+        not on record.
     """
+    from kiln.printers.safe_motion import chute_move
+
+    station = flush_station_for(printer_model)
+    to_chute = chute_move(station, feedrate=3000) if station else None
     lines = gcode.split("\n")
     result: list[str] = []
     # Track the initial T0 from start gcode — don't double-wrap it
@@ -1549,8 +1627,17 @@ def _wrap_tool_changes(
                 result.append(f"    M109 S{hotend_temp}")
                 result.append(f"    M104 S{flush_temp}")
                 result.append("    M400")
+                if to_chute is None:
+                    raise ValueError(
+                        f"this print changes filament and Kiln has no waste chute on record for "
+                        f"{_normalize_model(printer_model) or 'an undeclared printer'}, so it will not write "
+                        "the file: the AMS block has to purge somewhere off the plate, and sending the head "
+                        "to another model's chute is how a head meets a frame. Slice this one in a single "
+                        "colour, or print it on a model whose chute has been run and watched "
+                        f"({', '.join(sorted(_MODEL_FLUSH_STATION))}).",
+                    )
                 result.append(f"    T{n}")
-                result.append("    G1 X-48.2 F3000")
+                result.append(f"    {to_chute}")
                 result.append("    M400")
                 result.append(f"    M620.1 E F299.339 T{flush_temp}")
                 result.append(f"    M109 S{flush_temp}")
@@ -2583,6 +2670,7 @@ def build_bambu_3mf(
     if settings.num_filaments > 1:
         processed_body = _wrap_tool_changes(
             processed_body,
+            printer_model=printer_model,
             hotend_temp=settings.hotend_temp,
             filament_type=settings.filament_type,
             lift_floor_mm=lift_floor_mm,
@@ -2809,6 +2897,7 @@ def build_bambu_3mf(
         md5=file_md5,
         est_print_time_sec=est_time_sec_with_startup,
         start_gcode_model=start_source,
+        end_gcode_model=end_source,
         requested_model=printer_model,
         filament_type=str(settings.filament_type),
         hotend_temp=int(settings.hotend_temp),
