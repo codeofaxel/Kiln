@@ -286,30 +286,15 @@ def _serial_of(adapter: Any) -> str:
 def occupant_gcode_for(job_file: str | None) -> dict[str, str] | None:
     """The local G-code of what is on the plate, when Kiln has it.
 
-    The slice ledger (:func:`kiln.monitor_twin.sliced_entry_for`) joins the
-    printer-side name to the G-code Kiln sliced; failing that, the twin's
-    retained copy of the running job answers when it is the same file.
-    ``None`` when Kiln did not slice it -- the engine then uses the record's
-    footprint box.  Never raises.
+    Read through :func:`kiln.monitor_twin.printed_files_for`, the same join
+    the stage draws the print from: the slice ledger, else the copy retained
+    when that file started printing.  ``None`` when Kiln has neither -- the
+    engine then uses the record's footprint box.  Never raises.
     """
-    base = os.path.basename(str(job_file or ""))
-    if not base:
-        return None
-    try:
-        from kiln.monitor_twin import active_twin, sliced_entry_for
+    from kiln.monitor_twin import printed_files_for
 
-        entry = sliced_entry_for(base)
-        output = entry.get("output") if isinstance(entry, dict) else None
-        if isinstance(output, str) and os.path.isfile(output):
-            return {"path": output}
-        twin = active_twin()
-        if isinstance(twin, dict) and os.path.basename(str(twin.get("file_name") or "")) == base:
-            retained = twin.get("gcode")
-            if isinstance(retained, str) and os.path.isfile(retained):
-                return {"path": retained}
-    except Exception:  # noqa: BLE001 -- a ledger miss is "unknown", never a fault
-        logger.debug("occupant gcode lookup failed", exc_info=True)
-    return None
+    files = printed_files_for(job_file)
+    return {"path": files["gcode"]} if files else None
 
 
 def request_for(

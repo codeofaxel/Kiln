@@ -449,3 +449,154 @@ class TestSidecarOnTheHostedDoor:
         sg.attach_block_to_payload(payload, {"kind": "something.else"})
         sg.attach_block_to_payload(payload, None)
         assert "slicer" not in payload
+
+
+# ===========================================================================
+# A print already on the plate, drawn from its own files
+# ===========================================================================
+
+
+@pytest.fixture()
+def fresh_occupants(monkeypatch):
+    monkeypatch.setattr(stage_plate, "_OCCUPANT_CACHE", {})
+
+
+def _job(name):
+    import types
+
+    return types.SimpleNamespace(file=name)
+
+
+def _block(rect=(95.0, 95.0, 175.0, 135.0), name="part"):
+    return {"kind": "kiln.plate_occupancy.v1", "bed_mm": [256.0, 256.0],
+            "occupied": [{"name": name, "rect_mm": list(rect), "top_mm": 10.0}]}
+
+
+class TestAPrintOnThePlate:
+    """What already stands on the plate is drawn from the model it was
+    printed from, set down where its G-code printed it -- never from the
+    height grid the placement verdict judges by, which reads as blocks.
+    Only its slicer additions ride the extras; the model is the plate."""
+
+    def test_the_print_stands_where_its_gcode_printed_it(self, tmp_path, twin_dir, fresh_occupants):
+        mesh = _box(tmp_path / "part.stl")                    # 0..40 x 0..30 x 0..10
+        gcode = _gcode_for_box(tmp_path / "part.gcode")      # printed at bed 100..140 x 100..130
+        monitor_twin.note_sliced(mesh, gcode)
+        [entry] = stage_plate.occupant_prints([_job("part.gcode")], _block())
+        assert entry["footprint_mm"] == pytest.approx([100.0, 100.0, 140.0, 130.0], abs=0.05)
+        assert entry["place_mm"] == pytest.approx([100.0, 100.0, 0.0], abs=0.05)
+        assert entry["top_mm"] == pytest.approx(10.0, abs=0.05)
+        # Viewer frame (x, z, -y): the model's own vertices, not a grid.
+        pts = _positions(entry["mesh"])
+        assert pts[:, 0].min() == pytest.approx(0.0, abs=1e-4) and pts[:, 0].max() == pytest.approx(40.0, abs=1e-4)
+        assert pts[:, 1].max() == pytest.approx(10.0, abs=1e-4)
+        assert len(pts) < 100, "a box is 8 corners, not a heightmap of columns"
+
+    def test_its_slicer_additions_ride_apart_from_it(self, tmp_path, twin_dir, fresh_occupants):
+        mesh = _box(tmp_path / "part.stl")
+        gcode = _gcode_for_box(tmp_path / "part.gcode")
+        monitor_twin.note_sliced(mesh, gcode)
+        [entry] = stage_plate.occupant_prints([_job("part.gcode")], _block())
+        classes = {f["class"] for f in entry["slicer"]["features"]}
+        assert {"skirt", "prime_tower"} <= classes
+        assert entry["slicer"]["frame"] == "viewer"
+        # In the model's own frame, like the model: the tower sits 20 mm
+        # right of the part it was printed beside.
+        tower = next(f for f in entry["slicer"]["features"] if f["class"] == "prime_tower")
+        xs = _segments(tower)[:, [0, 3]]
+        assert xs.min() == pytest.approx(60.0, abs=0.05) and xs.max() == pytest.approx(70.0, abs=0.05)
+
+    def test_it_takes_the_name_the_block_gives_it(self, tmp_path, twin_dir, fresh_occupants):
+        mesh = _box(tmp_path / "part.stl")
+        gcode = _gcode_for_box(tmp_path / "part.gcode")
+        monitor_twin.note_sliced(mesh, gcode)
+        [entry] = stage_plate.occupant_prints([_job("part.gcode")], _block(name="part (2)"))
+        assert entry["name"] == "part (2)"
+
+    def test_a_print_not_where_the_block_says_is_not_drawn(self, tmp_path, twin_dir, fresh_occupants):
+        mesh = _box(tmp_path / "part.stl")
+        gcode = _gcode_for_box(tmp_path / "part.gcode")
+        monitor_twin.note_sliced(mesh, gcode)
+        assert stage_plate.occupant_prints([_job("part.gcode")], _block(rect=(0.0, 0.0, 50.0, 50.0))) == []
+
+    def test_a_model_that_is_not_what_was_printed_is_not_drawn(self, tmp_path, twin_dir, fresh_occupants):
+        mesh = _box(tmp_path / "part.stl", extents=(20.0, 20.0, 10.0))  # the G-code printed 40 x 30
+        gcode = _gcode_for_box(tmp_path / "part.gcode")
+        monitor_twin.note_sliced(mesh, gcode)
+        assert stage_plate.occupant_prints([_job("part.gcode")], _block()) == []
+
+    def test_a_print_kiln_has_no_files_for_is_not_drawn(self, twin_dir, fresh_occupants):
+        assert stage_plate.occupant_prints([_job("somebody_elses.gcode.3mf")], _block()) == []
+
+    def test_the_copy_kept_at_print_start_answers_after_the_ledger_moves_on(
+        self, tmp_path, twin_dir, fresh_occupants
+    ):
+        mesh = _box(tmp_path / "part.stl")
+        gcode = _gcode_for_box(tmp_path / "part.gcode")
+        monitor_twin.note_sliced(mesh, gcode)
+        monitor_twin.note_print_started("bambu", "part.gcode")
+        monitor_twin._write_json(monitor_twin._SLICES_FILE, [])   # the ledger has moved on
+        [entry] = stage_plate.occupant_prints([_job("part.gcode")], _block())
+        assert entry["footprint_mm"] == pytest.approx([100.0, 100.0, 140.0, 130.0], abs=0.05)
+
+    def test_the_hosted_process_never_reads_the_shared_plate(self, monkeypatch):
+        reads = []
+        monkeypatch.setattr("kiln.runtime_env.is_hosted_multitenant", lambda: True)
+        monkeypatch.setattr("kiln.plate_state.read", lambda *a, **k: reads.append(a))
+        block = _block()
+        assert stage_plate.attach_occupant_prints(block) is block
+        assert "prints" not in block and reads == []
+
+    def test_the_local_plate_record_is_what_gets_drawn(self, tmp_path, twin_dir, fresh_occupants, monkeypatch):
+        import types
+
+        mesh = _box(tmp_path / "part.stl")
+        gcode = _gcode_for_box(tmp_path / "part.gcode")
+        monitor_twin.note_sliced(mesh, gcode)
+        state = types.SimpleNamespace(occupied=True, jobs=[_job("part.gcode")])
+        monkeypatch.setattr("kiln.runtime_env.is_hosted_multitenant", lambda: False)
+        monkeypatch.setattr("kiln.server._get_adapter", lambda: object())
+        monkeypatch.setattr("kiln.plate_state.read", lambda adapter: state)
+        block = stage_plate.attach_occupant_prints(_block())
+        assert [p["name"] for p in block["prints"]] == ["part"]
+
+
+class TestOneJoinForAPrintsFiles:
+    """The verdict reads a print's G-code and the stage draws its model
+    through one join, so the two are always of the same print."""
+
+    def test_the_ledger_names_the_gcode_and_the_models(self, tmp_path, twin_dir):
+        mesh = _box(tmp_path / "part.stl")
+        gcode = _gcode_for_box(tmp_path / "part.gcode")
+        wrap = tmp_path / "part.gcode.3mf"
+        wrap.write_bytes(b"PK")
+        monitor_twin.note_sliced(mesh, gcode)
+        monitor_twin.note_wrapped(gcode, str(wrap))
+        files = monitor_twin.printed_files_for("part.gcode.3mf")
+        assert files == {"gcode": os.path.abspath(gcode), "models": [str(wrap), os.path.abspath(mesh)]}
+
+    def test_a_retained_copy_answers_for_its_own_file_even_when_another_printer_started_later(
+        self, tmp_path, twin_dir
+    ):
+        from kiln._pro_placement_bridge import occupant_gcode_for
+
+        mesh = _box(tmp_path / "part.stl")
+        gcode = _gcode_for_box(tmp_path / "part.gcode")
+        monitor_twin.note_sliced(mesh, gcode)
+        monitor_twin.note_print_started("bambu", "part.gcode")
+        other = _box(tmp_path / "other.stl")
+        other_gcode = _gcode_for_box(tmp_path / "other.gcode")
+        monitor_twin.note_sliced(other, other_gcode)
+        monitor_twin.note_print_started("prusa", "other.gcode")
+        monitor_twin._write_json(monitor_twin._SLICES_FILE, [])
+        kept = monitor_twin.active_twin("bambu")
+        files = monitor_twin.printed_files_for("part.gcode")
+        assert files == {"gcode": kept["gcode"], "models": [kept["mesh"]]}
+        assert occupant_gcode_for("part.gcode") == {"path": kept["gcode"]}
+
+    def test_nothing_is_named_for_a_file_kiln_never_sliced(self, twin_dir):
+        from kiln._pro_placement_bridge import occupant_gcode_for
+
+        assert monitor_twin.printed_files_for("unknown.gcode.3mf") is None
+        assert monitor_twin.printed_files_for("") is None
+        assert occupant_gcode_for("unknown.gcode.3mf") is None

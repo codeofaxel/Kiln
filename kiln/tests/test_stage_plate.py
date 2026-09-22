@@ -270,17 +270,39 @@ class TestEveryDoorGoesThroughThePayloadBuilder:
     """
 
     def test_only_local_stage_calls_the_encoder_directly(self):
+        import ast
         import pathlib
 
         src_root = pathlib.Path(__file__).parent.parent / "src" / "kiln"
         allowed = {"mesh_payload.py", "local_stage.py"}
+        # One named exception, scoped to the function: a print already
+        # standing on the plate is drawn INSIDE a stage payload's occupancy
+        # block, set down where its own G-code printed it.  Standing it on
+        # the plate or centring it would move it off the spot it occupies.
+        # It is not a payload, so it takes the raw geometry -- here and
+        # nowhere else in the module.
+        sanctioned = {("stage_plate.py", "_build_occupant")}
         offenders = []
         for path in src_root.rglob("*.py"):
             if path.name in allowed:
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
-            if "mesh_to_viewer_payload(" in text:
-                offenders.append(path.relative_to(src_root).as_posix())
+            if "mesh_to_viewer_payload(" not in text:
+                continue
+            tree = ast.parse(text)
+            parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+                if name != "mesh_to_viewer_payload":
+                    continue
+                up = parents.get(node)
+                while up is not None and not isinstance(up, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    up = parents.get(up)
+                where = up.name if up is not None else "<module>"
+                if (path.name, where) not in sanctioned:
+                    offenders.append(f"{path.relative_to(src_root).as_posix()}:{where}")
 
         assert not offenders, (
             "these modules build a stage payload without the plate or the "

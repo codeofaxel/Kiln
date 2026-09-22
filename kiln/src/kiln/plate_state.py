@@ -386,7 +386,7 @@ class PlateState:
             bed = None
         occupied = [
             {
-                "name": os.path.basename(job.file),
+                "name": pretty_job_name(job.file),
                 "rect_mm": list(job.footprint_mm) if job.footprint_mm else None,
                 "top_mm": job.max_z_mm,
             }

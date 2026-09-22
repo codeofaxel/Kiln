@@ -183,6 +183,7 @@ def attach_stage_plate(
     attach_slicer_geometry(payload, mesh_path=mesh_path, gcode_path=gcode_path)
     block = occupancy if isinstance(occupancy, dict) else occupancy_for_plate(payload["plate"])
     if block:
+        attach_occupant_prints(block)
         payload["occupancy"] = block
     return payload
 
@@ -218,6 +219,176 @@ def occupancy_for_plate(plate: dict[str, Any] | None = None) -> dict[str, Any] |
     except Exception:  # noqa: BLE001 — what the plate holds is furniture to the stage
         logger.debug("plate occupancy not resolved", exc_info=True)
         return None
+
+
+#: A print on the plate is drawn from its own files -- the model it was
+#: printed from, and the slicer's additions from its G-code -- never from
+#: the clearance engine's height grid, which is sized for checking where a
+#: head can go and reads as blocks when drawn.  Capped per print so a busy
+#: plate cannot swell the stage past what a panel will carry; a model over
+#: the cap is thinned by the mesh builder, never dropped silently.
+OCCUPANT_MAX_TRIANGLES = 40_000
+_OCCUPANT_MAX_PRINTS = 4
+_MODEL_SUFFIXES = (".3mf", ".stl", ".obj")
+_OCCUPANT_CACHE: dict[tuple[Any, ...], dict[str, Any] | None] = {}
+_OCCUPANT_CACHE_MAX = 8
+
+
+def attach_occupant_prints(block: dict[str, Any]) -> dict[str, Any]:
+    """Add ``prints`` to an occupancy *block*: each print still on the plate,
+    drawn from the files it was printed from, where Kiln has them.
+
+    Read from this install's own plate record and the files Kiln kept of
+    each print (:func:`occupant_prints`), and only on a person's own machine
+    (the hosted process's record is nobody's).  A
+    print is attached only when its footprint on the bed overlaps an
+    occupant the block already names, so a stage for one machine can never
+    draw another machine's part.  An occupant with no files keeps the
+    block's record box.  Never raises; returns *block*.
+    """
+    try:
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            return block
+        from kiln.plate_state import read
+        from kiln.server import _get_adapter
+
+        state = read(_get_adapter())
+        if not state.occupied:
+            return block
+        prints = occupant_prints(state.jobs, block)
+        if prints:
+            block["prints"] = prints
+    except Exception:  # noqa: BLE001 -- a drawing of the plate is furniture to the stage
+        logger.debug("occupant prints not attached", exc_info=True)
+    return block
+
+
+def occupant_prints(jobs: Any, block: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """The prints standing on the plate, each from its own files.
+
+    For every job the plate record holds, the files come from
+    :func:`kiln.monitor_twin.printed_files_for` -- the same join the
+    placement verdict reads the G-code through, so the drawing and the
+    verdict are always of the same print.  The model comes from the wrapped
+    3MF (the printed file carries the model it printed) or, failing that,
+    the model that was sliced; its place on the bed comes from the G-code, by
+    the same checked alignment the stage uses for a part's own skirt and
+    tower (:func:`kiln.slicer_geometry.slicer_features_block`) -- a model
+    whose size does not match what was printed is not drawn at all.  The
+    slicer's additions (prime tower, skirt, brim, supports) ride as their
+    own classified block so a stage can show them with its extras and
+    never mistake them for the part.
+
+    Each entry::
+
+        {"name": str, "top_mm": float, "footprint_mm": [x0, y0, x1, y1],
+         "place_mm": [dx, dy, dz],          # mesh coords + place = bed coords
+         "mesh": {"positions", "indices", "vertex_colors"?, "normals"?},
+         "slicer": <kiln.slicer_features.v1, viewer frame>}
+
+    Never raises.
+    """
+    out: list[dict[str, Any]] = []
+    occupied = [o for o in (block or {}).get("occupied") or [] if isinstance(o, dict)]
+    for job in list(jobs or [])[:_OCCUPANT_MAX_PRINTS]:
+        try:
+            entry = _occupant_print(job)
+        except Exception:  # noqa: BLE001
+            logger.debug("occupant print not built for %r", getattr(job, "file", job), exc_info=True)
+            entry = None
+        if entry is None:
+            continue
+        if block is not None:
+            # Drawn only where the block says something stands, and called
+            # by the block's own name for it -- the name the verdict uses in
+            # "74 mm from ...", so a label and a sentence never disagree.
+            best = max(occupied, key=lambda o: _overlap_area(entry["footprint_mm"], o.get("rect_mm")), default=None)
+            if best is None or _overlap_area(entry["footprint_mm"], best.get("rect_mm")) <= 0.0:
+                logger.debug("occupant print %s does not stand where the block says; not drawn", entry["name"])
+                continue
+            if isinstance(best.get("name"), str) and best["name"]:
+                entry["name"] = best["name"]
+        out.append(entry)
+    return out
+
+
+def _overlap_area(a: Any, b: Any) -> float:
+    try:
+        w = min(float(a[2]), float(b[2])) - max(float(a[0]), float(b[0]))
+        h = min(float(a[3]), float(b[3])) - max(float(a[1]), float(b[1]))
+    except (TypeError, ValueError, IndexError):
+        return 0.0
+    return w * h if w > 0 and h > 0 else 0.0
+
+
+def _file_key(path: str | None) -> tuple[Any, ...] | None:
+    import os
+
+    if not path:
+        return None
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (os.path.abspath(path), st.st_mtime_ns, st.st_size)
+
+
+def _occupant_print(job: Any) -> dict[str, Any] | None:
+    from kiln.monitor_twin import printed_files_for
+    from kiln.plate_state import pretty_job_name
+
+    file_name = getattr(job, "file", None)
+    files = printed_files_for(file_name)
+    if not files:
+        return None
+    gcode = files["gcode"]
+    models = [m for m in files["models"] if m.lower().endswith(_MODEL_SUFFIXES)]
+    for model in models:
+        key = (_file_key(model), _file_key(gcode))
+        if key in _OCCUPANT_CACHE:
+            built = _OCCUPANT_CACHE[key]
+        else:
+            built = _build_occupant(model, gcode)
+            if len(_OCCUPANT_CACHE) >= _OCCUPANT_CACHE_MAX:
+                _OCCUPANT_CACHE.pop(next(iter(_OCCUPANT_CACHE)))
+            _OCCUPANT_CACHE[key] = built
+        if built is not None:
+            return {"name": pretty_job_name(file_name), **built}
+    return None
+
+
+def _build_occupant(model: str, gcode: str) -> dict[str, Any] | None:
+    """The drawing of one print: its model placed where its G-code printed
+    it, and its slicer additions.  ``None`` when the two do not agree."""
+    from kiln.mesh_payload import mesh_to_viewer_payload
+    from kiln.slicer_geometry import slicer_features_block, to_viewer_frame
+
+    mesh = mesh_to_viewer_payload(model, max_triangles=OCCUPANT_MAX_TRIANGLES)
+    if mesh.get("downgraded") or not mesh.get("positions"):
+        return None
+    lo = [float(v) for v in mesh["bbox"]["min"]]
+    hi = [float(v) for v in mesh["bbox"]["max"]]
+    feats = slicer_features_block(gcode, tuple(lo), tuple(hi))
+    if not feats.get("available"):
+        logger.debug("occupant %s not drawn: %s", model, feats.get("reason"))
+        return None
+    ox, oy, oz = (float(v) for v in feats["offset_mm"])  # bed + offset = mesh
+    place = [-ox, -oy, -oz]
+    geometry = {k: mesh[k] for k in ("positions", "indices", "vertex_colors", "normals") if mesh.get(k)}
+    return {
+        "top_mm": round(hi[2] + place[2], 2),
+        "footprint_mm": [
+            round(lo[0] + place[0], 2),
+            round(lo[1] + place[1], 2),
+            round(hi[0] + place[0], 2),
+            round(hi[1] + place[1], 2),
+        ],
+        "place_mm": [round(v, 4) for v in place],
+        "mesh": geometry,
+        "slicer": to_viewer_frame(feats),
+    }
 
 
 def resolve_sliced_gcode(

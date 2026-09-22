@@ -174,6 +174,48 @@ def sliced_entry_for(file_name: str) -> dict[str, Any] | None:
     return None
 
 
+def printed_files_for(file_name: str | None) -> dict[str, Any] | None:
+    """The local files behind a printer-side *file_name*, or ``None``.
+
+    ``{"gcode": path, "models": [path, ...]}`` -- the G-code Kiln sliced and
+    the models it came from, most faithful first (the 3MF the G-code was
+    wrapped into, then the model that was sliced).  The slice ledger answers
+    first (:func:`sliced_entry_for`); failing that, the copies
+    :func:`note_print_started` retained when a print of this same file
+    started -- the ledger keeps only the last few slices, and the print
+    standing on a plate is usually older than that.  The one join for "what
+    is this print": the placement verdict reads the G-code here and the stage
+    draws the model from here, so the two can never disagree about which
+    files a print on the plate came from.  Every path returned exists.
+    Never raises.
+    """
+    try:
+        base = os.path.basename(str(file_name or ""))
+        if not base:
+            return None
+        entry = sliced_entry_for(base)
+        if isinstance(entry, dict):
+            gcode = entry.get("output")
+            if isinstance(gcode, str) and os.path.isfile(gcode):
+                models = [
+                    m for m in (entry.get("wrapped"), entry.get("input"))
+                    if isinstance(m, str) and m and os.path.isfile(m)
+                ]
+                return {"gcode": gcode, "models": models}
+        active = _read_json(_ACTIVE_FILE, {})
+        records = [r for r in active.values() if isinstance(r, dict)] if isinstance(active, dict) else []
+        for rec in sorted(records, key=lambda r: str(r.get("started_at") or ""), reverse=True):
+            if os.path.basename(str(rec.get("file_name") or "")) != base:
+                continue
+            gcode = rec.get("gcode")
+            if isinstance(gcode, str) and os.path.isfile(gcode):
+                mesh = rec.get("mesh")
+                return {"gcode": gcode, "models": [mesh] if isinstance(mesh, str) and os.path.isfile(mesh) else []}
+    except Exception:  # noqa: BLE001 -- a miss is "Kiln has no files", never a fault
+        logger.debug("monitor_twin.printed_files_for failed", exc_info=True)
+    return None
+
+
 def note_print_started(printer_name: str, file_name: str) -> None:
     """A print just started: join the printer-side name to the sliced pair
     and retain copies of the toolpath (+ mesh) for the Monitor's twin.
