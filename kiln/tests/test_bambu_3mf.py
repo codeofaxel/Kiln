@@ -2224,6 +2224,18 @@ class TestEndTemplateExpansion:
         truth = (Path(__file__).parent / "data" / "bambu_h2c_end_bambustudio_z20.gcode").read_text()
         assert expanded.rstrip("\n").split("\n") == truth.rstrip("\n").split("\n")
 
+    def test_the_h2cs_filament_0_holds_only_while_its_multicolour_files_are_refused(self):
+        """The H2C's end pulls back filament 0 because a multi-colour H2C
+        file is refused before it is built -- no chute is on record for it.
+        The day one is, the last filament a print ends on can be any slot,
+        and this fails so _MODEL_END_VALUES is revisited rather than trusted."""
+        from kiln.printers.bambu_3mf import _MODEL_END_VALUES, flush_station_for
+
+        assert _MODEL_END_VALUES["bambu_h2c"]["current_filament_id"] == 0
+        assert flush_station_for("bambu_h2c") is None, (
+            "the H2C can build multi-colour files now: revisit current_filament_id in _MODEL_END_VALUES"
+        )
+
     def test_the_h2cs_ams_values_never_move_the_head(self):
         """Every X, Y and Z in the H2C's end is the part's height: the AMS
         values only say how far and how fast the filament is pulled back."""
