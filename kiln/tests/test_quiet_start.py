@@ -831,23 +831,23 @@ class TestTheDoors:
         text = json.dumps(resp)
         assert "Kiln Pro" not in text and "kiln3d.com" not in text
 
-    @pytest.mark.parametrize("refusal, tail, sold", [
+    @pytest.mark.parametrize("refusal, said, sold", [
         # Below the plan's tier, on a plan that would stand: the tier is the one thing in the way.
         ({"code": "QUIET_START_TIER",
           "sentence": "the plate still holds jar v2; clear it and say so to print again, or print around it on "
                       "Kiln Pro (https://kiln3d.com/pricing)"},
-         " The plate still holds jar v2; clear it and say so to print again, or print around it on Kiln Pro "
-         "(https://kiln3d.com/pricing).",
+         "Kiln won't upload this file. The plate still holds jar v2; clear it and say so to print again, or print "
+         "around it on Kiln Pro (https://kiln3d.com/pricing).",
          True),
         # A plan that refuses on its own, on every tier: its own reason, no tier.
         ({"code": "PLACEMENT_LIFT_EXCEEDS_TRAVEL",
           "sentence": "to print beside jar v2 the head has to lift 257 mm clear of it, and the Bambu Lab A1 only "
                       "has 256 mm of travel"},
-         " To print beside jar v2 the head has to lift 257 mm clear of it, and the Bambu Lab A1 only has 256 mm "
-         "of travel.",
+         "Kiln won't upload this file. To print beside jar v2 the head has to lift 257 mm clear of it, and the "
+         "Bambu Lab A1 only has 256 mm of travel. Clear the plate and say so, then slice and print the ordinary way.",
          False),
     ])
-    def test_kiln_slice_print_after_says_why_the_file_has_no_quiet_start(self, tmp_path, monkeypatch, refusal, tail, sold):
+    def test_kiln_slice_print_after_says_why_the_file_has_no_quiet_start(self, tmp_path, monkeypatch, refusal, said, sold):
         """The CLI door that writes the printer file itself.  When the wrap
         refuses for want of a plan, the error carries the verdict's own
         start sentence -- the tier where the verdict names it, the plan's
@@ -879,8 +879,9 @@ class TestTheDoors:
         assert res.exit_code == 1, res.output
         error = json.loads(res.output)["error"]
         assert error["code"] == "QUIET_START_WRAP_FAILED", error
-        assert error["message"].endswith(tail), error["message"]
+        assert error["message"] == said, "the reason once, and one thing to do"
         assert ("kiln3d.com/pricing" in error["message"]) is sold, error["message"]
+        assert error["message"].count("say so") == 1, "one thing to do, said once"
 
     def test_every_wrap_call_site_hands_the_plan_on(self):
         """Every call that wraps a placed slice into a 3MF names the plan and
