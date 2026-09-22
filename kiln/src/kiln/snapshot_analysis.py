@@ -12,6 +12,7 @@ the agent should use a vision model on the base64-encoded image.
 from __future__ import annotations
 
 import logging
+import struct
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -134,6 +135,43 @@ def _estimate_brightness_and_variance(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def image_dimensions(image_data: bytes) -> tuple[int, int] | None:
+    """``(width, height)`` for a PNG or JPEG, or ``None`` when unreadable.
+
+    Stdlib only, like the rest of this module: PNG reads its IHDR, JPEG
+    walks segment headers to the first start-of-frame.  Exists because
+    :func:`analyze_snapshot` takes *width* and *height* as optional
+    arguments and its usable-dimension check is skipped when they are
+    absent -- so a caller that wants that check has to measure the frame,
+    and every caller measuring it its own way is how they drift.
+    """
+    try:
+        if image_data[:8] == _PNG_MAGIC:
+            width, height = struct.unpack(">II", image_data[16:24])
+            return (int(width), int(height))
+        if image_data[:3] == _JPEG_MAGIC:
+            i = 2
+            end = len(image_data)
+            while i + 9 < end:
+                if image_data[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = image_data[i + 1]
+                # Start-of-frame markers carry the dimensions; C4/C8/CC are
+                # tables and extensions that merely look like them.
+                if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                    height, width = struct.unpack(">HH", image_data[i + 5:i + 9])
+                    return (int(width), int(height))
+                if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+                    i += 2
+                    continue
+                segment = struct.unpack(">H", image_data[i + 2:i + 4])[0]
+                i += 2 + segment
+    except Exception:  # noqa: BLE001 -- an unreadable header is "no dimensions"
+        logger.debug("image dimensions not readable", exc_info=True)
+    return None
 
 
 def analyze_snapshot(
