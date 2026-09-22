@@ -1768,7 +1768,7 @@ class TestPerModelTemplateSelection:
         assert _select_end_gcode("  BAMBU_P2S ")[1] == "bambu_p2s"
 
     @pytest.mark.parametrize(
-        "declared", [None, "", "   ", "bambu_a2l", "bambu_never_heard_of_it"],
+        "declared", [None, "", "   ", "bambu_never_heard_of_it"],
     )
     def test_undeclared_or_unknown_model_keeps_todays_behaviour(self, declared):
         """Rule: an unknown model is never an error — people print on this path."""
@@ -1797,7 +1797,8 @@ class TestPerModelTemplateSelection:
 
         a1 = _load_a1_start_gcode()
         for model in ("bambu_p2s", "bambu_p1s", "bambu_p1p", "bambu_x1c",
-                      "bambu_x1e", "bambu_h2s", "bambu_a1_mini"):
+                      "bambu_x1e", "bambu_h2s", "bambu_a1_mini", "bambu_a2l",
+                      "bambu_h2d", "bambu_h2d_pro", "bambu_h2c", "bambu_x2d"):
             gcode, source = _select_start_gcode(model, 0.4)
             assert source == model, f"{model} was served {source}'s start gcode"
             assert gcode != a1, f"{model} still gets the A1 sequence"
@@ -1811,8 +1812,8 @@ class TestPerModelTemplateSelection:
         """
         from kiln.printers.bambu_3mf import _select_start_gcode
 
-        for model in ("bambu_p2s", "bambu_p1s", "bambu_p1p",
-                      "bambu_x1c", "bambu_x1e", "bambu_h2s"):
+        for model in ("bambu_p2s", "bambu_p1s", "bambu_p1p", "bambu_x1c", "bambu_x1e",
+                      "bambu_h2s", "bambu_h2d", "bambu_h2d_pro", "bambu_h2c", "bambu_x2d"):
             gcode, _ = _select_start_gcode(model, 0.4)
             assert not re.search(r"X-\d", gcode), f"{model} drives X negative"
 
@@ -1836,7 +1837,8 @@ class TestPerModelTemplateSelection:
 
     @pytest.mark.parametrize("nozzle", [0.2, 0.4, 0.6, 0.8])
     @pytest.mark.parametrize(
-        "model", ["bambu_p2s", "bambu_p1s", "bambu_p1p", "bambu_x1c", "bambu_x1e", "bambu_h2s"],
+        "model", ["bambu_p2s", "bambu_p1s", "bambu_p1p", "bambu_x1c", "bambu_x1e", "bambu_h2s",
+                  "bambu_h2d", "bambu_h2d_pro", "bambu_h2c", "bambu_x2d"],
     )
     def test_no_enclosed_models_warm_up_drives_x_negative_at_any_nozzle(self, model, nozzle):
         """The hazard pinned above at 0.4, pinned at every size.  The A1's
@@ -1880,13 +1882,43 @@ class TestPerModelTemplateSelection:
         )
         assert exact.start_gcode_warning is None
 
+    def test_every_bambu_the_catalogue_knows_has_its_own_warm_up(self):
+        """No printer Kiln lists is handed another machine's warm-up.  A new
+        Bambu added to the catalogue without a capture fails here, before a
+        print can run on the A1's sequence."""
+        import json
+
+        from kiln.printers.bambu_3mf import _DATA_DIR, _MODEL_START_GCODE_FILES, _select_start_gcode
+
+        catalogue = json.loads((_DATA_DIR / "printer_intelligence.json").read_text())
+        bambu = sorted(k for k in catalogue if k.startswith("bambu_"))
+        assert len(bambu) >= 13
+        missing = [m for m in bambu if (m, "0.4") not in _MODEL_START_GCODE_FILES]
+        assert missing == [], f"no warm-up captured for {missing}"
+        for model in bambu:
+            assert _select_start_gcode(model, 0.4)[1] == model
+
+    def test_the_a2l_keeps_to_its_own_envelope_not_the_a1s(self):
+        """The A2L is an open bed-slinger like the A1, but its own warm-up
+        never goes left of X-20; the A1's goes to X-48.2 with the soft
+        endstops off.  Its plate is 320 mm deep; the A1's warm-up stops at
+        Y262.5, cut for a 256 mm plate."""
+        from kiln.printers.bambu_3mf import _load_a1_start_gcode, _select_start_gcode
+
+        gcode, source = _select_start_gcode("bambu_a2l", 0.4)
+        assert source == "bambu_a2l" and gcode != _load_a1_start_gcode()
+        xs = [float(v) for v in re.findall(r"^\s*G[0-3]\b[^;\n]*\bX(-?\d+\.?\d*)", gcode, re.M)]
+        ys = [float(v) for v in re.findall(r"^\s*G[0-3]\b[^;\n]*\bY(-?\d+\.?\d*)", gcode, re.M)]
+        assert min(xs) > -48.2, "the A2L's own warm-up stays right of the A1's chute"
+        assert max(ys) > 262.5, "and reaches the back of a plate the A1's warm-up was never cut for"
+
     def test_start_and_end_fallback_warnings_do_not_silence_each_other(self):
         """One shared warned-set made the start gap invisible once end had warned."""
         from kiln.printers.bambu_3mf import _select_end_gcode, _select_start_gcode
 
         with patch("kiln.printers.bambu_3mf.logger") as mock_logger:
-            _select_end_gcode("bambu_a2l")
-            _select_start_gcode("bambu_a2l")
+            _select_end_gcode("bambu_never_heard_of_it")
+            _select_start_gcode("bambu_never_heard_of_it")
             messages = [c.args[0] for c in mock_logger.warning.call_args_list]
         assert any("start gcode" in m for m in messages)
         assert any("end gcode" in m for m in messages)
@@ -1896,7 +1928,7 @@ class TestPerModelTemplateSelection:
 
         with patch("kiln.printers.bambu_3mf.logger") as mock_logger:
             for _ in range(5):
-                _select_start_gcode("bambu_h2d")
+                _select_start_gcode("bambu_never_heard_of_it")
             assert mock_logger.warning.call_count == 1
 
     def test_a1_never_warns(self):

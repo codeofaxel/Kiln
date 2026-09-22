@@ -975,20 +975,22 @@ class TestTheAmsBlockGoesToThisMachinesChute:
 
 class TestTheEndSequenceSaysWhoseItIs:
     def test_a_model_with_no_end_capture_carries_the_a1s_and_says_so(self, tmp_path):
-        """The H2D has no end capture, so it gets the A1's — a deliberate,
-        long-standing fallback.  What was missing is that the start said so
-        and the end did not: the end block is the one that wipes, parks and
-        rolls the bed with a finished part on it."""
+        """The H2C has its own warm-up but no end template Kiln can expand --
+        it reads values only BambuStudio computes while slicing -- so its end
+        is the A1's, a deliberate, long-standing fallback.  What was missing
+        is that the start said so and the end did not: the end block is the
+        one that wipes, parks and rolls the bed with a finished part on it."""
         from kiln.printers.bambu_3mf import _MODEL_END_GCODE_FILES, BambuPrintSettings, build_bambu_3mf
 
-        assert "bambu_h2d" not in _MODEL_END_GCODE_FILES
+        assert "bambu_h2c" not in _MODEL_END_GCODE_FILES
         result = build_bambu_3mf(
-            _body(), str(tmp_path / "h2d.gcode.3mf"),
-            settings=BambuPrintSettings(), printer_model="bambu_h2d",
+            _body(), str(tmp_path / "h2c.gcode.3mf"),
+            settings=BambuPrintSettings(), printer_model="bambu_h2c",
         )
-        assert result.end_gcode_model == "bambu_a1" and result.requested_model == "bambu_h2d"
+        assert result.start_gcode_model == "bambu_h2c", "its own warm-up"
+        assert result.end_gcode_model == "bambu_a1" and result.requested_model == "bambu_h2c"
         said = result.end_gcode_warning
-        assert said and "bambu_a1 end sequence" in said and "bambu_h2d" in said
+        assert said and "bambu_a1 end sequence" in said and "bambu_h2c" in said
         assert result.to_dict()["end_gcode_model"] == "bambu_a1"
         assert "end_gcode_warning" in result.to_dict()
 

@@ -63,6 +63,22 @@ That provenance is what splits start from end here:
   slice, the same provenance as the A1 files, and BambuStudio itself picks the
   flush values and the branches.  No number here was chosen by hand.
 
+  The captures taken 2026-09-22 (A2L, H2D, H2D Pro, H2C, X2D) came from
+  BambuStudio 02.08.02.61's own command line rather than its window, and the
+  command line needs two things the window does for itself.  It does not merge
+  the ``"<machine> template <field>.json"`` files, so a system preset handed
+  to it slices with a two-line generic start (``G28`` and a lift) and reports
+  success.  And it does not follow ``inherits`` for a preset it is handed as a
+  file, so it falls back to built-in defaults: a blank ``printer_model``, a
+  2 mm3/s flow limit, halved machine limits.  So each preset is flattened
+  first -- the ``inherits`` chain walked inside the BBL directory, merged
+  parent-first -- and the template fields are merged in, Generic PLA at 220C
+  on a textured plate, as every earlier capture was.  Checked against the
+  window: the H2S captured this way matches the shipped H2S capture line for
+  line, bar one remaining-time estimate; the A1 mini matches but for the
+  time estimates and one ``M201`` that BambuStudio's own engine lowered from
+  the preset's 20000 to 6000.
+
   What that buys is not cosmetic.  The A1 and A1 mini are bed-slingers whose
   startup drives X negative --- 54 and 33 such moves --- with ``M211 X0 Y0 Z0``
   disabling the soft endstops first.  The enclosed models make **no** negative-X
@@ -77,8 +93,11 @@ standing in for theirs.  Start G-code is the opposite: P1P, P1S, X1 Carbon and
 X1E each publish four start templates (0.2 / 0.4 / 0.6 / 0.8) whose contents
 genuinely differ, and ``[nozzle_diameter]`` appears in their conditionals.
 ``_MODEL_START_GCODE_FILES`` is therefore keyed on ``(model, nozzle)`` and every
-capture so far is 0.4; any other nozzle falls back to the A1 and says so, rather
-than being handed a sequence cut for a different orifice.
+capture so far is 0.4.  Any other nozzle gets its own machine's capture and says
+so: across the vendor's own nozzle variants the head visits the same box and
+treats the soft endstops the same, so another size can mis-tune the purge and
+the flow calibration but cannot send the head anywhere this machine does not
+already go -- which the A1's sequence, the old fallback, did.
 """
 
 from __future__ import annotations
@@ -157,6 +176,13 @@ _MODEL_START_GCODE_FILES: dict[tuple[str, str], str] = {
     ("bambu_x1c", "0.4"): "bambu_x1c_start_gcode.gcode",
     ("bambu_x1e", "0.4"): "bambu_x1e_start_gcode.gcode",
     ("bambu_h2s", "0.4"): "bambu_h2s_start_gcode.gcode",
+    # Captured 2026-09-22 from BambuStudio 02.08.02.61's own command line (see
+    # the module docstring for how, and how the method was checked).
+    ("bambu_a2l", "0.4"): "bambu_a2l_start_gcode.gcode",
+    ("bambu_h2d", "0.4"): "bambu_h2d_start_gcode.gcode",
+    ("bambu_h2d_pro", "0.4"): "bambu_h2d_pro_start_gcode.gcode",
+    ("bambu_h2c", "0.4"): "bambu_h2c_start_gcode.gcode",
+    ("bambu_x2d", "0.4"): "bambu_x2d_start_gcode.gcode",
 }
 
 # End G-code, one file per model we ship a template for.
@@ -198,6 +224,16 @@ _MODEL_END_GCODE_FILES: dict[str, str] = {
     "bambu_x1c": "bambu_x1c_end_gcode.gcode",
     "bambu_x1e": "bambu_x1e_end_gcode.gcode",
     "bambu_h2s": "bambu_h2s_end_gcode.gcode",
+    "bambu_a2l": "bambu_a2l_end_gcode.gcode",
+    "bambu_h2d": "bambu_h2d_end_gcode.gcode",
+    "bambu_h2d_pro": "bambu_h2d_pro_end_gcode.gcode",
+    "bambu_x2d": "bambu_x2d_end_gcode.gcode",
+    # No bambu_h2c: its end template reads six values BambuStudio computes
+    # while slicing (the current filament and hotend, the flush speed, the
+    # cut retraction), the same kind that makes start G-code a capture.  An
+    # end block cannot be captured instead -- its lifts are the part's own
+    # height -- so the H2C keeps the A1's end sequence, and
+    # Bambu3MFResult.end_gcode_warning says so.
 }
 
 # Lazy cache for the per-model files, keyed by filename.

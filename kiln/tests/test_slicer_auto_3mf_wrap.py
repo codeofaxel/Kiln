@@ -299,12 +299,12 @@ class TestStartGcodeSubstitutionIsAudible:
         gcode = _write_dummy_gcode(tmp_path)
 
         threemf, warning = _auto_wrap_bambu_3mf(
-            str(gcode), effective_printer_id="bambu_h2d", stl_path=None,
+            str(gcode), effective_printer_id="bambu_never_heard_of_it", stl_path=None,
         )
 
         assert threemf is not None, "the wrap still succeeds — this is a warning"
         assert warning is not None, "the A1 substitution passed silently"
-        assert "bambu_h2d" in warning
+        assert "bambu_never_heard_of_it" in warning
         assert "bambu_a1" in warning
 
     def test_a_captured_model_stays_silent(self, tmp_path) -> None:
@@ -326,11 +326,11 @@ class TestStartGcodeSubstitutionIsAudible:
         result = build_bambu_3mf(
             Path(gcode).read_text(encoding="utf-8"),
             str(tmp_path / "out.3mf"),
-            printer_model="bambu_h2d",
+            printer_model="bambu_never_heard_of_it",
         )
 
         assert result.start_gcode_model == "bambu_a1"
-        assert result.requested_model == "bambu_h2d"
+        assert result.requested_model == "bambu_never_heard_of_it"
         assert "start_gcode_warning" in result.to_dict()
 
 
