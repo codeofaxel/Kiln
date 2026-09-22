@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from kiln.parametric import (
+    DerivedParameterError,
     ParameterDef,
     ParameterWarning,
     ScadModule,
@@ -168,6 +169,172 @@ class TestParseOpenscadParameters:
         assert parse_openscad_parameters("// just a comment\n// another") == []
 
 
+class TestParseDerivedParameters:
+    """parse_openscad_parameters surfaces parameters computed from others."""
+
+    def test_derived_line_surfaced_with_expression_and_depends_on(self):
+        code = (
+            "outer = 30; // mm\n"
+            "wall = 2; // mm\n"
+            "inner = outer - 2*wall; // mm inner size\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["outer", "wall", "inner"]
+        inner = params[2]
+        assert inner.derived is True
+        assert inner.value is None
+        assert inner.expression == "outer - 2*wall"
+        assert inner.depends_on == ["outer", "wall"]
+        assert inner.unit == "mm"
+        assert inner.description == "inner size"
+        assert inner.min_value is None
+        assert inner.max_value is None
+
+    def test_literal_lines_are_not_derived(self):
+        params = parse_openscad_parameters("wall = 2; // mm")
+        assert params[0].derived is False
+        assert params[0].expression == ""
+        assert params[0].depends_on == []
+
+    def test_depends_on_orders_by_first_use_without_repeats(self):
+        code = (
+            "a = 1;\n"
+            "b = 2;\n"
+            "c = b + a * b;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert params[2].depends_on == ["b", "a"]
+
+    def test_derived_may_depend_on_another_derived(self):
+        code = (
+            "outer = 30;\n"
+            "inner = outer - 4;\n"
+            "half = inner / 2;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert params[2].derived is True
+        assert params[2].depends_on == ["inner"]
+
+    def test_reference_to_name_declared_later_is_derived(self):
+        # OpenSCAD top-level assignments are order-independent.
+        code = (
+            "inner = outer * 2;\n"
+            "outer = 30;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["inner", "outer"]
+        assert params[0].derived is True
+        assert params[0].depends_on == ["outer"]
+        assert params[1].derived is False
+        assert params[1].value == 30.0
+
+    def test_name_declared_nowhere_is_not_a_dependency(self):
+        code = (
+            "wall = 2;\n"
+            "inner = outer - 2*wall;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert params[1].derived is True
+        assert params[1].depends_on == ["wall"]
+
+    def test_parameters_after_a_forward_reference_are_kept(self):
+        code = (
+            "inner = outer - 2*wall; // mm inner size\n"
+            "outer = 30; // mm\n"
+            "wall = 2; // mm\n"
+            "height = 12; // mm\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["inner", "outer", "wall", "height"]
+        assert params[0].derived is True
+        assert params[0].depends_on == ["outer", "wall"]
+        assert [p.value for p in params[1:]] == [30.0, 2.0, 12.0]
+
+    def test_forward_reference_to_a_derived_name_is_derived(self):
+        code = (
+            "c = b + 1;\n"
+            "b = a * 2;\n"
+            "a = 10;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["c", "b", "a"]
+        assert params[0].depends_on == ["b"]
+        assert params[1].depends_on == ["a"]
+
+    def test_chained_derived_lists_the_name_the_line_references(self):
+        code = (
+            "a = 10;\n"
+            "b = a * 2;\n"
+            "c = b + 1;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert params[2].derived is True
+        assert params[2].depends_on == ["b"]
+        assert params[1].depends_on == ["a"]
+
+    def test_line_referencing_no_parameter_still_ends_the_block(self):
+        code = (
+            "inner = outer - 1;\n"
+            "outer = 30;\n"
+            "dims = [10, 20, 30];\n"
+            "extra = 5;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["inner", "outer"]
+        assert params[0].depends_on == ["outer"]
+
+    def test_vector_literal_stays_ignored(self):
+        code = (
+            "size = 10;\n"
+            "dims = [10, 20, 30];\n"
+            "extra = 5;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["size"]
+
+    def test_string_mentioning_a_param_stays_ignored(self):
+        code = (
+            "wall = 2;\n"
+            'label = "the wall";\n'
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["wall"]
+
+    def test_function_of_nothing_known_stays_ignored(self):
+        code = (
+            "wall = 2;\n"
+            "twist = sin(45) * 3;\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["wall"]
+
+    def test_block_still_stops_at_module(self):
+        code = (
+            "outer = 30;\n"
+            "wall = 2;\n"
+            "inner = outer - 2*wall;\n"
+            "module box() {\n"
+            "  deeper = inner + 1;\n"
+            "}\n"
+        )
+        params = parse_openscad_parameters(code)
+        assert [p.name for p in params] == ["outer", "wall", "inner"]
+
+    def test_derived_to_dict_carries_new_fields(self):
+        code = "outer = 30;\ninner = outer - 4;\n"
+        d = parse_openscad_parameters(code)[1].to_dict()
+        assert d["derived"] is True
+        assert d["value"] is None
+        assert d["expression"] == "outer - 4"
+        assert d["depends_on"] == ["outer"]
+
+    def test_literal_to_dict_omits_expression_keys(self):
+        d = parse_openscad_parameters("wall = 2;")[0].to_dict()
+        assert d["derived"] is False
+        assert "expression" not in d
+        assert "depends_on" not in d
+
+
 # ---------------------------------------------------------------------------
 # update_openscad_parameter
 # ---------------------------------------------------------------------------
@@ -213,6 +380,29 @@ class TestUpdateOpenscadParameter:
         result = update_openscad_parameter(code, "size", 10.0)
         assert "size = 10;" in result
 
+    def test_refuses_derived_param_naming_formula_and_inputs(self):
+        code = (
+            "outer = 30; // mm\n"
+            "wall = 2; // mm\n"
+            "inner = outer - 2*wall;\n"
+        )
+        with pytest.raises(
+            DerivedParameterError,
+            match=r"inner = outer - 2\*wall.*change outer, wall instead",
+        ):
+            update_openscad_parameter(code, "inner", 20)
+
+    def test_derived_refusal_is_a_value_error(self):
+        code = "outer = 30;\ninner = outer - 4;\n"
+        with pytest.raises(ValueError, match="derived"):
+            update_openscad_parameter(code, "inner", 20)
+
+    def test_inputs_of_a_derived_param_still_update(self):
+        code = "outer = 30;\ninner = outer - 4;\n"
+        result = update_openscad_parameter(code, "outer", 50)
+        assert "outer = 50;" in result
+        assert "inner = outer - 4;" in result
+
 
 # ---------------------------------------------------------------------------
 # validate_openscad_parameters
@@ -221,6 +411,18 @@ class TestUpdateOpenscadParameter:
 
 class TestValidateOpenscadParameters:
     """validate_openscad_parameters checks values against limits."""
+
+    @patch("kiln.design_intelligence.get_material_profile")
+    def test_derived_params_are_skipped(self, mock_profile):
+        mock_profile.return_value = SimpleNamespace(
+            design_limits={"min_wall_thickness_mm": 1.2},
+        )
+        code = (
+            "wall = 0.5; // mm\n"
+            "inner_wall = wall * 2; // mm\n"
+        )
+        warnings = validate_openscad_parameters(code, material="pla")
+        assert [w.parameter_name for w in warnings] == ["wall"]
 
     def test_no_material_returns_empty_when_in_range(self):
         code = "wall = 2; // mm (min: 1, max: 5)"
@@ -440,6 +642,88 @@ class TestCompileScadCode:
         path = compile_scad_code("cube([10,10,10]);", output_path="/tmp/custom.stl")
         mock_move.assert_called_once_with("/tmp/original.stl", "/tmp/custom.stl")
         assert path == "/tmp/custom.stl"
+
+
+# ---------------------------------------------------------------------------
+# A machine-readable header on line 1 survives every door
+# ---------------------------------------------------------------------------
+
+
+_SKETCH_HEADER = '// kiln:sketch/1 {"v": 1, "points": {"A": [0, 0], "B": [40, 0]}}'
+_SKETCH_SCAD = (
+    _SKETCH_HEADER + "\n"
+    "width = 40; // mm\n"
+    "height = 20; // mm\n"
+    "module plate() {\n"
+    "    square([width, height]);\n"
+    "}\n"
+    "plate();\n"
+)
+
+
+class TestHeaderLineSurvivesEveryDoor:
+    """A comment header on line 1 reaches every public door byte-for-byte.
+
+    Tools that hand back OpenSCAD may put a machine-readable header on
+    line 1 and read it back later.  Nothing in public Kiln may strip,
+    move or reformat it: the parser reads past it, the editors leave it,
+    and the compiler writes it to the ``.scad`` file as line 1.
+    """
+
+    def test_parser_reads_past_the_header(self):
+        params = parse_openscad_parameters(_SKETCH_SCAD)
+        assert [p.name for p in params] == ["width", "height"]
+
+    def test_update_parameter_keeps_line_one(self):
+        out = update_openscad_parameter(_SKETCH_SCAD, "width", 50)
+        assert out.splitlines()[0] == _SKETCH_HEADER
+        assert "width = 50; // mm" in out
+
+    def test_module_editors_keep_line_one(self):
+        inserted = insert_into_scad_module(_SKETCH_SCAD, "plate", "circle(3);")
+        assert inserted.splitlines()[0] == _SKETCH_HEADER
+        modified = modify_scad_module(
+            _SKETCH_SCAD, "plate", "module plate() { cube(1); }"
+        )
+        assert modified.splitlines()[0] == _SKETCH_HEADER
+
+    @patch("kiln.generation.openscad.OpenSCADProvider")
+    def test_tweak_hands_the_compiler_line_one(self, MockProvider):
+        instance = MockProvider.return_value
+        instance.generate.return_value = SimpleNamespace(
+            id="job1", status=SimpleNamespace(value="succeeded"), error=None,
+        )
+        instance.download_result.return_value = SimpleNamespace(
+            local_path="/tmp/tweaked.stl",
+        )
+        result = tweak_and_compile(_SKETCH_SCAD, "width", 50)
+        assert result["updated_code"].splitlines()[0] == _SKETCH_HEADER
+        compiled = instance.generate.call_args[0][0]
+        assert compiled.splitlines()[0] == _SKETCH_HEADER
+
+    def test_compile_writes_line_one_to_the_scad_file(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KILN_OPENSCAD_BACKEND", "cgal")
+        written: dict[str, str] = {}
+
+        def fake_run(cmd, *_args, **_kwargs):
+            out_path, scad_path = cmd[2], cmd[-1]
+            with open(scad_path, encoding="utf-8") as fh:
+                written["first_line"] = fh.readline().rstrip("\n")
+            with open(out_path, "wb") as fh:
+                fh.write(b"solid kiln\nendsolid kiln\n")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        with (
+            patch(
+                "kiln.generation.openscad.OpenSCADProvider._require_binary",
+                return_value="openscad",
+            ),
+            patch("kiln.generation.openscad.subprocess.run", side_effect=fake_run),
+        ):
+            stl = compile_scad_code(_SKETCH_SCAD, output_path=str(tmp_path / "plate.stl"))
+
+        assert written["first_line"] == _SKETCH_HEADER
+        assert stl == str(tmp_path / "plate.stl")
 
 
 # ---------------------------------------------------------------------------

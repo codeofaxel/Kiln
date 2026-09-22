@@ -285,6 +285,21 @@ class TestPreviewWiring:
         assert "output_3mf" in _DEFAULT_STL_KEYS
 
 
+class TestApplyParametersToScad:
+    def test_derived_parameter_is_skipped_with_its_formula(self) -> None:
+        from kiln.design_rebuild import _apply_parameters_to_scad
+
+        scad = "outer = 30;\nwall = 2;\ninner = outer - 2*wall;\n"
+        code, applied, not_in_source, skipped = _apply_parameters_to_scad(
+            scad, {"outer": 40, "inner": 10, "nope": 1},
+        )
+        assert applied == {"outer": 40}
+        assert not_in_source == ["nope"]
+        assert "inner = outer - 2*wall" in skipped["inner"]
+        assert "outer, wall" in skipped["inner"]
+        assert "outer = 40;" in code
+
+
 class TestRefusals:
     def test_no_recipe(self, tools, tmp_path) -> None:
         r = tools["rebuild_design"](recipe_path=str(tmp_path / "nothing"))

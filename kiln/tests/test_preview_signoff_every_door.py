@@ -681,6 +681,120 @@ class TestCliDoors:
 
 
 # ---------------------------------------------------------------------------
+# A clearance ends with the call that earned it
+# ---------------------------------------------------------------------------
+
+
+class TestAClearanceEndsWithTheCallThatEarnedIt:
+    """A gate that passes and a tool that then fails leave a clearance
+    nobody spent.  It must not be there for the NEXT call to spend.
+
+    Nothing in the gate enforces that.  What does is the shape each door
+    dispatches with: the clearance is a ContextVar, and every door runs
+    each call in its own context — the MCP server spawns a task per
+    request, and the relay bounces each frame through a worker thread.
+    Both copy the context, so a grant inside one call is invisible to the
+    next.  (The CLI has no such boundary, which is why it drops both
+    records itself when the command closes.)
+
+    That containment is inherited, not stated, so it is pinned here at
+    the two doors that rely on it — the door an agent knocks on, and the
+    one the web knocks on, which reaches the tool functions directly and
+    passes through no gate wrapper at all.  A dispatch that stopped
+    isolating calls would hand an unspent clearance to a later start,
+    which is the one failure this file exists to prevent.
+    """
+
+    @staticmethod
+    def _grant(tool: str) -> None:
+        print_signoff.grant(
+            tool, "jar.stl", "garage",
+            source=print_consent.SOURCE_ELICITED, door="stage",
+        )
+
+    def test_a_failed_mcp_call_hands_no_clearance_to_the_next_one(self, monkeypatch):
+        """Through a live session: two ``tools/call`` requests, the first
+        earning a clearance and failing before any adapter spends it."""
+        import asyncio
+
+        from mcp.shared.memory import create_connected_server_and_client_session
+
+        seen: dict[str, object] = {}
+        tools = server.mcp._tool_manager._tools
+
+        def _grant_then_fail() -> dict:
+            self._grant("license_status")
+            raise RuntimeError("the tool failed after the gate passed")
+
+        def _report() -> dict:
+            seen["clearance"] = print_signoff.current()
+            seen["take"] = print_signoff.take("jar.stl", "garage")
+            return {"success": True}
+
+        # Two argument-free tools stand in for a print door and whatever
+        # the agent calls next, so the pin is about the dispatch and not
+        # about any one tool's body.
+        monkeypatch.setattr(tools["license_status"], "fn", _grant_then_fail)
+        monkeypatch.setattr(tools["donate_info"], "fn", _report)
+
+        async def _two_calls() -> None:
+            async with create_connected_server_and_client_session(server.mcp) as client:
+                first = await client.call_tool("license_status", {})
+                assert first.isError, first
+                await client.call_tool("donate_info", {})
+
+        asyncio.run(_two_calls())
+        assert "clearance" in seen, "the second call never ran"
+        assert seen["clearance"] is None, seen["clearance"]
+        assert seen["take"] is None, "the adapter backstop would have spent it"
+
+    def test_a_failed_relay_call_hands_no_clearance_to_the_next_frame(self):
+        """The web door runs the tool functions itself — no gate wrapper,
+        no reset in a ``finally`` — so the worker thread each frame runs
+        in is the whole of its isolation.  Driven here without the task
+        the receive loop adds on top, so the thread is what is pinned."""
+        import asyncio
+
+        from kiln import bridge_client
+
+        seen: dict[str, object] = {}
+
+        def _call_tool(name: str, args: dict):
+            if name == "slice_and_print":
+                self._grant(name)
+                raise RuntimeError("the tool failed after the gate passed")
+            seen["clearance"] = print_signoff.current()
+            seen["take"] = print_signoff.take("jar.stl", "garage")
+            return {"success": True}
+
+        client = bridge_client.BridgeClient(
+            license_key="lic", call_tool=_call_tool, fetch_artifact=lambda _t: "",
+        )
+
+        class _Socket:
+            def __init__(self) -> None:
+                self.sent: list[str] = []
+
+            async def send(self, blob: str) -> None:
+                self.sent.append(blob)
+
+        async def _two_frames() -> _Socket:
+            ws = _Socket()
+            for tool in ("slice_and_print", "printer_status"):
+                await client._handle_and_reply(
+                    ws, {"request_id": tool, "tool_name": tool, "args": {}},
+                )
+            return ws
+
+        ws = asyncio.run(_two_frames())
+        assert len(ws.sent) == 2, ws.sent
+        assert json.loads(ws.sent[0])["ok"] is False, ws.sent[0]
+        assert "clearance" in seen, "the second frame never ran"
+        assert seen["clearance"] is None, seen["clearance"]
+        assert seen["take"] is None, "the adapter backstop would have spent it"
+
+
+# ---------------------------------------------------------------------------
 # Structural pin: every call that reaches a printer is cleared first
 # ---------------------------------------------------------------------------
 
