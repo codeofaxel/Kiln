@@ -110,7 +110,7 @@ logger = logging.getLogger(__name__)
 SCHEMA = "placement_verdict/1"
 REQUEST_SCHEMA = "placement_request/1"
 TOOL = "placement_plan"
-__all__ = ["OCCUPANCY_KIND", "REQUEST_SCHEMA", "SCHEMA", "TOOL", "ask", "hosted_form", "request_for", "verdict_for"]
+__all__ = ["OCCUPANCY_KIND", "REQUEST_SCHEMA", "SCHEMA", "TOOL", "ask", "hosted_form", "job_envelope", "request_for", "verdict_for"]
 
 #: Why no verdict came back: the causes a miss can have, in the shared
 #: voice's own words (:data:`kiln.served_answer.CAUSES`).  Decided in ONE
@@ -377,3 +377,69 @@ def request_for(
         "placed_by": who,
         "suppress": list(suppress) if suppress else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# The job envelope a fleet survey reads
+# ---------------------------------------------------------------------------
+
+#: Files that are machine code already: their toolpath is fixed, so a plate
+#: is judged against the file as it will print, not against an envelope.
+_SLICED_EXTENSIONS = frozenset({".gcode", ".gco", ".g"})
+#: The slicer's own defaults when no profile says otherwise -- the numbers
+#: the slice doors use for a part before it is sliced.
+_DEFAULT_LAYER_HEIGHT_MM = 0.2
+_DEFAULT_SKIRT_MM = 6.0
+
+
+def job_envelope(file_path: str) -> dict[str, Any]:
+    """The job as a fleet survey reads it: ``{"file", "part", "sliced_gcode_path"}``.
+
+    ``part`` is the placement request's part block -- the part's size from
+    its bounding box, the slicer's default layer height and skirt -- or
+    ``None`` when the geometry cannot be read.  ``sliced_gcode_path`` is the
+    file itself when it is already machine code, else ``None``.  Reads the
+    file, never a printer; never raises.  Kiln-pro's fleet survey
+    (``kiln.placement_fleet.for_fleet``) takes this and asks each plate.
+    """
+    path = str(file_path or "")
+    name = os.path.basename(path) or path
+    ext = os.path.splitext(path)[1].lower()
+    sliced = path if ext in _SLICED_EXTENSIONS else None
+    part: dict[str, Any] | None = None
+    try:
+        if sliced is None:
+            from kiln.printers.bed_fit import compute_mesh_bbox
+
+            bbox = compute_mesh_bbox(path)
+            if bbox:
+                part = {
+                    "size_mm": [
+                        round(float(bbox["x_max"]) - float(bbox["x_min"]), 3),
+                        round(float(bbox["y_max"]) - float(bbox["y_min"]), 3),
+                        round(float(bbox["z_max"]) - float(bbox["z_min"]), 3),
+                    ],
+                    "layer_height_mm": _DEFAULT_LAYER_HEIGHT_MM,
+                    "tower_mm": None,
+                    "colour_changes_at_mm": [],
+                    "skirt_mm": _DEFAULT_SKIRT_MM,
+                }
+        if part is None:
+            # A sliced file, or a mesh the mesh reader could not open: the
+            # plate record's own reader gives the footprint and height it can.
+            from kiln.plate_state import geometry_of
+
+            footprint, max_z = geometry_of(path)
+            if footprint and max_z is not None:
+                x0, y0, x1, y1 = (float(v) for v in footprint)
+                part = {
+                    "size_mm": [round(x1 - x0, 3), round(y1 - y0, 3), round(float(max_z), 3)],
+                    "layer_height_mm": _DEFAULT_LAYER_HEIGHT_MM,
+                    "tower_mm": None,
+                    "colour_changes_at_mm": [],
+                    "skirt_mm": 0.0,
+                }
+    except Exception:  # noqa: BLE001 -- unreadable geometry is "no envelope", and the survey says so
+        logger.debug("job envelope of %s not derivable", path, exc_info=True)
+        part = None
+    return {"file": name, "part": part, "sliced_gcode_path": sliced}

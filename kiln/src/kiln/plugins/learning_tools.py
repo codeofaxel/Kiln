@@ -1119,6 +1119,40 @@ def clean_agent_memory() -> dict:
 # ---------------------------------------------------------------------------
 
 
+
+def _plate_rooms(names: list[str], file_name: str | None, registry: Any) -> tuple[dict[str, dict] | None, str | None]:
+    """``(plates, note)``: one plate block per printer from kiln-pro's fleet
+    survey, read without a part (so ``has_room`` is "a clear plate Kiln has
+    a record of"), or ``(None, why)`` when the survey is not available --
+    no kiln-pro, or a tier below the fleet's.  *registry* resolves each
+    name to its adapter, the same registry the door ranks from.  Never raises."""
+    if not names:
+        return {}, None
+    try:
+        from kiln.placement_fleet import for_fleet
+    except ImportError:
+        return None, "Plate room is not read on this server: fleet placement needs kiln-pro."
+    adapters: dict[str, Any] = {}
+    for name in names:
+        try:
+            adapters[name] = registry.get(name)
+        except Exception:  # noqa: BLE001 -- the survey says "not registered" in its own row
+            continue
+    try:
+        survey = for_fleet(
+            {"file": file_name or "", "part": None, "sliced_gcode_path": None}, names, adapters=adapters,
+        )
+    except Exception as exc:  # noqa: BLE001 -- advisory: a survey that fails is a note, never an error
+        _logger.debug("plate survey failed for suggestions: %s", exc)
+        return None, "Kiln could not read the plates for these printers."
+    if isinstance(survey, dict) and survey.get("ok"):
+        plates = survey.get("plates")
+        return (dict(plates) if isinstance(plates, dict) else {}), None
+    gate = survey.get("gate") if isinstance(survey, dict) else None
+    note = str(gate.get("error") or gate.get("message") or "") if isinstance(gate, dict) else ""
+    return None, note or "Plate room was not read for these printers."
+
+
 class _LearningToolsPlugin:
     """Cross-printer learning and persistent agent memory tools.
 
@@ -1225,6 +1259,14 @@ class _LearningToolsPlugin:
             or preflight checks.  Always run preflight validation before starting
             a print regardless of learning data.
 
+            Each suggestion also says ``has_room``: whether that printer's plate,
+            as Kiln's record has it, can take a print right now (a clear plate;
+            a part still on it, or no record, is ``false``), with the plate
+            block beside it.  Advisory, like the rest: the slice and start doors
+            judge the real part against the real plate.  The plate reading is a
+            fleet feature; below its tier ``has_room`` is ``null`` and
+            ``plate_note`` says so.
+
             Args:
                 file_hash: Optional hash of the file to match previous prints.
                 material_type: Optional material type to filter by (e.g. ``"PLA"``).
@@ -1264,12 +1306,21 @@ class _LearningToolsPlugin:
                 # Sort by score descending
                 suggestions.sort(key=lambda s: s["score"], reverse=True)
 
+                # The plate beside the history: kiln-pro's fleet survey, one
+                # row per suggested printer, advisory like everything here.
+                plates, plate_note = _plate_rooms([s["printer_name"] for s in suggestions], file_name, _registry)
+                for entry in suggestions:
+                    block = plates.get(entry["printer_name"]) if plates is not None else None
+                    entry["has_room"] = bool(block.get("has_room")) if isinstance(block, dict) else None
+                    entry["plate"] = block if isinstance(block, dict) else None
+
                 total_outcomes = sum(e["total_prints"] for e in ranked)
                 confidence = "low" if total_outcomes < 5 else ("medium" if total_outcomes < 20 else "high")
 
                 return {
                     "success": True,
                     "suggestions": suggestions,
+                    "plate_note": plate_note,
                     "query": {
                         "file_hash": file_hash,
                         "material_type": material_type,
