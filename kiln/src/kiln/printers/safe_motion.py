@@ -1147,6 +1147,7 @@ def build_quiet_start_preamble(
     approach_mm: float = 5.0,
     home_xy_gcode: str = "G28 X Y",
     prime_mm: float = 5.0,
+    purge_at_mm: tuple[float | None, float | None] | None = None,
 ) -> list[str]:
     """The quiet start: the print beside a part still on the plate.
 
@@ -1163,10 +1164,15 @@ def build_quiet_start_preamble(
        top, because the clear height is above every top;
     3. the firmware's X/Y home at that height -- the bed may roll its
        whole length; every part passes under a head that clears it;
-    4. a travel to the new part's own footprint centre, still at the
-       clear height;
-    5. the waits for the bed and the hotend, over the new footprint, so
-       the ooze of heating falls on clean plate;
+    4. with a chute on record (*purge_at_mm*, the printer's own waste
+       chute off the plate; ``None`` for an axis it keeps), a travel to
+       it, still at the clear height, and the waits for the bed and the
+       hotend and the prime THERE -- the ooze of heating and the prime
+       fall into the chute, nothing lands on the plate;
+    5. a travel to the new part's own footprint centre, still at the
+       clear height (without a chute the waits and the prime happen here,
+       over the new footprint, so what falls lands under the part's own
+       first layer and nowhere else);
     6. a descent over the new footprint only, to *approach_mm* above the
        first layer -- the body's first move takes it the rest of the way;
     7. the prime, so the E counter is defined before the first extrusion.
@@ -1175,7 +1181,18 @@ def build_quiet_start_preamble(
     on each line say why it is there.
     """
     cx, cy = float(travel_to_mm[0]), float(travel_to_mm[1])
-    return [
+    waits = [
+        f"M190 S{int(bed_temp)}  ; wait for the bed",
+        f"M109 S{int(hotend_temp)}  ; wait for the hotend",
+    ]
+    prime = [
+        "; --- Extruder prime on quiet start ---",
+        "G92 E0  ; the E counter is undefined after the last print ended",
+        f"G1 E{prime_mm:g} F60  ; prime",
+        "G92 E0  ; re-anchor E so the first build move starts from 0",
+        "G4 P500  ; let the prime settle",
+    ]
+    lines = [
         f"M140 S{int(bed_temp)}  ; bed target, no wait: nothing moves yet",
         f"M104 S{int(hotend_temp)}  ; hotend target, no wait",
         "G21  ; millimetres",
@@ -1183,16 +1200,34 @@ def build_quiet_start_preamble(
         "M83  ; relative extrusion, as the body was sliced",
         f"G1 Z{clear_z_mm:.2f} F{_LIFT_FEEDRATE}  ; clear of everything on the plate, wherever the head rests",
         f"{home_xy_gcode}  ; home X and Y at that height; never Z with parts on the plate",
-        f"G1 X{cx:.2f} Y{cy:.2f} F{_TRAVEL_FEEDRATE}  ; over the new part's own footprint, still clear",
-        f"M190 S{int(bed_temp)}  ; wait for the bed",
-        f"M109 S{int(hotend_temp)}  ; wait for the hotend",
-        f"G1 Z{float(first_layer_z_mm) + float(approach_mm):.2f} F{_LIFT_FEEDRATE}  ; down over the new footprint only",
-        "; --- Extruder prime on quiet start ---",
-        "G92 E0  ; the E counter is undefined after the last print ended",
-        f"G1 E{prime_mm:g} F60  ; prime",
-        "G92 E0  ; re-anchor E so the first build move starts from 0",
-        "G4 P500  ; let the prime settle",
     ]
+    chute = _chute_move(purge_at_mm)
+    if chute is not None:
+        lines.append(f"{chute}  ; over the printer's own waste chute, off the plate, still clear")
+        lines += waits + prime
+        lines.append(f"G1 X{cx:.2f} Y{cy:.2f} F{_TRAVEL_FEEDRATE}  ; over the new part's own footprint, still clear")
+        lines.append(f"G1 Z{float(first_layer_z_mm) + float(approach_mm):.2f} F{_LIFT_FEEDRATE}  ; down over the new footprint only")
+        return lines
+    lines.append(f"G1 X{cx:.2f} Y{cy:.2f} F{_TRAVEL_FEEDRATE}  ; over the new part's own footprint, still clear")
+    lines += waits
+    lines.append(f"G1 Z{float(first_layer_z_mm) + float(approach_mm):.2f} F{_LIFT_FEEDRATE}  ; down over the new footprint only")
+    return lines + prime
+
+
+def _chute_move(purge_at_mm: tuple[float | None, float | None] | None) -> str | None:
+    """The travel to the chute as one absolute move, or ``None`` without a
+    chute; an axis given as ``None`` is kept where the home left it."""
+    if not purge_at_mm:
+        return None
+    x, y = purge_at_mm
+    words = []
+    if x is not None:
+        words.append(f"X{float(x):.2f}")
+    if y is not None:
+        words.append(f"Y{float(y):.2f}")
+    if not words:
+        return None
+    return "G1 " + " ".join(words) + f" F{_TRAVEL_FEEDRATE}"
 
 
 def build_safe_abort_sequence(

@@ -1907,6 +1907,18 @@ def _check_quiet_plan(plan: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _purge_at(value: Any) -> tuple[float | None, float | None] | None:
+    """The plan's chute as ``(x, y)`` with ``None`` for a kept axis, or
+    ``None`` when the plan names no chute."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    x, y = value
+    try:
+        return (None if x is None else float(x), None if y is None else float(y))
+    except (TypeError, ValueError):
+        return None
+
+
 def _quiet_start_header(plan: dict[str, Any]) -> str:
     """The contract the pre-print gate reads back from the file
     (:func:`kiln.printers.print_gate.read_quiet_start_contract`): which
@@ -2604,6 +2616,7 @@ def build_bambu_3mf(
             first_layer_z_mm=float(quiet_start["first_layer_z_mm"]),
             approach_mm=float(quiet_start.get("approach_mm", 5.0)),
             home_xy_gcode=str(quiet_start.get("home_xy_gcode") or "G28 X Y"),
+            purge_at_mm=_purge_at(quiet_start.get("purge_at_mm")),
         )
         complete_gcode = (
             header + _quiet_start_header(quiet_start) + "\n".join(preamble) + "\n\n"

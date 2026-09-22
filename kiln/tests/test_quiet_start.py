@@ -117,7 +117,7 @@ def _plan(machine: Any, **over: Any) -> dict[str, Any]:
     plan = {
         "mode": "quiet_start", "ok": True, "available": True, "refusals": [],
         "clear_z_mm": 47.0, "lift_floor_mm": 47.0, "travel_to_mm": [215.0, 35.0], "first_layer_z_mm": 0.2,
-        "approach_mm": 5.0, "z_travel_mm": 256.0, "home_xy_gcode": "G28 X Y",
+        "approach_mm": 5.0, "z_travel_mm": 256.0, "home_xy_gcode": "G28 X Y", "purge_at_mm": [-48.2, None],
         "flags": {"bed_leveling": False, "flow_cali": False, "vibration_cali": False, "timelapse": False, "layer_inspect": False},
         "switched_off": {"clog_probe": "nozzle_clog_detect=False"},
         "planned_for_machine": same_bed_machine_id(machine),
@@ -313,6 +313,33 @@ class TestThePreamble:
         assert codes.index("M190 S65") > codes.index("G1 X215.00 Y35.00 F6000"), "the waits happen over the new footprint"
         assert not any(c.startswith(("G28 Z", "G29", "G380", "G91")) for c in codes)
 
+    def test_with_a_chute_on_record_the_heat_and_the_prime_happen_off_the_plate(self):
+        lines = [line.split(";", 1)[0].strip() for line in build_quiet_start_preamble(
+            hotend_temp=220, bed_temp=65, clear_z_mm=47.0, travel_to_mm=(215.0, 35.0), first_layer_z_mm=0.2,
+            purge_at_mm=(-48.2, None),
+        )]
+        codes = [line for line in lines if line]
+        assert codes == [
+            "M140 S65", "M104 S220", "G21", "G90", "M83",
+            "G1 Z47.00 F600", "G28 X Y",
+            "G1 X-48.20 F6000",
+            "M190 S65", "M109 S220",
+            "G92 E0", "G1 E5 F60", "G92 E0", "G4 P500",
+            "G1 X215.00 Y35.00 F6000",
+            "G1 Z5.20 F600",
+        ], "home, then the chute at the clear height, the waits and the prime there, then over the part, then down"
+        both = build_quiet_start_preamble(
+            hotend_temp=220, bed_temp=65, clear_z_mm=47.0, travel_to_mm=(215.0, 35.0), first_layer_z_mm=0.2,
+            purge_at_mm=(60.0, 265.0),
+        )
+        assert any(line.startswith("G1 X60.00 Y265.00 F6000") for line in both), "a chute behind the plate names both axes"
+        assert build_quiet_start_preamble(
+            hotend_temp=220, bed_temp=65, clear_z_mm=47.0, travel_to_mm=(215.0, 35.0), first_layer_z_mm=0.2,
+            purge_at_mm=(None, None),
+        ) == build_quiet_start_preamble(
+            hotend_temp=220, bed_temp=65, clear_z_mm=47.0, travel_to_mm=(215.0, 35.0), first_layer_z_mm=0.2,
+        ), "a chute with no axis is no chute"
+
     def test_a_printer_spells_its_own_home_and_the_prime_carries_its_sentinel(self):
         lines = build_quiet_start_preamble(
             hotend_temp=200, bed_temp=60, clear_z_mm=12.5, travel_to_mm=(10.0, 10.0), first_layer_z_mm=0.3,
@@ -342,6 +369,8 @@ class TestTheWrap:
         assert 0 < head < end
         motions = [line for line in lines[end:] if re.match(r"^G[01]\b.*[XYZ]-?\d", line.split(";", 1)[0])]
         assert motions[0].startswith("G1 Z47.00 F600"), "the first motion is the absolute lift"
+        assert motions[1].startswith("G1 X-48.20 F6000"), "then the chute, before anything heats over the plate"
+        assert lines.index("M109 S220  ; wait for the hotend") < lines.index("G1 X215.00 Y35.00 F6000  ; over the new part's own footprint, still clear")
         assert "M620 M" not in gcode and "G29" not in gcode and "G380" not in gcode and "M73 P0 R" not in gcode.split(";LAYER_CHANGE")[0]
         homes = [line for line in lines if line.split(";", 1)[0].strip().startswith("G28")]
         assert homes and all(line.split(";", 1)[0].strip() == "G28 X Y" for line in homes)
