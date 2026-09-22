@@ -11,6 +11,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **A check Kiln couldn't make is never reported as a pass.** A pre-flight that can't reach the servers lists the check as not made, instead of quietly leaving it out.
 
+- **Kiln tells you when your nozzle crosses a wear milestone.** Approaching the end of its life, past the point half of nozzles like it wore out, past the budget: each said once, on every signed-in Kiln, and a print at the budget is refused until you swap it.
+
 - **The weight on your printer's screen is for the filament you're actually using.** Every slice is weighed with the material you name or the spool your printer reports loaded, and Kiln tells you which one it used.
 
 - **Your Bambu is told the filament you're actually printing.** It warms up for that filament, and its screen shows the right one.
