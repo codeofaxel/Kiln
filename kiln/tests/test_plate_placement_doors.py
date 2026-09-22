@@ -207,6 +207,27 @@ DOORS = [
     ("slice_and_estimate", _estimate_tools, {}),
 ]
 
+#: The doors whose output is only a number.  They walk every scenario below
+#: with the rest -- none may quietly opt out -- but where a door that makes a
+#: printable file refuses because of the plate, an estimate answers: nothing
+#: it produces is ever started onto the plate (Adam, 2026-09-22).
+ESTIMATE_DOORS = frozenset({"slice_and_estimate"})
+
+
+def _assert_estimates_the_part_on_an_empty_plate(resp: dict, spy: Any) -> None:
+    """What an estimate door does where a printing door refuses: it answers,
+    for the part as sliced on an empty plate, and says that is what it is."""
+    from kiln.plugins.estimate_tools import EMPTY_PLATE_ESTIMATE_NOTE
+
+    assert resp["success"] is True, resp
+    assert resp["plate_note"] == EMPTY_PLATE_ESTIMATE_NOTE
+    assert spy.called, "an estimate that answers has sliced something"
+    assert not str(spy.call_args.args[0]).endswith("_placed.stl"), "the fallback estimates the part unplaced"
+    assert "placement" not in resp, "an estimate on an empty plate claims no spot beside the part"
+    if "message" in resp:
+        # The summary is what gets read: the caveat rides it, not only a side key.
+        assert resp["message"].endswith(EMPTY_PLATE_ESTIMATE_NOTE), resp["message"]
+
 
 def _call(door: str, registry, extra: dict, **kwargs) -> dict:
     tool = registry()[door]
@@ -233,6 +254,9 @@ class TestEveryDoor:
         spy, _ = _fake_slice(tmp_path)
         with patch("kiln.slicer.slice_file", spy):
             resp = _call(door, registry, extra, input_path=stl)
+        if door in ESTIMATE_DOORS:
+            _assert_estimates_the_part_on_an_empty_plate(resp, spy)
+            return
         assert resp["success"] is False and resp["error"]["code"] == "PLACEMENT_PLATE_OCCUPIED"
         msg = resp["error"]["message"]
         assert msg.startswith("The last print, jar v2, is still on the plate (since ")
@@ -298,6 +322,9 @@ class TestEveryDoor:
         spy, _ = _fake_slice(tmp_path)
         with patch("kiln.slicer.slice_file", spy):
             resp = _call(door, registry, extra, input_path=stl, placement=[100, 100])
+        if door in ESTIMATE_DOORS:
+            _assert_estimates_the_part_on_an_empty_plate(resp, spy)
+            return
         assert resp["success"] is False and resp["error"]["code"] == "PLACEMENT_REFUSED"
         assert "the head would clip the jar on its way down." in resp["error"]["message"]
         assert "Spots with room: [40, 40] (12 mm clear), [40, 200] (30 mm clear)." in resp["error"]["message"]
@@ -317,6 +344,11 @@ class TestEveryDoor:
         spy, _ = _fake_slice(tmp_path)
         with patch("kiln.slicer.slice_file", spy):
             resp = _call(door, registry, extra, input_path=stl, placement=[40, 40])
+        if door in ESTIMATE_DOORS:
+            # An estimate needs no clearance verdict, so being offline or
+            # signed out never stops one.
+            _assert_estimates_the_part_on_an_empty_plate(resp, spy)
+            return
         assert resp["success"] is False and resp["error"]["code"] == "PLACEMENT_NO_VERDICT"
         from kiln import plate_state
 
@@ -335,6 +367,12 @@ class TestEveryDoor:
         spy, _ = _fake_slice(tmp_path)
         with patch("kiln.slicer.slice_file", spy):
             resp = _call(door, registry, extra, input_path=stl, placement=[40, 40])
+        if door in ESTIMATE_DOORS:
+            # The refusal came AFTER the bed-fit gate ran: it is still the
+            # plate's, and the estimate still answers.
+            _assert_estimates_the_part_on_an_empty_plate(resp, spy)
+            assert spy.call_count == 2, "the placed copy was sliced, refused, and the part sliced again unplaced"
+            return
         assert spy.called, "the slice happened; what is refused is handing the file on"
         assert resp["success"] is False and resp["error"]["code"] == "PLACEMENT_REFUSED"
         assert "checked the sliced file" in resp["error"]["message"]
@@ -844,6 +882,40 @@ class TestEveryCallerOfTheSlicer:
             f"gated AND walked behaviourally here; a removed one comes off _WALKED."
         )
 
+    def test_only_the_estimate_helper_may_switch_the_plate_gate_off(self):
+        """The plate gate's one exemption is a door whose output is never
+        printed.  Written down in prose it would be borrowed by the next door
+        that finds the gate inconvenient; this fails the moment anything but
+        the estimate helper passes ``plate_gate`` to the shared step."""
+        import ast
+
+        import kiln
+
+        root = Path(kiln.__file__).parent
+        callers: set[str] = set()
+        for rel, name, node in _functions(root):
+            for call in ast.walk(node):
+                if isinstance(call, ast.Call) and any(kw.arg == "plate_gate" for kw in call.keywords):
+                    callers.add(f"{rel}:{name}")
+        assert callers == {"plugins/estimate_tools.py:_estimate_slice"}, (
+            f"the plate gate is switched off from {sorted(callers)}.  Only an estimate -- whose output is "
+            f"never started onto a plate -- may do that, through _estimate_slice."
+        )
+
+    def test_an_estimate_still_refuses_a_part_that_does_not_fit_the_bed(self, tmp_path, machine, monkeypatch):
+        """The plate stops refusing an estimate; the bed does not.  A part
+        too big for the machine has no honest estimate on any plate."""
+        _occupy(machine)
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=False, spots=[]), None)))
+        big = _cube(tmp_path / "big.stl", size=400.0)
+        spy, _ = _fake_slice(tmp_path)
+        with patch("kiln.slicer.slice_file", spy):
+            resp = _estimate_tools()["slice_and_estimate"](input_path=big, printer_id="ender3")
+        assert resp["success"] is False
+        assert resp["error"]["code"] == "EXCEEDS_BED"
+        assert "plate_note" not in resp
+        assert not spy.called
+
     def test_the_walk_sees_the_slicers_public_wrappers_as_entries(self):
         """``estimate_print`` and ``slice_multicolor_copies`` slice too; a
         door that reaches them raw would go red here today."""
@@ -998,9 +1070,10 @@ class TestEveryCallerOfTheSlicer:
         assert not spy.called
 
     def test_estimate_print_time_takes_the_gate_and_says_no_start(self, tmp_path, machine, monkeypatch):
-        """The estimate slices too (through ``estimate_print``'s reading of
-        the file): an occupied plate refuses it, and a placed estimate says
-        the part must not be started there by hand."""
+        """The estimate slices too, through the shared step: an occupied plate
+        with no safe spot named still gets an answer -- the part on an empty
+        plate, said so -- and a placed estimate says the part must not be
+        started there by hand."""
         tools = _estimate_tools()
         _occupy(machine)
         monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=False, spots=[]), None)))
@@ -1008,8 +1081,7 @@ class TestEveryCallerOfTheSlicer:
         spy, _ = _fake_slice(tmp_path)
         with patch("kiln.slicer.slice_file", spy):
             resp = tools["estimate_print_time"](file_path=stl, printer_id="ender3")
-        assert resp["success"] is False and resp["error"]["code"] == "PLACEMENT_PLATE_OCCUPIED"
-        assert not spy.called
+        _assert_estimates_the_part_on_an_empty_plate(resp, spy)
         monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=True), None)))
         with patch("kiln.slicer.slice_file", spy):
             resp = tools["estimate_print_time"](file_path=stl, printer_id="ender3", placement=[40, 40])

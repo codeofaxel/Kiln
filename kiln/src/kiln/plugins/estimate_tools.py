@@ -49,6 +49,58 @@ def _format_time(seconds: int | None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# The estimate's slice: never refused because of the plate
+# ---------------------------------------------------------------------------
+
+#: What an estimate says when the plate still holds the last print and the
+#: part could not be placed beside it: the number is real, for the part on an
+#: empty plate.
+EMPTY_PLATE_ESTIMATE_NOTE = (
+    "The plate still holds the last print, so this is the estimate for the part on an empty plate."
+)
+
+
+def _estimate_slice(input_path: str, **kwargs: Any) -> tuple[Any, dict | None, dict[str, Any]]:
+    """The shared slice step for a door that only estimates.
+
+    An estimate never refuses because of the plate.  The plate gate exists
+    because a file sliced onto an occupied plate would be started onto it,
+    and an estimate is started onto nothing.  So: slice through the shared
+    step as usual -- a safe named spot still gives the estimate of the part
+    THERE -- and when the step refuses because the plate is occupied, slice
+    again without the plate gate and say, in ``info["plate_note"]``, that
+    this is the part on an empty plate.  Every other refusal stands: a part
+    that does not fit the bed (on a door that checks it), and a placement
+    argument that cannot be read, are the caller's to hear about.
+
+    The one caller of the shared step allowed to switch the plate gate off;
+    a test holds that to this function, so a door that prints cannot borrow it.
+    """
+    from kiln.plugins.slicer_tools import _placed_slice
+
+    result, err, info = _placed_slice(input_path, **kwargs)
+    placement_info = info.get("placement") if isinstance(info, dict) else None
+    code = (err.get("error") or {}).get("code") if isinstance(err, dict) else None
+    # Judged by the refusal's own code, never by which gate ran last: the
+    # second verdict on the sliced file refuses AFTER the bed-fit gate has
+    # run, and is still the plate's refusal.  A placement argument that
+    # cannot be read refuses before the record is read, so it never carries
+    # an occupied plate and stands.
+    plate_refused = (
+        isinstance(code, str)
+        and code.startswith("PLACEMENT_")
+        and isinstance(placement_info, dict)
+        and placement_info.get("plate") == "occupied"
+    )
+    if not plate_refused:
+        return result, err, info
+    result, err, info = _placed_slice(input_path, plate_gate=False, **kwargs)
+    if err is None:
+        info["plate_note"] = EMPTY_PLATE_ESTIMATE_NOTE
+    return result, err, info
+
+
+# ---------------------------------------------------------------------------
 # Plugin class
 # ---------------------------------------------------------------------------
 
@@ -115,13 +167,12 @@ class _EstimateToolsPlugin:
                 placement: Where the part goes when the plate still holds the
                     last print: ``[x, y]`` in mm (the part's footprint
                     origin), a named region (``"front-left"``, ``"centre"``,
-                    ``"back-right"``, …), or ``"keep"``.  Omitted, an
-                    occupied plate refuses and lists the spots that would
-                    work; a clear plate estimates as before.  The response's
-                    ``placement`` block is the clearance verdict, checked
-                    again on the sliced file.  The clearance verdict is free;
-                    placing and starting a second print on an occupied plate
-                    is a kiln-pro feature (https://kiln3d.com/pricing).
+                    ``"back-right"``, …), or ``"keep"``.  An estimate never
+                    refuses because of the plate: when the plate still holds
+                    the last print and no safe spot is named, the estimate is
+                    for the part on an empty plate and ``plate_note`` says
+                    so.  Where a named spot is safe, the estimate is of the
+                    part there, with the clearance verdict in ``placement``.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("slicer"):
@@ -148,15 +199,14 @@ class _EstimateToolsPlugin:
                 # file was not created" (bambu_p1s, 2026-08-24), where
                 # slice_model says EXCEEDS_BED with the dimensions.  Same
                 # helper, same refusal shape, so the two doors cannot differ.
-                from kiln.plugins.slicer_tools import _attach_placement, _placed_slice
+                from kiln.plugins.slicer_tools import _attach_placement
 
-                # The plate may still hold the last print: the same shared
-                # step as the slice doors (plate gate, bed-fit gate, slice,
-                # second verdict), so an estimate is of the part where it
-                # will actually print — and refuses where they do.  The
-                # slicer weighs the print with this material's density
+                # The same shared step as the slice doors, so an estimate is
+                # of the part where it will actually print -- but it never
+                # refuses because of the plate (_estimate_slice).  The slicer
+                # weighs the print with this material's density
                 # (kiln.slicer_filament), so the estimate's grams are its own.
-                result, slice_err, sinfo = _placed_slice(
+                result, slice_err, sinfo = _estimate_slice(
                     input_path, effective_printer_id=effective_printer_id,
                     printer_name=printer_name, placement=placement,
                     profile_path=effective_profile, auto_center=True,
@@ -286,6 +336,12 @@ class _EstimateToolsPlugin:
                     "message": message,
                 }
                 _attach_placement(response, place_info)
+                if sinfo.get("plate_note"):
+                    # In the summary as well as beside it: the summary is what
+                    # gets read, and a number without its caveat is a number
+                    # someone will plan a plate around.
+                    response["plate_note"] = sinfo["plate_note"]
+                    response["message"] = f"{message} {sinfo['plate_note']}"
                 return response
 
             except SlicerNotFoundError as exc:
@@ -411,13 +467,9 @@ class _EstimateToolsPlugin:
                     return {"success": True, **result}
 
                 # Otherwise, slice first with the right profile -- through
-                # the same shared step as every slice door, so a plate that
-                # still holds the last print refuses an estimate exactly as
-                # it refuses a slice (``placement`` names the spot; the
-                # clearance verdict is free, placing and starting a second
-                # print on an occupied plate is a kiln-pro feature,
-                # https://kiln3d.com/pricing).
-                from kiln.plugins.slicer_tools import _attach_placement, _placed_slice
+                # the same shared step as every slice door, never refusing
+                # because of the plate (_estimate_slice).
+                from kiln.plugins.slicer_tools import _attach_placement
                 from kiln.slicer import estimates_for_result
 
                 resolved_profile = profile or None
@@ -430,7 +482,7 @@ class _EstimateToolsPlugin:
 
                     resolved_profile = resolve_slicer_profile(printer_id)
 
-                result, slice_err, sinfo = _placed_slice(
+                result, slice_err, sinfo = _estimate_slice(
                     file_path, effective_printer_id=printer_id or None, printer_name=None,
                     placement=placement, profile_path=resolved_profile,
                     slicer_path=slicer_path or None, material=material or None,
@@ -439,6 +491,8 @@ class _EstimateToolsPlugin:
                     return slice_err
                 response = {"success": True, **estimates_for_result(result, material or None)}
                 _attach_placement(response, sinfo["placement"])
+                if sinfo.get("plate_note"):
+                    response["plate_note"] = sinfo["plate_note"]
                 return response
             except Exception as exc:
                 return _srv._error_dict(f"Print estimation failed: {exc}", code="ESTIMATE_ERROR")

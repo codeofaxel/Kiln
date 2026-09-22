@@ -863,9 +863,18 @@ def _placed_slice(
     auto_center: bool | None = None,
     material_id: str | None = None,
     slicer: Any | None = None,
+    plate_gate: bool = True,
     **slice_kwargs: Any,
 ) -> tuple[Any | None, dict | None, dict[str, Any]]:
     """The slice every door shares: plate gate, bed-fit gate, slicer, second verdict.
+
+    *plate_gate* ``False`` skips the plate gate and its second verdict, and
+    is for a door whose output is never printed -- an estimate.  The plate
+    gate exists because a file sliced onto an occupied plate would be
+    started onto it; a number about how long a part takes is started onto
+    nothing.  The bed-fit gate is untouched by it: *auto_center* decides that
+    gate exactly as before, and a part that does not fit the bed has no
+    honest estimate on any plate.
 
     Returns ``(result, error_dict_or_None, info)``.  *auto_center* ``None``
     means the door never had a bed-fit gate and keeps not having one; a
@@ -881,10 +890,13 @@ def _placed_slice(
     height every lift in the file rises to).  Raises whatever the slicer
     raises; each door words that.
     """
-    placed, err, place_info = _apply_plate_placement(
-        input_path, effective_printer_id=effective_printer_id, printer_name=printer_name,
-        placement=placement, profile_path=profile_path, adapter=adapter,
-    )
+    if plate_gate:
+        placed, err, place_info = _apply_plate_placement(
+            input_path, effective_printer_id=effective_printer_id, printer_name=printer_name,
+            placement=placement, profile_path=profile_path, adapter=adapter,
+        )
+    else:
+        placed, err, place_info = input_path, None, {"plate": "not_checked"}
     info: dict[str, Any] = {"placement": place_info, "bed_fit": None, "effective_input": input_path}
     if err is not None:
         return None, err, info
