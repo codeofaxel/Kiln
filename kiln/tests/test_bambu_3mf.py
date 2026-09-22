@@ -789,8 +789,8 @@ class TestBuildBambu3mf:
                 return_value=FAKE_START_GCODE,
             ),
             patch(
-                "kiln.printers.bambu_3mf._load_a1_end_gcode",
-                return_value=FAKE_END_GCODE,
+                "kiln.printers.bambu_3mf._select_end_gcode",
+                return_value=(FAKE_END_GCODE, "bambu_a1"),
             ),
         )
 
@@ -1048,8 +1048,8 @@ class TestBuildBambu3mfSourceExtraction:
                 return_value=FAKE_START_GCODE,
             ),
             patch(
-                "kiln.printers.bambu_3mf._load_a1_end_gcode",
-                return_value=FAKE_END_GCODE,
+                "kiln.printers.bambu_3mf._select_end_gcode",
+                return_value=(FAKE_END_GCODE, "bambu_a1"),
             ),
         )
 
@@ -1249,8 +1249,8 @@ class TestThumbnailsReachTheArchive:
                 return_value=FAKE_START_GCODE,
             ),
             patch(
-                "kiln.printers.bambu_3mf._load_a1_end_gcode",
-                return_value=FAKE_END_GCODE,
+                "kiln.printers.bambu_3mf._select_end_gcode",
+                return_value=(FAKE_END_GCODE, "bambu_a1"),
             ),
         )
 
@@ -1782,7 +1782,8 @@ class TestPerModelTemplateSelection:
         start, start_source = _select_start_gcode(declared)
         end, end_source = _select_end_gcode(declared)
         assert start == _load_a1_start_gcode()
-        assert end == _load_a1_end_gcode()
+        assert end == _select_end_gcode("bambu_a1")[0], "the A1's end, filled in at the real height"
+        assert end != _load_a1_end_gcode(), "never the capture frozen at one 65 mm print"
         assert start_source == end_source == "bambu_a1"
 
     def test_a1_start_gcode_is_untouched(self):
@@ -2130,8 +2131,9 @@ class TestEndTemplateExpansion:
     )
     def test_the_installed_bambu_studio_still_ships_the_a1_end_kiln_was_proven_on(self):
         """A drift report, not a gate.  When Bambu ships a new A1 end, this
-        says so and what moved, rather than failing: Kiln keeps the file that
-        was run on the owner's A1 until a bench print says otherwise."""
+        says so and what moved, rather than failing: Kiln keeps serving the
+        template the owner's A1 was proven on until a bench print says
+        otherwise."""
         import difflib
 
         from kiln.printers.bambu_3mf import _expand_end_template
@@ -2156,9 +2158,95 @@ class TestEndTemplateExpansion:
         ]
         pytest.skip(
             f"Bambu moved the A1 end template to {stamp}: {len(moved)} expanded lines differ from the "
-            "20231229 template Kiln's proven A1 end was captured from. Kiln keeps the proven file until "
-            "a bench print on an A1 says otherwise."
+            "20231229 template Kiln's proven A1 end was captured from and still serves. Kiln keeps serving "
+            "it until a bench print on an A1 says otherwise."
         )
+
+    def test_the_a1_end_is_bambus_template_inside_the_proven_captures_own_wrapper(self):
+        """The shipped A1 end is exactly the template the proven capture was
+        taken from (stamped 20231229, kept in kiln/tests/data) between the
+        capture's own slicer lines -- nothing Kiln wrote, nothing frozen."""
+        from kiln.printers.bambu_3mf import _load_a1_end_gcode, _select_end_gcode
+
+        shipped, source = _select_end_gcode("bambu_a1")
+        assert source == "bambu_a1"
+        proven = _load_a1_end_gcode()
+        i, j = proven.index(";===== date: 20231229"), proven.index("M73 P100 R0")
+        gap = proven[i:j][len(proven[i:j].rstrip("\n")):]
+        vendor = (Path(__file__).parent / "data" / "bambu_a1_end_template_20231229.gcode").read_text()
+        assert shipped == proven[:i] + vendor.rstrip("\n") + gap + proven[j:]
+
+    def test_at_65mm_the_a1_end_is_the_proven_capture_byte_for_byte(self):
+        """65 mm is the height the proven file was captured at: there the
+        template must reproduce it exactly, and the printer must receive
+        exactly what it received from the frozen copy."""
+        from kiln.printers.bambu_3mf import (
+            _end_template_variables,
+            _expand_end_template,
+            _load_a1_end_gcode,
+            _resolve_end_gcode,
+            _select_end_gcode,
+        )
+
+        template, _ = _select_end_gcode("bambu_a1")
+        proven = _load_a1_end_gcode()
+        assert _expand_end_template(template, _end_template_variables(65.0, "bambu_a1")) == proven
+        assert (_resolve_end_gcode(template, max_z=65.0, printer_model="bambu_a1")
+                == _resolve_end_gcode(proven, max_z=65.0, printer_model="bambu_a1"))
+
+    @pytest.mark.parametrize("height", [156.0, 170.0, 190.0, 200.0, 240.0, 255.0])
+    def test_after_a_tall_a1_print_the_head_never_comes_back_down_onto_it(self, height):
+        """The frozen capture lifted above a tall part and then drove the
+        gantry back down to Z165/Z163 -- after a print taller than about
+        188 mm, the X rail 25 mm above the nozzle came down on the part.
+        Bambu Studio itself, on a 240 mm A1 print, lifts to 240.4 and then
+        parks at 256."""
+        from kiln.printers.bambu_3mf import _resolve_end_gcode, _select_end_gcode
+
+        template, _ = _select_end_gcode("bambu_a1")
+        out = _resolve_end_gcode(template, max_z=height, printer_model="bambu_a1")
+        zs = [float(v) for v in re.findall(r"^\s*G[01]\b[^;\n]*\bZ(-?[\d.]+)", out, re.M)]
+        assert zs[1:] == [256.0, 256.0], f"after the first lift the A1 parks at the top, not {zs[1:]}"
+        assert all(z >= height for z in zs), f"a {height:g} mm print, and the head is sent to {min(zs):g}"
+
+    def test_no_end_routine_is_frozen_at_one_height(self):
+        """The gate that would have caught the A1 in March.  For every
+        model, the lifts after Kiln's first one are read at a short print and
+        at one 20 mm under the machine's top.  A routine may keep the same
+        late lifts whatever the height only if they already clear the tall
+        part; one that parks below a tall part at a height it chose for a
+        short one was frozen, not filled in.  The frozen A1 capture is run
+        through the same check and must fail it."""
+        from kiln.printers.bambu_3mf import (
+            _DATA_DIR,
+            _MODEL_END_GCODE_FILES,
+            _load_a1_end_gcode,
+            _resolve_end_gcode,
+            _select_end_gcode,
+        )
+
+        catalogue = json.loads((_DATA_DIR / "printer_intelligence.json").read_text())
+
+        def late_lifts(model: str, height: float, text: str) -> list[float]:
+            out = _resolve_end_gcode(text, max_z=height, printer_model=model)
+            zs, absolute = [], True
+            for line in out.split("\n"):
+                code = line.split(";", 1)[0].strip()
+                if code in ("G90", "G91"):
+                    absolute = code == "G90"
+                m = re.match(r"^G[01]\b.*\bZ(-?[\d.]+)", code)
+                if m and absolute:
+                    zs.append(float(m.group(1)))
+            return zs[1:]
+
+        def frozen_below_a_tall_part(model: str, text: str) -> bool:
+            tall = float(catalogue[model]["build_volume_mm"][2]) - 20.0
+            short_lifts, tall_lifts = late_lifts(model, 10.0, text), late_lifts(model, tall, text)
+            return short_lifts == tall_lifts and any(z < tall for z in tall_lifts)
+
+        for model in _MODEL_END_GCODE_FILES:
+            assert not frozen_below_a_tall_part(model, _select_end_gcode(model)[0]), model
+        assert frozen_below_a_tall_part("bambu_a1", _load_a1_end_gcode()), "the check must catch the frozen capture"
 
     def test_taller_print_takes_the_other_branch(self):
         """A print near the Z ceiling must clamp, not lift through the lid."""

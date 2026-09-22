@@ -43,6 +43,18 @@ also contain the slicer's injected preamble (``M201``/``M203`` machine limits,
 ``M73`` progress) and postamble (``; MACHINE_END_GCODE_END``, spaghetti
 detector).  They are the A1-proven artifacts and are left exactly as they are.
 
+The end capture is no longer what an A1 receives, though.  A capture holds
+the numbers of the one print it was taken from, and two of the end block's
+lifts are the part's own height: this one froze "100 mm above the part" as
+``Z165``/``Z163``, so after any A1 print taller than about 188 mm the end
+sequence lifted clear and then drove the gantry back down, and the X rail --
+25 mm above the nozzle, across the plate -- came down on the part.  The A1
+is now served ``bambu_a1_end_template.gcode``: Bambu's template stamped
+20231229, the one the capture was taken from, inside the capture's own
+slicer lines.  Filled in at 65 mm it is the capture byte for byte; at every
+other height it is Bambu's own routine.  The capture stays, as the reference
+that pins exactly that.
+
 That provenance is what splits start from end here:
 
 * **End G-code is per model.**  Across every model's end template the only
@@ -218,7 +230,15 @@ _MODEL_FLUSH_STATION: dict[str, tuple[float | None, float | None]] = {
 
 
 _MODEL_END_GCODE_FILES: dict[str, str] = {
-    "bambu_a1": "bambu_a1_end_gcode.gcode",
+    # The A1's end is Bambu's own template -- the one stamped 20231229 that the
+    # hardware-proven bambu_a1_end_gcode.gcode was captured from -- inside that
+    # capture's own slicer wrapper (power-loss recovery off, the 0.04 mm
+    # retract, fan and spaghetti detector off, and the closing M73).  Filled in
+    # at the print's real height it is that capture byte for byte at 65 mm,
+    # the height it was taken at, and Bambu's own routine at every other: the
+    # capture froze "lift 100 mm above the part" as Z165, which after a print
+    # taller than about 188 mm lowered the X rail onto the part.
+    "bambu_a1": "bambu_a1_end_template.gcode",
     "bambu_a1_mini": "bambu_a1_mini_end_gcode.gcode",
     "bambu_p1p": "bambu_p1p_end_gcode.gcode",
     "bambu_p1s": "bambu_p1s_end_gcode.gcode",
@@ -461,7 +481,9 @@ def _load_a1_start_gcode() -> str:
 
 
 def _load_a1_end_gcode() -> str:
-    """Load the A1 end gcode template."""
+    """The hardware-proven A1 end capture, as captured: frozen at a 65 mm
+    print.  Kept as the reference the A1's end template is checked against,
+    never sent to a printer -- :func:`_select_end_gcode` serves the template."""
     global _a1_end_gcode  # noqa: PLW0603
     if _a1_end_gcode is None:
         if not _A1_END_GCODE_PATH.is_file():
@@ -607,7 +629,7 @@ def _select_end_gcode(printer_model: str | None) -> tuple[str, str]:
             "No end gcode template for %s — using the Bambu A1 end sequence.",
             model,
         )
-    return _load_a1_end_gcode(), "bambu_a1"
+    return _load_model_template(_MODEL_END_GCODE_FILES["bambu_a1"]), "bambu_a1"
 
 
 # ---------------------------------------------------------------------------
@@ -1153,8 +1175,7 @@ def _resolve_end_gcode(
     Two steps, in this order:
 
     1. Expand BambuStudio's template syntax against the real print height.
-       A pre-expanded template (the proven A1 capture) passes through
-       untouched.
+       A template with no expressions passes through untouched.
     2. Adjust the safe Z-move height.  The first ``G1 Z... F900`` command is
        the safe-move after the last layer — it needs to clear the print.
        Kiln lifts ``max_z + 5.0`` where Bambu's own template asks for
