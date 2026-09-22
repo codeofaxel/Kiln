@@ -939,9 +939,17 @@ class TestTheAmsBlockGoesToThisMachinesChute:
         assert "bambu_a1" in said, "the refusal names what it CAN do"
         assert "-48.2" not in said, "a refusal never leaks another machine's position as a suggestion"
 
-    def test_an_undeclared_printer_is_refused_too(self):
-        with pytest.raises(ValueError, match="undeclared printer"):
-            _wrap_tool_changes(_TWO_COLOUR_BODY, printer_model=None)
+    @pytest.mark.parametrize("printer_model", [None, "", "bambu_never_heard_of_it"])
+    def test_a_printer_nobody_declared_keeps_the_a1_default_its_other_routines_take(self, printer_model):
+        """An undeclared or unknown printer has always been treated as an A1
+        -- its warm-up and end sequence are the A1's -- and people print
+        multi-colour on that path.  Only a model Kiln KNOWS is not an A1 is
+        refused its chute."""
+        from kiln.printers.bambu_3mf import flush_station_for
+
+        assert flush_station_for(printer_model) == (-48.2, None)
+        out = _wrap_tool_changes(_TWO_COLOUR_BODY, printer_model=printer_model).split("\n")
+        assert "    G1 X-48.20 F3000" in out
 
     def test_a_single_colour_print_is_untouched_on_every_model(self):
         """The refusal is about the AMS block, not about the machine: a file

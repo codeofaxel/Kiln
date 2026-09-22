@@ -207,8 +207,10 @@ _MODEL_START_GCODE_FILES: dict[tuple[str, str], str] = {
 # it a bench fact about one machine, not a rule about Bambu printers -- so it
 # cannot be carried to a sibling by analogy, however similar the frame looks.
 # A model earns a line here when its own flush position has been run and
-# watched, and until then :func:`_wrap_tool_changes` refuses to write the
-# file rather than send a head to another machine's chute.
+# watched.  Until then :func:`_wrap_tool_changes` refuses to write a
+# multi-colour file for a model Kiln KNOWS is not an A1, rather than send its
+# head to the A1's chute; a printer nobody declared keeps the A1 default that
+# its warm-up and end sequence take too.
 _MODEL_FLUSH_STATION: dict[str, tuple[float | None, float | None]] = {
     # Run on the owner's A1 Combo; ``None`` in Y keeps the head's own row.
     "bambu_a1": (-48.2, None),
@@ -569,10 +571,22 @@ def _select_start_gcode(
 
 
 def flush_station_for(printer_model: str | None) -> tuple[float | None, float | None] | None:
-    """Where this model's AMS block takes the head to flush, or ``None`` when
-    no position for it has been run and watched.  ``None`` is a refusal the
-    caller must act on, never a cue to reach for a sibling's figure."""
-    return _MODEL_FLUSH_STATION.get(_normalize_model(printer_model))
+    """Where this model's AMS block takes the head to flush.
+
+    A model with a station on record gets it.  A model Kiln KNOWS -- one with
+    its own captured warm-up -- but whose chute is not on record gets
+    ``None``: a refusal the caller must act on, never a cue to reach for a
+    sibling's figure, because Kiln knows that machine is not an A1.  A
+    printer nobody declared, or one Kiln has never heard of, gets the A1's,
+    the same long-standing default its warm-up and end sequence take:
+    people print on that path, and nothing says the machine is not an A1.
+    """
+    model = _normalize_model(printer_model)
+    if model in _MODEL_FLUSH_STATION:
+        return _MODEL_FLUSH_STATION[model]
+    if any(known == model for known, _nozzle in _MODEL_START_GCODE_FILES):
+        return None
+    return _MODEL_FLUSH_STATION["bambu_a1"]
 
 
 def _select_end_gcode(printer_model: str | None) -> tuple[str, str]:
@@ -1770,11 +1784,10 @@ def _wrap_tool_changes(
                 if to_chute is None:
                     raise ValueError(
                         f"this print changes filament and Kiln has no waste chute on record for "
-                        f"{_normalize_model(printer_model) or 'an undeclared printer'}, so it will not write "
-                        "the file: the AMS block has to purge somewhere off the plate, and sending the head "
-                        "to another model's chute is how a head meets a frame. Slice this one in a single "
-                        "colour, or print it on a model whose chute has been run and watched "
-                        f"({', '.join(sorted(_MODEL_FLUSH_STATION))}).",
+                        f"{_normalize_model(printer_model)}, so it will not write the file: the AMS block has "
+                        "to purge somewhere off the plate, and sending the head to another model's chute is "
+                        "how a head meets a frame. Slice this one in a single colour, or print it on a model "
+                        f"whose chute has been run and watched ({', '.join(sorted(_MODEL_FLUSH_STATION))}).",
                     )
                 result.append(f"    T{n}")
                 result.append(f"    {to_chute}")
