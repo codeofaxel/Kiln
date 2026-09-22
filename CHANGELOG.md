@@ -17,6 +17,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Kiln makes multi-colour Bambu files for the A1 only.** Single-colour prints, and multi-colour files you slice in Bambu Studio, work on every Bambu as before.
+
 - **When Kiln can't reach its servers, it says so in plain words.** Every feature that leans on them names which of four things happened — this computer is offline, you're signed out, the servers didn't answer, or they said no — and what to do next.
 
 - **A check Kiln couldn't make is never reported as a pass.** A pre-flight that can't reach the servers lists the check as not made, instead of quietly leaving it out.
@@ -275,6 +277,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   https://kiln3d.com/pricing.
 
 ### Fixed
+
+- **Every Bambu printer Kiln supports now starts and finishes each print the way Bambu designed it.**
+
+- **Tall prints on a Bambu A1 now finish with the head safely clear.**
 
 - **A Bambu keeps the moves Kiln saved for it through a brief hiccup on Kiln's side.** Homing, parking and wiping used to refuse until you were back online, because Kiln dropped the sequence it had saved for your machine.
 
