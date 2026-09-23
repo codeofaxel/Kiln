@@ -602,3 +602,127 @@ class TestSupportsDuplicateFlag:
         assert not supports_duplicate_flag(
             self._info("/opt/bin/prusa-fast", "OrcaSlicer-2.3.2:")
         )
+
+
+class TestThePlacementIsPrintedAsHandedOver:
+    """2026-09-23: Orca's ``--arrange`` defaults to auto, and auto re-packs
+    a 3MF that is not one of its own projects — a jar-and-lid plate approved
+    side by side along X was sliced side by side along Y.  A 3MF's placement
+    is the person's; a loose STL has none and keeps Orca's own default,
+    which centres an origin-centred part (told not to, Orca refuses it)."""
+
+    def _argv_for(self, tmp_path, input_path):
+        seen: dict[str, list[str]] = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = list(cmd)
+            work = cmd[cmd.index("--outputdir") + 1]
+            with open(os.path.join(work, "plate_1.gcode"), "w") as fh:
+                fh.write("G28\nG1 X1\n; filament used [mm] = 1\n")
+            return _completed(0)
+
+        fake = SimpleNamespace(path="/x/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
+        with patch("kiln.slicer.find_slicer", return_value=fake), \
+             patch("kiln.slicer.subprocess.run", side_effect=fake_run):
+            slice_file(input_path, output_dir=str(tmp_path / "out"), extra_args=["--x-extra"])
+        return seen["cmd"]
+
+    def test_a_3mf_is_sliced_where_it_was_placed(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("kiln.slicer._check_3mf_on_bed", lambda *_a, **_k: None)
+        monkeypatch.setattr("kiln.slicer.detect_multicolor_3mf", lambda *_a, **_k: None, raising=False)
+        threemf = tmp_path / "plate.3mf"
+        _write_plate_3mf(str(threemf))
+        cmd = self._argv_for(tmp_path, str(threemf))
+        assert cmd[cmd.index("--arrange") + 1] == "0"
+        assert cmd[cmd.index("--orient") + 1] == "0"
+        # A caller's own arguments come after, so they can still override.
+        assert cmd.index("--x-extra") > cmd.index("--arrange")
+
+    def test_orca_is_started_inside_its_own_scratch_directory(self, tmp_path):
+        """Orca's CLI drops a ``result.json`` status file in its working
+        directory; started from the server's own directory it litters
+        wherever Kiln happens to run (found in the repo root, 2026-09-23)."""
+        seen: dict[str, object] = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["cwd"] = kwargs.get("cwd")
+            seen["work"] = cmd[cmd.index("--outputdir") + 1]
+            with open(os.path.join(seen["work"], "plate_1.gcode"), "w") as fh:
+                fh.write("G28\nG1 X1\n; filament used [mm] = 1\n")
+            return _completed(0)
+
+        fake = SimpleNamespace(path="/x/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
+        with patch("kiln.slicer.find_slicer", return_value=fake), \
+             patch("kiln.slicer.subprocess.run", side_effect=fake_run):
+            slice_file(_write_cube(str(tmp_path / "cube.stl")), output_dir=str(tmp_path / "out"))
+        assert seen["cwd"] == seen["work"]
+
+    def test_a_loose_stl_keeps_orcas_own_arrange(self, tmp_path):
+        cmd = self._argv_for(tmp_path, _write_cube(str(tmp_path / "cube.stl")))
+        assert "--arrange" not in cmd and "--orient" not in cmd
+
+
+def _write_plate_3mf(path: str) -> dict[str, float]:
+    """Two 20 x 30 x 10 boxes side by side along X, deliberately off the bed
+    centre (x 40..100, y 40..70) — a placement auto-arrange would move.
+    Returns the placed footprint."""
+    trimesh = pytest.importorskip("trimesh")
+    scene = trimesh.Scene()
+    for name, cx in (("a", 50.0), ("b", 90.0)):
+        box = trimesh.creation.box(extents=(20.0, 30.0, 10.0))
+        box.apply_translation([cx, 55.0, 5.0])
+        scene.add_geometry(box, node_name=name, geom_name=name)
+    with open(path, "wb") as fh:
+        fh.write(scene.export(file_type="3mf"))
+    return {"x_min": 40.0, "x_max": 100.0, "y_min": 40.0, "y_max": 70.0}
+
+
+@pytest.mark.skipif(not _installed(_ORCA), reason="needs a real OrcaSlicer")
+class TestOrcaPrintsThePlacementForReal:
+    def test_a_two_object_plate_is_printed_where_it_was_placed(self, tmp_path):
+        """Fails on a slice that lets Orca arrange: measured, the two boxes
+        come back re-packed around the bed centre."""
+        from kiln.slicer_geometry import parse_slicer_features
+
+        placed = _write_plate_3mf(str(tmp_path / "plate.3mf"))
+        result = slice_file(
+            str(tmp_path / "plate.3mf"),
+            output_dir=str(tmp_path / "out"),
+            profile=resolve_slicer_profile("bambu_a1"),
+            slicer_path=_ORCA,
+        )
+        assert result.success is True
+        fp = parse_slicer_features(result.output_path).model_footprint
+        assert fp is not None
+        # Half a line width of shrink is the toolpath centreline, not a move.
+        assert fp[0] == pytest.approx(placed["x_min"], abs=0.5)
+        assert fp[1] == pytest.approx(placed["y_min"], abs=0.5)
+        assert fp[2] == pytest.approx(placed["x_max"], abs=0.5)
+        assert fp[3] == pytest.approx(placed["y_max"], abs=0.5)
+
+
+class TestAPlateOrcaWillNotMoveIsRefusedInPlainWords:
+    def test_the_refusal_names_the_placement_and_the_fix(self, tmp_path, monkeypatch):
+        """The one refusal arrange-off can newly produce: auto-arrange used
+        to move a plate grazing the volume's edge; now the slice says why
+        it stopped and what to do, not a CLI log line."""
+        monkeypatch.setattr("kiln.slicer._check_3mf_on_bed", lambda *_a, **_k: None)
+        threemf = tmp_path / "plate.3mf"
+        _write_plate_3mf(str(threemf))
+        fake = SimpleNamespace(path="/x/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
+        orca_said = (
+            "[error]   plate 1: Nothing to be sliced, Either the print is empty or "
+            "no object is fully inside the print volume before apply.\n\nrun found error, exit"
+        )
+        with patch("kiln.slicer.find_slicer", return_value=fake), \
+             patch("kiln.slicer.subprocess.run", return_value=_completed(206, stderr=orca_said)), \
+             pytest.raises(SlicerError, match="exactly where it was placed") as info:
+            slice_file(str(threemf), output_dir=str(tmp_path / "out"))
+        assert "move the part in from the bed edge" in str(info.value)
+
+    def test_an_stl_keeps_the_verbatim_report(self, tmp_path):
+        fake = SimpleNamespace(path="/x/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
+        with patch("kiln.slicer.find_slicer", return_value=fake), \
+             patch("kiln.slicer.subprocess.run", return_value=_completed(206, stderr="no object is fully inside the print volume")), \
+             pytest.raises(SlicerError, match="exited with code 206"):
+            slice_file(_write_cube(str(tmp_path / "cube.stl")), output_dir=str(tmp_path / "out"))

@@ -156,6 +156,10 @@ def attach_stage_plate(
     never contained (:mod:`kiln.slicer_geometry`).  They share the plate's
     coordinate frame and must move with the same centring the part gets,
     so the one door that decides placement is the one that attaches them.
+    When the slice says the slicer turned the part, the part is turned the
+    same way here, about its own centre, before the extras are laid
+    around it (:func:`kiln.slicer_geometry.apply_pose_to_payload`) — the
+    stage shows what will print, and ``payload["pose"]`` says it did.
     A door passes ``gcode_path`` when it holds the slice (the print twin),
     or ``mesh_path`` so the slice can be looked up in the machine's own
     ledger (:func:`kiln.monitor_twin.sliced_output_for`); a door that

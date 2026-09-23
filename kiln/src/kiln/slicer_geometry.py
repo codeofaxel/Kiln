@@ -41,8 +41,23 @@ an extra is the part as the slicer placed it, so its centre maps to the
 mesh's bounding-box centre and the first layer rests on the mesh's floor.
 The join is checked before it is believed — a footprint whose size does
 not match the model's means the slice is of something else (a scaled,
-rotated, or different part), and the block says so instead of drawing a
-skirt around the wrong object.
+re-arranged, or different part), and the block says so instead of drawing
+a skirt around the wrong object.
+
+A slicer may also TURN the part: OrcaSlicer's arrange is free to rotate a
+plate a quarter turn while it packs it (measured 2026-09-23 on a jar-and-
+lid plate, sliced 90 degrees from the placement the person approved).
+A footprint whose width and depth are the model's depth and width is that
+turn, not a different part, and the block says so with a ``pose`` — the
+rotation about Z the slicer applied — so the stage can draw the part the
+way it will print.  Which way it turned (90 or 270) cannot be read off a
+bounding box, so it is settled by the first layer: the printed first
+layer's footprint is rasterised against the mesh's own floor turned each
+way, and the turn whose floor it matches wins.  A part whose floor looks
+the same both ways is drawn the same both ways, so the tie is harmless.
+A mismatch is still refused: a 180-degree turn of an asymmetric floor is
+recognised the same way, and a plate whose objects were re-packed
+individually matches no turn at all.
 
 A zero-length ``G1 E0.8`` (an unretract at a travel destination) is not a
 toolpath and is never counted: measured on the jar, those alone pushed the
@@ -73,6 +88,9 @@ payload as its optional ``slicer`` key (see :mod:`kiln.mesh_payload`)::
       "filaments": ["#FFFFFF", "#C81E1E", "#161616"],   # per tool; [] if unnamed
       "model_footprint": {"min": [x, y], "max": [x, y]},   # mesh XY, always
       "offset_mm": [dx, dy, dz],        # bed coords + offset = mesh coords
+      "pose": {"rotation_deg": 0,       # the turn about Z the slicer applied
+               "resolved": true},       # false: a quarter turn whose way
+                                        # could not be read (no floor)
       "segments_total": 15997,
       "sampled_layer_stride": 1,        # >1 when the budget forced sampling
       "truncated": false
@@ -304,6 +322,10 @@ class ParsedFeatures:
     labelled: bool                         # any feature label seen at all
     truncated: bool
     segments_total: int
+    #: The model's first printed layer as ``(x0, y0, x1, y1)`` segments in
+    #: bed coordinates (capped) — the printed footprint, for telling which
+    #: way a turned part was turned.
+    first_layer_segments: list[tuple[float, float, float, float]] = field(default_factory=list)
 
 
 def _slicer_from_header(lines: list[str]) -> str | None:
@@ -614,6 +636,7 @@ def parse_slicer_features(
     model_zmin = math.inf
     model_first_layer: int | None = None
     first_pts: list[tuple[float, float]] = []   # the part's first-layer outline, for the brim split
+    first_segs: list[tuple[float, float, float, float]] = []   # the same layer, as segments
     segments_total = 0
     truncated = False
 
@@ -646,6 +669,10 @@ def parse_slicer_features(
             model_first_layer = layer
         if layer == model_first_layer and len(first_pts) < 60000:
             first_pts.extend((px, py) for px, py, _pz in pts)
+            first_segs.extend(
+                (ax, ay, bx, by)
+                for (ax, ay, _az), (bx, by, _bz) in zip(pts, pts[1:], strict=False)
+            )
         for px, py, pz in pts:
             if px < fp_xmin:
                 fp_xmin = px
@@ -803,6 +830,7 @@ def parse_slicer_features(
         filament_colors=filament_colors,
         truncated=truncated,
         segments_total=segments_total,
+        first_layer_segments=first_segs,
     )
 
 
@@ -856,20 +884,191 @@ def _arc_points(
 # ---------------------------------------------------------------------------
 
 
-def align_to_mesh(
+#: Rotations about Z a slicer's arrange can apply to a part, in degrees.
+_TURNS = (0, 90, 180, 270)
+
+#: Occupancy-grid cell for the first-layer-against-floor comparison, mm.
+_FLOOR_CELL_MM = 2.0
+
+#: Height above the mesh floor within which a face counts as the floor, mm.
+_FLOOR_BAND_MM = 0.6
+
+#: How much better (in intersection-over-union) a turn must match the
+#: printed first layer than no turn before the stage turns the part.  A
+#: part whose floor looks the same either way never clears this, and is
+#: drawn unturned — the same picture.
+_TURN_MARGIN = 0.15
+
+#: The intersection-over-union below which the printed first layer does
+#: not recognisably match the mesh's floor turned the chosen way, and the
+#: pose is reported as unresolved.
+_RESOLVED_FLOOR_MATCH = 0.5
+
+
+def _turn_xy(xy: Any, deg: int, cx: float, cy: float) -> Any:
+    """*xy* (N×2) rotated *deg* about ``(cx, cy)``, counter-clockwise seen
+    from above (+Z)."""
+    import numpy as np
+
+    if deg % 360 == 0:
+        return np.asarray(xy, dtype=float)
+    rad = math.radians(deg)
+    c, sn = math.cos(rad), math.sin(rad)
+    arr = np.asarray(xy, dtype=float)
+    dx = arr[:, 0] - cx
+    dy = arr[:, 1] - cy
+    out = np.empty_like(arr)
+    out[:, 0] = cx + dx * c - dy * sn
+    out[:, 1] = cy + dx * sn + dy * c
+    return out
+
+
+def _segments_to_points(segs: Any, step: float) -> Any:
+    """Points every *step* mm along each ``(x0, y0, x1, y1)`` segment,
+    endpoints included (N×2)."""
+    import numpy as np
+
+    arr = np.asarray(segs, dtype=float).reshape(-1, 4)
+    if arr.shape[0] == 0:
+        return np.zeros((0, 2))
+    lengths = np.hypot(arr[:, 2] - arr[:, 0], arr[:, 3] - arr[:, 1])
+    counts = np.maximum(2, np.ceil(lengths / step).astype(int) + 1)
+    total = int(counts.sum())
+    if total > 400_000:  # a budget, not a precision claim
+        scale = 400_000 / total
+        counts = np.maximum(2, (counts * scale).astype(int))
+    idx = np.repeat(np.arange(arr.shape[0]), counts)
+    # t in [0, 1] within each segment
+    starts = np.cumsum(counts) - counts
+    local = np.arange(idx.shape[0]) - np.repeat(starts, counts)
+    t = local / np.maximum(1, np.repeat(counts - 1, counts))
+    x = arr[idx, 0] + (arr[idx, 2] - arr[idx, 0]) * t
+    y = arr[idx, 1] + (arr[idx, 3] - arr[idx, 1]) * t
+    return np.column_stack([x, y])
+
+
+def _floor_points(vertices: Any, faces: Any, step: float) -> Any:
+    """Points sampled over the mesh's floor — the faces whose three corners
+    all lie within :data:`_FLOOR_BAND_MM` of the lowest vertex — every
+    *step* mm, in the mesh's own XY (N×2).  A mesh with no such face (a
+    point contact) yields its floor-band vertices instead."""
+    import numpy as np
+
+    v = np.asarray(vertices, dtype=float).reshape(-1, 3)
+    if v.shape[0] == 0:
+        return np.zeros((0, 2))
+    z_floor = float(v[:, 2].min())
+    low = v[:, 2] <= z_floor + _FLOOR_BAND_MM
+    f = np.asarray(faces, dtype=np.int64).reshape(-1, 3) if faces is not None else np.zeros((0, 3), int)
+    if f.shape[0]:
+        f = f[(f < v.shape[0]).all(axis=1)]
+        cap = f[low[f].all(axis=1)]
+    else:
+        cap = f
+    if cap.shape[0] == 0:
+        return v[low][:, :2]
+    a, b, c = v[cap[:, 0], :2], v[cap[:, 1], :2], v[cap[:, 2], :2]
+    # A barycentric lattice per triangle, dense enough for the cell size,
+    # built one lattice size at a time so a floor of a hundred thousand
+    # small triangles is a handful of array operations, not a loop.
+    longest = np.maximum.reduce([
+        np.hypot(*(b - a).T), np.hypot(*(c - b).T), np.hypot(*(a - c).T),
+    ])
+    n = np.clip(np.ceil(longest / step).astype(int), 1, 64)
+    pts = [a, b, c]
+    for k in np.unique(n):
+        k = int(k)
+        if k <= 1:
+            continue
+        sel = n == k
+        i, j = np.meshgrid(np.arange(k + 1), np.arange(k + 1), indexing="ij")
+        keep = (i + j) <= k
+        u = (i[keep] / k)[None, :, None]
+        w = (j[keep] / k)[None, :, None]
+        aa, bb, cc = a[sel][:, None, :], b[sel][:, None, :], c[sel][:, None, :]
+        pts.append((aa + (bb - aa) * u + (cc - aa) * w).reshape(-1, 2))
+    return np.vstack(pts)
+
+
+def _occupancy(xy: Any, origin: tuple[float, float], shape: tuple[int, int], cell: float) -> Any:
+    import numpy as np
+
+    grid = np.zeros(shape, dtype=bool)
+    if xy.shape[0] == 0:
+        return grid
+    ix = np.floor((xy[:, 0] - origin[0]) / cell).astype(int)
+    iy = np.floor((xy[:, 1] - origin[1]) / cell).astype(int)
+    ok = (ix >= 0) & (iy >= 0) & (ix < shape[0]) & (iy < shape[1])
+    grid[ix[ok], iy[ok]] = True
+    return grid
+
+
+def _turn_scores(
     parsed: ParsedFeatures,
     mesh_min: tuple[float, float, float],
     mesh_max: tuple[float, float, float],
-) -> tuple[tuple[float, float, float] | None, str | None]:
-    """The ``(dx, dy, dz)`` that carries bed coordinates into the mesh's
-    frame, or ``(None, reason)`` when the slice provably is not of this
-    model.
+    mesh_floor: tuple[Any, Any],
+    offset_xy: tuple[float, float],
+    candidates: tuple[int, ...],
+) -> dict[int, float]:
+    """Intersection-over-union between the printed first layer and the
+    mesh's floor turned each candidate way, both on one occupancy grid in
+    mesh XY.  Empty when either side has nothing to compare."""
+    import numpy as np
+
+    gcode = _segments_to_points(parsed.first_layer_segments, _FLOOR_CELL_MM / 2.0)
+    if gcode.shape[0] == 0:
+        return {}
+    gcode = gcode + np.asarray(offset_xy, dtype=float)
+    floor = _floor_points(mesh_floor[0], mesh_floor[1], _FLOOR_CELL_MM / 2.0)
+    if floor.shape[0] == 0:
+        return {}
+    cx = (float(mesh_min[0]) + float(mesh_max[0])) / 2.0
+    cy = (float(mesh_min[1]) + float(mesh_max[1])) / 2.0
+    half = max(float(mesh_max[0]) - cx, float(mesh_max[1]) - cy) + 2 * _FLOOR_CELL_MM
+    origin = (cx - half, cy - half)
+    n = int(math.ceil(2 * half / _FLOOR_CELL_MM)) + 1
+    printed = _occupancy(gcode, origin, (n, n), _FLOOR_CELL_MM)
+    scores: dict[int, float] = {}
+    for deg in candidates:
+        turned = _occupancy(_turn_xy(floor, deg, cx, cy), origin, (n, n), _FLOOR_CELL_MM)
+        union = int((printed | turned).sum())
+        scores[deg] = (int((printed & turned).sum()) / union) if union else 0.0
+    return scores
+
+
+def align_pose(
+    parsed: ParsedFeatures,
+    mesh_min: tuple[float, float, float],
+    mesh_max: tuple[float, float, float],
+    *,
+    mesh_floor: tuple[Any, Any] | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """How the slice sits on this mesh — ``{"rotation_deg", "resolved",
+    "offset"}`` — or ``(None, reason)`` when the slice provably is not of
+    this model.
+
+    ``rotation_deg`` is the turn about Z the slicer applied to the part
+    (0, 90, 180 or 270; counter-clockwise seen from above), ``offset`` the
+    ``(dx, dy, dz)`` that carries bed coordinates into the mesh's frame
+    once the mesh has been turned that way about its own bbox centre.
 
     Lateral: the model toolpaths' footprint centre → the mesh bbox centre.
     Vertical: the bed (``z = 0``) → the mesh floor.  The footprint SIZE
-    must agree with the mesh's within a line width and a little — an
-    extrusion centreline sits half a line inside the surface, so the
-    toolpath box is always a hair smaller than the mesh, never larger.
+    must agree with the mesh's — as it is, or turned a quarter — within a
+    line width and a little: an extrusion centreline sits half a line
+    inside the surface, so the toolpath box is always a hair smaller than
+    the mesh, never larger.  A 3 % tolerance on the mesh's own extent never
+    turns a quarter turn into a match, because the jar-and-lid plate that
+    taught this was 114.5 × 52.7 mm: its turned footprint missed by 60 mm
+    on each axis, and the check said "different part" — which it was not.
+
+    *mesh_floor* is ``(vertices, faces)`` of the mesh in its own frame;
+    with it, the way a turn went is settled against the printed first
+    layer (see the module docstring), and ``resolved`` says whether that
+    layer recognisably matched the floor turned the chosen way.  Without
+    it a quarter turn is reported as 90 with ``resolved`` false; 0 and 180
+    are told apart only with a floor, and default to 0.
     """
     if not parsed.labelled:
         return None, (
@@ -885,16 +1084,65 @@ def align_to_mesh(
     gd = fy1 - fy0
     tol_w = max(1.5, 0.03 * mw)
     tol_d = max(1.5, 0.03 * md)
-    if abs(gw - mw) > tol_w or abs(gd - md) > tol_d:
+    upright = abs(gw - mw) <= tol_w and abs(gd - md) <= tol_d
+    quarter = abs(gw - md) <= tol_d and abs(gd - mw) <= tol_w
+    if not upright and not quarter:
         return None, (
             f"the slice's footprint ({gw:.1f} × {gd:.1f} mm) does not match "
             f"this model ({mw:.1f} × {md:.1f} mm) — it was sliced from a "
-            "different, scaled, or rotated part"
+            "different, scaled, or re-arranged part"
         )
     dx = (float(mesh_min[0]) + float(mesh_max[0])) / 2.0 - (fx0 + fx1) / 2.0
     dy = (float(mesh_min[1]) + float(mesh_max[1])) / 2.0 - (fy0 + fy1) / 2.0
     dz = float(mesh_min[2])
-    return (dx, dy, dz), None
+    offset = (dx, dy, dz)
+
+    candidates: tuple[int, ...] = tuple(
+        deg for deg in _TURNS if (upright if deg in (0, 180) else quarter)
+    )
+    scores: dict[int, float] = {}
+    if mesh_floor is not None and len(candidates) > 1:
+        try:
+            scores = _turn_scores(parsed, mesh_min, mesh_max, mesh_floor, (dx, dy), candidates)
+        except Exception:  # noqa: BLE001 — an unreadable floor is "unresolved", not a crash
+            logger.debug("first-layer comparison failed", exc_info=True)
+            scores = {}
+
+    resolved = True
+    if scores:
+        best = max(candidates, key=lambda d: (scores.get(d, 0.0), -d))
+        if upright:
+            # Unturned is the default; a turn must clearly beat it.
+            rotation = best if scores[best] - scores.get(0, 0.0) > _TURN_MARGIN else 0
+        else:
+            rotation = best
+        # "Resolved" means the printed first layer actually looks like the
+        # mesh's floor turned that way — not merely that one guess scored
+        # above another.  A floor the comparison could not recognise leaves
+        # the turn a guess, and the pose says so.
+        resolved = scores.get(rotation, 0.0) >= _RESOLVED_FLOOR_MATCH
+    elif upright:
+        rotation = 0
+    else:
+        rotation = 90
+        resolved = False
+    return {"rotation_deg": rotation, "resolved": resolved, "offset": offset}, None
+
+
+def align_to_mesh(
+    parsed: ParsedFeatures,
+    mesh_min: tuple[float, float, float],
+    mesh_max: tuple[float, float, float],
+) -> tuple[tuple[float, float, float] | None, str | None]:
+    """The ``(dx, dy, dz)`` that carries bed coordinates into the mesh's
+    frame, or ``(None, reason)`` when the slice provably is not of this
+    model — :func:`align_pose` without the turn.  The offset is the same
+    whichever way the slicer turned the part, because a turn about the
+    bbox centre leaves that centre where it was."""
+    pose, reason = align_pose(parsed, mesh_min, mesh_max)
+    if pose is None:
+        return None, reason
+    return pose["offset"], None
 
 
 # ---------------------------------------------------------------------------
@@ -1049,10 +1297,13 @@ def slicer_features_block(
     mesh_max: tuple[float, float, float],
     *,
     max_segments: int = MAX_EXTRA_SEGMENTS,
+    mesh_floor: tuple[Any, Any] | None = None,
 ) -> dict[str, Any]:
     """The ``kiln.slicer_features.v1`` block for *gcode_path*, aligned to a
     mesh whose bbox is ``mesh_min``..``mesh_max`` (mesh space, z up), in
-    the MESH frame.
+    the MESH frame.  *mesh_floor* — ``(vertices, faces)`` in the mesh's
+    frame — lets :func:`align_pose` tell which way a turned part was
+    turned; the block's ``pose`` says what it decided.
 
     Never raises: every failure is an ``available: false`` block with a
     reason a person can read.
@@ -1066,9 +1317,11 @@ def slicer_features_block(
         logger.debug("slicer geometry parse failed", exc_info=True)
         return unavailable_block(f"the G-code could not be read: {exc}", _source(path, None))
 
-    offset, reason = align_to_mesh(parsed, mesh_min, mesh_max)
-    if offset is None:
+    pose, reason = align_pose(parsed, mesh_min, mesh_max, mesh_floor=mesh_floor)
+    if pose is None:
         return unavailable_block(reason or "unaligned", _source(path, parsed))
+    offset = pose["offset"]
+    pose_out = {"rotation_deg": int(pose["rotation_deg"]), "resolved": bool(pose["resolved"])}
     if not parsed.buckets:
         return {
             "kind": FEATURE_KIND,
@@ -1080,6 +1333,7 @@ def slicer_features_block(
             "filaments": list(parsed.filament_colors),
             "model_footprint": _footprint_dict(parsed, offset),
             "offset_mm": [round(v, 4) for v in offset],
+            "pose": pose_out,
             "segments_total": 0,
             "sampled_layer_stride": 1,
             "truncated": parsed.truncated,
@@ -1111,6 +1365,7 @@ def slicer_features_block(
         "filaments": list(parsed.filament_colors),
         "model_footprint": _footprint_dict(parsed, offset),
         "offset_mm": [round(v, 4) for v in offset],
+        "pose": pose_out,
         "segments_total": sum(f["count"] for f in features),
         "sampled_layer_stride": stride,
         "truncated": parsed.truncated,
@@ -1221,14 +1476,15 @@ def shift_block(block: dict[str, Any], dx: float, dy: float) -> dict[str, Any]:
 MAX_SIDECAR_BYTES = 2 * 1024 * 1024
 
 
-def mesh_bounds(
+def mesh_geometry(
     mesh_path: str | os.PathLike[str],
-) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
-    """Mesh-space ``(min, max)`` of a mesh file, or ``None``.
+) -> tuple[tuple[float, float, float], tuple[float, float, float], Any, Any] | None:
+    """Mesh-space ``(min, max, vertices, faces)`` of a mesh file, or ``None``.
 
     Reads the file the same way the payload encoder does — a 3MF through
     Kiln's own standard-library reader, everything else through trimesh —
-    so the bbox a sidecar is aligned to is the bbox the stage will measure.
+    so the bbox a sidecar is aligned to is the bbox the stage will measure,
+    and the floor a turn is settled against is the floor the stage draws.
     """
     try:
         import numpy as np
@@ -1243,10 +1499,24 @@ def mesh_bounds(
             return None
         lo = np.asarray(mesh.bounds[0], dtype=float)
         hi = np.asarray(mesh.bounds[1], dtype=float)
-        return (float(lo[0]), float(lo[1]), float(lo[2])), (float(hi[0]), float(hi[1]), float(hi[2]))
+        return (
+            (float(lo[0]), float(lo[1]), float(lo[2])),
+            (float(hi[0]), float(hi[1]), float(hi[2])),
+            np.asarray(mesh.vertices, dtype=float),
+            np.asarray(mesh.faces, dtype=np.int64),
+        )
     except Exception:  # noqa: BLE001 — no bounds, no sidecar
-        logger.debug("mesh bounds unavailable", exc_info=True)
+        logger.debug("mesh geometry unavailable", exc_info=True)
         return None
+
+
+def mesh_bounds(
+    mesh_path: str | os.PathLike[str],
+) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
+    """Mesh-space ``(min, max)`` of a mesh file, or ``None`` —
+    :func:`mesh_geometry` without the geometry."""
+    geo = mesh_geometry(mesh_path)
+    return None if geo is None else (geo[0], geo[1])
 
 
 def sidecar_for_mesh(
@@ -1272,12 +1542,15 @@ def sidecar_for_mesh(
         gcode = resolve_sliced_gcode(str(mesh_path), str(gcode_path) if gcode_path else None)
         if not gcode:
             return None
-        bounds = mesh_bounds(mesh_path)
-        if bounds is None:
+        geo = mesh_geometry(mesh_path)
+        if geo is None:
             return None
+        lo, hi, verts, faces = geo
         budget = MAX_EXTRA_SEGMENTS
         for _ in range(4):
-            block = slicer_features_block(gcode, bounds[0], bounds[1], max_segments=budget)
+            block = slicer_features_block(
+                gcode, lo, hi, max_segments=budget, mesh_floor=(verts, faces),
+            )
             if not block.get("available") or not block.get("features"):
                 return None
             raw = json.dumps(block, separators=(",", ":")).encode("utf-8")
@@ -1309,6 +1582,101 @@ def load_sidecar(raw: bytes | str | None) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
+def payload_mesh_frame(payload: dict[str, Any]) -> tuple[Any, Any] | None:
+    """The payload's ``(vertices, faces)`` back in MESH space (z up), or
+    ``None`` when it carries no geometry — the viewer rotation undone,
+    ``(x, y, z)_viewer → (x, -z, y)_mesh``."""
+    try:
+        import numpy as np
+
+        positions = payload.get("positions")
+        if not isinstance(positions, str) or not positions:
+            return None
+        v = np.frombuffer(base64.b64decode(positions), dtype="<f4").reshape(-1, 3).astype(float)
+        mesh = np.empty_like(v)
+        mesh[:, 0] = v[:, 0]
+        mesh[:, 1] = -v[:, 2]
+        mesh[:, 2] = v[:, 1]
+        indices = payload.get("indices")
+        faces = (
+            np.frombuffer(base64.b64decode(indices), dtype="<u4").reshape(-1, 3).astype(np.int64)
+            if isinstance(indices, str) and indices
+            else None
+        )
+        return mesh, faces
+    except Exception:  # noqa: BLE001 — no floor is "unresolved", never a crash
+        logger.debug("payload geometry unreadable", exc_info=True)
+        return None
+
+
+def apply_pose_to_payload(payload: dict[str, Any], rotation_deg: int) -> dict[str, Any]:
+    """Turn the payload's part *rotation_deg* about Z (mesh up) around its
+    own bbox centre, in place — positions, normals and bbox together, so
+    the payload can never describe the part somewhere its vertices are
+    not — and record it as ``payload["pose"]``.
+
+    This is how the stage draws a part the way the slicer will print it:
+    the one function every door's payload goes through, called by
+    :func:`attach_to_payload` (local doors) and
+    :func:`attach_block_to_payload` (the hosted door) from the block's own
+    ``pose``.  A turn of 0 records nothing and changes nothing.  Never
+    raises.
+    """
+    try:
+        deg = int(rotation_deg) % 360
+        if deg == 0 or not isinstance(payload, dict) or payload.get("downgraded"):
+            return payload
+        positions = payload.get("positions")
+        bbox = payload.get("bbox")
+        if not isinstance(positions, str) or not isinstance(bbox, dict):
+            return payload
+        lo, hi = bbox.get("min"), bbox.get("max")
+        if not (isinstance(lo, list) and isinstance(hi, list) and len(lo) == 3 and len(hi) == 3):
+            return payload
+        import numpy as np
+
+        cx = (float(lo[0]) + float(hi[0])) / 2.0
+        cy = (float(lo[1]) + float(hi[1])) / 2.0
+        rad = math.radians(deg)
+        c, sn = math.cos(rad), math.sin(rad)
+
+        def _turn_viewer(b64: str, about: bool) -> tuple[str, Any]:
+            arr = np.frombuffer(base64.b64decode(b64), dtype="<f4").reshape(-1, 3).astype(float)
+            mx = arr[:, 0] - (cx if about else 0.0)
+            my = -arr[:, 2] - (cy if about else 0.0)       # viewer z is -mesh y
+            nx = mx * c - my * sn + (cx if about else 0.0)
+            ny = mx * sn + my * c + (cy if about else 0.0)
+            out = arr.copy()
+            out[:, 0] = nx
+            out[:, 2] = -ny
+            return base64.b64encode(out.astype("<f4", copy=False).tobytes()).decode("ascii"), out
+
+        payload["positions"], turned = _turn_viewer(positions, True)
+        normals = payload.get("normals")
+        if isinstance(normals, str) and normals:
+            payload["normals"], _ = _turn_viewer(normals, False)
+        # The bbox from the turned vertices themselves — the exact rule
+        # stand_on_plate keeps: bbox and positions move as one.
+        mesh_x = turned[:, 0]
+        mesh_y = -turned[:, 2]
+        new_lo = [round(float(mesh_x.min()), 4), round(float(mesh_y.min()), 4), lo[2]]
+        new_hi = [round(float(mesh_x.max()), 4), round(float(mesh_y.max()), 4), hi[2]]
+        bbox["min"], bbox["max"] = new_lo, new_hi
+        bbox["size"] = [round(new_hi[i] - new_lo[i], 4) for i in range(3)]
+        payload["pose"] = {
+            "rotation_deg": deg,
+            "about": "z",
+            "source": "slice",
+            "note": (
+                f"drawn as the slicer placed it: turned {deg} degrees from the "
+                "file's own placement"
+            ),
+        }
+    except Exception:  # noqa: BLE001 — an unturned part beats a dead stage
+        logger.debug("pose not applied", exc_info=True)
+    return payload
+
+
 def attach_block_to_payload(
     payload: dict[str, Any] | None, block: dict[str, Any] | None
 ) -> dict[str, Any] | None:
@@ -1335,6 +1703,9 @@ def attach_block_to_payload(
         import copy
 
         block = copy.deepcopy(block)
+        pose = block.get("pose") if isinstance(block.get("pose"), dict) else None
+        if pose and pose.get("rotation_deg"):
+            apply_pose_to_payload(payload, int(pose["rotation_deg"]))
         if block.get("frame") == "viewer":
             payload[PAYLOAD_KEY] = block
             return payload
@@ -1366,7 +1737,10 @@ def attach_to_payload(
     """Stamp the viewer-frame block onto a ``kiln.mesh.v1`` *payload*.
 
     Aligned to the payload's OWN ``bbox`` — whatever centring the plate
-    door already applied is therefore baked in.  A downgraded payload
+    door already applied is therefore baked in.  When the slice says the
+    slicer turned the part, the payload is turned the same way first
+    (:func:`apply_pose_to_payload`), so the stage shows the part as it
+    will print and the extras land around THAT.  A downgraded payload
     (no geometry) gets nothing: there is no part on the stage to stand a
     skirt around.  ``None`` for *gcode_path* attaches nothing at all —
     absence of a slice is the ordinary case, not an unavailable block.
@@ -1384,8 +1758,11 @@ def attach_to_payload(
             return payload
         block = slicer_features_block(
             gcode_path, (lo[0], lo[1], lo[2]), (hi[0], hi[1], hi[2]),
-            max_segments=max_segments,
+            max_segments=max_segments, mesh_floor=payload_mesh_frame(payload),
         )
+        pose = block.get("pose") if isinstance(block.get("pose"), dict) else None
+        if block.get("available") and pose and pose.get("rotation_deg"):
+            apply_pose_to_payload(payload, int(pose["rotation_deg"]))
         payload[PAYLOAD_KEY] = to_viewer_frame(block)
     except Exception:  # noqa: BLE001 — extras never break the stage
         logger.debug("slicer geometry not attached", exc_info=True)

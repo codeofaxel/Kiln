@@ -32,7 +32,9 @@ platform-endian, which is LE on every client Kiln targets)::
       "source": {"filename": "<basename only>", "format": "stl"},
       "plate": {...},                  # optional — see THE PLATE below
       "cad": {...},                    # optional — see THE CAD BLOCK below
-      "slicer": {...}                  # optional — see THE SLICER BLOCK below
+      "slicer": {...},                 # optional — see THE SLICER BLOCK below
+      "pose": {"rotation_deg": 90, "about": "z", "source": "slice", "note": "…"}
+                                       # optional — see THE SLICER BLOCK below
     }
 
 THE SLICER BLOCK
@@ -47,7 +49,12 @@ frame as ``positions`` and moved by the same plate-centring offset
 only behind a toggle that is off by default, so the model-only view is
 unchanged; a stage that predates the block ignores an unknown key.  The
 block is ``kiln.slicer_features.v1`` — shape, frames and budget are
-documented on that module.
+documented on that module.  When the slice shows the slicer TURNED the
+part (a quarter turn under auto-arrange), the payload's part is turned the
+same way about its own centre before the block is laid around it
+(:func:`kiln.slicer_geometry.apply_pose_to_payload`), so ``positions``,
+``normals`` and ``bbox`` already describe the part as it will print, and
+``pose`` records the turn; an unturned part carries no ``pose`` key.
 
 THE CAD BLOCK
 -------------

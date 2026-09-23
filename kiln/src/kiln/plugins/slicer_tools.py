@@ -988,6 +988,7 @@ def _placed_slice(
     info["placement"] = place_info
     if verify_err is not None:
         return None, verify_err, info
+    _report_the_sliced_footprint(info, result.output_path)
     # The quiet start's plan and the lift floor, for whichever door wraps
     # the file next: the plan when the verdict carries one this account may
     # use, the floor whenever there is one (it is a safety number, and the
@@ -995,6 +996,61 @@ def _placed_slice(
     info["quiet_start"] = _quiet_start_plan(place_info)
     info["lift_floor_mm"] = _lift_floor_of(place_info)
     return result, None, info
+
+
+def _report_the_sliced_footprint(info: dict[str, Any], gcode_path: str | None) -> None:
+    """Make the bed-fit block describe the file that will print.
+
+    The gate measured the MESH before the slicer ran.  What prints is the
+    G-code, and a slicer is free to move what it was handed — OrcaSlicer's
+    arrange turned a jar-and-lid plate a quarter turn on 2026-09-23, and
+    the result reported the mesh's placement under ``bed_fit`` beside the
+    G-code's under ``safety_verification``: two footprints for one file.
+    One footprint leaves here, the G-code's — every print move, skirt and
+    tower included, measured the same way the post-wrap safety check
+    measures it.  The part's own toolpaths are compared with the mesh the
+    gate measured, and when the slicer moved or turned it the block says
+    so (``slicer_moved_the_part``) and keeps the mesh's number under
+    ``input_bbox``, because that disagreement is itself the finding.  A
+    footprint the G-code cannot give (no file, no print moves) leaves the
+    block as the gate wrote it.  Never raises.
+    """
+    try:
+        fit = info.get("bed_fit")
+        if not isinstance(fit, dict) or not gcode_path:
+            return
+        from kiln.printers.bed_fit import compute_gcode_bbox
+
+        printed = compute_gcode_bbox(gcode_path)
+        if not printed:
+            return
+        measured = fit.get("bbox")
+        fit["bbox"] = {
+            k: printed[k]
+            for k in ("x_min", "x_max", "y_min", "y_max", "z_min", "z_max", "truncated")
+            if k in printed
+        }
+        fit["bbox_source"] = "gcode"
+        if not isinstance(measured, dict):
+            return
+        from kiln.slicer_geometry import parse_slicer_features
+
+        parsed = parse_slicer_features(gcode_path)
+        part = parsed.model_footprint
+        if part is None or not parsed.labelled:
+            return  # unlabelled: the part cannot be told from its skirt or tower
+        px0, py0, px1, py1 = part
+        # Half a line width of shrink is the toolpath centreline, not a move.
+        moved = any(
+            abs(float(measured.get(k, 0.0)) - v) > 1.5
+            for k, v in (("x_min", px0), ("y_min", py0), ("x_max", px1), ("y_max", py1))
+        )
+        if moved:
+            fit["input_bbox"] = measured
+            fit["slicer_moved_the_part"] = True
+            fit["part_footprint"] = {"x_min": px0, "y_min": py0, "x_max": px1, "y_max": py1}
+    except Exception:  # noqa: BLE001 — a report never fails the slice
+        _logger.debug("sliced footprint not reported", exc_info=True)
 
 
 def _auto_wrap_bambu_3mf(

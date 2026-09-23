@@ -654,6 +654,7 @@ def _run_slicer_with_startup_retry(
     retryable_returncodes: frozenset[int],
     remove_partial_output,
     output_is_complete,
+    cwd: str | None = None,
 ) -> subprocess.CompletedProcess:
     """Launch a slicer, re-drawing the startup-crash lottery when it hits.
 
@@ -664,12 +665,18 @@ def _run_slicer_with_startup_retry(
     is the salvage case, owned by the caller), and an attempt remains.
     *remove_partial_output* runs between attempts so a half-written file
     from a crashed run can never pose as the next run's result.
+    *cwd* is the slicer's working directory: Orca's CLI writes a
+    ``result.json`` status file wherever it is started, so the Orca path
+    starts it inside its own scratch directory rather than in whatever
+    directory the server happens to be running from.
     """
     result: subprocess.CompletedProcess | None = None
     for attempt in range(1, _SLICE_ATTEMPTS + 1):
         started = time.monotonic()
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd,
+            )
         except subprocess.TimeoutExpired:
             remove_partial_output()
             raise SlicerError(
@@ -711,7 +718,7 @@ def _slice_with_orca(
 
     A different argv and a different preset format from
     :func:`slice_file`'s Slic3r path: ``--slice 0 --outputdir DIR
-    --load-settings "machine.json;process.json"
+    [--arrange 0 --orient 0] --load-settings "machine.json;process.json"
     --load-filaments "f1.json[;f2.json…]"``, one filament preset per slot,
     where the presets are the JSON that :mod:`kiln.slicer_orca` writes out of
     the same bundled settings the ``.ini`` is built from.
@@ -722,6 +729,27 @@ def _slice_with_orca(
     """
     with tempfile.TemporaryDirectory(prefix="kiln_orca_") as work_dir:
         cmd: list[str] = [slicer.path, "--slice", "0", "--outputdir", work_dir]
+        if input_abs.lower().endswith(".3mf"):
+            # A 3MF carries a placement, and it is the one the person
+            # approved on the stage: ``--arrange 0 --orient 0`` prints the
+            # plate where and how it was handed over.  Orca's CLI defaults
+            # both to "auto", and auto re-packs any 3MF that is not one of
+            # its own projects around the bed centre, free to turn parts a
+            # quarter turn while it does.  Measured 2026-09-23 on a jar-
+            # and-lid plate placed side by side along X: sliced side by
+            # side along Y, 90 degrees from the placement just approved,
+            # with the prime tower positioned for the old placement.
+            # Kiln's own gates decide a 3MF's pose before the slicer runs
+            # (:func:`_check_3mf_on_bed` refuses one that misses the bed),
+            # so the slicer has nothing left to decide; a plate that does
+            # not fit fails the slice honestly instead of being quietly
+            # rearranged.  A loose STL carries no placement — Kiln's own
+            # meshes sit around the origin — and keeps Orca's auto, which
+            # measured: leaves a part that fits where it is and centres one
+            # that does not (told not to, it refuses the origin-centred
+            # cube outright).  *extra_args* follow, so a caller can still
+            # ask Orca to arrange.
+            cmd += ["--arrange", "0", "--orient", "0"]
 
         if profile and not os.path.isfile(profile):
             raise SlicerError(f"Profile file not found: {os.path.basename(profile)}")
@@ -800,6 +828,7 @@ def _slice_with_orca(
             retryable_returncodes=_ORCA_STARTUP_CRASH_RETURNCODES,
             remove_partial_output=_drop_partial_gcode,
             output_is_complete=_latest_gcode_complete,
+            cwd=work_dir,
         )
 
         produced = sorted(Path(work_dir).glob("*.gcode"), key=lambda p: p.stat().st_mtime)
@@ -830,6 +859,20 @@ def _slice_with_orca(
         if result.returncode != 0 and not crashed_after_finishing:
             # This CLI reports the reason on stdout and leaves stderr empty.
             stderr_snippet = (result.stderr or "").strip() or (result.stdout or "").strip()
+            if "fully inside the print volume" in stderr_snippet and input_abs.lower().endswith(".3mf"):
+                # The one refusal the arrange-off rule above can newly
+                # produce: a plate whose placement grazes or leaves the
+                # volume, which auto-arrange used to move silently.  Said
+                # in the person's terms, with the fix, instead of a CLI log
+                # line.
+                raise SlicerError(
+                    f"{os.path.basename(slicer.path)} refused to slice: as placed, "
+                    f"the plate is not fully inside the printer's build volume. Kiln "
+                    f"slices a 3MF exactly where it was placed (the placement is the "
+                    f"one that was approved, so the slicer is not allowed to "
+                    f"rearrange it) — move the part in from the bed edge, or "
+                    f"re-place it, and slice again."
+                )
             raise SlicerError(f"Slicer exited with code {result.returncode}. stderr: {stderr_snippet[:500]}")
 
         if not produced:
