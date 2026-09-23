@@ -28,6 +28,7 @@ from __future__ import annotations
 import functools
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -530,6 +531,11 @@ def test_allows_fake_secrets_and_local_hosts() -> None:
 
 # ── Rule 7: private research, through the socket ─────────────────────────────
 
+# git run from these tests must never inherit a hook's GIT_DIR and act on
+# the real repository.
+_CLEAN_GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def _plugged(patterns=(), private_text=""):
     fingerprints = frozenset(d for _o, d, _w, _s in _GATE.fingerprint_windows(private_text))
     return _GATE.PrivateRules(
@@ -571,6 +577,13 @@ def test_a_private_word_is_refused_anywhere_once_the_socket_is_plugged() -> None
     assert [line for _p, line, rule, _s in leaks if rule == "private research"] == [2]
 
 
+def test_the_public_allowlist_cannot_silence_private_research(monkeypatch) -> None:
+    """A public exception list cannot name what may not be said in public:
+    an entry that would pass the text through leaves the private finding."""
+    monkeypatch.setattr(_GATE, "_ALLOWLIST", _GATE._ALLOWLIST + (("x.py", "frobnicate"),))
+    assert _private_in("kiln/src/kiln/x.py", 'NOTE = "frobnicate the gizmo"\n', _plugged(patterns=_WIDGET))
+
+
 def test_a_run_of_private_text_is_refused_and_a_shorter_one_is_not() -> None:
     """Eight words in a row from private research are a copy, whatever the
     case, punctuation or quoting; seven are a coincidence."""
@@ -595,10 +608,10 @@ def test_the_socket_reads_a_path_or_a_branch_and_says_so_when_it_cannot(tmp_path
 
     repo = tmp_path / "private"
     repo.mkdir()
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, env=_CLEAN_GIT_ENV)
     (repo / "rules.json").write_text(rules_file.read_text())
-    subprocess.run(["git", "-C", str(repo), "add", "rules.json"], check=True)
-    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "rules"], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "rules.json"], check=True, env=_CLEAN_GIT_ENV)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "rules"], check=True, env=_CLEAN_GIT_ENV)
     (repo / "rules.json").write_text("not json")  # the working tree is not what is read
     monkeypatch.setenv("KILN_PRIVATE_LEAK_RULES", f"git:{repo}:HEAD:rules.json")
     loaded = _GATE.load_private_rules()

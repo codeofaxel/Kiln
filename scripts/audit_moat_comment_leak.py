@@ -61,8 +61,9 @@ The rules, in plain language
 6. **Research provenance** (comments / docstrings, src AND tests): a
    third-party repository, a line pinned into someone else's source in
    any spelling (``file.cpp:12``, ``file.cpp L12``, ``lines 12-14``; a
-   line into one of Kiln's own files is a cross-reference and passes), a vendor or community page path, a community account or client
-   name, or a fetch date.  A public catalogue note has never been allowed
+   line into one of Kiln's own files is a cross-reference and passes), a
+   vendor or community page path, a community account or client name, or
+   a fetch date.  A public catalogue note has never been allowed
    to carry these (``kiln.data_note_contract``); a code comment is the
    same page with a different door, and it read as a research trail a
    copycat can follow.  Kiln's own hosts (``kiln3d.com``, its GitHub) are
@@ -719,8 +720,7 @@ def _read_rules_spec(spec: str) -> str:
         return subprocess.run(
             ["git", "-C", repo, "show", f"{ref}:{path}"],
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             env={k: v for k, v in os.environ.items() if k not in _GIT_ENV_OVERRIDES},
         ).stdout.decode("utf-8")
     return Path(spec).expanduser().read_text(encoding="utf-8")
@@ -745,7 +745,7 @@ def load_private_rules(*, require: bool = False) -> PrivateRules | None:
             fingerprints=frozenset(int(h, 16) for h in data.get("fingerprints", [])),
             window=int(data.get("fingerprint_window", FINGERPRINT_WINDOW)),
         )
-    except Exception as exc:  # noqa: BLE001 -- any failure turns the rule off, said out loud
+    except Exception as exc:  # any failure turns the rule off, said out loud
         message = f"private leak rules at {spec!r} could not be read ({exc}); that rule is OFF for this run"
         if require:
             raise SystemExit(message) from exc
@@ -969,10 +969,12 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
                 hit(line + offset, "research provenance", f"{rule}: {matched}")
 
     # Private research — the configured private rules, over the whole file.
+    # Never through _ALLOWLIST: a public exception list cannot name what may
+    # not be said in public; the reviewed overlap lives with the rules.
     rules = _private_rules_cached()
     if rules is not None and rel not in _SELF:
         for line, what in private_findings(text, rules):
-            hit(line, "private research", what)
+            leaks.append((rel, line, "private research", what))
 
     # Shipped-data rules — data JSON (and test JSON fixtures) line by line.
     if is_shipped_json:
@@ -1276,7 +1278,10 @@ def main(argv: list[str] | None = None) -> int:
         "reworded to the source CLASS ('the maker's own client', 'the "
         "firmware's own source') with the trail kept in kiln-pro's evidence; "
         "an integration target's API reference that must stay gets an "
-        "_ALLOWLIST entry."
+        "_ALLOWLIST entry.  Private research -- a private method's own words, "
+        "or eight words in a row from private research -- is never allowlisted "
+        "here: say it in your own words, or, for a sentence public shares on "
+        "purpose, have it added to the private rules' reviewed overlap."
     )
     return 2
 

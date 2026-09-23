@@ -6,8 +6,8 @@ Every other family gets the slicer's raw G-code as-is, and what their
 surfaces read was established from the surfaces themselves:
 
 * **Klipper / Moonraker** (Mainsail, Fluidd, and Kiln's Creality adapter,
-  which is Moonraker-backed): ``moonraker/components/file_manager/metadata.py``
-  matches ``(thumbnail(?:_[A-Za-z0-9]+)?) begin([;/\\+=\\w\\s]+?); \\1 end``
+  which is Moonraker-backed): Moonraker's metadata parser matches
+  ``(thumbnail(?:_[A-Za-z0-9]+)?) begin([;/\\+=\\w\\s]+?); \\1 end``
   and refuses a block whose declared size is not the length of its base64;
   weight comes from ``total filament used [g]`` and ``filament used [g]``.
   Mainsail's own slicer page asks for ``32x32/PNG,400x300/PNG``.
@@ -15,11 +15,11 @@ surfaces read was established from the surfaces themselves:
   ``^; thumbnail(?:_JPG)* begin \\d+[x ]\\d+ \\d+`` and stops reading at the
   first ``G1`` with an ``E`` word, so the block must precede the first
   extrusion.  Filament figures come from OctoPrint's own pass over the E
-  moves (``octoprint/util/gcodeInterpreter.py``), not from a comment.
-* **PrusaLink**: ``prusa3d/gcode-metadata`` matches
+  moves, not from a comment.
+* **PrusaLink**: Prusa's G-code metadata library matches
   ``; thumbnail_?(QOI|JPG|) begin (dim) (size)`` — plain PNG included —
   ignores anything under 50x50, and reads ``filament used [g]``.
-* **Duet / RepRapFirmware**: ``FileInfoParser.cpp`` looks for
+* **Duet / RepRapFirmware** looks for
   ``; thumbnail begin 32x32 2140`` (PNG) and ``ilament used`` in mm.
 * **Elegoo** (SDCP): what the Centauri Carbon's own screen reads could not
   be established from a source Kiln can cite, so a preview is written
@@ -28,8 +28,8 @@ surfaces read was established from the surfaces themselves:
   comment line on the way to the SD card, so neither a preview nor a
   weight survives the trip.  Nothing is refused for their absence.
 
-The format written is PrusaSlicer's own, pinned here against its emitter
-(``src/libslic3r/GCode/Thumbnails.hpp``, 2.9.4)::
+The format written is PrusaSlicer's own, pinned here against its thumbnail
+emitter (2.9.4)::
 
     output("\\n;\\n; %s begin %dx%d %d\\n")   # tag, width, height, len(base64)
     ...                                     # "; " + up to 78 base64 chars
@@ -159,8 +159,8 @@ class TestThumbnailBlockFormat:
         assert text.count("; thumbnail end") == 2
 
     def test_moonrakers_own_regex_reads_it(self, tmp_path, preview):
-        """The pattern copied verbatim from Moonraker's metadata.py, and the
-        size check it applies: a declared length that is not the base64's
+        """The pattern copied verbatim from Moonraker's metadata parser, and
+        the size check it applies: a declared length that is not the base64's
         own length is dropped with ``Thumbnail Size Mismatch``."""
         path = raw_gcode(tmp_path)
         complete(path, "moonraker", preview_png=preview)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import os
 import re
 import subprocess
 import sys
@@ -234,9 +235,11 @@ def test_a_commit_message_is_held_to_the_private_rules_when_plugged() -> None:
 
 
 def _git(repo: Path, *args: str) -> str:
+    """git in a scratch repo, never under an inherited hook's GIT_DIR."""
     return subprocess.run(
         ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@x", *args],
         check=True, capture_output=True, text=True,
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
     ).stdout.strip()
 
 
