@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Show any file you already have on the 3D stage.** A model or the sliced file about to print — turn it over before you approve it, without remaking or re-slicing anything.
+
 - **A look at the camera now settles what's on the plate.** Kiln already showed you the feed; now what you see goes on the record, so it stops asking and prints can start again.
 
 - **No job goes to a printer whose plate isn't free (Business+).** Kiln checks every plate in the fleet before it routes, says which printers have room, and turns a job down as you submit it rather than at the printer. See https://kiln3d.com/pricing.
