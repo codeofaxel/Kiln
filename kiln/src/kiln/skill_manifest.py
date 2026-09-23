@@ -13,6 +13,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.curve_resolution import AGENT_ADVICE
+
 
 def design_template_counts() -> dict[str, int]:
     """How many design templates of each kind this build actually ships.
@@ -146,6 +148,7 @@ class SkillManifest:
         default_factory=lambda: {
             "create_custom_object_free": [
                 "DEFAULT for 'make me a ...': write OpenSCAD yourself, compile with compile_scad — free, no API key, works on every tier",
+                AGENT_ADVICE,
                 "visualize_model(file_path) — show a preview image (MANDATORY, every iteration round)",
                 "iterate: edit the OpenSCAD, recompile, show a fresh preview each round; offer 'loop ~3 more then check in, or loop until it's done?'",
                 "validate_generated_mesh / analyze_printability — printability check (conservative defaults are free)",

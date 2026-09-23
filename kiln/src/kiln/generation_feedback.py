@@ -22,6 +22,8 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from kiln.curve_resolution import AGENT_ADVICE
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -1777,7 +1779,7 @@ def build_parametric_generation_prompt(
         "// mm (min: 2, max: 50)\n"
         "- Use descriptive variable names (wall_thickness, not wt)\n"
         "- Organize code with modules for logical groupings\n"
-        "- Use $fn=60 or higher for smooth curves\n"
+        f"- {AGENT_ADVICE}\n"
         "- Design for FDM 3D printing: flat bottom, printable geometry\n"
         "- Single solid body unless multi-part is explicitly requested\n"
         + lib_rule

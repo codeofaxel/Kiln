@@ -775,6 +775,7 @@ def compile_scad_code(
     *,
     output_path: str | None = None,
     timeout: int = 300,
+    as_written: bool = False,
 ) -> str:
     """Compile OpenSCAD code to an STL file.
 
@@ -784,6 +785,9 @@ def compile_scad_code(
     :param scad_code: Valid OpenSCAD source code.
     :param output_path: Optional output STL path. Auto-generated if None.
     :param timeout: Maximum compilation time in seconds.
+    :param as_written: Skip Kiln's curve rule and compile the source
+        exactly as given -- for a design's kept source, whose rebuild must
+        make the part it made (see :func:`kiln.curve_resolution.apply_rule`).
     :returns: Absolute path to the generated STL file.
     :raises ValueError: If compilation fails.
     """
@@ -796,7 +800,7 @@ def compile_scad_code(
     kwargs: dict[str, Any] = {}
     if output_path:
         kwargs["output_dir"] = os.path.dirname(output_path) or "."
-    job = provider.generate(scad_code, **kwargs)
+    job = provider.generate(scad_code, as_written=as_written, **kwargs)
 
     if job.status.value == "failed":
         raise ValueError(f"OpenSCAD compilation failed: {job.error}")

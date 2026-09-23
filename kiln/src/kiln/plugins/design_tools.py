@@ -1554,6 +1554,13 @@ class _DesignToolsPlugin:
             For surface() heightmap operations (photo emboss, lithophane),
             increase timeout to 600+ seconds.
 
+            Round shapes: leave ``$fn`` out and Kiln cuts each curve by its
+            size, writing that rule into the file it compiles.  Set ``$fn``
+            only for a deliberate polygon (``$fn = 6`` for a hexagon).  A
+            file that sets ``$fn``, ``$fa`` or ``$fs`` at the top compiles
+            exactly as written, and the result's ``curve_resolution`` note
+            says so.
+
             When you pass ``fastener``, the result carries a
             ``fastener_advice`` block saying the code compiled as written
             and nothing resized the hole for that fastener.  Kiln raises
@@ -1593,6 +1600,14 @@ class _DesignToolsPlugin:
                     "stl_path": stl_path,
                     "message": f"Compiled to {stl_path}",
                 }
+                from kiln.curve_resolution import AGENT_ADVICE, own_resolution
+
+                _own = own_resolution(code)
+                if _own:
+                    response["curve_resolution"] = (
+                        f"This file sets {_own} for the whole part, so it "
+                        f"compiled exactly as written. {AGENT_ADVICE}"
+                    )
                 # Surface an outdated-OpenSCAD notice at make-time (not just a
                 # buried log) so a maker who skipped get_started still finds out
                 # their engine is slow / SVG-broken and how to upgrade.
@@ -1855,6 +1870,7 @@ class _DesignToolsPlugin:
             if err := _srv._check_auth("cache"):
                 return err
 
+            from kiln.curve_resolution import apply_rule
             from kiln.design_cache import get_design_cache
 
             try:
@@ -1863,7 +1879,8 @@ class _DesignToolsPlugin:
                     file_path,
                     tags=tags,
                     filament_type=filament_type,
-                    scad_source=scad_source,
+                    # The source as compiled: Kiln's curve rule included.
+                    scad_source=apply_rule(scad_source) if scad_source else scad_source,
                     generation_prompt=generation_prompt,
                     provider=provider,
                 )

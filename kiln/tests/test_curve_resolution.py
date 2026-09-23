@@ -377,3 +377,187 @@ class TestTemplateDoorsShareOneRenderer:
 
         tpl = _template("threaded_jar")
         assert Path(result.scad_file).read_text() == render_template_scad(tpl, _defaults(tpl))
+
+
+# ---------------------------------------------------------------------------
+# Source Kiln is handed: an agent's own OpenSCAD
+# ---------------------------------------------------------------------------
+
+_OWN_RESOLUTION_CASES = [
+    ("cylinder(d=45, h=1);", None),
+    ("$fn = 48;\ncylinder(d=45, h=1);", "$fn = 48"),
+    ("cylinder(d=5, h=1, $fn=6);\n$fn = 48;", "$fn = 48"),
+    ("module m() { $fn = 30; cylinder(d=4, h=1); }\nm();", None),
+    ('// $fn = 99;\n/* $fa = 3; */ echo("$fs = 2;");\ncube(1);', None),
+    ("x = let($fn = 10) 3;", None),
+    ("if ($fn == 5) cube(1);", None),
+    ("$fa=12; $fs=2;\nsphere(5);", "$fa = 12"),
+]
+
+
+# (source, does Kiln write its rule in?)
+_APPLY_RULE_CASES = [
+    ("cylinder(d=45, h=1);", True),
+    ("$fn = 48;\ncylinder(d=45, h=1);", False),  # the file's own setting
+    ("cylinder(d=5, h=1, $fn=6);\n$fn = 48;", False),
+    ("module m() { $fn = 30; cylinder(d=4, h=1); }\nm();", True),  # scoped, not the file's
+    ('// $fn = 99;\n/* $fa = 3; */ echo("$fs = 2;");\ncube(1);', False),  # no curve in code
+    ("module main(){cube(1);}", False),  # nothing the rule could change
+    ("include <BOSL2/std.scad>\ncuboid(10, rounding=2);", True),  # library code it cannot see
+    ("$fa=12; $fs=2;\nsphere(5);", False),
+]
+
+
+def _plugin_tools(module: str) -> dict:
+    import importlib
+
+    tools: dict = {}
+    importlib.import_module(f"kiln.plugins.{module}").plugin.register(
+        SimpleNamespace(tool=lambda *a, **k: lambda fn: tools.setdefault(fn.__name__, fn)),
+    )
+    return tools
+
+
+def _ring(stl_path: str, z: float = 0.0) -> int:
+    """Vertices on the plane z: a cylinder's facet count at its end."""
+    import trimesh
+
+    v = trimesh.load(stl_path).vertices
+    return int((np.abs(v[:, 2] - z) < 1e-6).sum())
+
+
+class TestAgentSource:
+    """The rule on source Kiln is handed: written in once, never over a
+    setting the file makes for itself."""
+
+    @pytest.mark.parametrize(("scad", "own"), _OWN_RESOLUTION_CASES)
+    def test_only_a_top_level_setting_is_the_files_own(self, scad, own):
+        from kiln.curve_resolution import own_resolution
+
+        assert own_resolution(scad) == own
+
+    @pytest.mark.parametrize(("scad", "gets_rule"), _APPLY_RULE_CASES)
+    def test_the_rule_is_written_in_once_and_only_where_it_can_matter(self, scad, gets_rule):
+        from kiln.curve_resolution import SCAD_TRAILER, apply_rule
+
+        once = apply_rule(scad)
+        assert apply_rule(once) == once
+        assert once == (scad + SCAD_TRAILER if gets_rule else scad)
+
+
+@patch("kiln.server._check_auth", return_value=None)
+class TestAgentDoors:
+    """compile_scad, the save doors, rebuild, the composer, Gemini and
+    validate: every door that takes or keeps an agent's source."""
+
+    def test_compile_scad_cuts_an_unstated_curve_by_its_size(self, _auth):
+        _openscad_or_skip()
+        from kiln import curve_resolution as cr
+
+        result = _plugin_tools("design_tools")["compile_scad"](scad_code="cylinder(d = 45, h = 2);")
+        assert _ring(result["stl_path"]) == cr.fragments(22.5)
+        assert "curve_resolution" not in result
+
+    def test_a_file_with_its_own_count_compiles_as_written_and_says_so(self, _auth):
+        _openscad_or_skip()
+        result = _plugin_tools("design_tools")["compile_scad"](
+            scad_code="$fn = 48;\ncylinder(d = 45, h = 2);",
+        )
+        assert _ring(result["stl_path"]) == 48
+        assert "$fn = 48" in result["curve_resolution"]
+
+    def test_rebuild_makes_the_part_a_kept_source_made(self, _auth, tmp_path):
+        """A source kept before the rule existed rebuilds as it first built."""
+        _openscad_or_skip()
+        from kiln import design_rebuild as dr
+        from kiln.design_recipe import create_recipe
+
+        recipe = create_recipe("old", [], source_scad="cylinder(d = 45, h = 2);")
+        with patch.object(dr, "slice_stl", return_value="x.gcode"), patch.object(dr, "wrap_or_gcode", return_value={}):
+            rebuilt = dr._rebuild_parametric(recipe, str(tmp_path))
+        # OpenSCAD's own default for a 45 mm circle, exactly as before.
+        assert _ring(rebuilt["compiled_stl"]) == 30
+
+    def test_compile_keep_and_rebuild_make_one_part(self, _auth, tmp_path, monkeypatch):
+        _openscad_or_skip()
+        from kiln import design_rebuild as dr
+        from kiln.design_recipe import find_recipe, load_recipe
+        from kiln.plugins import version_tools
+
+        code = "cylinder(d = 45, h = 2);"
+        compiled = _plugin_tools("design_tools")["compile_scad"](scad_code=code)["stl_path"]
+        monkeypatch.setattr(version_tools, "_DESIGNS_ROOT", str(tmp_path / "designs"))
+        _plugin_tools("version_tools")["save_design_version"](
+            design_id="cup",
+            scad_source=code,
+            stl_path=compiled,
+        )
+        design_dir = str(tmp_path / "designs" / "cup")
+        recipe = load_recipe(find_recipe(design_dir))
+        with patch.object(dr, "slice_stl", return_value="x.gcode"), patch.object(dr, "wrap_or_gcode", return_value={}):
+            rebuilt = dr._rebuild_parametric(recipe, design_dir)
+        assert _ring(rebuilt["compiled_stl"]) == _ring(compiled)
+
+    def test_the_design_cache_keeps_the_source_as_compiled(self, _auth, tmp_path, monkeypatch):
+        import trimesh
+
+        from kiln import design_cache as dc
+        from kiln.curve_resolution import SCAD_TRAILER
+
+        monkeypatch.setattr(dc, "_design_cache", dc.DesignCache(cache_dir=str(tmp_path / "c")))
+        stl = str(tmp_path / "part.stl")
+        trimesh.creation.cylinder(radius=5, height=2).export(stl)
+        result = _plugin_tools("design_tools")["cache_design_with_source"](
+            file_path=stl,
+            scad_source="cylinder(d = 10, h = 2);",
+        )
+        kept = dc.get_design_cache().get_source(result["design_id"])["scad_source"]
+        assert kept == "cylinder(d = 10, h = 2);" + SCAD_TRAILER
+
+    def test_composed_curves_follow_the_rule_and_the_hexagon_stays(self, _auth, tmp_path):
+        _openscad_or_skip()
+        from kiln import curve_resolution as cr
+        from kiln.generation.openscad import compose_from_primitives
+
+        round_part = compose_from_primitives(
+            [{"type": "primitive", "shape": "cylinder", "params": {"h": 2, "r": 22.5}}],
+            output_path=str(tmp_path / "round.stl"),
+        )
+        hex_part = compose_from_primitives(
+            [{"type": "primitive", "shape": "hex_prism", "params": {"h": 2, "r": 22.5}}],
+            output_path=str(tmp_path / "hex.stl"),
+        )
+        assert _ring(round_part["path"]) == cr.fragments(22.5)
+        assert _ring(hex_part["path"]) == 6
+
+    def test_gemini_output_compiles_under_the_rule(self, _auth, tmp_path):
+        _openscad_or_skip()
+        from kiln import curve_resolution as cr
+        from kiln.generation.gemini import GeminiDeepThinkProvider
+        from kiln.generation.openscad import _find_openscad
+
+        provider = GeminiDeepThinkProvider(api_key="test", openscad_path=_find_openscad())
+        out = str(tmp_path / "g.stl")
+        job = provider._compile_scad("cylinder(d = 45, h = 2);", out, "job", "a cup", "stl")
+        assert job.status.value == "succeeded"
+        assert _ring(out) == cr.fragments(22.5)
+
+    def test_validate_checks_the_file_compile_would_build(self, _auth):
+        _openscad_or_skip()
+        import kiln.server as srv
+
+        result = srv.validate_openscad_code(
+            scad_code="cylinder(d = 10, h = 1, $fn = curve_fragments(5));",
+        )
+        assert result.get("valid") is True
+        assert not any("curve_fragments" in str(w) for w in result.get("warnings") or [])
+
+    def test_every_prompt_kiln_hands_a_model_carries_the_one_advice_line(self, _auth):
+        from kiln.curve_resolution import AGENT_ADVICE
+        from kiln.generation.gemini import _SYSTEM_PROMPT
+        from kiln.generation_feedback import build_parametric_generation_prompt
+        from kiln.skill_manifest import SkillManifest
+
+        assert AGENT_ADVICE in _SYSTEM_PROMPT
+        assert AGENT_ADVICE in json.dumps(build_parametric_generation_prompt("a cup").to_dict())
+        assert AGENT_ADVICE in SkillManifest().workflows["create_custom_object_free"]

@@ -345,7 +345,10 @@ def _rebuild_parametric(recipe: Any, design_dir: str) -> dict[str, Any]:
     )
 
     try:
-        compiled_stl = compile_scad_code(scad_code)
+        # The kept source is the design: compile it as written.  Kiln's
+        # curve rule was written into it when it was kept (or it predates
+        # the rule), so adding it now would rebuild a different part.
+        compiled_stl = compile_scad_code(scad_code, as_written=True)
     except Exception as exc:
         return {
             "status": "error",

@@ -44,6 +44,7 @@ from typing import Any
 
 import requests
 
+from kiln.curve_resolution import AGENT_ADVICE, apply_rule
 from kiln.generation.base import (
     GenerationAuthError,
     GenerationError,
@@ -88,7 +89,7 @@ Requirements:
 - Center the model at the origin when practical
 - Provide a flat bottom surface for stable printing
 - Target practical 3D printing size (typically 20-200mm)
-- Use $fn between 32-64 for curves (balance quality vs render time)
+- {curve_advice}
 - Use difference(), union(), intersection() for complex shapes
 - Use hull() and minkowski() for organic or rounded shapes
 - Use linear_extrude() and rotate_extrude() for 2D-to-3D operations
@@ -259,7 +260,7 @@ purpose. Before writing any code, scan the prompt for keywords that match librar
 Do NOT simplify or skip complex features. If the user asks for a honeycomb pattern, \
 you MUST produce visible honeycomb cells. If they ask for a living hinge, you MUST \
 include the slit pattern. A plain box is NEVER acceptable when a patterned feature \
-was requested. These library modules are tested and guaranteed to produce manifold output."""
+was requested. These library modules are tested and guaranteed to produce manifold output.""".replace("{curve_advice}", AGENT_ADVICE)
 
 # Supported image MIME types for multimodal input
 _SUPPORTED_IMAGE_TYPES = {
@@ -1060,6 +1061,9 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 full_code = library_code + "\n\n// === USER-GENERATED CODE ===\n\n" + scad_code
         except ImportError:
             logger.debug("scad_library not available, compiling without library modules")
+
+        # The same curve rule every OpenSCAD build in Kiln gets.
+        full_code = apply_rule(full_code)
 
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_gemini_")
         try:

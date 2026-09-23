@@ -213,6 +213,13 @@ class _VersionToolsPlugin:
 
             import difflib
 
+            from kiln.curve_resolution import apply_rule
+
+            # Keep the source the part was compiled from: Kiln's engine
+            # wrote its curve rule into it, so the kept copy carries it too
+            # and rebuild_design makes the same part.
+            scad_source = apply_rule(scad_source)
+
             from kiln.design_recipe import (
                 create_new_version,
                 create_recipe,
