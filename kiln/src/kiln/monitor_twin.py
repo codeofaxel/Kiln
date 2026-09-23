@@ -223,7 +223,10 @@ def printed_files_for(file_name: str | None) -> dict[str, Any] | None:
     first (:func:`sliced_entry_for`); failing that, the copies
     :func:`note_print_started` retained when a print of this same file
     started -- the ledger keeps only the last few slices, and the print
-    standing on a plate is usually older than that.  The one join for "what
+    standing on a plate is usually older than that.  A ledger file written
+    after that print started is a later slice under the same name, never
+    the print on the plate: the kept copy answers, or nothing does.  The one
+    join for "what
     is this print": the placement verdict reads the G-code here and the stage
     draws the model from here, so the two can never disagree about which
     files a print on the plate came from.  Every path returned exists.
@@ -233,27 +236,57 @@ def printed_files_for(file_name: str | None) -> dict[str, Any] | None:
         base = os.path.basename(str(file_name or ""))
         if not base:
             return None
+        active = _read_json(_ACTIVE_FILE, {})
+        records = [r for r in active.values() if isinstance(r, dict)] if isinstance(active, dict) else []
+        started = next(
+            (
+                r
+                for r in sorted(records, key=lambda r: str(r.get("started_at") or ""), reverse=True)
+                if os.path.basename(str(r.get("file_name") or "")) == base
+            ),
+            None,
+        )
+        since = _epoch(started.get("started_at")) if started else None
         entry = sliced_entry_for(base)
         if isinstance(entry, dict):
             gcode = entry.get("output")
-            if isinstance(gcode, str) and os.path.isfile(gcode):
+            # A file written after this print started is a later slice under
+            # the same name, not the print on the plate: the copy kept at the
+            # start answers instead.
+            if isinstance(gcode, str) and os.path.isfile(gcode) and not _written_after(gcode, since):
                 models = [
-                    m for m in (entry.get("wrapped"), entry.get("input"))
-                    if isinstance(m, str) and m and os.path.isfile(m)
+                    m
+                    for m in (entry.get("wrapped"), entry.get("input"))
+                    if isinstance(m, str) and m and os.path.isfile(m) and not _written_after(m, since)
                 ]
                 return {"gcode": gcode, "models": models}
-        active = _read_json(_ACTIVE_FILE, {})
-        records = [r for r in active.values() if isinstance(r, dict)] if isinstance(active, dict) else []
-        for rec in sorted(records, key=lambda r: str(r.get("started_at") or ""), reverse=True):
-            if os.path.basename(str(rec.get("file_name") or "")) != base:
-                continue
-            gcode = rec.get("gcode")
+        if started is not None:
+            gcode = started.get("gcode")
             if isinstance(gcode, str) and os.path.isfile(gcode):
-                mesh = rec.get("mesh")
+                mesh = started.get("mesh")
                 return {"gcode": gcode, "models": [mesh] if isinstance(mesh, str) and os.path.isfile(mesh) else []}
     except Exception:  # noqa: BLE001 -- a miss is "Kiln has no files", never a fault
         logger.debug("monitor_twin.printed_files_for failed", exc_info=True)
     return None
+
+
+def _epoch(stamp: Any) -> float | None:
+    """An ISO start stamp as epoch seconds, or ``None``."""
+    try:
+        return datetime.fromisoformat(str(stamp)).timestamp() if stamp else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _written_after(path: str, since: float | None) -> bool:
+    """Whether *path* was written after *since* (a second's slack for the
+    filesystem's clock).  ``False`` when there is nothing to compare."""
+    if since is None:
+        return False
+    try:
+        return os.path.getmtime(path) > since + 1.0
+    except OSError:
+        return False
 
 
 def note_print_started(printer_name: str, file_name: str) -> None:

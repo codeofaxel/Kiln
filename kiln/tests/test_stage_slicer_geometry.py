@@ -600,3 +600,48 @@ class TestOneJoinForAPrintsFiles:
         assert monitor_twin.printed_files_for("unknown.gcode.3mf") is None
         assert monitor_twin.printed_files_for("") is None
         assert occupant_gcode_for("unknown.gcode.3mf") is None
+
+
+class TestAPrintIsReadAsItStarted:
+    """A slice written after a print started is not that print.  Re-slicing
+    a model while its print still stands on the plate writes the same file
+    name again; the fit check and the stage must keep reading what is
+    actually on the plate -- the copy kept when the print started."""
+
+    def _started(self, tmp_path):
+        mesh = _box(tmp_path / "part.stl")
+        gcode = _gcode_for_box(tmp_path / "part.gcode")
+        monitor_twin.note_sliced(mesh, gcode)
+        monitor_twin.note_print_started("bambu", "part.gcode")
+        return mesh, gcode, monitor_twin.active_twin("bambu")
+
+    def _reslice_later(self, gcode, rec, mesh):
+        from datetime import datetime
+
+        with open(gcode, "a") as fh:
+            fh.write("; re-sliced with a change\n")
+        later = datetime.fromisoformat(rec["started_at"]).timestamp() + 120
+        os.utime(gcode, (later, later))
+        monitor_twin.note_sliced(mesh, gcode)
+
+    def test_a_slice_written_after_the_print_started_is_not_that_print(self, tmp_path, twin_dir):
+        from kiln._pro_placement_bridge import occupant_gcode_for
+
+        mesh, gcode, rec = self._started(tmp_path)
+        self._reslice_later(gcode, rec, mesh)
+        assert monitor_twin.printed_files_for("part.gcode") == {"gcode": rec["gcode"], "models": [rec["mesh"]]}
+        assert occupant_gcode_for("part.gcode") == {"path": rec["gcode"]}
+
+    def test_a_slice_from_before_the_start_still_answers_from_the_ledger(self, tmp_path, twin_dir):
+        mesh, gcode, _rec = self._started(tmp_path)
+        files = monitor_twin.printed_files_for("part.gcode")
+        assert files["gcode"] == os.path.abspath(gcode)
+
+    def test_a_later_slice_with_nothing_kept_names_no_files(self, tmp_path, twin_dir):
+        mesh, gcode, rec = self._started(tmp_path)
+        active = monitor_twin._read_json(monitor_twin._ACTIVE_FILE, {})
+        active["bambu"]["gcode"] = None     # nothing was kept when it started
+        active["bambu"]["mesh"] = None
+        monitor_twin._write_json(monitor_twin._ACTIVE_FILE, active)
+        self._reslice_later(gcode, rec, mesh)
+        assert monitor_twin.printed_files_for("part.gcode") is None, "unknown beats the wrong print"
