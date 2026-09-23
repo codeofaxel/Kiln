@@ -99,11 +99,12 @@ class TestLedgerJoin:
         assert monitor_twin.active_twin(None)["file_name"] == "part.gcode"
 
     def test_ledger_is_ring_buffered(self, twin_dir, tmp_path):
-        mesh, gcode = _make_files(tmp_path)
-        for _ in range(monitor_twin._MAX_SLICE_ENTRIES + 5):
-            monitor_twin.note_sliced(str(mesh), str(gcode))
+        mesh, _ = _make_files(tmp_path)
+        for i in range(monitor_twin._MAX_SLICE_ENTRIES + 5):
+            monitor_twin.note_sliced(str(mesh), str(tmp_path / f"part_{i}.gcode"))
         entries = json.loads((twin_dir / "slices.json").read_text())
         assert len(entries) == monitor_twin._MAX_SLICE_ENTRIES
+        assert entries[-1]["output"] == str(tmp_path / f"part_{monitor_twin._MAX_SLICE_ENTRIES + 4}.gcode")
 
     def test_note_functions_never_raise(self, twin_dir):
         # Paths that don't exist, names that are empty — bookkeeping is
@@ -346,8 +347,11 @@ class TestTheWrapFindsItsSlice:
         mesh, gcode = _make_files(tmp_path)
         wrapped = tmp_path / "part.gcode.3mf"
         wrapped.write_bytes(b"PK\x03\x04")
-        monitor_twin.note_sliced(str(mesh), str(gcode))
-        monitor_twin.note_sliced(str(mesh), str(gcode))
+        # Two rows for one G-code: a ledger written before a new slice took
+        # its path over from the older rows can still hold them.
+        row = {"input": str(mesh), "output": str(gcode), "wrapped": None, "at": "2026-09-01T00:00:00+00:00"}
+        twin_dir.mkdir()
+        (twin_dir / "slices.json").write_text(json.dumps([dict(row), dict(row)]))
         monitor_twin.note_wrapped(str(gcode), str(wrapped))
         rows = monitor_twin._read_json(monitor_twin._SLICES_FILE, [])
         assert [bool(r.get("wrapped")) for r in rows] == [False, True]
@@ -358,3 +362,110 @@ class TestTheWrapFindsItsSlice:
         stranger.write_bytes(b"PK\x03\x04")
         monitor_twin.note_sliced(str(mesh), str(gcode))
         assert monitor_twin.sliced_output_for(str(stranger)) is None
+
+
+class TestEveryPathBelongsToItsNewestSlice:
+    """The slicer writes each model to a fixed path (``kiln_sliced/<stem>.gcode``),
+    so a re-slice overwrites the file an older row points at.  Covered: a
+    burst of re-slices of one model, wrapped or not, leaves every other
+    slice in the ledger; a mesh whose G-code another mesh overwrote has no
+    slice; a print on the plate is read from the copy taken when it
+    started, not from a later slice written over its G-code; a wrap whose
+    G-code was re-sliced still names its mesh and claims no G-code."""
+
+    def test_reslicing_one_model_keeps_every_other_slice(self, twin_dir, tmp_path):
+        jar = tmp_path / "jar.stl"
+        jar.write_bytes(b"solid jar\nendsolid jar\n")
+        jar_gcode = tmp_path / "jar.gcode"
+        jar_gcode.write_text("; the jar\n")
+        monitor_twin.note_sliced(str(jar), str(jar_gcode))
+        cube = tmp_path / "cube.stl"
+        cube.write_bytes(b"solid cube\nendsolid cube\n")
+        cube_gcode = tmp_path / "cube.gcode"
+        for _ in range(monitor_twin._MAX_SLICE_ENTRIES + 2):
+            cube_gcode.write_text("; the cube\n")
+            monitor_twin.note_sliced(str(cube), str(cube_gcode))
+
+        monitor_twin.note_print_started("p1", "jar.gcode")
+
+        rec = monitor_twin.active_twin("p1")
+        assert rec["gcode"] is not None
+        assert Path(rec["gcode"]).read_text() == "; the jar\n"
+
+    def test_reslicing_and_rewrapping_one_model_keeps_every_other_slice(self, twin_dir, tmp_path):
+        jar = tmp_path / "jar.stl"
+        jar.write_bytes(b"solid jar\nendsolid jar\n")
+        jar_gcode = tmp_path / "jar.gcode"
+        jar_gcode.write_text("; the jar\n")
+        monitor_twin.note_sliced(str(jar), str(jar_gcode))
+        cube = tmp_path / "cube.stl"
+        cube.write_bytes(b"solid cube\nendsolid cube\n")
+        cube_gcode = tmp_path / "cube.gcode"
+        cube_wrap = tmp_path / "cube.gcode.3mf"
+        for _ in range(monitor_twin._MAX_SLICE_ENTRIES + 2):
+            cube_gcode.write_text("; the cube\n")
+            monitor_twin.note_sliced(str(cube), str(cube_gcode))
+            cube_wrap.write_bytes(b"PK\x03\x04")
+            monitor_twin.note_wrapped(str(cube_gcode), str(cube_wrap))
+
+        monitor_twin.note_print_started("p1", "jar.gcode")
+
+        rec = monitor_twin.active_twin("p1")
+        assert rec["gcode"] is not None
+        assert Path(rec["gcode"]).read_text() == "; the jar\n"
+
+    def test_a_mesh_whose_gcode_another_mesh_overwrote_has_no_slice(self, twin_dir, tmp_path):
+        first = tmp_path / "a" / "part.stl"
+        second = tmp_path / "b" / "part.stl"
+        for mesh in (first, second):
+            mesh.parent.mkdir()
+            mesh.write_bytes(b"solid part\nendsolid part\n")
+        out = tmp_path / "kiln_sliced" / "part.gcode"
+        out.parent.mkdir()
+        out.write_text("; the first part\n")
+        monitor_twin.note_sliced(str(first), str(out))
+        out.write_text("; the second part\n")
+        monitor_twin.note_sliced(str(second), str(out))
+
+        assert monitor_twin.sliced_output_for(str(first)) is None
+        assert monitor_twin.sliced_output_for(str(second)) == str(out)
+
+    def test_a_print_on_the_plate_is_read_from_its_own_copy_after_a_reslice(self, twin_dir, tmp_path):
+        mesh = tmp_path / "jar.stl"
+        mesh.write_bytes(b"solid jar\nendsolid jar\n")
+        gcode = tmp_path / "jar.gcode"
+        gcode.write_text("; the jar on the plate\n")
+        wrap = tmp_path / "jar.gcode.3mf"
+        wrap.write_bytes(b"PK\x03\x04")
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_wrapped(str(gcode), str(wrap))
+        monitor_twin.note_print_started("bambu", "jar.gcode.3mf")
+        # The same model sliced again into the same folder, not wrapped --
+        # a time estimate, say -- while the first print stands on the plate.
+        gcode.write_text("; a later slice\n")
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+
+        files = monitor_twin.printed_files_for("jar.gcode.3mf")
+
+        assert files is not None
+        assert Path(files["gcode"]).read_text() == "; the jar on the plate\n"
+
+    def test_a_wrap_whose_gcode_was_resliced_still_names_its_mesh(self, twin_dir, tmp_path):
+        mesh = tmp_path / "jar.stl"
+        mesh.write_bytes(b"solid jar\nendsolid jar\n")
+        gcode = tmp_path / "jar.gcode"
+        gcode.write_text("; the slice inside the wrap\n")
+        wrap = tmp_path / "jar.gcode.3mf"
+        wrap.write_bytes(b"PK\x03\x04")
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_wrapped(str(gcode), str(wrap))
+        # An estimate slices the same model to the same path before the wrap prints.
+        gcode.write_text("; an estimate\n")
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+
+        entry = monitor_twin.sliced_entry_for("jar.gcode.3mf")
+        monitor_twin.note_print_started("p1", "jar.gcode.3mf")
+
+        assert entry is not None
+        assert entry["input"] == str(mesh)
+        assert monitor_twin.active_twin("p1")["gcode"] is None

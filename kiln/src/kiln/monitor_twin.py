@@ -52,8 +52,10 @@ _TWIN_DIR = Path("~/.kiln/monitor_twin").expanduser()
 _SLICES_FILE = _TWIN_DIR / "slices.json"
 _ACTIVE_FILE = _TWIN_DIR / "active.json"
 
-#: Recent-slice ledger depth.  A machine slices a handful of jobs between
-#: prints; eight covers every real flow without growing a history.
+#: Recent-slice ledger depth.  Every G-code or wrap path belongs to the newest
+#: row that wrote it, so re-slicing a model to the same path adds no rows (see
+#: :func:`note_sliced`).  A machine slices a handful of jobs between prints;
+#: eight covers every real flow without growing a history.
 _MAX_SLICE_ENTRIES = 8
 
 #: Retention ceilings.  Past these the twin quietly isn't retained — a
@@ -98,6 +100,23 @@ def _slug(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", name or "default")[:64] or "default"
 
 
+def _release(entries: list[Any], key: str, path: str) -> list[Any]:
+    """*entries* with every row's *key* claim on *path* withdrawn.
+
+    The file at *path* has just been rewritten, so no older row may still
+    say it holds that row's slice.  A row left naming neither a G-code nor
+    a wrap joins nothing, and is dropped.
+    """
+    kept: list[Any] = []
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get(key) == path:
+            entry = {**entry, key: None}
+            if not entry.get("output") and not entry.get("wrapped"):
+                continue
+        kept.append(entry)
+    return kept
+
+
 # ---------------------------------------------------------------------------
 # Chokepoint notes — called from slicer / wrapper / start_print
 # ---------------------------------------------------------------------------
@@ -108,15 +127,27 @@ def note_sliced(input_path: str, output_path: str) -> None:
 
     Paths only — nothing is copied until a print actually starts, so a
     slice that never prints costs a ledger line, not a file copy.
+
+    Every file path belongs to the newest row that wrote it.  The slicer
+    writes a model to a path fixed by its name (``kiln_sliced/<stem>.gcode``
+    unless a door names another), so this slice has just overwritten the
+    G-code any older row for the same path describes.  That row gives up
+    its G-code and keeps its wrap, whose file still holds its slice, or
+    leaves the ledger when it has none.  Kept whole, such rows claimed
+    toolpaths their files no longer held and each still cost a slot:
+    twenty-one slices to two paths (2026-09-22) pushed every other slice
+    out of the ledger.
     """
     try:
         entries = _read_json(_SLICES_FILE, [])
         if not isinstance(entries, list):
             entries = []
+        output_abs = os.path.abspath(output_path)
+        entries = _release(entries, "output", output_abs)
         entries.append(
             {
                 "input": os.path.abspath(input_path),
-                "output": os.path.abspath(output_path),
+                "output": output_abs,
                 "wrapped": None,
                 "at": _now_iso(),
             }
@@ -130,21 +161,28 @@ def note_wrapped(gcode_path: str, wrapped_path: str) -> None:
     """Remember that ``gcode_path`` was wrapped into ``wrapped_path``.
 
     The printer-side name will be the WRAP's basename; the layer viewer
-    wants the raw G-code inside — this line keeps the two joined.
+    wants the raw G-code inside — this line keeps the two joined.  The wrap
+    file has just been rewritten, so an older row claiming the same path
+    gives it up (see :func:`note_sliced`).
     """
     try:
         gcode_abs = os.path.abspath(gcode_path)
+        wrapped_abs = os.path.abspath(wrapped_path)
         entries = _read_json(_SLICES_FILE, [])
         if not isinstance(entries, list):
             return
+        kept = _release(entries, "wrapped", wrapped_abs)
+        changed = kept != entries
         # The NEWEST row for this G-code, only: an older row is an older
         # slice that happened to write the same path, and stamping it too
         # would let a stale wrap claim a G-code it never contained.
-        for entry in reversed(entries):
+        for entry in reversed(kept):
             if isinstance(entry, dict) and entry.get("output") == gcode_abs:
-                entry["wrapped"] = os.path.abspath(wrapped_path)
-                _write_json(_SLICES_FILE, entries)
+                entry["wrapped"] = wrapped_abs
+                changed = True
                 break
+        if changed:
+            _write_json(_SLICES_FILE, kept)
     except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
         logger.debug("monitor_twin.note_wrapped failed", exc_info=True)
 
@@ -156,7 +194,9 @@ def sliced_entry_for(file_name: str) -> dict[str, Any] | None:
     what the wrapper wrote (``wrapped``); newest wins among exact twins.
     The one join for everything that needs the local file behind a
     printer-side name -- the Monitor's twin and the plate record alike.
-    ``None`` when Kiln did not slice it.  Never raises.
+    ``output`` is ``None`` on a wrap whose G-code a later slice wrote over:
+    the wrap still names the mesh it came from.  ``None`` when Kiln did not
+    slice it.  Never raises.
     """
     try:
         base = os.path.basename(str(file_name or ""))
@@ -167,7 +207,7 @@ def sliced_entry_for(file_name: str) -> dict[str, Any] | None:
                     continue
                 out = os.path.basename(str(entry.get("output") or ""))
                 wrapped = os.path.basename(str(entry.get("wrapped") or ""))
-                if base in (out, wrapped) and out:
+                if base in (out, wrapped):
                     return entry
     except Exception:  # noqa: BLE001 — a ledger miss is not a failure
         logger.debug("monitor_twin.sliced_entry_for failed", exc_info=True)
