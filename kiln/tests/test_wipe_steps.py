@@ -16,6 +16,8 @@ pinned where they live.
 from __future__ import annotations
 
 import json
+import threading
+import time
 
 import pytest
 
@@ -128,6 +130,29 @@ class TestStepMode:
         assert "moves the extruder" in result.message and "run step 2 (heat) first" in result.message
         assert "Nothing was sent" in result.message and _scripts(bambu) == []
         assert result.details["last_hotend_reading"] == 25.0 and result.step_sent == 3
+
+    def test_a_thread_left_by_an_earlier_test_cannot_heat_this_nozzle(self, bambu, monkeypatch):
+        """The cold-nozzle refusal above, with a stranger sleeping nearby.
+
+        On CI an earlier test's routine can still be running in the same
+        worker, sleeping through the same ``time`` module this test fakes.
+        Its sleeps once ticked this test's thermistor to 210 and the step
+        went through -- "assert (True is False)", 2026-09-22."""
+        stop = threading.Event()
+
+        def earlier_tests_routine() -> None:
+            while not stop.is_set():
+                time.sleep(0.01)
+
+        stranger = threading.Thread(target=earlier_tests_routine, daemon=True)
+        stranger.start()
+        try:
+            _ready(bambu, monkeypatch, _steps_doc())
+            threading.Event().wait(0.05)  # the stranger sleeps a few times
+            result = bambu.wipe_nozzle(step=3)
+        finally:
+            stop.set()
+        assert result.success is False and result.details["last_hotend_reading"] == 25.0
 
     def test_the_snap_after_the_heat_sends_the_plans_own_retract(self, bambu, monkeypatch):
         _ready(bambu, monkeypatch, _steps_doc())

@@ -31,6 +31,7 @@ import inspect
 import itertools
 import json
 import sys
+import threading
 import time
 from unittest import mock
 
@@ -814,14 +815,31 @@ def _hot(adapter, monkeypatch, temp=210.0, cold=138.0):
     """Clock and thermistor: the first sleep brings the hotend to *temp*;
     once the heater has been switched off (``M104 S0`` published) each
     sleep reads *cold* instead, as a nozzle under the fan would.  Pass
-    ``cold=None`` for a nozzle that never cools."""
-    counter = itertools.count(0.0, 0.5)
-    monkeypatch.setattr(time, "monotonic", lambda: next(counter))
+    ``cold=None`` for a nozzle that never cools.
 
-    def _tick(_s):
+    Only this test's threads see the fake clock.  ``time`` is one module
+    for the whole process, so a thread an earlier test left running -- a
+    routine still waiting on ITS printer -- sleeps through the same patch,
+    and its sleeps used to heat THIS printer: a cold nozzle read 210 and a
+    refusal that should have held went through (CI, 2026-09-22).  Threads
+    already alive when the clock is installed keep the real one."""
+    counter = itertools.count(0.0, 0.5)
+    real_sleep, real_monotonic = time.sleep, time.monotonic
+    foreign = set(threading.enumerate()) - {threading.current_thread()}
+
+    def _monotonic():
+        if threading.current_thread() in foreign:
+            return real_monotonic()
+        return next(counter)
+
+    def _tick(s):
+        if threading.current_thread() in foreign:
+            real_sleep(s)
+            return
         off = cold is not None and any(script == "M104 S0" for script in _scripts(adapter))
         adapter._last_status["nozzle_temper"] = cold if off else temp
 
+    monkeypatch.setattr(time, "monotonic", _monotonic)
     monkeypatch.setattr(time, "sleep", _tick)
 
 
