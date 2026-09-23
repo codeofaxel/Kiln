@@ -1755,6 +1755,11 @@ class MoonrakerAdapter(PrinterAdapter):
         version = str(_safe_get(info, "result", "software_version", default="") or "").strip()
         return version or None
 
+    def reported_firmware_version(self) -> str | None:
+        """Klipper's own version line (``/printer/info`` software_version):
+        a fork's build stamp, which says which macros a unit likely ships."""
+        return self._software_version()
+
     def _klipper_can_extrude(self) -> tuple[str, str] | None:
         """Klipper's own ``extruder.can_extrude`` — a real signal, read
         after heating.  Returns a refusal ``(reason, source)`` or ``None``."""

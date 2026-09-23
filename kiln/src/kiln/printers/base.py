@@ -5651,6 +5651,26 @@ class PrinterAdapter(ABC):
 
     # -- firmware updates (optional) ------------------------------------
 
+    def reported_firmware_version(self) -> str | None:
+        """The firmware version this printer reports, as text, or ``None``.
+
+        The one accessor the heartbeat reads, so Kiln can tell which
+        firmware the printers out in the wild actually run -- the version a
+        maker's published code is read for is not always the one shipped.
+        Each backend answers from what it already holds (a Bambu's cached
+        module list, Klipper's own version line, a Marlin machine's M115
+        report read for its motion facts); nothing here sends a command
+        the print could feel.  Never a serial number, never an address.
+        """
+        source = getattr(self, "_motion_machine_source", None)
+        if isinstance(source, tuple) and len(source) == 2 and source[0] == "marlin_report":
+            report = source[1]
+            name = str(getattr(report, "firmware_name", "") or "").strip()
+            version = str(getattr(report, "firmware_version", "") or "").strip()
+            text = " ".join(part for part in (name, version) if part)
+            return text or None
+        return None
+
     def get_firmware_status(self) -> FirmwareStatus | None:
         """Check for available firmware/software updates.
 

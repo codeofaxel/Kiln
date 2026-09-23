@@ -3862,6 +3862,10 @@ class BambuAdapter(PrinterAdapter):
                 return version or None
         return None
 
+    def reported_firmware_version(self) -> str | None:
+        """The OTA firmware version from the cached module list; no request."""
+        return self._printer_firmware_version()
+
     def homed_axes_now(self) -> set[str] | None:
         """Which axes the printer says are homed, from a push it answers NOW.
 

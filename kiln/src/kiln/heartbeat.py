@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 from datetime import date
@@ -350,6 +351,41 @@ def _get_all_adapter_types() -> list[str]:
     return families
 
 
+#: A firmware version is a short label: letters, digits and the
+#: punctuation makers use in one ("v0.12.0-123-gabc", "01.05.00.00",
+#: "Marlin 2.1.2.1").  Anything else is dropped rather than sent.
+_FIRMWARE_VERSION_CHARS = re.compile(r"[^A-Za-z0-9 ._+/()-]")
+_MAX_FIRMWARE_VERSION_LEN = 64
+
+
+def _get_printer_firmware() -> list[dict[str, str]]:
+    """Best-effort ``[{"model", "firmware"}]`` for every registered printer
+    that reports a firmware version (``reported_firmware_version``), capped
+    like the model list.  Version text only, cleaned to a short label."""
+    out: list[dict[str, str]] = []
+    try:
+        from kiln.registry import get_registry
+
+        reg = get_registry()
+        for name in reg.list_names():
+            if len(out) >= _MAX_HEARTBEAT_PRINTER_MODELS:
+                break
+            try:
+                adapter = reg.get(name)
+                reader = getattr(adapter, "reported_firmware_version", None)
+                version = reader() if callable(reader) else None
+            except Exception:
+                continue
+            version = _FIRMWARE_VERSION_CHARS.sub("", str(version or "")).strip()[:_MAX_FIRMWARE_VERSION_LEN]
+            if not version:
+                continue
+            model = str(_adapter_model(adapter) or "").strip()[:60]
+            out.append({"model": model, "firmware": version})
+    except Exception:
+        pass
+    return out
+
+
 def _get_daily_counts() -> dict[str, int]:
     """Read today's event counters from daily_stats."""
     try:
@@ -546,6 +582,11 @@ def _send_heartbeat() -> None:
                 # on_plate and plate_occupied are the gate working.  Tokens only
                 # (daily_stats._MOTION_KEY_RE): no host, path or URL fits.
                 "motion_refusals": _top_n(stats.get("motion_refusals", {}), 100),
+                # Which firmware each registered printer reports it runs
+                # (version text only) -- so Kiln can tell when the printers
+                # out in the wild run a version its records were not read
+                # from.  Never a serial, never an address.
+                "printer_firmware": _get_printer_firmware(),
                 # What a served motion plan did on a real machine —
                 # {"<model>|<verb>|<outcome>": count_today} over the closed
                 # vocabularies in kiln.daily_stats (MOTION_VERBS,

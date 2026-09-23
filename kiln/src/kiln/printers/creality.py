@@ -1153,6 +1153,10 @@ class CrealityAdapter(PrinterAdapter):
     def get_firmware_status(self) -> FirmwareStatus | None:
         return self._backend.get_firmware_status()
 
+    def reported_firmware_version(self) -> str | None:
+        reader = getattr(self._backend, "reported_firmware_version", None)
+        return reader() if callable(reader) else None
+
     def update_firmware(self, component: str | None = None) -> FirmwareUpdateResult:
         return self._backend.update_firmware(component=component)
 
