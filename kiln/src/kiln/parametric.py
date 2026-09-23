@@ -749,6 +749,27 @@ def insert_into_scad_module(
 # ---------------------------------------------------------------------------
 
 
+def render_template_scad(template: dict[str, Any], params: dict[str, Any]) -> str:
+    """The OpenSCAD a parametric part from ``data/design_templates.json`` builds.
+
+    Every door that builds geometry from a template renders it here, so
+    each one gets the same substitution and the same curve resolution:
+    :data:`kiln.curve_resolution.SCAD_TRAILER` is appended, and a template
+    need never type a facet count of its own.  The result is
+    self-contained -- OpenSCAD run on it by hand builds the same part
+    Kiln does.
+
+    :param template: One template record (its ``scad_template`` is used).
+    :param params: Parameter values, substituted into ``${name}`` slots.
+    :returns: OpenSCAD source ready to compile.
+    """
+    from string import Template
+
+    from kiln.curve_resolution import SCAD_TRAILER
+
+    return Template(template["scad_template"]).safe_substitute(params) + SCAD_TRAILER
+
+
 def compile_scad_code(
     scad_code: str,
     *,

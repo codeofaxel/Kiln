@@ -14193,7 +14193,8 @@ def generate_from_template(
     try:
         import json as _json
         from pathlib import Path as _Path
-        from string import Template
+
+        from kiln.parametric import render_template_scad
 
         tpl_path = _Path(__file__).parent / "data" / "design_templates.json"
         with open(tpl_path) as fh:
@@ -14232,8 +14233,8 @@ def generate_from_template(
         defaults = {k: v["default"] for k, v in tpl.get("parameters", {}).items()}
         params = {**defaults, **(parameters or {})}
 
-        # Substitute parameters into SCAD code
-        scad_code = Template(tpl["scad_template"]).safe_substitute(params)
+        # Substitute parameters; the shared renderer adds the curve rule
+        scad_code = render_template_scad(tpl, params)
 
         # Generate via OpenSCAD provider
         gen = _get_generation_provider("openscad")

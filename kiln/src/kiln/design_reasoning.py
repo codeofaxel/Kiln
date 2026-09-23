@@ -2181,7 +2181,8 @@ def optimize_template_params(
     import itertools
     import json
     import tempfile
-    from string import Template
+
+    from kiln.parametric import render_template_scad
 
     # Load templates
     if templates_path is None:
@@ -2200,7 +2201,6 @@ def optimize_template_params(
         raise ValueError(f"Template {template_id!r} not found")
 
     params_spec = tpl.get("parameters", {})
-    scad_template = tpl.get("scad_template", "")
 
     if not params_spec:
         raise ValueError(f"Template {template_id!r} has no parameters to optimize")
@@ -2284,7 +2284,7 @@ def optimize_template_params(
                 continue
 
         # Generate SCAD code
-        scad_code = Template(scad_template).safe_substitute(params)
+        scad_code = render_template_scad(tpl, params)
         scad_path = str(Path(work_dir) / f"variant_{idx}.scad")
         stl_path = str(Path(work_dir) / f"variant_{idx}.stl")
 
@@ -3002,7 +3002,8 @@ def design_to_gcode(
     """
     import json as _json
     import tempfile
-    from string import Template
+
+    from kiln.parametric import render_template_scad
 
     result = DesignToGCodeResult(description=description)
 
@@ -3037,8 +3038,8 @@ def design_to_gcode(
     # Write SCAD file.
     #
     # Templates are ``string.Template`` sources — ``pegs = ${pegs};`` —
-    # so the defaults must be SUBSTITUTED, the same way
-    # :func:`optimize_template_params` renders the same templates above.
+    # so the defaults must be SUBSTITUTED, through the renderer every
+    # template door shares (:func:`kiln.parametric.render_template_scad`).
     # This step used to prepend ``k = v;`` assignments instead, leaving
     # every ``${...}`` in place, and the resulting file failed OpenSCAD's
     # parser on line one of the first placeholder — no template ever
@@ -3052,7 +3053,7 @@ def design_to_gcode(
         for name, spec in tmpl.get("parameters", {}).items()
         if isinstance(spec, dict) and spec.get("default") is not None
     }
-    scad_code = Template(tmpl["scad_template"]).safe_substitute(params)
+    scad_code = render_template_scad(tmpl, params)
     scad_path.write_text(scad_code)
     result.scad_file = str(scad_path)
     result.steps_completed.append("scad_generation")

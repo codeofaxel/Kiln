@@ -1271,7 +1271,8 @@ class _GenerationAIToolsPlugin:
             if err := _srv._check_auth("generate"):
                 return err
             import json
-            from string import Template
+
+            from kiln.parametric import render_template_scad
 
             variation_count = max(1, min(10, variation_count))
 
@@ -1313,7 +1314,7 @@ class _GenerationAIToolsPlugin:
                             val = pmin + t * (pmax - pmin)
                         params[pname] = round(val, 1)
 
-                    scad_code = Template(tpl["scad_template"]).safe_substitute(params)
+                    scad_code = render_template_scad(tpl, params)
                     job = gen.generate(scad_code, format="stl")
 
                     var_entry: dict[str, Any] = {
