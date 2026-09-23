@@ -254,6 +254,21 @@ class TestAnExistingFileReachesTheStage:
         assert "no record of the mesh" in sc["error"]["message"]
         assert "artifact" not in sc, "a cube must not reach the panel"
 
+    def test_raw_gcode_is_drawn_as_the_mesh_it_was_sliced_from(self, tmp_path):
+        mesh = _block(tmp_path / "block.stl")
+        _placeholder_archive(tmp_path, sliced_from=mesh)
+        sc = _show(str(tmp_path / "block.gcode"))
+        assert sc["stage_mesh_path"] == os.path.abspath(mesh)
+        assert "only toolpaths" in sc["shows"]
+
+    def test_raw_gcode_nobody_sliced_here_is_refused_in_words(self, tmp_path):
+        gcode = tmp_path / "found.gcode"
+        gcode.write_text(_LAYERS)
+        out = _door(_served()).fn(file_path=str(gcode))
+        assert out["error"]["code"] == "NOT_STAGEABLE"
+        assert "only toolpaths" in out["error"]["message"]
+        assert "no record of the mesh" in out["error"]["message"]
+
     def test_a_host_with_no_panel_gets_the_link_for_the_same_file(self, tmp_path, monkeypatch):
         calls = _wire_link_door(monkeypatch)
         archive = _sliced_archive(tmp_path)

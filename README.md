@@ -411,6 +411,8 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 92
   - Put any image, text, QR code, or pattern onto a model surface as an emboss or deboss
 - **slice_model**
   - Slice a model (STL/3MF/STEP) to G-code using PrusaSlicer, OrcaSlicer, or BambuStudio
+- **show_on_stage**
+  - Turn over a file you already have — a model, or the sliced file about to print — on Kiln's interactive 3D stage, without re-making or re-slicing it
 - **estimate_print_cost_from_mesh**
   - Estimate material cost, weight, and print time before committing the printer
 - **preflight_check**
