@@ -422,7 +422,15 @@ class TestPaintedPreviewReachesTheStage:
         pixels = list(img.getdata())
         assert sum(1 for r, g, b in pixels if r > 120 and g < 80 and b < 80) > 20, "the paint is missing"
 
-    def test_without_the_stage_the_coloured_renderer_still_draws(self, tmp_path, monkeypatch):
+    def test_without_a_browser_the_painter_draws_the_paint_in_the_stage_look(
+        self, tmp_path, monkeypatch,
+    ):
+        """No browser to photograph with: the software stage painter draws
+        the plate, in its paint.  Until 2026-09-22 this fell to the grey
+        per-face renderer, which no person is meant to be shown; that
+        renderer now draws only a part whose paint misses the payload."""
+        from PIL import Image
+
         from kiln.model_visualizer import visualize_model
 
         monkeypatch.setenv("KILN_STAGE_BROWSER", "/nonexistent/browser")
@@ -432,7 +440,10 @@ class TestPaintedPreviewReachesTheStage:
             path, output_dir=str(tmp_path / "out"), share_link=False, angles=["isometric"],
         )
         assert result["success"], result
-        assert result["renderer"] == "colored_mesh"
+        assert result["renderer"] == "stage_paint", result["renderer"]
+        img = Image.open(result["views"][0]["path"]).convert("RGB")
+        pixels = list(img.getdata())
+        assert sum(1 for r, g, b in pixels if r > 120 and g < 80 and b < 80) > 20, "the paint is missing"
 
 
 # ---------------------------------------------------------------------------

@@ -73,10 +73,27 @@ def trimesh_absent():
         sys.meta_path.remove(blocker)
         # Drop anything imported under the block, then put back exactly what
         # was there before it.
+        dropped = {}
         for name in list(sys.modules):
             if (_is_blocked(name) or name.startswith("kiln.")) and name not in saved:
-                del sys.modules[name]
+                dropped[name] = sys.modules.pop(name)
         sys.modules.update(saved)
+        # An import also binds the module as an attribute of its parent
+        # package, and restoring sys.modules does not undo that: a re-import
+        # under the block left ``kiln.local_stage`` on the ``kiln`` package
+        # pointing at the module built here, so ``from kiln import
+        # local_stage`` and ``import kiln.local_stage`` answered with two
+        # different modules for the rest of the session, and a later test
+        # patched one while the code read the other.
+        for name, mod in {**dropped, **saved}.items():
+            parent_name, _, child = name.rpartition(".")
+            parent = sys.modules.get(parent_name)
+            if parent is None:
+                continue
+            if name in saved:
+                setattr(parent, child, mod)
+            elif getattr(parent, child, None) is mod:
+                delattr(parent, child)
 
 
 def test_the_blocker_actually_blocks():
