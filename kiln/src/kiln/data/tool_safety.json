@@ -446,6 +446,11 @@
     },
     "repair_guide": {
       "level": "safe"
+    },
+    "printer_bench": {
+      "level": "confirm",
+      "physical_effect": true,
+      "note": "Pauses, resumes and cancels a coin-sized test print the person started through the approval dialog; every step is one ask the person answers."
     }
   }
 }

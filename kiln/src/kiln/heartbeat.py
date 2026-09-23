@@ -671,6 +671,11 @@ def _send_heartbeat() -> None:
             from kiln.printer_motion_report import send_after_heartbeat
 
             send_after_heartbeat(_SUPABASE_URL, _SUPABASE_ANON_KEY)
+            # And what the guided session observed and has not sent yet
+            # (kiln.bench): numbers only, same switch, same posture.
+            from kiln.bench import send_after_heartbeat as _send_observations
+
+            _send_observations(_SUPABASE_URL, _SUPABASE_ANON_KEY)
 
     except Exception as exc:
         _logger.debug("Heartbeat failed (non-fatal): %s", exc)

@@ -11120,6 +11120,17 @@ def register_printer(
             result["persisted"] = True
             result["config_path"] = persisted_path
 
+        # Once, for a model whose motion record has blanks: the offer of the
+        # five-minute session that fills them (kiln.bench).  Never twice.
+        try:
+            from kiln.bench import offer_after_registration
+
+            _offer = offer_after_registration(adapter, name)
+            if _offer is not None:
+                result["bench_offer"] = _offer
+        except Exception:
+            logger.debug("bench offer after registration skipped", exc_info=True)
+
         if printer_type == "bambu" and verify_connection:
             try:
                 ams_info = adapter.get_ams_status()

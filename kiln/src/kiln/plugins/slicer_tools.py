@@ -596,7 +596,32 @@ def _placement_refusal(
     # region, cannot be resolved.
     resp["regions"] = [] if _places_withheld(verdict) else list(PLACEMENT_REGIONS)
     resp["tier_note"] = _PLACEMENT_TIER_NOTE if _quiet_start_would_stand(verdict) else _PLACEMENT_FREE_NOTE
+    offer = _bench_offer(state, verdict)
+    if offer is not None:
+        resp["bench_offer"] = offer
     return resp
+
+
+def _bench_offer(state: Any, verdict: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The point-of-need door: a refusal that rests on a block nobody has
+    described offers the five-minute session that fills it, instead of a
+    dead end -- unless the person declined or already ran it."""
+    try:
+        from kiln import bench
+
+        blanks = bench.refusal_blanks(verdict)
+        if not blanks:
+            return None
+        unit = bench.unit_from_machine(getattr(state, "machine", None))
+        if not bench.may_offer(unit, "refusal"):
+            return None
+        record = verdict.get("record") if isinstance(verdict, dict) else None
+        printer_id = str(record.get("printer_id") or "") if isinstance(record, dict) else ""
+        name = bench._display_name(printer_id) if printer_id else "this printer"
+        return {"tool": "printer_bench", "blanks": blanks, "minutes": 5, "sentence": bench.offer_sentence(name, blanks)}
+    except Exception:  # noqa: BLE001 -- an offer is a courtesy; the refusal stands without it
+        _logger.debug("bench offer skipped", exc_info=True)
+        return None
 
 
 def _apply_plate_placement(

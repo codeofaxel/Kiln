@@ -56,6 +56,7 @@ Request (``schema: "placement_request/1"``)::
      "keep_at_mm": [x, y] | null,
      "placed_by": "auto"|"human"|"agent"|"keep",
      "suppress": [str] | null,
+     "printer_observations": [<printer_motion_observation/1>] | null,   # kiln.bench
      "printer_settings": {"format": "klipper_motion_settings/1", "sections": {...},
                           "chip": str|null, "unit": str|null} | null}
 
@@ -320,6 +321,7 @@ def request_for(
     an agent's, ``"keep"`` and ``"auto"`` are their own).  Never raises.
     """
     from kiln import plate_state
+    from kiln.bench import observations_for_request
     from kiln.machine_motion import motion_settings_of
 
     state = plate_state.read(adapter)
@@ -374,6 +376,10 @@ def request_for(
         # (:func:`kiln.machine_motion.motion_settings`), so the verdict can
         # be judged on how THIS unit moves; sent only while telemetry is on.
         "printer_settings": motion_settings_of(adapter),
+        # What this unit's owner observed it do in a guided session
+        # (:mod:`kiln.bench`), so a blank in the record is judged on the
+        # owner's numbers for THIS printer at once.
+        "printer_observations": observations_for_request(adapter),
     }
 
 
