@@ -135,7 +135,7 @@ class TestTheObserver:
         stubs["name"] = property(lambda self: "x")
         _Adapter = type("_Adapter", (base.PrinterAdapter,), stubs)
         with mock.patch.object(base, "_feed_slot_observer", side_effect=RuntimeError("boom")), \
-                mock.patch.object(base, "_feed_outcome_lifecycle", lambda a, s: seen.setdefault("fed", True)):
+                mock.patch.object(base, "_feed_outcome_lifecycle", lambda a, s, **_: seen.setdefault("fed", True)):
             adapter = _Adapter.__new__(_Adapter)
             assert _Adapter.get_state(adapter).connected is True
         assert seen == {"fed": True}

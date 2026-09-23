@@ -2612,9 +2612,13 @@ class PrinterAdapter(ABC):
 
             @functools.wraps(state_original)
             def _observed_get_state(self):
+                # Taken before the read: a reading is as old as the moment
+                # it was asked for, and the outcome table orders readings by
+                # it (see ``auto_record_hook.observe_state``).
+                read_at = time.monotonic()
                 state = state_original(self)
                 try:
-                    _feed_outcome_lifecycle(self, state)
+                    _feed_outcome_lifecycle(self, state, read_at=read_at)
                 except Exception:  # noqa: BLE001 — bookkeeping never breaks status
                     import logging as _logging
 
@@ -6377,8 +6381,14 @@ def _feed_slot_observer(adapter: PrinterAdapter, state: PrinterState) -> None:
         _logging.getLogger(__name__).debug("observed slot change not reported", exc_info=True)
 
 
-def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> None:
+def _feed_outcome_lifecycle(
+    adapter: PrinterAdapter, state: PrinterState, *, read_at: float | None = None
+) -> None:
     """Feed one ``get_state()`` result into the print-outcome lifecycle.
+
+    *read_at* is when the read was asked for (``time.monotonic()``), so the
+    outcome table can tell this reading from a newer one filed while it was
+    in flight -- see :func:`kiln.auto_record_hook.observe_state`.
 
     This is what makes outcome capture ADAPTER-GENERIC: every adapter's
     normalized status stream — polled by the scheduler, the status
@@ -6483,7 +6493,7 @@ def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> Non
                 legacy_printer_name=family or None,
             )
 
-    prev = observe_state(name, value)
+    prev = observe_state(name, value, read_at=read_at)
     # Job identity may cost a network round trip — pay it only for an
     # edge that could actually record something.
     if is_terminal_transition(prev, value):

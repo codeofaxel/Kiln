@@ -249,7 +249,8 @@ class _HookState:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        # printer_name -> {"prev_state": str, "last_transition_ts": float}
+        # printer_name -> {"prev_state": str, "read_at": float}; read_at is
+        # when the filed reading was TAKEN (time.monotonic), see advance().
         self._prev_by_printer: dict[str, dict[str, Any]] = {}
         # printer_name -> timestamp of most recent register_cancel_intent
         self._cancel_intents: dict[str, float] = {}
@@ -265,12 +266,21 @@ class _HookState:
                 return None
             return entry.get("prev_state")
 
-    def set_previous_state(self, printer: str, state: str) -> None:
+    def advance(
+        self, printer: str, state: str, read_at: float
+    ) -> tuple[bool, str | None]:
+        """File *state* unless the table already holds a later reading.
+
+        Returns ``(filed, previous)``.  The check and the write share one
+        lock, so two doors filing at once cannot both see the same previous
+        state and both find the same edge in it.
+        """
         with self._lock:
-            self._prev_by_printer[printer] = {
-                "prev_state": state,
-                "last_transition_ts": time.monotonic(),
-            }
+            entry = self._prev_by_printer.get(printer)
+            if entry is not None and read_at < entry["read_at"]:
+                return False, entry.get("prev_state")
+            self._prev_by_printer[printer] = {"prev_state": state, "read_at": read_at}
+            return True, None if entry is None else entry.get("prev_state")
 
     def register_cancel_intent(self, printer: str) -> None:
         with self._lock:
@@ -620,7 +630,9 @@ def fire_terminal_state_hook(
     return result if isinstance(result, dict) else {"raw": result}
 
 
-def observe_state(printer_name: str, current_state: str) -> str | None:
+def observe_state(
+    printer_name: str, current_state: str, *, read_at: float | None = None
+) -> str | None:
     """Track the previous state for ``printer_name`` and return it.
 
     Call from the adapter's state-update path BEFORE mutating its
@@ -648,9 +660,23 @@ def observe_state(printer_name: str, current_state: str) -> str | None:
     table as each frame lands, so the polled wrap behind it usually finds no
     edge at all.  Announced per door, a Bambu ending would arrive on the
     push door and never on the polled one.
+
+    ``read_at`` is when the reading was TAKEN, on ``time.monotonic()``; a
+    door filing what it has just received leaves it out.  The two doors run
+    on different threads, so a status read that began before an ending was
+    filed can be filed after it, still saying "printing".  Taken as the
+    latest word, that stale read looked like a new print starting: it wiped
+    the cancel the ending was about to be classified by, so a cancelled print
+    was recorded a success, and it re-armed the edge, so the next read
+    announced the same ending again and recorded it a second time under the
+    other door's job name.  A reading older than the one the table holds
+    therefore changes nothing -- no write, no clear, no announcement -- and
+    reports no previous state, so its caller finds no edge either.
     """
-    prev = _HOOK_STATE.previous_state(printer_name)
-    _HOOK_STATE.set_previous_state(printer_name, current_state)
+    taken = time.monotonic() if read_at is None else read_at
+    filed, prev = _HOOK_STATE.advance(printer_name, current_state, taken)
+    if not filed:
+        return None
     # Cheap string checks first: the clear touches durable storage, and this
     # runs on every status frame, but the edge itself happens once per print.
     if (
