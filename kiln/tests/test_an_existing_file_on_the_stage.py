@@ -400,10 +400,17 @@ class TestAPlaceholderIsWhatTheModelHolds:
 
         assert carries_placeholder_model(_small_part_archive(tmp_path)) is False
 
-    def test_a_plain_model_3mf_is_not_a_print_archive(self, tmp_path):
-        from kiln.printers.bambu_3mf import carries_placeholder_model
+    def test_a_model_3mf_with_no_print_inside_is_never_a_placeholder(self, tmp_path):
+        """Even one whose model IS a 1 mm cube: without plate G-code it is a
+        part someone made, not a print archive's stand-in."""
+        import zipfile
 
-        assert carries_placeholder_model(_ball(tmp_path / "ball.3mf")) is False
+        from kiln.printers.bambu_3mf import _MINIMAL_3D_MODEL, carries_placeholder_model
+
+        tiny = tmp_path / "tiny.3mf"
+        with zipfile.ZipFile(tiny, "w") as zf:
+            zf.writestr("3D/3dmodel.model", _MINIMAL_3D_MODEL)
+        assert carries_placeholder_model(str(tiny)) is False
 
     def test_meshes_in_sub_parts_are_not_a_placeholder(self, tmp_path):
         import zipfile
