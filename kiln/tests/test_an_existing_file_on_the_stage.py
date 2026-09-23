@@ -1,0 +1,303 @@
+"""A file that already exists can be put on Kiln's 3D stage.
+
+Measured 2026-09-22, live, preparing a sliced painted jar for an A1: the
+print gate asks for the inline stage first, the handoff said "inline stage
+first, do not re-slice", and no door could open the stage on a file that
+already existed.  Every stage door made or changed something; the one tool
+that shows an existing file (``visualize_model``) is the still door, so the
+agent reached the browser link and nothing better.  The other routes were
+worse: ``extract_model_from_3mf`` stages a third file — no paint, its own
+hash — and the gate refuses it for the print file.
+
+Pinned here:
+
+* ``show_on_stage`` opens the stage on an existing mesh or print file,
+  through the same result hook every stage door uses, and the panel's
+  fetch signs off exactly the file about to print;
+* a print archive carrying only Kiln's 1 mm placeholder is never staged as
+  a cube — it is drawn as the mesh it was sliced from, or refused in words;
+* the gate reads the same answer, so it never demands a stage no door can
+  open, and its stage refusal names the door that opens one.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+from pathlib import Path
+
+import pytest
+
+from kiln import local_stage, monitor_twin, preview_evidence, stage_cache
+from tests.test_local_stage import _cache_the_stage, _Caps, _Host, _Result, _wire_link_door
+
+_UI = local_stage.MCP_APPS_EXTENSION_ID
+
+
+@pytest.fixture(autouse=True)
+def _isolated(monkeypatch, tmp_path):
+    """Fresh ledgers under tmp, the stage on, the link door signed out."""
+    monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv(local_stage._OPT_OUT_ENV, raising=False)
+    monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+    twin = tmp_path / "twin"
+    monkeypatch.setattr(monitor_twin, "_TWIN_DIR", twin)
+    monkeypatch.setattr(monitor_twin, "_SLICES_FILE", twin / "slices.json")
+    monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", twin / "active.json")
+    monkeypatch.setattr(
+        "kiln.auth_session.resolve_api_bearer",
+        lambda *a, **k: type("B", (), {"token": "", "state": "signed_out"})(),
+    )
+    from kiln import stage_link
+
+    stage_link._cache.clear()
+    stage_link._REFUSED_BEARER = None
+    local_stage._reset_for_tests()
+    stage_cache._reset_for_tests()
+    preview_evidence._reset_for_tests()
+    yield
+    local_stage._reset_for_tests()
+    stage_cache._reset_for_tests()
+    preview_evidence._reset_for_tests()
+
+
+# ---------------------------------------------------------------------------
+# Real files, from the real writers
+# ---------------------------------------------------------------------------
+
+_LAYERS = ";LAYER_CHANGE\n;Z:0.2\nG1 Z0.2\nG1 X10 Y10 E1\n;LAYER_CHANGE\n;Z:0.4\nG1 Z0.4\nG1 X20 Y10 E2\n"
+
+
+def _ball(path: Path) -> str:
+    """A 24 mm ball as a 3MF — big enough that its model is no placeholder."""
+    trimesh = pytest.importorskip("trimesh")
+    mesh = trimesh.creation.icosphere(subdivisions=2, radius=12.0)
+    mesh.apply_translation([0.0, 0.0, 12.0])
+    mesh.export(str(path))
+    return str(path)
+
+
+def _block(path: Path) -> str:
+    """A 30 x 20 x 10 mm block as an STL — the kind of source a Kiln wrap
+    carries no model for."""
+    trimesh = pytest.importorskip("trimesh")
+    trimesh.creation.box(extents=(30.0, 20.0, 10.0)).export(str(path))
+    return str(path)
+
+
+def _sliced_archive(tmp_path: Path) -> str:
+    """A ``.gcode.3mf`` built by Kiln's wrapper from a 3MF source, so it
+    carries the source's real model beside the plate G-code."""
+    from kiln.printers.bambu_3mf import build_bambu_3mf
+
+    source = _ball(tmp_path / "ball.3mf")
+    out = tmp_path / "ball.gcode.3mf"
+    build_bambu_3mf(_LAYERS, str(out), source_3mf_path=source)
+    return str(out)
+
+
+def _placeholder_archive(tmp_path: Path, *, sliced_from: str | None = None) -> str:
+    """A ``.gcode.3mf`` built by Kiln's wrapper from G-code alone: its model
+    is the 1 mm placeholder cube.  With *sliced_from*, the slice ledger
+    records the mesh the G-code came from, as the slicer and wrapper do."""
+    from kiln.printers.bambu_3mf import repackage_gcode_as_bambu_3mf
+
+    gcode = tmp_path / "block.gcode"
+    gcode.write_text("; HEADER_BLOCK_START\n; HEADER_BLOCK_END\n" + _LAYERS)
+    out = str(tmp_path / "block.gcode.3mf")
+    if sliced_from:
+        monitor_twin.note_sliced(sliced_from, str(gcode))
+    repackage_gcode_as_bambu_3mf(str(gcode), out)
+    if sliced_from:
+        monitor_twin.note_wrapped(str(gcode), out)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The door, registered and stamped the way ``kiln serve`` does it
+# ---------------------------------------------------------------------------
+
+
+def _served() -> object:
+    from kiln.mcp_compat import FastMCP
+    from kiln.plugins.mesh_tools import plugin
+
+    mcp = FastMCP("test")
+    plugin.register(mcp)
+    _cache_the_stage()
+    local_stage.install(mcp)
+    return mcp
+
+
+def _door(mcp: object):
+    return mcp._tool_manager._tools["show_on_stage"]  # type: ignore[attr-defined]
+
+
+def _through_the_hook(mcp: object, host: _Host, body: dict) -> dict:
+    """Hand *body* — the door's own return value — to the real lowlevel
+    result hook, as ``tools/call`` for ``show_on_stage``, and return what
+    the host receives: the structured content the hook wrote, or the body
+    untouched when it wrote none (a refusal).  Same two-major shape as
+    ``test_local_stage``."""
+    import anyio
+    from mcp.types import CallToolRequestParams
+
+    from kiln.mcp_compat import MCP_SDK_MAJOR, lowlevel_server
+
+    result = _Result(body)
+    server = lowlevel_server(mcp)
+    params = CallToolRequestParams(name="show_on_stage", arguments={})
+    if MCP_SDK_MAJOR >= 2:
+        entry = server.get_request_handler("tools/call")
+
+        async def _base(_ctx, _params):
+            return result
+
+        server.add_request_handler("tools/call", entry.params_type, _base)
+        local_stage._install_result_hook(mcp)
+        handler = server.get_request_handler("tools/call").handler
+        anyio.run(handler, host._mcp_server.request_context, params)
+        return result.structuredContent or body
+
+    from mcp.server.lowlevel.server import request_ctx
+    from mcp.types import CallToolRequest
+
+    async def _base_v1(_req):
+        return type("R", (), {"root": result})()
+
+    server.request_handlers[CallToolRequest] = _base_v1
+    local_stage._install_result_hook(mcp)
+    token = request_ctx.set(host._mcp_server.request_context)
+    try:
+        anyio.run(server.request_handlers[CallToolRequest],
+                  CallToolRequest(method="tools/call", params=params))
+    finally:
+        request_ctx.reset(token)
+    return result.structuredContent or body
+
+
+def _show(file_path: str, host: _Host | None = None) -> dict:
+    mcp = _served()
+    body = _door(mcp).fn(file_path=file_path)
+    return _through_the_hook(mcp, host or _Host(_Caps(extensions={_UI: {}})), body)
+
+
+def _panel_fetches(sc: dict) -> dict:
+    """What the rendered panel does next: present its token to the fetch verb."""
+    from kiln.mcp_compat import FastMCP
+
+    verb = FastMCP("panel")
+    local_stage._register_payload_verb(verb)
+    out = verb._tool_manager._tools["kiln_viewer_payload"].fn(sc["artifact"]["artifact_token"])
+    assert out.get("success") is not False, out
+    return next(iter(out.values()))
+
+
+# ---------------------------------------------------------------------------
+
+
+class TestAnExistingFileReachesTheStage:
+    """The door exists, is stamped like every stage door, and draws the
+    right file for each kind of file a person might be about to print."""
+
+    def test_the_door_is_stamped_to_open_the_stage(self):
+        tool = _door(_served())
+        assert (tool.meta or {}).get("ui", {}).get("resourceUri") == local_stage.MESH_VIEWER_RESOURCE_URI
+        assert local_stage.STAGE_DESCRIPTION_CLAUSE in (tool.description or "")
+        assert "show_on_stage" in local_stage.VIEWER_TOOLS
+
+    def test_a_sliced_print_file_is_drawn_as_the_model_it_carries_and_signs_itself_off(self, tmp_path):
+        archive = _sliced_archive(tmp_path)
+        sc = _show(archive)
+        assert sc["success"] is True
+        assert sc["stage_mesh_path"] == archive
+        assert local_stage.resolve(sc["artifact"]["artifact_token"]) == archive
+        size = _panel_fetches(sc)["bbox"]["size"]
+        assert min(size) > 20.0, f"the stage drew {size}, not the 24 mm ball the archive carries"
+        refusal, verdict = preview_evidence.judge(archive, "stage", host_renders=True, panel_proven=True)
+        assert refusal is None, refusal
+        assert verdict["door"] == "stage"
+
+    def test_a_placeholder_archive_is_drawn_as_the_mesh_it_was_sliced_from(self, tmp_path):
+        mesh = _block(tmp_path / "block.stl")
+        archive = _placeholder_archive(tmp_path, sliced_from=mesh)
+        sc = _show(archive)
+        assert sc["stage_mesh_path"] == os.path.abspath(mesh)
+        assert "placeholder" in sc["shows"]
+        size = sorted(_panel_fetches(sc)["bbox"]["size"])
+        assert size == pytest.approx([10.0, 20.0, 30.0], abs=0.01), (
+            f"the stage drew {size}; a 1 mm cube is the placeholder, not the part"
+        )
+        refusal, _ = preview_evidence.judge(archive, "stage", host_renders=True, panel_proven=True)
+        assert refusal is None, refusal
+
+    def test_a_placeholder_archive_nobody_sliced_here_is_refused_in_words(self, tmp_path):
+        archive = _placeholder_archive(tmp_path)
+        sc = _show(archive)
+        assert sc["success"] is False
+        assert sc["error"]["code"] == "NOT_STAGEABLE"
+        assert "placeholder" in sc["error"]["message"]
+        assert "no record of the mesh" in sc["error"]["message"]
+        assert "artifact" not in sc, "a cube must not reach the panel"
+
+    def test_a_host_with_no_panel_gets_the_link_for_the_same_file(self, tmp_path, monkeypatch):
+        calls = _wire_link_door(monkeypatch)
+        archive = _sliced_archive(tmp_path)
+        sc = _show(archive, host=_Host(_Caps()))
+        assert sc["viewer_url"]
+        assert sc["shown"]["door"] == "link"
+        assert len(calls) == 1
+        refusal, _ = preview_evidence.judge(archive, "url", host_renders=False)
+        assert refusal is None, refusal
+
+    def test_the_door_changes_nothing(self, tmp_path):
+        files = tmp_path / "files"
+        files.mkdir()
+        archive = _sliced_archive(files)
+        before = hashlib.sha256(Path(archive).read_bytes()).hexdigest()
+        listing = sorted(os.listdir(files))
+        _show(archive)
+        assert hashlib.sha256(Path(archive).read_bytes()).hexdigest() == before
+        assert sorted(os.listdir(files)) == listing
+
+    def test_openscad_source_is_refused_with_the_door_that_draws_it(self, tmp_path):
+        scad = tmp_path / "part.scad"
+        scad.write_text("cube(10);")
+        out = _door(_served()).fn(file_path=str(scad))
+        assert out["error"]["code"] == "NOT_STAGEABLE"
+        assert "compile_scad" in out["error"]["message"]
+
+    def test_a_switched_off_stage_says_so(self, tmp_path, monkeypatch):
+        mcp = _served()
+        monkeypatch.setenv(local_stage._OPT_OUT_ENV, "1")
+        out = _door(mcp).fn(file_path=_sliced_archive(tmp_path))
+        assert out["error"]["code"] == "STAGE_OFF"
+        assert "visualize_model" in out["error"]["message"]
+
+
+class TestTheGateReadsTheSameAnswer:
+    """The door and the gate cannot disagree about what the stage can show."""
+
+    def test_png_is_not_refused_for_a_stage_no_door_can_open(self, tmp_path):
+        archive = _placeholder_archive(tmp_path)
+        preview_evidence.record("png", archive, renderer="stage", shown_sha="abc")
+        preview_evidence.record_url_refusal(archive, "signed_out")
+        refusal, verdict = preview_evidence.judge(archive, "png", host_renders=True, panel_proven=True)
+        assert refusal is None, refusal
+        assert "placeholder" in verdict["skipped"]["stage"]
+
+    def test_png_is_still_refused_when_the_door_could_have_opened_the_stage(self, tmp_path):
+        archive = _sliced_archive(tmp_path)
+        preview_evidence.record("png", archive, renderer="stage", shown_sha="abc")
+        preview_evidence.record_url_refusal(archive, "signed_out")
+        refusal, _ = preview_evidence.judge(archive, "png", host_renders=True, panel_proven=True)
+        assert refusal is not None
+        assert "show_on_stage(" in refusal["message"]
+
+    def test_the_stage_refusal_names_a_door_that_exists(self, tmp_path):
+        archive = _sliced_archive(tmp_path)
+        refusal, _ = preview_evidence.judge(archive, "stage", host_renders=True, panel_proven=True)
+        assert refusal is not None
+        assert "show_on_stage(" in refusal["message"]
+        assert "show_on_stage" in local_stage.VIEWER_TOOLS
+        assert "show_on_stage" in _served()._tool_manager._tools  # type: ignore[attr-defined]

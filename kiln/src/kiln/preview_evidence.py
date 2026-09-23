@@ -48,6 +48,12 @@ the DESIGN mesh; the printer receives the SLICE.  The slice ledger
 (:mod:`kiln.monitor_twin`) is the one place that knows which mesh a
 slice came from, so evidence recorded for ``jar.stl`` counts for the
 ``jar.gcode.3mf`` sliced from it — and for nothing else.
+
+Which file the stage draws for a given file is one answer,
+:func:`stage_file_for`, read by the door that opens the stage on a file
+that already exists and by this module's own judgement of whether the
+stage was available.  Two copies of that rule would let the gate send an
+agent to a stage no door can open.
 """
 
 from __future__ import annotations
@@ -58,6 +64,7 @@ import logging
 import os
 import threading
 import time
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +99,9 @@ _mem: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
 
 _MESH_SUFFIXES = frozenset({".stl", ".3mf", ".obj"})
+
+#: Print files that carry no model at all, only toolpaths.
+_GCODE_SUFFIXES = frozenset({".gcode", ".gco", ".bgcode"})
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +263,102 @@ def design_mesh_for(file_path: str | os.PathLike[str]) -> str | None:
     return None
 
 
+def _carries_placeholder(path: str) -> bool:
+    """Whether the 3MF at *path* is a print archive whose model is only
+    the 1 mm cube Kiln writes when it wraps G-code sliced from an STL.
+
+    The still door's own test, read rather than restated, so a file the
+    stills refuse to draw is a file the stage refuses to draw."""
+    from kiln.model_visualizer import _is_bambu_wrapped_3mf
+
+    return _is_bambu_wrapped_3mf(path)
+
+
+def _holds_a_print(path: str) -> bool:
+    """Whether the 3MF at *path* carries a slicer's plate G-code."""
+    try:
+        with zipfile.ZipFile(path) as zf:
+            return any(
+                n.startswith("Metadata/plate_") and n.endswith(".gcode") for n in zf.namelist()
+            )
+    except (zipfile.BadZipFile, OSError):
+        return False
+
+
+def _extras_clause(staged: str) -> str:
+    """Whether the stage will lay the slice's own additions around the
+    drawn file, as the tail of a :func:`stage_file_for` clause.  Asked of
+    the plate door that attaches them, never assumed."""
+    try:
+        from kiln.stage_plate import resolve_sliced_gcode
+
+        if resolve_sliced_gcode(staged):
+            return ", with the slicer's own additions under EXTRAS"
+    except Exception:  # noqa: BLE001 — a sentence, never a failure
+        logger.debug("slice extras not resolved", exc_info=True)
+    return (
+        ", without the slicer's additions (skirt, brim, prime tower, supports), which "
+        "the stage draws only for a slice this machine made and still has on record"
+    )
+
+
+def stage_file_for(file_path: str | os.PathLike[str]) -> tuple[str | None, str]:
+    """Which file Kiln's stage draws for *file_path*, and what that is, in a
+    clause — or ``None`` and why the stage cannot draw it.
+
+    * A mesh — an STL, an OBJ, a 3MF with no print inside — is drawn as
+      itself.
+    * A sliced print archive (``.gcode.3mf``) is drawn as the model it
+      carries: those are the bytes going to the printer, painted as they
+      will print, so the panel's fetch is evidence for exactly them.  The
+      still door photographs the same model and the link door uploads the
+      same file, so all three doors show one object.
+    * An archive whose model is only Kiln's 1 mm placeholder, and a raw
+      G-code file, carry nothing to draw.  They are drawn as the mesh this
+      machine sliced them from, while the slice ledger still knows it
+      (:func:`design_mesh_for`, the same join that credits that mesh's
+      evidence to the print file) — never as the placeholder, which draws
+      a 1 mm cube and would sign it off.
+
+    Measured 2026-09-22 on a sliced painted jar: staging the STL that
+    ``extract_model_from_3mf`` wrote left the print file with no evidence
+    at all, because the extract is a third file with its own hash and none
+    of the archive's colours.  Staging the archive itself signs it off.
+    """
+    path = os.path.abspath(str(file_path))
+    name = os.path.basename(path)
+    if not os.path.isfile(path):
+        return None, f"{name} is not on this machine"
+    suffix = Path(path).suffix.lower()
+    if suffix in _MESH_SUFFIXES and not (suffix == ".3mf" and _carries_placeholder(path)):
+        if suffix == ".3mf" and _holds_a_print(path):
+            return path, (
+                f"the model {name} carries, which is the file going to the printer"
+                + _extras_clause(path)
+            )
+        return path, f"{name} itself"
+    if suffix == ".3mf":
+        carried = "only the 1 mm placeholder Kiln writes when it wraps G-code sliced from an STL"
+    elif suffix in _GCODE_SUFFIXES:
+        carried = "no model, only toolpaths"
+    elif suffix == ".scad":
+        return None, (
+            f"{name} is OpenSCAD source, which the stage draws once it is compiled: "
+            "compile_scad opens the stage on the result"
+        )
+    else:
+        return None, f"the stage draws STL, OBJ and 3MF files, and print files Kiln sliced, not {name}"
+    mesh = design_mesh_for(path)
+    if mesh and Path(mesh).suffix.lower() in _MESH_SUFFIXES:
+        return mesh, (
+            f"{os.path.basename(mesh)}, the mesh this machine sliced {name} from "
+            f"({name} carries {carried})" + _extras_clause(mesh)
+        )
+    return None, (
+        f"{name} carries {carried}, and this machine has no record of the mesh it was sliced from"
+    )
+
+
 def _fresh(facts: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(facts, dict):
         return None
@@ -299,15 +405,9 @@ def evidence_for(file_path: str | os.PathLike[str]) -> dict[str, Any]:
     return out
 
 
-def _stageable(file_path: str, design_mesh: str | None) -> bool:
-    if design_mesh:
-        return True
-    return Path(file_path).suffix.lower() in _MESH_SUFFIXES
-
-
 def stage_unavailable_reason(
     file_path: str | os.PathLike[str], *, host_renders: bool | None,
-    design_mesh: str | None = None, panel_proven: bool | None = None,
+    panel_proven: bool | None = None,
 ) -> str | None:
     """Why the inline stage cannot show *file_path* right now — or ``None``
     when it can, which is the answer that refuses a PNG-only sign-off.
@@ -323,6 +423,12 @@ def stage_unavailable_reason(
     ``False`` says so; ``None`` means the caller did not look, and the
     declaration stands.  Without this, 2026-09-21's exact state — stale
     host plus signed out — had no door the gate would accept.
+
+    Whether the stage can draw the file at all is :func:`stage_file_for`'s
+    answer, the one the stage door itself acts on.  A suffix check here
+    used to call every ``.3mf`` stageable, so a print archive carrying only
+    Kiln's placeholder was refused a PNG sign-off for a stage no door could
+    open for it.
     """
     try:
         from kiln import local_stage
@@ -340,9 +446,8 @@ def stage_unavailable_reason(
             "tool list cached before a restart_server draws none; reconnect "
             "the Kiln MCP server in the host, or open a new chat"
         )
-    if not _stageable(str(file_path), design_mesh):
-        return "neither this file nor a design mesh Kiln sliced it from can be staged"
-    return None
+    staged, why = stage_file_for(file_path)
+    return None if staged else why
 
 
 # ---------------------------------------------------------------------------
@@ -393,9 +498,12 @@ def judge(
             CODE_NOT_USED,
         ), verdict
 
+    # The door is named: an existing file reaches the stage only through
+    # show_on_stage, and a sentence that says "open the stage" without
+    # saying how sent an agent to the link door on 2026-09-22.
     stage_line = (
-        f"open Kiln's inline 3D stage on {name} (or the design mesh it was sliced from) "
-        "so the panel fetches its geometry, then call issue_preview_token again with "
+        f"call show_on_stage(file_path) on {name} so Kiln's inline 3D stage opens and "
+        "the panel fetches its geometry, then call issue_preview_token again with "
         "door='stage'"
     )
     url_line = (
@@ -445,9 +553,7 @@ def judge(
             "issue_preview_token again with door='url'.",
             CODE_SKIPPED,
         ), verdict
-    no_stage = stage_unavailable_reason(
-        path, host_renders=host_renders, design_mesh=ev["design_mesh"], panel_proven=panel_proven,
-    )
+    no_stage = stage_unavailable_reason(path, host_renders=host_renders, panel_proven=panel_proven)
     if no_stage is None:
         return _refusal(
             f"PNG renders are the last resort and the inline 3D stage is available on this "

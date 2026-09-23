@@ -170,6 +170,15 @@ STAGE_DESCRIPTION_CLAUSE = (
 #: :func:`kiln.stage_link.find_mesh_path`), and the stage dresses it in
 #: the slice's own skirt and tower from this machine's ledger.  The start
 #: token stays the only wall: nothing here gates ``upload_file``.
+#:
+#: ``show_on_stage`` is the one door on this list that makes nothing: it
+#: opens the stage on a file that already exists, a sliced print file
+#: included.  Until 2026-09-22 no door did, so the print gate — which asks
+#: for the stage first — could only be answered for an existing file by
+#: re-making or re-slicing it; an agent told "inline stage first, do not
+#: re-slice" reached the link door and nothing better.  ``visualize_model``
+#: stays off: it is the still door, called after every make round, and a
+#: second panel of the mesh the make just opened is ceremony.
 VIEWER_TOOLS: frozenset[str] = frozenset(
     {
         "add_feature_during_print",
@@ -266,6 +275,7 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
         "run_reslice_and_print",
         "scale_mesh_to_fit",
         "separate_overlapping_parts",
+        "show_on_stage",
         "simplify_mesh_model",
         "slice_and_estimate",
         "slice_and_print",

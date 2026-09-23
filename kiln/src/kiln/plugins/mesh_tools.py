@@ -1630,6 +1630,101 @@ class _MeshToolsPlugin:
                 return result
 
         # ---------------------------------------------------------------
+        # The 3D stage, on a file that already exists
+        # ---------------------------------------------------------------
+
+        @mcp.tool(annotations=read_only("Show a file on the 3D stage"))
+        def show_on_stage(file_path: str) -> dict:
+            """Open Kiln's interactive 3D stage on a file that already exists.
+
+            The door for "let me see it" when nothing needs making: a mesh
+            from an earlier session, a download, or the sliced print file
+            about to go to the printer.  Nothing is re-made, re-sliced,
+            imported or written.  Free on every install, like the stage.
+
+            What the stage draws (``shows`` says which, in words):
+
+            - An STL, OBJ or 3MF is drawn as itself; a STEP file is drawn
+              from Kiln's mesh of it.
+            - A sliced ``.gcode.3mf`` is drawn as the model it carries — the
+              file going to the printer, in its paint — with the slicer's
+              skirt, brim, prime tower and supports under EXTRAS while this
+              machine still holds that slice's G-code.
+            - A print file with no model of its own (raw G-code, or an
+              archive holding only Kiln's 1 mm placeholder) is drawn as the
+              mesh this machine sliced it from, and refused, with the
+              reason, when there is no record of that mesh.
+
+            Before a print: open the print file here, let the person turn it
+            over, then call ``issue_preview_token(file_path, door="stage")``
+            for that same file — the panel's own fetch is the evidence the
+            gate reads.  On a host that draws no panel, or until a panel has
+            fetched since the server started, the result also carries
+            ``viewer_url``: hand it over, and use ``door="url"``.  ``shown``
+            says which door this result took.
+
+            ``visualize_model`` is the still-picture door: renders to check
+            yourself, and the sign-off only when neither this panel nor a
+            link is possible.
+
+            :param file_path: Path to an STL, OBJ, 3MF, STEP, ``.gcode.3mf``
+                or G-code file on this machine.
+            :returns: ``stage_mesh_path`` (the file the stage draws),
+                ``shows`` and ``message``; the stage adds ``artifact``,
+                ``shown`` and, when the link is the stage, ``viewer_url``.
+            """
+            from kiln import local_stage
+            from kiln.server import _error_dict
+
+            if not local_stage.enabled():
+                return _error_dict(
+                    "Kiln's inline 3D stage is switched off on this install "
+                    "(KILN_NO_LOCAL_STAGE is set); visualize_model gives still "
+                    "pictures and a browser stage link instead.",
+                    code="STAGE_OFF",
+                )
+            if not os.path.isfile(file_path):
+                return _error_dict(f"File not found: {file_path}", code="FILE_NOT_FOUND")
+            name = os.path.basename(file_path)
+
+            # A CAD file is drawn from Kiln's mesh of it, through the one
+            # conversion door every mesh tool shares.
+            from kiln.step_import import resolve_mesh_input
+
+            mesh_input, conversion, refusal = resolve_mesh_input(file_path)
+            if refusal:
+                return refusal
+
+            # Which file the stage draws is the gate's own answer, so a file
+            # this door opens is a file issue_preview_token can credit, and a
+            # file it refuses is one the gate knows the stage cannot show.
+            from kiln.preview_evidence import stage_file_for
+
+            staged, shows = stage_file_for(mesh_input)
+            if staged is None:
+                return _error_dict(
+                    f"Kiln's 3D stage can't show {name}: {shows}.", code="NOT_STAGEABLE",
+                )
+            if conversion is not None:
+                shows = f"Kiln's mesh of the CAD file {name}"
+            # The stage believes a key that names it outright
+            # (kiln.stage_link.find_mesh_path), so the token is minted for
+            # exactly the file the evidence must be about.  No other key in
+            # this result may carry a "stage" segment.
+            return {
+                "success": True,
+                "stage_mesh_path": staged,
+                "file_path": os.path.abspath(file_path),
+                "shows": shows,
+                "message": (
+                    f"Kiln's 3D stage shows {shows}. `shown` says whether the "
+                    "host drew the inline panel or the viewer_url is the stage "
+                    "for now. Before a print, once the person has looked, issue "
+                    "the preview token for this same file."
+                ),
+            }
+
+        # ---------------------------------------------------------------
         # Mesh estimation (weight, print time)
         # ---------------------------------------------------------------
 
