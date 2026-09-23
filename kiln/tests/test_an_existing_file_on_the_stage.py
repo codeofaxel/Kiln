@@ -339,3 +339,33 @@ class TestTheGuidanceNamesTheDoor:
 
         blob = str(SkillManifest().to_dict())
         assert "show_on_stage(file_path)" in blob
+
+
+class TestExtractionNeverWritesThePlaceholder:
+    """``extract_model_from_3mf`` is stamped for the stage, so whatever it
+    writes is what the person is shown.  From a placeholder archive it used
+    to write the 1 mm cube and call it the part."""
+
+    def test_a_placeholder_archive_is_refused_instead_of_extracted(self, tmp_path):
+        from kiln.generation.validation import extract_model_from_3mf
+
+        archive = _placeholder_archive(tmp_path)
+        out = tmp_path / "part.stl"
+        with pytest.raises(ValueError, match="placeholder"):
+            extract_model_from_3mf(archive, output_path=str(out))
+        assert not out.exists()
+
+    def test_the_refusal_names_the_mesh_it_was_sliced_from(self, tmp_path):
+        from kiln.generation.validation import extract_model_from_3mf
+
+        mesh = _block(tmp_path / "block.stl")
+        archive = _placeholder_archive(tmp_path, sliced_from=mesh)
+        with pytest.raises(ValueError, match="block.stl"):
+            extract_model_from_3mf(archive, output_path=str(tmp_path / "part.stl"))
+
+    def test_an_archive_carrying_its_model_still_extracts(self, tmp_path):
+        from kiln.generation.validation import extract_model_from_3mf
+
+        out = extract_model_from_3mf(_sliced_archive(tmp_path), output_path=str(tmp_path / "ball.stl"))
+        assert out["triangle_count"] > 12
+        assert out["dimensions"]["z_mm"] == pytest.approx(24.0, abs=0.5)
