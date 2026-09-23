@@ -48,13 +48,24 @@ it means "give me the OpenSCAD look", not "avoid browsers".
 
 WHAT IS APPROXIMATED, HONESTLY
 ------------------------------
-No bloom pass, and the light rig's OUTPUT levels are fitted rather
-than transcribed: the _LIGHTS intensities are three.js-internal units
-that do not survive three's physically-scaled pipeline into pixel
-values, so _LIGHT_SCALES / _AMBIENT / _EXPOSURE are measured off real
-photographs by ``kiln/scripts/calibrate_stage_paint.py`` -- the
-sphere-probe method documented there; re-run it whenever the stage
-document's rig changes.  The BRDF itself is not approximated: real GGX
+No bloom pass.  The stage's composer runs an UnrealBloomPass and this
+does not: bloom is a screen-space blur of the blown highlights added
+back over the frame, not a per-pixel shading term, so it shows up here
+as the brightest faces reading a little darker than the photograph's
+(measured 2026-09-22: agreement within a few tone levels up to ~180/255,
+falling behind above it).  The calibration masks the halo out rather
+than paying for it with the constants everything else depends on.
+
+The light rig's OUTPUT levels are fitted rather than transcribed: the
+_LIGHTS intensities and the environment's intensity are three.js
+-internal units that do not survive three's physically-scaled pipeline
+into pixel values, so _LIGHT_SCALES / _AMBIENT / _ENV_SCALE / _EXPOSURE
+are measured off real photographs by
+``kiln/scripts/calibrate_stage_paint.py`` -- the sphere-probe method
+documented there; re-run it whenever the stage document's rig changes.
+The environment gradient's SHAPE is transcribed like everything else,
+and its two convolutions (diffuse and specular) are three's own.  The
+BRDF itself is not approximated: real GGX
 with Schlick Fresnel and Smith visibility, the MeshPhysicalMaterial's
 own lobe.  Flat shading is parity, not a shortcut: the payload ships
 no normals by design and the stage flat-shades stills ("matching the
@@ -96,13 +107,33 @@ _ROUGHNESS = 0.4
 # (10, 20, 10), rim `0xd8e1ff @ 0.5` from (-15, 8, -10), graze
 # `0xffffff @ 0.75` from (16, 6, 1.5), counter-graze `0xffffff @ 0.5`
 # from (-16, 6, 1.5).  Positions are directions (normalized in-scene).
-_AMBIENT = 0.085  # fitted: the transcribed 0.35 is a three-internal unit
+_AMBIENT = 0.110  # fitted: the transcribed 0.35 is a three-internal unit
 _LIGHTS = (
     # (direction xyz, color rgb 0..1, intensity)
     ((10.0, 20.0, 10.0), (1.0, 0xF7 / 0xFF, 0xEE / 0xFF), 1.0),
     ((-15.0, 8.0, -10.0), (0xD8 / 0xFF, 0xE1 / 0xFF, 1.0), 0.5),
     ((16.0, 6.0, 1.5), (1.0, 1.0, 1.0), 0.75),
     ((-16.0, 6.0, 1.5), (1.0, 1.0, 1.0), 0.5),
+)
+
+# Environment: `scene.environment = buildEnvMap(renderer)` — "a
+# studio-softbox vertical gradient run through PMREM so the physical
+# material has something believable to reflect".  A 256x128 canvas
+# filled by `createLinearGradient(0, h, 0, 0)` with the stops below,
+# uploaded as an equirectangular sRGB `CanvasTexture`.
+#
+# Stop `s` → direction: a CanvasTexture flips Y (`Texture.flipY` is
+# true), so stop 0 (drawn at the canvas BOTTOM) lands at texture v = 0
+# and stop 1 at v = 1; three's `equirectUv` sets
+# `v = asin(dir.y)/PI + 0.5`, so `dir.y = -cos(PI * s)`.  s = 0 is
+# straight DOWN, s = 1 straight UP.  Which is why this term exists: the
+# lower hemisphere is a lit slate, not black, and a downward-facing face
+# — the one the four lights all miss — is lit almost entirely by it.
+_ENV_STOPS = (
+    (0.00, (88, 104, 120)),   # straight down
+    (0.45, (26, 34, 45)),     # just under the horizon
+    (0.78, (150, 152, 158)),  # ~50 deg up
+    (1.00, (255, 255, 255)),  # straight up
 )
 
 # Camera: `PerspectiveCamera(35, ...)`; still framing
@@ -158,8 +189,22 @@ _METALNESS = 0.05  # MeshPhysicalMaterial metalness, transcribed
 #: grazes arrive near-horizontal, a naive sum let them flood every
 #: vertical wall, and carved text lost the wall/top contrast that makes
 #: it read (Adam: "significantly less crispy").  Fitted so wall and top
-#: tones both match the photograph.
-_LIGHT_SCALES = (0.601, 1.970, 0.234, 0.234)
+#: tones both match the photograph.  They dropped sharply on 2026-09-22
+#: (from 0.601 / 1.970 / 0.234) when the environment term arrived: the
+#: old rig had been standing in for the environment's light, the rim
+#: most of all, and with the real term in place it no longer has to.
+#: Carved-text contrast came out CLOSER to the photograph for it
+#: (wall high-pass 10.4 against the photograph's 10.4, was 11.3).
+_LIGHT_SCALES = (0.170, 0.063, 0.271, 0.271)
+
+#: Environment-map intensity, fitted the same way.  three's
+#: `MeshPhysicalMaterial` defaults `envMapIntensity` to 1 and its
+#: indirect diffuse is `envColor * albedo` with NO 1/PI, while the
+#: painter's direct terms carry three's light-unit conversion inside
+#: _LIGHT_SCALES and _EXPOSURE -- so the honest expectation here is
+#: 1 / _EXPOSURE ~= 1.4, not 1.0, and landing near it is the
+#: transcription checking itself.
+_ENV_SCALE = 1.502
 
 
 def _srgb_to_linear(c: np.ndarray) -> np.ndarray:  # noqa: F821
@@ -169,6 +214,131 @@ def _srgb_to_linear(c: np.ndarray) -> np.ndarray:  # noqa: F821
 def _linear_to_srgb(c: np.ndarray) -> np.ndarray:  # noqa: F821
     c = _np.clip(c, 0.0, 1.0)
     return _np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055)
+
+
+#: ``(diffuse, specular)`` lookup tables, built once on first paint.
+_ENV_TABLES = None
+_ENV_TABLE_N = 257  # the curves are smooth; 257 knots resolve them to <0.1/255
+
+
+def _env_gradient(s):
+    """The canvas gradient's LINEAR RGB at stop fractions *s*.
+
+    A CSS gradient interpolates in sRGB byte space and the texture is
+    uploaded as ``SRGBColorSpace``, so the stops are mixed first and
+    decoded second — doing it the other way round lightens the whole
+    lower hemisphere by several tone levels.
+    """
+    stops = _np.asarray([st for st, _ in _ENV_STOPS])
+    cols = _np.asarray([c for _, c in _ENV_STOPS], dtype=_np.float64) / 255.0
+    mixed = _np.stack(
+        [_np.interp(s, stops, cols[:, ch]) for ch in range(3)], axis=-1
+    )
+    return _srgb_to_linear(mixed)
+
+
+def _env_radiance_at(y):
+    """The gradient's linear RGB for directions with this y.
+
+    ``y = -cos(PI * s)`` inverted: the stop a direction reads from.
+    """
+    return _env_gradient(_np.arccos(_np.clip(-y, -1.0, 1.0)) / math.pi)
+
+
+def _build_env_diffuse():
+    """Cosine-convolve the gradient — three's roughness-1 PMREM, in 1-D.
+
+    ``getIBLIrradiance`` samples the PMREM chain's roughest level
+    (``textureCubeUV(envMap, N, 1.0)``) and returns ``PI * envColor``,
+    which the Lambert BRDF's 1/PI then cancels — so the indirect diffuse
+    is ``envColor * diffuseColor``, and ``envColor`` is the cosine-weighted
+    MEAN RADIANCE about the normal.  That is what this returns.
+
+    The gradient varies only with elevation, so the convolution is
+    azimuthally symmetric: the result depends on the normal's y alone,
+    and a 1-D table serves every pixel.  The azimuth integral is closed
+    form — for ``max(a + b cos(phi), 0)`` with ``b >= 0`` it is ``2*pi*a``
+    when ``a >= b``, zero when ``a <= -b``, and ``2*(a*p + b*sin(p))``
+    with ``p = arccos(-a/b)`` in between — so only the polar integral is
+    quadrature, and 2048 knots put it well past PNG resolution.
+    """
+    ny = _np.linspace(-1.0, 1.0, _ENV_TABLE_N)
+    m = 2048
+    theta = (_np.arange(m) + 0.5) * (math.pi / m)  # polar angle from +Y
+    ct, st = _np.cos(theta), _np.sin(theta)
+    radiance = _env_radiance_at(ct)
+
+    a = ny[:, None] * ct[None, :]
+    b = _np.sqrt(_np.maximum(1.0 - ny * ny, 0.0))[:, None] * st[None, :]
+    safe = _np.maximum(b, 1e-12)
+    p = _np.arccos(_np.clip(-a / safe, -1.0, 1.0))
+    phi = 2.0 * (a * p + b * _np.sin(p))
+    phi = _np.where(a >= b, 2.0 * math.pi * a, phi)
+    phi = _np.where(a <= -b, 0.0, phi)
+
+    weight = phi * st[None, :] * (math.pi / m)
+    irradiance = weight @ radiance  # (N, 3) — the full irradiance E
+    return irradiance / math.pi  # three's envColor = E / PI
+
+
+def _build_env_specular():
+    """The gradient prefiltered for ``getIBLRadiance`` at this roughness.
+
+    The environment lights the part through the specular lobe as well as
+    the diffuse one, and unlike the diffuse term that one is VIEW
+    -dependent: it reads the gradient along the REFLECTION vector.  It is
+    what makes a near-horizontal wall read brighter from below than from
+    above, and a fit with the diffuse half alone left near-horizontal
+    faces seen from below 32 tone levels under the photograph.
+
+    Kernel: the split-sum prefilter three's PMREM approximates — GGX half
+    -vectors about the reflection direction (``N = V = R``), each mapping
+    to a sample direction at twice its angle and weighted by ``N·L``.
+    The blur is close, not identical: three's PMREM runs a Gaussian
+    approximation of this lobe over a mip chain, and the whole level is
+    fitted by ``_ENV_SCALE`` anyway.  Azimuth needs quadrature here (a
+    GGX lobe's has no closed form), but the geometry stays 1-D: a sample
+    at polar offset ``psi`` and azimuth ``al`` from a direction whose own
+    polar angle is ``beta`` has ``y = cos(psi)cos(beta) -
+    sin(psi)cos(al)sin(beta)``.
+    """
+    alpha = _ROUGHNESS * _ROUGHNESS
+    a2 = alpha * alpha
+    # Half-vector angles: beyond PI/4 the sample direction falls below the
+    # horizon (N·L <= 0) and the split-sum drops it.
+    nh, na = 192, 128
+    th = (_np.arange(nh) + 0.5) * (0.25 * math.pi / nh)
+    psi = 2.0 * th
+    cth = _np.cos(th)
+    d = a2 / (math.pi * (cth * cth * (a2 - 1.0) + 1.0) ** 2)
+    w = d * cth * _np.sin(th) * _np.cos(psi)  # GGX measure x N·L
+    al = (_np.arange(na) + 0.5) * (2.0 * math.pi / na)
+
+    beta = _np.arccos(_np.clip(_np.linspace(-1.0, 1.0, _ENV_TABLE_N), -1.0, 1.0))
+    out = _np.empty((_ENV_TABLE_N, 3))
+    cpsi, spsi = _np.cos(psi), _np.sin(psi)
+    cal = _np.cos(al)
+    for i, b in enumerate(beta):
+        y = cpsi[:, None] * math.cos(b) - spsi[:, None] * cal[None, :] * math.sin(b)
+        rad = _env_radiance_at(y)  # (nh, na, 3)
+        out[i] = (w @ rad.sum(axis=1)) / (w.sum() * na)
+    return out
+
+
+def _env_tables():
+    """``(diffuse, specular)`` tables over the direction's y, built once."""
+    global _ENV_TABLES
+    if _ENV_TABLES is None:
+        _ENV_TABLES = (_build_env_diffuse(), _build_env_specular())
+    return _ENV_TABLES
+
+
+def _env_lookup(table, y):
+    """Linear RGB from a direction-y table, linearly interpolated."""
+    idx = _np.clip((y + 1.0) * 0.5 * (_ENV_TABLE_N - 1), 0, _ENV_TABLE_N - 1.001)
+    lo = idx.astype(_np.int64)
+    t = (idx - lo)[:, None]
+    return table[lo] * (1.0 - t) + table[lo + 1] * t
 
 
 def _aces(x: np.ndarray) -> np.ndarray:  # noqa: F821
@@ -295,7 +465,17 @@ def _view_projection(eye, w: int, h: int):
 
 
 def _shade(albedo_lin, normals, view):
-    """Per-pixel RGB in sRGB bytes: Lambert diffuse + GGX specular.
+    """Per-pixel RGB in sRGB bytes: environment + Lambert + GGX specular.
+
+    The stage lights the part from ``scene.environment`` as well as from
+    the four directionals, and that term is the one a face pointing
+    DOWN lives on: the four lights all arrive from above, so a downward
+    face falls to the indirect light alone.  A flat ambient constant put
+    a bottom view 40 tone levels under the photograph; the gradient's own
+    convolutions (:func:`_env_tables`) put it back, because they VARY —
+    the diffuse half with the normal, the specular half with the
+    REFLECTION, and the stage's softbox is a lit slate below, near-black
+    at the horizon and white overhead.
 
     The material is three's MeshPhysicalMaterial (roughness 0.4,
     metalness 0.05), so the specular is the real Cook-Torrance lobe --
@@ -320,7 +500,34 @@ def _shade(albedo_lin, normals, view):
         f0 = 0.04 + _METALNESS * (float(albedo_lin.mean()) - 0.04)
 
     nv = _np.clip((normals * view).sum(axis=1), 1e-4, None)
-    color = _np.full((len(normals), 3), _AMBIENT)
+
+    # The environment, three's RE_IndirectSpecular_Physical (which owns
+    # the indirect DIFFUSE too).  DFGApprox is the split-sum term, the
+    # multi-scatter compensation follows, and the diffuse half is
+    # attenuated by what the specular half took -- all transcribed.
+    diff_tbl, spec_tbl = _env_tables()
+    env_d = _ENV_SCALE * _env_lookup(diff_tbl, normals[:, 1])
+    refl = 2.0 * nv[:, None] * normals - view  # reflect(-view, normal)
+    refl = refl + (normals - refl) * a  # mix(reflectVec, normal, roughness^2)
+    refl = refl / _np.maximum(_np.linalg.norm(refl, axis=1), 1e-12)[:, None]
+    env_s = _ENV_SCALE * _env_lookup(spec_tbl, refl[:, 1])
+    dnv = _np.clip(nv, 0.0, 1.0)
+    r_x = -_ROUGHNESS + 1.0
+    a004 = _np.minimum(r_x * r_x, _np.exp2(-9.28 * dnv)) * r_x + (
+        -0.0275 * _ROUGHNESS + 0.0425
+    )
+    fab_x = -1.04 * a004 + (-0.572 * _ROUGHNESS + 1.04)
+    fab_y = 1.04 * a004 + (0.022 * _ROUGHNESS - 0.04)
+    fss_ess = f0 * fab_x + fab_y  # specularF90 is 1 for this material
+    ems = 1.0 - (fab_x + fab_y)
+    favg = f0 + (1.0 - f0) * 0.047619
+    multi = fss_ess * favg / _np.maximum(1.0 - ems * favg, 1e-9) * ems
+    total_scatter = fss_ess + multi
+
+    color = (
+        _AMBIENT
+        + env_d * ((1.0 - total_scatter) * (1.0 - _METALNESS))[:, None]
+    )
     for (direction, light_rgb, intensity), scale in zip(
         _LIGHTS, _LIGHT_SCALES, strict=True
     ):
@@ -342,8 +549,12 @@ def _shade(albedo_lin, normals, view):
 
         contrib = (ndl + spec * ndl)[:, None] * _np.asarray(light_rgb)
         color += intensity * contrib
-    color = color * (albedo_lin if albedo_lin.ndim == 2 else albedo_lin[None, :]) * _EXPOSURE
-    srgb = _linear_to_srgb(_aces(color))
+    color = color * (albedo_lin if albedo_lin.ndim == 2 else albedo_lin[None, :])
+    # The environment's specular half is NOT tinted by the part's colour,
+    # exactly as three adds it after the diffuse -- a dark logo on a
+    # painted part keeps its highlight instead of swallowing it.
+    color += env_s * fss_ess[:, None] + env_d * multi[:, None]
+    srgb = _linear_to_srgb(_aces(color * _EXPOSURE))
     return _np.clip(srgb * 255.0 + 0.5, 0, 255).astype(_np.uint8)
 
 

@@ -79,6 +79,22 @@ def _img(views) -> np.ndarray:
     return np.asarray(Image.open(views[0]["path"]).convert("RGB"), float)
 
 
+def _model_mask(a: np.ndarray) -> np.ndarray:
+    """Model pixels by GEOMETRY, whatever their tone.
+
+    The painter fills its backdrop with exactly ``_BG``, so anything else
+    is part; three pixels of erosion drop the anti-aliased rim.  A tone
+    threshold cannot do this job on the views that need it most: a part
+    painted too dark sits right on the backdrop's colour and falls out
+    of its own measurement.
+    """
+    from PIL import ImageFilter
+
+    part = (np.abs(a - np.array(_BG, float)) > 2).any(axis=2)
+    img = Image.fromarray((part * 255).astype(np.uint8))
+    return np.asarray(img.filter(ImageFilter.MinFilter(7))) > 0
+
+
 # ---------------------------------------------------------------------------
 # Contract — the photograph sibling's rules, kept
 # ---------------------------------------------------------------------------
@@ -189,18 +205,91 @@ def test_model_tone_matches_the_recorded_reference(
     probe: str, tmp_path: Path
 ) -> None:
     """Reference (browser photograph, same probe, same pose): model-region
-    mean 199, silhouette 553x361 at 800x600.  The painter measured 197.9
-    on the day the sphere-probe calibration was fitted
-    (kiln/scripts/calibrate_stage_paint.py); wide-ish tolerances absorb
-    platform float noise, not a lighting regression."""
+    mean 199.3, silhouette 553x361 at 800x600.  The painter measured
+    189.4 when the environment term was fitted in (2026-09-22,
+    kiln/scripts/calibrate_stage_paint.py); wide-ish tolerances absorb
+    platform float noise, not a lighting regression.
+
+    The ~10 under the photograph is the composer's bloom, which this
+    backend does not model — an isometric view of this probe is nearly
+    all bright top face, the one regime where the halo lands.  The
+    previous calibration sat ON 199 here by running the whole rig hot
+    enough to stand in for bloom, which is what put a BOTTOM view 42
+    tone levels under the photograph: no light in that fit reached a
+    downward face at all.  Matching here by that route is the bug, not
+    the pin — see test_downward_faces_match_the_recorded_reference."""
     a = _img(_render(probe, tmp_path))
     grey = a.mean(axis=2)
     model = grey > 90
-    assert abs(float(grey[model].mean()) - 198.0) < 10.0
+    assert abs(float(grey[model].mean()) - 189.4) < 10.0
     dist = np.abs(a - np.array(_BG, float)).sum(axis=2) > 120
     ys, xs = np.nonzero(dist)
     assert abs((xs.max() - xs.min()) - 553) <= 6
     assert abs((ys.max() - ys.min()) - 361) <= 6
+
+
+def test_downward_faces_match_the_recorded_reference(
+    probe: str, tmp_path: Path
+) -> None:
+    """The stage lights downward faces from ``scene.environment``, and
+    this backend must too.
+
+    References (browser photographs of this probe, 2026-09-22,
+    chrome-headless-shell 1217, measured under this test's own mask):
+    mean 98.5 from underneath and 103.4 from 45 degrees under, where the
+    four directionals all arrive from above and contribute essentially
+    nothing.  The painter with a flat ambient in place of the
+    environment read 51.1 and 59.1 — 47 and 44 tone levels dark, a
+    charcoal part where the stage shows a lit slate one."""
+    for label, rot, want in (
+        ("bottom", (170.0, 0.0, 0.0), 98.5),
+        ("under45", (135.0, 0.0, 40.0), 103.4),
+    ):
+        views = try_paint_stage_views(
+            probe, [(label, label)], {label: rot},
+            output_dir=str(tmp_path / label), width=800, height=600,
+        )
+        a = _img(views)
+        got = float(a.mean(axis=2)[_model_mask(a)].mean())
+        assert abs(got - want) < 8.0, f"{label}: {got:.1f} against {want}"
+
+
+def test_a_flat_environment_convolves_to_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The convolution's own arithmetic, with no browser in sight.
+
+    Both kernels are normalized weighted averages of the surrounding
+    radiance, so an environment of one constant colour must come back as
+    that colour from every direction — whatever the lobe.  It catches a
+    mis-set measure or a normalization slip, which a tone comparison
+    would only ever show as "a bit dark"."""
+    stage_paint._deps()
+    flat = tuple((s, (128, 128, 128)) for s, _ in stage_paint._ENV_STOPS)
+    monkeypatch.setattr(stage_paint, "_ENV_STOPS", flat)
+    monkeypatch.setattr(stage_paint, "_ENV_TABLES", None)
+    want = float(stage_paint._srgb_to_linear(np.array([128 / 255]))[0])
+    for table in stage_paint._env_tables():
+        assert np.allclose(table, want, atol=1e-4)
+
+
+def test_the_environment_is_brightest_overhead_and_lit_underneath() -> None:
+    """The term has to VARY with the normal — that is the whole fix.
+
+    The stage's gradient runs white at the zenith down to a lit slate at
+    the nadir, so a normal's irradiance must fall monotonically from up
+    to down while staying well clear of zero underneath.  A flat ambient
+    (what this replaced) has ratio 1 and would fail the spread; getting
+    the equirect flip backwards puts the white zenith UNDERNEATH, which
+    every mean-tone check in this file would happily pass."""
+    stage_paint._deps()
+    diffuse, _spec = stage_paint._env_tables()
+    down, horizon, up = diffuse[0].mean(), diffuse[128].mean(), diffuse[-1].mean()
+    assert up > horizon > down > 0.0, (up, horizon, down)
+    assert up / down > 3.0, f"too flat to be the gradient: {up / down:.2f}"
+    # Underneath, the environment is the only light there is: it must be
+    # worth at least as much as the flat ambient beside it.
+    assert stage_paint._ENV_SCALE * down > 0.5 * stage_paint._AMBIENT
 
 
 def test_hidden_surfaces_resolve_the_notch_stays_visible(
