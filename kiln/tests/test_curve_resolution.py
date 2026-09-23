@@ -165,9 +165,8 @@ class TestRule:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def jar_45(tmp_path_factory):
-    """The 45 mm jar printed 2026-09-22, through generate_from_template."""
+def _build_jar(tmp_dir, **overrides) -> SimpleNamespace:
+    """A threaded jar built through generate_from_template, split into parts."""
     _openscad_or_skip()
     import tempfile
 
@@ -176,9 +175,9 @@ def jar_45(tmp_path_factory):
     import kiln.daily_stats as stats
     import kiln.server as srv
 
-    params = {"diameter": 45, "height": 45}
+    params = {"diameter": 45, "height": 45, **overrides}
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(tempfile, "tempdir", str(tmp_path_factory.mktemp("jar")))
+        mp.setattr(tempfile, "tempdir", str(tmp_dir))
         mp.setattr(srv, "_check_auth", lambda *_: None)
         mp.setattr(stats, "record_template_use", lambda *_: None)
         result = srv.generate_from_template("threaded_jar", params)
@@ -192,6 +191,79 @@ def jar_45(tmp_path_factory):
         parts=parts,
         params={**_defaults(_template("threaded_jar")), **params},
     )
+
+
+def _lid_play(jar) -> tuple[float, float]:
+    """(measured, designed) axial play of the lid seated cap-up on the rim.
+
+    Lift the lid through one pitch; the longest interference-free run is
+    the play, its edges found to 0.005 mm.  A run touching the first lift
+    is cut short by the rim, not a flank, so the scan starts clear of it.
+    Facets eat into the radial clearance, and the old 60-facet jar lost
+    a quarter of it.
+    """
+    mf = pytest.importorskip("manifold3d")
+    import trimesh
+
+    p = jar.params
+    scad = _template("threaded_jar")["scad_template"]
+
+    def constant(name: str) -> float:
+        return float(re.search(rf"^{name} = ([\d.]+);", scad, re.M).group(1))
+
+    # The play the template designs in: both flanks' axial gap, from its
+    # own radial clearance through its own flank slope.
+    pitch = p["thread_pitch"]
+    half = pitch * float(re.search(r"^half = pitch \* ([\d.]+);", scad, re.M).group(1))
+    depth = min(constant("thread_depth"), half)
+    designed = 2 * (pitch / 2 - half + half * constant("clearance") / depth)
+
+    body, lid = jar.parts
+    lid = lid.copy()
+    lid.apply_translation([*-lid.bounds.mean(axis=0)[:2], 0])
+    lid.apply_transform(trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
+    lid.apply_translation([0, 0, p["height"] + p["wall"]])
+
+    def solid(mesh):
+        return mf.Manifold(
+            mf.Mesh(
+                vert_properties=np.asarray(mesh.vertices, np.float32),
+                tri_verts=np.asarray(mesh.faces, np.uint32),
+            )
+        )
+
+    body_solid = solid(body)
+
+    def clear(lift: float) -> bool:
+        moved = lid.copy()
+        moved.apply_translation([0, 0, lift])
+        return (body_solid ^ solid(moved)).volume() < 1e-6
+
+    lifts = [0.02 + 0.1 * i for i in range(int(pitch / 0.1) + 1)]
+    runs: list[list[float]] = []
+    for z in lifts:
+        if clear(z):
+            if runs and abs(z - runs[-1][-1] - 0.1) < 1e-9:
+                runs[-1].append(z)
+            else:
+                runs.append([z])
+    assert runs, "the lid cannot sit on the jar anywhere in a turn"
+    run = max(runs, key=len)
+    assert run[0] > lifts[0] and run[-1] < lifts[-1], "window cut by the scan"
+
+    def edge(inside: float, outside: float) -> float:
+        while abs(outside - inside) > 0.005:
+            mid = (inside + outside) / 2
+            inside, outside = (mid, outside) if clear(mid) else (inside, mid)
+        return inside
+
+    return edge(run[-1], run[-1] + 0.1) - edge(run[0], run[0] - 0.1), designed
+
+
+@pytest.fixture(scope="module")
+def jar_45(tmp_path_factory):
+    """The 45 mm jar printed 2026-09-22."""
+    return _build_jar(tmp_path_factory.mktemp("jar"))
 
 
 class TestThreadedJar:
@@ -214,70 +286,15 @@ class TestThreadedJar:
         assert _thread_crest_chord_depth(jar_45.parts[0], pitch) <= _OCP_LINEAR_DEFLECTION
 
     def test_lid_screws_on_with_its_designed_play(self, jar_45):
-        """Seat the lid cap-up on the rim, then lift it through one pitch:
-        the free window is the axial play.  Facets cut into the radial
-        clearance, and the old 60-facet jar lost a quarter of it."""
-        mf = pytest.importorskip("manifold3d")
-        import trimesh
+        play, designed = _lid_play(jar_45)
+        assert abs(play - designed) <= 0.05
 
-        p = jar_45.params
-        scad = _template("threaded_jar")["scad_template"]
-
-        def constant(name: str) -> float:
-            return float(re.search(rf"^{name} = ([\d.]+);", scad, re.M).group(1))
-
-        # The play the template designs in: both flanks' axial gap, from
-        # its own clearance and thread depth.
-        pitch = p["thread_pitch"]
-        half = pitch * float(re.search(r"^half = pitch \* ([\d.]+);", scad, re.M).group(1))
-        depth = min(constant("thread_depth"), half)
-        radial = constant("clearance") + constant("thread_depth") - depth
-        designed = 2 * (pitch / 2 - half + half * radial / depth)
-
-        jar, lid = jar_45.parts
-        lid = lid.copy()
-        lid.apply_translation([*-lid.bounds.mean(axis=0)[:2], 0])
-        lid.apply_transform(trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
-        lid.apply_translation([0, 0, p["height"] + p["wall"]])
-
-        def solid(mesh):
-            return mf.Manifold(
-                mf.Mesh(
-                    vert_properties=np.asarray(mesh.vertices, np.float32),
-                    tri_verts=np.asarray(mesh.faces, np.uint32),
-                )
-            )
-
-        jar_solid = solid(jar)
-
-        def clear(lift: float) -> bool:
-            moved = lid.copy()
-            moved.apply_translation([0, 0, lift])
-            return (jar_solid ^ solid(moved)).volume() < 1e-6
-
-        # Coarse pass over one pitch, then the longest free run's edges
-        # to 0.005 mm.  A run touching the first lift is cut short by the
-        # rim, not by a flank, so the scan starts clear of it.
-        lifts = [0.02 + 0.1 * i for i in range(int(pitch / 0.1) + 1)]
-        runs: list[list[float]] = []
-        for z in lifts:
-            if clear(z):
-                if runs and abs(z - runs[-1][-1] - 0.1) < 1e-9:
-                    runs[-1].append(z)
-                else:
-                    runs.append([z])
-        assert runs, "the lid cannot sit on the jar anywhere in a turn"
-        run = max(runs, key=len)
-        assert run[0] > lifts[0] and run[-1] < lifts[-1], "window cut by the scan"
-
-        def edge(inside: float, outside: float) -> float:
-            while abs(outside - inside) > 0.005:
-                mid = (inside + outside) / 2
-                inside, outside = (mid, outside) if clear(mid) else (inside, mid)
-            return inside
-
-        play = edge(run[-1], run[-1] + 0.1) - edge(run[0], run[0] - 0.1)
-        assert play >= designed - 0.05
+    def test_the_finest_pitch_lid_keeps_the_same_clearance(self, tmp_path):
+        # At pitch 2 the thread is shallower than thread_depth; the bore
+        # used to be sized from thread_depth anyway, leaving the lid
+        # 0.3 mm looser than the clearance the template promises.
+        play, designed = _lid_play(_build_jar(tmp_path, thread_pitch=2))
+        assert abs(play - designed) <= 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -467,7 +484,7 @@ class TestAgentDoors:
         assert "$fn = 48" in result["curve_resolution"]
 
     def test_rebuild_makes_the_part_a_kept_source_made(self, _auth, tmp_path):
-        """A source kept before the rule existed rebuilds as it first built."""
+        # A source kept before the rule existed rebuilds as it first built.
         _openscad_or_skip()
         from kiln import design_rebuild as dr
         from kiln.design_recipe import create_recipe
@@ -594,8 +611,8 @@ class TestCatalog:
     """Every parametric part cuts its curves by the rule."""
 
     def test_no_part_types_a_facet_count_of_its_own(self):
-        """A count may stay only where it is the shape: a hexagon (6), or a
-        floor built on curve_fragments for holes too small for the rule."""
+        # A count may stay only where it is the shape: a hexagon (6), or a
+        # floor built on curve_fragments for holes too small for the rule.
         data = json.loads(_TEMPLATES.read_text(encoding="utf-8"))
         typed = {}
         for template_id, tpl in data.items():
@@ -607,8 +624,8 @@ class TestCatalog:
         assert typed == {}
 
     def test_a_big_round_part_sits_inside_the_chord_floor(self, tmp_path):
-        """The pot drip tray at its default size: 80 typed flats sat 0.05 mm
-        inside a 125 mm circle, ten times the floor."""
+        # The pot drip tray at its default size: 80 typed flats sat 0.05 mm
+        # inside a 125 mm circle, ten times the floor.
         _openscad_or_skip()
         import trimesh
 
