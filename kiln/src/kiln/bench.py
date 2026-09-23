@@ -49,8 +49,14 @@ _logger = logging.getLogger(__name__)
 OBSERVATION_FORMAT = "printer_motion_observation/1"
 #: The blocks a session can observe, in the order it asks.
 BLOCKS = ("pause", "cancel", "end", "filament_change", "head")
-#: The blocks a record can have a blank for that a session can fill.
+#: The blocks a record can have a blank for.
 RECORD_BLOCKS = ("pause", "cancel", "end", "filament_change")
+#: The blanks a five-minute session can fill.  A colour change is never
+#: triggered (no printer offers a way to without unloading by hand), and the
+#: Z travel and the quiet start are not things a test print can show.
+TEACHABLE = ("pause", "cancel", "end", "head")
+#: What a printer does in each teachable block, as the end of "when it ...".
+_BLOCK_VERBS = {"pause": "pauses", "cancel": "cancels a print", "end": "finishes a print"}
 #: The four ways an observation is made.
 HOWS = ("position_log", "camera", "owner_zone", "owner_measure")
 #: What each lift word means as a LOWER bound in millimetres: the verdict
@@ -68,7 +74,7 @@ LOG_SETTLE_S = 4.0
 LOG_MAX_S = 120.0
 
 __all__ = [
-    "BLOCKS", "HOWS", "LIFT_WORDS_MM", "OBSERVATION_FORMAT", "RECORD_BLOCKS", "PositionLog",
+    "BLOCKS", "HOWS", "LIFT_WORDS_MM", "OBSERVATION_FORMAT", "RECORD_BLOCKS", "TEACHABLE", "PositionLog",
     "bed_of", "bench_dir", "blanks_for", "can_log_positions", "draw_head_sketch", "draw_zones",
     "fingerprint_of", "firmware_of", "head_observation", "keep_observation", "may_offer", "note_offer",
     "observation", "observations_for_request", "observations_of", "offer_after_registration",
@@ -365,13 +371,13 @@ def refusal_blanks(verdict: Any) -> list[str]:
     out: list[str] = []
     for refusal in verdict.get("refusals") or []:
         sentence = str(refusal.get("sentence") or "") if isinstance(refusal, dict) else ""
-        for block in RECORD_BLOCKS:
+        for block in (b for b in TEACHABLE if b != "head"):
             said = block.replace("_", " ")
             if (said in sentence or block in sentence) and (_WORST_CASE in sentence or block in blanks):
                 if block not in out:
                     out.append(block)
     if not out and any(r.get("code") == "PLACEMENT_UNKNOWN_PRINTER" for r in verdict.get("refusals") or [] if isinstance(r, dict)):
-        return list(RECORD_BLOCKS) + ["head"]
+        return list(TEACHABLE)
     return out
 
 
@@ -404,19 +410,28 @@ def blanks_for(adapter: Any, printer_id: str | None) -> tuple[list[str], dict[st
     return [b for b in (record.get("blanks") or []) if isinstance(b, str)], verdict
 
 
+def _joined(words: list[str], last: str = "or") -> str:
+    """``a``, ``a or b``, ``a, b or c``."""
+    if len(words) <= 1:
+        return "".join(words)
+    return ", ".join(words[:-1]) + f" {last} " + words[-1]
+
+
 def offer_sentence(model_name: str, blanks: list[str]) -> str:
-    """The offer, in one sentence: what Kiln does not know and what five
-    minutes buys."""
-    blocks = [b.replace("_", " ") for b in blanks if b in RECORD_BLOCKS]
-    if "head" in blanks:
-        blocks.append("head size")
-    if blocks:
-        what = f"where {model_name} sends its head when it {' or '.join(blocks[:2])}s" if len(blocks) <= 2 and "head size" not in blocks \
-            else f"how {model_name} moves its head on its own ({', '.join(blocks)})"
+    """The offer: what Kiln does not know about this printer that five
+    minutes can teach it -- only the blanks a session can fill."""
+    moves = [_BLOCK_VERBS[b] for b in ("pause", "cancel", "end") if b in blanks]
+    head = "head" in blanks
+    if moves and head:
+        what = f"where the {model_name} sends its head when it {_joined(moves)}, or how big the head is"
+    elif moves:
+        what = f"where the {model_name} sends its head when it {_joined(moves)}"
+    elif head:
+        what = f"how big the {model_name}'s head is"
     else:
-        what = f"how {model_name} moves its head on its own"
-    return (f"Kiln doesn't know {what}, so it assumes the worst. A five-minute session with a coin-sized test print "
-            f"teaches it: call printer_bench.")
+        what = f"how the {model_name} moves its head on its own"
+    return (f"Kiln doesn't know {what}, so it assumes the worst. A five-minute session with a coin-sized test "
+            "print teaches it; the printer_bench tool runs it.")
 
 
 # ---------------------------------------------------------------------------
@@ -493,14 +508,19 @@ def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] 
             if verdict is not None:
                 note_offer(unit, answer="done")   # nothing to teach; never ask
             return None
+        teachable = [b for b in blanks if b in TEACHABLE]
+        if not teachable:
+            return None                           # blanks no session can fill; a later one may
         note_offer(unit)
         first = bool(verdict and any(isinstance(r, dict) and r.get("code") == "PLACEMENT_UNKNOWN_PRINTER"
                                      for r in verdict.get("refusals") or []))
         name = _display_name(printer_id)
-        sentence = offer_sentence(name, blanks)
         if first:
-            sentence = f"Kiln has never met a {name}: you'd be the first to teach it this printer. {sentence}"
-        return {"tool": "printer_bench", "printer_name": printer_name, "blanks": blanks, "first": first,
+            sentence = (f"Kiln has no record for the {name} yet, so it can't check a second part beside the first. "
+                        "A five-minute session with a coin-sized test print teaches it; the printer_bench tool runs it.")
+        else:
+            sentence = offer_sentence(name, teachable)
+        return {"tool": "printer_bench", "printer_name": printer_name, "blanks": teachable, "first": first,
                 "minutes": 5, "sentence": sentence}
     except Exception:  # noqa: BLE001
         _logger.debug("bench: registration offer skipped", exc_info=True)
@@ -628,14 +648,19 @@ def draw_head_sketch(*, size_px: int = 640) -> bytes | None:
 
 def position_of(adapter: Any) -> tuple[float, float, float] | None:
     """Where the head is right now, from the printer's own word: Klipper's
-    ``toolhead.position`` through Moonraker, Marlin's ``M114`` over USB.
-    ``None`` for a firmware that does not say (a Bambu, an OctoPrint
-    server without a position API)."""
+    ``motion_report.live_position`` through Moonraker -- where the head IS,
+    not ``toolhead.position``, which is where the last queued move ENDS and
+    jumps past a macro's waypoints the moment they are queued -- and
+    Marlin's ``M114`` over USB.  ``None`` for a firmware that does not say
+    (a Bambu, an OctoPrint server without a position API).  The served
+    side judges a log by the lowest height it saw away from the part, never
+    by its line, so a waypoint that falls between two samples cannot make
+    a verdict looser."""
     try:
         query = getattr(adapter, "_get_json", None)
         if callable(query):
-            payload = query("/printer/objects/query", params={"toolhead": "position"})
-            raw = payload.get("result", {}).get("status", {}).get("toolhead", {}).get("position")
+            payload = query("/printer/objects/query", params={"motion_report": "live_position"})
+            raw = payload.get("result", {}).get("status", {}).get("motion_report", {}).get("live_position")
             if isinstance(raw, (list, tuple)) and len(raw) >= 3:
                 return (float(raw[0]), float(raw[1]), float(raw[2]))
             return None
@@ -657,7 +682,13 @@ def can_log_positions(adapter: Any) -> bool:
 class PositionLog(threading.Thread):
     """Poll the head's position at :data:`LOG_HZ` until it has been still
     for :data:`LOG_SETTLE_S` (after at least one move), a stop is asked
-    for, or :data:`LOG_MAX_S` has passed.  ``points`` is the path."""
+    for, or :data:`LOG_MAX_S` has passed.  ``points`` is the path.
+
+    ``complete`` is True only when the log ended the honest way: the head
+    moved, then read back still, with no failed read, for the whole settle
+    window.  A log cut short -- a stop, the time limit, a printer that
+    stopped answering mid-move -- may have missed where the head went
+    last, and a session writes nothing from it."""
 
     def __init__(self, adapter: Any, *, settle_s: float = LOG_SETTLE_S, max_s: float = LOG_MAX_S,
                  hz: float = LOG_HZ, until_idle: Any = None) -> None:
@@ -670,6 +701,7 @@ class PositionLog(threading.Thread):
         self._stop = threading.Event()
         self.points: list[tuple[float, float, float]] = []
         self.moved = False
+        self.complete = False
         self.finished_at: float | None = None
 
     def stop(self) -> None:
@@ -678,24 +710,27 @@ class PositionLog(threading.Thread):
     def run(self) -> None:  # pragma: no cover - timing; the pure parts are tested through `read`
         started = time.monotonic()
         last_change = started
+        last_failure = started
         last: tuple[float, float, float] | None = None
         while not self._stop.is_set() and time.monotonic() - started < self._max:
             pos = position_of(self._adapter)
             now = time.monotonic()
-            if pos is not None:
-                if last is None or any(abs(a - b) > 0.05 for a, b in zip(pos, last)):
-                    if last is not None:
-                        self.moved = True
-                    last_change = now
-                    self.points.append(pos)
-                    last = pos
+            if pos is None:
+                last_failure = now                 # a gap: the settle window starts again
+            elif last is None or any(abs(a - b) > 0.05 for a, b in zip(pos, last)):
+                if last is not None:
+                    self.moved = True
+                last_change = now
+                self.points.append(pos)
+                last = pos
             idle = False
             if self._until_idle is not None:
                 try:
                     idle = bool(self._until_idle())
                 except Exception:  # noqa: BLE001
                     idle = False
-            if self.moved and now - last_change >= self._settle and (self._until_idle is None or idle):
+            if self.moved and now - max(last_change, last_failure) >= self._settle and (self._until_idle is None or idle):
+                self.complete = True
                 break
             time.sleep(self._period)
         self.finished_at = time.monotonic()

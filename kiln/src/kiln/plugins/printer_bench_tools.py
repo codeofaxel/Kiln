@@ -106,15 +106,86 @@ def _end_session(session: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _joined_and(words: list[str]) -> str:
+    """``a``, ``a and b``, ``a, b, and c``."""
+    if len(words) <= 2:
+        return " and ".join(words)
+    return ", ".join(words[:-1]) + ", and " + words[-1]
+
+
+#: What happens to a square in each step, as the session says it.
+_ACT_WORDS = {"pause": "pauses and resumes it", "end": "lets it finish", "cancel": "cancels it partway",
+              "cancel_quietly": "stops it"}
+_ASK_WORDS = {"pause": "pause it partway", "end": "let it finish", "cancel": "cancel it partway",
+              "cancel_quietly": "stop it"}
+
+
+def _prints_in(plan: list[str]) -> list[list[str]]:
+    """What the plan does to each square it prints, in order."""
+    prints: list[list[str]] = []
+    for step in plan:
+        if step == "print":
+            prints.append([])
+        elif prints and step in _ACT_WORDS:
+            prints[-1].append(step)
+    return prints
+
+
+def _intro(session: dict[str, Any]) -> str:
+    """The consent screen, built from the plan so it promises only what
+    the session will do."""
+    model = session.get("model_name") or session["printer_id"]
+    prints = _prints_in(session["plan"])
+    head = "head" in session["asked"]
+    parts: list[str] = []
+    for i, acts in enumerate(prints):
+        noun = "a coin-sized square" if i == 0 else "a second one"
+        words = [_ACT_WORDS[a] for a in acts]
+        if len(words) >= 2:
+            parts.append(f"prints {noun}, " + ", ".join(words[:-1]) + ", and " + words[-1])
+        elif words:
+            parts.append(f"prints {noun} and {words[0]}")
+        else:
+            parts.append(f"prints {noun}")
+    lead = "" if not session.get("first") else f"Kiln has no record for the {model} yet. "
+    if parts:
+        what = "it " + ", then ".join(parts) + ", watching where the head goes each time"
+        if head:
+            what += ", and you measure the head with calipers"
+        text = f"{lead}Help Kiln get to know your {model} in about five minutes: {what}."
+        text += (" Kiln reads where the head goes from the printer itself." if session["loggable"]
+                 else " Kiln will ask you where the head stopped, with a picture.")
+    else:
+        text = f"{lead}Help Kiln get to know your {model}: two caliper measurements of its print head."
+    return text + " Ready?"
+
+
+def _print_ask(session: dict[str, Any]) -> str:
+    """The ask before a square is started: what Kiln will do to THIS one."""
+    plan, here = session["plan"], int(session.get("plan_index", 0))
+    acts: list[str] = []
+    for step in plan[here + 1:]:
+        if step in ("print", "clear", "done"):
+            break
+        if step in _ASK_WORDS:
+            acts.append(_ASK_WORDS[step])
+    which = "a second coin-sized square" if int(session.get("print_n", 0)) >= 1 else "a coin-sized square"
+    if len(acts) >= 2:
+        return f"Kiln will print {which}, " + ", then ".join(acts) + ". Ready to start it?"
+    if acts:
+        return f"Kiln will print {which} and {acts[0]}. Ready to start it?"
+    return f"Kiln will print {which}. Ready to start it?"
+
+
 def _plan(blanks: list[str], loggable: bool) -> list[str]:
     """The steps, in order, for these blanks.  One print covers pause,
     resume and end; a second covers cancel when the first was let to end."""
-    steps = ["intro", "plate"]
+    steps = ["intro"]
     wants_pause = "pause" in blanks
     wants_end = "end" in blanks
     wants_cancel = "cancel" in blanks
     if wants_pause or wants_end or wants_cancel:
-        steps.append("print")
+        steps += ["plate", "print"]      # an empty plate matters only to a session that prints
     if wants_pause:
         steps += ["pause", "parked"] + ([] if loggable else ["pause_zone", "pause_lift", "pause_measure"])
         steps += ["resume", "resumed"] + ([] if loggable else ["resume_back"])
@@ -312,15 +383,6 @@ def _log_done(session: dict[str, Any], block: str) -> bool:
     return log is None or not log.is_alive()
 
 
-def _points(session: dict[str, Any], *blocks: str) -> list[tuple[float, float, float]]:
-    out: list[tuple[float, float, float]] = []
-    for block in blocks:
-        log = _log_for(session, block)
-        if log is not None:
-            out.extend(log.points)
-    return out
-
-
 # ---------------------------------------------------------------------------
 # Building the documents
 # ---------------------------------------------------------------------------
@@ -332,9 +394,19 @@ def _keep(session: dict[str, Any], adapter: Any, doc: dict[str, Any]) -> None:
 
 
 def _observed_from_log(session: dict[str, Any], adapter: Any, block: str, *, returns: bool,
-                       points: list[tuple[float, float, float]], layer_z: float) -> None:
-    if len(points) < 2:
-        session.setdefault("notes", []).append(f"{block}: the position log caught no movement, so nothing was written")
+                       logs: list[Any], layer_z: float) -> None:
+    """Write *block*'s observation from its logs -- only when every log ran
+    to a clean finish and the head really moved.  A log cut short may have
+    missed where the head went last, and one that saw no movement would
+    read as a block that never leaves the part: either would make a
+    verdict looser than the machine, so neither is written."""
+    if not logs or any(log is None or not getattr(log, "complete", False) for log in logs):
+        session.setdefault("notes", []).append(
+            f"{block}: the position log was cut short before the head settled, so nothing was written for it")
+        return
+    points = [p for log in logs for p in log.points]
+    if len({tuple(round(v, 1) for v in p) for p in points}) < 2:
+        session.setdefault("notes", []).append(f"{block}: the position log caught no movement, so nothing was written for it")
         return
     doc = bench.observation(
         session["printer_id"], block, "position_log", bed_mm=tuple(session["bed_mm"]), layer_z_mm=layer_z,
@@ -386,18 +458,44 @@ def _ask_zone(session: dict[str, Any], adapter: Any, block: str, what: str) -> d
 
 def _ask_lift(session: dict[str, Any], what: str) -> dict[str, Any]:
     return _reply(
-        session, f"About how high did it lift {what}: barely, a finger, or a hand span?",
+        session, f"About how high did it lift {what}, before it moved sideways: barely, a finger, or a hand span?",
         options=["barely", "a finger", "a hand span", "a number in mm"],
     )
 
 
 def _payoff(session: dict[str, Any]) -> str:
+    """What the session bought, true on this person's tier and printer.
+
+    Every tier gets the verdict: the head kept clear of what is on the
+    plate, and whether a second part fits.  WHERE it fits is the plan's
+    tier, and starting it beside the first part also needs a quiet start
+    Kiln has seen this printer run.  The community half is said only when
+    the numbers go to Kiln, and says when they help anyone else: once
+    enough owners agree and a person adopts them."""
     name = session.get("model_name") or session["printer_id"]
-    line = (f"Kiln now knows how your {name} moves, so it keeps the head clear of what's on the plate and can tell "
-            "you where a second part fits")
     if _has_pro():
-        line += ", and can start it for you"
-    return line + f". Every {name} owner gets this."
+        line = (f"Kiln now knows how your {name} moves, so it keeps the head clear of what's on the plate and can "
+                "tell you where a second part fits")
+        if "quiet_start" not in session["blanks"]:
+            line += ", and can start it for you"
+    else:
+        line = (f"Kiln now knows how your {name} moves, so it keeps the head clear of what's on the plate and can "
+                "tell you whether a second part fits")
+    line += "."
+    if _sharing():
+        line += f" The numbers go to Kiln; once enough {name} owners agree, every {name} owner gets them."
+    else:
+        line += " The numbers stay on this machine."
+    return line
+
+
+def _sharing() -> bool:
+    try:
+        from kiln.heartbeat import _telemetry_enabled
+
+        return bool(_telemetry_enabled())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _has_pro() -> bool:
@@ -515,7 +613,13 @@ def printer_bench(
                 return {"success": True, "step": "done", "printer_name": target_name, "blanks": [], "learned": [],
                         "ask": "", "images": [],
                         "message": f"Kiln already knows how {bench._display_name(printer_id)} moves its head; there is nothing to teach it."}
-            asked = [b for b in blanks if b in ("pause", "cancel", "end", "head")]
+            asked = [b for b in blanks if b in bench.TEACHABLE]
+            if not asked:
+                return {"success": True, "step": "done", "printer_name": target_name, "blanks": blanks, "learned": [],
+                        "ask": "", "images": [],
+                        "message": (f"Kiln still doesn't know {', '.join(b.replace('_', ' ') for b in blanks)} for "
+                                    f"the {bench._display_name(printer_id)}, but a test print can't show those, so "
+                                    "there is nothing for a session to do.")}
             loggable = bench.can_log_positions(adapter)
             session = {
                 "printer_name": target_name, "printer_id": printer_id, "unit": unit,
@@ -543,16 +647,7 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
     # ---- intro ---------------------------------------------------------
     if step == "intro":
         if answer is None or not (_is_yes(answer) or _is_later(answer) or _is_no(answer)):
-            first = " Kiln has never met one; you'd be the first to teach it." if session.get("first") else ""
-            how = ("Kiln will read where the head goes from the printer itself." if session["loggable"]
-                   else "Kiln will ask you where the head stopped, with a picture.")
-            asks = ", ".join(b.replace("_", " ") for b in session["asked"])
-            return _reply(
-                session,
-                f"Help Kiln get to know your {model} in about five minutes: it prints a coin-sized square, pauses and "
-                f"resumes it, cancels one, and watches where the head goes ({asks}).{first} {how} Ready?",
-                options=["yes", "later", "no"],
-            )
+            return _reply(session, _intro(session), options=["yes", "later", "no"])
         if _is_later(answer):
             bench.note_offer(session["unit"], answer="later")
             _end_session(session)
@@ -591,12 +686,8 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
                 _next_step(session)
                 return _advance(session, adapter, None)
             path = session.get("print_file") or _write_square(session)
-            n = int(session.get("print_n", 0)) + 1
-            which = "a second coin-sized square" if n > 1 else "a coin-sized square"
             return _reply(
-                session,
-                f"Kiln will print {which} and {'cancel it partway' if n > 1 or 'pause' not in session['asked'] else 'pause it partway'}. "
-                "Ready to start it?",
+                session, _print_ask(session),
                 options=["yes"], print_file=path,
                 how_to_start=(f"Show the file with visualize_model(model_path={path!r}), get a token with "
                               f"issue_preview_token, then run_quick_print(model_path={path!r}, printer_name={name!r}, "
@@ -692,7 +783,8 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
         if state not in ("printing", "idle") or not settled or not _log_done(session, "resume"):
             return _reply(session, "The head is coming back; Kiln is watching the way back.", waiting=True)
         if session["loggable"]:
-            _observed_from_log(session, adapter, "pause", returns=True, points=_points(session, "pause", "resume"),
+            _observed_from_log(session, adapter, "pause", returns=True,
+                               logs=[_log_for(session, "pause"), _log_for(session, "resume")],
                                layer_z=float(session.get("pause_layer_z") or 1.0))
         _next_step(session)
         answer = None
@@ -734,7 +826,7 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
         if not settled or not _log_done(session, "end"):
             return _reply(session, "The print has ended; Kiln is watching the head settle.", waiting=True)
         if session["loggable"]:
-            _observed_from_log(session, adapter, "end", returns=False, points=_points(session, "end"),
+            _observed_from_log(session, adapter, "end", returns=False, logs=[_log_for(session, "end")],
                                layer_z=float(session.get("end_layer_z") or SQUARE_MM[2]))
         _next_step(session)
         answer = None
@@ -765,7 +857,7 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
         state, _job = _status(adapter)
         if state in ("printing", "paused"):
             _door("cancel_print", name)
-            return _reply(session, "Kiln is cancelling the square (that block is already on record).", waiting=True)
+            return _reply(session, "Kiln is stopping the square; it already knows what this printer does on a cancel.", waiting=True)
         _next_step(session)
         answer = None
         step = session["step"]
@@ -795,7 +887,7 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
         if state not in ("idle", "error") or not settled or not _log_done(session, "cancel"):
             return _reply(session, "The print is cancelling; Kiln is watching where the head goes.", waiting=True)
         if session["loggable"]:
-            _observed_from_log(session, adapter, "cancel", returns=False, points=_points(session, "cancel"),
+            _observed_from_log(session, adapter, "cancel", returns=False, logs=[_log_for(session, "cancel")],
                                layer_z=float(session.get("cancel_layer_z") or 1.0))
         _next_step(session)
         answer = None
@@ -862,14 +954,15 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
         _send_in_background()
         learned = _learned_lines(session)
         unknown = _unknown_lines(session)
+        payoff = _payoff(session) if learned else ""
         return {
             "success": True, "step": "done", "printer_name": name, "ask": "", "images": [],
             "learned": learned, "still_unknown": unknown, "notes": session.get("notes", []),
-            "payoff": _payoff(session),
+            "payoff": payoff,
             "first": bool(session.get("first")),
-            "message": (("You're the first to teach Kiln this printer. " if session.get("first") else "")
-                        + ("Learned: " + "; ".join(learned) + ". " if learned else "Nothing new was observed this time. ")
-                        + _payoff(session)
+            "message": (("Kiln had no record for this printer; now it has yours. " if session.get("first") and learned else "")
+                        + ("Learned: " + "; ".join(learned) + ". " + payoff if learned
+                           else "Nothing new was observed this time, so Kiln still assumes the worst for this printer.")
                         + (" Still unknown: " + "; ".join(unknown) + "." if unknown else "")),
             "kept_at": str(bench.bench_dir()),
         }

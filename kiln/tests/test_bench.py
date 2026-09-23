@@ -248,13 +248,24 @@ class TestWhatTheRecordLacks:
         # An older server writes no record line: the sentence alone settles it.
         old = _verdict(ok=False, sentences=[worst]); old["record"] = {"printer_id": "bambu_a1"}
         assert bench.refusal_blanks(old) == ["pause"]
-        assert bench.refusal_blanks(_verdict(ok=False, code="PLACEMENT_UNKNOWN_PRINTER")) == ["pause", "cancel", "end", "filament_change", "head"]
+        assert bench.refusal_blanks(_verdict(ok=False, code="PLACEMENT_UNKNOWN_PRINTER")) == ["pause", "cancel", "end", "head"]
         assert bench.refusal_blanks(None) == [] and bench.refusal_blanks(_verdict(ok=True)) == []
+        # A refusal that rests on a block no session can teach offers nothing.
+        colour = "the print head would hit jar during a filament change (this printer's own filament change motion is not on record, so the worst case is assumed)"
+        assert bench.refusal_blanks(_verdict(ok=False, sentences=[colour], blanks=["filament_change"])) == []
 
-    def test_the_offer_is_one_sentence_that_names_the_tool(self):
-        text = bench.offer_sentence("Bambu Lab A1", ["pause", "cancel"])
-        assert text.startswith("Kiln doesn't know where Bambu Lab A1 sends its head when it pause or cancels")
-        assert text.endswith("teaches it: call printer_bench.") and text.count(". ") == 1
+    def test_the_offer_names_only_what_a_session_can_teach_in_plain_words(self):
+        assert bench.offer_sentence("Bambu Lab A1", ["pause", "cancel"]) == (
+            "Kiln doesn't know where the Bambu Lab A1 sends its head when it pauses or cancels a print, so it "
+            "assumes the worst. A five-minute session with a coin-sized test print teaches it; the printer_bench "
+            "tool runs it.")
+        every = bench.offer_sentence("Creality K1", ["pause", "cancel", "end", "head", "quiet_start"])
+        assert every.startswith("Kiln doesn't know where the Creality K1 sends its head when it pauses, cancels a "
+                                "print or finishes a print, or how big the head is, so it assumes the worst.")
+        assert bench.offer_sentence("Creality K1", ["head"]).startswith("Kiln doesn't know how big the Creality K1's head is,")
+        # A colour change is never triggered by a session, so it is never offered.
+        colour = bench.offer_sentence("Bambu Lab A1", ["filament_change", "pause"])
+        assert "colour" not in colour and "when it pauses, so" in colour
 
 
 class TestNeverNaggedTwice:
@@ -283,7 +294,14 @@ class TestNeverNaggedTwice:
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause", "cancel", "end", "filament_change", "head"],
                                                                         _verdict(ok=False, code="PLACEMENT_UNKNOWN_PRINTER")))
         first = bench.offer_after_registration(fresh, "new")
-        assert first["first"] is True and first["sentence"].startswith("Kiln has never met a")
+        assert first["first"] is True and first["blanks"] == ["pause", "cancel", "end", "head"]
+        assert first["sentence"].startswith("Kiln has no record for the") and "can't check a second part beside the first" in first["sentence"]
+        # Blanks no session can fill are no reason to offer one, and the one
+        # offer is not spent on them.
+        other = _Adapter(); other.serial = "01P00A000000003"
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["filament_change", "quiet_start"], _verdict(ok=True)))
+        assert bench.offer_after_registration(other, "x") is None
+        assert bench.may_offer(bench.unit_of(other), "registration") is True
 
     def test_registration_stays_quiet_when_there_is_nothing_to_teach_or_nothing_answers(self, monkeypatch):
         machine = _Adapter()
@@ -323,8 +341,10 @@ class TestThePrintersOwnWord:
     def test_klipper_and_marlin_say_where_the_head_is_and_a_bambu_does_not(self):
         class _Moonraker:
             def _get_json(self, path, params=None):
-                assert path == "/printer/objects/query" and params == {"toolhead": "position"}
-                return {"result": {"status": {"toolhead": {"position": [10.0, 20.0, 5.0, 0.0]}}}}
+                # Where the head IS -- never toolhead.position, where the last
+                # queued move ends, which skips a macro's waypoints.
+                assert path == "/printer/objects/query" and params == {"motion_report": "live_position"}
+                return {"result": {"status": {"motion_report": {"live_position": [10.0, 20.0, 5.0, 0.0]}}}}
 
         assert bench.position_of(_Moonraker()) == (10.0, 20.0, 5.0) and bench.can_log_positions(_Moonraker())
         assert bench.position_of(_Adapter(position=True)) == (30.0, 30.0, 1.0)
@@ -341,8 +361,21 @@ class TestThePrintersOwnWord:
         time.sleep(0.05)
         machine.head = [-48.0, 180.0, 11.0]
         log.join(timeout=5.0)
-        assert not log.is_alive() and log.moved is True
+        assert not log.is_alive() and log.moved is True and log.complete is True
         assert log.points[0] == (30.0, 30.0, 1.0) and log.points[-1] == (-48.0, 180.0, 11.0) and len(log.points) == 3
+
+    def test_a_log_whose_reads_fail_after_the_head_moved_never_completes(self):
+        machine = _Adapter(position=True)
+        log = bench.PositionLog(machine, settle_s=0.1, max_s=0.6, hz=50.0)
+        log.start()
+        import time
+
+        time.sleep(0.05)
+        machine.head = [30.0, 30.0, 11.0]
+        time.sleep(0.05)
+        machine._position = False               # the printer stops answering mid-move
+        log.join(timeout=5.0)
+        assert log.moved is True and log.complete is False
 
     def test_pending_documents_go_through_the_one_rpc_once_and_only_while_telemetry_is_on(self, monkeypatch):
         machine = _Adapter()
@@ -433,8 +466,12 @@ class TestTheConversation:
     def test_a_closed_firmware_printer_is_walked_end_to_end_with_pictures_and_one_ask_at_a_time(self, server):
         m = server.machine
         out = _step(server)
-        assert out["step"] == "intro" and out["ask"].startswith("Help Kiln get to know your Bambu Lab A1") and out["options"] == ["yes", "later", "no"]
-        assert "pause, cancel, end, head" in out["ask"] and out["ask"].endswith("Ready?")
+        assert out["step"] == "intro" and out["options"] == ["yes", "later", "no"]
+        assert out["ask"] == (
+            "Help Kiln get to know your Bambu Lab A1 in about five minutes: it prints a coin-sized square, pauses and "
+            "resumes it, and lets it finish, then prints a second one and cancels it partway, watching where the head "
+            "goes each time, and you measure the head with calipers. Kiln will ask you where the head stopped, with a "
+            "picture. Ready?")
         out = _step(server, "yes")
         assert out["step"] == "plate" and out["ask"] == "Is the plate empty?" and out["images"][0]["kind"] == "camera"
         assert out["image_b64"] == out["images"][0]["image_b64"]
@@ -442,7 +479,8 @@ class TestTheConversation:
         assert "Take everything off" in out["ask"]
         out = _step(server, "yes")
         assert out["step"] == "print" and out["print_file"].endswith("kiln_bench_square.stl") and "run_quick_print" in out["how_to_start"]
-        assert "issue_preview_token" in out["how_to_start"] and out["ask"].endswith("Ready to start it?")
+        assert "issue_preview_token" in out["how_to_start"]
+        assert out["ask"] == "Kiln will print a coin-sized square, pause it partway, then let it finish. Ready to start it?"
         out = _step(server, "started")                       # not printing yet
         assert out["waiting"] is True and "isn't printing yet" in out["ask"]
         m.state, m.layer = "printing", 1
@@ -457,6 +495,9 @@ class TestTheConversation:
         assert out["step"] == "pause_zone"                    # asked again, nothing recorded
         out = _step(server, "zone 24")
         assert out["step"] == "pause_lift" and out["options"] == ["barely", "a finger", "a hand span", "a number in mm"]
+        # The height the verdict relies on is the one BEFORE the head moved sideways.
+        assert out["ask"] == ("About how high did it lift when it paused, before it moved sideways: barely, a finger, "
+                              "or a hand span?")
         out = _step(server, "a hand span")
         assert out["step"] == "pause_measure" and out["options"] == ["skip"]
         out = _step(server, "skip")
@@ -474,7 +515,7 @@ class TestTheConversation:
         out = _step(server, "barely")
         assert "end" in out["learned"] and out["step"] == "clear" and out["options"] == ["it's empty"]
         out = _step(server, "it's empty")
-        assert out["step"] == "print" and "second coin-sized square" in out["ask"] and "cancel it partway" in out["ask"]
+        assert out["step"] == "print" and out["ask"] == "Kiln will print a second coin-sized square and cancel it partway. Ready to start it?"
         m.state, m.layer, m.completion = "printing", 2, 10.0
         out = _step(server, "yes")
         assert out["step"] == "cancel" and out["waiting"] is True
@@ -490,8 +531,11 @@ class TestTheConversation:
         assert out["step"] == "head_rod" and "lowest bar" in out["ask"]
         out = _step(server, "25 mm")
         assert out["step"] == "done"
-        assert out["payoff"].startswith("Kiln now knows how your Bambu Lab A1 moves, so it keeps the head clear of what's on the plate and can tell you where a second part fits.")
-        assert out["payoff"].endswith("Every Bambu Lab A1 owner gets this.") and "start it for you" not in out["payoff"]
+        # Free: WHETHER a second part fits, never where -- where is the plan's tier.
+        assert out["payoff"] == (
+            "Kiln now knows how your Bambu Lab A1 moves, so it keeps the head clear of what's on the plate and can "
+            "tell you whether a second part fits. The numbers go to Kiln; once enough Bambu Lab A1 owners agree, "
+            "every Bambu Lab A1 owner gets them.")
         assert len(out["learned"]) == 4 and out["still_unknown"] == []
         # What was written: one document per block, numbers only, this unit's.
         docs = {d["block"]: d for d in bench.observations_of(m)}
@@ -543,6 +587,7 @@ class TestTheConversation:
             def __init__(self, adapter, **kw):
                 self.points = [(30.0, 30.0, 1.0), (30.0, 30.0, 11.0), (-48.0, 180.0, 11.0)]
                 self.moved = True
+                self.complete = True
 
             def start(self):
                 pass
@@ -552,7 +597,10 @@ class TestTheConversation:
 
         monkeypatch.setattr(bench, "PositionLog", _InstantLog)
         out = _step(server)
-        assert "read where the head goes from the printer itself" in out["ask"]
+        assert out["ask"] == (
+            "Help Kiln get to know your Bambu Lab A1 in about five minutes: it prints a coin-sized square, pauses and "
+            "resumes it, and stops it, watching where the head goes each time. Kiln reads where the head goes from "
+            "the printer itself. Ready?")
         _step(server, "yes"); _step(server, "yes")
         m.state, m.layer = "printing", 5
         out = _step(server, "started")
@@ -578,6 +626,93 @@ class TestTheConversation:
         out = server.tool.printer_bench(printer_name="a1")
         assert out["success"] is False and out["error"]["code"] == "BENCH_NO_VERDICT"
 
+    def test_an_end_only_session_lets_the_square_finish_and_says_so(self, server, monkeypatch):
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["end"], _verdict(ok=True, blanks=["end"])))
+        out = _step(server)
+        assert out["ask"].startswith("Help Kiln get to know your Bambu Lab A1 in about five minutes: it prints a "
+                                     "coin-sized square and lets it finish, watching where the head goes each time.")
+        _step(server, "yes")
+        out = _step(server, "yes")
+        assert out["ask"] == "Kiln will print a coin-sized square and let it finish. Ready to start it?"
+
+    def test_a_head_only_session_prints_nothing(self, server, monkeypatch):
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["head"], _verdict(ok=True, blanks=["head"])))
+        out = _step(server)
+        assert out["ask"] == "Help Kiln get to know your Bambu Lab A1: two caliper measurements of its print head. Ready?"
+        out = _step(server, "yes")
+        assert out["step"] == "head_width" and server.log == []
+
+    def test_blanks_no_test_print_can_show_are_said_and_nothing_runs(self, server, monkeypatch):
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["filament_change", "quiet_start"], _verdict(ok=True)))
+        out = _step(server)
+        assert out["step"] == "done" and "a test print can't show those" in out["message"] and server.log == []
+
+    def test_the_payoff_is_true_on_every_tier_and_printer(self, server, monkeypatch):
+        tool = server.tool
+        session = {"model_name": "Creality K1", "printer_id": "k1", "blanks": ["pause", "head", "quiet_start"]}
+        monkeypatch.setattr(tool, "_has_pro", lambda: False)
+        free = tool._payoff(session)
+        assert "whether a second part fits" in free and "where a second part" not in free and "start it" not in free
+        monkeypatch.setattr(tool, "_has_pro", lambda: True)
+        pro = tool._payoff(session)
+        # Pro sees where; starting it needs a quiet start this printer has run.
+        assert "can tell you where a second part fits." in pro and "start it for you" not in pro
+        assert tool._payoff({**session, "blanks": ["pause"]}).startswith(
+            "Kiln now knows how your Creality K1 moves, so it keeps the head clear of what's on the plate and can "
+            "tell you where a second part fits, and can start it for you.")
+        monkeypatch.setenv("KILN_TELEMETRY", "false")
+        assert tool._payoff(session).endswith("The numbers stay on this machine.")
+
+    def test_nothing_observed_claims_nothing(self, server, monkeypatch):
+        m = server.machine
+        m._position = True
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause"], _verdict(ok=True, blanks=["pause"])))
+
+        class _StillLog:
+            def __init__(self, adapter, **kw):
+                self.points, self.moved, self.complete = [(30.0, 30.0, 1.0)], False, True
+
+            def start(self):
+                pass
+
+            def is_alive(self):
+                return False
+
+        monkeypatch.setattr(bench, "PositionLog", _StillLog)
+        _step(server); _step(server, "yes"); _step(server, "yes")
+        m.state, m.layer = "printing", 5
+        _step(server, "started")
+        _step(server)
+        out = _step(server, "yes")
+        assert out["step"] == "done" and out["payoff"] == "" and out["learned"] == []
+        assert "Kiln still assumes the worst for this printer" in out["message"]
+        assert any("caught no movement" in n for n in out["notes"])
+
+    def test_a_log_cut_short_writes_nothing(self, server, monkeypatch):
+        m = server.machine
+        m._position = True
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause"], _verdict(ok=True, blanks=["pause"])))
+
+        class _CutLog:
+            def __init__(self, adapter, **kw):
+                self.points = [(30.0, 30.0, 1.0), (30.0, 30.0, 11.0)]
+                self.moved, self.complete = True, False
+
+            def start(self):
+                pass
+
+            def is_alive(self):
+                return False
+
+        monkeypatch.setattr(bench, "PositionLog", _CutLog)
+        _step(server); _step(server, "yes"); _step(server, "yes")
+        m.state, m.layer = "printing", 5
+        _step(server, "started")
+        _step(server)
+        out = _step(server, "yes")
+        assert out["step"] == "done" and out["learned"] == [] and bench.observations_of(m) == []
+        assert any("cut short" in n for n in out["notes"])
+
     def test_the_plan_covers_every_blank_with_at_most_two_prints(self):
         from kiln.plugins.printer_bench_tools import _plan
 
@@ -591,7 +726,7 @@ class TestTheConversation:
         only_cancel = _plan(["cancel"], loggable=False)
         assert only_cancel.count("print") == 1 and "pause" not in only_cancel and "cancel_zone" in only_cancel
         only_head = _plan(["head"], loggable=False)
-        assert "print" not in only_head and only_head == ["intro", "plate", "head_width", "head_rod", "done"]
+        assert only_head == ["intro", "head_width", "head_rod", "done"]      # no print, so no plate ask
         assert "runout" not in " ".join(full)
 
     def test_the_tool_is_registered_and_classified(self):
