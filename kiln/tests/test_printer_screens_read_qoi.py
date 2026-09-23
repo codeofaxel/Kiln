@@ -8,32 +8,26 @@ else, established from their firmware rather than from habit:
 * **Prusa MK4 / MK4S / MK3.5 / MK3.9 / XL / Core One / MINI** —
   Prusa-Firmware-Buddy 5.1.0 (2023-11-23): "QOI instead of PNG (XL, MK4,
   MINI) ... all the G-codes sliced until now, won't have a visible
-  thumbnail on firmware 5.1.0 or newer."  At v6.10.2,
-  ``src/common/gcode/gcode_reader_plaintext.cpp``
-  matches the exact prefix ``"; thumbnail_QOI begin "`` (L198), parses
-  ``WxH N`` with ``%hux%hu%lu`` (L208), takes the type and BOTH dimensions
-  exactly (L223-228), searches the first 2048 lines (L36), and counts only
-  base64 characters against ``N``, skipping CR, LF, space and ``;``
-  (L166-169).  The sizes are ``src/common/thumbnail_sizes.hpp`` L10-21:
-  the 480x320 display (xBuddy/XLBuddy boards) reads a 313x173 preview and a
-  480x240 progress picture with 440x240 as its fallback; the 240x320 MINI
-  display reads 220x124 and 240x240 with 200x240 as fallback
-  (``src/gui/window_thumbnail.cpp`` L27, L52-57; ``gcode_info.cpp``
-  L96-99, L494-502).  All three are asked for as ``ImgType::QOI``.
-* **Duet's PanelDue** — PanelDueFirmware 3.7.0 ``src/Library/Thumbnail.cpp``
-  L16-21 accepts only QOI; ``src/PanelDue.cpp`` L2194-2205 keeps the largest
-  QOI that fits its file-dialog field, which ``src/UI/UserInterface.cpp``
-  L628-633 sizes at 161x161 on the 480x272 panel and 263x245 on the
-  800x480 panels.  RepRapFirmware 3.6.3 hands it the first four thumbnail
-  blocks in the file (``src/Config/Configuration.h`` L275 ``MaxThumbnails``),
-  each 16..500 pixels a side (``src/Storage/FileInfoParser.cpp`` L747-751).
+  thumbnail on firmware 5.1.0 or newer."  At v6.10.2 the reader matches
+  the exact prefix ``"; thumbnail_QOI begin "``, parses ``WxH N`` with
+  ``%hux%hu%lu``, takes the type and BOTH dimensions exactly, searches the
+  first 2048 lines, and counts only base64 characters against ``N``,
+  skipping CR, LF, space and ``;``.  The 480x320 display (xBuddy/XLBuddy
+  boards) reads a 313x173 preview and a 480x240 progress picture with
+  440x240 as its fallback; the 240x320 MINI display reads 220x124 and
+  240x240 with 200x240 as fallback.  All three are asked for as
+  ``ImgType::QOI``.
+* **Duet's PanelDue** — PanelDueFirmware 3.7.0 accepts only QOI and keeps
+  the largest QOI that fits its file-dialog field: 161x161 on the 480x272
+  panel and 263x245 on the 800x480 panels.  RepRapFirmware 3.6.3 hands it
+  the first four thumbnail blocks in the file (``MaxThumbnails``), each
+  16..500 pixels a side.
 
-The block itself is PrusaSlicer's, tag ``thumbnail_QOI``
-(``src/libslic3r/GCode/Thumbnails.cpp`` L43, 2.9.4), in the shape its
-emitter writes (``Thumbnails.hpp`` L72-82).
+The block itself is PrusaSlicer's (2.9.4), tag ``thumbnail_QOI``, in the
+shape its emitter writes.
 
 NOT verified on hardware: the owner has no Prusa and no Duet.  Every
-assertion here is against the readers' own source, quoted above.
+assertion here is against the readers' own source, at the versions named.
 """
 
 from __future__ import annotations
@@ -197,7 +191,7 @@ class TestQoiBlockFormat:
         """A file nobody sliced through Kiln gets its picture drawn from its
         own moves, and a dense print draws a picture QOI compresses badly —
         several hundred lines a block.  The screen's own 2048-line search
-        (``gcode_reader_plaintext.cpp`` L36) must still reach the preview
+        must still reach the preview
         the screen is refused without and the icons its web UI serves."""
         moves = ["M83\n"]
         for i in range(6000):
@@ -261,9 +255,9 @@ class TestEachPrusaModelsSizes:
         assert qoi_sizes(text_of(path)) == MINI
 
     def test_the_buddy_web_ui_gets_its_16x16_png_icon(self, tmp_path):
-        """``lib/WUI/link_content/previews.cpp`` L38-41: the file list's
-        small icon is a PNG of exactly 16x16; L42-46: the large one is the
-        first PNG bigger than that."""
+        """The Buddy web UI's file list takes its small icon from a PNG of
+        exactly 16x16, and its large one from the first PNG bigger than
+        that."""
         path = raw_gcode(tmp_path)
         complete(path, "prusalink", "prusa_mk4")
         sizes = gcode_complete.gcode_thumbnails(text_of(path))
@@ -284,8 +278,8 @@ class TestEachPrusaModelsSizes:
 
     @pytest.mark.parametrize("model", ["prusa_mk3s", "prusa_mk3", "prusa_mk2_5", "prusa_mk2_5s"])
     def test_the_8bit_printers_have_no_qoi_screen(self, tmp_path, model):
-        """PrusaSlicer's own MK3 profile writes ``160x120`` PNG and no QOI
-        (PrusaResearch.ini L37830); nothing is owed and nothing is written."""
+        """PrusaSlicer's own MK3 profile writes ``160x120`` PNG and no QOI;
+        nothing is owed and nothing is written."""
         path = raw_gcode(tmp_path)
         complete(path, "prusalink", model)
         assert qoi_sizes(text_of(path)) == set()
@@ -334,9 +328,9 @@ class TestDuet:
         assert all(w <= 263 and h <= 245 for w, h in sizes), "a block no PanelDue can draw"
 
     def test_paneldues_own_pick_lands_on_each_panel(self, tmp_path):
-        """``PanelDue.cpp`` L2196-2199, in the order RRF reports the blocks:
-        a candidate replaces the pick when it is larger in both dimensions
-        and still fits the field."""
+        """PanelDue's own pick, in the order RRF reports the blocks: a
+        candidate replaces the pick when it is larger in both dimensions and
+        still fits the field."""
         path = raw_gcode(tmp_path)
         complete(path, "duet")
         blocks = [
@@ -412,9 +406,12 @@ class TestTheCheck:
         assert gcode_complete.gcode_problems(str(path), "prusalink", printer_model="prusa_mk4") == []
 
     def test_the_screen_entries_say_where_they_came_from(self):
+        """Each screen names its reader and the version it was read at --
+        the source by type, never the file and line it was read from."""
         for key, screen in gcode_complete.QOI_SCREENS.items():
             assert screen.key == key
-            assert re.search(r"\.(cpp|hpp|h)\b", screen.evidence) and re.search(r"L\d+", screen.evidence), key
+            assert re.search(r"\b(?:Prusa-Firmware-Buddy|PanelDueFirmware) v?\d+\.\d+\.\d+\b", screen.evidence), key
+            assert not re.search(r"\.(?:cpp|hpp|h)\b|\bL\d+", screen.evidence), key
             assert screen.preview in screen.sizes
         assert gcode_complete.QOI_SCREENS["paneldue"].refuses_missing is False
         assert gcode_complete.QOI_SCREENS["buddy_large"].refuses_missing is True

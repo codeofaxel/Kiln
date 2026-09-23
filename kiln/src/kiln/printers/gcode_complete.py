@@ -11,7 +11,7 @@ than from habit.  Each entry in :data:`SURFACES` carries its own evidence
 string; the short version:
 
 * **Klipper / Moonraker** — Mainsail and Fluidd show what Moonraker
-  extracted.  ``moonraker/components/file_manager/metadata.py`` matches
+  extracted.  Moonraker's metadata parser matches
   ``(thumbnail(?:_[A-Za-z0-9]+)?) begin([;/\\+=\\w\\s]+?); \\1 end``, drops a
   block whose declared size is not the length of its base64, and makes its
   own 32x32 miniature when the file carries none.  Weight comes from
@@ -22,30 +22,26 @@ string; the short version:
   ``^; thumbnail(?:_JPG)* begin \\d+[x ]\\d+ \\d+`` and stops reading at the
   first ``G1`` carrying an ``E`` word, so the block has to come before the
   first extrusion.  OctoPrint's own file list gets filament length and
-  volume from a pass over the E moves (``util/gcodeInterpreter.py``), not
-  from any comment — so no weight line is owed to it.
-* **PrusaLink** — ``prusa3d/gcode-metadata`` (the Python PrusaLink on a
-  Pi) matches ``; thumbnail_?(QOI|JPG|) begin (dim) (size)``, so a plain
+  volume from a pass over the E moves, not from any comment — so no weight
+  line is owed to it.
+* **PrusaLink** — Prusa's G-code metadata library (the Python PrusaLink on
+  a Pi) matches ``; thumbnail_?(QOI|JPG|) begin (dim) (size)``, so a plain
   PNG block counts; it ignores anything smaller than 50x50, picks the image
   nearest 640x480 for the preview and nearest 100x100 for the icon, and
-  reads ``filament used [g]``.  Its ``IMAGE_FORMATS = ['PNG', 'JPG']``
-  (metadata.py L75, applied at L982) means a QOI block is parsed but never
-  chosen, so the QOI blocks below cannot displace the PNG.  The Buddy
-  printers' own web UI (``lib/WUI/link_content/previews.cpp`` L38-46 and
-  ``lib/WUI/nhttp/gcode_preview.cpp`` L56, v6.10.2) serves ``/thumb/s/``
+  reads ``filament used [g]``.  It chooses among PNG and JPG only, so a QOI
+  block is parsed but never chosen, and the QOI blocks below cannot displace
+  the PNG.  The Buddy printers' own web UI (v6.10.2) serves ``/thumb/s/``
   from a PNG of exactly 16x16 and ``/thumb/l/`` from the first PNG larger
   than that — PNG both, so those printers get a 16x16 PNG beside the
   400x300.  The printer's own SCREEN reads none of these; see below.
-* **Duet / RepRapFirmware** — ``src/Storage/FileInfoParser.cpp`` (3.6.3)
-  L69-71 knows ``Thumbnail begin`` (PNG), ``Thumbnail_JPG begin`` and
-  ``Thumbnail_QOI begin``, compared exactly after the first letter (L453);
-  L747-755 take 16..500 pixels a side and a size of at least 10; L511-517
-  stop parsing the header at the first G/M/T command, so every block must
-  precede it; ``src/Config/Configuration.h`` L275 ``MaxThumbnails = 4``
-  stores and reports only the first four.  Filament is ``ilament used`` in
-  millimetres.  Duet Web Control (v3.6-dev
-  ``src/components/misc/ThumbnailImg.vue`` L36-60) decodes PNG, JPEG and
-  QOI alike in the browser; PanelDue draws QOI only — see below.
+* **Duet / RepRapFirmware** (3.6.3) knows ``Thumbnail begin`` (PNG),
+  ``Thumbnail_JPG begin`` and ``Thumbnail_QOI begin``, compared exactly
+  after the first letter; it takes 16..500 pixels a side and a size of at
+  least 10; it stops parsing the header at the first G/M/T command, so every
+  block must precede it; and with ``MaxThumbnails = 4`` it stores and
+  reports only the first four.  Filament is ``ilament used`` in
+  millimetres.  Duet Web Control (v3.6-dev) decodes PNG, JPEG and QOI alike
+  in the browser; PanelDue draws QOI only — see below.
 * **Elegoo (SDCP)** — what the Centauri Carbon's screen reads could not be
   established from a source Kiln can cite.  A preview is written anyway,
   because a comment block costs nothing, and its absence is never a
@@ -58,7 +54,7 @@ string; the short version:
 WHAT THE PRINTER'S OWN SCREEN READS.  Two screens read a QOI block, not a
 PNG one, and each is in :data:`QOI_SCREENS` with its evidence.  Nothing
 here was confirmed on hardware — the owner has a Bambu — so every size and
-rule below is quoted from the firmware source, at the version named.
+rule below comes from the firmware's own source, at the version named.
 
 * **Prusa MK4 / MK4S / MK3.5 / MK3.9 / XL / Core One / iX / MINI**
   (Prusa-Firmware-Buddy).  The 5.1.0 release notes (2023-11-23): "QOI
@@ -66,67 +62,58 @@ rule below is quoted from the firmware source, at the version named.
   won't have a visible thumbnail on firmware 5.1.0 or newer."  At v6.10.2
   (2026-09-16; identical on master as of 2026-09-19):
 
-  - ``src/common/gcode/gcode_reader_plaintext.cpp`` L197-198 match the
-    literal prefixes ``"; thumbnail begin "`` (PNG) and ``"; thumbnail_QOI
-    begin "`` (QOI); L208 reads ``WxH N`` with ``%hux%hu%lu``; L223 refuses
-    the wrong type and L227-228 the wrong width or height (exact, unless
-    the caller allows larger, which the screen never does); L36 searches
-    only the first 2048 lines; L166-169 read the base64 one character at a
-    time, skipping CR, LF, space and ``;``, and count only the base64
+  - The G-code reader matches the literal prefixes ``"; thumbnail begin "``
+    (PNG) and ``"; thumbnail_QOI begin "`` (QOI), reads ``WxH N`` with
+    ``%hux%hu%lu``, and refuses the wrong type and the wrong width or height
+    (exact, unless the caller allows larger, which the screen never does).
+    It searches only the first 2048 lines, reads the base64 one character
+    at a time, skipping CR, LF, space and ``;``, and counts only the base64
     characters against ``N``.
-  - ``src/common/thumbnail_sizes.hpp`` L10-21: on the 480x320 display
-    (``HAS_LARGE_DISPLAY``) the preview is 313x173 and the progress
-    picture 480x240 with an ``old_progress_thumbnail_width`` of 440; on the
-    240x320 MINI display the preview is 220x124 and the progress picture
-    240x240 with an old width of 200.  ``include/guiconfig/guiconfig.h``
-    L18-21 give the large display to the XBUDDY and XLBUDDY boards and the
-    MINI display to BUDDY; ``CMakePresets.json`` builds MINI on BUDDY,
+  - On the 480x320 display (``HAS_LARGE_DISPLAY``) the preview is 313x173
+    and the progress picture 480x240 with an
+    ``old_progress_thumbnail_width`` of 440; on the 240x320 MINI display
+    the preview is 220x124 and the progress picture 240x240 with an old
+    width of 200.  The large display belongs to the XBUDDY and XLBUDDY
+    boards and the MINI display to BUDDY; the firmware builds MINI on BUDDY,
     MK4 (the build the MK4S and MK3.9 run), MK3.5, iX, COREONE and COREONEL
     on XBUDDY, XL on XLBUDDY.
-  - ``src/gui/window_thumbnail.cpp`` L27 asks for the preview at the
-    window's own size as ``ImgType::QOI``; L52-57 ask for the progress
-    picture at the full width, then at the old width drawn centred.
-    ``src/common/gcode/gcode_info.cpp`` L96-99 index exactly those three
-    sizes, all QOI, and L494-502 set ``has_preview_thumbnail_`` and
-    ``has_progress_thumbnail_`` only for a QOI block at one of them.
-  - ``src/gui/qoi_decoder.hpp`` L47-67 read width and height from header
-    bytes 4..11 and nothing else; ``src/guiapi/src/ili9488.cpp`` L677 mixes
-    each pixel's alpha against the back colour, which for a G-code
-    thumbnail is black (``src/guiapi/src/display_ex.cpp`` L530-531).
-  - Prusa's own profiles agree: ``resources/profiles/PrusaResearch.ini``
-    in PrusaSlicer 2.9.4 writes ``16x16/QOI, 313x173/QOI, 480x240/QOI,
-    380x285/PNG`` for the MK4 family (L39046, inherited by MK4S, MK3.9 and
-    MK3.5), the XL (L38344), the Core One (L39520) and the Core One L
-    (L40186), and
-    ``16x16/QOI, 220x124/QOI, 200x240/QOI, 380x285/PNG`` for the MINI
-    (L38152).  2.7.0 (the release that went with firmware 5.1.0) wrote
+  - The screen asks for the preview at the window's own size as
+    ``ImgType::QOI``, and for the progress picture at the full width, then
+    at the old width drawn centred.  The file index holds exactly those
+    three sizes, all QOI, and marks a file as having a preview or a
+    progress picture only for a QOI block at one of them.
+  - Its QOI decoder reads width and height from header bytes 4..11 and
+    nothing else, and the display mixes each pixel's alpha against the back
+    colour, which for a G-code thumbnail is black.
+  - Prusa's own profiles agree: PrusaSlicer 2.9.4 writes ``16x16/QOI,
+    313x173/QOI, 480x240/QOI, 380x285/PNG`` for the MK4 family (inherited
+    by MK4S, MK3.9 and MK3.5), the XL, the Core One and the Core One L, and
+    ``16x16/QOI, 220x124/QOI, 200x240/QOI, 380x285/PNG`` for the MINI.
+    2.7.0 (the release that went with firmware 5.1.0) wrote
     440x240 for the large display; 2.7.4 through 2.9.0 wrote 440x240 and
     480x240 both.  Kiln writes both progress widths, so a screen on either
     side of that change finds its picture.  The MK3 and MK3S profiles write
-    ``160x120`` PNG and no QOI (L37830): those printers have no screen
-    that reads one, and nothing is written or refused for them.
+    ``160x120`` PNG and no QOI: those printers have no screen that reads
+    one, and nothing is written or refused for them.
   - UNKNOWN: who reads the ``16x16/QOI`` in those profiles.  The firmware
     at v6.10.2 asks for no 16x16 QOI anywhere, its web UI wants a 16x16
-    PNG, and gcode-metadata drops anything under 50x50.  Not written.
+    PNG, and the Python metadata library drops anything under 50x50.  Not
+    written.
 
 * **Duet's PanelDue** (PanelDueFirmware 3.7.0; 3.5.2 reads the same way).
-  ``src/Library/Thumbnail.cpp`` L16-21: only ``ImageFormat::Qoi`` is valid.
-  ``src/PanelDue.cpp`` L2076 takes the format from RepRapFirmware's M36
-  report as ``"qoi"``, and L2194-2205 keep, in the order RepRapFirmware
-  lists them, the largest QOI whose height and width are both no more than
-  the file dialog's picture field and both strictly more than the previous
-  pick's.  ``src/UI/UserInterface.cpp`` L628-633 size that field at
-  ``7 * rowTextHeight + 2 * rowTextHeight / 3`` by ``fileInfoPopupWidth / 3
-  + 5``; with ``src/UI/UserInterfaceConstants.hpp`` (margin 2 and row 21
-  for the 480-wide panel, L26/L34; margin 4 and row 32 for the 800-wide
-  panels, L72/L80; ``fileInfoPopupWidth`` L156) that is 161x161 on the
-  4.3-inch 480x272 panel and 263x245 on the 5- and 7-inch 800x480 panels.
-  ``src/UI/Display.cpp`` L1112-1119 draw a smaller picture right-aligned
-  and vertically centred; ``src/Hardware/UTFT.cpp`` L2248 discards alpha,
-  so a transparent pixel shows the colour underneath it.  Its decoder
-  (Duet3D/qoi ``qoi.h`` at ef59be0, L575-583) refuses a header without
-  the magic, with a zero dimension, with channels outside 3..4 or a
-  colorspace above 1.  Kiln writes 160x120 (fits every panel) and 256x192
+  Only ``ImageFormat::Qoi`` is a valid thumbnail.  It takes the format from
+  RepRapFirmware's M36 report as ``"qoi"`` and keeps, in the order
+  RepRapFirmware lists them, the largest QOI whose height and width are both
+  no more than the file dialog's picture field and both strictly more than
+  the previous pick's.  That field is ``7 * rowTextHeight + 2 *
+  rowTextHeight / 3`` by ``fileInfoPopupWidth / 3 + 5``: with margin 2 and
+  row 21 on the 480-wide panel and margin 4 and row 32 on the 800-wide
+  panels, 161x161 on the 4.3-inch 480x272 panel and 263x245 on the 5- and
+  7-inch 800x480 panels.  A smaller picture is drawn right-aligned and
+  vertically centred, and alpha is discarded, so a transparent pixel shows
+  the colour underneath it.  Its QOI decoder refuses a header without the
+  magic, with a zero dimension, with channels outside 3..4 or a colorspace
+  above 1.  Kiln writes 160x120 (fits every panel) and 256x192
   (the 800-wide panels pick it over the smaller one), 4:3 like the render.
   A PanelDue is optional hardware Kiln cannot see, so its blocks are
   written and their absence is never a refusal.  They are written for the
@@ -134,17 +121,15 @@ rule below is quoted from the firmware source, at the version named.
   (``firmware_family`` in ``printer_intelligence.json``), so the slice
   door serves them without knowing the adapter.
 
-* **Klipper / Moonraker** would convert a QOI block to PNG through Pillow
-  (``SUPPORTED_THUMB_FORMATS`` and ``FMT_CONV_MAP``, metadata.py L42-45),
+* **Klipper / Moonraker** would convert a QOI block to PNG through Pillow,
   which needs a Pillow with a QOI reader (9.5 or later).  No Klipper screen
   asks for one, so none is written for that family.
 
 * The QOI encoder is :mod:`kiln.printers.qoi`, pinned byte for byte
   against the reference implementation.  Blocks are written RGBA with
-  colorspace sRGB, as PrusaSlicer's ``compress_thumbnail_qoi`` does
-  (``Thumbnails.cpp`` L101-107); the tag is ``thumbnail_QOI``
-  (``Thumbnails.cpp`` L43; ``thumbnails_format`` in ``PrintConfig.cpp``
-  L399-404 offers PNG, JPG and QOI).  The screen's blocks go first in the
+  colorspace sRGB, as PrusaSlicer's own QOI compressor does; the tag is
+  ``thumbnail_QOI``, and PrusaSlicer's ``thumbnails_format`` offers PNG, JPG
+  and QOI.  The screen's blocks go first in the
   file, preview first, because the screen's reader has a line budget and
   the web readers have byte budgets a whole MiB wide.
 
@@ -159,8 +144,8 @@ every slice is handed one (:mod:`kiln.slicer_filament`) and the slicer
 writes both lines itself; the weight fill below stays as the safety net for
 G-code sliced elsewhere, and a Kiln slice leaves it untouched.
 
-THE FORMAT WRITTEN is PrusaSlicer's own, from its emitter
-(``src/libslic3r/GCode/Thumbnails.hpp`` L72-82, 2.9.4)::
+THE FORMAT WRITTEN is PrusaSlicer's own, as its thumbnail emitter writes
+it in 2.9.4::
 
     "\\n;\\n; %s begin %dx%d %d\\n"   # tag, width, height, len(base64)
     "; %s\\n"                        # up to 78 base64 characters per row
@@ -279,15 +264,11 @@ QOI_SCREENS: dict[str, QoiScreen] = {
         png_sizes=((16, 16),),
         refuses_missing=True,
         evidence=(
-            "Prusa-Firmware-Buddy v6.10.2 src/common/thumbnail_sizes.hpp L16-21 "
-            "(HAS_LARGE_DISPLAY: preview 313x173, progress 480x240, old width 440); "
-            "src/gui/window_thumbnail.cpp L27, L52-57 and src/common/gcode/"
-            "gcode_info.cpp L96-99, L494-502 ask for all three as ImgType::QOI; "
-            "guiconfig.h L18-19 gives the display to the XBUDDY/XLBUDDY boards "
-            "(MK4, MK4S, MK3.5, MK3.9, XL, Core One, Core One L, iX per "
-            "CMakePresets.json); "
-            "lib/WUI/link_content/previews.cpp L38-41 serves the web list icon "
-            "from a 16x16 PNG"
+            "Prusa-Firmware-Buddy v6.10.2: the large display (HAS_LARGE_DISPLAY) "
+            "asks for a 313x173 preview, a 480x240 progress picture and the old "
+            "440 width, all three as ImgType::QOI; it belongs to the "
+            "XBUDDY/XLBUDDY boards (MK4, MK4S, MK3.5, MK3.9, XL, Core One, "
+            "Core One L, iX); the web UI serves its list icon from a 16x16 PNG"
         ),
     ),
     "buddy_mini": QoiScreen(
@@ -298,12 +279,11 @@ QOI_SCREENS: dict[str, QoiScreen] = {
         png_sizes=((16, 16),),
         refuses_missing=True,
         evidence=(
-            "Prusa-Firmware-Buddy v6.10.2 src/common/thumbnail_sizes.hpp L10-15 "
-            "(HAS_MINI_DISPLAY: preview 220x124, progress 240x240, old width 200); "
-            "the same readers as the large display; guiconfig.h L20-21 gives the "
-            "display to the BUDDY board, which CMakePresets.json builds the MINI on; "
-            "lib/WUI/link_content/previews.cpp L38-41 serves the web list icon "
-            "from a 16x16 PNG"
+            "Prusa-Firmware-Buddy v6.10.2: the MINI display (HAS_MINI_DISPLAY) "
+            "asks for a 220x124 preview, a 240x240 progress picture and the old "
+            "200 width, through the same readers as the large display; it "
+            "belongs to the BUDDY board, which the MINI is built on; the web UI "
+            "serves its list icon from a 16x16 PNG"
         ),
     ),
     "paneldue": QoiScreen(
@@ -314,11 +294,9 @@ QOI_SCREENS: dict[str, QoiScreen] = {
         png_sizes=(),
         refuses_missing=False,
         evidence=(
-            "PanelDueFirmware 3.7.0 src/Library/Thumbnail.cpp L16-21 (QOI only); "
-            "src/PanelDue.cpp L2194-2205 keeps the largest QOI that fits the file "
-            "dialog's picture field, sized by src/UI/UserInterface.cpp L628-633 to "
-            "161x161 on the 480x272 panel and 263x245 on the 800x480 panels; "
-            "RepRapFirmware 3.6.3 src/Config/Configuration.h L275 reports the "
+            "PanelDueFirmware 3.7.0 reads QOI only and keeps the largest QOI that "
+            "fits the file dialog's picture field, 161x161 on the 480x272 panel "
+            "and 263x245 on the 800x480 panels; RepRapFirmware 3.6.3 reports the "
             "first four blocks only.  A PanelDue is optional hardware, so its "
             "blocks are written and never refused over"
         ),
@@ -469,10 +447,9 @@ SURFACES: dict[str, GcodeSurface] = {
         reads_thumbnail=True,
         weight_unit="g",
         evidence=(
-            "moonraker/components/file_manager/metadata.py: parse_thumbnails "
-            "matches '(thumbnail(?:_[A-Za-z0-9]+)?) begin ... ; end' and checks the "
-            "declared size against the base64 length; parse_filament_weight_total "
-            "reads 'total filament used [g]'"
+            "Moonraker's metadata parser matches "
+            "'(thumbnail(?:_[A-Za-z0-9]+)?) begin ... ; end', checks the declared "
+            "size against the base64 length, and reads 'total filament used [g]'"
         ),
     ),
     "creality": GcodeSurface(
@@ -495,9 +472,9 @@ SURFACES: dict[str, GcodeSurface] = {
         weight_unit=None,
         evidence=(
             "OctoPrint-SlicerThumbnails matches '^; thumbnail(_JPG)* begin WxH N' "
-            "and stops at the first G1 with an E word; OctoPrint's own "
-            "util/gcodeInterpreter.py sums the E moves for length and volume, so "
-            "no weight comment is read.  Kiln uploads to /api/files/local, the "
+            "and stops at the first G1 with an E word; OctoPrint's own G-code "
+            "analysis sums the E moves for length and volume, so no weight "
+            "comment is read.  Kiln uploads to /api/files/local, the "
             "host's own storage, and OctoPrint streams the moves from there, so "
             "no screen on the printer ever opens the file"
         ),
@@ -509,11 +486,10 @@ SURFACES: dict[str, GcodeSurface] = {
         reads_thumbnail=True,
         weight_unit="g",
         evidence=(
-            "prusa3d/gcode-metadata: THUMBNAIL_BEGIN_PAT accepts a plain PNG "
-            "'; thumbnail begin', get_closest_image ignores anything under 50x50 "
-            "and scores against 640x480 (preview) and 100x100 (icon), PNG and "
-            "JPG only (IMAGE_FORMATS, metadata.py L75); 'filament used [g]' is "
-            "one of its attributes.  The Buddy printers' own screen reads a QOI "
+            "Prusa's G-code metadata library accepts a plain PNG "
+            "'; thumbnail begin', ignores anything under 50x50 and scores "
+            "against 640x480 (preview) and 100x100 (icon), PNG and JPG only; "
+            "'filament used [g]' is one of its attributes.  The Buddy printers' own screen reads a QOI "
             "block instead, resolved per model through screen_for_model"
         ),
     ),
@@ -523,9 +499,8 @@ SURFACES: dict[str, GcodeSurface] = {
         reads_thumbnail=True,
         weight_unit="mm",
         evidence=(
-            "RepRapFirmware 3.6.3 src/Storage/FileInfoParser.cpp L69-71 reads "
-            "'; thumbnail begin 32x32 2140' (PNG), '_JPG' and '_QOI', the first "
-            "four in the file (Configuration.h L275); filament is parsed from "
+            "RepRapFirmware 3.6.3 reads '; thumbnail begin 32x32 2140' (PNG), "
+            "'_JPG' and '_QOI', the first four in the file; filament is parsed from "
             "'ilament used' in mm.  Duet Web Control decodes all three formats; "
             "PanelDue draws QOI only, and gets its blocks through qoi_screens"
         ),
@@ -1230,8 +1205,8 @@ def complete_gcode_for_printer(
     screens = _screens_for(surface, printer_model)
 
     # The order is the order the readers' budgets dictate.  The Buddy
-    # screen and its web UI both look through the first 2048 lines only
-    # (gcode_reader_plaintext.cpp L36), and a toolpath drawn from a dense
+    # screen and its web UI both look through the first 2048 lines only,
+    # and a toolpath drawn from a dense
     # print costs several hundred lines a block; so: the preview the screen
     # refuses without, then the small icons the web lists want, then the
     # large web PNG (before the 32x32, since Buddy's /thumb/l/ takes the
