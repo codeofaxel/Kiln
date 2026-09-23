@@ -288,7 +288,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Your painted parts look like themselves in every preview.** On a machine without a browser Kiln can drive, a multi-colour part used to come back as a flat grey picture; it now gets the same 3D stage look as everything else, in its own colours.
 
-- **A part's underside in a preview picture is no longer too dark.** Previews built without a browser now light it the way the real one does.
+- **Preview pictures look like the 3D stage, even without a browser.** Undersides are lit, highlights shine, and the brightest edges glow the way the stage draws them — painted parts included.
 
 - **Every Bambu printer Kiln supports now starts and finishes each print the way Bambu designed it.**
 
