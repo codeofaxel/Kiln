@@ -318,3 +318,111 @@ def fill_from_machine(facts: MotionFacts, kind: str, payload: Any) -> MotionFact
     if kind == "marlin_report":
         return fill_from_marlin_report(facts, payload)
     return facts
+
+
+# ---------------------------------------------------------------------------
+# The settings that decide where the head goes, for the placement door
+# ---------------------------------------------------------------------------
+
+#: The version of the settings document handed to the placement door.
+MOTION_SETTINGS_FORMAT = "klipper_motion_settings/1"
+#: Sections of a Klipper configuration that decide where the head goes on its
+#: own: every macro and delayed G-code, the axes' limits, the homing and
+#: levelling routines, the idle timeout, and the kinematics.  A section
+#: named here is kept whole (less the options below); nothing else leaves.
+_MOTION_SECTION_PREFIXES: tuple[str, ...] = (
+    "gcode_macro ", "delayed_gcode ", "stepper_", "extruder_stepper ", "homing_override", "safe_z_home",
+    "idle_timeout", "force_move", "pause_resume", "printer", "extruder", "z_tilt", "quad_gantry_level",
+    "screws_tilt_adjust", "bed_mesh", "gcode_arcs", "exclude_object", "firmware_retraction",
+)
+#: Options that identify a machine or its owner rather than a motion: pin
+#: names, serial ports, file paths.  Dropped from every kept section.
+_IDENTIFYING_OPTION_SUFFIXES = ("pin", "serial", "path", "filename", "file", "baud", "canbus_uuid", "host", "port")
+#: A value with a slash in it is a path or an address, never a distance.
+_PATH_MARKER = "/"
+#: The most a settings document may weigh on the wire.
+MOTION_SETTINGS_MAX_BYTES = 512 * 1024
+
+
+def _chip_from_serial(serial: str) -> str | None:
+    """The board's chip name from a Klipper serial path
+    (``/dev/serial/by-id/usb-Klipper_stm32f401xc_...``), and nothing else of
+    it."""
+    marker = "usb-Klipper_"
+    if marker not in serial:
+        return None
+    rest = serial.split(marker, 1)[1]
+    chip = rest.split("_", 1)[0].strip().lower()
+    return chip or None
+
+
+def motion_settings(config: Any) -> dict[str, Any] | None:
+    """The parts of a Klipper configuration the placement door reads to learn
+    how this printer's head moves on its own -- its pause, resume, cancel and
+    homing macros, its axis limits -- with everything that identifies the
+    machine or its owner left out.
+
+    *config* is Moonraker's ``configfile.config`` mapping.  The document
+    carries the kept sections, the board's chip name, and ``unit``: a
+    one-way hash of the board's serial so one printer counts once, never the
+    serial itself.  ``None`` when there is nothing to keep, or the document
+    would be too large.
+    """
+    if not isinstance(config, dict):
+        return None
+    import hashlib
+    import json
+
+    sections: dict[str, dict[str, str]] = {}
+    serials: list[str] = []
+    chip: str | None = None
+    for name, options in config.items():
+        if not isinstance(name, str) or not isinstance(options, dict):
+            continue
+        key = name.strip()
+        lowered = key.lower()
+        if lowered == "mcu" or lowered.startswith("mcu "):
+            serial = str(options.get("serial", "") or "")
+            if serial:
+                serials.append(serial)
+                chip = chip or _chip_from_serial(serial)
+            continue
+        if not lowered.startswith(_MOTION_SECTION_PREFIXES):
+            continue
+        kept: dict[str, str] = {}
+        for option, value in options.items():
+            opt = str(option).strip().lower()
+            text = str(value)
+            if opt.endswith(_IDENTIFYING_OPTION_SUFFIXES) or opt in ("serial", "pin"):
+                continue
+            if opt != "gcode" and _PATH_MARKER in text:
+                continue
+            kept[opt] = text
+        if kept:
+            sections[key] = kept
+    if not sections:
+        return None
+    unit = hashlib.sha256("\n".join(sorted(serials)).encode("utf-8")).hexdigest()[:32] if serials else None
+    doc = {"format": MOTION_SETTINGS_FORMAT, "sections": sections, "chip": chip, "unit": unit}
+    if len(json.dumps(doc).encode("utf-8")) > MOTION_SETTINGS_MAX_BYTES:
+        return None
+    return doc
+
+
+def motion_settings_of(adapter: Any) -> dict[str, Any] | None:
+    """:func:`motion_settings` for *adapter*'s machine, read the way the
+    motion planner reads it (once per adapter), and only while telemetry is
+    on -- the settings are the same kind of thing a heartbeat sends, and the
+    same switch covers them.  Never raises."""
+    try:
+        from kiln.heartbeat import _telemetry_enabled
+
+        if not _telemetry_enabled():
+            return None
+        reader = getattr(adapter, "_read_machine_motion_source", None)
+        source = reader() if callable(reader) else None
+        if not source or source[0] != "klipper_config":
+            return None
+        return motion_settings(source[1])
+    except Exception:  # noqa: BLE001 -- a machine that cannot be asked sends nothing
+        return None

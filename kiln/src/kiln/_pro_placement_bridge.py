@@ -55,7 +55,9 @@ Request (``schema: "placement_request/1"``)::
      "placement": [x, y] | "keep" | "auto",
      "keep_at_mm": [x, y] | null,
      "placed_by": "auto"|"human"|"agent"|"keep",
-     "suppress": [str] | null}
+     "suppress": [str] | null,
+     "printer_settings": {"format": "klipper_motion_settings/1", "sections": {...},
+                          "chip": str|null, "unit": str|null} | null}
 
 ``occupant_gcode`` is the local G-code of what is on the plate when Kiln
 has it (the slice ledger joins the printer-side name to the file Kiln
@@ -73,7 +75,8 @@ Verdict (``schema: "placement_verdict/1"``)::
      "switched_off": {name: how}, "spots": [{"at_mm", "clearance_mm"}],
      "occupancy": {"kind": "kiln.plate_occupancy.v1", "bed_mm", "occupied",
                    "proposed", "source": "gcode"|"record_box"},
-     "record": {"printer_id", "measured", "source", "quiet_start"},
+     "record": {"printer_id", "measured", "source", "quiet_start",
+                "machine_blocks": {block: "read" | why-not}},
      "start": {"mode": "quiet_start", "ok", "available", "refusals",
                "clear_z_mm", "lift_floor_mm", "travel_to_mm", "first_layer_z_mm",
                "approach_mm", "home_xy_gcode", "flags", "switched_off",
@@ -317,6 +320,7 @@ def request_for(
     an agent's, ``"keep"`` and ``"auto"`` are their own).  Never raises.
     """
     from kiln import plate_state
+    from kiln.machine_motion import motion_settings_of
 
     state = plate_state.read(adapter)
     job = state.job
@@ -365,6 +369,11 @@ def request_for(
         "keep_at_mm": [float(keep_at[0]), float(keep_at[1])] if keep_at else None,
         "placed_by": who,
         "suppress": list(suppress) if suppress else None,
+        # A Klipper-family printer's own pause, cancel and homing macros and
+        # axis limits, with nothing that identifies it or its owner
+        # (:func:`kiln.machine_motion.motion_settings`), so the verdict can
+        # be judged on how THIS unit moves; sent only while telemetry is on.
+        "printer_settings": motion_settings_of(adapter),
     }
 
 
