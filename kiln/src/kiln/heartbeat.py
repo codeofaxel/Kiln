@@ -620,6 +620,16 @@ def _send_heartbeat() -> None:
                 with _lock:
                     _sent_on = str(date.today())
                 _logger.debug("Heartbeat sent (install=%s)", installation_id[:8])
+                sent = True
+            else:
+                sent = False
+        if sent:
+            # Once a day, with the heartbeat: how each Klipper-family printer
+            # here moves on its own (kiln.printer_motion_report), so Kiln
+            # learns from every install.  Same switch, same posture.
+            from kiln.printer_motion_report import send_after_heartbeat
+
+            send_after_heartbeat(_SUPABASE_URL, _SUPABASE_ANON_KEY)
 
     except Exception as exc:
         _logger.debug("Heartbeat failed (non-fatal): %s", exc)
