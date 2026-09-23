@@ -21,6 +21,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Designs agents write come out rounder.**
+
 - **Kiln makes multi-colour Bambu files for the A1 only.** Single-colour prints, and multi-colour files you slice in Bambu Studio, work on every Bambu as before.
 
 - **When Kiln can't reach its servers, it says so in plain words.** Every feature that leans on them names which of four things happened — this computer is offline, you're signed out, the servers didn't answer, or they said no — and what to do next.
@@ -281,6 +283,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   https://kiln3d.com/pricing.
 
 ### Fixed
+
+- **Fine-pitch jar lids fit as snugly as the rest.**
 
 - **Your painted parts look like themselves in every preview.** On a machine without a browser Kiln can drive, a multi-colour part used to come back as a flat grey picture; it now gets the same 3D stage look as everything else, in its own colours.
 
