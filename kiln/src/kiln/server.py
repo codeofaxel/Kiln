@@ -958,10 +958,12 @@ def _build_instructions() -> str:
     # --- Visualization ---
     parts.append(
         "VISUALIZATION: Before printing ANY model (generated, downloaded, or custom), "
-        "call `visualize_model(file_path)` to render 6-angle previews (iso, front, "
-        "right, top, bottom, back). Show ALL preview images to the user. "
-        "Auto-detects optimal camera distance from model bounding box. "
-        "Works with STL, 3MF, OBJ, and SCAD files. Never skip visualization."
+        "put the file the printer will get on Kiln's interactive 3D stage with "
+        "`show_on_stage(file_path)` so the user can turn it over — it takes an existing "
+        "mesh or a sliced .gcode.3mf and changes nothing, and it is the print gate's "
+        "first door. Call `visualize_model(file_path)` for 6-angle still renders (iso, "
+        "front, right, top, bottom, back) of any STL, 3MF, OBJ, or SCAD file, to check "
+        "the model yourself. Never skip visualization."
     )
 
     # --- Recovery ---
@@ -13900,7 +13902,9 @@ def visualize_model(
     height: int = 600,
     color: str = "",
 ) -> dict:
-    """Primary 3D preview tool — renders high-quality PNGs from multiple camera angles via OpenSCAD.
+    """Still pictures of any 3D file from multiple camera angles — the still door, not the 3D stage.
+
+    FOR THE PERSON'S LOOK BEFORE A PRINT, OPEN THE STAGE: ``show_on_stage(file_path)`` puts a file that already exists — a mesh, or the sliced print file — on Kiln's interactive 3D stage, which the print gate asks for first (``issue_preview_token(door="stage")``). These renders are for checking a model yourself. When the user is signed in the result also carries a browser stage link (``viewer_url``), the door for a host that draws no panel.
 
     INSPECTION-ONLY UNLESS THE STAGE DREW IT: the result's ``renderer`` says which look these pixels are. ``stage`` (the stage photographed) and ``stage_paint`` (the stage's look painted) are accepted by ``issue_preview_token(door="png")`` for print sign-off; a raw ``openscad`` render is not — it has no plate and none of the stage's lighting, and a person once approved the wrong colours from one. Use it to inspect, and sign off from the stage, the viewer link, or a stage still.
 
@@ -13917,11 +13921,12 @@ def visualize_model(
     Dark models get an adaptive lighter background for visibility.
     Each view includes a ``quality_score`` and ``dark_material`` flag.
 
-    Use this BEFORE printing to verify the model looks correct from all
-    sides.  Both agents and humans should review the output.
+    Use this to check a model from all sides — after each change, and
+    before printing.
 
     **When to use this vs other preview tools:**
-    - ``visualize_model`` — any file, 6 angles, universal (USE THIS ONE)
+    - ``show_on_stage`` — the interactive 3D stage on an existing file; what the person turns over before a print
+    - ``visualize_model`` — still renders of any file, 6 angles, to check it yourself
     - ``preview_generated_model`` — after AI generation, includes bottom check
     - ``render_model_preview`` — single angle, quick check
 

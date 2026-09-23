@@ -301,3 +301,41 @@ class TestTheGateReadsTheSameAnswer:
         assert "show_on_stage(" in refusal["message"]
         assert "show_on_stage" in local_stage.VIEWER_TOOLS
         assert "show_on_stage" in _served()._tool_manager._tools  # type: ignore[attr-defined]
+
+
+class TestTheGuidanceNamesTheDoor:
+    """Every surface that tells an agent how to show a print names the stage
+    door.  On 2026-09-22 the only tool Kiln's guidance named for showing a
+    file was the still door, whose description called itself the primary
+    preview tool — so an agent following it to the letter could not reach
+    the stage the gate asks for first."""
+
+    def test_visualize_model_no_longer_claims_to_be_the_primary_door(self):
+        from kiln import server
+
+        desc = server.mcp._tool_manager._tools["visualize_model"].description or ""
+        assert "Primary 3D preview" not in desc
+        assert "USE THIS ONE" not in desc
+        assert "show_on_stage(file_path)" in desc
+
+    def test_the_print_refusal_names_the_stage_door(self):
+        from kiln.print_signoff import not_confirmed_message
+
+        assert "show_on_stage(file_path)" in not_confirmed_message("start_print")
+
+    def test_the_connect_preamble_names_the_stage_door(self):
+        from kiln.server import _build_instructions
+
+        assert "`show_on_stage(file_path)`" in _build_instructions()
+
+    def test_onboarding_prints_a_file_through_the_stage_and_the_token(self):
+        from kiln.server import get_started
+
+        flow = get_started()["core_workflows"]["print_a_file"]
+        assert flow.index("show_on_stage") < flow.index("issue_preview_token") < flow.index("start_print")
+
+    def test_the_skill_manifest_names_the_stage_door(self):
+        from kiln.skill_manifest import SkillManifest
+
+        blob = str(SkillManifest().to_dict())
+        assert "show_on_stage(file_path)" in blob

@@ -256,9 +256,11 @@ class SkillManifest:
             "generation_enhance": "build_generation_prompt(brief) — enhance with design intelligence",
             "preview": "preview_generated_model(model_id) — multi-angle visual check (mandatory)",
             "show_in_3d": (
-                "import_external_mesh(mesh_path) — bring a mesh file in AND "
-                "open the interactive inline 3D stage on it (heavy meshes "
-                "auto-decimate; see discovery.inline_3d_stage)"
+                "show_on_stage(file_path) — open the interactive inline 3D "
+                "stage on an existing mesh or sliced .gcode.3mf, changing "
+                "nothing (heavy meshes auto-decimate; import_external_mesh "
+                "also opens it while importing a design; see "
+                "discovery.inline_3d_stage)"
             ),
             "slicing": "slice_model(file_path) — STL/3MF to gcode",
             "adaptive_slicing": "generate_adaptive_slicing_plan(file) — quality/time tradeoff",

@@ -835,7 +835,10 @@ class _UtilityToolsPlugin:
                     ),
                 },
                 "core_workflows": {
-                    "print_a_file": "upload_file → visualize_model → preflight_check → start_print",
+                    "print_a_file": (
+                        "show_on_stage(file) → issue_preview_token(file, door=...) → "
+                        "upload_file → preflight_check → start_print(preview_token=...)"
+                    ),
                     "marketplace_to_print": (
                         "search_all_models → download_and_upload → preflight_check → start_print"
                     ),
@@ -857,12 +860,12 @@ class _UtilityToolsPlugin:
                         "earlier and carves nothing new."
                     ),
                     "show_a_mesh_file_in_3d": (
-                        "import_external_mesh(mesh_path) — brings an STL/OBJ/3MF/"
-                        "STEP file in as a design AND opens the interactive 3D "
-                        "stage on it (see inline_3d_stage below). Where that "
-                        "tool isn't available (it ships with kiln-pro), "
-                        "visualize_model gives the PNG plus a browser stage "
-                        "link when signed in."
+                        "show_on_stage(file_path) — opens the interactive 3D "
+                        "stage on an STL/OBJ/3MF/STEP file or a sliced "
+                        ".gcode.3mf that already exists, free, changing "
+                        "nothing (see inline_3d_stage below). "
+                        "import_external_mesh(mesh_path) (kiln-pro) opens it "
+                        "too while bringing the file in as a design version."
                     ),
                     "flat_part_from_relationships": (
                         "solve_sketch(sketch=...) → compile_scad(scad_code=<the "
@@ -923,24 +926,31 @@ class _UtilityToolsPlugin:
                         "decoration and repair tools) open it automatically on "
                         "success: inline in hosts that render MCP Apps panels "
                         "(Kiln's hosted connection also attaches a browser "
-                        "stage link for hosts that don't). In a host without "
-                        "panels on a local install, visualize_model attaches "
-                        "a browser stage link of its own when the user is "
-                        "signed in — so there is always some way to let them "
-                        "turn the part over, and 'here is a PNG' is never the "
-                        "end of the answer."
+                        "stage link for hosts that don't). For a file that "
+                        "already exists — including the sliced file about to "
+                        "print — show_on_stage opens the same stage. In a host "
+                        "without panels on a local install, visualize_model "
+                        "attaches a browser stage link of its own when the "
+                        "user is signed in — so there is always some way to "
+                        "let them turn the part over, and 'here is a PNG' is "
+                        "never the end of the answer."
                     ),
                     "how_to_find_it": (
-                        "The stage is attached to those tools' RESULTS (via "
-                        "_meta and structured content), so it is not a separate "
-                        "tool and won't show up under a name like 'viewer' — "
-                        "never conclude from a tool search that Kiln can only "
-                        "produce still images. Stage-opening tools say INLINE "
-                        "3D STAGE in their descriptions."
+                        "The stage rides those tools' RESULTS (via _meta and "
+                        "structured content), so it won't show up under a name "
+                        "like 'viewer' — never conclude from a tool search that "
+                        "Kiln can only produce still images. Stage-opening "
+                        "tools say INLINE 3D STAGE in their descriptions; "
+                        "show_on_stage is the one that opens it on a file that "
+                        "already exists."
                     ),
                     "show_me_this_file": (
-                        "When the user asks to see a mesh file in 3D, the door "
-                        "is import_external_mesh — importing IS showing. Heavy "
+                        "When the user asks to see a file in 3D — a mesh, or "
+                        "the sliced print file about to go to the printer — "
+                        "the door is show_on_stage: it opens the stage on the "
+                        "file as it is, free, and changes nothing. "
+                        "import_external_mesh (kiln-pro) opens it too while "
+                        "bringing the file in as a design version. Heavy "
                         "meshes are decimated automatically for the stage; no "
                         "mesh is too big to try."
                     ),

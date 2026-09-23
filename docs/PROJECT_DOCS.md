@@ -550,6 +550,7 @@ Design intelligence queries — material recommendations for a duty, printer des
 | `merge_mesh_files` / `split_mesh_by_component` / `compose_models` | `file_paths` | Composition and splitting |
 | `split_mesh_to_fit` | `model_path`, bed or `printer_id` | Cut an oversize model into printable pieces that reassemble; cuts land on natural seams and every cut face comes back sealed |
 | `export_model_3mf` / `extract_model_from_3mf` | `file_path` | 3MF conversion and extraction |
+| `show_on_stage` | `file_path` | Opens the interactive 3D stage on a mesh or sliced print file that already exists, changing nothing |
 | `estimate_mesh_print_time` / `estimate_material_cost` / `estimate_support_material` | `file_path`, params | Pre-slice estimates |
 | `compare_mesh_versions` | `file_a`, `file_b` | Geometric diff between two meshes |
 

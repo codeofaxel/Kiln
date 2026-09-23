@@ -619,10 +619,12 @@ def visualize_model(
     share_link: bool = True,
     deadline: float | None = None,
 ) -> dict:
-    """Primary 3D preview tool — renders high-quality PNGs via OpenSCAD.
+    """Still renders of a 3D model — the engine behind the still door.
 
     Preferred over ``render_multi_view_preview()`` (which produces
-    lightweight SVGs). Use this for all user-facing model previews.
+    lightweight SVGs) for pictures.  The interactive 3D stage is a
+    different door: :mod:`kiln.local_stage`, which ``show_on_stage``
+    opens on a file that already exists.
 
     Render a 3D model from multiple camera angles.
 

@@ -332,7 +332,8 @@ def not_confirmed_message(tool: str) -> str:
     through which door, and how to hand the token in."""
     return (
         f"{tool} refuses to proceed without a preview confirmation. Show the user the "
-        "print first — the inline 3D stage if this host draws one, else a viewer link "
+        "print first — the inline 3D stage if this host draws one (show_on_stage(file_path) "
+        "opens it on the file), else a viewer link "
         "(visualize_model(file_path, share_link=True) gives a viewer_url), else the PNG "
         "renders — then call issue_preview_token(file_path, door=<stage|url|png>) and "
         "pass the token as preview_token=<token>. To bypass (advanced / CI only), set "

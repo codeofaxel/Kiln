@@ -90,8 +90,9 @@ class TestGetStarted:
         stage = result["inline_3d_stage"]
         blob = " ".join(stage.values())
         assert "interactive" in blob and "3D stage" in blob
-        # The door for "show me this mesh file", by name.
-        assert "import_external_mesh" in stage["show_me_this_file"]
+        # The door for "show me this file", by name — the free one that
+        # takes a file as it is, sliced print files included.
+        assert "show_on_stage" in stage["show_me_this_file"]
         # Nothing in a docstring said heavy meshes are handled — the same
         # session rejected the stage on mesh size when the payload path
         # decimates automatically.
@@ -108,7 +109,7 @@ class TestGetStarted:
 
     def test_show_a_mesh_file_workflow_names_the_stage_door(self):
         wf = get_started()["core_workflows"]["show_a_mesh_file_in_3d"]
-        assert "import_external_mesh" in wf
+        assert wf.startswith("show_on_stage(")
 
     def test_creating_models_surfaces_the_template_library(self):
         """The 65 parametric parts were reachable only by guessing a name.
