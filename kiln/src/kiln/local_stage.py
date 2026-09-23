@@ -123,7 +123,7 @@ MESH_VIEWER_RESOURCE_NAME = "kiln_mesh_viewer"
 #: per tool: a hand-copy across ninety-odd docstrings is drift with a head
 #: start.
 STAGE_DESCRIPTION_CLAUSE = (
-    "INLINE 3D STAGE: on success this tool also opens Kiln's interactive 3D "
+    "INLINE 3D STAGE: on success this tool opens Kiln's interactive 3D "
     "stage — an inline viewer panel the user can orbit, zoom, and turn over "
     "— in hosts that render MCP Apps panels (Kiln's hosted connection "
     "attaches a browser stage link for hosts that don't). Oversized meshes "

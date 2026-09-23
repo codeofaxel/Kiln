@@ -64,7 +64,6 @@ import logging
 import os
 import threading
 import time
-import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -263,25 +262,6 @@ def design_mesh_for(file_path: str | os.PathLike[str]) -> str | None:
     return None
 
 
-def _carries_placeholder(path: str) -> bool:
-    """Whether the 3MF at *path* is a print archive with no model of its
-    own — asked of the writer of the placeholder, which knows its shape."""
-    from kiln.printers.bambu_3mf import carries_placeholder_model
-
-    return carries_placeholder_model(path)
-
-
-def _holds_a_print(path: str) -> bool:
-    """Whether the 3MF at *path* carries a slicer's plate G-code."""
-    try:
-        with zipfile.ZipFile(path) as zf:
-            return any(
-                n.startswith("Metadata/plate_") and n.endswith(".gcode") for n in zf.namelist()
-            )
-    except (zipfile.BadZipFile, OSError):
-        return False
-
-
 def _extras_clause(staged: str) -> str:
     """Whether the stage will lay the slice's own additions around the
     drawn file, as the tail of a :func:`stage_file_for` clause.  Asked of
@@ -290,13 +270,10 @@ def _extras_clause(staged: str) -> str:
         from kiln.stage_plate import resolve_sliced_gcode
 
         if resolve_sliced_gcode(staged):
-            return ", with the slicer's own additions under EXTRAS"
+            return ", with the slicer's skirt, brim and prime tower under EXTRAS"
     except Exception:  # noqa: BLE001 — a sentence, never a failure
         logger.debug("slice extras not resolved", exc_info=True)
-    return (
-        ", without the slicer's additions (skirt, brim, prime tower, supports), which "
-        "the stage draws only for a slice this machine made and still has on record"
-    )
+    return "; its skirt, brim and prime tower aren't drawn, because this machine has no record of that slice"
 
 
 def stage_file_for(file_path: str | os.PathLike[str]) -> tuple[str | None, str]:
@@ -327,12 +304,11 @@ def stage_file_for(file_path: str | os.PathLike[str]) -> tuple[str | None, str]:
     if not os.path.isfile(path):
         return None, f"{name} is not on this machine"
     suffix = Path(path).suffix.lower()
-    if suffix in _MESH_SUFFIXES and not (suffix == ".3mf" and _carries_placeholder(path)):
-        if suffix == ".3mf" and _holds_a_print(path):
-            return path, (
-                f"the model {name} carries, which is the file going to the printer"
-                + _extras_clause(path)
-            )
+    from kiln.printers.bambu_3mf import carries_placeholder_model
+
+    if suffix in _MESH_SUFFIXES and not (suffix == ".3mf" and carries_placeholder_model(path)):
+        if name.lower().endswith(".gcode.3mf"):
+            return path, f"the model inside {name}, the file going to the printer" + _extras_clause(path)
         return path, f"{name} itself"
     if suffix == ".3mf":
         carried = (
