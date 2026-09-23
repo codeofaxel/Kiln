@@ -280,6 +280,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Your painted parts look like themselves in every preview.** On a machine without a browser Kiln can drive, a multi-colour part used to come back as a flat grey picture; it now gets the same 3D stage look as everything else, in its own colours.
+
 - **Every Bambu printer Kiln supports now starts and finishes each print the way Bambu designed it.**
 
 - **Tall prints on a Bambu A1 now finish with the head safely clear.**
