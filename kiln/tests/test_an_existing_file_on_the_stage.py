@@ -96,6 +96,20 @@ def _sliced_archive(tmp_path: Path) -> str:
     return str(out)
 
 
+def _small_part_archive(tmp_path: Path) -> str:
+    """A sliced 20 mm cube: a real part whose model is as small as the
+    placeholder's (about 2 KB), so only what the model holds tells them
+    apart."""
+    from kiln.printers.bambu_3mf import build_bambu_3mf
+
+    trimesh = pytest.importorskip("trimesh")
+    source = tmp_path / "cube20.3mf"
+    trimesh.creation.box(extents=(20.0, 20.0, 20.0)).export(str(source))
+    out = tmp_path / "cube20.gcode.3mf"
+    build_bambu_3mf(_LAYERS, str(out), source_3mf_path=str(source))
+    return str(out)
+
+
 def _placeholder_archive(tmp_path: Path, *, sliced_from: str | None = None) -> str:
     """A ``.gcode.3mf`` built by Kiln's wrapper from G-code alone: its model
     is the 1 mm placeholder cube.  With *sliced_from*, the slice ledger
@@ -369,3 +383,57 @@ class TestExtractionNeverWritesThePlaceholder:
         out = extract_model_from_3mf(_sliced_archive(tmp_path), output_path=str(tmp_path / "ball.stl"))
         assert out["triangle_count"] > 12
         assert out["dimensions"]["z_mm"] == pytest.approx(24.0, abs=0.5)
+
+
+class TestAPlaceholderIsWhatTheModelHolds:
+    """The placeholder is told apart by what its model holds — a 1 mm cube,
+    or nothing — never by the size of its file.  A small real part and a
+    project keeping its meshes in sub-parts both have a tiny model entry."""
+
+    def test_the_wrappers_own_placeholder_is_recognised(self, tmp_path):
+        from kiln.printers.bambu_3mf import carries_placeholder_model
+
+        assert carries_placeholder_model(_placeholder_archive(tmp_path)) is True
+
+    def test_a_small_real_part_is_not_a_placeholder(self, tmp_path):
+        from kiln.printers.bambu_3mf import carries_placeholder_model
+
+        assert carries_placeholder_model(_small_part_archive(tmp_path)) is False
+
+    def test_a_plain_model_3mf_is_not_a_print_archive(self, tmp_path):
+        from kiln.printers.bambu_3mf import carries_placeholder_model
+
+        assert carries_placeholder_model(_ball(tmp_path / "ball.3mf")) is False
+
+    def test_meshes_in_sub_parts_are_not_a_placeholder(self, tmp_path):
+        import zipfile
+
+        from kiln.printers.bambu_3mf import carries_placeholder_model
+
+        root = (
+            '<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
+            'xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">'
+            '<resources><object id="2" type="model"><components>'
+            '<component p:path="/3D/Objects/object_1.model" objectid="1"/>'
+            "</components></object></resources><build><item objectid=\"2\"/></build></model>"
+        )
+        archive = tmp_path / "project.gcode.3mf"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("3D/3dmodel.model", root)
+            zf.writestr("3D/Objects/object_1.model", "<model>real geometry lives here</model>")
+            zf.writestr("Metadata/plate_1.gcode", _LAYERS)
+        assert carries_placeholder_model(str(archive)) is False
+
+    def test_the_stage_draws_a_small_real_part_as_itself(self, tmp_path):
+        archive = _small_part_archive(tmp_path)
+        sc = _show(archive)
+        assert sc["success"] is True, sc
+        assert sc["stage_mesh_path"] == archive
+        assert "placeholder" not in sc["shows"]
+        assert sorted(_panel_fetches(sc)["bbox"]["size"]) == pytest.approx([20.0, 20.0, 20.0], abs=0.01)
+
+    def test_a_small_real_part_still_extracts(self, tmp_path):
+        from kiln.generation.validation import extract_model_from_3mf
+
+        out = extract_model_from_3mf(_small_part_archive(tmp_path), output_path=str(tmp_path / "c.stl"))
+        assert out["dimensions"]["x_mm"] == pytest.approx(20.0, abs=0.01)

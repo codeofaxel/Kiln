@@ -264,14 +264,11 @@ def design_mesh_for(file_path: str | os.PathLike[str]) -> str | None:
 
 
 def _carries_placeholder(path: str) -> bool:
-    """Whether the 3MF at *path* is a print archive whose model is only
-    the 1 mm cube Kiln writes when it wraps G-code sliced from an STL.
+    """Whether the 3MF at *path* is a print archive with no model of its
+    own — asked of the writer of the placeholder, which knows its shape."""
+    from kiln.printers.bambu_3mf import carries_placeholder_model
 
-    The still door's own test, read rather than restated, so a file the
-    stills refuse to draw is a file the stage refuses to draw."""
-    from kiln.model_visualizer import _is_bambu_wrapped_3mf
-
-    return _is_bambu_wrapped_3mf(path)
+    return carries_placeholder_model(path)
 
 
 def _holds_a_print(path: str) -> bool:
@@ -338,7 +335,10 @@ def stage_file_for(file_path: str | os.PathLike[str]) -> tuple[str | None, str]:
             )
         return path, f"{name} itself"
     if suffix == ".3mf":
-        carried = "only the 1 mm placeholder Kiln writes when it wraps G-code sliced from an STL"
+        carried = (
+            "no model of its own (Kiln writes a 1 mm placeholder cube there when it "
+            "wraps G-code sliced from an STL)"
+        )
     elif suffix in _GCODE_SUFFIXES:
         carried = "no model, only toolpaths"
     elif suffix == ".scad":

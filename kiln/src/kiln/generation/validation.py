@@ -4559,17 +4559,19 @@ def extract_model_from_3mf(
     # A print archive Kiln wrapped from G-code sliced off an STL carries a
     # 1 mm cube where the model goes.  Extracting it wrote that cube as the
     # part — and this tool opens the 3D stage on what it writes, so the
-    # person was shown a cube (measured 2026-09-22).  The still door's own
-    # test decides, so the two can never disagree about what a placeholder is.
-    from kiln.model_visualizer import _is_bambu_wrapped_3mf
+    # person was shown a cube (measured 2026-09-22).  The writer of the
+    # placeholder decides what one is, by what the model holds: a real
+    # part that happens to be small still extracts.
+    from kiln.printers.bambu_3mf import carries_placeholder_model
 
-    if _is_bambu_wrapped_3mf(str(file_path)):
+    if carries_placeholder_model(file_path):
         from kiln.preview_evidence import design_mesh_for
 
         source = design_mesh_for(file_path)
         raise ValueError(
-            f"{path.name} carries only the 1 mm placeholder Kiln writes when it wraps "
-            "G-code sliced from an STL; there is no part inside to extract. "
+            f"{path.name} carries no model of its own (Kiln writes a 1 mm placeholder "
+            "cube there when it wraps G-code sliced from an STL), so there is no part "
+            "inside to extract. "
             + (
                 f"The mesh it was sliced from is {source}."
                 if source else

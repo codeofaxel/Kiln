@@ -2084,6 +2084,61 @@ _MINIMAL_3D_MODEL = (
     "</model>"
 )
 
+#: The widest the placeholder's geometry spans — it is the 1 mm cube above.
+_PLACEHOLDER_EXTENT_MM = 1.0
+
+#: A model part past this is real geometry and is not parsed to find out.
+#: The placeholder is about 1.5 KB.
+_PLACEHOLDER_MAX_PARSE_BYTES = 64 * 1024
+
+_VERTEX_TAG_RE = re.compile(r"<vertex\b[^>]*>")
+_VERTEX_AXIS_RE = re.compile(r'\b([xyz])="([^"]*)"')
+
+
+def carries_placeholder_model(path: str | os.PathLike[str]) -> bool:
+    """Whether the print archive at *path* has no model of its own: only
+    the 1 mm cube :data:`_MINIMAL_3D_MODEL` this module writes when it wraps
+    G-code sliced from an STL, or no geometry at all.
+
+    Decided by what the model holds, not by how big its file is.  A sliced
+    20 mm calibration cube's model part is as small as the placeholder's,
+    and a project whose meshes live in ``3D/Objects`` sub-parts has a tiny
+    root with real geometry elsewhere; neither is a placeholder, and a door
+    that treated them as one would refuse to show or extract a real part.
+
+    ``False`` for anything that is not a print archive (no plate G-code),
+    so a plain model 3MF is never mistaken for one.  Never raises.
+    """
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = zf.namelist()
+            if not any(n.startswith("Metadata/plate_") and n.endswith(".gcode") for n in names):
+                return False
+            parts = [n for n in names if n.startswith("3D/") and n.endswith(".model")]
+            if not parts:
+                return True
+            if parts != ["3D/3dmodel.model"]:
+                return False
+            if zf.getinfo("3D/3dmodel.model").file_size > _PLACEHOLDER_MAX_PARSE_BYTES:
+                return False
+            xml = zf.read("3D/3dmodel.model").decode("utf-8", errors="replace")
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return False
+    lows = [math.inf, math.inf, math.inf]
+    highs = [-math.inf, -math.inf, -math.inf]
+    for tag in _VERTEX_TAG_RE.findall(xml):
+        for axis, raw in _VERTEX_AXIS_RE.findall(tag):
+            try:
+                value = float(raw)
+            except ValueError:
+                return False
+            i = "xyz".index(axis)
+            lows[i] = min(lows[i], value)
+            highs[i] = max(highs[i], value)
+    if lows[0] == math.inf:
+        return True
+    return max(h - lo for h, lo in zip(highs, lows, strict=True)) <= _PLACEHOLDER_EXTENT_MM + 1e-6
+
 
 #: BambuStudio's thumbnail set: archive path -> (width, height).  Firmware
 #: and Studio each pick a different entry by path, so the whole set travels

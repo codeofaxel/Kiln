@@ -139,6 +139,7 @@ READ_ONLY_TOOLS: set[str] = {
     "analyze_print_failure",
     "render_model_preview",
     "visualize_model",
+    "show_on_stage",
     "get_feedback_loop_status",
     "list_design_templates",
     "validate_openscad_code",
