@@ -1847,6 +1847,10 @@ class BambuAdapter(PrinterAdapter):
         # settle any outcome rows left pending by prints that ended while
         # no Kiln process was watching (see auto_record_hook).
         self._pending_outcomes_reconciled = False
+        # The reconcile runs off the network thread, and a quick reconnect
+        # can start a second one before the first is done: they take turns,
+        # so the second reads what the first already settled.
+        self._reconcile_lock = threading.Lock()
 
         # MQTT client.
         self._mqtt_client: mqtt.Client | None = None
@@ -2811,29 +2815,32 @@ class BambuAdapter(PrinterAdapter):
             # resolves it; a merely-idle printer resolves it to "unknown",
             # never to success; an actively-printing state leaves rows
             # for the live hook above.
+            #
+            # Off the network thread, for the fault notice's reason: this is
+            # paho's serial ``on_message``, and the reconcile opens the
+            # database -- building it, on a fresh install -- then writes and
+            # federates every row it settles, up to 250 on an upgraded
+            # install.  Inline, all of that stood between the printer and
+            # every telemetry frame behind this one.
             if not self._pending_outcomes_reconciled and new_gcode_state:
                 self._pending_outcomes_reconciled = True
-                try:
-                    from kiln.auto_record_hook import (
-                        reconcile_pending_outcomes,
-                    )
-
-                    reconcile_pending_outcomes(
-                        printer_name=lifecycle_name,
-                        gcode_state=new_gcode_state,
-                        print_error_code=print_error_for_hook,
-                        current_job_label=(
+                threading.Thread(
+                    target=self._reconcile_pending_outcomes,
+                    kwargs={
+                        "printer_name": lifecycle_name,
+                        "gcode_state": new_gcode_state,
+                        "print_error_code": print_error_for_hook,
+                        "current_job_label": (
                             str(job_id_for_hook) if job_id_for_hook else None
                         ),
                         # Rows opened before the identity fix live under the
                         # family name; when this adapter is unregistered the
                         # two names coincide and the sweep no-ops.
-                        legacy_printer_name=self.name,
-                    )
-                except Exception as exc:  # pragma: no cover
-                    logger.debug(
-                        "pending-outcome reconcile raised (non-fatal): %s", exc,
-                    )
+                        "legacy_printer_name": self.name,
+                    },
+                    name="kiln-outcome-reconcile",
+                    daemon=True,
+                ).start()
 
             # Flow-anomaly cross-check — when the merged push_status
             # carries an HMS code that the firmware classifies as a
@@ -2902,6 +2909,16 @@ class BambuAdapter(PrinterAdapter):
             )
         except Exception:  # noqa: BLE001
             logger.debug("observed tray change not reported", exc_info=True)
+
+    def _reconcile_pending_outcomes(self, **kwargs: Any) -> None:
+        """Settle outcome rows left pending while nothing watched.  Never raises."""
+        with self._reconcile_lock:
+            try:
+                from kiln.auto_record_hook import reconcile_pending_outcomes
+
+                reconcile_pending_outcomes(**kwargs)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("pending-outcome reconcile raised (non-fatal): %s", exc)
 
     def _own_stop_settling(self) -> bool:
         """Is this fault the tail of a stop Kiln itself just sent?"""

@@ -31,6 +31,7 @@ nothing.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from types import SimpleNamespace
 
@@ -560,6 +561,10 @@ def test_reconcile_sweeps_rows_stranded_under_the_family_name(
 
     adapter = _bambu(monkeypatch)           # registered as "garage"
     _push(adapter, "IDLE", job="bracket")   # first status after connect
+    # The reconcile runs off the network thread; wait for it.
+    for t in threading.enumerate():
+        if t.name == "kiln-outcome-reconcile":
+            t.join(5.0)
 
     assert db.list_print_outcomes(printer_name="bambu", outcome="pending") == []
     # Settled to unknown — testimony from today cannot reach a days-old job —

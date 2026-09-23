@@ -562,6 +562,15 @@ class TestBambuReconcileWire:
         ).encode()
         adapter._on_message(MagicMock(), None, msg)
 
+    @staticmethod
+    def _join_reconciles(timeout: float = 5.0) -> None:
+        """Wait for the reconcile, which runs off the network thread."""
+        import threading
+
+        for t in threading.enumerate():
+            if t.name == "kiln-outcome-reconcile":
+                t.join(timeout)
+
     def test_first_status_triggers_reconcile_once(self, tmp_kiln_env):
         from unittest.mock import patch
 
@@ -571,13 +580,38 @@ class TestBambuReconcileWire:
             return_value=[],
         ) as reconcile:
             self._push_status(adapter, gcode_state="idle")
+            self._join_reconciles()
             assert reconcile.call_count == 1
             kwargs = reconcile.call_args.kwargs
             assert kwargs["printer_name"] == adapter.name
             assert kwargs["gcode_state"] == "idle"
             # Later status updates must not re-run it.
             self._push_status(adapter, gcode_state="idle")
+            self._join_reconciles()
             assert reconcile.call_count == 1
+
+    def test_the_reconcile_never_blocks_the_telemetry_thread(self, tmp_kiln_env):
+        """The first status after a connect is not held up by the reconcile.
+
+        This runs inside paho's serial ``on_message``, where every frame
+        behind this one waits.  The reconcile opens the database -- builds
+        it, on a fresh install -- and writes and federates every row it
+        settles, so it runs on a thread of its own; a slow one must cost
+        the telemetry path nothing."""
+        from unittest.mock import patch
+
+        adapter = self._adapter()
+        with patch(
+            "kiln.auto_record_hook.reconcile_pending_outcomes",
+            side_effect=lambda **_kw: time.sleep(0.5) or [],
+        ) as reconcile:
+            started = time.monotonic()
+            self._push_status(adapter, gcode_state="idle")
+            blocked = time.monotonic() - started
+            self._join_reconciles()
+
+        assert blocked < 0.2, f"on_message blocked for {blocked:.2f}s"
+        assert reconcile.call_count == 1
 
 
 # ---------------------------------------------------------------------------
