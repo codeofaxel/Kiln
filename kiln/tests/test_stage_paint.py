@@ -887,3 +887,139 @@ def test_a_painted_part_whose_colours_miss_the_payload_keeps_its_colours(
         painted_cube, angles=["isometric"], output_dir=str(tmp_path / "o"), share_link=False,
     )
     assert r["renderer"] == "colored_mesh", r["renderer"]
+
+
+# ---------------------------------------------------------------------------
+# Shading normals — the stage's creases, corner for corner
+# ---------------------------------------------------------------------------
+
+
+def _prism(sides: int, radius: float = 20.0, height: float = 40.0):
+    """A regular prism in the viewer frame (y up), indexed, capped."""
+    ang = np.arange(sides) * (2 * np.pi / sides)
+    ring = np.stack([radius * np.cos(ang), np.zeros(sides), radius * np.sin(ang)], 1)
+    top = ring + [0.0, height, 0.0]
+    v = np.vstack([ring, top, [[0.0, 0.0, 0.0], [0.0, height, 0.0]]])
+    i = np.arange(sides)
+    j = (i + 1) % sides
+    lo_c, hi_c = 2 * sides, 2 * sides + 1
+    # Outward winding: the painter culls and the stage creases on it.
+    walls = np.concatenate([np.stack([i, sides + i, j], 1),
+                            np.stack([j, sides + i, sides + j], 1)])
+    caps = np.concatenate([np.stack([np.full(sides, lo_c), i, j], 1),
+                           np.stack([np.full(sides, hi_c), sides + j, sides + i], 1)])
+    return v, np.concatenate([walls, caps]).astype(np.int64), len(walls)
+
+
+def _wall_spread(sides: int) -> float:
+    """Largest gap between the normals the corners at one wall vertex carry.
+
+    Measured as the distance between unit vectors, not an angle: arccos
+    near 1 turns a float32 rounding step into a hundredth of a degree.
+    """
+    stage_paint._deps()
+    v, f, n_wall = _prism(sides)
+    cn = stage_paint._creased_normals(v, f)[:n_wall].reshape(-1, 3).astype(float)
+    corners = f[:n_wall].reshape(-1)
+    worst = 0.0
+    for vid in np.unique(corners):
+        at = cn[corners == vid]
+        gap = np.linalg.norm(at[:, None, :] - at[None, :, :], axis=2)
+        worst = max(worst, float(gap.max()))
+    return worst
+
+
+def test_walls_round_off_under_thirty_degrees_and_stay_hard_over_it() -> None:
+    """The stage creases at 30 degrees, and this must crease where it does.
+
+    A 13-gon's facets meet at 27.7 degrees, so its wall shades round: every
+    corner at a wall vertex carries the same normal.  An 11-gon's meet at
+    32.7, so it stays faceted, each corner keeping its own face's normal
+    (the full 32.7 apart).  Moving the crease either way breaks one side."""
+    assert _wall_spread(13) < 1e-6
+    assert abs(_wall_spread(11) - 2 * np.sin(np.radians(360.0 / 11) / 2)) < 1e-6
+
+
+def test_a_60gon_joins_its_seams_and_keeps_its_rims() -> None:
+    """The case the stage's own parity tests pin: a 60-gon prism.
+
+    Across every wall seam the facets agree on one normal, level, and
+    lying BETWEEN the two facets (each 3 degrees off the radial) -- not
+    exactly radial, because the mean is per triangle, as three's is, and
+    here one facet brings two triangles to a ring vertex and its
+    neighbour one.  At the rim, where wall meets cap at 90 degrees, the
+    cap keeps a straight up or down normal instead of rounding the edge."""
+    stage_paint._deps()
+    v, f, n_wall = _prism(60)
+    cn = stage_paint._creased_normals(v, f).astype(float)
+    assert _wall_spread(60) < 1e-6  # one normal per seam
+    wall = cn[:n_wall].reshape(-1, 3)
+    radial = v[f[:n_wall].reshape(-1)] * [1.0, 0.0, 1.0]
+    radial /= np.linalg.norm(radial, axis=1)[:, None]
+    off = np.degrees(np.arccos(np.clip((wall * radial).sum(axis=1), -1.0, 1.0)))
+    assert np.allclose(wall[:, 1], 0.0, atol=1e-6)
+    assert off.max() < 3.0 - 1e-3, f"a seam normal left its facets: {off.max():.3f} deg"
+    caps = cn[n_wall:]
+    assert np.allclose(np.abs(caps[..., 1]), 1.0, atol=1e-6)
+    assert np.allclose(caps[..., [0, 2]], 0.0, atol=1e-6)
+
+
+def test_a_round_wall_paints_without_facet_steps(tmp_path: Path) -> None:
+    """Through the public door: a 60-gon's wall is shaded as a curve.
+
+    Measured 2026-09-22 against the stage that creases: across the wall,
+    tone moves at most 0.64 per pixel in the photograph and 0.66 here;
+    the flat-shaded painter stepped 4.0 at every facet edge."""
+    trimesh = pytest.importorskip("trimesh")
+    cyl = trimesh.creation.cylinder(radius=20, height=40, sections=60)
+    cyl.apply_translation([0, 0, 20])
+    src = tmp_path / "cyl60.stl"
+    cyl.export(src)
+    views = try_paint_stage_views(
+        str(src), [("front", "f")], {"front": (90.0, 0.0, 0.0)},
+        output_dir=str(tmp_path / "o"), width=800, height=600,
+    )
+    grey = _img(views).mean(axis=2)
+    wall = grey > 100
+    ys, _xs = np.nonzero(wall)
+    mid = int(np.median(ys))
+    band = slice(mid - 25, mid + 25)
+    cols = np.nonzero(wall[band].all(axis=0))[0]
+    profile = grey[band, cols.min() + 10:cols.max() - 10].mean(axis=0)
+    assert np.abs(np.diff(profile)).max() < 2.0
+
+
+def test_normals_a_payload_ships_are_the_ones_painted(
+    probe: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stage creases only a payload that ships no normals; one that
+    ships them is drawn with them, and so is it here."""
+    import base64
+
+    from kiln import local_stage
+
+    real = local_stage._payload_for_mesh
+
+    def facing_up(*a, **k):
+        payload = real(*a, **k)
+        n = len(base64.b64decode(payload["positions"])) // 12
+        up = np.tile(np.array([0.0, 1.0, 0.0], dtype="<f4"), n)
+        payload["normals"] = base64.b64encode(up.tobytes()).decode("ascii")
+        return payload
+
+    own = _img(_render(probe, tmp_path / "own", plate=False))
+    monkeypatch.setattr(local_stage, "_payload_for_mesh", facing_up)
+    shipped = _img(_render(probe, tmp_path / "shipped", plate=False))
+    # Every face lit as a top face: the walls' shading is gone, so the
+    # part's tones collapse toward one value.
+    spread = lambda a: float(a.mean(axis=2)[_model_mask(a)].std())  # noqa: E731
+    assert spread(shipped) < 0.5 * spread(own)
+
+
+def test_a_fan_past_the_crease_budget_declines(
+    probe: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A part whose crease pass would stall the preview falls through,
+    like one past the face cap — never a half-shaded picture."""
+    monkeypatch.setattr(stage_paint, "_CREASE_MAX_PAIRS", 10)
+    assert _render(probe, tmp_path) is None

@@ -67,9 +67,9 @@ The environment gradient's SHAPE is transcribed like everything else,
 and its two convolutions (diffuse and specular) are three's own.  The
 BRDF itself is not approximated: real GGX
 with Schlick Fresnel and Smith visibility, the MeshPhysicalMaterial's
-own lobe.  Flat shading is parity, not a shortcut: the payload ships
-no normals by design and the stage flat-shades stills ("matching the
-faceted look of Kiln's OpenSCAD previews" -- mesh_payload).  Hidden
+own lobe.  Shading normals are the stage's own too: it creases every
+payload that ships none (three's toCreasedNormals at 30 degrees), and so
+does :func:`_creased_normals`, corner for corner.  Hidden
 surfaces are resolved by a true z-buffer with perspective-correct
 interpolation, so composed and interpenetrating bodies
 (``compose_models`` output) draw correctly.  The camera math, plate,
@@ -102,6 +102,16 @@ _BG = (0x1A, 0x22, 0x2D)
 # metalness: 0.05 })` — materials.ts "default".
 _MODEL_COLOR = "#d9d9d9"
 _ROUGHNESS = 0.4
+
+# Shading normals: `modelGeometry` gives every payload that ships no
+# normals (every payload a stage door builds) `creasedNormals` -- three's
+# `toCreasedNormals`, hand-ported between the document's
+# `crease-normals:begin/end` markers -- and draws with `flatShading`
+# off.  `PRINT_CREASE_DEG = 30`, the web viewer's crease; corners weld
+# when `trunc(position * (1 + 1e-10) * 1e2)` agrees, a hundredth of a
+# unit.  So curved walls shade round and hard rims stay hard.
+_CREASE_DEG = 30.0
+_CREASE_HASH = (1 + 1e-10) * 1e2
 
 # Lights: `AmbientLight(0xffffff, 0.35)`, key `0xfff7ee @ 1.0` from
 # (10, 20, 10), rim `0xd8e1ff @ 0.5` from (-15, 8, -10), graze
@@ -364,7 +374,7 @@ def _deps():
 
 
 def _load_viewer_frame_mesh(file_path: str):
-    """``(vertices, faces, colours)`` in the stage's y-up frame, or ``None``.
+    """``(vertices, faces, colours, normals)`` in the stage's y-up frame, or ``None``.
 
     Read from the stage's own payload door (:func:`kiln.local_stage.
     _payload_for_mesh`), the one the live panel and the photograph draw
@@ -376,7 +386,9 @@ def _load_viewer_frame_mesh(file_path: str):
     the payload's own reader does not.
 
     ``colours`` is the payload's RGBA per vertex, or ``None`` for a part
-    that carries none.  Positions arrive already rotated into the viewer
+    that carries none; ``normals`` likewise, and ``None`` is the default --
+    no stage door asks the encoder for them, so the stage creases its own
+    (:func:`_creased_normals`).  Positions arrive already rotated into the viewer
     frame, (x, y, z)_mesh → (x, z, -y)_viewer, so the light rig and orbit
     mapping stay verbatim.  A payload the door had to decimate or leave
     out declines, the same as a mesh past the face cap always has.
@@ -407,7 +419,12 @@ def _load_viewer_frame_mesh(file_path: str):
         rgba = _np.frombuffer(base64.b64decode(payload["vertex_colors"]), dtype=_np.uint8)
         if len(rgba) == len(v) * 4:
             colours = rgba.reshape(-1, 4)
-    return v, f, colours
+    normals = None
+    if payload.get("normals"):
+        nrm = _np.frombuffer(base64.b64decode(payload["normals"]), dtype="<f4")
+        if len(nrm) == len(v) * 3:
+            normals = nrm.reshape(-1, 3)
+    return v, f, colours, normals
 
 
 def _bounding_sphere(v):
@@ -416,6 +433,82 @@ def _bounding_sphere(v):
     c = (lo + hi) / 2.0
     r = float(_np.sqrt(((v - c) ** 2).sum(axis=1).max()))
     return c, max(r, 1e-6), lo, hi
+
+
+#: Ceiling on the crease pass's pairwise work: the sum, over welded
+#: vertices, of the corners there squared.  An ordinary mesh spends a few
+#: tens per face (a 327k-face sphere creases in 0.2 s); only a fan of
+#: tens of thousands of faces on one point gets near it -- 2e8 pairs
+#: measured 0.18 s, so this sits near two seconds -- and past it the
+#: part falls through rather than stall a preview.  The stage's own port
+#: pays the same quadratic, in JavaScript.
+_CREASE_MAX_PAIRS = 2_000_000_000
+_CREASE_SLAB = 4_000_000  # pair-matrix entries held at once
+
+
+def _creased_normals(v, f):
+    """Per-corner shading normals ``(F, 3, 3)``, the stage's rule, or ``None``.
+
+    ``creasedNormals`` verbatim: each face's normal is ``(c - b) x (a - b)``
+    normalized; corners whose ``trunc(position * _CREASE_HASH)`` agree
+    are one vertex; a corner's normal is the UNWEIGHTED mean of the
+    normals of the faces around its vertex -- a face counted once per
+    corner it has there -- that meet its own face within
+    ``_CREASE_DEG``, normalized.  *v* must be the payload's positions as
+    sent: the stage welds before it centres, so a centred mesh would
+    bin its corners differently.
+
+    Grouping is a value sort, not a byte-wise ``unique``: ``-0.0`` and
+    ``0.0`` are one bin to the stage's ``===`` and must be here.
+    ``None`` when the pairwise work is past ``_CREASE_MAX_PAIRS``.
+    """
+    np = _np
+    tri = v[f]
+    fn = np.cross(tri[:, 2] - tri[:, 1], tri[:, 0] - tri[:, 1])
+    ln = np.linalg.norm(fn, axis=1)
+    fn = fn / np.where(ln > 0.0, ln, 1.0)[:, None]  # the port's `|| 1`
+    crease = math.cos(_CREASE_DEG * math.pi / 180.0)
+
+    q = np.trunc(tri.reshape(-1, 3) * _CREASE_HASH)
+    order = np.lexsort((q[:, 2], q[:, 1], q[:, 0]))
+    qs = q[order]
+    fresh = np.ones(len(qs), dtype=bool)
+    fresh[1:] = (qs[1:] != qs[:-1]).any(axis=1)
+    starts = np.flatnonzero(fresh)
+    sizes = np.diff(np.append(starts, len(qs)))
+    if int((sizes.astype(np.int64) ** 2).sum()) > _CREASE_MAX_PAIRS:
+        return None
+
+    face_of = order // 3  # the face each sorted corner belongs to
+    out = np.empty((len(q), 3), dtype=np.float32)  # the port's Float32Array
+    for d in np.unique(sizes):
+        d = int(d)
+        group_starts = starts[sizes == d]
+        if d * d <= _CREASE_SLAB:
+            # Every vertex with d corners at once: (g, d, 3) normals, a
+            # (g, d, d) crease mask, one batched product for the sums.
+            step = max(1, _CREASE_SLAB // (d * d))
+            for s in range(0, len(group_starts), step):
+                idx = group_starts[s:s + step, None] + np.arange(d)[None, :]
+                nrm = fn[face_of[idx]]
+                within = nrm @ nrm.transpose(0, 2, 1) > crease
+                sums = within.astype(np.float64) @ nrm
+                norm = np.linalg.norm(sums, axis=2)
+                out[order[idx]] = sums / np.where(norm > 0.0, norm, 1.0)[..., None]
+        else:
+            # One crowded vertex at a time, in row slabs.
+            rows = max(1, _CREASE_SLAB // d)
+            for g0 in group_starts:
+                members = order[g0:g0 + d]
+                nrm = fn[face_of[g0:g0 + d]]
+                for r0 in range(0, d, rows):
+                    part = nrm[r0:r0 + rows]
+                    sums = (part @ nrm.T > crease).astype(np.float64) @ nrm
+                    norm = np.linalg.norm(sums, axis=1)
+                    out[members[r0:r0 + rows]] = (
+                        sums / np.where(norm > 0.0, norm, 1.0)[:, None]
+                    )
+    return out.reshape(-1, 3, 3)
 
 
 def _camera(az_deg: float, el_deg: float, aspect: float, fit_radius: float,
@@ -499,7 +592,8 @@ def _shade(albedo_lin, normals, view):
     else:
         f0 = 0.04 + _METALNESS * (float(albedo_lin.mean()) - 0.04)
 
-    nv = _np.clip((normals * view).sum(axis=1), 1e-4, None)
+    ndv = (normals * view).sum(axis=1)
+    nv = _np.clip(ndv, 1e-4, None)
 
     # The environment, three's RE_IndirectSpecular_Physical (which owns
     # the indirect DIFFUSE too).  DFGApprox is the split-sum term, the
@@ -507,7 +601,9 @@ def _shade(albedo_lin, normals, view):
     # attenuated by what the specular half took -- all transcribed.
     diff_tbl, spec_tbl = _env_tables()
     env_d = _ENV_SCALE * _env_lookup(diff_tbl, normals[:, 1])
-    refl = 2.0 * nv[:, None] * normals - view  # reflect(-view, normal)
+    # reflect(-view, normal) on the RAW dot: a smooth normal near the
+    # silhouette can face away from the eye, and three does not clamp here.
+    refl = 2.0 * ndv[:, None] * normals - view
     refl = refl + (normals - refl) * a  # mix(reflectVec, normal, roughness^2)
     refl = refl / _np.maximum(_np.linalg.norm(refl, axis=1), 1e-12)[:, None]
     env_s = _ENV_SCALE * _env_lookup(spec_tbl, refl[:, 1])
@@ -893,7 +989,7 @@ def _clip_polygon_near(corners, uvs, eye, fwd, near):
 
 def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
                 floor_y, footprint, fit_radius, fit_size, plate_tex_np,
-                cost_only=False, vertex_albedo=None):
+                corner_normals, cost_only=False, vertex_albedo=None):
     """One still at full working resolution.  PIL image, or ``None``.
 
     ``cost_only`` stops after the geometry — every projection and clip
@@ -902,7 +998,9 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
     the price it is quoted is the price the rasterizer will charge.
 
     ``vertex_albedo`` is the part's own linear RGB per vertex, or ``None``
-    to paint the whole part in ``albedo_lin``.
+    to paint the whole part in ``albedo_lin``.  ``corner_normals`` is the
+    shading normal at each face's corners, ``(F, 3, 3)`` aligned with *f*
+    (:func:`_creased_normals`).
     """
     from PIL import Image
 
@@ -919,6 +1017,7 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
     ln = np.linalg.norm(fn, axis=1)
     keep = ln > 1e-12
     f2 = f[keep]
+    cn = corner_normals[keep]
     fn = fn[keep] / ln[keep][:, None]
     centroids = tri[keep].mean(axis=1)
     facing = ((eye[None, :] - centroids) * fn).sum(axis=1) > 0
@@ -928,12 +1027,11 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
 
     if len(f2):
         tri = v[f2]
-        # The payload ships NO normals on purpose ("the viewer flat-shades
-        # via derivative normals, matching the faceted look of Kiln's
-        # OpenSCAD previews" -- mesh_payload).  Flat is PARITY here, not a
-        # shortcut: the face normal rides all three corners, so the
-        # interpolator emits it constant across the face.
-        tn = _np.repeat(fn[facing][:, None, :], 3, axis=1)
+        # Each corner carries the stage's creased normal and the
+        # interpolator blends them across the face, as three's vertex
+        # normals are: round walls, hard rims.  (Until 2026-09-22 the
+        # stage flat-shaded and so did this, the face normal on all three.)
+        tn = cn[facing].astype(_np.float64)
         px, py, pz = project(tri.reshape(-1, 3))
         iz = (1.0 / pz).reshape(-1, 3)
         all_px.append(px.reshape(-1, 3))
@@ -1074,7 +1172,7 @@ def try_paint_stage_views(
         loaded = _load_viewer_frame_mesh(file_path)
         if loaded is None:
             return None
-        v, f, colours = loaded
+        v, f, colours, normals = loaded
         # The stage hands vertex colours to three.js as normalized bytes on
         # a white base (mesh_viewer.html, modelMaterial), and three reads a
         # colour attribute as linear, so the bytes are the linear albedo
@@ -1085,6 +1183,13 @@ def try_paint_stage_views(
             vertex_albedo = colours[:, :3].astype(_np.float64) / 255.0
         elif require_colors:
             logger.debug("stage paint: %s carries no colours to paint — declining", file_path)
+            return None
+
+        # Shading normals before centring: the stage welds corners on the
+        # payload's positions as sent, and a shifted mesh bins differently.
+        corner_normals = normals[f] if normals is not None else _creased_normals(v, f)
+        if corner_normals is None:
+            logger.debug("stage paint: %s is past the crease budget", file_path)
             return None
 
         c, radius, lo, hi = _bounding_sphere(v)
@@ -1136,7 +1241,8 @@ def try_paint_stage_views(
                 width=width * ss_probe, height=canvas_probe,
                 albedo_lin=albedo_lin, floor_y=floor_y,
                 footprint=footprint, fit_radius=radius, fit_size=fit_size,
-                plate_tex_np=plate_tex_np, cost_only=True,
+                plate_tex_np=plate_tex_np, corner_normals=corner_normals,
+                cost_only=True,
             )
             if cost > _PAIR_CAP:
                 logger.debug(
@@ -1183,7 +1289,8 @@ def try_paint_stage_views(
                 width=width * ss_int, height=canvas_h,
                 albedo_lin=albedo_lin, floor_y=floor_y,
                 footprint=footprint, fit_radius=radius, fit_size=fit_size,
-                plate_tex_np=plate_tex_np, vertex_albedo=vertex_albedo,
+                plate_tex_np=plate_tex_np, corner_normals=corner_normals,
+                vertex_albedo=vertex_albedo,
             )
             if img is None:  # raster budget said no — all or nothing
                 return None
