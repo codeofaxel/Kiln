@@ -119,6 +119,7 @@ class TestMeshToolsPluginMeta:
             "simplify_mesh_model",
             "export_model_3mf",
             "extract_model_from_3mf",
+            "show_on_stage",
             "estimate_mesh_weight",
             "estimate_mesh_print_time",
         }
