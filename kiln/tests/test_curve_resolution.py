@@ -561,3 +561,65 @@ class TestAgentDoors:
         assert AGENT_ADVICE in _SYSTEM_PROMPT
         assert AGENT_ADVICE in json.dumps(build_parametric_generation_prompt("a cup").to_dict())
         assert AGENT_ADVICE in SkillManifest().workflows["create_custom_object_free"]
+
+
+# ---------------------------------------------------------------------------
+# The whole catalog
+# ---------------------------------------------------------------------------
+
+#: Parts /create also builds and decorates; their counts come out in the
+#: pass that re-checks those decorations.
+_DECORATED_ELSEWHERE = {"bookmark", "fridge_magnet", "pen_cup", "soap_dish"}
+
+
+def _fn_expressions(scad: str) -> list[str]:
+    """Every ``$fn = <expr>`` in *scad*, the expression read to its end."""
+    found = []
+    for match in re.finditer(r"\$fn\s*=\s*", scad):
+        depth, i = 0, match.end()
+        while i < len(scad):
+            ch = scad[i]
+            if ch in "([":
+                depth += 1
+            elif ch in ")]" and depth:
+                depth -= 1
+            elif ch in ",;)]\n" and depth == 0:
+                break
+            i += 1
+        found.append(scad[match.end() : i].strip())
+    return found
+
+
+class TestCatalog:
+    """Every parametric part cuts its curves by the rule."""
+
+    def test_no_part_types_a_facet_count_of_its_own(self):
+        """A count may stay only where it is the shape: a hexagon (6), or a
+        floor built on curve_fragments for holes too small for the rule."""
+        data = json.loads(_TEMPLATES.read_text(encoding="utf-8"))
+        typed = {}
+        for template_id, tpl in data.items():
+            if template_id.startswith("_") or template_id in _DECORATED_ELSEWHERE:
+                continue
+            for expr in _fn_expressions(tpl["scad_template"]):
+                if expr != "6" and "curve_fragments" not in expr:
+                    typed.setdefault(template_id, []).append(expr)
+        assert typed == {}
+
+    def test_a_big_round_part_sits_inside_the_chord_floor(self, tmp_path):
+        """The pot drip tray at its default size: 80 typed flats sat 0.05 mm
+        inside a 125 mm circle, ten times the floor."""
+        _openscad_or_skip()
+        import trimesh
+
+        from kiln.parametric import compile_scad_code, render_template_scad
+        from kiln.step_import import _OCP_LINEAR_DEFLECTION
+
+        tpl = _template("pot_drip_tray")
+        stl = compile_scad_code(
+            render_template_scad(tpl, _defaults(tpl)),
+            output_path=str(tmp_path / "tray.stl"),
+        )
+        tray = trimesh.load(stl)
+        _, deepest = _outer_wall_chord_depth(tray, z=tray.bounds[1][2] / 2)
+        assert deepest <= _OCP_LINEAR_DEFLECTION
