@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from unittest import mock
+from types import SimpleNamespace
 
 import pytest
 
@@ -170,10 +170,30 @@ class TestConfiguration:
         misconfigure."""
         monkeypatch.delenv("KILN_DISABLE_ORPHAN_WATCHDOG", raising=False)
         monkeypatch.setattr("kiln.parent_watchdog.os.getppid", lambda: 99999)
-        with mock.patch("kiln.parent_watchdog.time.sleep") as fake_sleep:
-            start_parent_watchdog(interval_s=0)
-            # Give the daemon a beat to enter the loop and call
-            # sleep() once.
-            time.sleep(0.1)
-            assert fake_sleep.call_count >= 1
-            assert fake_sleep.call_args_list[0].args[0] >= 1.0
+        # Swap the watchdog's own ``time``, not the shared ``time.sleep``.
+        # Patching the shared one also recorded this test's own wait, and
+        # on a busy machine that call landed first: "assert 0.1 >= 1.0".
+        # Each nap is tagged with the thread that took it, because
+        # watchdogs left running by earlier tests nap through the same
+        # module, and each nap then parks so no loop spins.
+        naps: list[tuple[int, float]] = []
+        napped = threading.Condition()
+
+        def fake_sleep(seconds: float) -> None:
+            with napped:
+                naps.append((threading.get_ident(), seconds))
+                napped.notify_all()
+            threading.Event().wait()
+
+        monkeypatch.setattr(
+            "kiln.parent_watchdog.time", SimpleNamespace(sleep=fake_sleep)
+        )
+        thread = start_parent_watchdog(interval_s=0)
+        assert thread is not None
+
+        def first_nap() -> float | None:
+            return next((s for who, s in naps if who == thread.ident), None)
+
+        with napped:
+            assert napped.wait_for(lambda: first_nap() is not None, timeout=10.0)
+        assert first_nap() >= 1.0
