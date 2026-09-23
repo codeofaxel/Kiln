@@ -30,6 +30,7 @@ Auto-discovered by :func:`~kiln.plugin_loader.register_all_plugins`.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -95,10 +96,8 @@ def _save_session(session: dict[str, Any]) -> None:
 
 
 def _end_session(session: dict[str, Any]) -> None:
-    try:
+    with contextlib.suppress(OSError):
         _session_path(session["unit"]).unlink()
-    except OSError:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +275,7 @@ def _reply(session: dict[str, Any], ask: str, *, pictures: list[dict[str, Any] |
         "success": True, "printer_name": session["printer_name"], "step": session["step"], "ask": ask,
         "options": options or [], "waiting": waiting, "blanks": session["blanks"],
         "learned": sorted(session["observed"]), "images": shown,
-        "next": ("Call printer_bench again in about %d seconds." % CHECK_AGAIN_S) if waiting
+        "next": (f"Call printer_bench again in about {int(CHECK_AGAIN_S)} seconds.") if waiting
         else "Relay the ask word for word, show the picture, and call printer_bench again with the person's answer.",
     }
     if waiting:
@@ -341,7 +340,8 @@ def _write_square(session: dict[str, Any]) -> str:
     for a, b, c in faces:
         lines.append("  facet normal 0 0 0\n    outer loop")
         for i in (a, b, c):
-            lines.append("      vertex %.3f %.3f %.3f" % v[i])
+            x, y, z = v[i]
+            lines.append(f"      vertex {x:.3f} {y:.3f} {z:.3f}")
         lines.append("    endloop\n  endfacet")
     lines.append("endsolid kiln_bench_square")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -500,9 +500,9 @@ def _sharing() -> bool:
 
 def _has_pro() -> bool:
     try:
-        from kiln_pro.pro_gate import _TIER_CHECKERS  # type: ignore[import-not-found]
+        from kiln_pro.pro_gate import check_pro  # type: ignore[import-not-found]
 
-        return _TIER_CHECKERS["pro"]("") is None
+        return check_pro("") is None
     except Exception:  # noqa: BLE001
         return False
 
@@ -642,7 +642,6 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
 
     step = session["step"]
     name = session["printer_name"]
-    model = session.get("model_name") or session["printer_id"]
 
     # ---- intro ---------------------------------------------------------
     if step == "intro":

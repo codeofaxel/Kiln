@@ -33,6 +33,7 @@ This module is everything under that tool that is not the conversation:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -157,7 +158,7 @@ def parse_lift(answer: Any) -> float | None:
             return mm
     if "span" in text or "palm" in text:
         return LIFT_WORDS_MM["hand"]
-    if "not" in text or "didn't" in text or "no" == text:
+    if "not" in text or "didn't" in text or text == "no":
         return 0.0
     return None
 
@@ -373,9 +374,9 @@ def refusal_blanks(verdict: Any) -> list[str]:
         sentence = str(refusal.get("sentence") or "") if isinstance(refusal, dict) else ""
         for block in (b for b in TEACHABLE if b != "head"):
             said = block.replace("_", " ")
-            if (said in sentence or block in sentence) and (_WORST_CASE in sentence or block in blanks):
-                if block not in out:
-                    out.append(block)
+            if ((said in sentence or block in sentence) and (_WORST_CASE in sentence or block in blanks)
+                    and block not in out):
+                out.append(block)
     if not out and any(r.get("code") == "PLACEMENT_UNKNOWN_PRINTER" for r in verdict.get("refusals") or [] if isinstance(r, dict)):
         return list(TEACHABLE)
     return out
@@ -698,26 +699,28 @@ class PositionLog(threading.Thread):
         self._max = max_s
         self._period = 1.0 / max(1.0, hz)
         self._until_idle = until_idle
-        self._stop = threading.Event()
+        # Not ``_stop``: through Python 3.12 threading.Thread has a private
+        # ``_stop()`` method that join() calls, and an Event there breaks it.
+        self._halt = threading.Event()
         self.points: list[tuple[float, float, float]] = []
         self.moved = False
         self.complete = False
         self.finished_at: float | None = None
 
     def stop(self) -> None:
-        self._stop.set()
+        self._halt.set()
 
     def run(self) -> None:  # pragma: no cover - timing; the pure parts are tested through `read`
         started = time.monotonic()
         last_change = started
         last_failure = started
         last: tuple[float, float, float] | None = None
-        while not self._stop.is_set() and time.monotonic() - started < self._max:
+        while not self._halt.is_set() and time.monotonic() - started < self._max:
             pos = position_of(self._adapter)
             now = time.monotonic()
             if pos is None:
                 last_failure = now                 # a gap: the settle window starts again
-            elif last is None or any(abs(a - b) > 0.05 for a, b in zip(pos, last)):
+            elif last is None or any(abs(a - b) > 0.05 for a, b in zip(pos, last, strict=True)):
                 if last is not None:
                     self.moved = True
                 last_change = now
@@ -806,10 +809,8 @@ def send_pending(supabase_url: str, anon_key: str) -> int:
                 _logger.debug("bench: observation not sent (non-fatal): %s", exc)
         if changed:
             store["sent"] = sent
-            try:
+            with contextlib.suppress(OSError):
                 _save_store(store.get("unit") or path.stem, store)
-            except OSError:
-                pass
     return landed
 
 
