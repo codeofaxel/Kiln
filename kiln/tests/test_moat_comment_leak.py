@@ -27,9 +27,13 @@ from __future__ import annotations
 
 import functools
 import importlib.util
+import json
+import re
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def _load_gate():
@@ -44,6 +48,9 @@ def _load_gate():
 
 
 _GATE = _load_gate()
+# Unit tests run with the private-rules socket OFF, whatever this machine's
+# git config says; the tests that exercise the socket plug rules in by hand.
+_GATE._PRIVATE_RULES[:] = [None]
 
 
 def _rules(rel: str, text: str, **kw) -> list[str]:
@@ -325,6 +332,25 @@ def test_gcode_is_read_as_text() -> None:
     assert _GATE._in_scope("kiln/src/kiln/data/bambu_a1_end_gcode.gcode")
 
 
+def test_a_line_into_someone_elses_source_is_refused_in_any_spelling() -> None:
+    """``file.cpp:12`` was the only spelling refused; ``file.cpp L12``, a
+    backticked path with lines on the next line, and another project's
+    Python file are the same pin.  A line into Kiln's own file is a
+    cross-reference and passes."""
+    for text in (
+        "# per widget.cpp L12\nx = 1\n",
+        "# ``src/acme/reader.cpp`` L12-14 matches it\nx = 1\n",
+        "# acme/klippy/extras/probe.py lines 40-44\nx = 1\n",
+        '"""see ``thumb.hpp``\n    L96-99 for the sizes"""\n',
+    ):
+        assert _pins_in("kiln/src/kiln/x.py", text), text
+    for text in (
+        "# see bambu_3mf.py L120 for the wrap\nx = 1\n",
+        "# kiln/src/kiln/printers/bambu_3mf.py:120 builds it\nx = 1\n",
+    ):
+        assert _pins_in("kiln/src/kiln/x.py", text) == [], text
+
+
 def test_allows_kilns_own_hosts_data_strings_and_api_docs() -> None:
     clean = (
         "# See https://kiln3d.com/pricing and github.com/codeofaxel/Kiln/issues\n"
@@ -500,3 +526,86 @@ def test_allows_fake_secrets_and_local_hosts() -> None:
     )
     assert _rules("kiln/tests/test_redaction.py", fixture) == []
     assert _rules("kiln/tests/test_stripe_checkout.py", fixture) == []
+
+
+# ── Rule 7: private research, through the socket ─────────────────────────────
+
+def _plugged(patterns=(), private_text=""):
+    fingerprints = frozenset(d for _o, d, _w, _s in _GATE.fingerprint_windows(private_text))
+    return _GATE.PrivateRules(
+        tuple((name, re.compile(rx)) for name, rx in patterns), fingerprints, _GATE.FINGERPRINT_WINDOW
+    )
+
+
+def _private_in(rel: str, text: str, rules) -> list[str]:
+    saved = list(_GATE._PRIVATE_RULES)
+    _GATE._PRIVATE_RULES[:] = [rules]
+    try:
+        leaks, _ = _GATE.scan_file(rel, text.encode())
+    finally:
+        _GATE._PRIVATE_RULES[:] = saved
+    return [snippet for _p, _l, rule, snippet in leaks if rule == "private research"]
+
+
+_WIDGET = [("a widget method", r"(?i:\bfrobnicate the (?:sprocket|gizmo)s?\b)")]
+
+
+def test_a_private_word_is_refused_anywhere_once_the_socket_is_plugged() -> None:
+    """The words a public rule must not spell out come from a private file;
+    once plugged in they are refused in prose, in code strings and in docs,
+    across a wrapped line, and nowhere when nothing is plugged in."""
+    rules = _plugged(patterns=_WIDGET)
+    assert _private_in("kiln/src/kiln/x.py", "x = 1\n# we frobnicate the\n# sprockets first\n", rules)
+    assert _private_in("kiln/src/kiln/x.py", 'NOTE = "frobnicate the gizmo"\n', rules)
+    assert _private_in("docs/x.md", "Then frobnicate the sprocket.\n", rules)
+    assert _private_in("kiln/src/kiln/data/x_end_gcode.gcode", "; frobnicate the gizmo\nM400\n", rules)
+    assert _private_in("kiln/src/kiln/x.py", 'NOTE = "frobnicate the gizmo"\n', None) == []
+    # The line reported is the one the phrase starts on.
+    leaks, _ = [], None
+    saved = list(_GATE._PRIVATE_RULES)
+    _GATE._PRIVATE_RULES[:] = [rules]
+    try:
+        leaks, _ = _GATE.scan_file("kiln/src/kiln/x.py", b"x = 1\n# we frobnicate the\n# sprockets first\n")
+    finally:
+        _GATE._PRIVATE_RULES[:] = saved
+    assert [line for _p, line, rule, _s in leaks if rule == "private research"] == [2]
+
+
+def test_a_run_of_private_text_is_refused_and_a_shorter_one_is_not() -> None:
+    """Eight words in a row from private research are a copy, whatever the
+    case, punctuation or quoting; seven are a coincidence."""
+    rules = _plugged(private_text="The quick widget always parks behind the left sprocket before it cools, and never before.")
+    assert _private_in("kiln/src/kiln/x.py", "# The widget always parks behind the left sprocket before moving.\nx = 1\n", rules)
+    assert _private_in("docs/x.md", "WIDGET, always parks -- behind the left `sprocket` before\n", rules)
+    assert _private_in("kiln/src/kiln/x.py", "# The widget always parks behind the left sprocket today.\nx = 1\n", rules) == []
+
+
+def test_a_run_of_numbers_or_code_noise_is_never_a_fingerprint() -> None:
+    """A window needs five real words, so tables of numbers cannot collide."""
+    assert list(_GATE.fingerprint_windows("0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15")) == []
+    assert list(_GATE.fingerprint_windows("x = 1; y = 2; z = 3; w = 4")) == []
+
+
+def test_the_socket_reads_a_path_or_a_branch_and_says_so_when_it_cannot(tmp_path, monkeypatch, capsys) -> None:
+    rules_file = tmp_path / "rules.json"
+    rules_file.write_text(json.dumps({"patterns": _WIDGET, "fingerprints": [], "fingerprint_window": 8}))
+    monkeypatch.setenv("KILN_PRIVATE_LEAK_RULES", str(rules_file))
+    loaded = _GATE.load_private_rules()
+    assert loaded is not None and loaded.patterns[0][0] == "a widget method"
+
+    repo = tmp_path / "private"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "rules.json").write_text(rules_file.read_text())
+    subprocess.run(["git", "-C", str(repo), "add", "rules.json"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "rules"], check=True)
+    (repo / "rules.json").write_text("not json")  # the working tree is not what is read
+    monkeypatch.setenv("KILN_PRIVATE_LEAK_RULES", f"git:{repo}:HEAD:rules.json")
+    loaded = _GATE.load_private_rules()
+    assert loaded is not None and len(loaded.patterns) == 1
+
+    monkeypatch.setenv("KILN_PRIVATE_LEAK_RULES", str(tmp_path / "missing.json"))
+    assert _GATE.load_private_rules() is None
+    assert "OFF" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        _GATE.load_private_rules(require=True)

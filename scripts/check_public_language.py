@@ -9,6 +9,12 @@ at the PR.  (The gate skips itself during a merge or rebase, where the index
 carries files the committer did not author; the full-tree CI step covers
 those.)  Full-tree runs of that gate stay with its own CI step and the
 pre-push hook; this file only closes the commit-time door.
+
+``--outgoing`` is the push-time door for messages: fed the ref lines git
+hands a pre-push hook, it checks every commit the push would publish that no
+remote has yet -- a rebased, amended or ``--no-verify`` commit never met the
+commit-time check.  Both doors also apply the leak gate's private rules when
+this checkout is configured with them (see that gate's rule 7).
 """
 
 from __future__ import annotations
@@ -264,7 +270,34 @@ def find_violations(
                 )
     if provenance is not None:
         findings.extend(_wrapped_findings(text, source, provenance, findings))
+        findings.extend(_private_message_findings(text, source))
     return findings
+
+
+_GATE_MODULE: list = []
+
+
+def _leak_gate_module():
+    """The leak gate loaded from this tree, where the private-rules socket
+    lives; ``None`` in a tree that never carried it."""
+    if not _GATE_MODULE:
+        module = None
+        if _LEAK_GATE.is_file():
+            try:
+                module = _load_module("audit_moat_comment_leak_for_language", _LEAK_GATE)
+            except Exception:  # noqa: BLE001 -- a gate that will not load is the leak gate's own failure
+                module = None
+        _GATE_MODULE.append(module)
+    return _GATE_MODULE[0]
+
+
+def _private_message_findings(text: str, source: str) -> list[Finding]:
+    """A commit message held to the configured private rules, if any."""
+    gate = _leak_gate_module()
+    rules = gate._private_rules_cached() if gate is not None else None
+    if rules is None:
+        return []
+    return [Finding(source, line, "private research", what) for line, what in gate.private_findings(text, rules)]
 
 
 # Git exports these into hook environments to pin a command to the invoking
@@ -404,8 +437,8 @@ def _staged_leak_gate() -> tuple[int, str]:
     return result.returncode, result.stdout
 
 
-def _range_messages(revision_range: str) -> list[tuple[str, str]]:
-    raw = _git("log", "--format=%H%x00%B%x00", revision_range)
+def _range_messages(*revisions: str) -> list[tuple[str, str]]:
+    raw = _git("log", "--format=%H%x00%B%x00", *revisions)
     fields = raw.decode("utf-8", errors="replace").split("\0")
     messages: list[tuple[str, str]] = []
     for index in range(0, len(fields) - 1, 2):
@@ -413,6 +446,24 @@ def _range_messages(revision_range: str) -> list[tuple[str, str]]:
         message = fields[index + 1]
         if commit_hash:
             messages.append((f"commit {commit_hash[:12]}", message))
+    return messages
+
+
+def _outgoing_messages(ref_lines: str) -> list[tuple[str, str]]:
+    """Every commit a push would publish that no remote has yet, read from
+    the ref lines git hands a pre-push hook.  A rebased, amended or
+    ``--no-verify`` commit skipped the commit-message check; this is the
+    last door before the message is public."""
+    messages: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for line in ref_lines.splitlines():
+        parts = line.split()
+        if len(parts) != 4 or not parts[1].strip("0"):
+            continue  # malformed, or a branch deletion
+        for source, message in _range_messages(parts[1], "--not", "--remotes"):
+            if source not in seen:
+                seen.add(source)
+                messages.append((source, message))
     return messages
 
 
@@ -433,9 +484,26 @@ def main(argv: list[str] | None = None) -> int:
         dest="revision_range",
         help="also scan commit messages in a Git revision range",
     )
+    parser.add_argument(
+        "--outgoing",
+        action="store_true",
+        help="pre-push: read git's ref lines on stdin and scan only the messages of commits no remote has yet",
+    )
     args = parser.parse_args(argv)
 
     findings: list[Finding] = []
+    if args.outgoing:
+        for source, message in _outgoing_messages(sys.stdin.read()):
+            findings.extend(find_violations(message, source=source, commit_message=True))
+        if not findings:
+            print("Public-language audit: outgoing commit messages clean.")
+            return 0
+        print("PUBLIC-LANGUAGE VIOLATION — an outgoing commit message:")
+        for finding in findings:
+            print(f"  {finding.source}:{finding.line}: {finding.rule}\n    {finding.text}")
+        print("  Reword the commit before it is pushed (git commit --amend for the last one): once public, it is permanent.")
+        return 2
+
     for source, text in _tracked_content(staged=args.staged):
         findings.extend(find_violations(text, source=source))
         findings.extend(data_note_findings(source, text))

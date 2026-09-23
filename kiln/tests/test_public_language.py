@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -19,6 +22,10 @@ def _load_gate():
 
 
 _GATE = _load_gate()
+# The private-rules socket stays OFF for these tests whatever this machine's
+# git config says; the tests that exercise it plug rules in by hand.
+if _GATE._leak_gate_module() is not None:
+    _GATE._leak_gate_module()._PRIVATE_RULES[:] = [None]
 
 
 _INTERNAL_TIER = "".join(("found", "er"))
@@ -200,3 +207,62 @@ def test_a_dependency_bump_and_kilns_own_links_pass_the_commit_rule() -> None:
         "Read from the maker's own client and its published guides.",
     ):
         assert _GATE.find_violations(text, source="abcd123", commit_message=True) == [], text
+
+
+def _plug(rules):
+    gate = _GATE._leak_gate_module()
+    saved = list(gate._PRIVATE_RULES)
+    gate._PRIVATE_RULES[:] = [rules]
+    return gate, saved
+
+
+def test_a_commit_message_is_held_to_the_private_rules_when_plugged() -> None:
+    """The words a public rule must not spell out reach the commit-message
+    door through the same socket as the tree, across a 72-column wrap."""
+    gate = _GATE._leak_gate_module()
+    rules = gate.PrivateRules(((
+        "a widget method", re.compile(r"(?i:\bfrobnicate the (?:sprocket|gizmo)s?\b)")),),
+        frozenset(), gate.FINGERPRINT_WINDOW)
+    gate, saved = _plug(rules)
+    try:
+        wrapped = "Park the head.\n\nFirst we frobnicate the\nsprockets, then park.\n"
+        found = _GATE.find_violations(wrapped, source="abcd123", commit_message=True)
+        assert [(f.line, f.rule) for f in found] == [(3, "private research")]
+    finally:
+        gate._PRIVATE_RULES[:] = saved
+    assert _GATE.find_violations(wrapped, source="abcd123", commit_message=True) == []
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@x", *args],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+
+def test_the_outgoing_door_reads_every_commit_no_remote_has(tmp_path, monkeypatch) -> None:
+    """A rebased or --no-verify commit never met the commit-message check;
+    the pre-push door reads every commit a push would publish."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "a.txt").write_text("a\n")
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "-qm", "cross-checked against pybambu")  # already public
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    (repo / "b.txt").write_text("b\n")
+    _git(repo, "add", "b.txt")
+    _git(repo, "commit", "-qm", "Pinned from DevMapping.cpp:127")
+    (repo / "c.txt").write_text("c\n")
+    _git(repo, "add", "c.txt")
+    _git(repo, "commit", "-qm", "A clean message")
+    head = _git(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(_GATE, "_ROOT", repo)
+    lines = f"refs/heads/x {head} refs/heads/main {'0' * 40}\n"
+    messages = [m.strip() for _s, m in _GATE._outgoing_messages(lines)]
+    assert messages == ["A clean message", "Pinned from DevMapping.cpp:127"]
+    assert _GATE._outgoing_messages(f"(delete) {'0' * 40} refs/heads/old {head}\n") == []
+    monkeypatch.setattr(sys, "stdin", io.StringIO(lines))
+    assert _GATE.main(["--outgoing"]) == 2
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"refs/heads/x {_git(repo, 'rev-parse', 'HEAD~2')} refs/heads/main {'0' * 40}\n"))
+    assert _GATE.main(["--outgoing"]) == 0

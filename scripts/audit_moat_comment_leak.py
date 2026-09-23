@@ -59,8 +59,9 @@ The rules, in plain language
    the PyPI sdist.  Checked in full-tree mode, and in ``--staged`` mode
    only when the manifest or ``pyproject.toml`` is part of the commit.
 6. **Research provenance** (comments / docstrings, src AND tests): a
-   third-party repository, a source file:line pin into someone else's
-   code, a vendor or community page path, a community account or client
+   third-party repository, a line pinned into someone else's source in
+   any spelling (``file.cpp:12``, ``file.cpp L12``, ``lines 12-14``; a
+   line into one of Kiln's own files is a cross-reference and passes), a vendor or community page path, a community account or client
    name, or a fetch date.  A public catalogue note has never been allowed
    to carry these (``kiln.data_note_contract``); a code comment is the
    same page with a different door, and it read as a research trail a
@@ -77,6 +78,10 @@ The rules, in plain language
    across a wrapped line -- a block's comment markers dropped and its
    lines joined -- because a build number split over two lines is the
    same sentence.
+7. **Private research** (every scanned file, code and strings included):
+   the patterns and fingerprinted text of a private rules file, when this
+   checkout's local git config names one.  Public holds only the socket;
+   the words live in the private repo.
 
 Internal persona / process phrases are ``scripts/check_public_language.py``'s
 rule — it scans the whole tracked tree and commit messages — not this
@@ -109,12 +114,15 @@ from __future__ import annotations
 import argparse
 import bisect
 import io
+import json
 import os
 import re
 import subprocess
 import sys
 import tokenize
+import zlib
 from pathlib import Path
+from typing import NamedTuple
 
 _ROOT = Path(__file__).resolve().parent.parent
 _MANIFEST = _ROOT / "kiln" / "MANIFEST.in"
@@ -509,8 +517,15 @@ _RESEARCH_PINS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(r"(?:github\.com|raw\.githubusercontent\.com|gitlab\.com)/[\w.-]+/[\w.-]+"),
     ),
     (
+        # A line into someone else's source, however it is spelled:
+        # ``file.cpp:12``, ``file.cpp L12``, ``file.py`` lines 12-14, or a
+        # file pinned to a release.  A line into Kiln's own file is a
+        # cross-reference and passes (see _research_pins).
         "a source file:line pin",
-        re.compile(r"\b[\w./-]+\.(?:cpp|hpp|cc|c|h)\b(?::\d+|[^\n]{0,40}@ \d+\.\d+)"),
+        re.compile(
+            r"\b(?:[\w.-]+/)*[\w-]+\.(?:cpp|hpp|cc|c|h|py|vue|js|ts|tsx)\b`{0,2}"
+            r"(?::\d+|\s*\(?\s*(?:L\d+|lines?\s+\d+)|[^\n]{0,40}@ \d+\.\d+)"
+        ),
     ),
     (
         # A wiki / forum page path is where a fact was READ; an integration
@@ -535,6 +550,7 @@ _RESEARCH_PINS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 _PIN_PREFILTER = re.compile(
     r"github\.com|githubusercontent|gitlab\.com|\.(?:cpp|hpp|cc|c|h)\b|reddit\.com/r/|"
+    r"\.(?:py|vue|js|tsx?)\b`{0,2}\s*\(?\s*(?:L\d|lines?\s+\d|:\d)|"
     r"(?:wiki|forum|forums|community|discuss)\.[\w.-]+\.(?:com|org|io|net|dev|cn)/|read 20\d\d-|"
     r"pellcorp|Guilouz|TheFeralEngineer|artillery3dlab|fpnewton|Doridian|OpenBambuAPI|open-bamboo|ha-bambulab|"
     r"pybambu|bambuddy|bambino|OpenCentauri",
@@ -639,6 +655,133 @@ def _paragraphs(text: str):
         yield start, "\n".join(block)
 
 
+# ── Rule 7: private research, from a rules file the public tree never holds ─
+# Some of what must never reach public is too specific to name in public: the
+# words of a private method, the sentences of private research.  A rule that
+# spelled them out here would publish them, so the gate carries a socket
+# instead.  When this checkout's local git config (``kiln.privateLeakRules``)
+# or ``KILN_PRIVATE_LEAK_RULES`` names a rules file -- a path, or
+# ``git:<repo>:<ref>:<path>`` to read it from a branch rather than a working
+# tree -- its patterns are applied to the whole of every scanned file, code
+# and strings included, and any run of its fingerprinted text is refused.
+# Public carries only the socket.  With nothing configured the rule is off; a
+# configured file that cannot be read is a warning, or a failure under
+# ``--require-private-rules``.
+_PRIVATE_RULES_ENV = "KILN_PRIVATE_LEAK_RULES"
+_PRIVATE_RULES_CONFIG = "kiln.privateLeakRules"
+#: A fingerprinted word: letters and digits, joined by ``.``, ``_``, ``-`` or
+#: an apostrophe, compared lower-cased.
+_FINGERPRINT_WORD = re.compile(r"[a-z0-9]+(?:[._'\u2019-][a-z0-9]+)*", re.IGNORECASE)
+FINGERPRINT_WINDOW = 8
+
+
+_ROLL_BASE = 0x100000001B3
+_ROLL_MASK = (1 << 64) - 1
+
+
+def fingerprint_windows(text: str, window: int = FINGERPRINT_WINDOW):
+    """Yield ``(offset, digest, words, start)`` for every run of *window*
+    words in *text* that carries at least five real words (three letters or
+    more); ``" ".join(words[start:start + window])`` is the run itself.
+
+    The one definition of a fingerprint: the private repo builds its list
+    with this function and the gate checks with it, so the two cannot drift.
+    A rolling 64-bit hash over each word's CRC-32, so a whole tree hashes in
+    well under a second.
+    """
+    matches = list(_FINGERPRINT_WORD.finditer(text))
+    words = [m.group(0).lower() for m in matches]
+    codes = [zlib.crc32(w.encode("utf-8")) for w in words]
+    real = [1 if len(w) >= 3 and w[:1].isalpha() else 0 for w in words]
+    top = pow(_ROLL_BASE, window - 1, 1 << 64)
+    digest = 0
+    real_count = 0
+    for i, code in enumerate(codes):
+        if i >= window:
+            digest = (digest - codes[i - window] * top) & _ROLL_MASK
+            real_count -= real[i - window]
+        digest = (digest * _ROLL_BASE + code) & _ROLL_MASK
+        real_count += real[i]
+        if i >= window - 1 and real_count >= 5:
+            start = i - window + 1
+            yield matches[start].start(), digest, words, start
+
+
+class PrivateRules(NamedTuple):
+    patterns: tuple[tuple[str, re.Pattern[str]], ...]
+    fingerprints: frozenset[int]
+    window: int
+
+
+def _read_rules_spec(spec: str) -> str:
+    if spec.startswith("git:"):
+        _, repo, ref, path = spec.split(":", 3)
+        return subprocess.run(
+            ["git", "-C", repo, "show", f"{ref}:{path}"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={k: v for k, v in os.environ.items() if k not in _GIT_ENV_OVERRIDES},
+        ).stdout.decode("utf-8")
+    return Path(spec).expanduser().read_text(encoding="utf-8")
+
+
+def load_private_rules(*, require: bool = False) -> PrivateRules | None:
+    """The configured private rules, or ``None`` when none are configured."""
+    spec = os.environ.get(_PRIVATE_RULES_ENV, "").strip()
+    if not spec:
+        try:
+            spec = _git("config", "--get", _PRIVATE_RULES_CONFIG).decode("utf-8").strip()
+        except (OSError, subprocess.CalledProcessError):
+            spec = ""
+    if not spec:
+        if require:
+            raise SystemExit("private leak rules are required, and none are configured")
+        return None
+    try:
+        data = json.loads(_read_rules_spec(spec))
+        return PrivateRules(
+            patterns=tuple((str(name), re.compile(pattern)) for name, pattern in data.get("patterns", [])),
+            fingerprints=frozenset(int(h, 16) for h in data.get("fingerprints", [])),
+            window=int(data.get("fingerprint_window", FINGERPRINT_WINDOW)),
+        )
+    except Exception as exc:  # noqa: BLE001 -- any failure turns the rule off, said out loud
+        message = f"private leak rules at {spec!r} could not be read ({exc}); that rule is OFF for this run"
+        if require:
+            raise SystemExit(message) from exc
+        print(f"\u26a0\ufe0f  {message}", file=sys.stderr)
+        return None
+
+
+_PRIVATE_RULES: list[PrivateRules | None] = []
+
+
+def _private_rules_cached() -> PrivateRules | None:
+    if not _PRIVATE_RULES:
+        _PRIVATE_RULES.append(load_private_rules())
+    return _PRIVATE_RULES[0]
+
+
+def private_findings(text: str, rules: PrivateRules) -> list[tuple[int, str]]:
+    """``(line, what)`` for every private pattern and fingerprinted run in
+    *text*, read across wrapped lines."""
+    found: list[tuple[int, str]] = []
+    if rules.patterns:
+        flat, starts = _flattened(text)
+        for name, rx in rules.patterns:
+            for m in rx.finditer(flat):
+                found.append((bisect.bisect_right(starts, m.start()), f"{name}: {m.group(0)}"))
+    if rules.fingerprints:
+        lines: set[int] = set()
+        for offset, digest, words, start in fingerprint_windows(text, rules.window):
+            if digest in rules.fingerprints:
+                line = text.count("\n", 0, offset) + 1
+                if line not in lines:
+                    lines.add(line)
+                    found.append((line, f"a run of private text: {' '.join(words[start:start + rules.window])}"))
+    return found
+
+
 def _is_prose_block(block: str) -> bool:
     """A comment block or a docstring -- never a data string literal (a
     fixture URL, an XML namespace, a checkout link a test asserts on)."""
@@ -663,8 +806,30 @@ def _research_pins(block: str, *, prose_only: bool = True, repos: bool = True) -
             text = m.group(0)
             if any(own in text for own in _OWN_HOSTS):
                 continue
+            if rule == "a source file:line pin" and _is_our_file(text):
+                continue
             found.append((rule, text))
     return found
+
+
+_OUR_FILES: list[tuple[frozenset[str], frozenset[str]]] = []
+_CITED_FILE = re.compile(r"(?:[\w.-]+/)*[\w-]+\.(?:cpp|hpp|cc|c|h|py|vue|js|ts|tsx)\b")
+
+
+def _is_our_file(pin: str) -> bool:
+    """Whether a pinned file is one of Kiln's own: its path, when the pin
+    gives one, ends a tracked path; a bare name is one a tracked file has."""
+    if not _OUR_FILES:
+        paths = _tree_paths()
+        _OUR_FILES.append((frozenset(paths), frozenset(p.rsplit("/", 1)[-1] for p in paths)))
+    paths, names = _OUR_FILES[0]
+    cited = _CITED_FILE.match(pin.strip("`"))
+    if cited is None:
+        return False
+    cited_path = cited.group(0)
+    if "/" in cited_path:
+        return any(p == cited_path or p.endswith("/" + cited_path) for p in paths)
+    return cited_path in names
 
 
 def _pin_key(rel: str, text: str) -> str:
@@ -802,6 +967,12 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
                 continue
             for offset, rule, matched in _capture_provenance(block):
                 hit(line + offset, "research provenance", f"{rule}: {matched}")
+
+    # Private research — the configured private rules, over the whole file.
+    rules = _private_rules_cached()
+    if rules is not None and rel not in _SELF:
+        for line, what in private_findings(text, rules):
+            hit(line, "private research", what)
 
     # Shipped-data rules — data JSON (and test JSON fixtures) line by line.
     if is_shipped_json:
@@ -1021,11 +1192,17 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--freeze-source-pins", action="store_true",
         help="rewrite scripts/public_source_pins.txt from the scanned tree and exit",
     )
+    parser.add_argument(
+        "--require-private-rules", action="store_true",
+        help="fail unless the private rules are configured and readable (a backstop run)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.require_private_rules:
+        _PRIVATE_RULES[:] = [load_private_rules(require=True)]
     check_manifest = True
     if args.staged:
         if _merge_or_rebase_in_progress():
