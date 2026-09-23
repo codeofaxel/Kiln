@@ -818,9 +818,12 @@ def _center_on_plate(payload: dict | None) -> dict | None:
 def _payload_for_mesh(mesh: str, **encode: Any) -> dict:
     """Encode *mesh*, stand it on the plate, and stamp this install's bed on.
 
-    The one place a payload is built for the stage — all THREE doors go
-    through it: the result hook, the panel's lazy fetch, and the still
-    renderer in :mod:`kiln.stage_still`, which photographs this same stage.
+    The one place a payload is built for the stage — all FOUR doors go
+    through it: the result hook, the panel's lazy fetch, the still
+    renderer in :mod:`kiln.stage_still`, which photographs this same stage,
+    and the software painter in :mod:`kiln.stage_paint`, which paints it
+    where no browser can photograph it.  The painter read files itself
+    until 2026-09-22 and so never saw a painted part's colours.
     None of them can ship geometry with no bed under it: the stage draws the
     plate from what arrives here, and a payload that names no plate falls
     back to a reference square for a bed it knows nothing about.  Same
@@ -830,7 +833,7 @@ def _payload_for_mesh(mesh: str, **encode: Any) -> dict:
     The stills door used to build its payload directly and was therefore
     exempt from both — so a still and the live stage disagreed about the
     same mesh.  That is the failure this docstring is here to prevent, and
-    it is why the count above is worth keeping accurate: a fourth caller
+    it is why the count above is worth keeping accurate: a fifth caller
     that reaches for ``mesh_to_viewer_payload`` instead of this function
     silently opts out of the bed and the centring.
 

@@ -688,9 +688,9 @@ def visualize_model(
 
     # ------------------------------------------------------------------
     # Colored 3MF — per-face colors, which OpenSCAD cannot render.  With
-    # the stage allowed, the stage gets first refusal below (its payload
-    # carries vertex colours, so a painted part is photographed in its
-    # paint); the PIL renderer is the fallback.  Before 2026-09-19 this
+    # the stage allowed, both stage backends get first refusal below (the
+    # payload carries vertex colours, so a painted part is photographed,
+    # or painted, in its paint); the PIL renderer is the fallback.  Before 2026-09-19 this
     # branch returned here, so a painted model never reached the stage
     # anywhere Kiln shows one, and the sign-off picture of a painted jar
     # was a flat render.
@@ -889,9 +889,13 @@ def visualize_model(
         ) if allow_stage else None
         if stage_views:
             stage_renderer = "stage"
-        elif allow_stage and colored_mesh is None:
-            # The painter takes one colour; a painted part would come out
-            # in the wrong one.  Its fallback is the colored renderer.
+        elif allow_stage:
+            # The painter paints the stage's own payload, a painted part's
+            # colours included.  For a part known to carry colours it must
+            # paint them or decline — the part in one colour is the wrong
+            # picture — and the colored renderer below draws it instead.
+            # (It was skipped for every painted part until 2026-09-22, when
+            # it could only paint one colour.)
             from kiln.stage_paint import try_paint_stage_views
 
             stage_views = try_paint_stage_views(
@@ -903,6 +907,7 @@ def visualize_model(
                 height=height,
                 color=color,
                 deadline=deadline,
+                require_colors=colored_mesh is not None,
             )
             if stage_views:
                 stage_renderer = "stage_paint"

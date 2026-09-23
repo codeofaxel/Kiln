@@ -661,3 +661,140 @@ def test_the_prepass_and_the_rasterizer_agree_on_cost(probe: str, tmp_path: Path
     # from the same helper on the same geometry.
     assert len(counts_seen) == 2
     assert counts_seen[0] == counts_seen[1]
+
+
+# ---------------------------------------------------------------------------
+# A painted part is painted in its own colours
+# ---------------------------------------------------------------------------
+#
+# Until 2026-09-22 the painter read files with trimesh, which never sees a
+# 3MF's paint, so visualize_model skipped it for every painted part and a
+# machine with no usable browser showed people the grey per-face render.
+# It now paints the stage's own payload, colours included.
+
+
+_RED, _BLUE = "#F72323", "#2366F7"
+
+
+@pytest.fixture()
+def painted_cube(tmp_path: Path) -> str:
+    """A 20 mm cube written by Kiln's own painted-3MF writer: top and
+    bottom faces red, the four sides blue."""
+    trimesh = pytest.importorskip("trimesh")
+    from kiln.multicolor_3mf import compose_painted_3mf
+
+    mesh = trimesh.creation.box(extents=(20.0, 20.0, 20.0))
+    mesh.apply_translation((100.0, 100.0, 10.0))
+    tris = [tuple(map(tuple, mesh.vertices[f])) for f in mesh.faces]
+    colors = [
+        _RED if all(v[2] > 19.9 for v in t) or all(v[2] < 0.1 for v in t) else _BLUE
+        for t in tris
+    ]
+    out = tmp_path / "painted_cube.3mf"
+    compose_painted_3mf(tris, colors, output_path=str(out))
+    return str(out)
+
+
+def _hue_counts(a: np.ndarray) -> tuple[int, int, int]:
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    red = int(((r > 90) & (r > g + 50) & (r > b + 50)).sum())
+    blue = int(((b > 90) & (b > r + 40) & (b > g + 20)).sum())
+    green = int(((g > 90) & (g > r + 40) & (g > b + 40)).sum())
+    return red, blue, green
+
+
+def test_a_painted_part_is_painted_in_its_own_colours(painted_cube: str, tmp_path: Path) -> None:
+    red, blue, _green = _hue_counts(_img(_render(painted_cube, tmp_path)))
+    assert red > 2000, "the red top never reached the pixels"
+    assert blue > 2000, "the blue sides never reached the pixels"
+
+
+def test_the_bottom_view_shows_the_paint_underneath(painted_cube: str, tmp_path: Path) -> None:
+    """The case that started this: paint on a face that prints against the
+    plate is only seen from below, where the face is lit by ambient
+    alone -- so it is judged by hue, not brightness."""
+    views = try_paint_stage_views(
+        painted_cube, [("bottom", "b")], {"bottom": (170, 0, 15)},
+        output_dir=str(tmp_path / "o"), width=800, height=600,
+    )
+    a = _img(views)
+    h, w = a.shape[:2]
+    centre = a[h // 2 - 20: h // 2 + 20, w // 2 - 20: w // 2 + 20].reshape(-1, 3).mean(axis=0)
+    r, g, b = centre
+    assert r > 1.5 * g and r > 1.5 * b, f"the underside reads {centre.round()}, not red"
+
+
+def test_the_parts_own_colours_outrank_a_requested_colour(painted_cube: str, tmp_path: Path) -> None:
+    """The stage document's rule: a filament colour the caller assumed
+    yields to the colours the user made."""
+    red, blue, green = _hue_counts(_img(_render(painted_cube, tmp_path, color="#00ff00")))
+    assert green == 0, "a requested colour painted over the part's own"
+    assert red > 2000 and blue > 2000
+
+
+def test_a_3mf_paints_without_trimeshs_3mf_loader(
+    painted_cube: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plain install has no lxml or networkx, which trimesh's 3MF loader
+    imports when it runs.  The painter reads through the payload's own
+    standard-library reader, so a 3MF still paints there."""
+    import importlib.abc
+    import sys
+
+    blocked = ("lxml", "networkx")
+
+    class _Block(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path=None, target=None):
+            if name.split(".")[0] in blocked:
+                raise ImportError(f"{name} blocked: a plain install has no {name}")
+            return None
+
+    for name in [n for n in sys.modules if n.split(".")[0] in blocked]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setattr(sys, "meta_path", [_Block(), *sys.meta_path])
+    with pytest.raises(ImportError):
+        import lxml  # noqa: F401  -- the block holds before it is relied on
+    views = _render(painted_cube, tmp_path)
+    assert views is not None, "a 3MF did not paint without trimesh's 3MF loader"
+    red, _blue, _green = _hue_counts(_img(views))
+    assert red > 2000
+
+
+def test_front_door_paints_a_painted_part_in_the_stage_look(
+    painted_cube: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kiln import stage_still
+    from kiln.model_visualizer import visualize_model
+
+    monkeypatch.setattr(stage_still, "try_render_stage_views", lambda *a, **k: None)
+    r = visualize_model(
+        painted_cube, angles=["isometric"], output_dir=str(tmp_path / "o"), share_link=False,
+    )
+    assert r["renderer"] == "stage_paint", r["renderer"]
+    a = np.asarray(Image.open(r["views"][0]["path"]).convert("RGB"), float)
+    red, blue, _green = _hue_counts(a)
+    assert red > 1000 and blue > 1000
+
+
+def test_a_painted_part_whose_colours_miss_the_payload_keeps_its_colours(
+    painted_cube: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the paint does not survive into the stage payload, the part in
+    one colour would be the wrong picture: the painter declines and the
+    per-face renderer draws the real colours instead."""
+    from kiln import local_stage, stage_still
+    from kiln.model_visualizer import visualize_model
+
+    real = local_stage._payload_for_mesh
+
+    def colourless(*a, **k):
+        payload = real(*a, **k)
+        payload.pop("vertex_colors", None)
+        return payload
+
+    monkeypatch.setattr(local_stage, "_payload_for_mesh", colourless)
+    monkeypatch.setattr(stage_still, "try_render_stage_views", lambda *a, **k: None)
+    r = visualize_model(
+        painted_cube, angles=["isometric"], output_dir=str(tmp_path / "o"), share_link=False,
+    )
+    assert r["renderer"] == "colored_mesh", r["renderer"]

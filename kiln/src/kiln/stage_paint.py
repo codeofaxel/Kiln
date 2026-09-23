@@ -34,6 +34,13 @@ WHERE IT SITS
    geometry, same rig, approximated shading.
 3. OpenSCAD — the always-available floor.
 
+The geometry is the stage's own payload (``kiln.local_stage.
+_payload_for_mesh``), a painted part's colours included, so a painted
+part on a machine with no usable browser keeps the stage look.  Until
+2026-09-22 this module read files with trimesh, saw no colours, and was
+skipped for every painted part; those previews fell to the grey per-face
+renderer, which no person is meant to be shown.
+
 Everything here is best-effort and silent, exactly like the photograph
 path: any miss returns ``None`` and the caller falls through.  The same
 ``KILN_NO_STAGE_STILLS=1`` opt-out disables both stage-look backends —
@@ -187,30 +194,50 @@ def _deps():
 
 
 def _load_viewer_frame_mesh(file_path: str):
-    """Triangles in the stage's y-up frame, or ``None``.
+    """``(vertices, faces, colours)`` in the stage's y-up frame, or ``None``.
 
-    The payload's baked rotation (``mesh_payload``): (x, y, z)_mesh →
-    (x, z, -y)_viewer.  Baking it here the same way keeps the light rig
-    and orbit mapping verbatim rather than mirrored.
+    Read from the stage's own payload door (:func:`kiln.local_stage.
+    _payload_for_mesh`), the one the live panel and the photograph draw
+    from, so the painter paints what the stage shows.  It used to call
+    ``trimesh.load`` itself, which cost it two things: a painted part's
+    colours, which trimesh never reads from a 3MF, so every painted part
+    skipped this backend for the grey renderer; and every 3MF on a plain
+    install, where trimesh's 3MF loader lacks the libraries it needs and
+    the payload's own reader does not.
+
+    ``colours`` is the payload's RGBA per vertex, or ``None`` for a part
+    that carries none.  Positions arrive already rotated into the viewer
+    frame, (x, y, z)_mesh → (x, z, -y)_viewer, so the light rig and orbit
+    mapping stay verbatim.  A payload the door had to decimate or leave
+    out declines, the same as a mesh past the face cap always has.
     """
-    import trimesh
+    import base64
+
+    from kiln.local_stage import _payload_for_mesh
+    from kiln.stage_still import _STILL_MAX_BYTES
 
     try:
-        mesh = trimesh.load(file_path, force="mesh")
+        payload = _payload_for_mesh(
+            file_path, max_triangles=_MAX_FACES, max_bytes=_STILL_MAX_BYTES,
+        )
     except Exception as exc:  # noqa: BLE001 — any unreadable source → decline
         logger.debug("stage paint: cannot read %s: %s", file_path, exc)
         return None
-    if mesh is None or not hasattr(mesh, "faces") or len(mesh.faces) == 0:
+    if not payload or payload.get("downgraded") or payload.get("decimated_from"):
+        logger.debug("stage paint: %s is past the %d-face cap", file_path, _MAX_FACES)
         return None
-    if len(mesh.faces) > _MAX_FACES:
-        logger.debug(
-            "stage paint: %d faces exceeds the %d cap", len(mesh.faces), _MAX_FACES
-        )
+    v = _np.frombuffer(base64.b64decode(payload["positions"]), dtype="<f4")
+    f = _np.frombuffer(base64.b64decode(payload["indices"]), dtype="<u4")
+    v = v.astype(_np.float64).reshape(-1, 3)
+    f = f.astype(_np.int64).reshape(-1, 3)
+    if len(f) == 0:
         return None
-    v = _np.asarray(mesh.vertices, dtype=_np.float64)
-    f = _np.asarray(mesh.faces, dtype=_np.int64)
-    v = _np.column_stack([v[:, 0], v[:, 2], -v[:, 1]])
-    return v, f
+    colours = None
+    if payload.get("vertex_colors"):
+        rgba = _np.frombuffer(base64.b64decode(payload["vertex_colors"]), dtype=_np.uint8)
+        if len(rgba) == len(v) * 4:
+            colours = rgba.reshape(-1, 4)
+    return v, f, colours
 
 
 def _bounding_sphere(v):
@@ -279,11 +306,18 @@ def _shade(albedo_lin, normals, view):
     brighter than its low ones, and the wall/top contrast that makes
     carved text read at all.  Only the per-light output scales and the
     exposure are fitted; the BRDF is the material's own.
+
+    *albedo_lin* is one linear RGB for the whole part, or one per pixel
+    ``(N, 3)`` for a part carrying its own colours; the Fresnel base
+    follows it per pixel, as the material's does.
     """
     a = _ROUGHNESS * _ROUGHNESS
     a2 = a * a
     k_vis = a / 2.0
-    f0 = 0.04 + _METALNESS * (float(albedo_lin.mean()) - 0.04)
+    if albedo_lin.ndim == 2:
+        f0 = 0.04 + _METALNESS * (albedo_lin.mean(axis=1) - 0.04)
+    else:
+        f0 = 0.04 + _METALNESS * (float(albedo_lin.mean()) - 0.04)
 
     nv = _np.clip((normals * view).sum(axis=1), 1e-4, None)
     color = _np.full((len(normals), 3), _AMBIENT)
@@ -308,7 +342,7 @@ def _shade(albedo_lin, normals, view):
 
         contrib = (ndl + spec * ndl)[:, None] * _np.asarray(light_rgb)
         color += intensity * contrib
-    color = color * albedo_lin[None, :] * _EXPOSURE
+    color = color * (albedo_lin if albedo_lin.ndim == 2 else albedo_lin[None, :]) * _EXPOSURE
     srgb = _linear_to_srgb(_aces(color))
     return _np.clip(srgb * 255.0 + 0.5, 0, 255).astype(_np.uint8)
 
@@ -458,7 +492,9 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
     ``attrs`` carries, per triangle vertex, either a unit NORMAL scaled by
     1/z (model triangles — shaded per pixel after visibility, three's
     smooth shading) or a texture u/z, v/z pair padded with a leading -2
-    sentinel (plate triangles — sampled from ``tex_np``).  Vectorized in
+    sentinel (plate triangles — sampled from ``tex_np``).  A part that
+    carries its own colours adds a linear RGB/z in channels 6-8, which
+    replaces ``albedo_lin`` pixel by pixel.  Vectorized in
     BOUNDED SLICES: candidate (pixel, triangle) pairs are laid out flat at
     most ``_PAIR_SLICE`` at a time and reduced into a persistent per-pixel
     nearest-depth winner, so peak memory tracks the slice and the
@@ -603,7 +639,8 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
             view = eye[None, :] - pos
             view = view / np.maximum(
                 np.linalg.norm(view, axis=1), 1e-12)[:, None]
-            rgb[smooth] = _shade(albedo_lin, n, view)
+            albedo = a_interp[smooth, 6:9] if attrs.shape[2] > 6 else albedo_lin
+            rgb[smooth] = _shade(albedo, n, view)
 
         buf[hit] = rgb
     return buf.reshape(h, w, 3)
@@ -645,13 +682,16 @@ def _clip_polygon_near(corners, uvs, eye, fwd, near):
 
 def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
                 floor_y, footprint, fit_radius, fit_size, plate_tex_np,
-                cost_only=False):
+                cost_only=False, vertex_albedo=None):
     """One still at full working resolution.  PIL image, or ``None``.
 
     ``cost_only`` stops after the geometry — every projection and clip
     the real pass makes, none of the rasterizing — and returns the view's
     pair count as an int.  That is what the set's pre-pass asks with, so
     the price it is quoted is the price the rasterizer will charge.
+
+    ``vertex_albedo`` is the part's own linear RGB per vertex, or ``None``
+    to paint the whole part in ``albedo_lin``.
     """
     from PIL import Image
 
@@ -689,9 +729,12 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
         all_py.append(py.reshape(-1, 3))
         all_iz.append(iz)
         # channels 0-2: normal/z; channels 3-5: position/z (for the
-        # per-pixel view vector the specular needs)
-        all_at.append(np.concatenate(
-            [tn * iz[:, :, None], tri * iz[:, :, None]], axis=2))
+        # per-pixel view vector the specular needs); 6-8: the part's own
+        # colour/z, when it carries one
+        channels = [tn * iz[:, :, None], tri * iz[:, :, None]]
+        if vertex_albedo is not None:
+            channels.append(vertex_albedo[f2] * iz[:, :, None])
+        all_at.append(np.concatenate(channels, axis=2))
 
     plate_y = floor_y - 0.2
     if eye[1] > plate_y and plate_tex_np is not None:
@@ -716,6 +759,8 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
             pts, uvs = poly
             pxc, pyc, pzc = project(np.asarray(pts))
             izc = 1.0 / pzc
+            # The plate's rows are as wide as the part's, colour or not.
+            pad = [0, 0, 0] if vertex_albedo is not None else []
             for k in range(1, len(pts) - 1):
                 a, b, c = 0, k, k + 1
                 all_px.append(np.array([[pxc[a], pxc[b], pxc[c]]]))
@@ -723,9 +768,9 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
                 all_iz.append(np.array([[izc[a], izc[b], izc[c]]]))
                 # sentinel -2 in channel 0; u/z, v/z ride channels 1-2
                 all_at.append(np.array([[
-                    [-2.0, uvs[a][0] * izc[a], uvs[a][1] * izc[a], 0, 0, 0],
-                    [-2.0, uvs[b][0] * izc[b], uvs[b][1] * izc[b], 0, 0, 0],
-                    [-2.0, uvs[c][0] * izc[c], uvs[c][1] * izc[c], 0, 0, 0],
+                    [-2.0, uvs[a][0] * izc[a], uvs[a][1] * izc[a], 0, 0, 0, *pad],
+                    [-2.0, uvs[b][0] * izc[b], uvs[b][1] * izc[b], 0, 0, 0, *pad],
+                    [-2.0, uvs[c][0] * izc[c], uvs[c][1] * izc[c], 0, 0, 0, *pad],
                 ]]))
 
     if not all_px:
@@ -759,6 +804,7 @@ def try_paint_stage_views(
     plate: bool = True,
     letterbox: bool = True,
     deadline: float | None = None,
+    require_colors: bool = False,
 ) -> list[dict] | None:
     """Paint every requested view in the stage look, or ``None``.
 
@@ -766,6 +812,15 @@ def try_paint_stage_views(
     verbatim: ``None`` — never a partial list, never an exception — means
     "run the next backend"; the caller's angle machinery rides through
     unchanged; a non-hex *color* declines rather than guessing.
+
+    A part that carries its own colours (a painted or multicolour 3MF,
+    whose payload has ``vertex_colors``) is painted in them, by the stage
+    document's rule: the colours sit on a white base, untinted, and a
+    *color* the caller asked for yields to them.  ``require_colors=True``
+    declines when the payload carries none — a caller that knows the part
+    is painted asks for that, because the part in one colour is the wrong
+    picture, and a wrong picture in the stage look is worse than a right
+    one without it.
 
     ``plate=False`` omits the print bed (grid, ember cross, stamp, and the
     contact shadow baked into its texture) so the part floats on the bare
@@ -808,7 +863,18 @@ def try_paint_stage_views(
         loaded = _load_viewer_frame_mesh(file_path)
         if loaded is None:
             return None
-        v, f = loaded
+        v, f, colours = loaded
+        # The stage hands vertex colours to three.js as normalized bytes on
+        # a white base (mesh_viewer.html, modelMaterial), and three reads a
+        # colour attribute as linear, so the bytes are the linear albedo
+        # here too -- no sRGB decode, or the painted part would come out
+        # darker than the photograph of the same file.
+        vertex_albedo = None
+        if colours is not None:
+            vertex_albedo = colours[:, :3].astype(_np.float64) / 255.0
+        elif require_colors:
+            logger.debug("stage paint: %s carries no colours to paint — declining", file_path)
+            return None
 
         c, radius, lo, hi = _bounding_sphere(v)
         v = v - c  # centre the bounding sphere at the orbit target
@@ -906,7 +972,7 @@ def try_paint_stage_views(
                 width=width * ss_int, height=canvas_h,
                 albedo_lin=albedo_lin, floor_y=floor_y,
                 footprint=footprint, fit_radius=radius, fit_size=fit_size,
-                plate_tex_np=plate_tex_np,
+                plate_tex_np=plate_tex_np, vertex_albedo=vertex_albedo,
             )
             if img is None:  # raster budget said no — all or nothing
                 return None
