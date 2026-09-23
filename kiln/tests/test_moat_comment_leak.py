@@ -566,6 +566,9 @@ def test_a_private_word_is_refused_anywhere_once_the_socket_is_plugged() -> None
     assert _private_in("docs/x.md", "Then frobnicate the sprocket.\n", rules)
     assert _private_in("kiln/src/kiln/data/x_end_gcode.gcode", "; frobnicate the gizmo\nM400\n", rules)
     assert _private_in("kiln/src/kiln/x.py", 'NOTE = "frobnicate the gizmo"\n', None) == []
+    # A public gate is waived from the public patterns it spells out, never
+    # from a private word.
+    assert _private_in("scripts/audit_moat_comment_leak.py", 'X = "frobnicate the gizmo"\n', rules)
     # The line reported is the one the phrase starts on.
     leaks, _ = [], None
     saved = list(_GATE._PRIVATE_RULES)

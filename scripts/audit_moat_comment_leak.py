@@ -576,17 +576,13 @@ def _capture_rules() -> tuple[tuple[str, re.Pattern[str]], ...]:
 
 _CAPTURE_RULES = _capture_rules()
 # A cheap superset of the capture rules, so a file that cannot trip them is
-# never read block by block for them: a profile-bundle path or template
-# field name, "flatten", a template field or file, a slicer build (its name
-# and number possibly split by a wrapped comment line), or a research verb
-# together with a date or a command line.  Literal tokens are checked on the
-# lowered text first; a regex runs only where its words are present.
+# never read block by block for them: a profile-bundle path, a slicer build
+# (its name and number possibly split by a wrapped comment line), or a
+# research verb together with a date or a command line.  Literal tokens are
+# checked on the lowered text first; a regex runs only where its words are
+# present.
 _WRAP = r"[\s#:;/*>]+"
-_CAPTURE_LITERALS = (
-    "profiles/", ".app/contents", "machine_start_gcode", "machine_end_gcode", "machine_pause_gcode",
-    "change_filament_gcode", "layer_change_gcode", "time_lapse_gcode", "flatten",
-)
-_TEMPLATE_FIELD = re.compile(r"template" + _WRAP + r"(?:fields?|files?)", re.IGNORECASE)
+_CAPTURE_LITERALS = ("profiles/", ".app/contents", "_gcode.json")
 _SLICER_WORDS = ("studio", "slicer", "cura", "creality")
 _SLICER_BUILD_ANCHOR = re.compile(
     r"(?:Studio|Slicer|Print|Cura)(?:['’]s)?" + _WRAP + r"v?\d{1,2}\.\d{1,2}\.\d", re.IGNORECASE
@@ -602,8 +598,6 @@ _CAPTURE_CONTEXT = re.compile(
 def _may_carry_capture(text: str) -> bool:
     low = text.lower()
     if any(token in low for token in _CAPTURE_LITERALS):
-        return True
-    if "template" in low and _TEMPLATE_FIELD.search(text):
         return True
     if any(word in low for word in _SLICER_WORDS) and _SLICER_BUILD_ANCHOR.search(text):
         return True
@@ -892,6 +886,14 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
     leaks: list[Leak] = []
     dotted: set[str] = set()
     if not _in_scope(rel):
+        # A gate in _SELF spells out the PUBLIC patterns it catches, so it is
+        # waived from them -- never from a private word, which no public file
+        # has a reason to carry.
+        if rel in _SELF:
+            rules = _private_rules_cached()
+            gate_text = _decode(data)
+            if rules is not None and gate_text is not None:
+                leaks.extend((rel, line, "private research", what) for line, what in private_findings(gate_text, rules))
         return leaks, dotted
     text = _decode(data)
     if text is None:
@@ -972,7 +974,7 @@ def scan_file(rel: str, data: bytes, *, broad: bool = False) -> tuple[list[Leak]
     # Never through _ALLOWLIST: a public exception list cannot name what may
     # not be said in public; the reviewed overlap lives with the rules.
     rules = _private_rules_cached()
-    if rules is not None and rel not in _SELF:
+    if rules is not None:
         for line, what in private_findings(text, rules):
             leaks.append((rel, line, "private research", what))
 
