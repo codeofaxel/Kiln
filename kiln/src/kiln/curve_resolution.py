@@ -96,12 +96,13 @@ AGENT_ADVICE = (
 
 # A string or a comment is not code; either may mention "$fn = ...".
 _NOT_CODE_RE = re.compile(r'"(?:\\.|[^"\\])*"|/\*.*?\*/|//[^\n]*', re.S)
-# What the rule can reach: shapes and operations OpenSCAD cuts with
-# $fn/$fa/$fs, code that reads those variables, and library code pulled in
-# by include/use, which this scan cannot see into.
+# What the rule can reach: the shapes and operations OpenSCAD cuts with
+# $fn/$fa/$fs (called, so a variable named ``offset`` does not count), code
+# that reads those variables, and library code pulled in by include/use,
+# which this scan cannot see into.
 _CAN_CURVE_RE = re.compile(
-    r"\b(?:circle|cylinder|sphere|rotate_extrude|text|offset|linear_extrude"
-    r"|include|use)\b|\$f[nas]\b"
+    r"\b(?:circle|cylinder|sphere|rotate_extrude|text|offset|linear_extrude)\s*\("
+    r"|\b(?:include|use)\s*<|\$f[nas]\b"
 )
 _SCAN_RE = re.compile(r"[{}()\[\]]|\$(fn|fa|fs)\s*=(?!=)")
 

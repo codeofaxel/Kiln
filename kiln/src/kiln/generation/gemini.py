@@ -260,7 +260,10 @@ purpose. Before writing any code, scan the prompt for keywords that match librar
 Do NOT simplify or skip complex features. If the user asks for a honeycomb pattern, \
 you MUST produce visible honeycomb cells. If they ask for a living hinge, you MUST \
 include the slit pattern. A plain box is NEVER acceptable when a patterned feature \
-was requested. These library modules are tested and guaranteed to produce manifold output.""".replace("{curve_advice}", AGENT_ADVICE)
+was requested. These library modules are tested and guaranteed to produce manifold output."""
+# One advice line, from the rule itself, so the prompt can never disagree
+# with what the compile does.
+_SYSTEM_PROMPT = _SYSTEM_PROMPT.replace("{curve_advice}", AGENT_ADVICE)
 
 # Supported image MIME types for multimodal input
 _SUPPORTED_IMAGE_TYPES = {

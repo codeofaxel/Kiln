@@ -218,7 +218,8 @@ class _VersionToolsPlugin:
             # Keep the source the part was compiled from: Kiln's engine
             # wrote its curve rule into it, so the kept copy carries it too
             # and rebuild_design makes the same part.
-            scad_source = apply_rule(scad_source)
+            if scad_source:
+                scad_source = apply_rule(scad_source)
 
             from kiln.design_recipe import (
                 create_new_version,
