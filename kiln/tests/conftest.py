@@ -925,6 +925,46 @@ def _isolate_kiln_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_print_watchdog_outlives_its_test(monkeypatch):
+    """Stop every print watchdog a test started when that test ends.
+
+    A watchdog is a daemon thread that polls its printer every few seconds
+    until something stops it, and a test that starts a print through a door
+    that arms one rarely does.  It outlived its test, still polling a fake
+    printer, and filed what that fake said into the outcome ledger above
+    under the fake's name -- a name the next tests reuse.  A fake "workshop"
+    that printed forever reached a later test's ledger between its cancel and
+    its ending, read as a new print starting, and wiped the cancel: a
+    cancelled print recorded a success, once in about forty CI runs, never
+    in isolation.  The same class as the ledger reset: process state one
+    test leaves behind for the next.
+    """
+    from kiln.print_watchdog import PrintWatchdog
+
+    started: list[PrintWatchdog] = []
+    real_start = PrintWatchdog.start
+
+    def start(self):
+        started.append(self)
+        return real_start(self)
+
+    monkeypatch.setattr(PrintWatchdog, "start", start)
+    yield
+    server = sys.modules.get("kiln.server")
+    table = getattr(server, "_print_watchdogs", None)
+    lock = getattr(server, "_print_watchdogs_lock", None) or contextlib.nullcontext()
+    for watchdog in started:
+        watchdog.stop(timeout=1.0)
+        # Filed in the server's table, a stopped watchdog is still what the
+        # next test's print on that name finds there.
+        if isinstance(table, dict):
+            with lock:
+                for name, filed in list(table.items()):
+                    if filed is watchdog:
+                        del table[name]
+
+
+@pytest.fixture(autouse=True)
 def _isolate_daily_stats(tmp_path, monkeypatch):
     """Point telemetry counters at a per-test file, never the real one.
 
