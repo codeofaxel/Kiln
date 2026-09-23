@@ -402,7 +402,7 @@ class TestOrcaArgvWiring:
         seen: dict = {}
 
         def fake_run(cmd, *, timeout, retryable_returncodes,
-                     remove_partial_output, output_is_complete):
+                     remove_partial_output, output_is_complete, cwd=None):
             seen["cmd"] = list(cmd)
             work_dir = cmd[cmd.index("--outputdir") + 1]
             Path(work_dir, "plate_1.gcode").write_text(
@@ -442,7 +442,7 @@ class TestOrcaArgvWiring:
         seen: dict = {}
 
         def fake_run(cmd, *, timeout, retryable_returncodes,
-                     remove_partial_output, output_is_complete):
+                     remove_partial_output, output_is_complete, cwd=None):
             seen["cmd"] = list(cmd)
             work_dir = cmd[cmd.index("--outputdir") + 1]
             Path(work_dir, "plate_1.gcode").write_text(
@@ -507,7 +507,7 @@ class TestPrusaAutoSwitch:
         fake_prusa.chmod(0o755)
 
         def fake_run(cmd, *, timeout, retryable_returncodes,
-                     remove_partial_output, output_is_complete):
+                     remove_partial_output, output_is_complete, cwd=None):
             out = cmd[cmd.index("--output") + 1]
             Path(out).write_text("T0\n; filament used [mm] = 1.0\n")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -536,7 +536,7 @@ class TestPrusaAutoSwitch:
         )
 
         def fake_run(cmd, *, timeout, retryable_returncodes,
-                     remove_partial_output, output_is_complete):
+                     remove_partial_output, output_is_complete, cwd=None):
             out = cmd[cmd.index("--output") + 1]
             Path(out).write_text("T0\n; filament used [mm] = 1.0\n")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -558,7 +558,7 @@ class TestPrusaAutoSwitch:
         threemf = _painted_3mf(tmp_path)
 
         def fake_run(cmd, *, timeout, retryable_returncodes,
-                     remove_partial_output, output_is_complete):
+                     remove_partial_output, output_is_complete, cwd=None):
             out = cmd[cmd.index("--output") + 1]
             Path(out).write_text("T0\n; filament used [mm] = 1.0\n")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
