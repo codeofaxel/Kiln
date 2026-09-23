@@ -713,11 +713,10 @@ class TestHeaderLineSurvivesEveryDoor:
                 fh.write(b"solid kiln\nendsolid kiln\n")
             return SimpleNamespace(returncode=0, stderr="")
 
+        # The provider looks its binary up when it is built, so the stand-in
+        # goes in at that lookup: a machine with no OpenSCAD (CI) runs this too.
         with (
-            patch(
-                "kiln.generation.openscad.OpenSCADProvider._require_binary",
-                return_value="openscad",
-            ),
+            patch("kiln.generation.openscad._find_openscad", return_value="openscad"),
             patch("kiln.generation.openscad.subprocess.run", side_effect=fake_run),
         ):
             stl = compile_scad_code(_SKETCH_SCAD, output_path=str(tmp_path / "plate.stl"))

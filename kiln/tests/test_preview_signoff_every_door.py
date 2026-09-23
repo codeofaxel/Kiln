@@ -717,7 +717,17 @@ class TestAClearanceEndsWithTheCallThatEarnedIt:
         earning a clearance and failing before any adapter spends it."""
         import asyncio
 
-        from mcp.shared.memory import create_connected_server_and_client_session
+        def _in_process_client():
+            """A client wired to ``server.mcp`` in-process, on either SDK major:
+            SDK 2 connects ``Client`` to a server object directly; 1.x has the
+            memory-stream helper that 2.x removed."""
+            try:
+                from mcp import Client
+            except ImportError:
+                from mcp.shared.memory import create_connected_server_and_client_session
+
+                return create_connected_server_and_client_session(server.mcp)
+            return Client(server.mcp)
 
         seen: dict[str, object] = {}
         tools = server.mcp._tool_manager._tools
@@ -738,9 +748,10 @@ class TestAClearanceEndsWithTheCallThatEarnedIt:
         monkeypatch.setattr(tools["donate_info"], "fn", _report)
 
         async def _two_calls() -> None:
-            async with create_connected_server_and_client_session(server.mcp) as client:
+            async with _in_process_client() as client:
                 first = await client.call_tool("license_status", {})
-                assert first.isError, first
+                # SDK 2 names the field is_error; 1.x, isError.
+                assert getattr(first, "is_error", None) or getattr(first, "isError", False), first
                 await client.call_tool("donate_info", {})
 
         asyncio.run(_two_calls())
