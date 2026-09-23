@@ -1,10 +1,33 @@
-"""Re-fit kiln.stage_paint's lighting constants against the real stage.
+"""Check kiln.stage_paint against photographs of the real stage.
 
 Run this whenever ``mesh_viewer.html`` changes its rig (lights, material,
-environment, tone pipeline) and the painter must follow.  It requires a
+environment, composer) and the painter must follow.  It requires a
 machine that can run the photograph backend (chrome-headless-shell + a
 cached stage document) — the whole point is to measure the stage, not to
 guess it.
+
+NOTHING IS FITTED
+-----------------
+The painter's constants are transcriptions of the page and of three r160,
+so this script does not produce constants to paste.  It produces two
+verdicts:
+
+1. PHOTOGRAPH AGAINST PAINTING.  The probe sphere is photographed and
+   painted from the same poses, and both images are read at the same
+   surface points.  The residual is reported per tone band, because the
+   failure this exists to catch is a residual that GROWS WITH TONE: that
+   is what an ACES curve the stage does not apply looked like (the
+   brightest band 45-88 levels dark), and what a highlight tinted by the
+   part's colour looked like.
+
+2. A FREE FIT, as a transcription check.  Each light term's level is
+   fitted against the photographs and reported as a multiple of its
+   transcribed value; every one should land near 1.00.  One that does not
+   names the term whose transcription has drifted from the page.  The fit
+   sees every sample, highlight cores included: the painter's own bloom
+   is captured from its render of the same pose and added in linear light
+   before the tone step, exactly where the composer adds it, so no region
+   has to be masked out.
 
 METHOD (the sphere probe)
 -------------------------
@@ -16,26 +39,11 @@ painter's own camera (:func:`kiln.stage_paint._view_projection`) rather
 than by re-deriving a ray per pixel: the two backends are geometrically
 interchangeable by contract, so the painter's projection is the honest
 way to ask which pixel of the photograph a given surface direction
-landed in, and it cannot drift from the code being fitted.
+landed in, and it cannot drift from the code being checked.
 
-The sphere is photographed from TWO poses.  One from above, which is
-where tops and walls live.  One from BELOW, because the four lights all
-arrive from above and a downward-facing face is lit almost entirely by
-``scene.environment`` — photographing only from above leaves that whole
-regime to the silhouette's grazing samples, and a flat ambient constant
-fitted against them put a bottom view 40 tone levels under the
-photograph.
-
-The painter's shading model is closed-form in its constants, so the fit
-needs no re-rendering: coordinate descent over (key, rim, graze,
-ambient, env, exposure) against the harvested tones, evaluated through
-:func:`kiln.stage_paint._shade` ITSELF — no second copy of the BRDF to
-drift — with the shadow end up-weighted and the two poses weighted
-equally so the smaller down-facing set is not drowned.
-
-Prints the constants to paste into ``stage_paint.py``, then renders a
-probe part through BOTH backends and reports the residual so the paste
-is justified by a number, not a feeling.
+Three poses: one from above (tops and walls), one from BELOW (the four
+lights all arrive from above, so a downward face is lit by
+``scene.environment`` alone), and one from the rim light's side.
 
 Usage:
     python3 kiln/scripts/calibrate_stage_paint.py
@@ -69,8 +77,7 @@ _RADIUS = 45.0
 #: pose the harness reconstructs is the pose the browser actually shot.
 #: ``back`` faces the opposite azimuth because the rim light comes from
 #: -x/-z: photographed only from the front, the rim lights mostly what
-#: the camera cannot see, and its scale wandered over a 0.79..1.06 range
-#: between otherwise identical fits.
+#: the camera cannot see.
 _POSES = {
     "iso": (55.0, 0.0, 25.0),     # elevation +35 — tops and walls
     "under": (155.0, 0.0, 25.0),  # elevation -65 — the down-facing faces
@@ -78,24 +85,11 @@ _POSES = {
 }
 
 #: Surface directions closer to the silhouette than this are dropped: the
-#: photograph's edge pixels are anti-aliased against the backdrop, and a
-#: flat-shaded facet's normal diverges from the analytic one fastest
-#: exactly there.
+#: photograph's edge pixels are anti-aliased against the backdrop.
 _MIN_NDV = 0.25
 
-#: Samples within this many pixels of a bloom SOURCE are dropped.  The
-#: stage's composer runs `UnrealBloomPass(0.45, 0.85, 0.92)` and the
-#: painter models no bloom (it is a screen-space pass, not a per-pixel
-#: term), so near a blown highlight the photograph carries light this
-#: shading model cannot produce: measured as a monotone brightness
-#: -dependent ramp reaching -76/255 at the top of the range, which an
-#: unmasked fit pays for by mis-setting exposure.  0.92 HDR luma is
-#: ~231/255 out of the tone curve, and the halo's lift falls under half
-#: a tone level past ~30 px (measured off the backdrop, 2026-09-22).
-#: The fitted constants are stable to this radius: 15, 30 and 60 px move
-#: them by less than 2%.
-_BLOOM_SOURCE = 231
-_BLOOM_HALO_PX = 30
+_BANDS = (0, 60, 100, 140, 180, 210, 230, 245, 256)
+_LUMA = np.array([0.299, 0.587, 0.114])  # what Pillow's "L" convert uses
 
 
 def _sphere(work: Path) -> str:
@@ -123,6 +117,29 @@ def _photograph(stl: str, label: str, out: Path) -> str:
     )
 
 
+def _paint(stl: str, label: str, out: Path):
+    """The painter's still of *label*, and the bloom field it added."""
+    captured = {}
+    real = sp._unreal_bloom
+
+    def spy(hdr, device_size):
+        bloom = real(hdr, device_size)
+        captured["bloom"] = bloom
+        return bloom
+
+    sp._unreal_bloom = spy
+    try:
+        painted = sp.try_paint_stage_views(
+            stl, [(label, label)], {label: _POSES[label]},
+            output_dir=str(out), width=_W, height=_H,
+        )
+    finally:
+        sp._unreal_bloom = real
+    if not painted:
+        raise SystemExit(f"the painter declined {label}")
+    return painted[0]["path"], captured.get("bloom")
+
+
 def _sample_directions(count: int) -> np.ndarray:
     """A Fibonacci sphere — even coverage, no pole clustering."""
     i = np.arange(count) + 0.5
@@ -132,43 +149,27 @@ def _sample_directions(count: int) -> np.ndarray:
     return np.stack([r * np.cos(phi), y, r * np.sin(phi)], axis=1)
 
 
-def _bilinear(grey: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-    h, w = grey.shape
+def _bilinear(img: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    h, w = img.shape[:2]
     x = np.clip(x, 0, w - 1.001)
     y = np.clip(y, 0, h - 1.001)
     x0, y0 = x.astype(np.int64), y.astype(np.int64)
     tx, ty = x - x0, y - y0
-    top = grey[y0, x0] * (1 - tx) + grey[y0, x0 + 1] * tx
-    bot = grey[y0 + 1, x0] * (1 - tx) + grey[y0 + 1, x0 + 1] * tx
+    if img.ndim == 3:
+        tx, ty = tx[:, None], ty[:, None]
+    top = img[y0, x0] * (1 - tx) + img[y0, x0 + 1] * tx
+    bot = img[y0 + 1, x0] * (1 - tx) + img[y0 + 1, x0 + 1] * tx
     return top * (1 - ty) + bot * ty
 
 
-def _bloom_halo(grey: np.ndarray) -> np.ndarray:
-    """True where the composer's bloom can reach (see ``_BLOOM_HALO_PX``).
-
-    A box dilation of the blown pixels, run through Pillow's max filter
-    rather than a distance transform so the harness needs nothing Kiln
-    does not already depend on.
-    """
-    from PIL import Image as _Image
-    from PIL import ImageFilter
-
-    src = _Image.fromarray(((grey > _BLOOM_SOURCE) * 255).astype(np.uint8))
-    # MaxFilter caps its kernel, so widen in passes rather than one jump.
-    step, grown = 9, src
-    for _ in range((2 * _BLOOM_HALO_PX) // (step - 1)):
-        grown = grown.filter(ImageFilter.MaxFilter(step))
-    return np.asarray(grown) > 0
-
-
-def _harvest(png: str, label: str):
-    """``(normals, views, tones)`` for one photographed pose.
+def _samples(label: str):
+    """``(normals, views, x_out, y_out, x_int, y_int)`` for one pose.
 
     The sphere the painter draws is centred on the orbit target with
     radius ``_RADIUS`` (``try_paint_stage_views`` subtracts the bounding
     -sphere centre), so a surface direction *u* is the point ``R*u`` and
-    its own normal.  Project it through the painter's camera and read the
-    photograph where it landed.
+    its own normal.  Projected through the painter's camera at its
+    internal resolution, then scaled to the output still.
     """
     az, el = _openscad_rotation_to_orbit(_POSES[label][0], _POSES[label][2])
     # The painter's internal frame, its own arithmetic (see
@@ -192,157 +193,108 @@ def _harvest(png: str, label: str):
 
     px, py, _pz = project(pts)
     x, y = px / ss_int, py / ss_int  # the letterbox pastes the canvas at (0,0)
-    grey = np.asarray(Image.open(png).convert("L"), float)
     inside = (x > 1) & (x < _W - 2) & (y > 1) & (y < _H - sp._FOOTER_PX - 2)
-    n, view, x, y = n[inside], view[inside], x[inside], y[inside]
-    clear = ~_bloom_halo(grey)[y.astype(int), x.astype(int)]
-    return n[clear], view[clear], _bilinear(grey, x[clear], y[clear])
+    return n[inside], view[inside], x[inside], y[inside], px[inside], py[inside]
 
 
-#: ``_EXPOSURE`` is NOT fitted, and must not be: it multiplies the whole
-#: accumulator just before the tone curve, so scaling it is
-#: indistinguishable from scaling (_AMBIENT, _ENV_SCALE, _LIGHT_SCALES)
-#: together — exactly redundant, not merely correlated.  Fitting both
-#: left the search wandering a flat valley and returning a different
-#: answer per run.  It is held at its shipped value and the other five
-#: carry the level; nothing is lost, because the redundancy is exact.
-_EXPOSURE = 0.708
+def _tone(path: str, x, y) -> np.ndarray:
+    """Luma at continuous image coordinates (a pixel's centre is at +0.5)."""
+    rgb = np.asarray(Image.open(path).convert("RGB"), float)
+    return _bilinear(rgb, x - 0.5, y - 0.5) @ _LUMA
 
 
-def _set_constants(p) -> None:
-    ks, rs, gs, amb, env = p
-    sp._LIGHT_SCALES = (ks, rs, gs, gs)
-    sp._AMBIENT = amb
-    sp._ENV_SCALE = env
-    sp._EXPOSURE = _EXPOSURE
+def _band_report(label: str, got: np.ndarray, ref: np.ndarray) -> float:
+    """Print the residual per tone band; return the worst band's |mean|."""
+    cells, worst = [], 0.0
+    for lo, hi in zip(_BANDS[:-1], _BANDS[1:], strict=True):
+        sel = (ref >= lo) & (ref < hi)
+        if sel.sum() >= 30:
+            mean = float((got[sel] - ref[sel]).mean())
+            worst = max(worst, abs(mean))
+            cells.append(f"{lo}-{hi}: {mean:+.1f}")
+    print(f"  {label}: mean {np.mean(got - ref):+.2f}, abs {np.mean(np.abs(got - ref)):.2f} | "
+          + "  ".join(cells))
+    return worst
 
 
-_LUMA = np.array([0.299, 0.587, 0.114])  # what Pillow's "L" convert uses
+# The fitted terms, as multiples of their transcriptions.
+_TERMS = ("key", "rim", "graze", "ambient", "env")
 
 
-def _model_tone(p, albedo, n, v):
-    """The painter's OWN shader at trial constants — never a copy of it."""
-    _set_constants(p)
-    return sp._shade(albedo, n, v).astype(float) @ _LUMA
+def _apply(p) -> None:
+    key, rim, graze, ambient, env = p
+    base = _TRANSCRIBED
+    lights = list(base["lights"])
+    for i, scale in enumerate((key, rim, graze, graze)):
+        direction, colour, intensity = lights[i]
+        lights[i] = (direction, colour, intensity * scale)
+    sp._LIGHTS = tuple(lights)
+    sp._AMBIENT = (base["ambient"][0], base["ambient"][1] * ambient)
+    sp._ENV_INTENSITY = base["env"] * env
 
 
-_LO = [0.0, 0.0, 0.0, 0.0, 0.0]
-_HI = [3.0, 3.0, 3.0, 1.0, 6.0]
-#: Several starts, best kept: coordinate descent on five correlated
-#: scales can settle in a shallow side minimum, and a calibration that
-#: depends on where it was started is not a measurement.
-_STARTS = (
-    [0.60, 2.00, 0.23, 0.05, 1.30],
-    [0.20, 0.80, 0.30, 0.13, 1.60],
-    [1.00, 0.30, 0.10, 0.20, 0.80],
-    [0.40, 1.20, 0.40, 0.02, 2.20],
-)
+_TRANSCRIBED = {"lights": sp._LIGHTS, "ambient": sp._AMBIENT, "env": sp._ENV_INTENSITY}
 
 
-def _descend(err, p):
-    steps = [0.2, 0.2, 0.15, 0.04, 0.3]
+def _model_tone(p, albedo, n, v, bloom):
+    """The painter's OWN shader and tone step at trial levels."""
+    _apply(p)
+    lin = sp._shade(albedo, n, v) + bloom
+    return sp._linear_to_srgb(lin) * 255.0 @ _LUMA
+
+
+def _fit(albedo, chunks):
+    """Coordinate descent from the transcription, every sample weighted."""
+    def err(p):
+        return float(np.mean([
+            np.abs(_model_tone(p, albedo, n, v, b) - t).mean() for n, v, b, t in chunks
+        ]))
+
+    p = [1.0] * len(_TERMS)
     best = err(p)
-    for it in range(6000):
-        i = it % 5
+    steps = [0.1] * len(_TERMS)
+    for it in range(60 * len(_TERMS)):
+        i = it % len(_TERMS)
         for sign in (1, -1):
             q = list(p)
-            q[i] = min(_HI[i], max(_LO[i], q[i] + sign * steps[i]))
+            q[i] = max(0.0, q[i] + sign * steps[i])
             e = err(q)
             if e < best:
                 best, p = e, q
-        if it % 5 == 4:
-            steps = [max(s * 0.97, 0.0008) for s in steps]
+        if i == len(_TERMS) - 1:
+            steps = [max(s * 0.8, 0.002) for s in steps]
+    _apply([1.0] * len(_TERMS))
     return p, best
-
-
-def _fit(albedo, n, v, tone, weight):
-    def err(p):
-        return float((np.abs(_model_tone(p, albedo, n, v) - tone) * weight).mean())
-
-    runs = sorted((_descend(err, list(s)) for s in _STARTS), key=lambda r: r[1])
-    spread = runs[-1][1] - runs[0][1]
-    if spread > 0.05:
-        print(f"  note: starts disagreed by {spread:.3f}/255 — best kept")
-    return runs[0]
-
-
-def _both_backends(stl: str, work: Path, p) -> list[tuple[str, float, float]]:
-    """Mean model tone from the photograph and from the painter, per pose."""
-    _set_constants(p)
-    rows = []
-    for label in _POSES:
-        rot = _POSES[label]
-        shot = _photograph(stl, label, work / "verify_shot")
-        painted = sp.try_paint_stage_views(
-            stl, [(label, label)], {label: rot},
-            output_dir=str(work / "verify_paint"), width=_W, height=_H,
-        )
-        if not painted:
-            raise SystemExit(f"the painter declined {label}")
-        means = []
-        for path in (shot, painted[0]["path"]):
-            a = np.asarray(Image.open(path).convert("RGB"), float)
-            model = np.abs(a - np.array(sp._BG, float)).sum(axis=2) > 60
-            means.append(float(a.mean(axis=2)[model].mean()))
-        rows.append((label, means[0], means[1]))
-    return rows
 
 
 def main() -> None:
     work = Path(tempfile.mkdtemp(prefix="kiln_stage_calib_"))
     stl = _sphere(work)
-
     albedo = sp._srgb_to_linear(
         np.array([int(sp._MODEL_COLOR.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)])
         / 255.0
     )
 
-    chunks = []
-    for label in _POSES:
-        png = _photograph(stl, label, work / "harvest")
-        n, v, tone = _harvest(png, label)
-        print(f"{label}: {len(n)} samples, tone {tone.min():.0f}..{tone.max():.0f}")
-        chunks.append((n, v, tone))
-
-    # Thin to a fit-sized set: six parameters do not need 400k samples,
-    # and the coordinate descent below evaluates the real shader.
+    print("photograph against painting, residual (painter - photograph) per tone band:")
     rng = np.random.default_rng(0)
-    n, v, tone, weight = [], [], [], []
-    for cn, cv, ct in chunks:
-        take = rng.choice(len(cn), size=min(6000, len(cn)), replace=False)
-        n.append(cn[take])
-        v.append(cv[take])
-        tone.append(ct[take])
-        # Equal weight per POSE (the down-facing set is the smaller one and
-        # must not be drowned), and the shadow end up-weighted inside it:
-        # deep pockets on carved text extrapolate from the darkest samples,
-        # and an unweighted fit let them go black while every mean looked
-        # right.
-        w = 1.0 + 2.0 * (ct[take] < 140)
-        weight.append(w / w.mean() / len(chunks))
-    n = np.vstack(n)
-    v = np.vstack(v)
-    tone = np.concatenate(tone)
-    weight = np.concatenate(weight)
+    chunks, worst = [], 0.0
+    for label in _POSES:
+        shot = _photograph(stl, label, work / "shot")
+        painted, bloom = _paint(stl, label, work / "paint")
+        n, v, x, y, xi, yi = _samples(label)
+        ref = _tone(shot, x, y)
+        worst = max(worst, _band_report(label, _tone(painted, x, y), ref))
+        lift = (np.zeros((len(n), 3)) if bloom is None
+                else _bilinear(bloom.astype(np.float64), xi - 0.5, yi - 0.5))
+        take = rng.choice(len(n), size=min(6000, len(n)), replace=False)
+        chunks.append((n[take], v[take], lift[take], ref[take]))
+    print(f"worst band: {worst:.1f} tone levels")
 
-    p, best = _fit(albedo, n, v, tone, weight)
-    ks, rs, gs, amb, env = p
-    print(f"weighted tone err: {best:.2f}/255 over {len(n)} samples")
-    for (cn, cv, ct), label in zip(chunks, _POSES, strict=True):
-        resid = _model_tone(p, albedo, cn, cv) - ct
-        print(f"  {label}: mean {resid.mean():+.2f}, "
-              f"abs {np.abs(resid).mean():.2f}, p95 {np.percentile(np.abs(resid), 95):.2f}")
-
-    print("paste into kiln/src/kiln/stage_paint.py:")
-    print(f"  _LIGHT_SCALES = ({ks:.3f}, {rs:.3f}, {gs:.3f}, {gs:.3f})")
-    print(f"  _AMBIENT = {amb:.3f}")
-    print(f"  _ENV_SCALE = {env:.3f}")
-    print(f"  (_EXPOSURE stays {_EXPOSURE} — see _set_constants)")
-
-    print("both backends on the probe sphere (mean model tone):")
-    for label, shot_mean, paint_mean in _both_backends(stl, work, p):
-        print(f"  {label}: photograph {shot_mean:6.1f}  painter {paint_mean:6.1f}  "
-              f"delta {paint_mean - shot_mean:+.1f}")
+    p, best = _fit(albedo, chunks)
+    print(f"free fit, every sample (mean abs {best:.2f}/255); each term as a multiple "
+          "of its transcription -- all should sit near 1.00:")
+    for name, value in zip(_TERMS, p, strict=True):
+        print(f"  {name:8s} x{value:.3f}")
 
 
 if __name__ == "__main__":

@@ -205,23 +205,19 @@ def test_model_tone_matches_the_recorded_reference(
     probe: str, tmp_path: Path
 ) -> None:
     """Reference (browser photograph, same probe, same pose): model-region
-    mean 199.3, silhouette 553x361 at 800x600.  The painter measured
-    189.4 when the environment term was fitted in (2026-09-22,
-    kiln/scripts/calibrate_stage_paint.py); wide-ish tolerances absorb
-    platform float noise, not a lighting regression.
+    mean 199.3, silhouette 553x361 at 800x600.  The painter measures
+    201.1 (2026-09-23): every term of the stage's shading transcribed,
+    nothing fitted, the environment blurred the way three's PMREM blurs it.
 
-    The ~10 under the photograph is the composer's bloom, which this
-    backend does not model — an isometric view of this probe is nearly
-    all bright top face, the one regime where the halo lands.  The
-    previous calibration sat ON 199 here by running the whole rig hot
-    enough to stand in for bloom, which is what put a BOTTOM view 42
-    tone levels under the photograph: no light in that fit reached a
-    downward face at all.  Matching here by that route is the bug, not
-    the pin — see test_downward_faces_match_the_recorded_reference."""
+    It read 189.4 before, under a tone curve the stage does not apply and
+    environment integrals three does not compute, and an older fit sat on
+    199 only by running the whole rig hot -- which put a BOTTOM view 42
+    tone levels under the photograph.  Matching here by that route is the
+    bug, not the pin; see test_downward_faces_match_the_recorded_reference."""
     a = _img(_render(probe, tmp_path))
     grey = a.mean(axis=2)
     model = grey > 90
-    assert abs(float(grey[model].mean()) - 189.4) < 10.0
+    assert abs(float(grey[model].mean()) - 199.3) < 4.0
     dist = np.abs(a - np.array(_BG, float)).sum(axis=2) > 120
     ys, xs = np.nonzero(dist)
     assert abs((xs.max() - xs.min()) - 553) <= 6
@@ -288,8 +284,10 @@ def test_the_environment_is_brightest_overhead_and_lit_underneath() -> None:
     assert up > horizon > down > 0.0, (up, horizon, down)
     assert up / down > 3.0, f"too flat to be the gradient: {up / down:.2f}"
     # Underneath, the environment is the only light there is: it must be
-    # worth at least as much as the flat ambient beside it.
-    assert stage_paint._ENV_SCALE * down > 0.5 * stage_paint._AMBIENT
+    # worth at least half the flat ambient beside it, which three spreads
+    # through the Lambert BRDF's 1/PI.
+    _colour, ambient = stage_paint._AMBIENT
+    assert stage_paint._ENV_INTENSITY * down > 0.5 * ambient / np.pi
 
 
 def test_hidden_surfaces_resolve_the_notch_stays_visible(
@@ -1023,3 +1021,144 @@ def test_a_fan_past_the_crease_budget_declines(
     like one past the face cap — never a half-shaded picture."""
     monkeypatch.setattr(stage_paint, "_CREASE_MAX_PAIRS", 10)
     assert _render(probe, tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# The bright end — tone, highlights and bloom, as the stage renders them
+# ---------------------------------------------------------------------------
+#
+# References are browser photographs of the same parts at the same poses,
+# measured the same way (2026-09-23, chrome-headless-shell 1217, three r160
+# with its 0.161 postprocessing addons).  Until then the painter ran ACES
+# over a fitted rig -- a curve the stage does not apply, which flattened
+# every highlight -- tinted its highlights by the part's colour, and had no
+# bloom.  Each docstring gives the number it read then.
+
+
+def _paint(src: str, tmp_path: Path, label: str, rot) -> np.ndarray:
+    views = try_paint_stage_views(
+        src, [(label, label)], {label: rot},
+        output_dir=str(tmp_path / label), width=800, height=600,
+    )
+    return _img(views)
+
+
+def test_the_brightest_tones_reach_the_photographs(probe: str, tmp_path: Path) -> None:
+    """The top of the tone range is the photograph's, not a filmic shoulder.
+
+    The stage's composer ends in OutputPass with the renderer's tone
+    mapping off, so the screen gets the plain sRGB encoding of the linear
+    frame.  The probe's brightest percentile: 212.0 photographed, 196.7
+    under the old ACES curve."""
+    a = _img(_render(probe, tmp_path))
+    grey = a.mean(axis=2)
+    top = float(np.percentile(grey[_model_mask(a)], 99))
+    assert abs(top - 212.0) < 4.0, f"brightest percentile {top:.1f}, photograph 212.0"
+
+
+def test_a_round_walls_highlight_stands_as_proud_as_the_photographs(tmp_path: Path) -> None:
+    """A curved wall's highlight is as strong as the stage's.
+
+    The direct specular is added beside the diffuse, never scaled by the
+    part's albedo, and keeps the PI it has over the Lambert term.  A
+    60-gon (r 20, h 40) from low down: across the wall, the brightest
+    tone stands 25.4 above the median in the photograph; 15.1 before."""
+    trimesh = pytest.importorskip("trimesh")
+    cyl = trimesh.creation.cylinder(radius=20, height=40, sections=60)
+    cyl.apply_translation([0, 0, 20])
+    src = tmp_path / "cyl60.stl"
+    cyl.export(src)
+    a = _paint(str(src), tmp_path, "low", (100.0, 0.0, 20.0))
+    grey = a.mean(axis=2)
+    wall = _model_mask(a)
+    ys, _xs = np.nonzero(wall)
+    mid = int(np.median(ys))
+    band = slice(mid - 25, mid + 25)
+    cols = np.nonzero(wall[band].all(axis=0))[0]
+    profile = grey[band, cols.min() + 10:cols.max() - 10].mean(axis=0)
+    lift = float(profile.max() - np.median(profile))
+    assert abs(lift - 25.4) < 3.0, f"highlight lift {lift:.1f}, photograph 25.4"
+
+
+def test_a_highlight_on_a_painted_part_is_white_not_the_parts_colour(
+    painted_cube: str, tmp_path: Path
+) -> None:
+    """A red face catches a WHITE highlight, as the stage draws it.
+
+    Seen from the key light's mirror direction the cube's red top carries
+    the light's highlight; three adds it untinted, so the face's green
+    channel lifts under it.  Median green over the red face: 136
+    photographed; 100 when the highlight was multiplied by the red."""
+    a = _paint(painted_cube, tmp_path, "mirror", (35.3, 0.0, -135.0))
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    red = (r > 90) & (r > g + 20) & (r > b + 20)
+    assert red.sum() > 50_000, "the red top is not in view"
+    got = float(np.median(g[red]))
+    assert abs(got - 136.0) < 6.0, f"median green on the red face {got:.0f}, photograph 136"
+
+
+def test_a_blown_highlight_lifts_the_backdrop_as_the_photograph_does(tmp_path: Path) -> None:
+    """The composer's bloom halo, measured where nothing else can lift it.
+
+    From underneath there is no plate, so beside a sphere the backdrop is
+    bare and anything above ``_BG`` is bloom spilling from the rim's blown
+    highlights.  Mean lift in rings 4-8 / 8-16 / 16-32 px out: 0.61 /
+    0.55 / 0.40 photographed; nothing at all without the bloom pass."""
+    from PIL import ImageFilter
+
+    trimesh = pytest.importorskip("trimesh")
+    sph = trimesh.creation.icosphere(subdivisions=5, radius=45.0)
+    sph.apply_translation([0, 0, 45.0])
+    src = tmp_path / "sphere.stl"
+    sph.export(src)
+    a = _paint(str(src), tmp_path, "under", (155.0, 0.0, 25.0))
+    part = (np.abs(a - np.array(_BG, float)) > 2).any(axis=2)
+    lift = (a - np.array(_BG, float)).mean(axis=2)
+
+    def grown(px: int) -> np.ndarray:
+        img = Image.fromarray((part * 255).astype(np.uint8))
+        return np.asarray(img.filter(ImageFilter.MaxFilter(2 * px + 1))) > 0
+
+    for (inner, outer), want in (((4, 8), 0.61), ((8, 16), 0.55), ((16, 32), 0.40)):
+        ring = grown(outer) & ~grown(inner)
+        ring[-30:] = False  # the footer strip is page, not canvas
+        got = float(lift[ring].mean())
+        assert abs(got - want) < 0.2, f"ring {inner}-{outer} px lifts {got:.2f}, photograph {want}"
+
+
+#: three's own UnrealBloomPass + OutputPass on a known frame: the page's
+#: vendored three.js run in chrome-headless-shell 1217 on a 1600x1144
+#: canvas (an 800x600 still's device frame), the backdrop at ``_BG``
+#: with pixel-aligned squares of linear grey.  Per square: (x, y, w, h,
+#: linear value) and the green channel's lift over the backdrop along
+#: the square's middle row, 0/2/4/8/16/32/64/128 px right of its edge.
+_THREE_BLOOM = (
+    ((300, 200, 8, 8, 4.0), (221, 117, 83, 48, 28, 12, 3, 2)),
+    ((900, 300, 120, 80, 1.2), (221, 155, 141, 124, 101, 76, 45, 22)),
+    ((500, 700, 40, 40, 0.95), (221, 107, 93, 75, 52, 33, 14, 8)),
+    ((1200, 800, 4, 4, 20.0), (221, 182, 124, 59, 40, 15, 5, 2)),
+)
+
+
+def test_bloom_is_threes_own_pass() -> None:
+    """The port reproduces three's pass to a byte on the frame three ran.
+
+    Threshold, soft knee, the five-mip blur chain, the radius-lerped
+    composite and the additive blend -- including the blend's quirk of
+    weighting the composite by its own alpha, 1.35 here, which a port
+    reading the shaders alone would miss."""
+    stage_paint._deps()
+    w, h = 1600, 1144
+    bg = stage_paint._srgb_to_linear(np.array(_BG, float) / 255.0)
+    frame = np.empty((h, w, 3), np.float32)
+    frame[:] = bg
+    for (x, y, sw, sh, value), _want in _THREE_BLOOM:
+        frame[y:y + sh, x:x + sw] = value
+    out = stage_paint._develop(frame, (w, h)).astype(float)
+    for (x, y, sw, sh, value), want in _THREE_BLOOM:
+        row = y + sh // 2
+        edge = x + sw - 1
+        got = [out[row, edge + d, 1] - _BG[1] for d in (0, 2, 4, 8, 16, 32, 64, 128)]
+        assert np.abs(np.array(got) - np.array(want)).max() <= 1, (
+            f"{sw}x{sh} at {value}: {got} against three's {list(want)}"
+        )

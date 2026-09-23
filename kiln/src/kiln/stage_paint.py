@@ -48,26 +48,40 @@ it means "give me the OpenSCAD look", not "avoid browsers".
 
 WHAT IS APPROXIMATED, HONESTLY
 ------------------------------
-No bloom pass.  The stage's composer runs an UnrealBloomPass and this
-does not: bloom is a screen-space blur of the blown highlights added
-back over the frame, not a per-pixel shading term, so it shows up here
-as the brightest faces reading a little darker than the photograph's
-(measured 2026-09-22: agreement within a few tone levels up to ~180/255,
-falling behind above it).  The calibration masks the halo out rather
-than paying for it with the constants everything else depends on.
+Nothing in the light rig is fitted.  The stage renders with three r160,
+whose units ARE pixel units once you follow its pipeline to the end:
+a light hands the shader ``color * intensity`` (no PI, the page leaves
+``useLegacyLights`` off), the material is MeshPhysicalMaterial's own
+lobe, and the frame is NOT tone-mapped.  With the bloom composer
+present the page sets ``renderer.toneMapping = NoToneMapping``, and
+three's OutputPass tone-maps only when the renderer does -- so the
+screen gets the sRGB encoding of the linear sum, clipped at white.
+Until 2026-09-23 this module ran ACES there and fitted its light
+levels to make up the difference, which flattened every highlight
+(measured on the sphere probe: the brightest tone band 45-88 levels
+under the photograph; the transcription below is within 2.5 in every
+band).  ``kiln/scripts/calibrate_stage_paint.py`` photographs the stage
+and checks the transcription; re-run it whenever the stage document's
+rig changes.
 
-The light rig's OUTPUT levels are fitted rather than transcribed: the
-_LIGHTS intensities and the environment's intensity are three.js
--internal units that do not survive three's physically-scaled pipeline
-into pixel values, so _LIGHT_SCALES / _AMBIENT / _ENV_SCALE / _EXPOSURE
-are measured off real photographs by
-``kiln/scripts/calibrate_stage_paint.py`` -- the sphere-probe method
-documented there; re-run it whenever the stage document's rig changes.
-The environment gradient's SHAPE is transcribed like everything else,
-and its two convolutions (diffuse and specular) are three's own.  The
-BRDF itself is not approximated: real GGX
-with Schlick Fresnel and Smith visibility, the MeshPhysicalMaterial's
-own lobe.  Shading normals are the stage's own too: it creases every
+The rest of the frame is three's too: the environment through the
+generator's own PMREM blur chain (:func:`_build_env_tables`), the
+shader's specular anti-aliasing (:func:`_geometry_roughness`), and the
+composer's UnrealBloomPass (:func:`_unreal_bloom`), which reproduces
+three's pass to a byte on a frame three ran.
+
+What remains approximate: PMREM runs on a lat-long grid rather than
+cube faces, and the equirect's mip-mapped sampling on the way into the
+cube is left out (it dims the zenith about 1% after the blur); the frame
+is supersampled where the browser multisamples.  Together the painter
+reads about 2% brighter than the stage on lit faces -- invisible in a
+tone, but bloom has a hard threshold: a WHITE part whose lit faces sit
+right at it glows several times as much as the photograph (the painted
+jar's rim, 2026-09-23; the same frame 2% dimmer glows exactly as the
+photograph does).  The environment gradient's SHAPE is
+transcribed like everything else.  The BRDF itself is not approximated:
+GGX, three's Schlick Fresnel, height-correlated Smith visibility.
+Shading normals are the stage's own too: it creases every
 payload that ships none (three's toCreasedNormals at 30 degrees), and so
 does :func:`_creased_normals`, corner for corner.  Hidden
 surfaces are resolved by a true z-buffer with perspective-correct
@@ -117,13 +131,16 @@ _CREASE_HASH = (1 + 1e-10) * 1e2
 # (10, 20, 10), rim `0xd8e1ff @ 0.5` from (-15, 8, -10), graze
 # `0xffffff @ 0.75` from (16, 6, 1.5), counter-graze `0xffffff @ 0.5`
 # from (-16, 6, 1.5).  Positions are directions (normalized in-scene).
-_AMBIENT = 0.110  # fitted: the transcribed 0.35 is a three-internal unit
+# Colours stay as the page writes them: three reads a hex colour as sRGB
+# and decodes it to linear (:func:`_hex_linear`), which is what tints the
+# rim as blue as it is.
+_AMBIENT = (0xFFFFFF, 0.35)
 _LIGHTS = (
-    # (direction xyz, color rgb 0..1, intensity)
-    ((10.0, 20.0, 10.0), (1.0, 0xF7 / 0xFF, 0xEE / 0xFF), 1.0),
-    ((-15.0, 8.0, -10.0), (0xD8 / 0xFF, 0xE1 / 0xFF, 1.0), 0.5),
-    ((16.0, 6.0, 1.5), (1.0, 1.0, 1.0), 0.75),
-    ((-16.0, 6.0, 1.5), (1.0, 1.0, 1.0), 0.5),
+    # (direction xyz, colour, intensity)
+    ((10.0, 20.0, 10.0), 0xFFF7EE, 1.0),
+    ((-15.0, 8.0, -10.0), 0xD8E1FF, 0.5),
+    ((16.0, 6.0, 1.5), 0xFFFFFF, 0.75),
+    ((-16.0, 6.0, 1.5), 0xFFFFFF, 0.5),
 )
 
 # Environment: `scene.environment = buildEnvMap(renderer)` — "a
@@ -145,6 +162,29 @@ _ENV_STOPS = (
     (0.78, (150, 152, 158)),  # ~50 deg up
     (1.00, (255, 255, 255)),  # straight up
 )
+_ENV_CANVAS_W = 256  # buildEnvMap: `cv.width = 256`
+
+# PMREM: `new THREE.PMREMGenerator(r).fromEquirectangular(equirect)`, the
+# generator of three r160 as vendored.  It sizes its cube at a quarter of
+# the texture's width (`_setSize(texture.image.width / 4)`); the rest is
+# its own: LOD_MIN 4, EXTRA_LOD_SIGMA, MAX_SAMPLES 20, and the ten pole
+# axes it cycles its blurs through.
+_PMREM_LOD_MIN = 4
+_PMREM_EXTRA_SIGMA = (0.125, 0.215, 0.35, 0.446, 0.526, 0.582)
+_PMREM_MAX_SAMPLES = 20
+_PHI = (1.0 + math.sqrt(5.0)) / 2.0
+_PMREM_AXES = (
+    (1.0, 1.0, 1.0), (-1.0, 1.0, 1.0), (1.0, 1.0, -1.0), (-1.0, 1.0, -1.0),
+    (0.0, _PHI, 1.0 / _PHI), (0.0, _PHI, -1.0 / _PHI),
+    (1.0 / _PHI, 0.0, _PHI), (-1.0 / _PHI, 0.0, _PHI),
+    (_PHI, 1.0 / _PHI, 0.0), (-_PHI, 1.0 / _PHI, 0.0),
+)
+# textureCubeUV's roughness -> mip knots (`cubeUV_r0/m0` .. `cubeUV_r6/m6`).
+_CUBEUV_KNOTS = ((1.0, -2.0), (0.8, -1.0), (0.4, 2.0), (0.305, 3.0), (0.21, 4.0))
+#: The lat-long grid the blur chain runs on.  128 x 64 lands within
+#: 0.002 (linear) of a 512 x 256 run at a sixteenth of the cost -- under a
+#: quarter of a tone level -- so finer buys nothing a PNG can show.
+_PMREM_GRID = (128, 64)
 
 # Camera: `PerspectiveCamera(35, ...)`; still framing
 # `orbit.fitRadius * (STILL.dist_factor || 3.4)` clamped to the orbit
@@ -183,38 +223,26 @@ _MAX_FACES = 600_000
 
 _OPT_OUT_ENV = "KILN_NO_STAGE_STILLS"
 
-# Exposure trim: the browser still is tone-mapped by three's OutputPass;
-# this scalar is the one fitted constant (calibrated against reference
-# stills of the probe cube, see test_stage_paint) rather than a
-# transcription.  It absorbs the difference between three's light-unit
-# conventions and the plain N·L sum below.
-_EXPOSURE = 0.708
-
 _METALNESS = 0.05  # MeshPhysicalMaterial metalness, transcribed
 
-#: Per-light output scales (key, rim, graze, counter-graze), fitted the
-#: same way.  The _LIGHTS intensities are transcribed three.js-internal
-#: units; three's physically-scaled pipeline does not sum them the way a
-#: plain N-dot-L does, and the visible casualty was WALL tone: the
-#: grazes arrive near-horizontal, a naive sum let them flood every
-#: vertical wall, and carved text lost the wall/top contrast that makes
-#: it read (Adam: "significantly less crispy").  Fitted so wall and top
-#: tones both match the photograph.  They dropped sharply on 2026-09-22
-#: (from 0.601 / 1.970 / 0.234) when the environment term arrived: the
-#: old rig had been standing in for the environment's light, the rim
-#: most of all, and with the real term in place it no longer has to.
-#: Carved-text contrast came out CLOSER to the photograph for it
-#: (wall high-pass 10.4 against the photograph's 10.4, was 11.3).
-_LIGHT_SCALES = (0.170, 0.063, 0.271, 0.271)
+#: `envMapIntensity`: MeshPhysicalMaterial's default, which the page
+#: never sets.
+_ENV_INTENSITY = 1.0
 
-#: Environment-map intensity, fitted the same way.  three's
-#: `MeshPhysicalMaterial` defaults `envMapIntensity` to 1 and its
-#: indirect diffuse is `envColor * albedo` with NO 1/PI, while the
-#: painter's direct terms carry three's light-unit conversion inside
-#: _LIGHT_SCALES and _EXPOSURE -- so the honest expectation here is
-#: 1 / _EXPOSURE ~= 1.4, not 1.0, and landing near it is the
-#: transcription checking itself.
-_ENV_SCALE = 1.502
+# Bloom: `composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(w,
+# h), BLOOM_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD))` with
+# `BLOOM_STRENGTH = 0.45, BLOOM_RADIUS = 0.85, BLOOM_THRESHOLD = 0.92`
+# (a still never runs the reveal, so its pulse never adds to strength).
+# The rest is the pass's own, from the vendored UnrealBloomPass.js: the
+# high pass's `smoothWidth` 0.01, five mips with `kernelSizeArray = [3,
+# 5, 7, 9, 11]`, and `bloomFactors = [1.0, 0.8, 0.6, 0.4, 0.2]`.
+_BLOOM_STRENGTH = 0.45
+_BLOOM_RADIUS = 0.85
+_BLOOM_THRESHOLD = 0.92
+_BLOOM_SMOOTH_WIDTH = 0.01
+_BLOOM_KERNELS = (3, 5, 7, 9, 11)
+_BLOOM_FACTORS = (1.0, 0.8, 0.6, 0.4, 0.2)
+_LUMA = (0.299, 0.587, 0.114)  # LuminosityHighPassShader's weights
 
 
 def _srgb_to_linear(c: np.ndarray) -> np.ndarray:  # noqa: F821
@@ -226,7 +254,13 @@ def _linear_to_srgb(c: np.ndarray) -> np.ndarray:  # noqa: F821
     return _np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055)
 
 
-#: ``(diffuse, specular)`` lookup tables, built once on first paint.
+def _hex_linear(value: int):
+    """A hex colour as three holds it: sRGB bytes, decoded to linear."""
+    rgb = _np.array([(value >> 16) & 255, (value >> 8) & 255, value & 255], dtype=_np.float64)
+    return _srgb_to_linear(rgb / 255.0)
+
+
+#: ``(diffuse, levels)`` lookup tables over the direction's y, built once.
 _ENV_TABLES = None
 _ENV_TABLE_N = 257  # the curves are smooth; 257 knots resolve them to <0.1/255
 
@@ -255,91 +289,165 @@ def _env_radiance_at(y):
     return _env_gradient(_np.arccos(_np.clip(-y, -1.0, 1.0)) / math.pi)
 
 
-def _build_env_diffuse():
-    """Cosine-convolve the gradient — three's roughness-1 PMREM, in 1-D.
+def _pmrem_plan():
+    """``(lod_max, sizes, sigmas)``: the generator's ``_createPlanes``."""
+    lod_max = int(math.floor(math.log2(_ENV_CANVAS_W / 4)))
+    sizes, sigmas = [], []
+    lod = lod_max
+    for i in range(lod_max - _PMREM_LOD_MIN + 1 + len(_PMREM_EXTRA_SIGMA)):
+        size = 2 ** lod
+        sigma = 1.0 / size
+        if i > lod_max - _PMREM_LOD_MIN:
+            sigma = _PMREM_EXTRA_SIGMA[i - lod_max + _PMREM_LOD_MIN - 1]
+        elif i == 0:
+            sigma = 0.0
+        sizes.append(size)
+        sigmas.append(sigma)
+        if lod > _PMREM_LOD_MIN:
+            lod -= 1
+    return lod_max, sizes, sigmas
 
-    ``getIBLIrradiance`` samples the PMREM chain's roughest level
-    (``textureCubeUV(envMap, N, 1.0)``) and returns ``PI * envColor``,
-    which the Lambert BRDF's 1/PI then cancels — so the indirect diffuse
-    is ``envColor * diffuseColor``, and ``envColor`` is the cosine-weighted
-    MEAN RADIANCE about the normal.  That is what this returns.
 
-    The gradient varies only with elevation, so the convolution is
-    azimuthally symmetric: the result depends on the normal's y alone,
-    and a 1-D table serves every pixel.  The azimuth integral is closed
-    form — for ``max(a + b cos(phi), 0)`` with ``b >= 0`` it is ``2*pi*a``
-    when ``a >= b``, zero when ``a <= -b``, and ``2*(a*p + b*sin(p))``
-    with ``p = arccos(-a/b)`` in between — so only the polar integral is
-    quadrature, and 2048 knots put it well past PNG resolution.
+def _roughness_to_mip(roughness, lod_max: int):
+    """``clamp(roughnessToMip(roughness), cubeUV_m0, CUBEUV_MAX_MIP)``, elementwise."""
+    np = _np
+    r = np.asarray(roughness, dtype=np.float64)
+    mip = -2.0 * np.log2(1.16 * np.maximum(r, 1e-6))
+    # The shader's if-chain, applied last branch first so earlier ones win.
+    knots = list(zip(_CUBEUV_KNOTS, _CUBEUV_KNOTS[1:], strict=False))
+    for (r_a, m_a), (r_b, m_b) in reversed(knots):
+        mip = np.where(r >= r_b, (r_a - r) * (m_b - m_a) / (r_a - r_b) + m_a, mip)
+    return np.clip(mip, _CUBEUV_KNOTS[0][1], float(lod_max))
+
+
+def _env_level_lookup(levels, y, mip, lod_max: int):
+    """``textureCubeUV`` from the level tables: two levels, mixed by the mip's fraction."""
+    np = _np
+    mip_int = np.floor(mip)
+    frac = (mip - mip_int)[:, None]
+    coarse = (lod_max - mip_int).astype(np.int64)  # mip m is level lod_max - m
+    fine = np.maximum(coarse - 1, 0)
+    idx = np.clip((y + 1.0) * 0.5 * (_ENV_TABLE_N - 1), 0, _ENV_TABLE_N - 1.001)
+    lo = idx.astype(np.int64)
+    t = (idx - lo)[:, None]
+
+    def at(level):
+        return levels[level, lo] * (1.0 - t) + levels[level, lo + 1] * t
+
+    return at(coarse) * (1.0 - frac) + at(fine) * frac
+
+
+def _latlong_sample(field, dirs):
+    """Bilinear lookup of a lat-long *field* ``(rows, cols, 3)`` at unit *dirs*."""
+    np = _np
+    rows, cols = field.shape[:2]
+    lat = np.arcsin(np.clip(dirs[..., 1], -1.0, 1.0))
+    lon = np.arctan2(dirs[..., 0], dirs[..., 2]) % (2.0 * math.pi)
+    y = (lat / math.pi + 0.5) * rows - 0.5
+    x = lon / (2.0 * math.pi) * cols - 0.5
+    y0, x0 = np.floor(y), np.floor(x)
+    ty, tx = (y - y0)[..., None], (x - x0)[..., None]
+    ya = np.clip(y0.astype(np.int64), 0, rows - 1)
+    yb = np.clip(y0.astype(np.int64) + 1, 0, rows - 1)
+    xa = x0.astype(np.int64) % cols
+    xb = (xa + 1) % cols
+    top = field[ya, xa] * (1.0 - tx) + field[ya, xb] * tx
+    bottom = field[yb, xa] * (1.0 - tx) + field[yb, xb] * tx
+    return top * (1.0 - ty) + bottom * ty
+
+
+def _pmrem_half_blur(field, dirs, sigma, size_in, pole, latitudinal):
+    """One ``_halfBlur`` pass: a 1-D Gaussian of rotations about an axis.
+
+    Latitudinal rotates each direction about the pole axis itself,
+    longitudinal about ``cross(pole, direction)``; the step is a texel of
+    the level read (``PI / (2 * (size - 1))``), and the taps and weights
+    are the generator's -- ``1 + floor(3 * sigmaPixels)`` of them, capped
+    at ``MAX_SAMPLES``, normalized over the ones the shader reads.
     """
-    ny = _np.linspace(-1.0, 1.0, _ENV_TABLE_N)
-    m = 2048
-    theta = (_np.arange(m) + 0.5) * (math.pi / m)  # polar angle from +Y
-    ct, st = _np.cos(theta), _np.sin(theta)
-    radiance = _env_radiance_at(ct)
+    np = _np
+    d_theta = math.pi / (2 * (size_in - 1))
+    sigma_px = sigma / d_theta
+    samples = min(1 + int(math.floor(3.0 * sigma_px)), _PMREM_MAX_SAMPLES)
+    weights = [math.exp(-0.5 * (i / sigma_px) ** 2) for i in range(samples)]
+    total = weights[0] + 2.0 * sum(weights[1:])
+    pole = np.asarray(pole, dtype=np.float64)
+    if latitudinal:
+        axis = np.broadcast_to(pole, dirs.shape).copy()
+    else:
+        axis = np.cross(pole, dirs)
+        flat = ~axis.any(axis=-1)
+        axis[flat] = np.stack(
+            [dirs[flat][:, 2], np.zeros(int(flat.sum())), -dirs[flat][:, 0]], axis=-1
+        )
+    axis /= np.linalg.norm(axis, axis=-1, keepdims=True)
+    along = (axis * dirs).sum(axis=-1, keepdims=True)
+    across = np.cross(axis, dirs)
+    out = weights[0] * _latlong_sample(field, dirs)
+    for i in range(1, samples):
+        for theta in (-d_theta * i, d_theta * i):
+            turned = (dirs * math.cos(theta) + across * math.sin(theta)
+                      + axis * along * (1.0 - math.cos(theta)))
+            out += weights[i] * _latlong_sample(field, turned)
+    return out / total
 
-    a = ny[:, None] * ct[None, :]
-    b = _np.sqrt(_np.maximum(1.0 - ny * ny, 0.0))[:, None] * st[None, :]
-    safe = _np.maximum(b, 1e-12)
-    p = _np.arccos(_np.clip(-a / safe, -1.0, 1.0))
-    phi = 2.0 * (a * p + b * _np.sin(p))
-    phi = _np.where(a >= b, 2.0 * math.pi * a, phi)
-    phi = _np.where(a <= -b, 0.0, phi)
 
-    weight = phi * st[None, :] * (math.pi / m)
-    irradiance = weight @ radiance  # (N, 3) — the full irradiance E
-    return irradiance / math.pi  # three's envColor = E / PI
+def _build_env_tables():
+    """The gradient through three's PMREM chain, read at two roughnesses.
 
+    ``getIBLIrradiance`` reads the chain at roughness 1 and returns
+    ``PI * envColor``, which the diffuse BRDF's 1/PI cancels, so the
+    indirect diffuse is ``envColor * diffuseColor``; ``getIBLRadiance``
+    reads it at the material's roughness along the bent reflection.  Both
+    are whatever PMREM's blurs made of the gradient -- NOT the cosine and
+    GGX integrals they stand in for.  The roughest level is a Gaussian
+    about 33 degrees wide, far narrower than a cosine lobe, so it sees
+    more of the white zenith from an up-facing normal: exact integrals
+    there (as this used until 2026-09-23) put every top face several tone
+    levels under the photograph.
 
-def _build_env_specular():
-    """The gradient prefiltered for ``getIBLRadiance`` at this roughness.
-
-    The environment lights the part through the specular lobe as well as
-    the diffuse one, and unlike the diffuse term that one is VIEW
-    -dependent: it reads the gradient along the REFLECTION vector.  It is
-    what makes a near-horizontal wall read brighter from below than from
-    above, and a fit with the diffuse half alone left near-horizontal
-    faces seen from below 32 tone levels under the photograph.
-
-    Kernel: the split-sum prefilter three's PMREM approximates — GGX half
-    -vectors about the reflection direction (``N = V = R``), each mapping
-    to a sample direction at twice its angle and weighted by ``N·L``.
-    The blur is close, not identical: three's PMREM runs a Gaussian
-    approximation of this lobe over a mip chain, and the whole level is
-    fitted by ``_ENV_SCALE`` anyway.  Azimuth needs quadrature here (a
-    GGX lobe's has no closed form), but the geometry stays 1-D: a sample
-    at polar offset ``psi`` and azimuth ``al`` from a direction whose own
-    polar angle is ``beta`` has ``y = cos(psi)cos(beta) -
-    sin(psi)cos(al)sin(beta)``.
+    The chain runs as the generator runs it -- each level blurred from the
+    last by ``sqrt(sigma_i^2 - sigma_(i-1)^2)``, latitudinal then
+    longitudinal, about the next of its ten pole axes -- on a lat-long
+    grid rather than cube faces.  The gradient varies with elevation
+    alone and the result stays within 0.02 of that symmetry, so each level
+    is averaged over azimuth into a table over the direction's y.
     """
-    alpha = _ROUGHNESS * _ROUGHNESS
-    a2 = alpha * alpha
-    # Half-vector angles: beyond PI/4 the sample direction falls below the
-    # horizon (N·L <= 0) and the split-sum drops it.
-    nh, na = 192, 128
-    th = (_np.arange(nh) + 0.5) * (0.25 * math.pi / nh)
-    psi = 2.0 * th
-    cth = _np.cos(th)
-    d = a2 / (math.pi * (cth * cth * (a2 - 1.0) + 1.0) ** 2)
-    w = d * cth * _np.sin(th) * _np.cos(psi)  # GGX measure x N·L
-    al = (_np.arange(na) + 0.5) * (2.0 * math.pi / na)
+    np = _np
+    lod_max, sizes, sigmas = _pmrem_plan()
+    cols, rows = _PMREM_GRID
+    lat = ((np.arange(rows) + 0.5) / rows - 0.5) * math.pi
+    lon = (np.arange(cols) + 0.5) / cols * 2.0 * math.pi
+    lat_g, lon_g = np.meshgrid(lat, lon, indexing="ij")
+    dirs = np.stack([np.cos(lat_g) * np.sin(lon_g), np.sin(lat_g),
+                     np.cos(lat_g) * np.cos(lon_g)], axis=-1)
 
-    beta = _np.arccos(_np.clip(_np.linspace(-1.0, 1.0, _ENV_TABLE_N), -1.0, 1.0))
-    out = _np.empty((_ENV_TABLE_N, 3))
-    cpsi, spsi = _np.cos(psi), _np.sin(psi)
-    cal = _np.cos(al)
-    for i, b in enumerate(beta):
-        y = cpsi[:, None] * math.cos(b) - spsi[:, None] * cal[None, :] * math.sin(b)
-        rad = _env_radiance_at(y)  # (nh, na, 3)
-        out[i] = (w @ rad.sum(axis=1)) / (w.sum() * na)
-    return out
+    field = _env_radiance_at(dirs[..., 1].reshape(-1)).reshape(rows, cols, 3)
+    levels = [field.mean(axis=1)]
+    for i in range(1, len(sizes)):
+        sigma = math.sqrt(sigmas[i] ** 2 - sigmas[i - 1] ** 2)
+        pole = _PMREM_AXES[(i - 1) % len(_PMREM_AXES)]
+        field = _pmrem_half_blur(field, dirs, sigma, sizes[i - 1], pole, True)
+        field = _pmrem_half_blur(field, dirs, sigma, sizes[i], pole, False)
+        levels.append(field.mean(axis=1))
+
+    knots = np.linspace(-1.0, 1.0, _ENV_TABLE_N)
+    lat_y = np.sin(lat)
+    tables = np.stack([
+        np.stack([np.interp(knots, lat_y, level[:, ch]) for ch in range(3)], axis=-1)
+        for level in levels
+    ])
+    diffuse = _env_level_lookup(
+        tables, knots, np.full(len(knots), _roughness_to_mip(1.0, lod_max)), lod_max
+    )
+    return diffuse, tables
 
 
 def _env_tables():
-    """``(diffuse, specular)`` tables over the direction's y, built once."""
+    """``(diffuse, levels)``: the roughness-1 table and every PMREM level, built once."""
     global _ENV_TABLES
     if _ENV_TABLES is None:
-        _ENV_TABLES = (_build_env_diffuse(), _build_env_specular())
+        _ENV_TABLES = _build_env_tables()
     return _ENV_TABLES
 
 
@@ -349,11 +457,6 @@ def _env_lookup(table, y):
     lo = idx.astype(_np.int64)
     t = (idx - lo)[:, None]
     return table[lo] * (1.0 - t) + table[lo + 1] * t
-
-
-def _aces(x: np.ndarray) -> np.ndarray:  # noqa: F821
-    """Narkowicz's ACES filmic fit — the curve three.js applies."""
-    return _np.clip((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0)
 
 
 _np = None  # populated by _deps(); module import stays dependency-free
@@ -531,8 +634,8 @@ def _camera(az_deg: float, el_deg: float, aspect: float, fit_radius: float,
     return eye, dist
 
 
-def _view_projection(eye, w: int, h: int):
-    """World → pixel mapping for a camera at *eye* looking at the origin."""
+def _camera_basis(eye):
+    """``(right, up, forward)`` of a camera at *eye* looking at the origin."""
     fwd = -eye / _np.linalg.norm(eye)
     up = _np.array([0.0, 1.0, 0.0])
     right = _np.cross(fwd, up)
@@ -541,7 +644,12 @@ def _view_projection(eye, w: int, h: int):
         right = _np.array([1.0, 0.0, 0.0])
         nr = 1.0
     right = right / nr
-    cam_up = _np.cross(right, fwd)
+    return right, _np.cross(right, fwd), fwd
+
+
+def _view_projection(eye, w: int, h: int):
+    """World → pixel mapping for a camera at *eye* looking at the origin."""
+    right, cam_up, fwd = _camera_basis(eye)
     focal = (h / 2.0) / math.tan(math.radians(_FOV_DEG) / 2.0)
 
     def project(points):
@@ -557,101 +665,282 @@ def _view_projection(eye, w: int, h: int):
     return project, fwd
 
 
-def _shade(albedo_lin, normals, view):
-    """Per-pixel RGB in sRGB bytes: environment + Lambert + GGX specular.
+def _shade(albedo_lin, normals, view, geometry_roughness=None):
+    """Per-pixel LINEAR radiance: three r160's MeshPhysicalMaterial, verbatim.
 
-    The stage lights the part from ``scene.environment`` as well as from
-    the four directionals, and that term is the one a face pointing
-    DOWN lives on: the four lights all arrive from above, so a downward
-    face falls to the indirect light alone.  A flat ambient constant put
-    a bottom view 40 tone levels under the photograph; the gradient's own
-    convolutions (:func:`_env_tables`) put it back, because they VARY —
-    the diffuse half with the normal, the specular half with the
-    REFLECTION, and the stage's softbox is a lit slate below, near-black
-    at the horizon and white overhead.
+    ``RE_Direct_Physical`` per directional light, ``RE_IndirectDiffuse``
+    for the ambient, ``RE_IndirectSpecular_Physical`` for the environment
+    -- every term at the level three computes it, nothing fitted.  The
+    result is the linear frame three renders into the composer's target;
+    :func:`_develop` finishes it the way the composer does.
 
-    The material is three's MeshPhysicalMaterial (roughness 0.4,
-    metalness 0.05), so the specular is the real Cook-Torrance lobe --
-    GGX distribution, Schlick Fresnel, Smith visibility (UE4 k=a/2
-    approximation) -- not a Blinn stand-in.  A Blinn lobe could be
-    fitted to match any ONE pose's tone; what it cannot fake is the
-    VIEW-dependence that makes the photograph's steep poses read
-    brighter than its low ones, and the wall/top contrast that makes
-    carved text read at all.  Only the per-light output scales and the
-    exposure are fitted; the BRDF is the material's own.
+    The two lessons this carries.  The direct SPECULAR is added after the
+    diffuse, never multiplied by the part's colour: ``directSpecular +=
+    irradiance * BRDF_GGX`` beside ``directDiffuse += irradiance *
+    diffuseColor / PI``.  Tinting it (as this did until 2026-09-23) turned
+    a highlight on a painted part the part's colour and cost it the PI it
+    has over the diffuse; on a 60-gon's wall the highlight stood 15.1 tone
+    levels proud of the wall where the photograph's stands 25.4.  And the environment
+    is the only light a DOWNWARD face gets -- the four lights all arrive
+    from above -- so its two convolutions (:func:`_env_tables`) vary, the
+    diffuse half with the normal and the specular half with the
+    REFLECTION; a flat ambient in their place put a bottom view 40 tone
+    levels under the photograph.
 
     *albedo_lin* is one linear RGB for the whole part, or one per pixel
     ``(N, 3)`` for a part carrying its own colours; the Fresnel base
-    follows it per pixel, as the material's does.
+    follows it per channel, as ``material.specularColor`` does.
+    *geometry_roughness* is three's per-pixel ``geometryRoughness``
+    (:func:`_geometry_roughness`), added to the material's roughness as
+    the shader adds it; ``None`` is a surface that does not curve.
     """
-    a = _ROUGHNESS * _ROUGHNESS
-    a2 = a * a
-    k_vis = a / 2.0
-    if albedo_lin.ndim == 2:
-        f0 = 0.04 + _METALNESS * (albedo_lin.mean(axis=1) - 0.04)
-    else:
-        f0 = 0.04 + _METALNESS * (float(albedo_lin.mean()) - 0.04)
+    np = _np
+    roughness = np.full(len(normals), max(_ROUGHNESS, 0.0525))
+    if geometry_roughness is not None:
+        roughness = np.minimum(roughness + geometry_roughness, 1.0)
+    alpha = roughness * roughness
+    a2 = alpha * alpha
+    albedo = albedo_lin if albedo_lin.ndim == 2 else albedo_lin[None, :]
+    diffuse = albedo * (1.0 - _METALNESS)
+    # specularColor = mix(0.04, diffuseColor, metalness): IOR 1.5 and a
+    # white specularColor put the dielectric base at ((1.5-1)/(1.5+1))^2.
+    f0 = 0.04 + (albedo - 0.04) * _METALNESS
 
     ndv = (normals * view).sum(axis=1)
-    nv = _np.clip(ndv, 1e-4, None)
+    nv = np.clip(ndv, 0.0, 1.0)
 
-    # The environment, three's RE_IndirectSpecular_Physical (which owns
-    # the indirect DIFFUSE too).  DFGApprox is the split-sum term, the
-    # multi-scatter compensation follows, and the diffuse half is
-    # attenuated by what the specular half took -- all transcribed.
-    diff_tbl, spec_tbl = _env_tables()
-    env_d = _ENV_SCALE * _env_lookup(diff_tbl, normals[:, 1])
+    irradiance = np.zeros((len(normals), 3))
+    specular = np.zeros((len(normals), 3))
+    for direction, colour, intensity in _LIGHTS:
+        ldir = np.asarray(direction, dtype=np.float64)
+        ldir = ldir / np.linalg.norm(ldir)
+        ndl = np.clip(normals @ ldir, 0.0, 1.0)
+        half = ldir[None, :] + view
+        half = half / np.maximum(np.linalg.norm(half, axis=1), 1e-12)[:, None]
+        ndh = np.clip((normals * half).sum(axis=1), 0.0, 1.0)
+        vdh = np.clip((view * half).sum(axis=1), 0.0, 1.0)
+        fresnel = np.exp2((-5.55473 * vdh - 6.98316) * vdh)[:, None]
+        f = f0 * (1.0 - fresnel) + fresnel  # specularF90 is 1
+        gv = ndl * np.sqrt(a2 + (1.0 - a2) * nv * nv)
+        gl = nv * np.sqrt(a2 + (1.0 - a2) * ndl * ndl)
+        vis = 0.5 / np.maximum(gv + gl, 1e-6)
+        dist = a2 / (math.pi * (ndh * ndh * (a2 - 1.0) + 1.0) ** 2)
+        light = ndl[:, None] * (_hex_linear(colour) * intensity)[None, :]
+        irradiance += light
+        specular += light * f * (vis * dist)[:, None]
+    ambient_colour, ambient_intensity = _AMBIENT
+    irradiance += _hex_linear(ambient_colour) * ambient_intensity
+    color = irradiance * diffuse / math.pi + specular
+
+    # The environment.  DFGApprox is the split-sum term, the multi-scatter
+    # compensation follows, and the diffuse half is attenuated by what the
+    # specular half took.
+    diff_tbl, levels = _env_tables()
+    env_d = _ENV_INTENSITY * _env_lookup(diff_tbl, normals[:, 1])
     # reflect(-view, normal) on the RAW dot: a smooth normal near the
     # silhouette can face away from the eye, and three does not clamp here.
     refl = 2.0 * ndv[:, None] * normals - view
-    refl = refl + (normals - refl) * a  # mix(reflectVec, normal, roughness^2)
-    refl = refl / _np.maximum(_np.linalg.norm(refl, axis=1), 1e-12)[:, None]
-    env_s = _ENV_SCALE * _env_lookup(spec_tbl, refl[:, 1])
-    dnv = _np.clip(nv, 0.0, 1.0)
-    r_x = -_ROUGHNESS + 1.0
-    a004 = _np.minimum(r_x * r_x, _np.exp2(-9.28 * dnv)) * r_x + (
-        -0.0275 * _ROUGHNESS + 0.0425
+    refl = refl + (normals - refl) * alpha[:, None]  # mix(reflectVec, normal, roughness^2)
+    refl = refl / np.maximum(np.linalg.norm(refl, axis=1), 1e-12)[:, None]
+    lod_max = _pmrem_plan()[0]
+    env_s = _ENV_INTENSITY * _env_level_lookup(
+        levels, refl[:, 1], _roughness_to_mip(roughness, lod_max), lod_max
     )
-    fab_x = -1.04 * a004 + (-0.572 * _ROUGHNESS + 1.04)
-    fab_y = 1.04 * a004 + (0.022 * _ROUGHNESS - 0.04)
-    fss_ess = f0 * fab_x + fab_y  # specularF90 is 1 for this material
+    r_x = 1.0 - roughness
+    a004 = np.minimum(r_x * r_x, np.exp2(-9.28 * nv)) * r_x + (-0.0275 * roughness + 0.0425)
+    fab_x = (-1.04 * a004 + (-0.572 * roughness + 1.04))[:, None]
+    fab_y = (1.04 * a004 + (0.022 * roughness - 0.04))[:, None]
+    fss_ess = f0 * fab_x + fab_y
     ems = 1.0 - (fab_x + fab_y)
     favg = f0 + (1.0 - f0) * 0.047619
-    multi = fss_ess * favg / _np.maximum(1.0 - ems * favg, 1e-9) * ems
-    total_scatter = fss_ess + multi
+    multi = fss_ess * favg / (1.0 - ems * favg) * ems
+    scatter = (fss_ess + multi).max(axis=1)
+    color += diffuse * (1.0 - scatter)[:, None] * env_d
+    color += env_s * fss_ess + multi * env_d
+    return color
 
-    color = (
-        _AMBIENT
-        + env_d * ((1.0 - total_scatter) * (1.0 - _METALNESS))[:, None]
-    )
-    for (direction, light_rgb, intensity), scale in zip(
-        _LIGHTS, _LIGHT_SCALES, strict=True
-    ):
-        intensity = intensity * scale
-        ldir = _np.asarray(direction, dtype=_np.float64)
-        ldir = ldir / _np.linalg.norm(ldir)
-        ndl = _np.clip(normals @ ldir, 0.0, None)
-        half = ldir[None, :] + view
-        half = half / _np.maximum(_np.linalg.norm(half, axis=1), 1e-12)[:, None]
-        ndh = _np.clip((normals * half).sum(axis=1), 0.0, None)
-        vdh = _np.clip((view * half).sum(axis=1), 0.0, None)
 
-        d = a2 / _np.maximum(_np.pi * (ndh * ndh * (a2 - 1.0) + 1.0) ** 2, 1e-9)
-        fres = f0 + (1.0 - f0) * (1.0 - vdh) ** 5
-        vis = 1.0 / _np.maximum(
-            4.0 * (ndl * (1 - k_vis) + k_vis) * (nv * (1 - k_vis) + k_vis), 1e-9
-        )
-        spec = d * fres * vis
+def _geometry_roughness(tris_px, tris_py, tris_invz, attrs, tri, raw, length,
+                        normal, inv_z, basis, px_per_device):
+    """three's ``geometryRoughness``, per pixel: how fast the normal turns.
 
-        contrib = (ndl + spec * ndl)[:, None] * _np.asarray(light_rgb)
-        color += intensity * contrib
-    color = color * (albedo_lin if albedo_lin.ndim == 2 else albedo_lin[None, :])
-    # The environment's specular half is NOT tinted by the part's colour,
-    # exactly as three adds it after the diffuse -- a dark logo on a
-    # painted part keeps its highlight instead of swallowing it.
-    color += env_s * fss_ess[:, None] + env_d * multi[:, None]
-    srgb = _linear_to_srgb(_aces(color * _EXPOSURE))
-    return _np.clip(srgb * 255.0 + 0.5, 0, 255).astype(_np.uint8)
+    ``lights_physical_fragment`` does ``dxy = max(abs(dFdx(normal)),
+    abs(dFdy(normal)))`` on the view-space normal, takes its largest
+    component and ADDS it to the material's roughness -- specular
+    anti-aliasing.  Where a surface curves tightly across a pixel (a rim,
+    a fillet, the edge of a carved letter) the highlight is spread out
+    and damped; left out, those highlights stay mirror-sharp, blow past
+    white and feed the bloom a glow the stage does not have.
+
+    The GPU's derivative is the pixel quad's difference on the pixel's own
+    triangle (helper pixels extend it past the edge), which is this: the
+    interpolated normal's exact screen gradient on that triangle,
+    perspective-correct, normalized as the shader normalizes, scaled from
+    this raster's pixels to the browser's (*px_per_device*).
+    """
+    np = _np
+    ax, ay = tris_px[tri, 0], tris_py[tri, 0]
+    bx, by = tris_px[tri, 1], tris_py[tri, 1]
+    qx, qy = tris_px[tri, 2], tris_py[tri, 2]
+    area = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax)
+    area = np.where(np.abs(area) > 1e-12, area, 1e-12)
+    # Screen gradients of the rasterizer's own barycentrics (w_i / area).
+    gx0, gy0 = (by - qy) / area, (qx - bx) / area
+    gx1, gy1 = (qy - ay) / area, (ax - qx) / area
+    gradients = ((gx0, gx1, -(gx0 + gx1)), (gy0, gy1, -(gy0 + gy1)))
+    corners = attrs[tri, :, 0:3]  # normal / z at each corner
+    iz = tris_invz[tri]
+    worst = np.zeros(len(tri))
+    for g0, g1, g2 in gradients:
+        d_num = (g0[:, None] * corners[:, 0] + g1[:, None] * corners[:, 1]
+                 + g2[:, None] * corners[:, 2])
+        d_den = g0 * iz[:, 0] + g1 * iz[:, 1] + g2 * iz[:, 2]
+        d_raw = (d_num - raw * d_den[:, None]) / inv_z[:, None]
+        d_n = d_raw - normal * (normal * d_raw).sum(axis=1)[:, None]
+        d_n *= (px_per_device / length)[:, None]
+        for axis in basis:
+            worst = np.maximum(worst, np.abs(d_n @ axis))
+    return worst
+
+
+def _js_round(x: float) -> int:
+    """``Math.round``: halves go UP, where Python's ``round`` goes to even."""
+    return int(math.floor(x + 0.5))
+
+
+def _sample_axis(img, axis: int, n_out: int, offset: float = 0.0):
+    """Sample *img* along one axis the way a GPU texture fetch does.
+
+    ``LinearFilter`` with ``ClampToEdgeWrapping`` (three's render-target
+    default), at the centres of an *n_out*-texel target shifted by
+    *offset* of ITS texels -- which is how the blur passes step, in
+    units of the target they draw into, whatever the size they read.
+    Bilinear sampling is separable, so two calls make one 2-D fetch.
+    """
+    np = _np
+    n_src = img.shape[axis]
+    x = (np.arange(n_out) + 0.5 + offset) * (n_src / n_out) - 0.5
+    x0 = np.floor(x)
+    frac = (x - x0).astype(img.dtype)
+    i0 = np.clip(x0.astype(np.int64), 0, n_src - 1)
+    i1 = np.clip(x0.astype(np.int64) + 1, 0, n_src - 1)
+    shape = [1] * img.ndim
+    shape[axis] = n_out
+    frac = frac.reshape(shape)
+    return np.take(img, i0, axis=axis) * (1 - frac) + np.take(img, i1, axis=axis) * frac
+
+
+def _sample(img, rows: int, cols: int):
+    """A bilinear fetch of *img* at every centre of a rows x cols target."""
+    return _sample_axis(_sample_axis(img, 0, rows), 1, cols)
+
+
+def _resize_box(img, cols: int, rows: int):
+    """Area-average *img* to cols x rows, channel by channel."""
+    from PIL import Image
+
+    np = _np
+    out = np.empty((rows, cols, img.shape[2]), dtype=np.float32)
+    for ch in range(img.shape[2]):
+        band = Image.fromarray(np.ascontiguousarray(img[..., ch], dtype=np.float32), "F")
+        out[..., ch] = np.asarray(band.resize((cols, rows), Image.BOX))
+    return out
+
+
+def _unreal_bloom(hdr, device_size):
+    """three r160's UnrealBloomPass over a linear frame: the light it adds.
+
+    The composer runs the pass on the BROWSER's canvas, *device_size*
+    pixels, so every radius below is in those pixels; the painter's own
+    supersampled frame is area-averaged down to it first, as the
+    browser's multisample resolve does, in linear light.  Then, step for
+    step:
+
+    1. the luminosity high pass, into a half-size target: a bilinear
+       fetch of the frame, kept by ``smoothstep(threshold, threshold +
+       smoothWidth, luma)``;
+    2. five mips, each a separable Gaussian (``KERNEL_RADIUS`` taps of
+       ``0.39894 * exp(-0.5 i^2 / r^2) / r``, normalized) drawn into a
+       target half the size of the last -- the horizontal pass fetches
+       the previous mip bilinearly, which is where the downsampling
+       happens;
+    3. the composite, at the first mip's size: each mip weighted by
+       ``mix(factor, 1.2 - factor, radius)``, times strength;
+    4. the blend, ``AdditiveBlending`` from a ShaderMaterial, so
+       ``blendFunc(SRC_ALPHA, ONE)``: the composite is added times its
+       own alpha, and every blur target stores alpha 1, so that alpha is
+       strength times the summed weights (1.35 here), not 1.
+
+    Returned at *hdr*'s resolution, sampled bilinearly from the composite
+    as the blend's full-screen quad samples it; ``None`` when nothing in
+    the frame reaches the threshold.
+    """
+    np = _np
+    dev_w, dev_h = device_size
+    rows, cols = hdr.shape[:2]
+    frame = hdr if (cols, rows) == (dev_w, dev_h) else _resize_box(hdr, dev_w, dev_h)
+    w, h = max(1, _js_round(dev_w / 2)), max(1, _js_round(dev_h / 2))
+
+    bright = _sample(frame, h, w)
+    luma = bright @ np.asarray(_LUMA, dtype=bright.dtype)
+    t = np.clip((luma - _BLOOM_THRESHOLD) / _BLOOM_SMOOTH_WIDTH, 0.0, 1.0)
+    keep = t * t * (3.0 - 2.0 * t)
+    if not keep.any():
+        return None
+    source = bright * keep[..., None]
+
+    mips = []
+    size = (w, h)
+    for radius in _BLOOM_KERNELS:
+        mw, mh = size
+        coeff = [0.39894 * math.exp(-0.5 * i * i / (radius * radius)) / radius
+                 for i in range(radius)]
+        total = coeff[0] + 2.0 * sum(coeff[1:])
+        rows_in = _sample_axis(source, 0, mh)
+        across = coeff[0] * _sample_axis(rows_in, 1, mw)
+        for i in range(1, radius):
+            across += coeff[i] * (_sample_axis(rows_in, 1, mw, i)
+                                  + _sample_axis(rows_in, 1, mw, -i))
+        across /= total
+        down = coeff[0] * across
+        for i in range(1, radius):
+            down += coeff[i] * (_sample_axis(across, 0, mh, i)
+                                + _sample_axis(across, 0, mh, -i))
+        down /= total
+        mips.append(down)
+        source = down
+        size = (max(1, _js_round(mw / 2)), max(1, _js_round(mh / 2)))
+
+    weights = [f + (1.2 - 2.0 * f) * _BLOOM_RADIUS for f in _BLOOM_FACTORS]
+    composite = np.zeros((h, w, hdr.shape[2]), dtype=np.float32)
+    for mip, weight in zip(mips, weights, strict=True):
+        composite += weight * _sample(mip, h, w)
+    composite *= _BLOOM_STRENGTH
+    blend_alpha = _BLOOM_STRENGTH * sum(weights)
+    return _sample(composite * blend_alpha, rows, cols)
+
+
+#: Rows developed at once, so the tone step's temporaries track a slab of
+#: the frame rather than all of it.
+_DEVELOP_ROWS = 256
+
+
+def _develop(hdr, device_size):
+    """The composer's tail on the linear frame: bloom, then OutputPass.
+
+    OutputPass does ``sRGBTransferOETF`` and nothing else here -- the
+    renderer's ``toneMapping`` is ``NoToneMapping`` whenever the composer
+    exists -- and the 8-bit canvas clips at white.  Returns sRGB bytes.
+    """
+    np = _np
+    bloom = _unreal_bloom(hdr, device_size)
+    out = np.empty(hdr.shape, dtype=np.uint8)
+    for r0 in range(0, hdr.shape[0], _DEVELOP_ROWS):
+        slab = hdr[r0:r0 + _DEVELOP_ROWS]
+        if bloom is not None:
+            slab = slab + bloom[r0:r0 + _DEVELOP_ROWS]
+        out[r0:r0 + _DEVELOP_ROWS] = (_linear_to_srgb(slab) * 255.0 + 0.5).astype(np.uint8)
+    return out
 
 
 def _plate_texture(footprint):
@@ -793,7 +1082,7 @@ def _pair_count(tris_px, tris_py, tris_invz, w, h) -> _ViewCost:
 
 
 def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
-               w, h, pair_cap=None):
+               w, h, pair_cap=None, device_scale=1.0):
     """One z-buffered pass over a triangle soup.
 
     ``attrs`` carries, per triangle vertex, either a unit NORMAL scaled by
@@ -811,8 +1100,9 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
     for one thumbnail.  Same formulas, same nearest-depth rule, same tie
     order — the earliest pair among depth-equals wins, because a slice's
     stable lexsort keeps first occurrence and later slices replace only on
-    STRICTLY nearer depth — so the output is bit-identical.)  Returns an
-    (h, w, 3) uint8 buffer, or ``None`` when the pair budget says this
+    STRICTLY nearer depth — so the output is bit-identical.)  Returns the
+    (h, w, 3) float32 LINEAR frame -- the composer's render target, which
+    :func:`_develop` finishes -- or ``None`` when the pair budget says this
     frame is too heavy to paint honestly (with slicing that is a TIME
     bound; memory no longer scales with the total).
     """
@@ -820,8 +1110,11 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
     if pair_cap is None:
         pair_cap = _PAIR_CAP
     x0, y0, bw, counts, total = _pair_count(tris_px, tris_py, tris_invz, w, h)
-    empty = np.zeros((h, w, 3), dtype=np.uint8)
-    empty[:] = _BG
+    # The plate and the backdrop are sRGB bytes, decoded into the linear
+    # frame by table: every byte comes back out of _develop as itself.
+    byte_linear = _srgb_to_linear(np.arange(256) / 255.0).astype(np.float32)
+    empty = np.empty((h, w, 3), dtype=np.float32)
+    empty[:] = byte_linear[np.asarray(_BG)]
     if total == 0:
         return empty
     if total > pair_cap:
@@ -896,6 +1189,7 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
     # the same slice treatment as the pair sweep — a dozen working arrays
     # over EVERY hit pixel at once was the other gigabyte.
     buf = empty.reshape(h * w, 3)
+    basis = _camera_basis(eye)
     for hstart in range(0, len(hit_all), _PAIR_SLICE):
         hit = hit_all[hstart:hstart + _PAIR_SLICE]
         t_sel = best_tri[hit]
@@ -907,7 +1201,7 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
                     + b1s[:, None] * attrs[t_sel, 1]
                     + b2s[:, None] * attrs[t_sel, 2]) / izs[:, None]
 
-        rgb = np.empty((len(hit), 3), dtype=np.uint8)
+        rgb = np.empty((len(hit), 3), dtype=np.float32)
         textured = attrs[t_sel, 0, 0] <= -1.5  # sentinel marks the plate
         if textured.any():
             u = np.clip(a_interp[textured, 1], 0.0, 1.0 - 1e-9)
@@ -935,19 +1229,23 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
                    + tex_np[ya, xb].astype(np.float64) * tx)
             bot = (tex_np[yb, xa].astype(np.float64) * (1 - tx)
                    + tex_np[yb, xb].astype(np.float64) * tx)
-            rgb[textured] = np.clip(top * (1 - ty) + bot * ty + 0.5,
-                                    0, 255).astype(np.uint8)
+            rgb[textured] = byte_linear[np.clip(top * (1 - ty) + bot * ty + 0.5,
+                                                0, 255).astype(np.uint8)]
         smooth = ~textured
         if smooth.any():
-            n = a_interp[smooth, 0:3]
-            ln = np.linalg.norm(n, axis=1)
-            n = n / np.maximum(ln, 1e-12)[:, None]
+            raw = a_interp[smooth, 0:3]
+            ln = np.maximum(np.linalg.norm(raw, axis=1), 1e-12)
+            n = raw / ln[:, None]
             pos = a_interp[smooth, 3:6]
             view = eye[None, :] - pos
             view = view / np.maximum(
                 np.linalg.norm(view, axis=1), 1e-12)[:, None]
             albedo = a_interp[smooth, 6:9] if attrs.shape[2] > 6 else albedo_lin
-            rgb[smooth] = _shade(albedo, n, view)
+            rough = _geometry_roughness(
+                tris_px, tris_py, tris_invz, attrs, t_sel[smooth], raw, ln, n,
+                izs[smooth], basis, 1.0 / device_scale,
+            )
+            rgb[smooth] = _shade(albedo, n, view, rough)
 
         buf[hit] = rgb
     return buf.reshape(h, w, 3)
@@ -989,7 +1287,8 @@ def _clip_polygon_near(corners, uvs, eye, fwd, near):
 
 def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
                 floor_y, footprint, fit_radius, fit_size, plate_tex_np,
-                corner_normals, cost_only=False, vertex_albedo=None):
+                corner_normals, cost_only=False, vertex_albedo=None,
+                device_scale=1.0):
     """One still at full working resolution.  PIL image, or ``None``.
 
     ``cost_only`` stops after the geometry — every projection and clip
@@ -1000,7 +1299,8 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
     ``vertex_albedo`` is the part's own linear RGB per vertex, or ``None``
     to paint the whole part in ``albedo_lin``.  ``corner_normals`` is the
     shading normal at each face's corners, ``(F, 3, 3)`` aligned with *f*
-    (:func:`_creased_normals`).
+    (:func:`_creased_normals`).  ``device_scale`` is the browser canvas's
+    size over this frame's: the bloom's radii are in its pixels.
     """
     from PIL import Image
 
@@ -1089,13 +1389,15 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
     if cost_only:
         return _pair_count(px_all, py_all, iz_all, width, height).total
 
-    buf = _rasterize(
+    hdr = _rasterize(
         px_all, py_all, iz_all,
         np.vstack(all_at), plate_tex_np, albedo_lin, eye, width, height,
+        device_scale=device_scale,
     )
-    if buf is None:
+    if hdr is None:
         return None
-    return Image.fromarray(buf, "RGB")
+    device = (_js_round(width * device_scale), _js_round(height * device_scale))
+    return Image.fromarray(_develop(hdr, device), "RGB")
 
 
 _HEX_COLOR = None  # shared with stage_still, resolved lazily
@@ -1284,13 +1586,15 @@ def try_paint_stage_views(
             canvas_h = full_h - strip
             if canvas_h < 32:  # degenerate request: skip the letterbox
                 canvas_h = full_h
+            # The browser draws this canvas at the user's supersample
+            # (width * ss across), so that is the frame its bloom sees.
             img = _paint_view(
                 v, f, az, el,
                 width=width * ss_int, height=canvas_h,
                 albedo_lin=albedo_lin, floor_y=floor_y,
                 footprint=footprint, fit_radius=radius, fit_size=fit_size,
                 plate_tex_np=plate_tex_np, corner_normals=corner_normals,
-                vertex_albedo=vertex_albedo,
+                vertex_albedo=vertex_albedo, device_scale=ss / ss_int,
             )
             if img is None:  # raster budget said no — all or nothing
                 return None
