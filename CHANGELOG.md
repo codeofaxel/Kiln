@@ -284,6 +284,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Slicing keeps your plate where you approved it, and the preview shows what will actually print.**
+
 - **Fine-pitch jar lids fit as snugly as the rest.**
 
 - **Your painted parts look like themselves in every preview.** On a machine without a browser Kiln can drive, a multi-colour part used to come back as a flat grey picture; it now gets the same 3D stage look as everything else, in its own colours.
