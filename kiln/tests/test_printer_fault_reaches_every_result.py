@@ -251,6 +251,19 @@ class TestTheBannerRidesEveryResult:
         assert result.structuredContent == {"success": True}
         assert len(result.content) == 1
 
+    def test_the_hosted_server_never_carries_a_banner(self, registry, monkeypatch) -> None:
+        """One process serves every tenant there, and its watchdog registry
+        is nobody's printer: the guard is explicit, like the update nudge's,
+        not a property of the registry happening to be empty."""
+        registry["default"] = _Dog(running=True, reading=_paused_with_todays_fault())
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        result = _Result(structured={"success": True}, text='{"success": true}')
+
+        watch_state._attach_fault_banner(result, None, "ams_status")
+
+        assert result.structuredContent == {"success": True}
+        assert len(result.content) == 1
+
     def test_an_error_result_is_left_alone(self, registry) -> None:
         registry["default"] = _Dog(running=True, reading=_paused_with_todays_fault())
         result = _Result(structured={"success": False}, is_error=True, text="boom")

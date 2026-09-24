@@ -287,6 +287,13 @@ def _attach_fault_banner(inner: Any, ctx: Any, name: str | None) -> None:
     try:
         if getattr(inner, "isError", False):
             return
+        # The hosted server runs one process for every tenant, and its
+        # watchdog registry is nobody's printer: said here, the way the
+        # update nudge says it, never left to the registry being empty.
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            return
         faults = watched_printer_faults()
         if not faults:
             return
