@@ -43,6 +43,17 @@ _DEFAULT_API_URL = "https://api.kiln3d.com"
 # process runs the loop (a manual ``start`` or the login service).
 _STATE_FILE = "~/.kiln/bridge.state"
 
+#: Consecutive handshake refusals before the session is checked with the
+#: server.  One refusal can be the relay mid-restart; two in a row, on a
+#: token the clock calls valid, is the case the clock cannot judge.
+SUSTAINED_REFUSALS = 2
+
+#: How long a signed-out bridge waits between attempts.  Minutes, not
+#: seconds: the relay refuses the same credential every time, and what ends
+#: the wait is a person running ``kiln signin``, which writes a fresh token
+#: file the next attempt picks up on its own.
+SIGNED_OUT_RETRY_S = 300.0
+
 # Injected dependency shapes.
 ToolCaller = Callable[[str, dict], Any]          # (tool_name, args) -> result
 ArtifactFetcher = Callable[[str], str]           # cloud token -> local file path
@@ -311,8 +322,13 @@ def _post_observe(api: str, bearer: str, nonce: str, family: int) -> bool:
         conn.close()
 
 
-def _read_license() -> str:
+def _read_license(*, verify: bool = False) -> str:
     """The bearer this machine presents to the relay, or ``""`` if there is none.
+
+    ``verify`` is the session resolver's: one exchange with the server on a
+    session the clock still vouches for, for a caller the server has just
+    refused (``kiln bridge status`` on a bridge that is running but cannot
+    connect).  A license key is never asked about.
 
     Routes through :func:`kiln.auth_session.resolve_api_bearer` — the one
     resolver every authenticated Kiln API caller uses — so a
@@ -335,7 +351,7 @@ def _read_license() -> str:
     try:
         from kiln.auth_session import resolve_api_bearer
 
-        token = resolve_api_bearer().token.strip()
+        token = resolve_api_bearer(verify=verify).token.strip()
         if token:
             return token
     except Exception:  # never let auth resolution break the bridge
@@ -478,6 +494,25 @@ class BridgeClient:
             # socket gone; the server times that call out
             await ws.send(json.dumps(resp))
 
+    def _session_verdict(self, *, verify: bool) -> Any:
+        """The session resolver's answer, or ``None`` when it cannot be asked.
+
+        A pinned license is never a session, so it is never asked about.
+        ``verify`` is the resolver's own: one exchange with the server on a
+        token the clock still vouches for.
+        """
+        if self._pinned_license is not None:
+            return None
+        try:
+            from kiln.auth_session import resolve_session_bearer
+
+            if verify:
+                return resolve_session_bearer(verify=True)
+            return resolve_session_bearer()
+        except Exception:  # diagnosis must never break the loop
+            logger.debug("session-state check failed", exc_info=True)
+            return None
+
     async def run(self) -> None:
         if not self._bearer():
             raise RuntimeError(
@@ -487,6 +522,9 @@ class BridgeClient:
         import websockets  # local import: only needed when actually running
 
         backoff = 1.0
+        refusals = 0  # consecutive handshake refusals in this outage
+        probed = False  # one server-side session check per outage
+        said_signin = False  # the hint, once per signed-out stretch
         write_bridge_state(connected=False)  # advertise "running"; flips true on connect
         while not self._stop:
             try:
@@ -496,6 +534,9 @@ class BridgeClient:
                     logger.info("bridge connected to relay")
                     write_bridge_state(connected=True)
                     backoff = 1.0
+                    refusals = 0
+                    probed = False
+                    said_signin = False
                     async for raw in ws:
                         try:
                             req = json.loads(raw)
@@ -506,30 +547,61 @@ class BridgeClient:
                 raise
             except Exception as exc:
                 write_bridge_state(connected=False)
-                logger.info("bridge link down (%s); retrying in %.0fs", exc, backoff)
                 # A handshake refusal is the relay refusing our CREDENTIAL,
                 # and one credential state is unrecoverable from this loop:
-                # a session whose refresh token has been rejected.  Left
-                # unsaid, that produced a measured 281-rejection retry storm
-                # whose every line read "HTTP 403" and none read "run kiln
-                # signin" — the one command that fixes it.  Asked once per
-                # failure, said only when the resolver is certain.
+                # a session the server will not renew.  Left unsaid, that
+                # produced a measured 281-rejection retry storm whose every
+                # line read "HTTP 403" and none read "run kiln signin" —
+                # the one command that fixes it.
+                #
+                # The resolver's fast path judges by the token's clock, and
+                # the clock cannot see a session revoked server-side: on
+                # 2026-09-24 the relay refused a clock-valid token 591 times
+                # (``exp`` forty minutes out, the session gone) and this loop
+                # said nothing, because every ask came back ``live``.  So a
+                # SUSTAINED refusal asks the server once per outage — one
+                # refresh exchange — and a session it will not renew is
+                # said once and retried in minutes, not seconds.  A session
+                # it does renew reconnects with the new token on the
+                # ordinary backoff: the refusal was something else.
+                signed_out = False
                 if "403" in str(exc):
-                    try:
-                        from kiln.auth_session import resolve_session_bearer
-
-                        session = resolve_session_bearer()
-                        if session.state == "needs_signin":
-                            logger.warning(
-                                "bridge: your Kiln session has expired and "
-                                "can't refresh itself. Run `kiln signin` on "
-                                "this machine, and the bridge will reconnect "
-                                "on its own."
+                    refusals += 1
+                    session = self._session_verdict(verify=False)
+                    state = getattr(session, "state", None)
+                    if (
+                        state not in ("needs_signin", "signed_out")
+                        and refusals >= SUSTAINED_REFUSALS
+                        and not probed
+                    ):
+                        probed = True
+                        session = self._session_verdict(verify=True)
+                        state = getattr(session, "state", None)
+                        if state == "refreshed":
+                            logger.info(
+                                "bridge: the relay kept refusing a token the clock "
+                                "called valid; the server renewed the session, so "
+                                "the refusal was not the session. Reconnecting with "
+                                "the new token."
                             )
-                    except Exception:  # diagnosis must never break the loop
-                        logger.debug("session-state check failed", exc_info=True)
+                    if state in ("needs_signin", "signed_out"):
+                        signed_out = True
+                        if not said_signin:
+                            said_signin = True
+                            logger.warning(
+                                "bridge: %s Run `kiln signin` on this machine, "
+                                "and the bridge will reconnect on its own "
+                                "(checking again every %.0f minutes until then).",
+                                getattr(session, "detail", None)
+                                or "your Kiln session has expired and can't "
+                                "refresh itself.",
+                                SIGNED_OUT_RETRY_S / 60,
+                            )
+                if signed_out:
+                    backoff = SIGNED_OUT_RETRY_S
+                logger.info("bridge link down (%s); retrying in %.0fs", exc, backoff)
                 await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 60.0)
+                backoff = SIGNED_OUT_RETRY_S if signed_out else min(backoff * 2, 60.0)
 
     def stop(self) -> None:
         self._stop = True

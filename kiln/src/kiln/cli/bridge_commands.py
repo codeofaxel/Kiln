@@ -172,7 +172,7 @@ class _Bearer(NamedTuple):
     detail: str
 
 
-def _resolve_bearer() -> _Bearer:
+def _resolve_bearer(*, verify: bool = False) -> _Bearer:
     """The bridge's credential, plus the one sentence explaining any absence.
 
     Two authorities, deliberately: :func:`_read_license` decides WHETHER we
@@ -183,8 +183,14 @@ def _resolve_bearer() -> _Bearer:
     that never signed in.  Consulting the session resolver for the verdict
     instead would report "signed out" to an operator whose license key in
     config.yaml is working fine.
+
+    ``verify`` asks the server, once, whether a session the clock still
+    vouches for is alive — for the one state where the clock is not
+    evidence: the bridge is running and the relay keeps refusing it.
+    Today's answer without it was "on, connecting…" over a session the
+    server had already ended (2026-09-24).
     """
-    token = _read_license()
+    token = _read_license(verify=True) if verify else _read_license()
     if token:
         return _Bearer(token=token, detail="")
     try:
@@ -237,6 +243,15 @@ def _describe_status(
         # already knows which — say it, rather than making the user guess
         # why "sign in" didn't seem to take the first time.
         lead = [signin_detail] if signin_detail else []
+        if running:
+            # The daemon is up and the relay is refusing it: "connecting…"
+            # would be true of the process and false of the situation, and
+            # the one errand that fixes it is not a restart.
+            lead.append(
+                "The bridge is running, but the relay refuses it: this "
+                "machine is signed out of Kiln. It reconnects on its own "
+                "once you sign in."
+            )
         return "signed out", [
             *lead,
             "Sign in so the relay can find your bridge:",
@@ -913,7 +928,9 @@ def status() -> None:
     sup = read_supervisor_state()
     running = _running_pid() is not None
     connected = bool(st.get("connected")) and running
-    bearer = _resolve_bearer()
+    # A bridge that is up and not connected is the one state where the
+    # token's clock is not evidence, so that state alone asks the server.
+    bearer = _resolve_bearer(verify=running and not connected)
     last_exit = sup.get("last_exit") if isinstance(sup.get("last_exit"), dict) else {}
     enabled = _service_installed()
     version = describe_bridge_version(

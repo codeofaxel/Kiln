@@ -1066,3 +1066,63 @@ def test_enable_runs_onboarding_before_the_service_and_notes_the_slicer(monkeypa
 
     assert result.exit_code == 0, result.output
     assert calls == ["preflight", "printer", "stop", "service", "slicer"]
+
+
+# ---------------------------------------------------------------------------
+# A running bridge the relay refuses is signed out, not "connecting…"
+# ---------------------------------------------------------------------------
+
+
+def test_a_running_bridge_that_is_signed_out_says_so_not_connecting():
+    """2026-09-24: the daemon was up, the relay refused its every handshake
+    (the session had been ended server-side), and status read "Running,
+    but not connected to the relay yet" — true of the process, false of
+    the situation, and naming no fix."""
+    head, lines = _describe_status(
+        signed_in=False, enabled=True, running=True,
+        connected=False, since=None, now=1000.0,
+        signin_detail="Your Kiln session has expired.",
+    )
+    assert head == "signed out"
+    assert any("running" in ln and "signed out" in ln for ln in lines)
+    assert any("kiln signin" in ln for ln in lines)
+    assert not any("not connected to the relay yet" in ln for ln in lines)
+
+
+def test_status_asks_the_server_only_when_the_bridge_is_up_and_refused(monkeypatch):
+    """The token's clock is not evidence in exactly one state: running and
+    not connected.  That state asks the server (one refresh exchange); the
+    others keep the no-network fast path."""
+    from kiln.auth_session import ApiBearer
+
+    asked: list[bool] = []
+
+    def _resolve(*a, verify=False, **k):
+        asked.append(verify)
+        if verify:
+            return ApiBearer(token="", state="needs_signin", detail="Your Kiln session has expired.")
+        return ApiBearer(token="clock-live-token", state="live")
+
+    monkeypatch.setattr("kiln.auth_session.resolve_api_bearer", _resolve)
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: True)
+    monkeypatch.setattr(bcmd, "_running_supervisor_pid", lambda: None)
+    monkeypatch.setattr(bcmd, "read_supervisor_state", lambda: {})
+    monkeypatch.setattr(bcmd, "_installed_version", lambda: "1.4.1.1")
+    monkeypatch.setattr(bcmd, "_latest_published_version", lambda: None)
+
+    # Up and refused: the server is asked, and its verdict is what shows.
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: 8213)
+    monkeypatch.setattr(bcmd, "read_bridge_state", lambda: {"connected": False, "since": None})
+    out = CliRunner().invoke(bridge, ["status"])
+    assert out.exit_code == 0, out.output
+    assert "signed out" in out.output
+    assert "kiln signin" in out.output
+    assert "not connected to the relay yet" not in out.output
+    assert asked and asked[0] is True
+
+    # Connected: nothing to verify; the clock's answer stands, no exchange.
+    asked.clear()
+    monkeypatch.setattr(bcmd, "read_bridge_state", lambda: {"connected": True, "since": 1.0})
+    out = CliRunner().invoke(bridge, ["status"])
+    assert "on, connected" in out.output
+    assert asked == [False]

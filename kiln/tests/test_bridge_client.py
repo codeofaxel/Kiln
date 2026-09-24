@@ -109,69 +109,160 @@ def test_local_slice_and_print_does_not_trigger_a_fetch():
 
 
 class TestHandshake403NamesTheFix:
-    """A 403 loop with an expired session must say `kiln signin` — once the
+    """A 403 loop with a dead session must say `kiln signin` — once the
     resolver is CERTAIN that is the problem.  Measured before this: 281
     rejections, every line "HTTP 403", none naming the one command that
-    fixes it."""
+    fixes it.
 
-    def _run_one_loop_iteration(self, monkeypatch, session_state, caplog):
-        import asyncio
-        import logging
+    Then measured again, 2026-09-24: 591 rejections with NO hint, because
+    the resolver's fast path judges by the token's clock and the clock
+    cannot see a session revoked server-side (``exp`` was forty minutes
+    out; GET /auth/v1/user said ``session_not_found``).  So a SUSTAINED
+    refusal now asks the server once — one refresh exchange — and a
+    session it will not renew is said once and retried in minutes.
+    """
 
-        import kiln.bridge_client as bc
-        from kiln.auth_session import SessionBearer
+    class _Refused(Exception):
+        def __str__(self):
+            return "server rejected WebSocket connection: HTTP 403"
 
-        class _Refused(Exception):
-            def __str__(self):
-                return "server rejected WebSocket connection: HTTP 403"
+    def _refusing_relay(self, monkeypatch):
+        import types
+
+        refused = self._Refused
 
         class _FailingConnect:
             def __init__(self, *a, **k):
                 pass
 
             async def __aenter__(self):
-                raise _Refused()
+                raise refused()
 
             async def __aexit__(self, *a):
                 return False
 
-        import types
         fake_ws = types.SimpleNamespace(connect=_FailingConnect)
         monkeypatch.setitem(__import__("sys").modules, "websockets", fake_ws)
-        monkeypatch.setattr(
-            "kiln.auth_session.resolve_session_bearer",
-            lambda *a, **k: SessionBearer(
-                token="", state=session_state, detail="run kiln signin"
-            ),
-        )
 
-        client = bc.BridgeClient.__new__(bc.BridgeClient)
-        client._pinned_license = "unit-test-license"
-        client._url = "wss://unit.invalid/api/bridge/connect"
-        client._stop = False
+    def _drive(self, monkeypatch, caplog, client, iterations):
+        """Run *client* through *iterations* refusals; return log text + sleeps."""
+        import asyncio
+        import logging
 
-        async def _one_pass():
-            # Stop after the first failure sleeps.
-            async def _sleep(_s):
-                client._stop = True
+        import kiln.bridge_client as bc
+
+        sleeps: list[float] = []
+
+        async def _passes():
+            async def _sleep(s):
+                sleeps.append(s)
+                if len(sleeps) >= iterations:
+                    client._stop = True
 
             monkeypatch.setattr(bc.asyncio, "sleep", _sleep)
             await client.run()
 
         with caplog.at_level(logging.DEBUG, logger="kiln.bridge_client"):
-            asyncio.run(_one_pass())
-        return caplog.text
+            asyncio.run(_passes())
+        return caplog.text, sleeps
+
+    def _run(self, monkeypatch, caplog, *, plain, verified, iterations):
+        """A session-bearer bridge through *iterations* refusals.
+
+        *plain* is what the resolver answers when asked by the clock alone,
+        *verified* what it answers when asked to check with the server.
+        Returns the log text, the sleeps taken, and how many times the
+        server was asked.
+        """
+        import kiln.bridge_client as bc
+        from kiln.auth_session import SessionBearer
+
+        self._refusing_relay(monkeypatch)
+        asked_server: list[bool] = []
+        on_file: list[str] = []  # the real resolver persists a rejection
+
+        def _resolve(*a, verify=False, **k):
+            if verify:
+                asked_server.append(True)
+                state = verified
+                if state == "needs_signin":
+                    on_file.append(state)
+            else:
+                state = on_file[-1] if on_file else plain
+            token = "tok" if state in ("live", "refreshed", "degraded") else ""
+            return SessionBearer(
+                token=token, state=state, detail="Your Kiln session has expired."
+            )
+
+        monkeypatch.setattr("kiln.auth_session.resolve_session_bearer", _resolve)
+        # The bearer the loop presents is the session's, not a pinned
+        # license: a pinned license is never asked about.
+        monkeypatch.setattr(bc, "_read_license", lambda **k: "tok")
+
+        client = bc.BridgeClient.__new__(bc.BridgeClient)
+        client._pinned_license = None
+        client._url = "wss://unit.invalid/api/bridge/connect"
+        client._stop = False
+        text, sleeps = self._drive(monkeypatch, caplog, client, iterations)
+        return text, sleeps, len(asked_server)
 
     def test_needs_signin_is_said_in_plain_words(self, monkeypatch, caplog):
-        text = self._run_one_loop_iteration(monkeypatch, "needs_signin", caplog)
+        text, sleeps, asked = self._run(
+            monkeypatch, caplog, plain="needs_signin", verified="needs_signin", iterations=1
+        )
         assert "kiln signin" in text
+        assert asked == 0, "a verdict already on file needs no exchange"
+
+    def test_a_sustained_403_on_a_clock_live_session_asks_the_server_once(
+        self, monkeypatch, caplog
+    ):
+        """Today's case: the clock says live, the relay says no, the
+        server, asked, says the session is gone.  Said once; then minutes."""
+        import kiln.bridge_client as bc
+
+        text, sleeps, asked = self._run(
+            monkeypatch, caplog, plain="live", verified="needs_signin", iterations=4
+        )
+        assert asked == 1, "one exchange per outage, not one per refusal"
+        assert text.count("kiln signin") == 1, "said once, not per retry"
+        # The first refusal alone is not sustained: ordinary backoff.
+        assert sleeps[0] == 1.0
+        # From the verdict on, the storm stops: minutes between attempts.
+        assert sleeps[1:] == [bc.SIGNED_OUT_RETRY_S] * 3
+        assert bc.SIGNED_OUT_RETRY_S >= 60.0
 
     def test_a_live_session_gets_no_false_signin_advice(self, monkeypatch, caplog):
         """A 403 while the session is fine (server-side refusal, an outage)
         must NOT tell the user to sign in — chasing the wrong fix hides the
-        real one."""
-        text = self._run_one_loop_iteration(monkeypatch, "live", caplog)
-        assert "session has expired" not in text
+        real one.  The server IS asked, once, and its renewal is the proof
+        the session is fine; the reconnect keeps the ordinary backoff."""
+        text, sleeps, asked = self._run(
+            monkeypatch, caplog, plain="live", verified="refreshed", iterations=4
+        )
+        assert asked == 1
+        assert "kiln signin" not in text
+        assert "renewed the session" in text
+        assert max(sleeps) <= 60.0
+
+    def test_a_pinned_license_is_never_asked_about(self, monkeypatch, caplog):
+        import kiln.bridge_client as bc
+
+        self._refusing_relay(monkeypatch)
+        asked = []
+        monkeypatch.setattr(
+            "kiln.auth_session.resolve_session_bearer",
+            lambda *a, **k: asked.append(k) or None,
+        )
+        client = bc.BridgeClient.__new__(bc.BridgeClient)
+        client._pinned_license = "unit-test-license"
+        client._url = "wss://unit.invalid/api/bridge/connect"
+        client._stop = False
+
+        text, sleeps = self._drive(monkeypatch, caplog, client, 3)
+
+        assert asked == []
+        assert "kiln signin" not in text
+        assert sleeps == [1.0, 2.0, 4.0]
 
 
 # ---------------------------------------------------------------------------
