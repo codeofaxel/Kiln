@@ -23,6 +23,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **After slicing, the 3D stage shows the file going to your printer.** Asking to see it again gives a one-line "already on the stage above" instead of a second identical stage.
+
 - **Designs agents write come out rounder.**
 
 - **Kiln makes multi-colour Bambu files for the A1 only.** Single-colour prints, and multi-colour files you slice in Bambu Studio, work on every Bambu as before.
@@ -285,6 +287,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   https://kiln3d.com/pricing.
 
 ### Fixed
+
+- **Kiln restarting mid-chat no longer breaks your next request.** It used to fail with "Invalid request parameters" and an empty 3D panel.
 
 - **Cost and filament estimates for OrcaSlicer and Bambu Studio files now match the slicer.**
 
