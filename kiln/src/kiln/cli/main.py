@@ -7123,13 +7123,17 @@ def cost(
             electricity_rate=electricity_rate,
             printer_wattage=printer_wattage,
         )
+        data = estimate.to_dict()
+        from kiln._pro_cost_bridge import attach_cost_intelligence
+
+        attach_cost_intelligence(data, file_path)
 
         if json_mode:
             click.echo(
                 _json.dumps(
                     {
                         "status": "success",
-                        "data": estimate.to_dict(),
+                        "data": data,
                     },
                     indent=2,
                 )
@@ -7144,6 +7148,9 @@ def cost(
                 click.echo(f"Est. time:  {hours:.1f} hours")
                 click.echo(f"Elec. $:    ${estimate.electricity_cost_usd:.2f}")
             click.echo(f"Total $:    ${estimate.total_cost_usd:.2f}")
+            answer = data.get("cost_intelligence")
+            if isinstance(answer, dict) and answer.get("summary"):
+                click.echo(f"Kiln:       {answer['summary']}")
             for w in estimate.warnings:
                 click.echo(f"Warning:    {w}")
     except FileNotFoundError as exc:
@@ -7359,7 +7366,11 @@ def compare_cost(
             electricity_rate=electricity_rate,
             printer_wattage=printer_wattage,
         )
-        result["local"] = {"available": True, "estimate": estimate.to_dict()}
+        local = estimate.to_dict()
+        from kiln._pro_cost_bridge import attach_cost_intelligence
+
+        attach_cost_intelligence(local, file_path)
+        result["local"] = {"available": True, "estimate": local}
     except ValueError as exc:
         result["local"] = {"available": False, "error": str(exc)}
     except Exception as exc:

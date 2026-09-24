@@ -396,6 +396,9 @@ class _EstimateToolsPlugin:
             Each filament is priced as the material the file was sliced
             for; ``estimate.filaments`` lists them and
             ``estimate.material_source`` says where the material came from.
+            When kiln-pro (https://kiln3d.com) answers, the estimate also
+            carries a ``cost_intelligence`` field; what it holds depends on
+            the tier (https://kiln3d.com/pricing).
 
             Args:
                 file_path: Path to the G-code file.
@@ -415,7 +418,11 @@ class _EstimateToolsPlugin:
                     electricity_rate=electricity_rate,
                     printer_wattage=printer_wattage,
                 )
-                return {"success": True, "estimate": estimate.to_dict()}
+                data = estimate.to_dict()
+                from kiln._pro_cost_bridge import attach_cost_intelligence
+
+                attach_cost_intelligence(data, file_path)
+                return {"success": True, "estimate": data}
             except FileNotFoundError as exc:
                 return _srv._error_dict(f"Failed to estimate cost: {exc}", code="FILE_NOT_FOUND")
             except ValueError as exc:

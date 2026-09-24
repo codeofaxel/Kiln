@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-09-22T21:21:52.446142+00:00",
-  "tool_count": 426,
+  "generated": "2026-09-24T07:36:02.445215+00:00",
+  "tool_count": 427,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -14598,6 +14598,76 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      }
+    },
+    {
+      "name": "print_cost_intelligence",
+      "description": "What a print's filament changes cost and how to cut them, and the cost with a reprint priced in.",
+      "tier": "free",
+      "access": "free",
+      "category": "part_economics",
+      "parameters": {
+        "properties": {
+          "gcode_gz_b64": {
+            "default": "",
+            "title": "Gcode Gz B64",
+            "type": "string"
+          },
+          "file_path": {
+            "default": "",
+            "title": "File Path",
+            "type": "string"
+          },
+          "file_name": {
+            "default": "",
+            "title": "File Name",
+            "type": "string"
+          },
+          "filaments": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filaments"
+          },
+          "total_cost_usd": {
+            "default": 0.0,
+            "title": "Total Cost Usd",
+            "type": "number"
+          },
+          "estimated_time_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Estimated Time Seconds"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "title": "print_cost_intelligenceArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {

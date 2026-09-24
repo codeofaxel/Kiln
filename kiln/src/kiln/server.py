@@ -10162,6 +10162,16 @@ def preflight_check(
             cost_estimate = _estimate_print_cost(
                 _cost_time_s, 0, material=expected_material, filaments=_file_filaments
             )
+            if cost_estimate is not None and file_path is not None:
+                from kiln._pro_cost_bridge import attach_cost_intelligence
+
+                attach_cost_intelligence(
+                    cost_estimate,
+                    str(file_path),
+                    printer_id=pf_target or "",
+                    filaments=list(_file_filaments.filaments) if _file_filaments else [],
+                    estimated_time_seconds=int(_cost_time_s) if _cost_time_s else None,
+                )
 
         # -- Brand filament compatibility (advisory) ----------------------
         if expected_material is not None:
@@ -13390,7 +13400,9 @@ def compare_print_options(
             only local estimate is returned.
         material: Filament material for the local estimate (PLA, PETG, …).
             Leave empty to use what the file was sliced for, PLA when it
-            names nothing.
+            names nothing.  When kiln-pro (https://kiln3d.com) answers, the
+            local estimate also carries a ``cost_intelligence`` field; what
+            it holds depends on the tier (https://kiln3d.com/pricing).
         fulfillment_material_id: Material ID from ``fulfillment_materials``
             for the outsourced quote.  If omitted, the fulfillment quote
             is skipped.
@@ -13412,6 +13424,9 @@ def compare_print_options(
             printer_wattage=printer_wattage,
         )
         local_estimate = estimate.to_dict()
+        from kiln._pro_cost_bridge import attach_cost_intelligence
+
+        attach_cost_intelligence(local_estimate, file_path)
     except FileNotFoundError:
         local_error = "G-code file not found"
     except Exception as exc:

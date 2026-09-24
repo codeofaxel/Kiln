@@ -8,6 +8,7 @@
 kiln_pro.adhesives
 kiln_pro.bridge
 kiln_pro.bridge.pro_features
+kiln_pro.cost_intelligence
 kiln_pro.cutter_intelligence
 kiln_pro.cutter_intelligence.catalogue
 kiln_pro.cutter_intelligence.counter
