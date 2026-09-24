@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from kiln.gcode import slicer_filament_totals
-from kiln.gcode_metadata import head_and_tail, read_head_and_tail
+from kiln.gcode_metadata import read_head, read_head_and_tail
 
 logger = logging.getLogger(__name__)
 
@@ -483,8 +483,13 @@ def _extract_ufp_metadata(file_path: str) -> FileMetadata:
                     break
 
             if gcode_path is not None:
-                with zf.open(gcode_path) as fh:
-                    lines = head_and_tail(raw.decode("utf-8", errors="replace") for raw in fh)
+                info = zf.getinfo(gcode_path)
+                with zf.open(info) as fh:
+                    # Only the top, bounded in bytes: a member's end can
+                    # only be reached by unpacking all of it, and Cura, which
+                    # writes UFP, puts its time, filament and layer count
+                    # at the top.
+                    lines = read_head(fh, info.file_size)
 
                 # Re-use gcode parsing on extracted lines
                 gcode_meta = _extract_gcode_metadata_from_lines(lines)

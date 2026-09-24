@@ -66,22 +66,49 @@ class TestTheWindowReachesTheEnd:
         assert meta.extra["layer_height"] == pytest.approx(0.2)
         assert meta.slicer_hint.startswith("OrcaSlicer 2.3.2")
 
-    def test_a_ufp_package_is_read_the_same_way(self, tmp_path):
-        import zipfile
-
-        from kiln.file_metadata import extract_metadata
-
-        path = tmp_path / "jar.ufp"
-        with zipfile.ZipFile(path, "w") as zf:
-            zf.writestr("3D/model.gcode", _orca_shaped_file())
-        meta = extract_metadata(str(path))
-        assert meta.file_type == "ufp"
-        assert meta.extra["filament_used"] == pytest.approx(11624.56)
-        assert meta.extra["printer_model"] == "bambu_a1_h679b"
-
     def test_a_value_at_the_top_still_wins_over_the_same_key_at_the_end(self, tmp_path):
         from kiln.file_metadata import extract_metadata
 
         path = tmp_path / "both.gcode"
         path.write_text("; layer_height = 0.16\n" + _orca_shaped_file())
         assert extract_metadata(str(path)).extra["layer_height"] == pytest.approx(0.16)
+
+
+def _cura_shaped_file(moves: int = 5000) -> str:
+    """Cura's shape, the slicer that writes UFP: everything read at the top."""
+    head = (
+        ";FLAVOR:Marlin\n;TIME:6632\n;Filament used: 4.523m\n;Layer height: 0.2\n"
+        ";Generated with Cura_SteamEngine 5.7.0\n;LAYER_COUNT:150\n;LAYER:0\n"
+    )
+    return head + "".join(f"G1 X{i % 200} Y{i % 150} E.05\n" for i in range(moves))
+
+
+class TestPackagesAreReadOnlyAtTheTop:
+    """A UFP's G-code is a zipped member: reaching its end means unpacking
+    all of it, so only its top is read, bounded in bytes."""
+
+    def _ufp(self, tmp_path, text: str):
+        import zipfile
+
+        path = tmp_path / "part.ufp"
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("3D/model.gcode", text)
+        return str(path)
+
+    def test_curas_header_is_read(self, tmp_path):
+        from kiln.file_metadata import extract_metadata
+
+        meta = extract_metadata(self._ufp(tmp_path, _cura_shaped_file()))
+        assert meta.file_type == "ufp"
+        assert meta.extra["filament_used"] == pytest.approx(4523.0)
+        assert meta.slicer_hint.startswith("Cura_SteamEngine 5.7.0")
+
+    def test_a_member_is_never_unpacked_to_its_end(self, tmp_path):
+        from kiln.file_metadata import extract_metadata
+
+        # 2.6 MB unpacked from a few KB: the line at its end must stay unread,
+        # because reading it means unpacking — and walking — every line.
+        text = ";Generated with Cura_SteamEngine 5.7.0\n" + "G1 X1 Y1 E.1\n" * 200_000 + "; filament used [mm] = 999\n"
+        meta = extract_metadata(self._ufp(tmp_path, text))
+        assert meta.slicer_hint.startswith("Cura_SteamEngine")
+        assert "filament_used" not in meta.extra

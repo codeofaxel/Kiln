@@ -28,7 +28,7 @@ import re
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, BinaryIO
 
 from kiln.gcode import slicer_filament_totals
 
@@ -48,6 +48,11 @@ _MAX_HEADER_LINES: int = 1000
 # totals and settings start about 745 lines (21 KB) from the end.
 _MAX_FOOTER_LINES: int = 1000
 _FOOTER_BYTES: int = 64 * 1024
+#: The most of a file's top that is read, however few line breaks it has.
+#: Bambu Studio's 560-line settings block is about 45 KB.  A budget in
+#: bytes, not only lines, is what keeps one enormous line — or a package
+#: member that unpacks to gigabytes — from being read whole.
+_HEADER_BYTES: int = 1024 * 1024
 
 
 def head_and_tail(lines: Iterable[str]) -> list[str]:
@@ -68,6 +73,32 @@ def head_and_tail(lines: Iterable[str]) -> list[str]:
     return head + list(tail)
 
 
+def _decoded_lines(data: bytes) -> list[str]:
+    return data.decode("utf-8", errors="replace").splitlines()
+
+
+def _read_window(fh: BinaryIO, size: int, *, tail: bool) -> list[str]:
+    """The window of an open binary stream of *size* bytes, read in bounded
+    pieces: at most :data:`_HEADER_BYTES` from the top and
+    :data:`_FOOTER_BYTES` from the end."""
+    head = fh.read(_HEADER_BYTES)
+    if len(head) >= size:
+        # The whole text is already in hand.
+        return head_and_tail(_decoded_lines(head))
+    lines = _decoded_lines(head)
+    if lines and not head.endswith((b"\n", b"\r")):
+        lines.pop()  # the budget ended part-way through a line
+    lines = lines[:_MAX_HEADER_LINES]
+    if tail:
+        start = max(0, size - _FOOTER_BYTES)
+        fh.seek(start)
+        tail_lines = _decoded_lines(fh.read(_FOOTER_BYTES))
+        if start > 0 and tail_lines:
+            tail_lines = tail_lines[1:]  # the first piece began part-way through a line
+        lines.extend(tail_lines[-_MAX_FOOTER_LINES:])
+    return lines
+
+
 def read_head_and_tail(file_path: str) -> list[str]:
     """:func:`head_and_tail` of a file on disk, reading only its two ends.
 
@@ -77,21 +108,17 @@ def read_head_and_tail(file_path: str) -> list[str]:
 
     :raises OSError: when the file cannot be read.
     """
-    lines: list[str] = []
-    with open(file_path, errors="replace") as fh:
-        for i, line in enumerate(fh):
-            if i >= _MAX_HEADER_LINES:
-                break
-            lines.append(line)
-        else:
-            return lines
     with open(file_path, "rb") as fh:
-        fh.seek(0, os.SEEK_END)
-        size = fh.tell()
-        fh.seek(max(0, size - _FOOTER_BYTES))
-        tail_text = fh.read().decode(errors="replace")
-    lines.extend(tail_text.splitlines()[-_MAX_FOOTER_LINES:])
-    return lines
+        return _read_window(fh, os.fstat(fh.fileno()).st_size, tail=True)
+
+
+def read_head(fh: BinaryIO, size: int) -> list[str]:
+    """The top window of an open binary stream of *size* bytes.
+
+    For a G-code member of a package (a UFP): its end can only be reached
+    by unpacking all of it, so only the top is read, bounded in bytes.
+    """
+    return _read_window(fh, size, tail=False)
 
 
 # ---------------------------------------------------------------------------
