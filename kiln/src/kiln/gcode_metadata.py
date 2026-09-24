@@ -77,24 +77,32 @@ def _decoded_lines(data: bytes) -> list[str]:
     return data.decode("utf-8", errors="replace").splitlines()
 
 
+_LINE_BREAKS = (b"\n", b"\r")
+
+
 def _read_window(fh: BinaryIO, size: int, *, tail: bool) -> list[str]:
     """The window of an open binary stream of *size* bytes, read in bounded
     pieces: at most :data:`_HEADER_BYTES` from the top and
-    :data:`_FOOTER_BYTES` from the end."""
-    head = fh.read(_HEADER_BYTES)
+    :data:`_FOOTER_BYTES` from the end.  A line cut by either edge is left
+    out; a line that starts or ends exactly on an edge is kept — one byte
+    past the top budget, and one before the end window, says which."""
+    head = fh.read(_HEADER_BYTES + 1)
     if len(head) >= size:
         # The whole text is already in hand.
         return head_and_tail(_decoded_lines(head))
+    after, head = head[_HEADER_BYTES:], head[:_HEADER_BYTES]
     lines = _decoded_lines(head)
-    if lines and not head.endswith((b"\n", b"\r")):
+    if lines and not head.endswith(_LINE_BREAKS) and after not in _LINE_BREAKS:
         lines.pop()  # the budget ended part-way through a line
     lines = lines[:_MAX_HEADER_LINES]
     if tail:
         start = max(0, size - _FOOTER_BYTES)
-        fh.seek(start)
-        tail_lines = _decoded_lines(fh.read(_FOOTER_BYTES))
-        if start > 0 and tail_lines:
-            tail_lines = tail_lines[1:]  # the first piece began part-way through a line
+        fh.seek(max(0, start - 1))
+        piece = fh.read(_FOOTER_BYTES + (1 if start else 0))
+        before, piece = (piece[:1], piece[1:]) if start else (b"\n", piece)
+        tail_lines = _decoded_lines(piece)
+        if tail_lines and before not in _LINE_BREAKS:
+            tail_lines = tail_lines[1:]  # the window began part-way through a line
         lines.extend(tail_lines[-_MAX_FOOTER_LINES:])
     return lines
 
@@ -116,7 +124,8 @@ def read_head(fh: BinaryIO, size: int) -> list[str]:
     """The top window of an open binary stream of *size* bytes.
 
     For a G-code member of a package (a UFP): its end can only be reached
-    by unpacking all of it, so only the top is read, bounded in bytes.
+    by unpacking all of it, so at most its first 1 MB is read.  A member
+    that small is read whole, end included.
     """
     return _read_window(fh, size, tail=False)
 

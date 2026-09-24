@@ -523,3 +523,55 @@ class TestTheWindowCoversBambuStudio:
         assert window[:_MAX_HEADER_LINES] == lines[:_MAX_HEADER_LINES]
         assert window[_MAX_HEADER_LINES:] == lines[-_MAX_FOOTER_LINES:]
         assert head_and_tail(lines[:10]) == lines[:10]
+
+
+def _filler(n: int, width: int) -> bytes:
+    """Exactly *n* bytes of whole comment lines, each at most *width* long."""
+    count, rest = divmod(n, width)
+    if 0 < rest < 2:
+        count, rest = count - 1, rest + width
+    out = (b";" + b"x" * (width - 2) + b"\n") * count
+    return out + (b";" + b"x" * (rest - 2) + b"\n" if rest else b"")
+
+
+class TestTheWindowEdges:
+    """The top is read up to a byte budget and the end from a fixed number
+    of bytes before it.  A line cut by either edge is left out, because
+    its visible piece can read as a different figure; a line that starts
+    or ends exactly on an edge is whole and is read."""
+
+    def _meta(self, tmp_path, data: bytes):
+        path = tmp_path / "edge.gcode"
+        path.write_bytes(data)
+        return extract_metadata(str(path))
+
+    def test_a_whole_line_starting_exactly_at_the_end_window_is_read(self, tmp_path) -> None:
+        from kiln.gcode_metadata import _FOOTER_BYTES, _HEADER_BYTES
+
+        time_line = b"; estimated printing time (normal mode) = 1h 50m 32s\n"
+        data = _filler(_HEADER_BYTES + 100_000, 4096) + time_line + _filler(_FOOTER_BYTES - len(time_line), 256)
+        assert self._meta(tmp_path, data).estimated_time_seconds == 6632
+
+    def test_a_line_cut_by_the_end_window_is_not_read(self, tmp_path) -> None:
+        from kiln.gcode_metadata import _FOOTER_BYTES, _HEADER_BYTES
+
+        # The whole line is "; note = abc;TIME:5", which is no time at all;
+        # the window starts at its ";TIME:5", which would read as 5 s.
+        data = (
+            _filler(_HEADER_BYTES + 100_000 - 12, 4096) + b"; note = abc"
+            + b";TIME:5\n" + _filler(_FOOTER_BYTES - 8, 256)
+        )
+        assert self._meta(tmp_path, data).estimated_time_seconds is None
+
+    def test_a_line_cut_by_the_top_budget_is_not_read(self, tmp_path) -> None:
+        from kiln.gcode_metadata import _HEADER_BYTES
+
+        # The budget ends after ";TIME:66" of ";TIME:6632123".
+        data = _filler(_HEADER_BYTES - 8, 4096) + b";TIME:6632123\n" + _filler(300_000, 4096)
+        assert self._meta(tmp_path, data).estimated_time_seconds is None
+
+    def test_a_whole_line_ending_exactly_at_the_top_budget_is_read(self, tmp_path) -> None:
+        from kiln.gcode_metadata import _HEADER_BYTES
+
+        data = _filler(_HEADER_BYTES - 10, 4096) + b";TIME:6632\n" + _filler(300_000, 4096)
+        assert self._meta(tmp_path, data).estimated_time_seconds == 6632

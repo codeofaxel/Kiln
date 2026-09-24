@@ -105,12 +105,69 @@ class TestPackagesAreReadOnlyAtTheTop:
         assert meta.layer_count == 150
         assert meta.slicer_hint.startswith("Cura_SteamEngine 5.7.0")
 
-    def test_a_member_is_never_unpacked_to_its_end(self, tmp_path):
-        from kiln.file_metadata import extract_metadata
+    def test_a_member_is_never_unpacked_past_the_budget(self, tmp_path, monkeypatch):
+        import zipfile
 
-        # 2.6 MB unpacked from a few KB: the line at its end must stay unread,
-        # because reading it means unpacking — and walking — every line.
-        text = ";Generated with Cura_SteamEngine 5.7.0\n" + "G1 X1 Y1 E.1\n" * 200_000 + "; filament used [mm] = 999\n"
-        meta = extract_metadata(self._ufp(tmp_path, text))
+        from kiln.file_metadata import extract_metadata
+        from kiln.gcode_metadata import _HEADER_BYTES
+
+        # 3 MB on one line, then 2.6 MB of moves: a few KB zipped.  Reading
+        # its end means unpacking all of it, and so does walking its lines.
+        text = (
+            ";Generated with Cura_SteamEngine 5.7.0\n;TIME:6632\n"
+            + ";" + "x" * 3_000_000 + "\n" + "G1 X1 Y1 E.1\n" * 200_000 + "; filament used [mm] = 999\n"
+        )
+        path = self._ufp(tmp_path, text)
+        reached: list[int] = []
+        real_open = zipfile.ZipFile.open
+
+        def watched_open(zf, name, *args, **kwargs):
+            return _Watched(real_open(zf, name, *args, **kwargs), reached)
+
+        monkeypatch.setattr(zipfile.ZipFile, "open", watched_open)
+        meta = extract_metadata(path)
         assert meta.slicer_hint.startswith("Cura_SteamEngine")
+        assert meta.estimated_time_seconds == 6632
         assert "filament_used" not in meta.extra
+        assert reached and max(reached) <= _HEADER_BYTES + 1
+
+
+class _Watched:
+    """A package member that records how far into it anything has read,
+    however it reads: whole reads, lines, iteration or a seek."""
+
+    def __init__(self, fh, reached: list[int]):
+        self._fh = fh
+        self._reached = reached
+
+    def _note(self, result):
+        self._reached.append(self._fh.tell())
+        return result
+
+    def read(self, n=-1):
+        return self._note(self._fh.read(n))
+
+    def readline(self, limit=-1):
+        return self._note(self._fh.readline(limit))
+
+    def seek(self, *args):
+        return self._note(self._fh.seek(*args))
+
+    def tell(self):
+        return self._fh.tell()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._fh.close()
+
