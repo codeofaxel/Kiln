@@ -10,11 +10,10 @@ from __future__ import annotations
 import contextlib
 import math
 import os
-import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from kiln.gcode import extruded_mm_per_tool, slicer_filament_totals
+from kiln.gcode import extruded_mm_per_tool, slicer_filament_totals, slicer_print_time
 
 #: How far Kiln's own count may sit from the slicer's ``filament used``
 #: total before the estimate says so.  The count matched OrcaSlicer to
@@ -189,47 +188,17 @@ class CostEstimate:
 # G-code parsing helpers
 # ---------------------------------------------------------------------------
 
-_TIME_PATTERNS = [
-    # PrusaSlicer: ; estimated printing time (normal mode) = 1h 23m 45s
-    re.compile(
-        r";\s*estimated printing time.*?=\s*"
-        r"(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
-        re.IGNORECASE,
-    ),
-    # Cura: ;TIME:5025
-    re.compile(r";\s*TIME:\s*(\d+)", re.IGNORECASE),
-    # OrcaSlicer: ; total estimated time: 1h 23m 45s
-    re.compile(
-        r";\s*total estimated time.*?:\s*"
-        r"(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
-        re.IGNORECASE,
-    ),
-]
-
-
 def _parse_time_from_comments(lines: list[str]) -> int | None:
-    """Try to extract estimated print time from slicer comments."""
-    for line in lines:
-        if not line.startswith(";"):
-            continue
+    """The slicer's own print time in seconds, read by the one reader of it
+    (:func:`kiln.gcode.slicer_print_time`), or ``None``."""
+    printed = slicer_print_time(_comment_text(lines))
+    return printed.seconds if printed is not None else None
 
-        # Try Cura-style TIME:seconds first (simplest)
-        for pattern in _TIME_PATTERNS:
-            m = pattern.search(line)
-            if m:
-                groups = m.groups()
-                # Cura pattern has 1 group (seconds total)
-                if len(groups) == 1 and groups[0] is not None:
-                    return int(groups[0])
-                # H/M/S patterns have 3 groups
-                if len(groups) == 3:
-                    h = int(groups[0]) if groups[0] else 0
-                    mins = int(groups[1]) if groups[1] else 0
-                    s = int(groups[2]) if groups[2] else 0
-                    total = h * 3600 + mins * 60 + s
-                    if total > 0:
-                        return total
-    return None
+
+def _comment_text(lines: list[str]) -> str:
+    """Only the comment lines, joined: the slicer's own figures are all on
+    them, and a plate's moves are 99% of its 8 MB."""
+    return "\n".join(line.rstrip("\r\n") for line in lines if line.lstrip().startswith(";"))
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +294,7 @@ class CostEstimator:
         est_time = _parse_time_from_comments(lines)
 
         # The slicer's own totals, read by the one reader that owns them.
-        totals = slicer_filament_totals("\n".join(line.rstrip("\r\n") for line in lines))
+        totals = slicer_filament_totals(_comment_text(lines))
         header_e_mm = totals.total_mm
 
         filament_source = "gcode_moves"

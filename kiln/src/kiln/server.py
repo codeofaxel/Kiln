@@ -10107,32 +10107,17 @@ def preflight_check(
             except Exception:
                 pass  # Already handled in remote file check above
 
-        # 2) Try local gcode file metadata (parse estimated time)
+        # 2) The slicer's own estimate in a local gcode file, read from the
+        #    top and the end of the file, where every slicer writes it.
         if _cost_time_s is None and file_path is not None:
             try:
-                _gcode_ext = {".gcode", ".gco", ".g", ".3mf"}
-                if Path(file_path).suffix.lower() in _gcode_ext:
-                    with open(file_path, errors="replace") as _fh:
-                        # Read first 200 lines for slicer time estimates
-                        for _i, _line in enumerate(_fh):
-                            if _i > 200:
-                                break
-                            _line_lower = _line.lower()
-                            # PrusaSlicer/OrcaSlicer: ; estimated printing time
-                            if "estimated printing time" in _line_lower:
-                                _time_match = re.findall(r"(\d+)\s*h", _line)
-                                _min_match = re.findall(r"(\d+)\s*m", _line)
-                                _sec_match = re.findall(r"(\d+)\s*s", _line)
-                                _cost_time_s = (
-                                    sum(int(h) * 3600 for h in _time_match)
-                                    + sum(int(m) * 60 for m in _min_match)
-                                    + sum(int(s) for s in _sec_match)
-                                )
-                                break
-                            # Cura: ;TIME:seconds
-                            if _line.startswith(";TIME:"):
-                                _cost_time_s = float(_line.split(":")[1].strip())
-                                break
+                if Path(file_path).suffix.lower() in {".gcode", ".gco", ".g"}:
+                    from kiln.gcode import slicer_print_time
+                    from kiln.gcode_metadata import read_head_and_tail
+
+                    _printed = slicer_print_time("\n".join(read_head_and_tail(file_path)))
+                    if _printed is not None:
+                        _cost_time_s = _printed.seconds
             except Exception as exc:
                 logger.debug("Cost estimate gcode parse failed: %s", exc)
 

@@ -33,7 +33,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from kiln.gcode import slicer_filament_totals
+from kiln.gcode import slicer_filament_totals, slicer_layer_count, slicer_print_time
 from kiln.gcode_metadata import read_head, read_head_and_tail
 
 logger = logging.getLogger(__name__)
@@ -98,14 +98,6 @@ class FileMetadata:
 # G-code header patterns (works for FDM G-code from all major slicers)
 # ---------------------------------------------------------------------------
 
-_RE_ESTIMATED_TIME = re.compile(
-    r";\s*estimated\s*(?:printing\s*)?time\b.*?[:=]\s*(.+)",
-    re.IGNORECASE,
-)
-_RE_LAYER_COUNT = re.compile(
-    r";\s*(?:layer\s*count|total\s*layers)\s*[:=]\s*(\d+)",
-    re.IGNORECASE,
-)
 _RE_MATERIAL = re.compile(
     r";\s*(?:material|filament_type)\s*[:=]\s*(.+)",
     re.IGNORECASE,
@@ -167,57 +159,6 @@ _RE_PRINTER_MODEL = re.compile(
 
 
 # ---------------------------------------------------------------------------
-# Time string parsing
-# ---------------------------------------------------------------------------
-
-
-def _parse_time_string(raw: str) -> int | None:
-    """Parse time strings like ``1h 42m 30s``, ``6150``, ``1 hours 42 minutes``.
-
-    :returns: Total seconds, or ``None`` if unparseable.
-    """
-    raw = raw.strip()
-    if not raw:
-        return None
-
-    # Pure integer seconds
-    if re.fullmatch(r"\d+", raw):
-        try:
-            return int(raw)
-        except ValueError:
-            return None
-
-    total = 0
-    found = False
-
-    # Days
-    m = re.search(r"(\d+)\s*d(?:ays?)?", raw, re.IGNORECASE)
-    if m:
-        total += int(m.group(1)) * 86400
-        found = True
-
-    # Hours
-    m = re.search(r"(\d+)\s*h(?:ours?)?", raw, re.IGNORECASE)
-    if m:
-        total += int(m.group(1)) * 3600
-        found = True
-
-    # Minutes
-    m = re.search(r"(\d+)\s*m(?:inutes?|in)?(?:\b|$)", raw, re.IGNORECASE)
-    if m:
-        total += int(m.group(1)) * 60
-        found = True
-
-    # Seconds
-    m = re.search(r"(\d+)\s*s(?:econds?|ec)?(?:\b|$)", raw, re.IGNORECASE)
-    if m:
-        total += int(m.group(1))
-        found = True
-
-    return total if found else None
-
-
-# ---------------------------------------------------------------------------
 # Dimension parsing from header comment
 # ---------------------------------------------------------------------------
 
@@ -246,10 +187,16 @@ def _parse_dimensions_string(raw: str) -> dict[str, float] | None:
 # ---------------------------------------------------------------------------
 
 
-def _filament_used(meta: FileMetadata, lines: list[str]) -> None:
-    """Every extruder's filament total, summed, from the slicer's own lines —
-    in mm when the file states a length, else in grams."""
-    totals = slicer_filament_totals("\n".join(lines))
+def _what_the_slicer_says(meta: FileMetadata, lines: list[str]) -> None:
+    """The slicer's own figures, read by the one reader of each: the print
+    time, the layer total, and every extruder's filament summed — in mm when
+    the file states a length, else in grams."""
+    text = "\n".join(lines)
+    printed = slicer_print_time(text)
+    if printed is not None:
+        meta.estimated_time_seconds = printed.seconds
+    meta.layer_count = slicer_layer_count(text)
+    totals = slicer_filament_totals(text)
     if totals.mm:
         meta.extra["filament_used"] = totals.total_mm
         meta.extra["filament_used_unit"] = "mm"
@@ -513,22 +460,11 @@ def _extract_gcode_metadata_from_lines(lines: list[str]) -> FileMetadata:
     """
     meta = FileMetadata(file_path="", file_type="gcode", file_format="gcode")
 
-    _filament_used(meta, lines)
+    _what_the_slicer_says(meta, lines)
     for line in lines:
         stripped = line.strip()
         if not stripped or not stripped.startswith(";"):
             continue
-
-        if meta.estimated_time_seconds is None:
-            m = _RE_ESTIMATED_TIME.match(stripped)
-            if m:
-                meta.estimated_time_seconds = _parse_time_string(m.group(1))
-
-        if meta.layer_count is None:
-            m = _RE_LAYER_COUNT.match(stripped)
-            if m:
-                with contextlib.suppress(ValueError):
-                    meta.layer_count = int(m.group(1))
 
         if meta.material_hint is None:
             m = _RE_MATERIAL.match(stripped)

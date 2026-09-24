@@ -30,7 +30,7 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from typing import Any, BinaryIO
 
-from kiln.gcode import slicer_filament_totals
+from kiln.gcode import slicer_filament_totals, slicer_print_time
 
 logger = logging.getLogger(__name__)
 
@@ -153,10 +153,6 @@ _RE_PRUSA_MATERIAL = re.compile(
     r";\s*filament_type\s*=\s*(.+)",
     re.IGNORECASE,
 )
-_RE_PRUSA_TIME = re.compile(
-    r";\s*estimated printing time.*?=\s*(.+)",
-    re.IGNORECASE,
-)
 _RE_PRUSA_TOOL_TEMP = re.compile(
     r";\s*(?:temperature|nozzle_temperature)\s*=\s*(\d+\.?\d*)",
     re.IGNORECASE,
@@ -183,10 +179,6 @@ _RE_CURA_MATERIAL = re.compile(
     r";\s*MATERIAL\s*[:=]\s*(.+)",
     re.IGNORECASE,
 )
-_RE_CURA_TIME = re.compile(
-    r";\s*TIME\s*[:=]\s*(\d+)",
-    re.IGNORECASE,
-)
 _RE_CURA_LAYER_HEIGHT = re.compile(
     r";\s*Layer height\s*[:=]\s*(\d+\.?\d*)",
     re.IGNORECASE,
@@ -209,10 +201,6 @@ _RE_S3D_BED_TEMP = re.compile(
     r";\s*platformTemp\s*,\s*(\d+\.?\d*)",
     re.IGNORECASE,
 )
-_RE_S3D_TIME = re.compile(
-    r";\s*Build time\s*[:=]?\s*(.+)",
-    re.IGNORECASE,
-)
 _RE_S3D_LAYER_HEIGHT = re.compile(
     r";\s*layerHeight\s*,\s*(\d+\.?\d*)",
     re.IGNORECASE,
@@ -225,65 +213,6 @@ _RE_S3D_SLICER = re.compile(
 # M-command temperature patterns (fallback)
 _RE_M_COMMAND = re.compile(r"^[Mm](104|109|140|190)\s")
 _RE_S_PARAM = re.compile(r"[Ss]\s*(\d+\.?\d*)")
-
-
-# ---------------------------------------------------------------------------
-# Time string parsing
-# ---------------------------------------------------------------------------
-
-
-def _parse_time_string(raw: str) -> int | None:
-    """Parse various time string formats into total seconds.
-
-    Supported formats:
-        - ``1h 42m 30s`` (PrusaSlicer)
-        - ``6150`` (Cura, raw seconds)
-        - ``1 hours 42 minutes`` (Simplify3D)
-        - ``1d 2h 30m 15s`` (extended PrusaSlicer)
-        - ``42m 30s`` (no hours)
-        - ``30s`` (seconds only)
-
-    Returns ``None`` if the string cannot be parsed.
-    """
-    raw = raw.strip()
-    if not raw:
-        return None
-
-    # Pure integer seconds (Cura style)
-    if re.fullmatch(r"\d+", raw):
-        try:
-            return int(raw)
-        except ValueError:
-            return None
-
-    total = 0
-    found = False
-
-    # Days
-    m = re.search(r"(\d+)\s*d(?:ays?)?", raw, re.IGNORECASE)
-    if m:
-        total += int(m.group(1)) * 86400
-        found = True
-
-    # Hours
-    m = re.search(r"(\d+)\s*h(?:ours?)?", raw, re.IGNORECASE)
-    if m:
-        total += int(m.group(1)) * 3600
-        found = True
-
-    # Minutes
-    m = re.search(r"(\d+)\s*m(?:inutes?|in)?(?:\b|$)", raw, re.IGNORECASE)
-    if m:
-        total += int(m.group(1)) * 60
-        found = True
-
-    # Seconds
-    m = re.search(r"(\d+)\s*s(?:econds?|ec)?(?:\b|$)", raw, re.IGNORECASE)
-    if m:
-        total += int(m.group(1))
-        found = True
-
-    return total if found else None
 
 
 # ---------------------------------------------------------------------------
@@ -315,9 +244,13 @@ def _extract_from_lines(lines: list[str]) -> GCodeMetadata:
 
     # Filament used: every extruder's value, summed, in mm — read once by
     # the one reader for what a slicer says.
-    totals = slicer_filament_totals("\n".join(lines))
+    text = "\n".join(lines)
+    totals = slicer_filament_totals(text)
     if totals.mm:
         meta.filament_used_mm = totals.total_mm
+    printed = slicer_print_time(text)
+    if printed is not None:
+        meta.estimated_time_seconds = printed.seconds
 
     # Track whether temps came from comments (preferred) vs M-commands (fallback)
     _tool_temp_from_comment = False
@@ -337,16 +270,6 @@ def _extract_from_lines(lines: list[str]) -> GCodeMetadata:
                     if m:
                         meta.material = _normalize_material(m.group(1))
                         break
-
-            # Estimated time
-            if meta.estimated_time_seconds is None:
-                for pat in (_RE_PRUSA_TIME, _RE_CURA_TIME, _RE_S3D_TIME):
-                    m = pat.match(stripped)
-                    if m:
-                        parsed = _parse_time_string(m.group(1))
-                        if parsed is not None:
-                            meta.estimated_time_seconds = parsed
-                            break
 
             # Tool temperature (from comment)
             if meta.tool_temp is None or not _tool_temp_from_comment:

@@ -920,7 +920,101 @@ class TestSlicerFilamentTotals:
         assert self._read("; filament used [mm] = 12g\n").mm == ()
         assert self._read("; filament used = 1.2m, 5g\n").mm == ()
 
+    def test_an_empty_value_never_reads_the_next_line(self):
+        assert self._read("; filament used [mm] = \n; filament used [g] = 3\n").mm == ()
+
     def test_trailing_text_and_move_lines_are_ignored(self):
         assert self._read("; filament used [mm] = 1234.56 (model only)\n").mm == (1234.56,)
         assert self._read("G1 X1 E.5 ; filament used [mm] = 9\n").mm == ()
         assert self._read("").mm == ()
+
+
+# ===================================================================
+# The slicer's own print time and layer count
+# ===================================================================
+
+
+class TestParseDuration:
+    @pytest.mark.parametrize(
+        ("text", "seconds"),
+        [
+            ("1h 42m 30s", 6150), ("2h 30m", 9000), ("42m 30s", 2550), ("30s", 30), ("2h", 7200),
+            ("1d 2h 30m 15s", 95415), ("6150", 6150), ("0", 0), ("1 hours 42 minutes", 6120),
+            ("1 hour 1 minute", 3660), ("100h", 360000), ("  1h 30m  ", 5400),
+            ("1h50m32s", 6632), ("12 mins", 720),
+        ],
+    )
+    def test_every_way_slicers_write_one(self, text, seconds):
+        from kiln.gcode import parse_duration
+
+        assert parse_duration(text) == seconds
+
+    @pytest.mark.parametrize("text", ["", "   ", "not a time"])
+    def test_nothing_readable_is_none(self, text):
+        from kiln.gcode import parse_duration
+
+        assert parse_duration(text) is None
+
+
+class TestSlicerPrintTime:
+    def _seconds(self, text):
+        from kiln.gcode import slicer_print_time
+
+        printed = slicer_print_time(text)
+        return printed.seconds if printed else None
+
+    def test_bambu_studios_total_not_its_model_time(self):
+        assert self._seconds("; model printing time: 14m 49s; total estimated time: 21m 5s\n") == 1265
+
+    def test_the_normal_mode_time_wins_over_a_slower_silent_one_after_it(self):
+        text = (
+            "; estimated printing time (normal mode) = 16m 32s\n"
+            "; estimated printing time (silent mode) = 17m 33s\n"
+        )
+        assert self._seconds(text) == 992
+
+    def test_a_first_layer_time_is_never_the_prints_time(self):
+        text = "; estimated first layer printing time (normal mode) = 29s\n; estimated printing time (normal mode) = 1h 50m 32s\n"
+        assert self._seconds(text) == 6632
+
+    def test_curas_spellings_and_not_its_per_layer_time(self):
+        assert self._seconds(";TIME_ELAPSED:12.5\n;TIME:6632\n") == 6632
+        assert self._seconds(";PRINT.TIME:6632\n") == 6632
+
+    def test_simplify3d_and_a_day_long_print(self):
+        assert self._seconds(";   Build time: 1 hours 42 minutes\n") == 6120
+        assert self._seconds("; estimated printing time (normal mode) = 1d 2h 3m 4s\n") == 93784
+
+    def test_the_words_come_back_as_written(self):
+        from kiln.gcode import slicer_print_time
+
+        assert slicer_print_time("; total estimated time: 21m 5s\n").as_written == "21m 5s"
+
+    def test_an_empty_value_never_reads_the_next_line(self):
+        text = "; estimated printing time (normal mode) = \n; estimated first layer printing time (normal mode) = 29s\n"
+        assert self._seconds(text) is None
+
+    def test_a_move_line_or_nothing_is_none(self):
+        assert self._seconds("G1 X10 Y10\nTIME:9999\n") is None
+        assert self._seconds("") is None
+
+
+class TestSlicerLayerCount:
+    @pytest.mark.parametrize(
+        ("text", "layers"),
+        [
+            ("; total layer number: 225\n", 225),
+            ("; total layers count = 225\n", 225),
+            (";LAYER_COUNT:150\n;LAYER:0\n", 150),
+        ],
+    )
+    def test_every_slicer_that_writes_one(self, text, layers):
+        from kiln.gcode import slicer_layer_count
+
+        assert slicer_layer_count(text) == layers
+
+    def test_a_setting_or_a_layer_marker_is_not_the_total(self):
+        from kiln.gcode import slicer_layer_count
+
+        assert slicer_layer_count("; interlocking_beam_layer_count = 2\n;LAYER:5\n") is None
+

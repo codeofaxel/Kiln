@@ -276,6 +276,14 @@ class TestParseTimeFromComments:
         text = "; estimated printing time (normal mode) = 2h"
         assert self._parse_time(text) == 7200
 
+    def test_a_print_longer_than_a_day(self):
+        text = "; estimated printing time (normal mode) = 1d 2h 3m 4s"
+        assert self._parse_time(text) == 93784
+
+    def test_bambu_studios_total_and_simplify3d(self):
+        assert self._parse_time("; model printing time: 14m 49s; total estimated time: 21m 5s") == 1265
+        assert self._parse_time(";   Build time: 1 hours 42 minutes") == 6120
+
     def test_ignores_non_comment_lines(self):
         text = "G1 X10 Y10\nTIME:9999"
         assert self._parse_time(text) is None

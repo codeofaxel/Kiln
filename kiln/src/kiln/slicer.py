@@ -1273,7 +1273,7 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     """
     import re as _re
 
-    from kiln.gcode import slicer_filament_totals
+    from kiln.gcode import slicer_filament_totals, slicer_layer_count, slicer_print_time
 
     estimates: dict[str, Any] = {"gcode_path": gcode_path}
 
@@ -1294,7 +1294,8 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     # than recorded as 0: "I don't know" is a true statement about every
     # print, "0 g" is a false one.  See derive_filament_weight, which fills
     # it in when a material is named.
-    totals = slicer_filament_totals("".join(search_lines))
+    comments = "".join(search_lines)
+    totals = slicer_filament_totals(comments)
     if totals.mm:
         estimates["filament_length_mm"] = totals.total_mm
     if totals.weight_g:
@@ -1302,27 +1303,20 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     if totals.cm3:
         estimates["filament_volume_cm3"] = float(sum(totals.cm3))
 
+    # The print time and layer total, read by the one reader of each.  The
+    # normal-mode time wins over a slower silent-mode line written after it.
+    printed = slicer_print_time(comments)
+    if printed is not None:
+        estimates["estimated_time_seconds"] = printed.seconds
+        if not printed.as_written.replace(".", "", 1).isdigit():
+            # Cura writes bare seconds; words only where the slicer wrote them.
+            estimates["estimated_time_human"] = printed.as_written
+    layers = slicer_layer_count(comments)
+    if layers is not None:
+        estimates["layer_count"] = layers
+
     for line in search_lines:
         line = line.strip()
-
-        # PrusaSlicer: ; estimated printing time (normal mode) = 1h 23m 45s
-        time_match = _re.search(
-            r"estimated printing time.*?=\s*(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
-            line,
-            _re.IGNORECASE,
-        )
-        if time_match:
-            d = int(time_match.group(1) or 0)
-            h = int(time_match.group(2) or 0)
-            m = int(time_match.group(3) or 0)
-            s = int(time_match.group(4) or 0)
-            estimates["estimated_time_seconds"] = d * 86400 + h * 3600 + m * 60 + s
-            estimates["estimated_time_human"] = line.split("=", 1)[-1].strip()
-
-        # ; total layers count = 123
-        layers = _re.search(r"total layers count\s*=\s*(\d+)", line, _re.IGNORECASE)
-        if layers:
-            estimates["layer_count"] = int(layers.group(1))
 
         # ; filament cost = 1.23
         #
@@ -1733,29 +1727,18 @@ def merge_multipart_gcode(
 
     merged_body = "".join(merged_blocks)
 
-    # Sum slicer time estimates from each part's original gcode file.
-    # PrusaSlicer puts estimates at the END of the file (after all layers),
-    # so we scan the full file, not just the pre-layer header.
-    _TIME_RE = re.compile(
-        r"estimated printing time \(normal mode\).*?=\s*"
-        r"(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
-        re.IGNORECASE,
-    )
+    # Sum the slicer's own time estimate from each part's gcode, read from
+    # the top and the end of the file, where every slicer writes it.
+    from kiln.gcode import slicer_print_time
+    from kiln.gcode_metadata import read_head_and_tail
+
     total_time = 0
     for _header, _layers, part_info in parsed:
         gcode_path = part_info.get("gcode_path", "")
         if gcode_path and os.path.isfile(gcode_path):
-            with open(gcode_path, errors="replace") as _f:
-                for _line in _f:
-                    m = _TIME_RE.search(_line)
-                    if m:
-                        total_time += (
-                            int(m.group(1) or 0) * 86400
-                            + int(m.group(2) or 0) * 3600
-                            + int(m.group(3) or 0) * 60
-                            + int(m.group(4) or 0)
-                        )
-                        break  # one estimate per file
+            printed = slicer_print_time("\n".join(read_head_and_tail(gcode_path)))
+            if printed is not None:
+                total_time += printed.seconds
 
     if not output_path:
         output_path = os.path.join(

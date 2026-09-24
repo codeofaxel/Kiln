@@ -1416,14 +1416,14 @@ class SlicerFilamentTotals:
 #: when none is written.  A reader that kept the first value of a list
 #: lost a two-colour plate's second filament (2026-09-23).
 _FILAMENT_LINES: tuple[tuple[str | None, re.Pattern[str]], ...] = (
-    ("mm", re.compile(r"^;\s*filament used \[mm\]\s*=\s*(?P<v>.+?)\s*$", re.I | re.M)),
-    ("mm", re.compile(r"^;\s*total filament length \[mm\]\s*:\s*(?P<v>.+?)\s*$", re.I | re.M)),
-    ("g", re.compile(r"^;\s*filament used \[g\]\s*=\s*(?P<v>.+?)\s*$", re.I | re.M)),
-    ("g", re.compile(r"^;\s*total filament weight \[g\]\s*:\s*(?P<v>.+?)\s*$", re.I | re.M)),
-    ("cm3", re.compile(r"^;\s*filament used \[cm3\]\s*=\s*(?P<v>.+?)\s*$", re.I | re.M)),
-    ("total_g", re.compile(r"^;\s*total filament used \[g\]\s*=\s*(?P<v>.+?)\s*$", re.I | re.M)),
-    (None, re.compile(r"^;\s*filament[ _]used\s*[:=]\s*(?P<v>.+?)\s*$", re.I | re.M)),
-    (None, re.compile(r"^;\s*filament length\s*[:=]?\s*(?P<v>.+?)\s*$", re.I | re.M)),
+    ("mm", re.compile(r"^;[ \t]*filament used \[mm\][ \t]*=[ \t]*(?P<v>.+?)[ \t]*$", re.I | re.M)),
+    ("mm", re.compile(r"^;[ \t]*total filament length \[mm\][ \t]*:[ \t]*(?P<v>.+?)[ \t]*$", re.I | re.M)),
+    ("g", re.compile(r"^;[ \t]*filament used \[g\][ \t]*=[ \t]*(?P<v>.+?)[ \t]*$", re.I | re.M)),
+    ("g", re.compile(r"^;[ \t]*total filament weight \[g\][ \t]*:[ \t]*(?P<v>.+?)[ \t]*$", re.I | re.M)),
+    ("cm3", re.compile(r"^;[ \t]*filament used \[cm3\][ \t]*=[ \t]*(?P<v>.+?)[ \t]*$", re.I | re.M)),
+    ("total_g", re.compile(r"^;[ \t]*total filament used \[g\][ \t]*=[ \t]*(?P<v>.+?)[ \t]*$", re.I | re.M)),
+    (None, re.compile(r"^;[ \t]*filament[ _]used[ \t]*[:=][ \t]*(?P<v>.+?)[ \t]*$", re.I | re.M)),
+    (None, re.compile(r"^;[ \t]*filament length[ \t]*[:=]?[ \t]*(?P<v>.+?)[ \t]*$", re.I | re.M)),
 )
 
 _FILAMENT_PIECE_RE = re.compile(rf"\s*(?P<n>{GCODE_NUMBER})\s*(?P<unit>mm|m|g|cm3)?(?![a-z])", re.I)
@@ -1500,3 +1500,104 @@ def slicer_filament_totals(text: str) -> SlicerFilamentTotals:
         cm3=found.get("cm3", ()),
         total_g=total_g,
     )
+
+
+# ---------------------------------------------------------------------------
+# The slicer's own print time and layer count
+# ---------------------------------------------------------------------------
+
+_DURATION_PART_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])",
+    re.IGNORECASE,
+)
+_SECONDS_PER_UNIT = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+
+
+def parse_duration(text: str) -> int | None:
+    """Seconds in a duration the way slicers write one, or ``None``.
+
+    ``1d 2h 30m 15s`` (PrusaSlicer, OrcaSlicer, Bambu Studio), ``1 hours 42
+    minutes`` (Simplify3D), ``6632`` (Cura writes bare seconds).
+    """
+    raw = text.strip()
+    if not raw:
+        return None
+    if re.fullmatch(r"\d+(?:\.\d+)?", raw):
+        return int(float(raw))
+    parts = _DURATION_PART_RE.findall(raw)
+    if not parts:
+        return None
+    return int(round(sum(float(n) * _SECONDS_PER_UNIT[unit[0].lower()] for n, unit in parts)))
+
+
+@dataclass(frozen=True)
+class SlicerPrintTime:
+    """The whole print's time as a slicer wrote it: seconds, and its words."""
+
+    seconds: int
+    as_written: str
+
+
+#: Each spelling of the whole print's time, most trusted first.  PrusaSlicer
+#: and OrcaSlicer write ``; estimated printing time (normal mode) = 1h 50m
+#: 32s``, then a slower ``(silent mode)`` line for printers that have one;
+#: Bambu Studio ``; model printing time: 14m 49s; total estimated time: 21m
+#: 5s``; Cura ``;TIME:6632`` (``;PRINT.TIME:6632`` in its UltiMaker header);
+#: Simplify3D ``;   Build time: 1 hours 42 minutes``.  A first-layer time is
+#: never the print's time, and neither is Cura's per-layer ``;TIME_ELAPSED``.
+_PRINT_TIME_LINES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^;[ \t]*estimated printing time(?:[ \t]*\(normal mode\))?[ \t]*=[ \t]*(?P<v>.+?)[ \t]*$", re.I | re.M),
+    re.compile(r"^;(?:[^\n]*;)?[ \t]*total estimated time[ \t]*:[ \t]*(?P<v>[^;\n]+?)[ \t]*(?:;|$)", re.I | re.M),
+    re.compile(r"^;[ \t]*(?:PRINT\.)?TIME[ \t]*[:=][ \t]*(?P<v>\d+(?:\.\d+)?)[ \t]*$", re.I | re.M),
+    re.compile(r"^;[ \t]*Build time[ \t]*:?[ \t]*(?P<v>.+?)[ \t]*$", re.I | re.M),
+    re.compile(r"^;[ \t]*estimated printing time[ \t]*\([^)\n]*\)[ \t]*=[ \t]*(?P<v>.+?)[ \t]*$", re.I | re.M),
+)
+
+#: Each spelling of the print's layer total.  OrcaSlicer and Bambu Studio
+#: write ``; total layer number: 225`` at the top (OrcaSlicer also ``; total
+#: layers count = 225`` at the end); Cura writes ``;LAYER_COUNT:150``.
+#: PrusaSlicer writes none — its ``; interlocking_beam_layer_count = 2`` is a
+#: setting, never the print's layer count.
+_LAYER_COUNT_LINES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^;[ \t]*total layer number[ \t]*[:=][ \t]*(?P<v>\d+)[ \t]*$", re.I | re.M),
+    re.compile(r"^;[ \t]*total layers count[ \t]*[:=][ \t]*(?P<v>\d+)[ \t]*$", re.I | re.M),
+    re.compile(r"^;[ \t]*LAYER_COUNT[ \t]*[:=][ \t]*(?P<v>\d+)[ \t]*$", re.I | re.M),
+)
+
+
+def _comments_naming(text: str, *words: str) -> str:
+    """The comment lines of *text* that contain any of *words* — the only
+    lines a slicer's own figures can be on, and a small fraction of a plate."""
+    return "\n".join(
+        line
+        for line in text.splitlines()
+        if any(word in line for word in words) and line.lstrip().startswith(";")
+    )
+
+
+def slicer_print_time(text: str) -> SlicerPrintTime | None:
+    """The whole print's time as the slicer wrote it into *text*, or ``None``.
+
+    The one reader of a slicer's time estimate: every door that reports a
+    print time from a G-code file's own comments calls it.  Never raises.
+    """
+    candidates = _comments_naming(text, "ime", "IME")
+    for pattern in _PRINT_TIME_LINES:
+        m = pattern.search(candidates)
+        if m is None:
+            continue
+        seconds = parse_duration(m.group("v"))
+        if seconds is not None:
+            return SlicerPrintTime(seconds=seconds, as_written=m.group("v").strip())
+    return None
+
+
+def slicer_layer_count(text: str) -> int | None:
+    """The print's layer total as the slicer wrote it into *text*, or
+    ``None`` when it wrote none (PrusaSlicer never does).  Never raises."""
+    candidates = _comments_naming(text, "ayer", "AYER")
+    for pattern in _LAYER_COUNT_LINES:
+        m = pattern.search(candidates)
+        if m is not None:
+            return int(m.group("v"))
+    return None

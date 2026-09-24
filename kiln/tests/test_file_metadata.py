@@ -101,6 +101,8 @@ class TestPackagesAreReadOnlyAtTheTop:
         meta = extract_metadata(self._ufp(tmp_path, _cura_shaped_file()))
         assert meta.file_type == "ufp"
         assert meta.extra["filament_used"] == pytest.approx(4523.0)
+        assert meta.estimated_time_seconds == 6632
+        assert meta.layer_count == 150
         assert meta.slicer_hint.startswith("Cura_SteamEngine 5.7.0")
 
     def test_a_member_is_never_unpacked_to_its_end(self, tmp_path):

@@ -18,7 +18,6 @@ import pytest
 from kiln.gcode_metadata import (
     GCodeMetadata,
     _normalize_material,
-    _parse_time_string,
     enrich_printer_file,
     extract_metadata,
     extract_metadata_from_content,
@@ -71,59 +70,6 @@ class TestGCodeMetadataDataclass:
         m2 = GCodeMetadata()
         m1.material = "PLA"
         assert m2.material is None
-
-
-# ===================================================================
-# Time string parsing
-# ===================================================================
-
-class TestTimeStringParsing:
-    """Test all time format variants."""
-
-    def test_prusa_format_hms(self) -> None:
-        assert _parse_time_string("1h 42m 30s") == 6150
-
-    def test_prusa_format_hm(self) -> None:
-        assert _parse_time_string("2h 30m") == 9000
-
-    def test_prusa_format_ms(self) -> None:
-        assert _parse_time_string("42m 30s") == 2550
-
-    def test_prusa_format_seconds_only(self) -> None:
-        assert _parse_time_string("30s") == 30
-
-    def test_prusa_format_hours_only(self) -> None:
-        assert _parse_time_string("2h") == 7200
-
-    def test_prusa_format_with_days(self) -> None:
-        assert _parse_time_string("1d 2h 30m 15s") == 95415
-
-    def test_cura_raw_seconds(self) -> None:
-        assert _parse_time_string("6150") == 6150
-
-    def test_cura_raw_seconds_zero(self) -> None:
-        assert _parse_time_string("0") == 0
-
-    def test_simplify3d_format(self) -> None:
-        assert _parse_time_string("1 hours 42 minutes") == 6120
-
-    def test_simplify3d_singular(self) -> None:
-        assert _parse_time_string("1 hour 1 minute") == 3660
-
-    def test_empty_string(self) -> None:
-        assert _parse_time_string("") is None
-
-    def test_whitespace_only(self) -> None:
-        assert _parse_time_string("   ") is None
-
-    def test_garbage_string(self) -> None:
-        assert _parse_time_string("not a time") is None
-
-    def test_large_value(self) -> None:
-        assert _parse_time_string("100h") == 360000
-
-    def test_leading_trailing_whitespace(self) -> None:
-        assert _parse_time_string("  1h 30m  ") == 5400
 
 
 # ===================================================================
