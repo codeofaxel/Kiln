@@ -187,9 +187,55 @@ _MATERIAL_TEMPS: dict[str, tuple[float, float, float, float]] = {
 # Parsing helpers
 # ---------------------------------------------------------------------------
 
+#: A number the way G-code writers actually spell one.  Slicers drop the
+#: leading zero (OrcaSlicer and Bambu Studio write ``E.04805``, ``E-.8``,
+#: ``Z.2`` on most lines), firmware accepts a trailing point (``X10.``)
+#: and an explicit plus.  No exponent form: nothing that emits G-code
+#: writes one, and an ``E`` after digits is the extruder word.  Every
+#: reader that pulls an axis value out of a line uses this ONE spelling
+#: (``axis_value`` / ``has_axis_word`` below) — a private
+#: ``E([-+]?\d+\.?\d*)`` in one module silently dropped three quarters of
+#: a plate's plastic (2026-09-23), and a spelling stated twice drifts.
+GCODE_NUMBER = r"[-+]?(?:\d+\.?\d*|\.\d+)"
+
+_AXIS_WORD_PATTERNS: dict[str, re.Pattern[str]] = {}
+
+
+def axis_word_pattern(letters: str) -> re.Pattern[str]:
+    """Compiled pattern for any of *letters* as a G-code word.
+
+    Group 1 is the letter, group 2 the number.  The letter must not
+    follow another letter (so ``NAME=BEE.5`` is no E word) and may be
+    written in either case.
+    """
+    key = "".join(sorted(set(letters.upper())))
+    pattern = _AXIS_WORD_PATTERNS.get(key)
+    if pattern is None:
+        pattern = re.compile(
+            rf"(?<![A-Za-z])([{key}])\s*({GCODE_NUMBER})", re.IGNORECASE
+        )
+        _AXIS_WORD_PATTERNS[key] = pattern
+    return pattern
+
+
+def axis_value(line: str, letter: str) -> float | None:
+    """Value of the *letter* word on one G-code line, or ``None``.
+
+    Comments (``;`` onward) are ignored, so a value quoted in a comment
+    is never read as a move.
+    """
+    m = axis_word_pattern(letter).search(line.split(";", 1)[0])
+    return float(m.group(2)) if m else None
+
+
+def has_axis_word(line: str, letters: str) -> bool:
+    """Whether the line carries any of *letters* as a word with a number."""
+    return axis_word_pattern(letters).search(line.split(";", 1)[0]) is not None
+
+
 # Regex to extract parameters from a G-code command.  Matches a letter
 # followed by an optional sign and a number (integer or float).
-_PARAM_RE = re.compile(r"([A-Za-z])\s*([+-]?\d*\.?\d+)")
+_PARAM_RE = re.compile(rf"([A-Za-z])\s*({GCODE_NUMBER})")
 
 # Regex to extract the command word (letter + digits) from the start of
 # a stripped line.  Tolerates an optional space between letter and number.

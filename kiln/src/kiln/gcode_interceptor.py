@@ -33,6 +33,7 @@ from enum import Enum
 from typing import Any
 
 from kiln.events import Event, EventBus, EventType
+from kiln.gcode import GCODE_NUMBER
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,9 @@ logger = logging.getLogger(__name__)
 _MAX_HISTORY_PER_SESSION: int = 500
 _DEFAULT_TEMP_DELTA_THRESHOLD: float = 10.0  # C/sec thermal runaway indicator
 
-# G-code parameter regex — matches letter + optional sign + number.
-_PARAM_RE = re.compile(r"([A-Za-z])\s*([+-]?\d*\.?\d+)")
+# G-code parameter regex — matches letter + optional sign + number,
+# spelled the one way every reader spells it (kiln.gcode.GCODE_NUMBER).
+_PARAM_RE = re.compile(rf"([A-Za-z])\s*({GCODE_NUMBER})")
 
 # Command word regex — letter + digits at start of line.
 _CMD_RE = re.compile(r"^([A-Za-z])\s*(\d+(?:\.\d+)?)")

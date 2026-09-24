@@ -131,6 +131,17 @@ class TestStepMode:
         assert "Nothing was sent" in result.message and _scripts(bambu) == []
         assert result.details["last_hotend_reading"] == 25.0 and result.step_sent == 3
 
+    def test_the_snap_spelled_the_way_slicers_spell_it_is_still_an_extruder_move(self, bambu, monkeypatch):
+        # ``G1 E-.8`` is how OrcaSlicer writes a retract; a reader that
+        # wanted a digit after the sign saw no extruder move and let a cold
+        # nozzle snap.
+        doc = _steps_doc()
+        doc["steps"][2]["gcode"] = ["M83", "G1 E-.8 F500", "M82"]
+        _ready(bambu, monkeypatch, doc)
+        result = bambu.wipe_nozzle(step=3)
+        assert result.success is False and result.verification_source == "thermistor"
+        assert "moves the extruder" in result.message and _scripts(bambu) == []
+
     def test_a_thread_left_by_an_earlier_test_cannot_heat_this_nozzle(self, bambu, monkeypatch):
         """The cold-nozzle refusal above, with a stranger sleeping nearby.
 

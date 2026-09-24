@@ -106,6 +106,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from kiln.gcode import GCODE_NUMBER, axis_value, has_axis_word
+
 logger = logging.getLogger(__name__)
 
 # Estimated Bambu startup overhead in seconds (homing, AMS load, bed
@@ -1213,7 +1215,7 @@ def _resolve_end_gcode(
     return _raise_absolute_z_to_floor(resolved, float(lift_floor_mm))
 
 
-_Z_ONLY_MOVE_RE = re.compile(r"^(\s*G[01]\s+)Z(-?\d+\.?\d*)(\b.*)$")
+_Z_ONLY_MOVE_RE = re.compile(rf"^(\s*G[01]\s+)Z({GCODE_NUMBER})(\b.*)$")
 
 
 def _raise_absolute_z_to_floor(gcode: str, floor_mm: float) -> str:
@@ -1231,7 +1233,7 @@ def _raise_absolute_z_to_floor(gcode: str, floor_mm: float) -> str:
             absolute = True
         if absolute:
             m = _Z_ONLY_MOVE_RE.match(line)
-            if m and not re.search(r"[XYE]-?\d", m.group(3).split(";", 1)[0]):
+            if m and not has_axis_word(m.group(3), "XYE"):
                 z = float(m.group(2))
                 if z < floor_mm:
                     line = f"{m.group(1)}Z{floor_mm:.2f}{m.group(3)}"
@@ -1323,7 +1325,7 @@ _GCODE_FILAMENT_DIAMETER_RE = re.compile(
 #: pseudo-tools (T255, T1000), not trays.
 _GCODE_ANY_TOOL_SELECT_RE = re.compile(r"^\s*T(\d+)\b", re.MULTILINE)
 _BAMBU_FIRST_PSEUDO_TOOL = 255
-_GCODE_E_WORD_RE = re.compile(r"(?:^|\s)E(-?\d*\.?\d+)")
+_GCODE_E_WORD_RE = re.compile(rf"(?<![A-Za-z])E({GCODE_NUMBER})")
 _FILAMENT_DIAMETER_MM = 1.75
 _DEFAULT_FILAMENT_DENSITY = 1.24  # PLA, the table's own figure
 
@@ -1772,15 +1774,15 @@ def _wrap_tool_changes(
                     layer_z = float(stripped[3:])
             elif stripped.startswith(("G0", "G1")):
                 code = stripped.split(";", 1)[0]
-                mz = re.search(r"\bZ(-?\d+\.?\d*)", code)
-                if mz:
-                    last_z = float(mz.group(1))
-                mx = re.search(r"\bX(-?\d+\.?\d*)", code)
-                my = re.search(r"\bY(-?\d+\.?\d*)", code)
-                if mx or my:
+                mz = axis_value(code, "Z")
+                if mz is not None:
+                    last_z = mz
+                mx = axis_value(code, "X")
+                my = axis_value(code, "Y")
+                if mx is not None or my is not None:
                     last_xy = (
-                        float(mx.group(1)) if mx else last_xy[0],
-                        float(my.group(1)) if my else last_xy[1],
+                        mx if mx is not None else last_xy[0],
+                        my if my is not None else last_xy[1],
                     )
         # Track if we're inside an M620/M621 block already
         if stripped.startswith("M620 "):
@@ -2302,7 +2304,7 @@ def _assert_quiet_start_file(gcode: str, plan: dict[str, Any]) -> None:
         if upper.startswith("G28") and upper != home:
             msg = f"quiet-start build carries a homing line other than {home!r}: {code!r}; refusing to write it"
             raise ValueError(msg)
-        if seen_end and first_motion is None and upper.startswith(("G0", "G1")) and re.search(r"[XYZ]-?\d", upper):
+        if seen_end and first_motion is None and upper.startswith(("G0", "G1")) and has_axis_word(upper, "XYZ"):
             first_motion = code
     expected = f"G1 Z{float(plan['clear_z_mm']):.2f}"
     if first_motion is None or not first_motion.upper().startswith(expected.upper()):

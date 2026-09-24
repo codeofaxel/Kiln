@@ -425,3 +425,25 @@ class TestApplyTranslationToStl:
         # Re-validate — should now pass
         result2 = validate_mesh_for_printer(str(out), "bambu_a1")
         assert result2["ok"] is True
+
+
+class TestGcodeBboxReadsSlicerSpelling:
+    def test_orca_spelled_extrusions_shape_the_bbox(self, tmp_path):
+        # OrcaSlicer writes ``E.04805``; a reader that wanted a digit first
+        # saw no E word, took every print move for a travel and returned
+        # a bbox drawn from nothing.
+        gcode = tmp_path / "orca.gcode"
+        gcode.write_text(
+            "M83\n"
+            ";LAYER_CHANGE\n"
+            "G1 Z.2 F24000\n"
+            "G1 X158.922 Y99.462 E.04805\n"
+            "G1 X160.875 Y120.53 E.06127\n"
+            "G1 X-48.2 F3000\n"
+        )
+        bbox = compute_gcode_bbox(str(gcode))
+        assert bbox is not None
+        assert bbox["x_min"] == pytest.approx(158.922)
+        assert bbox["x_max"] == pytest.approx(160.875)
+        assert bbox["y_min"] == pytest.approx(99.462)
+        assert bbox["y_max"] == pytest.approx(120.53)

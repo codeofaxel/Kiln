@@ -21,10 +21,10 @@ call in with a plan the gate has already passed.
 from __future__ import annotations
 
 import logging
-import re
 import time
 from typing import Any
 
+from kiln.gcode import axis_word_pattern
 from kiln.printers.base import FilamentOpPlan, FilamentOpResult, HomeResult, HomeStep, PrinterError
 from kiln.printers.command_verdict import CommandVerdict
 
@@ -386,8 +386,8 @@ def run_finish(adapter: Any, result: Any, finish: dict[str, Any]) -> str | None:
 
 #: How long one wipe step is watched for a fault after it is sent.
 WIPE_STEP_WATCH_S: float = 10.0
-#: A G-code word that moves the extruder (``G1 E-1 F500``).
-_E_WORD = re.compile(r"\bE-?\d")
+#: A G-code word that moves the extruder (``G1 E-1 F500``, ``G1 E-.8``).
+_E_WORD = axis_word_pattern("E")
 
 
 def wipe_steps_of(doc: dict[str, Any]) -> list[dict[str, Any]]:

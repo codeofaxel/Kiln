@@ -14,6 +14,19 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from kiln.gcode import axis_value, has_axis_word
+
+#: The moves that can lay filament down.  ``G0``/``G1`` are the straight
+#: ones; ``G2``/``G3`` arcs carry an E word exactly the same way.
+_EXTRUDING_MOVES = frozenset({"G0", "G1", "G2", "G3"})
+
+#: How far Kiln's own count may sit from the slicer's ``filament used``
+#: total before the estimate says so.  The count matched OrcaSlicer to
+#: the centimetre on a 320,000-line plate; a gap wider than this means a
+#: G-code dialect the counter does not read, and a confident number would
+#: be the wrong answer.
+_HEADER_DISAGREEMENT_FRACTION = 0.05
+
 # ---------------------------------------------------------------------------
 # Material profiles
 # ---------------------------------------------------------------------------
@@ -165,6 +178,12 @@ class CostEstimate:
     infill_percent: float = 20.0
     cost_breakdown: dict[str, float] = field(default_factory=dict)
     cost_summary: dict[str, float] = field(default_factory=dict)
+    #: Where the filament figures came from: ``slicer_header`` (the
+    #: slicer's own ``filament used`` totals, the primary source when the
+    #: file carries them), ``gcode_moves`` (Kiln's count of the extruding
+    #: moves — the only source for a file with no slicer totals), ``3mf``
+    #: (the archive's slice metadata) or ``mesh`` (estimated from geometry).
+    filament_source: str = "gcode_moves"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -174,7 +193,6 @@ class CostEstimate:
 # G-code parsing helpers
 # ---------------------------------------------------------------------------
 
-_E_PATTERN = re.compile(r"E([-+]?\d+\.?\d*)", re.IGNORECASE)
 _TIME_PATTERNS = [
     # PrusaSlicer: ; estimated printing time (normal mode) = 1h 23m 45s
     re.compile(
@@ -194,11 +212,14 @@ _TIME_PATTERNS = [
 
 
 def _extract_e_value(line: str) -> float | None:
-    """Extract the E parameter value from a G-code line."""
-    m = _E_PATTERN.search(line)
-    if m:
-        return float(m.group(1))
-    return None
+    """Extract the E parameter value from a G-code line.
+
+    The number is read the one way every Kiln reader reads a G-code word
+    (:func:`kiln.gcode.axis_value`): OrcaSlicer and Bambu Studio write
+    ``E.04805`` with no leading zero on most lines, and a pattern that
+    wanted a digit first dropped three quarters of a plate's plastic.
+    """
+    return axis_value(line, "E")
 
 
 def _parse_time_from_comments(lines: list[str]) -> int | None:
@@ -297,7 +318,16 @@ class CostEstimator:
         electricity_rate: float = 0.12,
         printer_wattage: float = 200.0,
     ) -> CostEstimate:
-        """Estimate cost from a list of G-code lines."""
+        """Estimate cost from a list of G-code lines.
+
+        The slicer's own ``filament used`` totals are the primary source
+        when the file carries them: the slicer computed them from the
+        toolpath it wrote, per extruder, and they are the figures its
+        user already saw.  Kiln's own count of the extruding moves is the
+        check on them, and the only source for a file with no totals; a
+        count that sits more than 5% from the slicer's total is reported
+        as a warning with both numbers rather than trusted silently.
+        """
         warnings: list[str] = []
 
         profile = self.get_material(material)
@@ -306,10 +336,30 @@ class CostEstimator:
             profile = BUILTIN_MATERIALS["PLA"]
 
         # Parse extrusion and time
-        total_e_mm = self._parse_extrusion(lines)
+        counted_e_mm = self._parse_extrusion(lines)
         est_time = _parse_time_from_comments(lines)
 
-        if total_e_mm <= 0:
+        # The slicer's own totals, read by the one reader that owns them
+        # (imported lazily: this module stays light for callers that never
+        # see a file).
+        from kiln.printers.bambu_3mf import filament_usage_from_gcode
+
+        usage = filament_usage_from_gcode("\n".join(line.rstrip("\r\n") for line in lines))
+        header_e_mm = sum(usage.mm) if usage.source in ("slicer_grams", "slicer_length") else 0.0
+
+        filament_source = "gcode_moves"
+        total_e_mm = counted_e_mm
+        if header_e_mm > 0:
+            filament_source = "slicer_header"
+            total_e_mm = header_e_mm
+            gap = abs(counted_e_mm - header_e_mm) / header_e_mm
+            if gap > _HEADER_DISAGREEMENT_FRACTION:
+                warnings.append(
+                    f"Kiln counted {counted_e_mm / 1000.0:.3f} m of extrusion in the "
+                    f"moves but the slicer's own total is {header_e_mm / 1000.0:.3f} m "
+                    f"({gap:.0%} apart); the slicer's figure is used"
+                )
+        elif total_e_mm <= 0:
             warnings.append("No extrusion commands found in G-code")
 
         # Convert E-axis mm to filament length in meters
@@ -322,8 +372,12 @@ class CostEstimator:
         # Volume in cm^3 (mm * mm^2 = mm^3, /1000 = cm^3)
         volume_cm3 = (total_e_mm * cross_section_mm2) / 1000.0
 
-        # Weight
-        weight_g = volume_cm3 * profile.density_g_per_cm3
+        # Weight: the slicer's own grams when it wrote them (its density
+        # for the filament it sliced), else length x the profile's density.
+        if usage.source == "slicer_grams":
+            weight_g = sum(usage.grams)
+        else:
+            weight_g = volume_cm3 * profile.density_g_per_cm3
 
         # Filament cost
         filament_cost = (weight_g / 1000.0) * profile.cost_per_kg_usd
@@ -352,6 +406,7 @@ class CostEstimator:
             printer_wattage=printer_wattage,
             total_cost_usd=round(total_cost, 2),
             warnings=warnings,
+            filament_source=filament_source,
         )
 
     def estimate_from_mesh(
@@ -533,6 +588,7 @@ class CostEstimator:
             adhesion_cost_usd=round(adhesion_cost, 4),
             total_plastic_volume_mm3=round(total_plastic_mm3, 2),
             infill_percent=infill_percent,
+            filament_source="mesh",
             cost_breakdown=cost_breakdown,
             cost_summary=cost_summary,
         )
@@ -640,14 +696,20 @@ class CostEstimator:
             printer_wattage=printer_wattage,
             total_cost_usd=round(total_cost, 2),
             warnings=warnings,
+            filament_source="3mf",
         )
 
     def _parse_extrusion(self, lines: list[str]) -> float:
         """Parse total filament extrusion in mm from G-code lines.
 
         Handles both absolute (default) and relative (M83) E-axis modes.
-        Filters out retractions (negative E in absolute mode detected by
-        comparing to previous E value).
+        Counts filament the way the slicers count it for their own
+        ``filament used`` total: a positive E delta on a move that also
+        travels (X, Y or Z) lays plastic down; an E-only line is a
+        retract, an unretract or a prime, and retract and unretract cancel
+        by definition.  Counting unretracts too ran 11% over the slicer on
+        a plate with 1,300 retractions; subtracting retracts as well ran
+        7% under.  Arcs (``G2``/``G3``) extrude like straight moves.
         """
         total_e_mm = 0.0
         last_e = 0.0
@@ -664,30 +726,24 @@ class CostEstimator:
             if ";" in line:
                 line = line[: line.index(";")].strip()
 
-            upper = line.upper()
+            word = line.split(None, 1)[0].upper()
 
             # Track E-axis mode
-            if upper.startswith("M82"):
+            if word == "M82":
                 relative_mode = False
                 last_e = 0.0
                 continue
-            if upper.startswith("M83"):
+            if word == "M83":
                 relative_mode = True
                 continue
             # G92 E0 resets the E position
-            if upper.startswith("G92"):
+            if word == "G92":
                 e_val = _extract_e_value(line)
                 if e_val is not None:
                     last_e = e_val
                 continue
 
-            # Only process G0/G1 moves
-            if not (
-                upper.startswith("G0 ")
-                or upper.startswith("G1 ")
-                or upper.startswith("G0\t")
-                or upper.startswith("G1\t")
-            ):
+            if word not in _EXTRUDING_MOVES:
                 continue
 
             e_val = _extract_e_value(line)
@@ -695,14 +751,12 @@ class CostEstimator:
                 continue
 
             if relative_mode:
-                # In relative mode, positive E = extrusion, negative = retraction
-                if e_val > 0:
-                    total_e_mm += e_val
+                delta = e_val
             else:
-                # Absolute mode: extrusion = current - last (when positive)
                 delta = e_val - last_e
-                if delta > 0:
-                    total_e_mm += delta
                 last_e = e_val
+
+            if delta > 0 and has_axis_word(line, "XYZ"):
+                total_e_mm += delta
 
         return total_e_mm

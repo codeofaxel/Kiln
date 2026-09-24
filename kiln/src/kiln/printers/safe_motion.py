@@ -52,6 +52,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from kiln.gcode import GCODE_NUMBER, axis_value
+
 logger = logging.getLogger(__name__)
 
 # Default clearance for the pre-home relative lift.  Matches the Bambu
@@ -124,8 +126,8 @@ def check_mid_print_sequence(commands: list[str]) -> list[str]:
         elif stripped.startswith("G90"):
             relative = False
         if relative and re.match(r"^G[01]\b", stripped):
-            zm = re.search(r"\bZ(-?\d+\.?\d*)", stripped)
-            if zm and float(zm.group(1)) > 0:
+            z = axis_value(stripped, "Z")
+            if z is not None and z > 0:
                 lift_seen = True
         if _G28_RE.match(stripped) and not lift_seen:
             violations.append(
@@ -191,10 +193,10 @@ _OBJECT_END_RES = (
     re.compile(r"^;\s*stop printing object\b", re.IGNORECASE),
 )
 
-_MOVE_X_RE = re.compile(r"\bX(-?\d+\.?\d*)")
-_MOVE_Y_RE = re.compile(r"\bY(-?\d+\.?\d*)")
-_MOVE_Z_RE = re.compile(r"\bZ(-?\d+\.?\d*)")
-_MOVE_E_RE = re.compile(r"\bE(-?\d+\.?\d*)")
+_MOVE_X_RE = re.compile(rf"(?<![A-Za-z])X({GCODE_NUMBER})")
+_MOVE_Y_RE = re.compile(rf"(?<![A-Za-z])Y({GCODE_NUMBER})")
+_MOVE_Z_RE = re.compile(rf"(?<![A-Za-z])Z({GCODE_NUMBER})")
+_MOVE_E_RE = re.compile(rf"(?<![A-Za-z])E({GCODE_NUMBER})")
 
 
 def _job_gcode_lines(job_path: str):

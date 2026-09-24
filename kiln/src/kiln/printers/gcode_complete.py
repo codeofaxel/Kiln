@@ -168,6 +168,7 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
+from kiln.gcode import axis_word_pattern
 from kiln.printers.qoi import qoi_dimensions, qoi_encode_png
 
 logger = logging.getLogger(__name__)
@@ -868,7 +869,7 @@ def _resize_png(source: bytes, width: int, height: int) -> bytes | None:
 #: subsampling.  A plate can be millions; a 400x300 tile cannot show them.
 _MAX_SEGMENTS = 120_000
 
-_XYZE_RE = re.compile(r"\b([XYZEF])\s*(-?\d*\.?\d+)")
+_XYZE_RE = axis_word_pattern("XYZEF")
 
 
 def _extruding_segments(text: str) -> list[tuple[float, float, float, float, float, float]]:

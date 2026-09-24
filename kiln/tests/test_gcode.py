@@ -747,3 +747,61 @@ class TestScanGcodeFileMissingTemps:
         assert result.valid is True
         temp_warns = [w for w in result.warnings if "hotend" in w.lower() or "bed temperature" in w.lower()]
         assert temp_warns == []
+
+
+# ===================================================================
+# Axis words, spelled the way slicers spell them
+# ===================================================================
+
+
+class TestAxisWords:
+    """The one number spelling every G-code reader shares (``axis_value`` /
+    ``has_axis_word``).  OrcaSlicer and Bambu Studio write no leading zero
+    on most lines; a reader that wanted a digit first read a quarter of a
+    plate."""
+
+    @pytest.mark.parametrize(
+        ("line", "letter", "expected"),
+        [
+            ("G1 X158.922 Y99.462 E.04805", "E", 0.04805),
+            ("G1 E-.8 F1800", "E", -0.8),
+            ("G1 E+.5", "E", 0.5),
+            ("G1 X1. Y2", "X", 1.0),
+            ("G1 Z.2 F24000", "Z", 0.2),
+            ("G1 X10 Y20 E1.5", "E", 1.5),
+            ("G1 E12", "E", 12.0),
+            ("g1 x5 e.25", "E", 0.25),
+            ("G1X10Y20E.5", "E", 0.5),
+            ("G1 X 10", "X", 10.0),
+        ],
+    )
+    def test_reads_every_spelling(self, line, letter, expected):
+        from kiln.gcode import axis_value
+
+        assert axis_value(line, letter) == pytest.approx(expected)
+
+    @pytest.mark.parametrize(
+        ("line", "letter"),
+        [
+            ("G1 X5 ; E.5 in a comment", "E"),
+            ("M117 NAME=BEE.5", "E"),
+            ("G28 X Y", "X"),
+            ("G1 X5 F1800", "E"),
+            ("", "E"),
+        ],
+    )
+    def test_reads_nothing_that_is_not_a_word(self, line, letter):
+        from kiln.gcode import axis_value
+
+        assert axis_value(line, letter) is None
+
+    def test_has_axis_word_sees_slicer_spelling(self):
+        from kiln.gcode import has_axis_word
+
+        assert has_axis_word("G1 Z.4 E.01", "XYE") is True
+        assert has_axis_word("G1 Z.4", "XYE") is False
+        assert has_axis_word("G1 Z.4 ; E.01", "XYE") is False
+
+    def test_extract_param_takes_the_same_spelling(self):
+        assert _extract_param("G1 X158.922 E.04805", "E") == pytest.approx(0.04805)
+        assert _extract_param("G1 X1.", "X") == pytest.approx(1.0)

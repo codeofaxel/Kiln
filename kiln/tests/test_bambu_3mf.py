@@ -2464,3 +2464,16 @@ class TestDeclaredModelReachesTheBuilder:
         with patch("kiln.printers.bambu_3mf.build_bambu_3mf") as mock_build:
             _auto_wrap_bambu_3mf(str(gcode), "bambu_h2s", None)
         assert mock_build.call_args.kwargs["printer_model"] == "bambu_h2s"
+
+
+class TestLiftFloorReadsSlicerSpelling:
+    def test_z_only_moves_without_a_leading_zero_are_raised(self):
+        from kiln.printers.bambu_3mf import _raise_absolute_z_to_floor
+
+        out = _raise_absolute_z_to_floor("G90\nG1 Z.2 F900\nG1 Z0.4 E.05\nG1 X10 Y10 E.5", 5.0)
+        lines = out.split("\n")
+        # A Z-only move below the floor is lifted whatever its spelling …
+        assert lines[1] == "G1 Z5.00 F900"
+        # … and a move that also extrudes (``E.05``) is not a Z-only move.
+        assert lines[2] == "G1 Z0.4 E.05"
+        assert lines[3] == "G1 X10 Y10 E.5"

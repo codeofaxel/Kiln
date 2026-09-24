@@ -541,3 +541,98 @@ class TestPerformance:
         assert elapsed < 1.0, f"Parsing took {elapsed:.2f}s, expected < 1s"
         assert est.filament_length_meters > 0
         assert est.estimated_time_seconds == 7200
+
+
+# -----------------------------------------------------------------------
+# Slicer spelling and the slicer's own totals
+# -----------------------------------------------------------------------
+
+#: Real OrcaSlicer 2.3.2 lines for a Bambu A1: relative E, no leading
+#: zero on the extrusions, wipe-retracts, a prime after each retract.
+_ORCA_LINES = [
+    "M83 ; use relative distances for extrusion",
+    "G1 Z.2 F24000",
+    "G1 E.8 F1800",
+    "G1 X158.922 Y99.462 E.04805",
+    "G1 X160.875 Y99.53 E.06127",
+    "G1 X170.5 Y101.2 E1.21025",
+    "G1 X171 Y101.4 E-.32 ; wipe",
+    "G1 E-.48 F1800",
+    "G1 E.8 F1800",
+    "G1 X180 Y110 E2.03825",
+]
+_ORCA_EXTRUDED_MM = 0.04805 + 0.06127 + 1.21025 + 2.03825
+
+
+class TestOrcaSlicerSpelling:
+    """Regression: the counter read only lines with a digit before the point.
+    On the release-thread jar (254,327 ``E.`` lines, 2,135 with a leading
+    digit) the cost tool reported 2.95 m / 8.81 g for a 11.62 m / 34.67 g
+    plate."""
+
+    def test_counts_every_extrusion_without_a_leading_zero(self):
+        total = CostEstimator()._parse_extrusion(_ORCA_LINES)
+        assert total == pytest.approx(_ORCA_EXTRUDED_MM, abs=1e-6)
+
+    def test_retract_and_prime_are_not_plastic(self):
+        # An E-only line moves filament back and forth in the nozzle; the
+        # slicer's ``filament used`` counts only moves that travel.  Counting
+        # the primes ran 11% over the slicer, subtracting retracts 7% under.
+        lines = ["M83", "G1 X10 Y10 E5", "G1 E-.8 F1800", "G1 E.8 F1800", "G1 X20 Y10 E5"]
+        assert CostEstimator()._parse_extrusion(lines) == pytest.approx(10.0)
+
+    def test_arcs_extrude_too(self):
+        lines = ["M83", "G2 X10 Y10 I5 J0 E.5", "G3 X0 Y0 I-5 J0 E.5"]
+        assert CostEstimator()._parse_extrusion(lines) == pytest.approx(1.0)
+
+    def test_estimate_reports_the_whole_plate(self):
+        est = CostEstimator().estimate_from_gcode(_ORCA_LINES, material="PLA")
+        expected_g = _ORCA_EXTRUDED_MM * math.pi * 0.875 ** 2 * 1.24 / 1000.0
+        assert est.filament_length_meters == pytest.approx(_ORCA_EXTRUDED_MM / 1000.0, abs=1e-3)
+        assert est.filament_weight_grams == pytest.approx(expected_g, abs=0.01)
+        assert est.filament_source == "gcode_moves"
+        assert est.warnings == []
+
+
+class TestSlicerHeaderIsPrimary:
+    """When the file carries the slicer's own ``filament used`` totals they
+    are the figures reported, per extruder summed; Kiln's count is the
+    check on them and speaks up when the two sit more than 5% apart."""
+
+    _HEADER = [
+        "; filament used [mm] = 11040.26, 584.30",
+        "; filament used [g] = 32.93, 1.74",
+        "; total filament used [g] = 34.67",
+        "; filament_type = PLA;PLA",
+    ]
+
+    def test_header_totals_win_and_agree_with_the_count(self):
+        # A count within 5% of the header: the header is used, nothing said.
+        moves = ["M83", "G1 X10 Y10 E11000", "G1 X20 Y20 E600"]
+        est = CostEstimator().estimate_from_gcode(moves + self._HEADER, material="PLA")
+        assert est.filament_source == "slicer_header"
+        assert est.filament_length_meters == pytest.approx(11.625, abs=1e-3)
+        assert est.filament_weight_grams == pytest.approx(34.67, abs=0.01)
+        assert est.filament_cost_usd == pytest.approx(34.67 / 1000.0 * 25.0, abs=1e-3)
+        assert est.warnings == []
+
+    def test_a_count_far_from_the_header_is_said_out_loud(self):
+        moves = ["M83", "G1 X10 Y10 E2952"]  # what the broken reader saw
+        est = CostEstimator().estimate_from_gcode(moves + self._HEADER, material="PLA")
+        assert est.filament_source == "slicer_header"
+        assert est.filament_length_meters == pytest.approx(11.625, abs=1e-3)
+        assert len(est.warnings) == 1
+        assert "2.952 m" in est.warnings[0] and "11.625 m" in est.warnings[0]
+        assert "slicer's figure is used" in est.warnings[0]
+
+    def test_a_length_only_header_uses_the_profile_density(self):
+        lines = ["M83", "G1 X10 Y10 E1000", "; filament used [mm] = 1000.00"]
+        est = CostEstimator().estimate_from_gcode(lines, material="PETG")
+        assert est.filament_source == "slicer_header"
+        expected_g = 1000.0 * math.pi * 0.875 ** 2 * 1.27 / 1000.0
+        assert est.filament_weight_grams == pytest.approx(expected_g, abs=0.01)
+
+    def test_no_header_means_the_count_is_the_source(self):
+        est = CostEstimator().estimate_from_gcode(["G1 X10 E100.0"])
+        assert est.filament_source == "gcode_moves"
+        assert "filament_source" in est.to_dict()

@@ -845,3 +845,32 @@ class TestAnalyzeHomingConfig:
 
     def test_default_dataclass_is_unknown(self):
         assert HomingBehavior().style == "unknown"
+
+
+class TestSlicerSpelling:
+    """OrcaSlicer and Bambu Studio write ``E.04805`` and ``Z.2``; a reader
+    that wanted a digit first saw travels where plastic was laid and no
+    height at all."""
+
+    def test_occupied_region_sees_orca_extrusions(self, tmp_path: Path):
+        gcode = tmp_path / "orca.gcode"
+        gcode.write_text(
+            "M83\n"
+            "; start printing object, id: jar\n"
+            "G1 Z.2 F24000\n"
+            "G1 X30 Y30 E.04805\n"
+            "G1 X60 Y60 E.06127\n"
+            "G1 Z.4\n"
+            "G1 X60 Y30 E.05\n"
+            "; stop printing object, id: jar\n"
+        )
+        regions = occupied_regions_for_job(str(gcode), margin_mm=0.0)
+        assert regions is not None and len(regions) == 1
+        region = regions[0]
+        assert region.x_min == pytest.approx(30.0)
+        assert region.x_max == pytest.approx(60.0)
+        assert region.y_max == pytest.approx(60.0)
+        assert region.z_top_mm == pytest.approx(0.4)
+
+    def test_relative_lift_spelled_without_a_leading_zero_counts(self):
+        assert check_mid_print_sequence(["G91", "G1 Z.5 F600", "G90", "G28 X Y"]) == []

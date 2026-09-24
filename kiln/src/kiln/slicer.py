@@ -1255,6 +1255,23 @@ def estimates_for_result(result: SliceResult, material: str | None = None) -> di
     return estimates
 
 
+def _sum_of_numbers(text: str) -> float | None:
+    """The sum of a slicer's comma-separated per-extruder list, or ``None``
+    when nothing in it is a number (``; filament used [mm] = 11040.26, 584.30``
+    is one plate's 11624.56 mm; reading the first value alone lost the
+    second filament)."""
+    values: list[float] = []
+    for piece in text.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            values.append(float(piece))
+        except ValueError:
+            break
+    return sum(values) if values else None
+
+
 def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     """Parse G-code file for slicer-generated estimates.
 
@@ -1298,10 +1315,11 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
             estimates["estimated_time_seconds"] = d * 86400 + h * 3600 + m * 60 + s
             estimates["estimated_time_human"] = line.split("=", 1)[-1].strip()
 
-        # ; filament used [mm] = 1234.56
-        fil_mm = _re.search(r"filament used \[mm\]\s*=\s*([\d.]+)", line, _re.IGNORECASE)
-        if fil_mm:
-            estimates["filament_length_mm"] = float(fil_mm.group(1))
+        # ; filament used [mm] = 1234.56 — one value per extruder, comma
+        # separated, on a multi-filament plate; the plate uses the sum.
+        fil_mm = _re.search(r"filament used \[mm\]\s*=\s*(.+)$", line, _re.IGNORECASE)
+        if fil_mm and (mm_total := _sum_of_numbers(fil_mm.group(1))) is not None:
+            estimates["filament_length_mm"] = mm_total
 
         # ; filament used [g] = 12.34 or total filament used [g] = 12.34
         #
@@ -1312,14 +1330,14 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
         # ABSENT rather than recorded as 0: "I don't know" is a true
         # statement about every print, "0 g" is a false one.  See
         # derive_filament_weight, which fills it in when a material is named.
-        fil_g = _re.search(r"filament used \[g\]\s*=\s*([\d.]+)", line, _re.IGNORECASE)
-        if fil_g and float(fil_g.group(1)) > 0:
-            estimates["filament_weight_g"] = float(fil_g.group(1))
+        fil_g = _re.search(r"filament used \[g\]\s*=\s*(.+)$", line, _re.IGNORECASE)
+        if fil_g and (g_total := _sum_of_numbers(fil_g.group(1))) is not None and g_total > 0:
+            estimates["filament_weight_g"] = g_total
 
         # ; filament used [cm3] = 12.34
-        fil_cm3 = _re.search(r"filament used \[cm3\]\s*=\s*([\d.]+)", line, _re.IGNORECASE)
-        if fil_cm3:
-            estimates["filament_volume_cm3"] = float(fil_cm3.group(1))
+        fil_cm3 = _re.search(r"filament used \[cm3\]\s*=\s*(.+)$", line, _re.IGNORECASE)
+        if fil_cm3 and (cm3_total := _sum_of_numbers(fil_cm3.group(1))) is not None:
+            estimates["filament_volume_cm3"] = cm3_total
 
         # ; total layers count = 123
         layers = _re.search(r"total layers count\s*=\s*(\d+)", line, _re.IGNORECASE)

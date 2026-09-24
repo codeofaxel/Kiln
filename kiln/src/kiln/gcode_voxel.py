@@ -55,6 +55,8 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from kiln.gcode import GCODE_NUMBER
+
 _logger = logging.getLogger(__name__)
 
 
@@ -62,10 +64,10 @@ _logger = logging.getLogger(__name__)
 # patterns are intentionally tolerant of leading sign + integer-only
 # coords (some hand-written gcode dispenses with decimals on round
 # numbers like ``X10``).
-_X_RE = re.compile(r"\bX(-?\d*\.?\d+)", re.IGNORECASE)
-_Y_RE = re.compile(r"\bY(-?\d*\.?\d+)", re.IGNORECASE)
-_Z_RE = re.compile(r"\bZ(-?\d*\.?\d+)", re.IGNORECASE)
-_E_RE = re.compile(r"\bE(-?\d*\.?\d+)", re.IGNORECASE)
+_X_RE = re.compile(rf"(?<![A-Za-z])X({GCODE_NUMBER})", re.IGNORECASE)
+_Y_RE = re.compile(rf"(?<![A-Za-z])Y({GCODE_NUMBER})", re.IGNORECASE)
+_Z_RE = re.compile(rf"(?<![A-Za-z])Z({GCODE_NUMBER})", re.IGNORECASE)
+_E_RE = re.compile(rf"(?<![A-Za-z])E({GCODE_NUMBER})", re.IGNORECASE)
 _G0_RE = re.compile(r"^\s*G0\b", re.IGNORECASE)
 _G1_RE = re.compile(r"^\s*G1\b", re.IGNORECASE)
 _G92_RE = re.compile(r"^\s*G92\b", re.IGNORECASE)
