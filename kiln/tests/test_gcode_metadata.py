@@ -464,12 +464,12 @@ class TestEdgeCases:
         for time and filament on every PrusaSlicer file).  A value outside
         both windows stays invisible.
         """
-        lines = ["; unrelated comment\n"] * 250
+        lines = ["; unrelated comment\n"] * 1100
         lines.append("; filament_type = PLA\n")
         lines.extend(["; more padding\n"] * 1100)
         content = "".join(lines)
         meta = extract_metadata_from_content(content)
-        # PLA sits past the 200-line header and more than 1000 lines above
+        # PLA sits past the 1000-line header and more than 1000 lines above
         # the end — outside both windows.
         assert meta.material is None
 
@@ -548,3 +548,32 @@ class TestPrinterFileToDict:
         assert d["estimated_time_seconds"] == 3600
         assert "slicer" not in d
         assert "layer_height" not in d
+
+
+class TestTheWindowCoversBambuStudio:
+    """Bambu Studio writes its settings block at the top and it runs past
+    line 500; a 200-line window read the material and stopped."""
+
+    def _studio_shaped(self) -> str:
+        head = "; model printing time: 14m 49s; total estimated time: 21m 5s\n; total filament length [mm] : 1227.58\n; HEADER_BLOCK_END\n; CONFIG_BLOCK_START\n"
+        settings = "".join(f"; setting_{i} = {i}\n" for i in range(300))
+        late = "; nozzle_diameter = 0.4\n; nozzle_temperature = 220\n; printer_model = Bambu Lab P1S\n; layer_height = 0.2\n; CONFIG_BLOCK_END\n"
+        return head + settings + late + "".join(f"G1 X{i} Y{i} E.05\n" for i in range(3000))
+
+    def test_settings_past_line_200_are_read(self, tmp_path) -> None:
+        path = tmp_path / "p1s.gcode"
+        path.write_text(self._studio_shaped())
+        meta = extract_metadata(str(path))
+        assert meta.printer_model == "Bambu Lab P1S"
+        assert meta.tool_temp == 220.0
+        assert meta.layer_height == pytest.approx(0.2)
+        assert meta.filament_used_mm == pytest.approx(1227.58)
+
+    def test_head_and_tail_keeps_both_ends(self) -> None:
+        from kiln.gcode_metadata import _MAX_FOOTER_LINES, _MAX_HEADER_LINES, head_and_tail
+
+        lines = [str(i) for i in range(5000)]
+        window = head_and_tail(lines)
+        assert window[:_MAX_HEADER_LINES] == lines[:_MAX_HEADER_LINES]
+        assert window[_MAX_HEADER_LINES:] == lines[-_MAX_FOOTER_LINES:]
+        assert head_and_tail(lines[:10]) == lines[:10]

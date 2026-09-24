@@ -7,7 +7,7 @@ inspection.
 
 Supported formats:
 
-- **G-code**: ``.gcode``, ``.gco``, ``.g`` (header comment parsing)
+- **G-code**: ``.gcode``, ``.gco``, ``.g`` (the slicer's comments, top and end)
 - **3MF**: ``.3mf`` (ZIP with XML metadata)
 - **UFP**: ``.ufp`` (Ultimaker format package)
 - **STL**: ``.stl`` (mesh only, limited metadata — file size and binary/ASCII)
@@ -34,10 +34,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from kiln.gcode import slicer_filament_totals
+from kiln.gcode_metadata import head_and_tail, read_head_and_tail
 
 logger = logging.getLogger(__name__)
 
-_MAX_HEADER_LINES: int = 300
 
 
 # ---------------------------------------------------------------------------
@@ -259,128 +259,28 @@ def _filament_used(meta: FileMetadata, lines: list[str]) -> None:
 
 
 def _extract_gcode_metadata(file_path: str) -> FileMetadata:
-    """Parse G-code header comments for FDM printer metadata.
+    """Parse a G-code file's own comments for FDM printer metadata.
 
-    Scans the first :data:`_MAX_HEADER_LINES` lines for embedded comments
-    from PrusaSlicer, OrcaSlicer, Cura, Simplify3D, BambuStudio, and others.
+    Reads the top and the end of the file
+    (:func:`kiln.gcode_metadata.read_head_and_tail`): Bambu Studio writes its
+    settings at the top, OrcaSlicer and PrusaSlicer write their totals and
+    settings at the end.  A top-only window returned only the slicer's name
+    for every OrcaSlicer file.
     """
     ext = os.path.splitext(file_path)[1].lower()
     file_format = _GCODE_EXTENSIONS.get(ext, ext.lstrip("."))
 
-    meta = FileMetadata(
-        file_path=file_path,
-        file_type="gcode",
-        file_format=file_format,
-        file_size_bytes=_safe_file_size(file_path),
-        created_at=_safe_created_at(file_path),
-    )
-
     try:
-        lines = _read_header_lines(file_path)
+        lines = read_head_and_tail(file_path)
     except OSError as exc:
         logger.warning("Could not read file for metadata: %s", exc)
-        return meta
+        lines = []
 
-    _filament_used(meta, lines)
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or not stripped.startswith(";"):
-            continue
-
-        # Estimated time
-        if meta.estimated_time_seconds is None:
-            m = _RE_ESTIMATED_TIME.match(stripped)
-            if m:
-                meta.estimated_time_seconds = _parse_time_string(m.group(1))
-
-        # Layer count
-        if meta.layer_count is None:
-            m = _RE_LAYER_COUNT.match(stripped)
-            if m:
-                with contextlib.suppress(ValueError):
-                    meta.layer_count = int(m.group(1))
-
-        # Material
-        if meta.material_hint is None:
-            m = _RE_MATERIAL.match(stripped)
-            if m:
-                meta.material_hint = m.group(1).strip()
-
-        # Slicer
-        if meta.slicer_hint is None:
-            m = _RE_SLICER.match(stripped)
-            if m:
-                meta.slicer_hint = m.group(1).strip()
-
-        # Dimensions from explicit comment
-        if meta.dimensions_mm is None:
-            m = _RE_DIMENSIONS.match(stripped)
-            if m:
-                meta.dimensions_mm = _parse_dimensions_string(m.group(1))
-
-        # --- FDM-specific extras ---
-
-        # Nozzle diameter
-        if "nozzle_diameter" not in meta.extra:
-            m = _RE_NOZZLE_DIAMETER.match(stripped)
-            if m:
-                with contextlib.suppress(ValueError):
-                    meta.extra["nozzle_diameter"] = float(m.group(1))
-
-        # Layer height
-        if "layer_height" not in meta.extra:
-            m = _RE_LAYER_HEIGHT.match(stripped)
-            if m:
-                with contextlib.suppress(ValueError):
-                    meta.extra["layer_height"] = float(m.group(1))
-
-        # Infill density
-        if "infill_pct" not in meta.extra:
-            m = _RE_INFILL.match(stripped)
-            if m:
-                with contextlib.suppress(ValueError):
-                    meta.extra["infill_pct"] = float(m.group(1))
-
-        # Print speed
-        if "print_speed" not in meta.extra:
-            m = _RE_PRINT_SPEED.match(stripped)
-            if m:
-                with contextlib.suppress(ValueError):
-                    meta.extra["print_speed"] = float(m.group(1))
-
-        # Bed temperature
-        if "bed_temp" not in meta.extra:
-            m = _RE_BED_TEMP.match(stripped)
-            if m:
-                with contextlib.suppress(ValueError):
-                    meta.extra["bed_temp"] = float(m.group(1))
-
-        # Hotend temperature
-        if "hotend_temp" not in meta.extra:
-            m = _RE_HOTEND_TEMP.match(stripped)
-            if m:
-                with contextlib.suppress(ValueError):
-                    meta.extra["hotend_temp"] = float(m.group(1))
-
-        # Feed rate
-        if "feed_rate" not in meta.extra:
-            m = _RE_FEED_RATE.match(stripped)
-            if m:
-                with contextlib.suppress(ValueError):
-                    meta.extra["feed_rate"] = float(m.group(1))
-
-        # Printer model
-        if "printer_model" not in meta.extra:
-            m = _RE_PRINTER_MODEL.match(stripped)
-            if m:
-                meta.extra["printer_model"] = m.group(1).strip()
-
-    # Try to extract bounds from explicit bound comments
-    if meta.dimensions_mm is None:
-        dims = _extract_bounds_from_lines(lines)
-        if dims:
-            meta.dimensions_mm = dims
-
+    meta = _extract_gcode_metadata_from_lines(lines)
+    meta.file_path = file_path
+    meta.file_format = file_format
+    meta.file_size_bytes = _safe_file_size(file_path)
+    meta.created_at = _safe_created_at(file_path)
     return meta
 
 
@@ -584,11 +484,7 @@ def _extract_ufp_metadata(file_path: str) -> FileMetadata:
 
             if gcode_path is not None:
                 with zf.open(gcode_path) as fh:
-                    lines: list[str] = []
-                    for i, raw_line in enumerate(fh):
-                        if i >= _MAX_HEADER_LINES:
-                            break
-                        lines.append(raw_line.decode("utf-8", errors="replace"))
+                    lines = head_and_tail(raw.decode("utf-8", errors="replace") for raw in fh)
 
                 # Re-use gcode parsing on extracted lines
                 gcode_meta = _extract_gcode_metadata_from_lines(lines)
@@ -606,7 +502,7 @@ def _extract_ufp_metadata(file_path: str) -> FileMetadata:
 
 
 def _extract_gcode_metadata_from_lines(lines: list[str]) -> FileMetadata:
-    """Parse G-code metadata from pre-read lines (used by UFP extraction).
+    """Parse G-code metadata from pre-read lines (a file's window, or UFP's).
 
     Returns a :class:`FileMetadata` with gcode-type fields populated.
     """
@@ -787,17 +683,6 @@ def extract_metadata(file_path: str) -> FileMetadata:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _read_header_lines(file_path: str, *, max_lines: int = _MAX_HEADER_LINES) -> list[str]:
-    """Read the first *max_lines* lines from a text file."""
-    lines: list[str] = []
-    with open(file_path, errors="replace") as fh:
-        for i, line in enumerate(fh):
-            if i >= max_lines:
-                break
-            lines.append(line)
-    return lines
 
 
 def _safe_file_size(file_path: str) -> int:

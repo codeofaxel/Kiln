@@ -25,6 +25,8 @@ import contextlib
 import logging
 import os
 import re
+from collections import deque
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -32,14 +34,64 @@ from kiln.gcode import slicer_filament_totals
 
 logger = logging.getLogger(__name__)
 
-_MAX_HEADER_LINES: int = 200  # Scan more than gcode.py's 100 to catch Cura footers
+# Bambu Studio writes its whole settings block at the TOP, and it runs to
+# about line 560 (measured on its files for the A1 mini, P1P, P1S, P2S, X1C,
+# X1E and H2S) — printer model at 371, nozzle size at 312.  A 200- or
+# 300-line window read the material and missed the rest.
+_MAX_HEADER_LINES: int = 1000
 # PrusaSlicer writes its totals (estimated printing time, filament used) at
 # the END of the file — a header-only scan answered "unknown" for time and
 # filament on every PrusaSlicer gcode, which is Kiln's primary slicer.
 # 1000, not a mirror of the header window: PrusaSlicer appends its whole
 # config dump (~350+ lines) AFTER the totals, so a small tail window reads
-# only config and misses the numbers it exists to find.
+# only config and misses the numbers it exists to find.  OrcaSlicer's
+# totals and settings start about 745 lines (21 KB) from the end.
 _MAX_FOOTER_LINES: int = 1000
+_FOOTER_BYTES: int = 64 * 1024
+
+
+def head_and_tail(lines: Iterable[str]) -> list[str]:
+    """The lines a slicer writes its metadata in: the top and the end.
+
+    The first :data:`_MAX_HEADER_LINES` lines, then the last
+    :data:`_MAX_FOOTER_LINES`; a text that fits in the first window is
+    returned whole.  The one window every reader of a G-code file's own
+    metadata uses, so none of them sees less of the file than another.
+    """
+    head: list[str] = []
+    tail: deque[str] = deque(maxlen=_MAX_FOOTER_LINES)
+    for line in lines:
+        if len(head) < _MAX_HEADER_LINES:
+            head.append(line)
+        else:
+            tail.append(line)
+    return head + list(tail)
+
+
+def read_head_and_tail(file_path: str) -> list[str]:
+    """:func:`head_and_tail` of a file on disk, reading only its two ends.
+
+    The tail is taken from the final 64 KB, which holds the last
+    :data:`_MAX_FOOTER_LINES` lines of every slicer's output measured
+    (OrcaSlicer's totals and settings run to about 21 KB).
+
+    :raises OSError: when the file cannot be read.
+    """
+    lines: list[str] = []
+    with open(file_path, errors="replace") as fh:
+        for i, line in enumerate(fh):
+            if i >= _MAX_HEADER_LINES:
+                break
+            lines.append(line)
+        else:
+            return lines
+    with open(file_path, "rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        size = fh.tell()
+        fh.seek(max(0, size - _FOOTER_BYTES))
+        tail_text = fh.read().decode(errors="replace")
+    lines.extend(tail_text.splitlines()[-_MAX_FOOTER_LINES:])
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -355,36 +407,20 @@ def _extract_from_lines(lines: list[str]) -> GCodeMetadata:
 
 
 def extract_metadata(file_path: str) -> GCodeMetadata:
-    """Extract metadata from a G-code file's header comments.
+    """Extract metadata from a G-code file's own comments.
 
-    Scans the first :data:`_MAX_HEADER_LINES` lines for slicer-embedded
-    metadata.  Also scans for the first temperature commands
-    (M104/M109/M140/M190) as fallback for tool/bed temps.
+    Reads the top and the end of the file (:func:`read_head_and_tail`), where
+    slicers write their metadata.  Also scans for the first temperature
+    commands (M104/M109/M140/M190) as fallback for tool/bed temps.
 
     :param file_path: Path to a G-code file.
     :returns: A :class:`GCodeMetadata` with whatever fields could be parsed.
         Never raises on parse errors -- returns empty metadata on failure.
     """
     try:
-        lines: list[str] = []
-        with open(file_path, errors="replace") as fh:
-            for i, line in enumerate(fh):
-                if i >= _MAX_HEADER_LINES:
-                    break
-                lines.append(line)
-            else:
-                # Whole file fit in the header window — nothing more to scan.
-                return _extract_from_lines(lines)
-        # PrusaSlicer's totals live in the FOOTER.  Read the tail and feed
-        # both windows; _extract_from_lines keeps the first match, so header
-        # values (Bambu/Orca style) still win on any conflict.
-        with open(file_path, "rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            size = fh.tell()
-            fh.seek(max(0, size - 64 * 1024))
-            tail_text = fh.read().decode(errors="replace")
-        lines.extend(tail_text.splitlines()[-_MAX_FOOTER_LINES:])
-        return _extract_from_lines(lines)
+        # Header lines come first, so a value written at the top still wins
+        # over the same key at the end (_extract_from_lines keeps the first).
+        return _extract_from_lines(read_head_and_tail(file_path))
     except (FileNotFoundError, PermissionError, OSError) as exc:
         logger.warning("Could not read G-code file for metadata: %s", exc)
         return GCodeMetadata()
@@ -400,13 +436,7 @@ def extract_metadata_from_content(content: str) -> GCodeMetadata:
     :returns: A :class:`GCodeMetadata` with whatever fields could be parsed.
     """
     try:
-        all_lines = content.splitlines()
-        if len(all_lines) <= _MAX_HEADER_LINES + _MAX_FOOTER_LINES:
-            lines = all_lines
-        else:
-            # Header + footer, same two windows as extract_metadata.
-            lines = all_lines[:_MAX_HEADER_LINES] + all_lines[-_MAX_FOOTER_LINES:]
-        return _extract_from_lines(lines)
+        return _extract_from_lines(head_and_tail(content.splitlines()))
     except Exception as exc:
         logger.warning("Unexpected error extracting metadata from content: %s", exc)
         return GCodeMetadata()
