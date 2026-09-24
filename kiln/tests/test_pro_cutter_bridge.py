@@ -52,6 +52,25 @@ class TestReadingTheFile:
         path = _gcode(tmp_path, "G1 X1\n" * 5000 + "; total filament change = 12\n")
         assert bridge.planned_cuts_in_file(path) == 12
 
+    def test_an_orca_footer_further_from_the_end_is_still_read(self, tmp_path):
+        # OrcaSlicer writes these about 590 lines from the end; a longer
+        # settings block pushes them further.  A 600-line tail window read
+        # "no changes planned, no grams" once they passed it.
+        body = (
+            "G1 X1 Y1 E.05\n" * 3000
+            + "; filament used [g] = 32.93, 1.74\n; total filament used [g] = 34.67\n"
+            + "; total filament change = 8\n"
+            + "".join(f"; setting_{i} = {i}\n" for i in range(700))
+        )
+        path = _gcode(tmp_path, body)
+        assert bridge.planned_cuts_in_file(path) == 8
+        assert bridge.grams_in_file(path) == pytest.approx(34.67)
+
+    def test_a_zero_grams_line_is_not_a_weight(self, tmp_path):
+        # A zero is the slicer saying it could not work the weight out.
+        path = _gcode(tmp_path, "; filament used [g] = 0.00\n; total filament used [g] = 34.67\n")
+        assert bridge.grams_in_file(path) == pytest.approx(34.67)
+
     def test_grams_come_from_the_slicers_own_line(self, tmp_path):
         assert bridge.grams_in_file(_gcode(tmp_path, "; total filament weight [g] : 3.89\n")) == 3.89
         assert bridge.grams_in_file(_gcode(tmp_path, "; filament used [g] = 12.5, 3.5\n")) == 16.0

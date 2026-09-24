@@ -34,9 +34,11 @@ import os
 import re
 import threading
 import time
-from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from kiln.gcode import slicer_filament_totals
+from kiln.gcode_metadata import read_head_and_tail
 
 logger = logging.getLogger(__name__)
 
@@ -54,20 +56,12 @@ _service_down_miss: Any = None
 #: reads it to say what it could not check.
 _last_miss: dict[str, Any] = {}
 
-#: How much of a sliced file to scan for the slicer's totals comment.
-#: Bambu Studio and Orca write ``; total filament change = N`` in the
-#: footer block; the head is scanned too for slicers that front-load it.
-_HEAD_LINES = 200
-_TAIL_LINES = 600
 
-#: ``; total filament change = 167`` (Bambu Studio / OrcaSlicer).  Absent on
+#: ``; total filament change = 167`` (Bambu Studio / OrcaSlicer), in the
+#: footer block, read through the one window every reader of a file's own
+#: figures uses (:func:`kiln.gcode_metadata.read_head_and_tail`).  Absent on
 #: a single-colour file, which plans no change.
 _FILAMENT_CHANGE_RE = re.compile(r";\s*total\s+filament\s+change\s*[:=]\s*(?P<n>\d+)", re.IGNORECASE)
-#: ``; total filament weight [g] : 3.89`` / ``; filament used [g] = 12.3``.
-_FILAMENT_GRAMS_RE = re.compile(
-    r";\s*(?:total\s+)?filament\s+(?:used|weight)\s*\[g\]\s*[:=]\s*(?P<values>[\d.\s,]+)",
-    re.IGNORECASE,
-)
 
 #: How many days of the local event log a status request carries along.
 FAULT_WINDOW_DAYS: int = 30
@@ -89,17 +83,6 @@ def available() -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _head_and_tail(path: str) -> list[str]:
-    head: list[str] = []
-    tail: deque[str] = deque(maxlen=_TAIL_LINES)
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        for i, line in enumerate(fh):
-            if i < _HEAD_LINES:
-                head.append(line)
-            tail.append(line)
-    return head + list(tail)
-
-
 def planned_cuts_in_file(file_path: str | None) -> int | None:
     """The filament changes the slicer planned, or ``None`` when unreadable.
 
@@ -110,7 +93,7 @@ def planned_cuts_in_file(file_path: str | None) -> int | None:
     if not file_path or not isinstance(file_path, str):
         return None
     try:
-        lines = _head_and_tail(file_path)
+        lines = read_head_and_tail(file_path)
     except OSError:
         return None
     for line in lines:
@@ -121,31 +104,16 @@ def planned_cuts_in_file(file_path: str | None) -> int | None:
 
 
 def grams_in_file(file_path: str | None) -> float | None:
-    """The slicer's own grams for the file, or ``None``."""
+    """The slicer's own grams for the file, or ``None``: every extruder's
+    grams summed, else its one-number total, read by the one reader of a
+    slicer's filament totals (:func:`kiln.gcode.slicer_filament_totals`)."""
     if not file_path or not isinstance(file_path, str):
         return None
     try:
-        lines = _head_and_tail(file_path)
+        lines = read_head_and_tail(file_path)
     except OSError:
         return None
-    for line in lines:
-        m = _FILAMENT_GRAMS_RE.search(line)
-        if not m:
-            continue
-        total = 0.0
-        found = False
-        for part in m.group("values").replace(";", ",").split(","):
-            part = part.strip()
-            if not part:
-                continue
-            try:
-                total += float(part)
-                found = True
-            except ValueError:
-                continue
-        if found:
-            return total
-    return None
+    return slicer_filament_totals("\n".join(lines)).weight_g
 
 
 # ---------------------------------------------------------------------------
