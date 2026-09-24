@@ -226,10 +226,18 @@ def _gcode_bytes(file_path: str) -> tuple[bytes | None, str]:
     return body, ""
 
 
+#: What Kiln's servers answer when a request is larger than they read.
+_TOO_LARGE_CODE = "PAYLOAD_TOO_LARGE"
+
+
 def _message(miss: Miss) -> str:
     if miss.code == _NOT_ASKED:
         detail = miss.detail.strip().rstrip(".") or "nothing was asked"
         return f"{detail[:1].upper()}{detail[1:]}, so this estimate comes without it."
+    if miss.code == _TOO_LARGE_CODE:
+        # The servers answered, and said the file is larger than they read:
+        # never "no answer", and trying again changes nothing.
+        return "The file is too large for Kiln's servers to read, so this estimate comes without it."
     return sentence(
         miss,
         feature="servers",

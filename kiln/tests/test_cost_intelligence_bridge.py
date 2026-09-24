@@ -107,6 +107,15 @@ class TestTheServedRequest:
         assert door.call_count == 1
         assert bridge.unanswered()["why"] in ("offline", "unanswered")
 
+    def test_a_file_too_large_for_the_servers_says_so(self, tmp_path):
+        path = _plate(tmp_path)
+        refused = {"success": False, "code": "PAYLOAD_TOO_LARGE", "error": "Request body too large (9000.0KB, max 8192.0KB)."}
+        with patch("kiln.server._pro_api_call", return_value=refused):
+            assert bridge.consult_print_cost(path, filaments=[], total_cost_usd=0.0, estimated_time_seconds=None) is None
+        assert bridge.unanswered()["message"] == (
+            "The file is too large for Kiln's servers to read, so this estimate comes without it."
+        )
+
     def test_a_refusal_is_a_miss_with_its_sentence(self, tmp_path):
         path = _plate(tmp_path)
         with patch("kiln.server._pro_api_call", return_value={"success": False, "code": "TIER_REQUIRED", "error": "no"}):
