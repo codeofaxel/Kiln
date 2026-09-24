@@ -1257,18 +1257,17 @@ def estimates_for_result(result: SliceResult, material: str | None = None) -> di
 
 def _sum_of_numbers(text: str) -> float | None:
     """The sum of a slicer's comma-separated per-extruder list, or ``None``
-    when nothing in it is a number (``; filament used [mm] = 11040.26, 584.30``
-    is one plate's 11624.56 mm; reading the first value alone lost the
-    second filament)."""
+    when it does not start with a number (``; filament used [mm] = 11040.26,
+    584.30`` is one plate's 11624.56 mm; reading the first value alone lost
+    the second filament).  Trailing text after a value is left alone."""
+    import re as _re
+
     values: list[float] = []
     for piece in text.split(","):
-        piece = piece.strip()
-        if not piece:
-            continue
-        try:
-            values.append(float(piece))
-        except ValueError:
+        head = _re.match(r"\s*([-+]?(?:\d+\.?\d*|\.\d+))", piece)
+        if head is None:
             break
+        values.append(float(head.group(1)))
     return sum(values) if values else None
 
 

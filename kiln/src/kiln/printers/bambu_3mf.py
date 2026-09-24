@@ -1633,7 +1633,7 @@ def _declared_filaments_in_gcode(
 
 def _find_max_z(gcode_body: str) -> float:
     """Find the maximum Z height from PrusaSlicer ``;Z:`` comments."""
-    z_heights = re.findall(r";Z:(\d+\.?\d*)", gcode_body)
+    z_heights = re.findall(rf";Z:({GCODE_NUMBER})", gcode_body)
     return max(float(z) for z in z_heights) if z_heights else 10.0
 
 

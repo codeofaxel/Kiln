@@ -16,6 +16,10 @@ from typing import Any
 
 from kiln.gcode import axis_value, has_axis_word
 
+#: The command word at the head of a line, ``G1`` in ``G1X10E.5`` and
+#: ``G01 X10`` alike.
+_COMMAND_WORD_RE = re.compile(r"([A-Za-z])\s*(\d+)")
+
 #: The moves that can lay filament down.  ``G0``/``G1`` are the straight
 #: ones; ``G2``/``G3`` arcs carry an E word exactly the same way.
 _EXTRUDING_MOVES = frozenset({"G0", "G1", "G2", "G3"})
@@ -726,7 +730,10 @@ class CostEstimator:
             if ";" in line:
                 line = line[: line.index(";")].strip()
 
-            word = line.split(None, 1)[0].upper()
+            head = _COMMAND_WORD_RE.match(line)
+            if head is None:
+                continue
+            word = f"{head.group(1).upper()}{int(head.group(2))}"
 
             # Track E-axis mode
             if word == "M82":

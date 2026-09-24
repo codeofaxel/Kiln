@@ -382,8 +382,11 @@ class _EstimateToolsPlugin:
             For STL/OBJ files, use ``slice_and_estimate`` instead — it slices
             and estimates in one step.
 
-            Analyses G-code extrusion commands to calculate filament usage,
-            material weight, filament cost, electricity cost, and total.
+            The slicer's own ``filament used`` totals are the filament
+            figures when the file carries them; otherwise Kiln counts the
+            extruding moves itself.  ``estimate.filament_source`` says which,
+            and a ``warnings`` entry names both numbers when Kiln's count
+            sits more than 5% from the slicer's total.
 
             Args:
                 file_path: Path to the G-code file.

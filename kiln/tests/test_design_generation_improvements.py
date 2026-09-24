@@ -1159,6 +1159,15 @@ class TestSlicerEstimation:
         assert result["filament_volume_cm3"] == pytest.approx(27.96)
         assert result["filament_weight_g"] == pytest.approx(34.67)
 
+    def test_trailing_text_after_a_total_is_left_alone(self, tmp_path):
+        from kiln.slicer import _parse_gcode_estimates
+
+        gcode = tmp_path / "annotated.gcode"
+        gcode.write_text("; filament used [mm] = 1234.56 (model only)\n; filament used [g] = 0\n")
+        result = _parse_gcode_estimates(str(gcode))
+        assert result["filament_length_mm"] == pytest.approx(1234.56)
+        assert "filament_weight_g" not in result
+
     def test_empty_gcode(self, tmp_path):
         """Empty gcode file returns just path."""
         from kiln.slicer import _parse_gcode_estimates

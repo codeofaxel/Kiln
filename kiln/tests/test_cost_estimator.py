@@ -636,3 +636,9 @@ class TestSlicerHeaderIsPrimary:
         est = CostEstimator().estimate_from_gcode(["G1 X10 E100.0"])
         assert est.filament_source == "gcode_moves"
         assert "filament_source" in est.to_dict()
+
+
+class TestCompactSpelling:
+    def test_moves_written_without_spaces_are_counted(self):
+        lines = ["M83", "G1X10Y10E.5", "G01 X20 Y10 E.5", "G1 E-.8", "G1X30Y10E1"]
+        assert CostEstimator()._parse_extrusion(lines) == pytest.approx(2.0)

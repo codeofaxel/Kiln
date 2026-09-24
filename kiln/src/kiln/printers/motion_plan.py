@@ -24,7 +24,7 @@ import logging
 import time
 from typing import Any
 
-from kiln.gcode import axis_word_pattern
+from kiln.gcode import has_axis_word
 from kiln.printers.base import FilamentOpPlan, FilamentOpResult, HomeResult, HomeStep, PrinterError
 from kiln.printers.command_verdict import CommandVerdict
 
@@ -386,8 +386,6 @@ def run_finish(adapter: Any, result: Any, finish: dict[str, Any]) -> str | None:
 
 #: How long one wipe step is watched for a fault after it is sent.
 WIPE_STEP_WATCH_S: float = 10.0
-#: A G-code word that moves the extruder (``G1 E-1 F500``, ``G1 E-.8``).
-_E_WORD = axis_word_pattern("E")
 
 
 def wipe_steps_of(doc: dict[str, Any]) -> list[dict[str, Any]]:
@@ -494,7 +492,9 @@ def run_wipe_step(
         # extrude here makes, kept when a person walks the steps out of
         # order or skips the heat.  One reading, no wait: the heat step is
         # where the waiting happens.
-        if any(_E_WORD.search(line) for line in chosen["gcode"]):
+        # An E word moves the extruder (``G1 E-1 F500``, ``G1 E-.8``); a
+        # comment that mentions one does not.
+        if any(has_axis_word(line, "E") for line in chosen["gcode"]):
             target = float(plan.temperature)
             hot, reading = adapter._wait_for_hotend(target, timeout=0.0)
             if not hot:
