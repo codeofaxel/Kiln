@@ -5523,6 +5523,12 @@ def monitor_print(
 
         # --- Format values ---
         progress_str = f"{completion:.0f}" if completion is not None else "N/A"
+        # The printer's counter has not started while its layers have: the
+        # job block's own verdict (JobProgress.progress_pending), read off
+        # the same flag the inline monitor and the web Monitor read, so the
+        # three surfaces hide the percent together and lead with the layer
+        # and time left.
+        progress_pending = bool(jd.get("progress_pending"))
         layer_str = (
             f"{current_layer} / {total_layers}" if current_layer is not None and total_layers is not None else "N/A"
         )
@@ -5846,7 +5852,12 @@ def monitor_print(
 
         # --- Assemble report ---
         lines = [
-            f"Print Status — {progress_str}% complete",
+            (
+                f"Print Status — layer {layer_str}, the printer's own progress "
+                "counter reads 0 and has not started counting yet"
+                if progress_pending
+                else f"Print Status — {progress_str}% complete"
+            ),
             f"- File: {file_name}",
             f"- Layer: {layer_str}",
             f"- Time elapsed: {elapsed_str} | Remaining: {remaining_str}",

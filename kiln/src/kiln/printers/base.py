@@ -1307,6 +1307,37 @@ class JobProgress:
             return self.active
         return self.ended_as is None
 
+    @property
+    def progress_pending(self) -> bool:
+        """Whether the printer's own progress counter has not started while
+        its layer counter says the print has.
+
+        Bambu's ``mc_percent`` sits at 0 through the start sequence AND the
+        first layers -- a live A1 read "0%" at layer 2 of 225, twelve minutes
+        in, and the printer's own screen said the same.  Both numbers are
+        the firmware's; the percent is not wrong, it is not counting yet.
+        But a person reads 0% beside "layer 2" as a lie, and a percent Kiln
+        DERIVED in its place (layer/total, elapsed/estimate) would be a
+        number the printer never said, wrong in the other direction while
+        the start sequence and the slow first layers run.
+
+        So Kiln neither invents a number nor repeats a misleading one: the
+        wire keeps ``completion`` exactly as the printer reports it and
+        carries this one verdict beside it, and every reader -- the inline
+        monitor, the web Monitor, the text report -- hides the percent while
+        it holds and leads with the layer count and time left, which are
+        real.  True only while the job is running, the counter reads
+        exactly 0, and the layer counter is at 1 or more; a printer that
+        reports no layers gets no verdict (0% at an unknown layer may be
+        honest), and once the counter moves the percent returns.
+        """
+        if not self.is_active or self.completion is None or self.current_layer is None:
+            return False
+        try:
+            return float(self.completion) == 0.0 and int(self.current_layer) >= 1
+        except (TypeError, ValueError):
+            return False
+
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
 
@@ -1317,6 +1348,13 @@ class JobProgress:
         for a cancelled print is a forecast of a future that is not coming.
         The fields that describe what happened -- the file, how far it got,
         which layer it stopped on -- are kept, because those are true.
+
+        ``progress_pending`` rides only while it is true (see the
+        property): the one verdict every door's reader hides the percent
+        on, composed here because every door that carries a job block --
+        the status tool the web and the inline monitor read, the text
+        report, the fleet view -- serialises through this method, so no
+        door needs its own branch and none can forget.
         """
         data = asdict(self)
         data.pop("ended_as", None)
@@ -1331,6 +1369,8 @@ class JobProgress:
         for key in ("current_layer", "total_layers", "job_id"):
             if data.get(key) is None:
                 data.pop(key, None)
+        if self.progress_pending:
+            data["progress_pending"] = True
         return data
 
 
