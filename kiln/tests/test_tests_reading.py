@@ -4,7 +4,8 @@ Coverage: a test that imports the changed module as ``from kiln import foo``
 (the spelling that never writes ``kiln.foo`` out) is a reader, including a
 parenthesised, aliased import, a nested package's module, and an import
 inside a test function; the module's bare name in a file that never imports
-it is not a reader.
+it is not a reader; a test file in a subfolder of tests/ is read like any
+other.
 """
 
 from __future__ import annotations
@@ -75,3 +76,7 @@ class TestReaders:
     def test_the_dotted_spelling_is_still_a_reader(self, tests_dir):
         files = {"test_a.py": "import kiln.foo\n", "test_b.py": 'PATCH = "kiln.foo.thing"\n'}
         assert _readers_of(tests_dir, "kiln/src/kiln/foo.py", files) == {"test_a.py", "test_b.py"}
+
+    def test_a_test_in_a_subfolder_is_a_reader(self, tests_dir):
+        files = {"regression/test_sweep.py": "from kiln import foo\n"}
+        assert _readers_of(tests_dir, "kiln/src/kiln/foo.py", files) == {"regression/test_sweep.py"}

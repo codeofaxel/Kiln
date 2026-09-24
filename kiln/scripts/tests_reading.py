@@ -186,7 +186,8 @@ def readers(needles: set[str]) -> list[Path]:
     # A module's last name is only a cheap filter before parsing, never a
     # needle of its own: ``emit`` and ``model`` are English.
     last_names = {m.rsplit(".", 1)[1] for m in modules}
-    for test in sorted(_TESTS.glob("test_*.py")):
+    # pytest collects the subfolders too (tests/regression/), so they are read.
+    for test in sorted(_TESTS.rglob("test_*.py")):
         try:
             text = test.read_text(encoding="utf-8")
         except OSError:
