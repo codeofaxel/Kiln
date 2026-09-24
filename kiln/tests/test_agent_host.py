@@ -95,6 +95,29 @@ CLAUDE_CODE = {
     "clientInfo": {"name": "claude-code", "title": "Claude Code", "version": "2.1.280"},
 }
 
+# Claude desktop's Cowork mode, as its own client code builds it: its name
+# is a prefix plus the name the user gave the server in the app's settings.
+COWORK = {
+    "protocolVersion": "2025-11-25",
+    "capabilities": {"extensions": {
+        "io.modelcontextprotocol/ui": {
+            "mimeTypes": ["text/html;profile=mcp-app"]}}},
+    "clientInfo": {"name": "local-agent-mode-kiln", "version": "1.0.0"},
+}
+
+# Cursor, as its own client code builds it: forms elicitation, roots, and
+# the Apps extension, under a fixed client version.
+CURSOR = {
+    "protocolVersion": "2025-11-25",
+    "capabilities": {
+        "elicitation": {"form": {}},
+        "roots": {"listChanged": False},
+        "extensions": {"io.modelcontextprotocol/ui": {
+            "mimeTypes": ["text/html;profile=mcp-app"]}},
+    },
+    "clientInfo": {"name": "cursor-vscode", "version": "1.0.0"},
+}
+
 NO_ENV: dict[str, str] = {}
 # What the desktop app's Code tab exports to a Kiln server it spawns,
 # read from a live process, minus everything not consulted.
@@ -141,6 +164,40 @@ def test_a_stale_entrypoint_variable_without_the_marker_is_ignored():
     )
     assert host is not None
     assert host.label == "claude-code"
+
+
+def test_claude_codes_marker_describes_only_claude_code():
+    """Every process Claude Code starts inherits its marker, shells
+    included, so an app launched from inside a Claude Code session can
+    carry it.  That app is not Claude Code: no door is folded into its
+    name, and Claude Code's model override is not read as its model."""
+    env = {**CODE_TAB_ENV, "ANTHROPIC_MODEL": "claude-opus-5-5"}
+    host = agent_host.describe(SimpleNamespace(), _ctx(CURSOR), env=env)
+    assert host is not None
+    assert host.name == "cursor-vscode"
+    assert host.entrypoint == ""
+    assert host.label == "cursor-vscode"
+    assert host.model == "unknown"
+    assert host.apps is True and host.elicitation is True
+    # ...while Claude Code under the same environment keeps both.
+    code = agent_host.describe(SimpleNamespace(), _ctx(CLAUDE_CODE), env=env)
+    assert code is not None
+    assert code.label == "claude-code claude-desktop"
+    assert code.model == "claude-opus-5-5"
+
+
+def test_coworks_name_keeps_the_app_and_drops_the_users_label():
+    """Cowork names its client after the server name the person chose; that
+    label is theirs, never sent, and never splits one app into many rows."""
+    for chosen in ("kiln", "Adams Printer Kiln", "k"):
+        params = {**COWORK, "clientInfo": {"name": f"local-agent-mode-{chosen}",
+                                           "version": "1.0.0"}}
+        host = agent_host.describe(SimpleNamespace(), _ctx(params), env=NO_ENV)
+        assert host is not None
+        assert host.name == "local-agent-mode"
+        assert host.label == "local-agent-mode"
+        assert all("adams" not in f and "kiln" not in f for f in host.facts), host.facts
+        assert host.apps is True
 
 
 def test_the_model_is_unknown_unless_the_host_volunteers_it():

@@ -11,17 +11,25 @@ door the process came in through.
 Measured on real hosts, which is what the labels below are shaped
 around:
 
-* Claude's desktop chat spawns the server through its bundle launcher,
-  passes NO environment of its own, and introduces itself as
-  ``claude-ai`` with the Apps extension declared.
+* Claude's desktop app introduces its chat as ``claude-ai`` and its
+  Cowork mode as ``local-agent-mode-`` followed by the name the user gave
+  the server in the app's settings, both with the Apps extension
+  declared; a server the app launched carried no CLAUDE variables.  The
+  user's label is dropped from the host name (see
+  ``_USER_SUFFIXED_NAME_PREFIXES``): it says what the person called
+  Kiln, not which app is asking.
 * Claude Code — the terminal CLI and the desktop app's Code tab — is
   ``claude-code`` with its own version, declares elicitation, and
   exports ``CLAUDECODE=1`` plus ``CLAUDE_CODE_ENTRYPOINT`` to every
-  server it spawns (``claude-desktop`` from the Code tab; unset in the
+  process it starts (``claude-desktop`` from the Code tab; unset in the
   terminal, which its own code reads as ``cli``; ``sdk-ts`` /
-  ``sdk-py`` / ``sdk-cli`` from the Agent SDK).  Those two names alone
-  cannot tell the terminal from the Code tab, so the entry point is
-  folded into the host label when that marker is present.
+  ``sdk-py`` / ``sdk-cli`` from the Agent SDK).  The name alone cannot
+  tell the terminal from the Code tab, so the entry point is folded into
+  the host label — but only for a host that names itself ``claude-code``.
+  Every process Claude Code starts inherits the marker, shells included,
+  so another app launched from inside a Claude Code session can carry it
+  too; the marker is Claude Code's statement about itself, never about
+  whichever host happens to hold it.
 
 The MODEL is not part of the protocol.  No host examined sends it in
 ``clientInfo`` and none exports it to the server process by default;
@@ -63,14 +71,18 @@ FACT_MODEL_PREFIX = "model:"
 #: Claude Code's own markers: it exports ``CLAUDECODE=1`` to every child,
 #: and ``CLAUDE_CODE_ENTRYPOINT`` names the door it was started from.
 #: The variable is unset for the plain terminal, which Claude Code's own
-#: code reads as ``cli``.  Only consulted when the marker is present, so
-#: a different host inheriting a stale shell variable is not mislabelled.
+#: code reads as ``cli``.  Only consulted when the marker is present AND
+#: the host names itself Claude Code (``_is_claude_code``), so another
+#: app that inherited the variable is not mislabelled.
 _CLAUDE_CODE_MARKER = "CLAUDECODE"
+#: The ``clientInfo.name`` Claude Code gives at the handshake.  The markers
+#: here are read only when the connected host names itself this.
+_CLAUDE_CODE_CLIENT_NAME = "claude-code"
 _CLAUDE_CODE_ENTRYPOINT = "CLAUDE_CODE_ENTRYPOINT"
 _CLAUDE_CODE_DEFAULT_ENTRYPOINT = "cli"
 #: Claude Code's documented model override; when set it names the model
-#: the host will use, which is the one thing the environment can say
-#: about the model.
+#: the session was configured to start with, which is the one thing the
+#: environment can say about the model.
 _CLAUDE_CODE_MODEL_OVERRIDE = "ANTHROPIC_MODEL"
 
 # A token as it lands in a heartbeat map key: lowercase, no whitespace,
@@ -86,6 +98,13 @@ _TOKEN_MAX = 40
 #: The longest key ``AgentHost.facts`` can produce; the dashboard's rule
 #: accepts exactly this many characters.
 KEY_BUDGET = 128
+
+#: Hosts that append a label of the USER's to their own name.  Claude
+#: desktop's Cowork mode names its client ``local-agent-mode-<the name the
+#: user gave this server>``: the suffix says what the person called Kiln,
+#: not which app is asking, and a person's own label is not ours to send.
+#: The name collapses to the prefix, without its trailing dash.
+_USER_SUFFIXED_NAME_PREFIXES = ("local-agent-mode-",)
 
 _recorded = False
 
@@ -141,6 +160,15 @@ def token(value: Any) -> str:
     return text[:_TOKEN_MAX] or UNKNOWN
 
 
+def _host_name(info: Any) -> str:
+    """The host's own name as a token, minus any label of the user's."""
+    name = token(getattr(info, "name", None))
+    for prefix in _USER_SUFFIXED_NAME_PREFIXES:
+        if name.startswith(prefix):
+            return prefix.rstrip("-")
+    return name
+
+
 def _client_info(mcp: Any, ctx: Any) -> Any | None:
     from kiln.mcp_compat import current_session
 
@@ -149,19 +177,31 @@ def _client_info(mcp: Any, ctx: Any) -> Any | None:
     return getattr(params, "clientInfo", None)
 
 
-def _entrypoint(env: Any) -> str:
-    if not str(env.get(_CLAUDE_CODE_MARKER, "") or "").strip():
+def _is_claude_code(name: str, env: Any) -> bool:
+    """Claude Code's markers apply: the host names itself Claude Code AND
+    the marker is present.  Either alone is not enough — the name without
+    the marker is a Claude Code build that does not export it, and the
+    marker without the name is some other app that inherited it."""
+    return name == _CLAUDE_CODE_CLIENT_NAME and bool(
+        str(env.get(_CLAUDE_CODE_MARKER, "") or "").strip()
+    )
+
+
+def _entrypoint(name: str, env: Any) -> str:
+    if not _is_claude_code(name, env):
         return ""
     return token(env.get(_CLAUDE_CODE_ENTRYPOINT) or _CLAUDE_CODE_DEFAULT_ENTRYPOINT)
 
 
-def _model_hint(info: Any, env: Any) -> str:
+def _model_hint(info: Any, name: str, env: Any) -> str:
     """A model the host volunteered, or ``unknown``.
 
     ``clientInfo`` is an open record (the SDK keeps unknown fields as
     extras), so a host that adds ``model`` there is read; no host examined
     does today.  Claude Code's ``ANTHROPIC_MODEL`` override counts only
-    under Claude Code's marker, for the same reason as the entry point.
+    for Claude Code itself, for the same reason as the entry point, and
+    it is the model the session was configured to START with: a switch
+    made inside the session never reaches the server's environment.
     """
     extra = getattr(info, "model_extra", None) or {}
     volunteered = extra.get("model") if isinstance(extra, dict) else None
@@ -169,7 +209,7 @@ def _model_hint(info: Any, env: Any) -> str:
         volunteered = getattr(info, "model", None)
     if volunteered:
         return token(volunteered)
-    if str(env.get(_CLAUDE_CODE_MARKER, "") or "").strip():
+    if _is_claude_code(name, env):
         override = env.get(_CLAUDE_CODE_MODEL_OVERRIDE)
         if override:
             return token(override)
@@ -193,13 +233,14 @@ def describe(mcp: Any, ctx: Any = None, env: Any = None) -> AgentHost | None:
         from kiln import local_stage
         from kiln.mcp_compat import host_can_ask_the_user
 
+        name = _host_name(info)
         return AgentHost(
-            name=token(getattr(info, "name", None)),
+            name=name,
             version=token(getattr(info, "version", None)),
-            entrypoint=_entrypoint(env),
+            entrypoint=_entrypoint(name, env),
             apps=bool(local_stage.host_declares_apps(mcp, ctx)),
             elicitation=bool(host_can_ask_the_user(mcp, ctx)),
-            model=_model_hint(info, env),
+            model=_model_hint(info, name, env),
         )
     except Exception as exc:  # noqa: BLE001 — telemetry never breaks a call
         _logger.debug("agent_host.describe failed: %s", exc)
