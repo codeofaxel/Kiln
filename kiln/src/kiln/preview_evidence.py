@@ -335,6 +335,28 @@ def stage_file_for(file_path: str | os.PathLike[str]) -> tuple[str | None, str]:
     )
 
 
+def name_stage_file(response: dict[str, Any], *, print_file: str | None = None) -> dict[str, Any]:
+    """Point a slice door's result at what the stage draws for the file it
+    wrote, in place, and return it.
+
+    The slice runner names the mesh it was handed, because that is all it
+    knows; the door then wraps the G-code into the file the printer gets.
+    Until 2026-09-23 the result kept naming the input, so the panel after a
+    slice drew the design while the print gate, the upload and
+    ``show_on_stage`` all meant the print file — and an agent told to show
+    "the file the printer will get" opened a second, identical panel on it.
+    One resolver decides for every door (:func:`stage_file_for`): the
+    print file when it carries the model, the design mesh the ledger joins
+    it to when it does not, and what the runner named when neither.
+    """
+    target = print_file or response.get("output_path")
+    if isinstance(target, str) and target:
+        staged, _why = stage_file_for(target)
+        if staged:
+            response["stage_mesh_path"] = staged
+    return response
+
+
 def _fresh(facts: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(facts, dict):
         return None

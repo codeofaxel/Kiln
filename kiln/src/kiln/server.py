@@ -961,10 +961,13 @@ def _build_instructions() -> str:
     # --- Visualization ---
     parts.append(
         "VISUALIZATION: Before printing ANY model (generated, downloaded, or custom), "
-        "put the file the printer will get on Kiln's interactive 3D stage with "
-        "`show_on_stage(file_path)` so the user can turn it over — it takes an existing "
-        "mesh or a sliced .gcode.3mf and changes nothing, and it is the print gate's "
-        "first door. Call `visualize_model(file_path)` for 6-angle still renders (iso, "
+        "the file the printer will get must be on Kiln's interactive 3D stage so the "
+        "user can turn it over. A slice result opens the stage on that file itself; "
+        "for a file that reached you another way — a download, an earlier session — "
+        "`show_on_stage(file_path)` opens it, changing nothing. Never open the stage "
+        "twice on the same file: a second panel of the same thing reads as a glitch. "
+        "The stage is the print gate's first door. Call `visualize_model(file_path)` "
+        "for 6-angle still renders (iso, "
         "front, right, top, bottom, back) of any STL, 3MF, OBJ, or SCAD file, to check "
         "the model yourself. Never skip visualization."
     )

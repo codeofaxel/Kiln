@@ -21,6 +21,7 @@ from typing import Any
 
 from kiln import plate_state as _plate_state
 from kiln.plate_state import pretty_job_name as _pretty_job_name
+from kiln.preview_evidence import name_stage_file
 from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_args import parse_json_object
 from kiln.tool_results import unwrap_tool_result
@@ -1887,6 +1888,9 @@ class _SlicerToolsPlugin:
                 # in-body count here: it would double-count this tool
                 # while every other path stayed at zero.)
 
+                # The stage draws the file the printer gets, the same file
+                # the gate, the upload and show_on_stage mean.
+                name_stage_file(response)
                 _attach_placement(response, place_info)
                 return response
             except SlicerNotFoundError as exc:
@@ -2171,6 +2175,9 @@ class _SlicerToolsPlugin:
                     response["multicolor_flattened"] = mc_block
                     response.setdefault("warnings", []).append(mc_warning)
 
+                # The stage draws the file the printer gets, the same file
+                # the gate, the upload and show_on_stage mean.
+                name_stage_file(response)
                 _attach_placement(response, place_info)
                 return response
             except SlicerNotFoundError as exc:
@@ -2848,6 +2855,7 @@ class _SlicerToolsPlugin:
                     resp["validation"] = validation_summary
                 if adhesion_rec:
                     resp["adhesion"] = adhesion_rec
+                name_stage_file(resp["slice"], print_file=upload_path)
                 if start_handoff:
                     resp["start_gcode_source"] = (
                         f"{start_handoff} — the printer's own start routine"

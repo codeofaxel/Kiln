@@ -240,6 +240,46 @@ def _call(door: str, registry, extra: dict, **kwargs) -> dict:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("door", ["slice_model", "reslice_with_overrides"])
+class TestTheStageDrawsThePrintFile:
+    """On a Bambu the door wraps the G-code into the print file; when that
+    file carries the model, the stage draws IT — the file the gate, the
+    upload and show_on_stage all mean.  Measured 2026-09-23: the slice
+    panel drew the design, and show_on_stage on the print file drew the
+    same jar again, read as Kiln glitching."""
+
+    def test_a_3mf_source_stages_the_print_file(self, door, tmp_path, machine, monkeypatch):
+        mark_clear(machine, "human")
+        monkeypatch.setattr(bridge, "ask", lambda request: pytest.fail("a clear plate asks nobody"))
+        trimesh = pytest.importorskip("trimesh")
+        ball = tmp_path / "ball.3mf"
+        mesh = trimesh.creation.icosphere(subdivisions=2, radius=12.0)
+        mesh.apply_translation([30.0, 30.0, 12.0])
+        mesh.export(str(ball))
+        spy, gcode = _fake_slice(tmp_path)
+        extra = {"overrides": {"brim_width": "5"}} if door == "reslice_with_overrides" else {}
+        with patch("kiln.slicer.slice_file", spy):
+            resp = _slicer_tools()[door](printer_id="bambu_a1", input_path=str(ball), **extra)
+        assert resp.get("success") is True, resp
+        assert resp["output_path"].endswith(".gcode.3mf"), resp["output_path"]
+        assert resp["stage_mesh_path"] == resp["output_path"], "the stage draws the file the printer gets"
+
+    def test_an_stl_source_stages_the_mesh_its_placeholder_file_was_sliced_from(self, door, tmp_path, machine, monkeypatch):
+        mark_clear(machine, "human")
+        monkeypatch.setattr(bridge, "ask", lambda request: pytest.fail("a clear plate asks nobody"))
+        from kiln import monitor_twin
+
+        stl = _cube(tmp_path / "part.stl", off=(30.0, 30.0, 0.0))
+        spy, gcode = _fake_slice(tmp_path)
+        monitor_twin.note_sliced(stl, gcode)  # what the real runner records
+        extra = {"overrides": {"brim_width": "5"}} if door == "reslice_with_overrides" else {}
+        with patch("kiln.slicer.slice_file", spy):
+            resp = _slicer_tools()[door](printer_id="bambu_a1", input_path=stl, **extra)
+        assert resp.get("success") is True, resp
+        assert resp["output_path"].endswith(".gcode.3mf")
+        assert resp["stage_mesh_path"] == stl, "a placeholder print file is drawn as the mesh it came from"
+
+
 @pytest.mark.parametrize(("door", "registry", "extra"), DOORS, ids=[d[0] for d in DOORS])
 class TestEveryDoor:
     def test_the_door_takes_placement(self, door, registry, extra):
@@ -390,6 +430,25 @@ class TestEveryDoor:
             resp = _call(door, registry, extra, input_path=stl)
         assert spy.call_args.args[0] == stl
         assert "placement" not in resp and "approval_note" not in resp
+
+    def test_the_result_names_the_file_the_stage_draws(self, door, registry, extra, tmp_path, machine, monkeypatch):
+        """Every door's result points the stage at the file the printer gets.
+        With raw G-code that is the mesh the ledger joins it to; the Bambu
+        wrap case is ``TestTheStageDrawsThePrintFile`` below."""
+        mark_clear(machine, "human")
+        monkeypatch.setattr(bridge, "ask", lambda request: pytest.fail("a clear plate asks nobody"))
+        stl = _cube(tmp_path / "part.stl", off=(10.0, 10.0, 0.0))
+        from kiln import monitor_twin
+
+        spy, gcode = _fake_slice(tmp_path)
+        monitor_twin.note_sliced(stl, gcode)
+        with patch("kiln.slicer.slice_file", spy):
+            resp = _call(door, registry, extra, input_path=stl)
+        if not resp.get("success") or door in ESTIMATE_DOORS:
+            # slice_and_print stops at the stubbed upload, and an estimate
+            # makes no print file: both keep what the runner named.
+            return
+        assert resp["stage_mesh_path"] == stl, resp
 
     def test_no_printer_at_all_passes_through(self, door, registry, extra, tmp_path, monkeypatch):
         import kiln.server as srv

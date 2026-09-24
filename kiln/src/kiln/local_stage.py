@@ -1451,10 +1451,15 @@ def _install_result_hook(mcp: Any) -> bool:
             # (the tool's own stamp was checked above).
             opens = renders
             mesh = resolve(token) or ""
+            # Judged first: a repeat of the drawing just above rides no
+            # geometry and expects no fetch — the panel above holds it.
+            same = _same_as_the_stage_above(token, mesh)
             # Opt-in FIRST: with inline geometry off — the default — there is
             # nothing to decide and no mesh to read off disk, so the ordinary
             # path never pays for an encode whose result it would discard.
-            if inline_geometry_enabled() and opens:
+            if same:
+                _drawn(token)
+            elif inline_geometry_enabled() and opens:
                 payload = _inline_payload(token)
                 if payload is not None:
                     # Geometry rode the result to a host that draws the
@@ -1478,7 +1483,6 @@ def _install_result_hook(mcp: Any) -> bool:
                 # the NEXT result can tell whether it did.
                 _expect_fetch(token, mesh)
             proven = _panel_proven
-            same = _same_as_the_stage_above(token, mesh)
             link_pending = False
             if not opens or stalled or not proven:
                 # The panel is not known to work for this host — none was

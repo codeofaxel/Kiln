@@ -477,10 +477,13 @@ def _sliced_design_and_print(tmp_path: Path) -> tuple[str, str, str]:
     return design, str(gcode), archive
 
 
-def _slice_result(design: str, gcode: str, archive: str) -> dict:
-    """What the host received from ``slice_model`` on 2026-09-23, keys and
-    shape: the print file it wrote, and the mesh it was handed named as
-    the stage's file."""
+def _slice_result(design: str, gcode: str, archive: str, *, named: bool = True) -> dict:
+    """What the host receives from ``slice_model``: the print file it wrote
+    and the file the stage draws — named by the doors' shared rule, or, with
+    ``named=False``, the mesh the runner was handed (what every door said
+    until 2026-09-23, and what a door that wraps nothing still says)."""
+    from kiln.preview_evidence import name_stage_file
+
     mcp = _served_with_the_slice_door()
     body = {
         "success": True,
@@ -490,6 +493,8 @@ def _slice_result(design: str, gcode: str, archive: str) -> dict:
         "stage_mesh_path": design,
         "message": f"Sliced {Path(design).name} -> {Path(gcode).name}",
     }
+    if named:
+        name_stage_file(body)
     return _through_the_hook(mcp, _Host(_Caps(extensions={_UI: {}})), body, name="slice_model")
 
 
@@ -517,17 +522,61 @@ class TestTheStageAboveAlreadyShowsIt:
     same slice again.  The result says so; nothing is suppressed, and only
     a drawing the panel above actually fetched counts."""
 
-    def test_the_print_file_after_its_slice_panel_is_the_same_slice(self, tmp_path):
+    def test_a_slice_result_draws_the_print_file_and_a_show_of_it_is_the_same_file(self, tmp_path):
         design, gcode, archive = _sliced_design_and_print(tmp_path)
         first = _slice_result(design, gcode, archive)
+        assert local_stage.resolve(first["artifact"]["artifact_token"]) == archive, (
+            "the slice panel draws the file the printer gets"
+        )
+        _panel_fetches(first)
+        second = _show(archive)
+        assert second["shown"]["repeat"] == "same_file"
+        assert "already drew jar.gcode.3mf" in second["shown"]["repeat_note"]
+        assert "print gate already has the stage on record for jar.gcode.3mf" in second["shown"]["repeat_note"]
+        refusal, _ = preview_evidence.judge(archive, "stage", host_renders=True, panel_proven=True)
+        assert refusal is None, "the note's gate clause must be what the gate says"
+
+    def test_a_result_that_still_names_the_design_is_the_same_slice(self, tmp_path):
+        """A door that wraps nothing names the mesh it was handed; a show of
+        the print file it maps to is the same slice, said as such."""
+        design, gcode, archive = _sliced_design_and_print(tmp_path)
+        first = _slice_result(design, gcode, archive, named=False)
+        assert local_stage.resolve(first["artifact"]["artifact_token"]) == design
         _panel_fetches(first)
         second = _show(archive)
         assert second["shown"]["repeat"] == "same_slice"
         note = second["shown"]["repeat_note"]
         assert "jar.3mf, the mesh jar.gcode.3mf was sliced from" in note
-        assert "print gate already has the stage on record for jar.gcode.3mf" in note
         refusal, _ = preview_evidence.judge(archive, "stage", host_renders=True, panel_proven=True)
-        assert refusal is None, "the note's gate clause must be what the gate says"
+        assert refusal is None
+
+    def test_a_repeat_expects_no_fetch_so_its_card_is_never_read_as_a_stalled_panel(self, tmp_path, monkeypatch):
+        archive = _sliced_archive(tmp_path)
+        _panel_fetches(_show(archive))
+        second = _show(archive)
+        assert second["shown"]["repeat"] == "same_file"
+        clock = [local_stage._now()]
+        monkeypatch.setattr(local_stage, "_now", lambda: clock[0])
+        clock[0] += local_stage._FETCH_GRACE_S + 1.0
+        assert local_stage.panel_fetches_stalled() is False, (
+            "the repeat's panel shows a card and fetches nothing; that is not a stall"
+        )
+        third = _show(archive)
+        assert third["shown"]["repeat"] == "same_file", "a repeat of a repeat is still on the stage above"
+        assert third["shown"]["door"] == "panel", third["shown"]
+
+    def test_the_rule_every_door_shares(self, tmp_path):
+        from kiln.preview_evidence import name_stage_file
+
+        design, gcode, archive = _sliced_design_and_print(tmp_path)
+        assert name_stage_file({"output_path": archive, "stage_mesh_path": design})["stage_mesh_path"] == archive
+        assert name_stage_file({"output_path": gcode, "stage_mesh_path": design})["stage_mesh_path"] == design
+        placeholder = _placeholder_archive(tmp_path, sliced_from=_block(tmp_path / "block.stl"))
+        assert name_stage_file({"output_path": placeholder})["stage_mesh_path"] == os.path.abspath(str(tmp_path / "block.stl"))
+        orphan = {"output_path": str(tmp_path / "nobody_sliced.gcode"), "stage_mesh_path": design}
+        (tmp_path / "nobody_sliced.gcode").write_text("G28\n")
+        assert name_stage_file(orphan)["stage_mesh_path"] == design, "no record: what the runner named stands"
+        assert name_stage_file({"stage_mesh_path": design}) == {"stage_mesh_path": design}
 
     def test_nothing_is_claimed_when_the_panel_above_never_fetched(self, tmp_path):
         design, gcode, archive = _sliced_design_and_print(tmp_path)
@@ -580,7 +629,7 @@ class TestTheStageAboveAlreadyShowsIt:
 
     def test_a_print_file_from_a_newer_slice_is_not_the_same_slice(self, tmp_path):
         design, gcode, archive = _sliced_design_and_print(tmp_path)
-        _panel_fetches(_slice_result(design, gcode, archive))
+        _panel_fetches(_slice_result(design, gcode, archive, named=False))
         # Re-sliced since: the design's newest slice is no longer the one
         # this print file carries.
         newer = tmp_path / "jar_v2.gcode"
