@@ -83,7 +83,7 @@ def _stub_composition(monkeypatch):
     monkeypatch.setattr(
         local_monitor,
         "_direct_status",
-        lambda printer_name: (
+        lambda printer_name, detail="lite": (
             {
                 "success": True,
                 "printer": {"state": "printing", "connected": True},
@@ -240,7 +240,7 @@ class TestComposeLocalPayload:
         monkeypatch.setattr(
             local_monitor,
             "_direct_status",
-            lambda printer_name: (
+            lambda printer_name, detail="lite": (
                 None,
                 {"code": "NOT_FOUND", "message": "Printer 'x' not found."},
             ),
@@ -327,6 +327,61 @@ class TestTheAccountAxisAsksForAnAccountNotACredential:
     ):
         _isolated_auth.write_text("{not json", encoding="utf-8")
         assert self._real_signed_in() is False
+
+
+class TestCapabilitiesRideOnlyOnThePollThatAsks:
+    """The panel asks for the machine's capabilities once per watched print
+    (``include_capabilities``); that poll reads the full status shape, every
+    other poll stays lite.  Driven through the REAL ``_direct_status`` so the
+    ``detail`` handed to ``printer_status`` is the thing under test."""
+
+    _real_direct_status = staticmethod(local_monitor._direct_status)
+
+    def test_the_asking_poll_reads_full_and_the_rest_stay_lite(self, monkeypatch):
+        from kiln import server
+
+        asked: list[str | None] = []
+
+        def fake_status(printer_name=None, detail=None):
+            asked.append(detail)
+            answer = {"success": True, "printer": {"state": "printing"}, "job": {}}
+            if detail == "full":
+                answer["capabilities"] = {"can_pause": True}
+            return answer
+
+        monkeypatch.setattr(local_monitor, "_direct_status", self._real_direct_status)
+        monkeypatch.setattr(server, "printer_status", fake_status)
+
+        plain = local_monitor.compose_local_payload()
+        with_caps = local_monitor.compose_local_payload(include_capabilities=True)
+
+        assert asked == ["lite", "full"]
+        assert "capabilities" not in plain["status"]
+        assert with_caps["status"]["capabilities"] == {"can_pause": True}
+
+    def test_the_poll_verb_carries_the_ask_through_the_sdk(self, monkeypatch):
+        """The door the panel actually polls.  The SDK drops an argument a
+        tool does not declare, silently -- which is how the ask went
+        unanswered -- so the flag goes in through the registered verb, the
+        way a host's ``tools/call`` arrives, not straight to the composer."""
+        from kiln import server
+
+        asked: list[str | None] = []
+
+        def fake_status(printer_name=None, detail=None):
+            asked.append(detail)
+            return {"success": True, "printer": {"state": "printing"}, "job": {}}
+
+        monkeypatch.setattr(local_monitor, "_direct_status", self._real_direct_status)
+        monkeypatch.setattr(server, "printer_status", fake_status)
+        mcp = _fastmcp()
+        assert local_monitor._register_snapshot_verb(mcp)
+        tools = mcp._tool_manager
+
+        anyio.run(tools.call_tool, "kiln_monitor_snapshot", {"include_capabilities": True})
+        anyio.run(tools.call_tool, "kiln_monitor_snapshot", {})
+
+        assert asked == ["full", "lite"]
 
 
 class TestTheStatusRefusalIsUnwrappedFromTheRealShape:

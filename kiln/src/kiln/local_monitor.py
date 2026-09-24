@@ -251,13 +251,18 @@ def _signed_in() -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _direct_status(printer_name: str | None) -> tuple[dict | None, dict | None]:
+def _direct_status(
+    printer_name: str | None, *, detail: str = "lite"
+) -> tuple[dict | None, dict | None]:
     """(status, status_failure) from this process's own registry.
 
-    The status axis is literally ``printer_status(detail="lite")`` — the
-    same tool the hosted door relays — so the panel sees one shape on every
-    door.  Imported lazily from the server module, which is importable by
-    the time anything calls this (it installed us).
+    The status axis is literally ``printer_status(detail=...)`` — the same
+    tool the hosted door relays — so the panel sees one shape on every door.
+    ``lite`` is the polling shape; ``full`` rides only when the panel asks
+    for the machine's capabilities (``can_pause`` and friends), which it
+    does once, on its first poll of a print — the hosted door answers the
+    same ask the same way.  Imported lazily from the server module, which
+    is importable by the time anything calls this (it installed us).
 
     The refusal is UNWRAPPED here, because ``_error_dict`` nests it:
     ``{"success": false, "error": {"code", "message", "retryable"}}``.
@@ -271,7 +276,7 @@ def _direct_status(printer_name: str | None) -> tuple[dict | None, dict | None]:
     """
     from kiln.server import printer_status
 
-    answer = printer_status(printer_name=printer_name, detail="lite")
+    answer = printer_status(printer_name=printer_name, detail=detail)
     if isinstance(answer, dict) and answer.get("success") is False:
         err = answer.get("error")
         if isinstance(err, dict):
@@ -391,6 +396,7 @@ def compose_local_payload(
     printer_name: str | None = None,
     include_camera: bool = False,
     include_video: bool = False,
+    include_capabilities: bool = False,
 ) -> dict[str, Any]:
     """The ``kiln.monitor.v1`` snapshot for THIS machine's printer.
 
@@ -399,7 +405,15 @@ def compose_local_payload(
     able to tell that from "bridge up".  Matches the hosted door's direct
     mode byte for byte.
     """
-    status, status_failure = _direct_status(printer_name)
+    # Capabilities are a fact about the machine, read once: the panel asks
+    # for them on its first poll of a print and never again,
+    # so the full status shape rides only that poll (the hosted door makes
+    # the same lite/full choice from the same flag).  Before this flag was
+    # accepted here the ask was silently ignored and the panel never learned
+    # whether the machine could pause.
+    status, status_failure = _direct_status(
+        printer_name, detail="full" if include_capabilities else "lite"
+    )
     camera_b64: str | None = None
     camera_note: str | None = None
     if include_camera:
@@ -509,6 +523,7 @@ def _register_snapshot_verb(mcp: Any) -> bool:
             printer_name: str | None = None,
             include_camera: bool = False,
             include_video: bool = False,
+            include_capabilities: bool = False,
         ) -> dict:
             """Internal support for Kiln's inline print monitor.
 
@@ -520,6 +535,7 @@ def _register_snapshot_verb(mcp: Any) -> bool:
                     printer_name=printer_name,
                     include_camera=include_camera,
                     include_video=include_video,
+                    include_capabilities=include_capabilities,
                 )
             }
 
