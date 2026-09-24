@@ -5222,7 +5222,8 @@ def _estimate_print_cost(
     Returns a dict with cost breakdown, or ``None`` if estimation is not
     possible (e.g. both time values and weight are missing).
     """
-    if filaments is not None and filaments.weight_g > 0 and filaments.cost_per_kg_usd is not None:
+    from_file = filaments is not None and filaments.weight_g > 0 and filaments.cost_per_kg_usd is not None
+    if from_file:
         filament_weight_g = filaments.weight_g
         cost_per_kg = filaments.cost_per_kg_usd
         mat_label = filaments.material
@@ -5261,7 +5262,7 @@ def _estimate_print_cost(
 
     total_cost = material_cost + electricity_cost
 
-    return {
+    estimate: dict[str, Any] = {
         "material": mat_label,
         "estimated_weight_g": round(total_weight_g, 1),
         "print_weight_g": round(estimated_weight_g, 1),
@@ -5274,6 +5275,12 @@ def _estimate_print_cost(
         "tool_changes": tool_changes,
         "weight_source": weight_source,
     }
+    if from_file:
+        # Where the material came from, and what was guessed, as the file's
+        # own estimate says it.
+        estimate["material_source"] = filaments.material_source
+        estimate["warnings"] = list(filaments.warnings)
+    return estimate
 
 
 def _format_duration(seconds: int | float | None) -> str:
@@ -9278,9 +9285,9 @@ def _wrapped_filament_type(threemf_path: str) -> str | None:
 @mcp.tool()
 def wrap_gcode_as_3mf(
     gcode_path: str,
-    hotend_temp: int = 220,
-    bed_temp: int = 65,
-    filament_type: str = "PLA",
+    hotend_temp: int | None = None,
+    bed_temp: int | None = None,
+    filament_type: str | None = None,
     source_3mf_path: str | None = None,
     num_filaments: int = 1,
     filament_colors: list[str] | None = None,
@@ -10139,7 +10146,11 @@ def preflight_check(
         #    material it was sliced for (the expected material wins when
         #    given), priced from the one material table.
         _file_filaments = None
-        if file_path is not None and Path(file_path).suffix.lower() in _GCODE_EXTENSIONS:
+        if (
+            file_result is not None
+            and file_result.get("valid")
+            and Path(file_path).suffix.lower() in _GCODE_EXTENSIONS
+        ):
             try:
                 _file_filaments = _get_cost_estimator().filament_pricing(
                     str(file_path), material=expected_material

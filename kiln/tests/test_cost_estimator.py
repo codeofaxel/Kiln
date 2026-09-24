@@ -524,6 +524,53 @@ class TestEstimateFrom3MF:
         with pytest.raises(ValueError, match="unpacks to"):
             CostEstimator().estimate_from_file(str(path))
 
+    def test_a_member_compressed_to_unpack_whole_is_refused(self, tmp_path):
+        import zipfile
+
+        path = tmp_path / "bz.gcode.3mf"
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_BZIP2) as zf:
+            zf.writestr("Metadata/plate_1.gcode", "G1 X10 E1\n")
+        with pytest.raises(ValueError, match="compressed in a way Kiln does not unpack"):
+            CostEstimator().estimate_from_file(str(path))
+
+    def test_a_member_that_lies_about_its_size_unpacks_within_a_bound(self, tmp_path):
+        """64 MB of zeros deflate to ~64 KB; declared as 1000 bytes, an
+        unbounded read inflates all of it before noticing."""
+        import struct
+        import tracemalloc
+        import zipfile
+
+        path = tmp_path / "bomb.gcode.3mf"
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("Metadata/plate_1.gcode", b"\0" * (64 * 1024 * 1024))
+        raw = bytearray(path.read_bytes())
+        local = raw.find(b"PK\x03\x04")
+        struct.pack_into("<I", raw, local + 22, 1000)  # local header's uncompressed size
+        central = raw.find(b"PK\x01\x02")
+        struct.pack_into("<I", raw, central + 24, 1000)  # central directory's
+        path.write_bytes(bytes(raw))
+
+        tracemalloc.start()
+        try:
+            with pytest.raises(ValueError):
+                CostEstimator().estimate_from_file(str(path))
+            _now, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert peak < 16 * 1024 * 1024
+
+    def test_a_filament_id_is_never_a_list_length(self, tmp_path):
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<config><plate>\n"
+            '  <filament id="10000001" type="PLA" used_m="1.0" used_g="3.0"/>\n'
+            "</plate></config>"
+        )
+        path = self._make_3mf(tmp_path, xml)
+        est = CostEstimator().estimate_from_file(path)
+        assert [f["tool"] for f in est.filaments] == [0]
+        assert est.filament_weight_grams == 3.0
+
     def test_the_cost_tool_names_a_model_3mf_as_the_callers_mistake(self, tmp_path):
         import zipfile
 

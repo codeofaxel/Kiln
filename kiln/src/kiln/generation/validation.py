@@ -3506,7 +3506,14 @@ def estimate_material_cost(
     # Density and price from the one material table, PLA's when it has no row.
     from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
 
-    row = resolve_material(material) or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
+    row = resolve_material(material)
+    warnings: list[str] = []
+    if row is None:
+        row = BUILTIN_MATERIALS[DEFAULT_MATERIAL]
+        warnings.append(
+            f"Unknown material '{material}': Kiln's material table has no row for it, "
+            f"so {row.name}'s density and price stood in"
+        )
     density = row.density_g_per_cm3
     price = cost_per_kg if cost_per_kg is not None else row.cost_per_kg_usd
 
@@ -3548,6 +3555,7 @@ def estimate_material_cost(
         "infill_pct": infill_pct,
         "density_g_cm3": density,
         "cost_per_kg_usd": price,
+        "warnings": warnings,
     }
 
 

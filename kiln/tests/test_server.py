@@ -3119,11 +3119,13 @@ class TestWrapGcodeAs3mf:
             source_3mf_path="/tmp/source.3mf",
         )
         assert result["success"] is True
+        # Omitted settings reach the adapter as None: the file's own type
+        # and temperatures are read there, never a forced PLA at 220/65.
         adapter.wrap_gcode_as_3mf.assert_called_once_with(
             "/tmp/test.gcode",
-            hotend_temp=220,
-            bed_temp=65,
-            filament_type="PLA",
+            hotend_temp=None,
+            bed_temp=None,
+            filament_type=None,
             source_3mf_path="/tmp/source.3mf",
             num_filaments=1,
             filament_colors=None,

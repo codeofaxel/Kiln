@@ -40,7 +40,7 @@ from kiln.gcode import (
     slicer_material_label,
     slicer_print_time,
 )
-from kiln.gcode_metadata import read_head, read_head_and_tail
+from kiln.gcode_metadata import read_head, read_head_and_tail, unpacks_in_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -429,8 +429,11 @@ def _extract_ufp_metadata(file_path: str) -> FileMetadata:
                     gcode_path = name
                     break
 
-            if gcode_path is not None:
-                info = zf.getinfo(gcode_path)
+            info = zf.getinfo(gcode_path) if gcode_path is not None else None
+            if info is not None and not unpacks_in_chunks(info):
+                logger.warning("UFP G-code member is compressed in a way Kiln does not unpack")
+                info = None
+            if info is not None:
                 with zf.open(info) as fh:
                     # Only the top, bounded in bytes: a member's end can
                     # only be reached by unpacking all of it, and Cura, which

@@ -3889,7 +3889,8 @@ def _analyze_cost(
     # Suggestion: expensive material
     mat_upper = material.upper()
     profile = estimator.get_material(mat_upper)
-    if profile is not None and profile.cost_per_kg_usd > 30.0:
+    pla = estimator.get_material("PLA")
+    if profile is not None and pla is not None and profile.cost_per_kg_usd > pla.cost_per_kg_usd:
         pla_est = estimator.estimate_from_mesh(
             file_path,
             material="PLA",
@@ -3900,7 +3901,7 @@ def _analyze_cost(
         savings = estimate.total_cost_usd - pla_est.total_cost_usd
         if savings > 0.01:
             recommendations.append(
-                f"Using PLA (~$25/kg) instead of {mat_upper} "
+                f"Using PLA (~${pla.cost_per_kg_usd:.0f}/kg) instead of {mat_upper} "
                 f"(~${profile.cost_per_kg_usd:.0f}/kg) would save ~${savings:.2f}"
             )
 

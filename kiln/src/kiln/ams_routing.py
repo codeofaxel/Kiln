@@ -46,7 +46,7 @@ from kiln.bambu_trays import TRAYS_PER_UNIT as _TRAYS_PER_UNIT
 from kiln.bambu_trays import tray_id as _bambu_tray_id
 from kiln.bambu_trays import tray_name as _bambu_tray_name
 from kiln.gcode import slicer_filament_types
-from kiln.gcode_metadata import sliced_gcode_member
+from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 
 __all__ = [
     "AmsPlan",
@@ -268,10 +268,10 @@ def read_file_filaments(path: str | None) -> FileFilaments:
             with zipfile.ZipFile(path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is not None:
-                    data = zf.read(member)
-                    text = (
-                        data[:_HEAD_BYTES] + b"\n" + data[-_TAIL_BYTES:]
-                    ).decode(errors="replace")
+                    from kiln.gcode import _MAX_SCAN_BYTES
+
+                    data = read_member_text(zf, member, _MAX_SCAN_BYTES)
+                    text = data[:_HEAD_BYTES] + "\n" + data[-_TAIL_BYTES:]
                     fils = _filaments_from_gcode_text(text)
                     if fils:
                         return FileFilaments(fils, source="gcode_3mf")
@@ -280,7 +280,7 @@ def read_file_filaments(path: str | None) -> FileFilaments:
         if lower.endswith((".gcode", ".gco", ".g")):
             fils = _filaments_from_gcode_text(_read_ends(path))
             return FileFilaments(fils, source="gcode" if fils else "none")
-    except (OSError, zipfile.BadZipFile, io.UnsupportedOperation):
+    except (OSError, ValueError, zipfile.BadZipFile, io.UnsupportedOperation):
         return FileFilaments()
     return FileFilaments()
 

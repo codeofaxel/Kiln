@@ -1508,8 +1508,8 @@ def slicer_filament_totals(text: str) -> SlicerFilamentTotals:
 #: the same line without the ``;``.  Cura-style headers write one
 #: ``;MATERIAL:PLA``.  OrcaSlicer's note at each prime-tower tool change,
 #: ``; material : PLA -> PETG``, is not a setting and is never read.
-_FILAMENT_TYPE_LINE = re.compile(r"^(?:;[ \t]*)?filament_type[ \t]*=[ \t]*(?P<v>.*?)[ \t]*$", re.I | re.M)
-_CURA_MATERIAL_LINE = re.compile(r"^;MATERIAL:[ \t]*(?P<v>\S.*?)[ \t]*$", re.M)
+_FILAMENT_TYPE_LINE = re.compile(r"^(?:;[ \t]*)?filament_type[ \t]*=[ \t]*(?P<v>\S.*?)[ \t]*$", re.I | re.M)
+_CURA_MATERIAL_LINE = re.compile(r"^;[ \t]*MATERIAL:[ \t]*(?P<v>\S.*?)[ \t]*$", re.M)
 
 
 def slicer_filament_types(text: str) -> tuple[str, ...]:
@@ -1527,10 +1527,10 @@ def slicer_filament_types(text: str) -> tuple[str, ...]:
     candidates = "\n".join(
         line.strip()
         for line in text.splitlines()
-        if "ilament_type" in line or "ILAMENT_TYPE" in line or ";MATERIAL:" in line
+        if "filament_type" in line.lower() or "MATERIAL:" in line
     )
     m = _FILAMENT_TYPE_LINE.search(candidates)
-    if m is not None and m.group("v"):
+    if m is not None:
         return tuple(part.strip().strip('"').strip() for part in m.group("v").split(";"))
     m = _CURA_MATERIAL_LINE.search(candidates)
     return (m.group("v"),) if m is not None else ()

@@ -26,6 +26,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
+
 logger = logging.getLogger(__name__)
 
 # Standard 1.75 mm filament cross-section area (mm^2).
@@ -33,6 +35,12 @@ _FILAMENT_DIAMETER_MM: float = 1.75
 _FILAMENT_RADIUS_MM: float = _FILAMENT_DIAMETER_MM / 2.0
 _FILAMENT_CROSS_SECTION_MM2: float = math.pi * _FILAMENT_RADIUS_MM**2
 
+# Each table row's density, and PLA's, for callers that read densities as a
+# mapping.  Derived from the one material table, never restated.
+_DEFAULT_DENSITIES: dict[str, float] = {
+    name: row.density_g_per_cm3 for name, row in BUILTIN_MATERIALS.items()
+}
+_FALLBACK_DENSITY: float = BUILTIN_MATERIALS[DEFAULT_MATERIAL].density_g_per_cm3
 
 
 # ---------------------------------------------------------------------------
@@ -203,8 +211,6 @@ def _mm_to_grams(filament_mm: float, material_type: str | None = None) -> float:
     Uses standard 1.75 mm filament diameter and the material's density from
     the one material table, PLA's when the table has no row for it.
     """
-    from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
-
     density = (resolve_material(material_type) or BUILTIN_MATERIALS[DEFAULT_MATERIAL]).density_g_per_cm3
     volume_cm3 = (filament_mm * _FILAMENT_CROSS_SECTION_MM2) / 1000.0
     return volume_cm3 * density

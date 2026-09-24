@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from kiln.gcode import (
+    FIRST_PSEUDO_TOOL,
     extruded_mm_per_tool,
     slicer_filament_totals,
     slicer_filament_types,
@@ -165,15 +166,18 @@ def resolve_material(
 
     The one lookup every estimate uses, so a name weighs and prices the
     same at every door.  Spellings arrive from three vocabularies -- a
-    person's (``"petg"``, ``"PLA Basic"``), a printer's AMS (``"PLA-CF"``,
-    ``"PA-CF"``) and the table's own (``"CF-PLA"``, ``"NYLON"``) -- so the
-    lookup tries, in order: the row itself (spaces and underscores read as
-    hyphens, a trailing ``PLUS`` as ``+``), the alias table
-    :mod:`kiln.materials` keeps (``PA`` is nylon), the hyphen pair reversed
-    (an AMS writes the modifier last, the table first), and finally the
-    family the name starts with (``PETG-HF`` is PETG for weighing and
-    pricing).  ``None`` means the table has no row and no family for it;
-    the caller decides what that means and says so.
+    person's (``"petg"``, ``"PLA Basic"``, ``"Rapid PETG"``), a printer's
+    AMS (``"PLA-CF"``, ``"PA-CF"``) and the table's own (``"CF-PLA"``,
+    ``"NYLON"``) -- so the lookup tries, in order: a row stored under the
+    name exactly as given (a caller's own row), the row itself (spaces and
+    underscores read as hyphens, ``PLUS`` as ``+``, ``CARBON FIBER`` as
+    ``CF``), the alias table :mod:`kiln.materials` keeps (``PA`` is nylon),
+    the hyphen pair reversed (an AMS writes the modifier last, the table
+    first), and finally the first word that names a family (``PETG-HF`` and
+    ``Rapid PETG`` are PETG for weighing and pricing).  ``None`` means the
+    table has no row and no family for it; the caller decides what that
+    means and says so.  PrusaSlicer's ``FLEX`` and ``PET`` stay ``None``:
+    its own profiles use them for a 0.89 g/cm³ TPE and a 1.33 g/cm³ PET.
 
     :param table: The rows to search, :data:`BUILTIN_MATERIALS` when
         omitted; a :class:`CostEstimator` passes its own, custom rows
@@ -182,10 +186,14 @@ def resolve_material(
     if not name:
         return None
     rows = BUILTIN_MATERIALS if table is None else table
-    key = re.sub(r"[\s_]+", "-", str(name).strip().upper())
-    key = re.sub(r"-?PLUS$", "+", key)
-    if not key:
+    raw = str(name).strip().upper()
+    if not raw:
         return None
+    if raw in rows:
+        return rows[raw]
+    key = re.sub(r"[\s_]+", "-", raw)
+    key = re.sub(r"-?PLUS$", "+", key)
+    key = re.sub(r"CARBON-FIB(?:ER|RE)", "CF", key)
 
     def _alias(candidate: str) -> str | None:
         try:
@@ -196,18 +204,18 @@ def resolve_material(
             return None
 
     def _row(candidate: str | None) -> MaterialProfile | None:
-        return rows.get(candidate) if candidate else None
+        return (rows.get(candidate) or rows.get(_alias(candidate) or "")) if candidate else None
 
-    hit = _row(key) or _row(_alias(key))
+    hit = _row(key)
     if hit is None and "-" in key:
         head, _, tail = key.partition("-")
         hit = _row(f"{tail}-{head}")
-    if hit is None:
-        family = re.match(r"[A-Z]+", key)
-        if family:
-            hit = _row(family.group(0)) or _row(_alias(family.group(0)))
+    for word in key.split("-") if hit is None else ():
+        letters = re.match(r"[A-Z]+", word)
+        hit = _row(word) or (_row(letters.group(0)) if letters else None)
+        if hit is not None:
+            break
     return hit
-
 
 # ---------------------------------------------------------------------------
 # Cost estimate result
@@ -241,7 +249,8 @@ class CostEstimate:
     #: slicer's own ``filament used`` totals, the primary source when the
     #: file carries them), ``gcode_moves`` (Kiln's count of the extruding
     #: moves — the only source for a file with no slicer totals), ``3mf``
-    #: (the archive's slice metadata) or ``mesh`` (estimated from geometry).
+    #: (the archive's slice metadata), ``mesh`` (estimated from geometry) or
+    #: ``length`` (a length the caller gave, :meth:`CostEstimator.estimate_from_length`).
     filament_source: str = "gcode_moves"
     #: A print file's filaments, one entry per filament it uses, in tool
     #: order: ``tool`` (``0`` is ``T0``), the ``material`` it is priced and
@@ -270,19 +279,34 @@ def _parse_time_from_comments(lines: list[str]) -> int | None:
     return printed.seconds if printed is not None else None
 
 
+def _refuse_oversized(file_path: str) -> None:
+    """Refuse a G-code file larger than Kiln scans (:data:`kiln.gcode._MAX_SCAN_BYTES`).
+
+    :raises ValueError: naming the size and the limit.
+    """
+    from kiln.gcode import _MAX_SCAN_BYTES
+
+    size = os.path.getsize(file_path)
+    if size > _MAX_SCAN_BYTES:
+        raise ValueError(
+            f"{os.path.basename(file_path)} is {size / 1024 / 1024:.0f} MB, more than the "
+            f"{_MAX_SCAN_BYTES // (1024 * 1024)} MB Kiln reads of a G-code file"
+        )
+
+
 def _sliced_3mf_gcode_lines(file_path: str) -> list[str]:
     """The lines of the G-code a sliced 3MF prints
     (:func:`kiln.gcode_metadata.sliced_gcode_member`).
 
     :raises ValueError: when the archive holds no G-code (a model, not a
-        print file), is not a readable archive, or unpacks to more than a
-        G-code file Kiln scans (:data:`kiln.gcode._MAX_SCAN_BYTES`), which
-        is refused before anything is unpacked.
+        print file), is not a readable archive, or its G-code cannot be
+        unpacked within what Kiln reads of a G-code file
+        (:func:`kiln.gcode_metadata.read_member_text`).
     """
     import zipfile
 
     from kiln.gcode import _MAX_SCAN_BYTES
-    from kiln.gcode_metadata import sliced_gcode_member
+    from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 
     name = os.path.basename(file_path)
     try:
@@ -293,13 +317,7 @@ def _sliced_3mf_gcode_lines(file_path: str) -> list[str]:
                     f"{name} holds a model, not sliced G-code, so it has no print cost to read yet; "
                     "slice it first (slice_and_estimate slices and estimates in one step)"
                 )
-            info = zf.getinfo(member)
-            if info.file_size > _MAX_SCAN_BYTES:
-                raise ValueError(
-                    f"{name}'s G-code unpacks to {info.file_size / 1024 / 1024:.0f} MB, "
-                    f"more than the {_MAX_SCAN_BYTES // (1024 * 1024)} MB Kiln reads"
-                )
-            text = zf.read(member).decode("utf-8", errors="replace")
+            text = read_member_text(zf, member, _MAX_SCAN_BYTES)
     except zipfile.BadZipFile as exc:
         raise ValueError(f"{name} is not a readable 3MF archive: {exc}") from exc
     return text.splitlines(keepends=True)
@@ -342,12 +360,16 @@ def _grams_from_length(length_mm: float, profile: MaterialProfile) -> float:
     return length_mm * math.pi * radius_mm * radius_mm * profile.density_g_per_cm3 / 1000.0
 
 
-def _filament_numbers(tools: list[int]) -> str:
+def _and_list(items: Sequence[str]) -> str:
+    """``A``, ``A and B``, ``A, B and C``."""
+    items = list(items)
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def _filament_numbers(tools: Sequence[int]) -> str:
     """``filament 2`` / ``filaments 1 and 3``: tools as a person counts them."""
-    numbers = [str(tool + 1) for tool in tools]
-    if len(numbers) == 1:
-        return f"filament {numbers[0]}"
-    return f"filaments {', '.join(numbers[:-1])} and {numbers[-1]}"
+    word = "filament" if len(tools) == 1 else "filaments"
+    return f"{word} {_and_list([str(tool + 1) for tool in tools])}"
 
 
 def _price_filaments(
@@ -364,8 +386,9 @@ def _price_filaments(
 
     *lengths_mm* and *grams* are indexed by tool, *file_types* by filament
     slot (the same index).  A filament is priced as the material *named*
-    when the caller named one, else as the type the file was sliced for,
-    else as PLA -- and a warning says which filaments were guessed.
+    when the caller named one the table has, else as the type the file was
+    sliced for, else as PLA -- and a warning says which filaments were
+    guessed and why.
 
     Weight is converted only between materials: grams weighed as one
     material (the slicer's own figure, or Kiln's weighing of the length at
@@ -375,17 +398,12 @@ def _price_filaments(
     """
     warnings: list[str] = []
     default = lookup(DEFAULT_MATERIAL) or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
-    named_row: MaterialProfile | None = None
-    if named:
-        named_row = lookup(named)
-        if named_row is None:
-            warnings.append(f"Unknown material '{named}', using PLA defaults")
-            named_row = default
+    named_row = lookup(named) if named else None
 
     entries: list[dict[str, Any]] = []
-    sliced_as_other: list[str] = []
+    renamed: dict[str, list[int]] = {}  # the file's word -> tools priced as the named row instead
     untyped: list[int] = []
-    unknown: list[str] = []
+    unknown: dict[str, list[int]] = {}
     weight_total = 0.0
     cost_total = 0.0
     for tool, length in enumerate(lengths_mm):
@@ -396,16 +414,16 @@ def _price_filaments(
         file_row = lookup(word)
         if named_row is not None:
             row, source = named_row, "named"
-            if file_row is not None and file_row.name != row.name and word not in sliced_as_other:
-                sliced_as_other.append(word)
+            if file_row is not None and file_row.name != row.name:
+                renamed.setdefault(str(word), []).append(tool)
         elif file_row is not None:
             row, source = file_row, "file"
         else:
             row, source = default, "default"
             if word is None:
                 untyped.append(tool)
-            elif word not in unknown:
-                unknown.append(word)
+            else:
+                unknown.setdefault(word, []).append(tool)
 
         if g <= 0:
             g = _grams_from_length(length, row)
@@ -432,10 +450,23 @@ def _price_filaments(
             }
         )
 
-    if sliced_as_other and named_row is not None:
+    if named and named_row is None:
+        from_file = any(entry["material_source"] == "file" for entry in entries)
         warnings.append(
-            f"The file was sliced for {', '.join(sliced_as_other)}, but {named_row.name} "
-            f"was named, so it is priced and weighed as {named_row.name}"
+            f"Unknown material '{named}': Kiln's material table has no row for it, so "
+            + (
+                "each filament is priced as what the file was sliced for"
+                if from_file
+                else f"it is priced as {default.name}"
+            )
+        )
+    if renamed and named_row is not None:
+        tools = sorted(t for ts in renamed.values() for t in ts)
+        whole = len(tools) == len(entries)
+        subject = "The file was" if whole else f"{_filament_numbers(tools).capitalize()} {'was' if len(tools) == 1 else 'were'}"
+        warnings.append(
+            f"{subject} sliced for {_and_list(list(renamed))}, but {named_row.name} was named, "
+            f"so {'it is' if whole or len(tools) == 1 else 'they are'} priced and weighed as {named_row.name}"
         )
     if untyped:
         if len(untyped) == len(entries):
@@ -448,21 +479,24 @@ def _price_filaments(
             f"The file does not say {what} priced as {default.name}; "
             "name the material to price it as another"
         )
-    for word in unknown:
+    for word, tools in unknown.items():
+        which = "that filament is" if len(tools) == 1 else "those filaments are"
         warnings.append(
             f"The file was sliced for {word}, which Kiln's material table does not have, "
-            f"so that filament is priced as {default.name}; name the material to price it as another"
+            f"so {which} priced as {default.name}; name the material to price it as another"
         )
 
     if entries:
         names = list(dict.fromkeys(entry["material"] for entry in entries))
         sources = {entry["material_source"] for entry in entries}
-        source = "named" if named_row is not None else ("default" if "default" in sources else "file")
+        if named_row is not None:
+            source = "named"
+        else:
+            source = "default" if "default" in sources else "file"
         material = " + ".join(names)
     else:
         # Nothing extruded: the material is still what it would have been.
-        first = next((t for t in file_types if t), None)
-        first_row = lookup(first)
+        first_row = lookup(next((t for t in file_types if t), None))
         if named_row is not None:
             material, source = named_row.name, "named"
         elif first_row is not None:
@@ -479,7 +513,6 @@ def _price_filaments(
         filament_source=filament_source,
         warnings=warnings,
     )
-
 
 # ---------------------------------------------------------------------------
 # Core estimator
@@ -540,6 +573,7 @@ class CostEstimator:
                 return result
             lines = _sliced_3mf_gcode_lines(file_path)
         else:
+            _refuse_oversized(file_path)
             with open(file_path, errors="replace") as f:
                 lines = f.readlines()
 
@@ -888,6 +922,7 @@ class CostEstimator:
                     return found[0]
                 body = "".join(_sliced_3mf_gcode_lines(file_path))
             else:
+                _refuse_oversized(file_path)
                 with open(file_path, errors="replace") as fh:
                     body = fh.read()
         except (OSError, ValueError):
@@ -895,6 +930,55 @@ class CostEstimator:
         comments = "\n".join(line for line in body.splitlines() if line.lstrip().startswith(";"))
         pricing = self._gcode_filaments(body, comments, material)
         return pricing if pricing.length_mm > 0 else None
+
+    def estimate_from_length(
+        self,
+        length_mm: float,
+        material: str = DEFAULT_MATERIAL,
+        *,
+        estimated_time_seconds: int | None = None,
+        electricity_rate: float = 0.12,
+        printer_wattage: float = 200.0,
+        file_name: str = "<length>",
+    ) -> CostEstimate:
+        """Price a filament length the caller already knows -- one part's
+        share of a plate, say -- weighed and priced the way a file's
+        filaments are, with nothing written as G-code to get there.
+
+        :param length_mm: Filament length in mm.
+        :param material: What it is printed in, looked up through
+            :meth:`get_material`; PLA, with a warning, when the table has
+            no row for it.
+        :param estimated_time_seconds: Print time for the electricity cost.
+        """
+        pricing = _price_filaments(
+            self.get_material,
+            lengths_mm=[max(float(length_mm), 0.0)],
+            grams=[0.0],
+            file_types=(),
+            named=material,
+            slicer_weighed=False,
+            filament_source="length",
+        )
+        electricity_cost = 0.0
+        if estimated_time_seconds and estimated_time_seconds > 0:
+            electricity_cost = printer_wattage / 1000.0 * estimated_time_seconds / 3600.0 * electricity_rate
+        return CostEstimate(
+            file_name=file_name,
+            material=pricing.material,
+            filament_length_meters=round(pricing.length_mm / 1000.0, 3),
+            filament_weight_grams=round(pricing.weight_g, 2),
+            filament_cost_usd=round(pricing.cost_usd, 4),
+            estimated_time_seconds=estimated_time_seconds,
+            electricity_cost_usd=round(electricity_cost, 4),
+            electricity_rate_kwh=electricity_rate,
+            printer_wattage=printer_wattage,
+            total_cost_usd=round(pricing.cost_usd + electricity_cost, 2),
+            warnings=list(pricing.warnings),
+            filament_source="length",
+            filaments=pricing.filaments,
+            material_source=pricing.material_source,
+        )
 
     def _gcode_filaments(self, body: str, comments: str, material: str | None) -> FilamentPricing:
         """Weigh and price each filament a G-code body uses.
@@ -970,7 +1054,9 @@ class CostEstimator:
                 tool = int(fil.get("id") or "") - 1
             except ValueError:
                 tool = position
-            by_tool[tool if tool >= 0 else position] = (
+            # A tool the printer could select: an id out of that range is
+            # read by its place in the list, never as a list that long.
+            by_tool[tool if 0 <= tool < FIRST_PSEUDO_TOOL else position] = (
                 used_m * 1000.0,
                 used_g,
                 (fil.get("type") or "").strip(),

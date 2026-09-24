@@ -1539,7 +1539,9 @@ def _declared_filaments_in_gcode(
         return (values + [filler] * count)[:count]
 
     colors = _fit(_declared(_GCODE_FILAMENT_COLOUR_RE), "#FFFFFF")
-    types = _fit([t for t in slicer_filament_types(gcode_body) if t], "PLA")
+    # A slot the file leaves blank keeps its place, filled, so the types
+    # after it still line up with their tools.
+    types = _fit([t or "PLA" for t in slicer_filament_types(gcode_body)], "PLA")
     return count, colors, types
 
 

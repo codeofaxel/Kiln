@@ -135,6 +135,43 @@ def sliced_gcode_member(zf: zipfile.ZipFile) -> str | None:
     return (plates or names or [None])[0]
 
 
+#: How a member may be compressed for Kiln to unpack it.  Stored and
+#: deflated members unpack in bounded chunks; bzip2 and LZMA members unpack
+#: whole inside one call, so a few hundred crafted bytes could fill memory
+#: before any size check saw them.  Slicers write deflate.
+_CHUNKED_COMPRESSION = frozenset({zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED})
+_MEMBER_CHUNK_BYTES = 1024 * 1024
+
+
+def unpacks_in_chunks(info: zipfile.ZipInfo) -> bool:
+    """Whether a member's compression lets Kiln unpack it in bounded chunks."""
+    return info.compress_type in _CHUNKED_COMPRESSION
+
+
+def read_member_text(zf: zipfile.ZipFile, name: str, limit: int) -> str:
+    """The text of archive member *name*, unpacked a chunk at a time.
+
+    :raises ValueError: when the member is compressed in a way that cannot
+        be unpacked in chunks, or unpacks to more than *limit* bytes --
+        counted as it unpacks, never trusting the size the archive declares.
+    """
+    info = zf.getinfo(name)
+    if not unpacks_in_chunks(info):
+        raise ValueError(f"{name} is compressed in a way Kiln does not unpack (method {info.compress_type})")
+    too_big = ValueError(f"{name} unpacks to more than the {limit // (1024 * 1024)} MB Kiln reads")
+    if info.file_size > limit:
+        raise too_big
+    chunks: list[bytes] = []
+    total = 0
+    with zf.open(info) as fh:
+        while chunk := fh.read(_MEMBER_CHUNK_BYTES):
+            total += len(chunk)
+            if total > limit:
+                raise too_big
+            chunks.append(chunk)
+    return b"".join(chunks).decode("utf-8", errors="replace")
+
+
 def read_head(fh: BinaryIO, size: int) -> list[str]:
     """The top window of an open binary stream of *size* bytes.
 

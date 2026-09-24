@@ -2327,10 +2327,13 @@ def resolve_filament(
     # --- Try brand profile first ---
     brand = get_brand_filament_profile(key)
     if brand is not None:
-        # Get parent material cost as fallback (brand profiles don't store cost)
-        parent_mat = BUILTIN_MATERIALS.get(brand.parent_material.upper())
-        cost = parent_mat.cost_per_kg_usd if parent_mat else 25.0
-        diameter = parent_mat.filament_diameter_mm if parent_mat else 1.75
+        # The parent material's row gives the price and diameter (brand
+        # profiles store neither), through the one lookup, PLA's when the
+        # table has none.
+        parent_mat = resolve_material(brand.parent_material)
+        parent_row = parent_mat or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
+        cost = parent_row.cost_per_kg_usd
+        diameter = parent_row.filament_diameter_mm
 
         # Build printer compatibility warnings
         if printer_id:
@@ -2341,8 +2344,7 @@ def resolve_filament(
             brand_profile_id=brand.profile_id,
             display_name=f"{brand.brand} {brand.product_name}",
             is_brand_specific=True,
-            density_g_per_cm3=brand.density_g_cm3
-            or (parent_mat or BUILTIN_MATERIALS[DEFAULT_MATERIAL]).density_g_per_cm3,
+            density_g_per_cm3=brand.density_g_cm3 or parent_row.density_g_per_cm3,
             cost_per_kg_usd=cost,
             filament_diameter_mm=diameter,
             nozzle_temp_optimal_c=brand.nozzle_temp_optimal_c,

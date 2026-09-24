@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import ast
 import math
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kiln.cost_estimator import BUILTIN_MATERIALS, CostEstimator, resolve_material
+from kiln.cost_estimator import BUILTIN_MATERIALS, CostEstimator, MaterialProfile, resolve_material
 from kiln.gcode import slicer_filament_types, slicer_material_label
 
 _SRC = Path(__file__).resolve().parents[1] / "src" / "kiln"
@@ -136,6 +137,18 @@ class TestTheOneReader:
     def test_a_file_that_names_nothing(self):
         assert slicer_filament_types(_cura_plate()) == ()
 
+    def test_an_empty_line_does_not_hide_the_real_one(self):
+        assert slicer_filament_types("; filament_type = \n; filament_type = PETG\n") == ("PETG",)
+
+    def test_the_key_is_read_in_any_case(self):
+        assert slicer_filament_types("; Filament_Type = abs\n") == ("abs",)
+
+    def test_a_spaced_material_line_is_one_filament(self):
+        assert slicer_filament_types("; MATERIAL: PETG\n") == ("PETG",)
+
+    def test_a_bambu_type_command_is_not_a_setting(self):
+        assert slicer_filament_types("    M1002 set_filament_type:PETG\n") == ()
+
     @pytest.mark.parametrize(
         "types, label",
         [
@@ -187,6 +200,13 @@ class TestEveryDoorAgrees:
         settings = resolve_settings_from_gcode(BambuPrintSettings(), _orca_plate("PETG;PLA;PLA"))
         assert settings.filament_type == "PETG"
 
+    def test_the_bambu_header_keeps_a_blank_slots_place(self):
+        from kiln.printers.bambu_3mf import _declared_filaments_in_gcode
+
+        body = "; filament_type = PLA;;PETG\nT0\nG1 X1 E1\nT2\nG1 X2 E1\n"
+        count, _colors, types = _declared_filaments_in_gcode(body)
+        assert count == 3 and types[2] == "PETG"
+
     def test_the_bambu_wrapper_states_each_types_own_density(self):
         from kiln.printers.bambu_3mf import _build_gcode_header
 
@@ -216,7 +236,7 @@ class TestEachFilamentIsPricedAsItsOwnMaterial:
         assert (est.material, est.material_source) == ("ABS", "named")
         # Weight converts between materials by density: the same filament length.
         assert est.filament_weight_grams == pytest.approx(_grams(1750, "ABS"), abs=0.02)
-        assert any("sliced for PLA, PETG" in w and "ABS was named" in w for w in est.warnings)
+        assert any("sliced for PLA and PETG" in w and "ABS was named" in w for w in est.warnings)
 
     def test_kiln_weighs_the_length_at_each_type_when_the_slicer_wrote_no_grams(self, tmp_path):
         path = _write(tmp_path, "plate.gcode", _orca_plate(grams=False))
@@ -244,6 +264,47 @@ class TestEachFilamentIsPricedAsItsOwnMaterial:
         assert any("WOODFILL" in w for w in est.warnings)
 
 
+class TestANamedMaterial:
+    def test_a_name_the_table_lacks_keeps_the_files_own_types(self, tmp_path):
+        path = _write(tmp_path, "plate.gcode", _orca_plate("PETG;PETG;PETG"))
+        est = CostEstimator().estimate_from_file(path, material="Unobtainium")
+        assert (est.material, est.material_source) == ("PETG", "file")
+        assert any("Unknown material 'Unobtainium'" in w and "what the file was sliced for" in w for w in est.warnings)
+        assert not any("was named" in w for w in est.warnings)
+
+    def test_a_name_the_table_lacks_on_a_file_that_names_nothing_is_pla(self, tmp_path):
+        path = _write(tmp_path, "plate.gcode", _cura_plate())
+        est = CostEstimator().estimate_from_file(path, material="Unobtainium")
+        assert est.material == "PLA"
+        assert any("Unknown material 'Unobtainium'" in w and "priced as PLA" in w for w in est.warnings)
+
+    def test_a_callers_own_row_under_their_own_spelling_wins(self):
+        mine = MaterialProfile(name="PLA_PLUS", density_g_per_cm3=1.24, cost_per_kg_usd=99.0)
+        est = CostEstimator(custom_materials={"PLA_PLUS": mine})
+        assert est.get_material("PLA_PLUS") is mine
+        assert est.estimate_from_length(1000, "PLA_PLUS").filament_cost_usd == pytest.approx(
+            _grams(1000, "PLA") * 99.0 / 1000, abs=1e-4
+        )
+
+    def test_only_the_filaments_that_differ_are_named(self, tmp_path):
+        path = _write(tmp_path, "plate.gcode", _orca_plate("PLA;PETG;PLA"))
+        est = CostEstimator().estimate_from_file(path, material="PLA")
+        assert "Filament 2 was sliced for PETG, but PLA was named, so it is priced and weighed as PLA" in est.warnings
+
+
+class TestAKnownLengthIsPriced:
+    """A caller that already knows a length -- one part's share of a
+    plate -- prices it without writing G-code to do it."""
+
+    def test_the_length_is_weighed_and_priced_as_its_material(self):
+        est = CostEstimator().estimate_from_length(1000, "PETG", estimated_time_seconds=3600)
+        petg = BUILTIN_MATERIALS["PETG"]
+        assert est.filament_weight_grams == pytest.approx(_grams(1000, "PETG"), abs=0.01)
+        assert est.filament_cost_usd == pytest.approx(_grams(1000, "PETG") * petg.cost_per_kg_usd / 1000, abs=1e-4)
+        assert est.electricity_cost_usd > 0
+        assert (est.filament_source, est.material_source) == ("length", "named")
+
+
 class TestOneTableAtEveryDoor:
     """Every estimate weighs and prices a material from the one table,
     through the one lookup, whatever the spelling."""
@@ -259,6 +320,9 @@ class TestOneTableAtEveryDoor:
             ("PLA-CF", "CF-PLA"),
             ("PA-CF", "NYLON"),
             ("abs", "ABS"),
+            ("carbon_fiber_pla", "CF-PLA"),
+            ("Rapid PETG", "PETG"),
+            ("Matte PLA", "PLA"),
         ],
     )
     def test_every_door_lands_on_the_same_row(self, tmp_path, spelling, row):
@@ -279,6 +343,12 @@ class TestOneTableAtEveryDoor:
         assert _get_material_profile(spelling)["cost_per_kg_usd"] == profile.cost_per_kg_usd
         assert resolve_filament(spelling).density_g_per_cm3 == profile.density_g_per_cm3
 
+    @pytest.mark.parametrize("spelling", ["FLEX", "PET", "PET-CF", "PCTG", "WOODFILL"])
+    def test_a_name_the_table_cannot_place_is_not_guessed(self, spelling):
+        # PrusaSlicer's own profiles use FLEX for a 0.89 g/cm3 TPE and PET
+        # for a 1.33 g/cm3 PET: neither is TPU or PETG.
+        assert resolve_material(spelling) is None
+
     def test_the_mesh_estimates_read_the_table(self, tmp_path):
         from kiln.design_reasoning import estimate_weight
         from kiln.generation.validation import estimate_material_cost
@@ -289,6 +359,14 @@ class TestOneTableAtEveryDoor:
         cost = estimate_material_cost(str(stl), material="PETG-HF")
         assert (cost["density_g_cm3"], cost["cost_per_kg_usd"]) == (petg.density_g_per_cm3, petg.cost_per_kg_usd)
         assert estimate_weight(str(stl), material="PETG-HF").density_g_cm3 == petg.density_g_per_cm3
+        assert estimate_material_cost(str(stl), material="PETG-HF")["warnings"] == []
+        assert "Unknown material" in estimate_material_cost(str(stl), material="WOODFILL")["warnings"][0]
+
+    def test_an_overlay_reading_densities_as_a_mapping_gets_the_tables(self):
+        from kiln.material_inventory import _DEFAULT_DENSITIES, _FALLBACK_DENSITY
+
+        assert {name: row.density_g_per_cm3 for name, row in BUILTIN_MATERIALS.items()} == _DEFAULT_DENSITIES
+        assert BUILTIN_MATERIALS["PLA"].density_g_per_cm3 == _FALLBACK_DENSITY
 
     def test_no_door_keeps_its_own_price_or_density_table(self):
         """A density or price written down a second time drifts: the
@@ -298,55 +376,143 @@ class TestOneTableAtEveryDoor:
             "the one table through kiln.cost_estimator.resolve_material instead"
         )
 
-    def test_no_module_restates_plas_density(self):
+    def test_no_module_restates_a_density(self):
         assert _restated_pla_density() == [], (
-            "PLA's density written as a number; read "
-            "BUILTIN_MATERIALS[DEFAULT_MATERIAL].density_g_per_cm3 instead"
+            "A material density written as a number; read it from "
+            "kiln.cost_estimator.resolve_material or BUILTIN_MATERIALS instead"
         )
+
+    def test_no_module_restates_a_price(self):
+        assert _restated_prices() == [], (
+            "A material price written as a number or in text; read it from "
+            "kiln.cost_estimator.resolve_material instead"
+        )
+
+    def test_a_ranking_price_list_is_still_there_to_name(self):
+        assert all((_SRC / rel).is_file() for rel in _RANKING_PRICES)
+
+
+_MATERIALS = {"PLA", "PETG", "ABS", "TPU", "ASA", "NYLON", "PC"}
+#: A name that says a mapping holds a density or a price.
+_TABLE_MARKERS = ("DENS", "COST", "PRICE", "USD", "_KG", "GRAM", "WEIGHT")
+
+
+def _modules():
+    for path in sorted(_SRC.rglob("*.py")):
+        yield str(path.relative_to(_SRC)), ast.parse(path.read_text(encoding="utf-8"))
+
+
+def _material_keys(value: ast.AST) -> set[str]:
+    """The materials a literal mapping is keyed by: a dict, ``dict(pla=...)``
+    or a list of ``(material, value)`` pairs."""
+    keys: list[object] = []
+    if isinstance(value, ast.Dict):
+        keys = [k.value for k in value.keys if isinstance(k, ast.Constant)]
+    elif isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == "dict":
+        keys = [kw.arg for kw in value.keywords if kw.arg]
+    elif isinstance(value, (ast.List, ast.Tuple)):
+        keys = [
+            e.elts[0].value
+            for e in value.elts
+            if isinstance(e, (ast.Tuple, ast.List)) and e.elts and isinstance(e.elts[0], ast.Constant)
+        ]
+    return {str(k).upper() for k in keys if isinstance(k, str)} & _MATERIALS
+
+
+def _named_values(tree: ast.AST):
+    """Every ``(name, value)`` a module binds: assignments, keyword
+    arguments, and parameter defaults."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                yield ast.unparse(target), node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            yield ast.unparse(node.target), node.value
+        elif isinstance(node, ast.keyword) and node.arg:
+            yield node.arg, node.value
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = node.args
+            positional = args.posonlyargs + args.args
+            for arg, default in zip(positional[len(positional) - len(args.defaults):], args.defaults, strict=True):
+                yield arg.arg, default
+            for arg, default in zip(args.kwonlyargs, args.kw_defaults, strict=True):
+                if default is not None:
+                    yield arg.arg, default
 
 
 def _material_tables() -> list[str]:
-    """Dicts keyed by materials whose name or shape says density or price."""
+    """Mappings keyed by materials whose name or shape says density or price."""
     found = []
-    for path in sorted(_SRC.rglob("*.py")):
-        rel = str(path.relative_to(_SRC))
+    for rel, tree in _modules():
         if rel == "cost_estimator.py":
             continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                names = " ".join(ast.unparse(t) for t in targets).upper()
-                table = node.value
-            else:
+        for name, value in _named_values(tree):
+            if len(_material_keys(value)) < 2:
                 continue
-            keys = {
-                k.value.upper() for k in table.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)
-            }
-            if not {"PLA", "PETG"} <= keys:
-                continue
-            nested_keys = {
+            nested = {
                 k.value
-                for v in table.values
+                for v in getattr(value, "values", []) or []
                 if isinstance(v, ast.Dict)
                 for k in v.keys
                 if isinstance(k, ast.Constant)
             }
-            if any(w in names for w in ("DENS", "COST", "PRICE")) or nested_keys & {"density", "cost_per_kg"}:
-                found.append(f"{rel}:{node.lineno}")
+            if any(m in name.upper() for m in _TABLE_MARKERS) or nested & {"density", "cost_per_kg"}:
+                found.append(f"{rel}:{value.lineno}")
     return found
+
+
+def _numbers(value: ast.AST) -> list[ast.Constant]:
+    return [
+        n
+        for n in ast.walk(value)
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)) and not isinstance(n.value, bool)
+    ]
 
 
 def _restated_pla_density() -> list[str]:
+    """PLA's density written as a number anywhere, or any table density
+    bound to a name that says density."""
     pla = BUILTIN_MATERIALS["PLA"].density_g_per_cm3
-    found = []
-    for path in sorted(_SRC.rglob("*.py")):
-        rel = str(path.relative_to(_SRC))
+    densities = {row.density_g_per_cm3 for row in BUILTIN_MATERIALS.values()}
+    found = set()
+    for rel, tree in _modules():
         if rel == "cost_estimator.py":
             continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, float) and node.value in (pla, pla / 1000):
-                found.append(f"{rel}:{node.lineno}")
-    return found
+                found.add(f"{rel}:{node.lineno}")
+        for name, value in _named_values(tree):
+            if "dens" in name.lower():
+                found.update(f"{rel}:{n.lineno}" for n in _numbers(value) if n.value in densities)
+    return sorted(found)
+
+
+#: Price tables that rank materials against each other rather than estimate
+#: a print; their prices are relative.  Listed so the gate names them.
+_RANKING_PRICES = {"material_routing.py"}
+
+
+def _restated_prices() -> list[str]:
+    """A table price bound to a name that says cost or price, or a price
+    per kg written into text ("~$25/kg")."""
+    prices = {row.cost_per_kg_usd for row in BUILTIN_MATERIALS.values()}
+    found = set()
+    for rel, tree in _modules():
+        if rel == "cost_estimator.py" or rel in _RANKING_PRICES:
+            continue
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and re.search(r"\$\s?\d+(?:\.\d+)?\s*/\s*kg", node.value, re.I)
+            ):
+                found.add(f"{rel}:{node.lineno}")
+        for name, value in _named_values(tree):
+            says_price = re.search(r"cost|price", name, re.I)
+            says_ratio = re.search(r"pct|percent|delta|ratio|factor|multiplier", name, re.I)
+            if says_price and not says_ratio:
+                found.update(f"{rel}:{n.lineno}" for n in _numbers(value) if n.value in prices)
+    return sorted(found)
 
 
 def _write_cube_stl(path: Path, size: float = 20.0) -> None:
@@ -397,6 +563,70 @@ class TestPreflightPricesTheFilesOwnFilament:
         assert cost["material"] == "PLA + PETG"
 
 
+    @patch("kiln.server._get_adapter")
+    @patch("kiln.server._get_temp_limits", return_value=(280.0, 120.0))
+    @patch("kiln.server.get_db")
+    @patch("kiln.server._registry")
+    def test_the_advisory_says_what_it_guessed(self, registry, get_db, _limits, adapter, tmp_path):
+        adapter.return_value.get_state.return_value = _state()
+        registry.count = 1
+        registry.list_names.return_value = ["default"]
+        get_db.return_value.get_printer_learning_insights.return_value = {"total_outcomes": 0}
+
+        from kiln.server import preflight_check
+
+        cost = preflight_check(file_path=_write(tmp_path, "plate.gcode", _cura_plate()))["estimated_cost"]
+        assert cost["material_source"] == "default"
+        assert any("does not say what filament" in w for w in cost["warnings"])
+
+    @patch("kiln.server._get_adapter")
+    @patch("kiln.server._get_temp_limits", return_value=(280.0, 120.0))
+    @patch("kiln.server.get_db")
+    @patch("kiln.server._registry")
+    def test_a_file_that_failed_validation_is_not_read(self, registry, get_db, _limits, adapter, tmp_path):
+        adapter.return_value.get_state.return_value = _state()
+        registry.count = 1
+        registry.list_names.return_value = ["default"]
+        get_db.return_value.get_printer_learning_insights.return_value = {"total_outcomes": 0}
+
+        from kiln.server import preflight_check
+
+        path = _write(tmp_path, "plate.gcode", _orca_plate())
+        with (
+            patch("kiln.server._validate_local_file", return_value={"valid": False, "errors": ["too large"]}),
+            patch.object(CostEstimator, "filament_pricing") as read,
+        ):
+            preflight_check(file_path=path)
+        read.assert_not_called()
+
+
+class TestTheWrapDoorReadsTheFile:
+    def test_omitted_settings_are_the_files_own(self, tmp_path):
+        """The door's own docs promise it: omitted, the type the slicer wrote
+        and the temperatures the G-code heats to."""
+        import zipfile
+
+        from kiln.printers.bambu import BambuAdapter
+
+        gcode = _write(
+            tmp_path,
+            "petg.gcode",
+            "; filament_type = PETG\nM109 S245\nM190 S80\n;LAYER_CHANGE\n;Z:0.2\n"
+            "G1 X10 Y5 Z0.2 F3000\nG1 X30 Y5 E1.5 F1200\n",
+        )
+        with patch("kiln.server._check_auth", return_value=None), \
+                patch("kiln.server._check_rate_limit", return_value=None), \
+                patch("kiln.server._get_adapter", return_value=BambuAdapter("192.0.2.1", "code", "serial")):
+            from kiln.server import wrap_gcode_as_3mf
+
+            result = wrap_gcode_as_3mf(gcode_path=gcode)
+        assert result.get("success") is True, result
+        assert result["filament_type"] == "PETG"
+        with zipfile.ZipFile(result["output_path"]) as zf:
+            plate = zf.read("Metadata/plate_1.gcode").decode()
+        assert "; temperature = 245" in plate and "; bed_temperature = 80" in plate
+
+
 # ---------------------------------------------------------------------------
 # The gate: nothing but kiln.gcode reads the slicer's per-filament settings
 # ---------------------------------------------------------------------------
@@ -417,56 +647,76 @@ _NOT_YET_MOVED = {
     ("slicer_geometry.py", "filament_colo"),
 }
 
+#: Strings that WRITE a setting or a printer command, or name a database
+#: column -- reviewed, exact, each with why.  A new string that mentions a
+#: setting is a new reader until it is shown to be one of these.
+_NOT_READERS = {
+    ("printers/bambu_3mf.py", "\n; filament_density: "): "the wrapper's header, written for the printer",
+    ("printers/bambu_3mf.py", "\n; filament_diameter: 1.75\n; max_z_height: "): "the wrapper's header",
+    ("printers/bambu_3mf.py", "\n; HEADER_BLOCK_END\n\n; CONFIG_BLOCK_START\n; filament_type = "): "the wrapper's header",
+    ("printers/bambu_3mf.py", "set_filament_type:PLA"): "rewrites the start G-code's own command",
+    ("printers/bambu_3mf.py", "set_filament_type:"): "rewrites the start G-code's own command",
+    ("printers/bambu_3mf.py", "    M1002 set_filament_type:UNKNOWN"): "a command Kiln writes at a filament change",
+    ("printers/bambu_3mf.py", "    M1002 set_filament_type:"): "a command Kiln writes at a filament change",
+    ("slicer.py", "; filament_type = "): "a merged file's header, written",
+    ("design_cache.py", "filament_type = ? COLLATE NOCASE"): "a database column",
+}
 
-_REGEX_CALLS = {"compile", "match", "search", "fullmatch", "findall", "finditer", "sub", "subn", "split"}
+
+def _docstring_nodes(tree: ast.AST) -> set[int]:
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                out.add(id(first.value))
+    return out
 
 
-def _pattern_text(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    if isinstance(node, ast.JoinedStr):
-        return "".join(v.value for v in node.values if isinstance(v, ast.Constant) and isinstance(v.value, str))
-    return None
-
-
-def _setting_readers() -> set[tuple[str, str]]:
-    """Every regex, outside kiln.gcode, that reads a per-filament setting
-    line or a material comment: the pattern handed to an ``re`` call."""
-    found: set[tuple[str, str]] = set()
-    for path in sorted(_SRC.rglob("*.py")):
-        rel = str(path.relative_to(_SRC))
+def _setting_strings() -> dict[tuple[str, str], str]:
+    """Every string outside kiln.gcode, docstrings aside, that mentions a
+    per-filament setting beside a line's punctuation, or a material comment
+    pattern: ``(module, setting) -> the string``.  Shapes do not matter --
+    a pattern held in a variable, a ``startswith`` prefix, a regex -- the
+    string is what gives a reader away."""
+    found: dict[tuple[str, str], str] = {}
+    for rel, tree in _modules():
         if rel == "gcode.py":
             continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if not (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr in _REGEX_CALLS
-                and node.args
-            ):
+        docs = _docstring_nodes(tree)
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)) or id(node) in docs:
                 continue
-            text = _pattern_text(node.args[0])
-            if text is None:
-                continue
+            text = node.value
             low = text.lower()
+            if text.strip().lower() in _SETTING_WORDS or text.lstrip().upper().startswith("CREATE TABLE"):
+                continue  # a bare key, or a table's own schema
             for word in _SETTING_WORDS:
-                if word in low:
-                    found.add((rel, word))
-            if "material" in low and (";" in text or "[:=]" in text):
-                found.add((rel, "material"))
+                if word in low and re.search(r"[;=:\\\[^$]", text) and (rel, text) not in _NOT_READERS:
+                    found[(rel, word)] = text
+            # A material comment PATTERN: regex syntax beside "material:",
+            # never a sentence that happens to say "material:".
+            regex_syntax = re.search(r"\\[sdw]|^\^|^\s*;|\[:=\]|\(\.[+*]\??\)", text)
+            if re.search(r"material(?:\\s[*+?]?|[^\w])*[:=]", low) and regex_syntax:
+                found[(rel, "material")] = text
     return found
 
 
 class TestTheSettingsBlockHasOneReader:
     def test_no_module_reads_a_files_material_its_own_way(self):
-        readers = _setting_readers()
-        rogue = sorted(r for r in readers if r not in _NOT_YET_MOVED)
-        assert rogue == [], (
+        rogue = {k: v for k, v in _setting_strings().items() if k not in _NOT_YET_MOVED}
+        assert rogue == {}, (
             "These read a slicer's per-filament settings (or a material comment) "
-            "with their own pattern; call kiln.gcode.slicer_filament_types / "
-            f"slicer_material_label instead: {rogue}"
+            "their own way; call kiln.gcode.slicer_filament_types / slicer_material_label, "
+            f"or list a string that only writes one in _NOT_READERS with why: {rogue}"
         )
 
     def test_the_not_yet_moved_list_only_shrinks(self):
-        gone = sorted(_NOT_YET_MOVED - _setting_readers())
+        gone = sorted(_NOT_YET_MOVED - set(_setting_strings()))
         assert gone == [], f"Moved to the one reader: take these off _NOT_YET_MOVED: {gone}"
+
+    def test_every_listed_writer_is_still_there(self):
+        texts = set()
+        for rel, tree in _modules():
+            texts.update((rel, n.value) for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str))
+        assert set(_NOT_READERS) <= texts, sorted(set(_NOT_READERS) - texts)
