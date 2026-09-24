@@ -895,7 +895,7 @@ class _UtilityToolsPlugin:
                     "tools": {
                         "restart_server": (
                             "restart_server() — hot-restart the MCP server "
-                            "in-place; the client auto-reconnects in ~1s. Use "
+                            "in place; the connection carries over. Use "
                             "after code, plugin, or env/config changes."
                         ),
                         "kiln_health": (

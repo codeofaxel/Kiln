@@ -73,6 +73,7 @@ __all__ = [
     "FunctionResource",
     "Image",
     "MCP_SDK_MAJOR",
+    "RESTART_HANDSHAKE_ENV",
     "RESTART_MARKER_ENV",
     "ToolError",
     "ask_user_to_confirm",
@@ -82,6 +83,7 @@ __all__ = [
     "host_can_ask_the_user",
     "install_uninitialized_request_guard",
     "lowlevel_server",
+    "restart_keeps_connection",
     "set_instructions",
     "stamp_restart",
     "set_tool_input_schema",
@@ -635,47 +637,93 @@ def wrap_list_tools_result(mcp: Any, mutate: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# A request on a connection that was never initialized
+# A restart that keeps the connection
 # ---------------------------------------------------------------------------
 #
-# ``restart_server`` re-execs over the running process with ``os.execve``,
-# which KEEPS the stdio pipe: the host never sees a disconnect, never repeats
-# the ``initialize`` handshake, and its next ``tools/call`` lands on a fresh
-# process that has not been initialized.  Both SDK majors answer that with
-# the JSON-RPC boilerplate "Invalid request parameters" — 1.x folds the
-# RuntimeError its session raises into that text, 2.x pins the same text as
-# a compat shape — so the agent reads a parameter it passed as the culprit,
-# drops it, and the retry, which lands after the host has torn the
-# connection down and re-initialized on its own, "works".  Measured
-# 2026-09-23, twice: the server log says "Received request before
-# initialization was complete" 11 s and 18 s after each restart, the two
-# parameters blamed (``printer_status(detail=...)``, ``slice_model(...,
-# printer_name=...)``) had not changed in any commit between the restarts,
-# and the host re-listed tools 10 s and 24 s later.
+# ``restart_server`` re-execs over the running process, and ``os.execve``
+# keeps the stdio pipe: the host sees no disconnect and never repeats the
+# ``initialize`` handshake, so its next request lands on a fresh process
+# that has not been initialized.  Both SDK majors refuse that with the
+# JSON-RPC boilerplate "Invalid request parameters", which reads as a bad
+# argument.  Measured 2026-09-23, twice: the agent blamed a parameter it had
+# passed (``printer_status(detail=...)``, then ``slice_model(...,
+# printer_name=...)``), neither of which had changed in any commit between
+# the restarts, and dropped it.  The refused state never clears on its own:
+# the same call retried on the same connection is refused again
+# (reproduced against a real ``kiln serve`` and ``restart_server``).
 #
-# The guard keeps the refusal — nothing runs before initialization — and
-# replaces the boilerplate with a sentence that names the restart when this
-# process knows it was restarted, says the parameters were not the problem,
-# and says what to do.  One place for both majors, like everything else in
-# this module; the server installs it once at startup.
+# The handshake belongs to the pipe, not to the process: the host made it,
+# once, with this connection.  So the process that owns the pipe records it
+# (the client's ``initialize`` params and the negotiated version),
+# ``restart_server`` hands it to the process it execs, and that process
+# takes it up on the first request — as if it had answered ``initialize``
+# itself, capabilities included, so a host that can put a consent dialog in
+# front of the person still can.  A request that arrives before any
+# handshake and with none handed down is still refused, in words that name
+# the restart when there was one.  One place for both majors, like
+# everything else in this module; the server installs it once at startup.
 
 #: Set in the environment ``restart_server`` hands its child (an ISO time),
 #: so the fresh process can name the restart in what it says.
 RESTART_MARKER_ENV = "KILN_RESTARTED_AT"
+
+#: Set beside it: the handshake this connection made, as JSON —
+#: ``{"params": <initialize params, wire form>, "protocol_version": ...}``.
+RESTART_HANDSHAKE_ENV = "KILN_RESTART_HANDSHAKE"
 
 #: The SDK's own words for the refusal, on both majors.
 _SDK_UNINITIALIZED_TEXT = "Invalid request parameters"
 
 _GUARDED = "_kiln_guards_uninitialized_requests"
 
+#: This process's connection handshake, once ``initialize`` completed or a
+#: handed-down one was taken up.  What ``restart_server`` passes on.
+_handshake: dict[str, Any] | None = None
+
+#: A handshake handed down by ``restart_server`` that no request has taken
+#: up yet.  Consumed by the first request, whatever it is.
+_inherited: dict[str, Any] | None = None
+
 
 def stamp_restart(env: dict[str, str]) -> dict[str, str]:
     """Mark *env* — the environment a restart hands its child — with the
-    moment of the restart, and return it."""
+    moment of the restart and, when this connection has one, its handshake.
+    Returns *env*."""
+    import json
     from datetime import datetime
 
     env[RESTART_MARKER_ENV] = datetime.now().astimezone().isoformat(timespec="seconds")
+    if _handshake is not None:
+        env[RESTART_HANDSHAKE_ENV] = json.dumps(_handshake)
+    else:
+        env.pop(RESTART_HANDSHAKE_ENV, None)
     return env
+
+
+def restart_keeps_connection() -> bool:
+    """Whether a restart now would hand this connection's handshake on."""
+    return _handshake is not None
+
+
+def _take_inherited_handshake() -> None:
+    """Pick up a handshake ``restart_server`` handed this process, once.
+
+    Popped from the environment, so nothing this process spawns inherits a
+    connection it does not have."""
+    import json
+    import os
+
+    global _inherited
+    raw = os.environ.pop(RESTART_HANDSHAKE_ENV, None)
+    if not raw:
+        return
+    try:
+        record = json.loads(raw)
+    except ValueError:
+        _logger.warning("restart handed down an unreadable MCP handshake; ignoring it")
+        return
+    if isinstance(record, dict) and isinstance(record.get("params"), dict):
+        _inherited = record
 
 
 def _restart_clock() -> str:
@@ -707,28 +755,32 @@ def uninitialized_request_message(method: str | None = None) -> str:
         cause = "this connection to Kiln has not completed the MCP initialize handshake"
     return (
         f"{cause}, so {what} never ran — the parameters you passed were not "
-        "the problem. Retry the same call unchanged in a few seconds, or "
-        "reconnect the Kiln MCP server in the app."
+        "the problem. Retry it unchanged once; if it is refused again, the "
+        "Kiln MCP server needs reconnecting in the app (or a new chat)."
     )
 
 
 def install_uninitialized_request_guard(mcp: Any) -> bool:
-    """Make a pre-initialization refusal say why, on whichever SDK is running.
+    """Keep the connection across ``restart_server``, and explain a refusal
+    when it cannot be kept — on whichever SDK is running.
 
-    1.x: the check lives in ``ServerSession._received_request``, which raises
-    RuntimeError and lets the receive loop write the boilerplate; the guard
-    wraps that method on the class (sessions are built per connection deep
-    inside ``Server.run``, so the class is the one place) and answers the
-    request itself, with the sentence, before the loop can.
+    1.x: the handshake gate lives in ``ServerSession._received_request``,
+    which raises RuntimeError and lets the receive loop write the
+    boilerplate.  The guard wraps that method on the class (sessions are
+    built per connection deep inside ``Server.run``, so the class is the one
+    place): it records the handshake when ``initialize`` completes, takes up
+    a handed-down one before the gate would refuse, and otherwise answers
+    the request itself, with the sentence, before the loop can.
 
-    2.x: the check lives in the per-connection runner, inside the innermost
-    link of ``Server.middleware``; a middleware appended there sees the
-    ``MCPError`` it raises and re-raises it with the sentence.
+    2.x: the gate lives in the per-connection runner, inside the innermost
+    link of ``Server.middleware``; a middleware appended there does the same
+    three things around it.
 
-    Idempotent.  Never raises: a server that cannot explain a refusal still
+    Idempotent.  Never raises: a server that cannot keep a connection still
     serves.  Returns True when the guard is in place.
     """
     try:
+        _take_inherited_handshake()
         if MCP_SDK_MAJOR >= 2:
             return _guard_v2(mcp)
         return _guard_v1()
@@ -737,9 +789,25 @@ def install_uninitialized_request_guard(mcp: Any) -> bool:
         return False
 
 
+def _take_up() -> dict[str, Any] | None:
+    """The handed-down handshake, consumed — or None when there is none."""
+    global _inherited, _handshake
+    record, _inherited = _inherited, None
+    if record is None:
+        return None
+    _handshake = record
+    client = (record.get("params") or {}).get("clientInfo") or {}
+    _logger.info(
+        "Kept the MCP connection across restart_server: took up the handshake "
+        "%s %s made before the restart.",
+        client.get("name", "the client"), client.get("version", ""),
+    )
+    return record
+
+
 def _guard_v1() -> bool:
     from mcp.server import session as _session_mod
-    from mcp.types import INVALID_PARAMS, ErrorData
+    from mcp.types import INVALID_PARAMS, ErrorData, InitializeRequest, InitializeRequestParams
 
     cls = _session_mod.ServerSession
     if getattr(cls, _GUARDED, False):
@@ -748,17 +816,43 @@ def _guard_v1() -> bool:
     initialized = _session_mod.InitializationState.Initialized
 
     async def _guarded(self: Any, responder: Any) -> Any:
+        global _handshake, _inherited
+        request = getattr(responder.request, "root", None)
+        is_initialize = isinstance(request, InitializeRequest)
+        if is_initialize:
+            _inherited = None  # the client is handshaking afresh
+        elif getattr(self, "_initialization_state", initialized) != initialized and _inherited:
+            record = _take_up()
+            if record is not None:
+                self._client_params = InitializeRequestParams.model_validate(record["params"])
+                self._initialization_state = initialized
         try:
-            return await original(self, responder)
+            result = await original(self, responder)
         except RuntimeError:
-            if getattr(self, "_initialization_state", initialized) == initialized:
+            if (
+                getattr(self, "_initialization_state", initialized) == initialized
+                or getattr(responder, "_completed", False)
+            ):
                 raise  # not the handshake gate — the SDK's own business
-            method = getattr(getattr(responder.request, "root", None), "method", None)
+            method = getattr(request, "method", None)
             message = uninitialized_request_message(method)
             _logger.warning("refused %s before initialization: %s", method, message)
             with responder:
                 await responder.respond(ErrorData(code=INVALID_PARAMS, message=message, data=""))
             return None
+        if is_initialize and getattr(self, "_client_params", None) is not None:
+            from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
+            from mcp.types import LATEST_PROTOCOL_VERSION
+
+            params = self._client_params
+            requested = getattr(params, "protocolVersion", None)
+            _handshake = {
+                "params": params.model_dump(mode="json", by_alias=True, exclude_none=True),
+                "protocol_version": (
+                    requested if requested in SUPPORTED_PROTOCOL_VERSIONS else LATEST_PROTOCOL_VERSION
+                ),
+            }
+        return result
 
     cls._received_request = _guarded  # type: ignore[method-assign]
     setattr(cls, _GUARDED, True)
@@ -767,7 +861,7 @@ def _guard_v1() -> bool:
 
 def _guard_v2(mcp: Any) -> bool:
     from mcp.shared.exceptions import MCPError  # type: ignore[import-not-found]
-    from mcp.types import INVALID_PARAMS
+    from mcp.types import INVALID_PARAMS, InitializeRequestParams
 
     middleware = getattr(lowlevel_server(mcp), "middleware", None)
     if not isinstance(middleware, list):
@@ -775,13 +869,40 @@ def _guard_v2(mcp: Any) -> bool:
     if any(getattr(m, _GUARDED, False) for m in middleware):
         return True
 
+    def _adopt(connection: Any, record: dict[str, Any]) -> None:
+        connection.client_params = InitializeRequestParams.model_validate(record["params"], by_name=False)
+        version = record.get("protocol_version")
+        try:
+            from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS  # type: ignore[import-not-found]
+
+            if version in HANDSHAKE_PROTOCOL_VERSIONS:
+                connection.protocol_version = version
+        except ImportError:
+            pass
+        # The client sent ``notifications/initialized`` to the process
+        # before this one; server-initiated requests (a consent dialog) are
+        # allowed from here, as they were there.
+        connection.initialized.set()
+
     class _Guard:
         async def __call__(self, ctx: Any, call_next: Any) -> Any:
+            global _handshake, _inherited
+            method = getattr(ctx, "method", None)
+            connection = getattr(getattr(ctx, "session", None), "_connection", None)
+            if method == "initialize":
+                _inherited = None  # the client is handshaking afresh
+            elif (
+                _inherited
+                and connection is not None
+                and not getattr(connection, "initialize_accepted", True)
+            ):
+                record = _take_up()
+                if record is not None:
+                    _adopt(connection, record)
             try:
-                return await call_next(ctx)
+                result = await call_next(ctx)
             except MCPError as exc:
                 error = getattr(exc, "error", None)
-                connection = getattr(getattr(ctx, "session", None), "_connection", None)
                 if (
                     error is None
                     or error.code != INVALID_PARAMS
@@ -789,10 +910,16 @@ def _guard_v2(mcp: Any) -> bool:
                     or getattr(connection, "initialize_accepted", True)
                 ):
                     raise
-                method = getattr(ctx, "method", None)
                 message = uninitialized_request_message(method)
                 _logger.warning("refused %s before initialization: %s", method, message)
                 raise MCPError(code=INVALID_PARAMS, message=message, data="") from exc
+            if method == "initialize" and isinstance(result, dict):
+                params = InitializeRequestParams.model_validate(dict(ctx.params or {}), by_name=False)
+                _handshake = {
+                    "params": params.model_dump(mode="json", by_alias=True, exclude_none=True),
+                    "protocol_version": result.get("protocolVersion"),
+                }
+            return result
 
     setattr(_Guard, _GUARDED, True)
     middleware.append(_Guard())

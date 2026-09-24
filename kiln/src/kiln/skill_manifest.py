@@ -277,7 +277,7 @@ class SkillManifest:
             "post_processing": "get_post_processing_guide(material) — finishing techniques",
             "server_restart": (
                 "restart_server() — hot-restart the MCP server after code, "
-                "plugin, or config changes; the client auto-reconnects. Never "
+                "plugin, or config changes; the connection carries over. Never "
                 "tell the user to quit and reopen their app for this."
             ),
             "server_health": "kiln_health() — versions, uptime, module availability, safety-gate state",

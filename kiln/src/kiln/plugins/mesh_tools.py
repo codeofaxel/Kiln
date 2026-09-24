@@ -1667,11 +1667,12 @@ class _MeshToolsPlugin:
             yourself, and the sign-off only when neither this panel nor a
             link is possible.
 
-            If the result just above already opened the stage on this same
-            file (``slice_model`` and every other stage door say so in
-            ``shown``), the panel is already up: calling this draws the
-            identical file a second time, and the result's ``shown.repeat``
-            says so.
+            A slice result that opened the stage has already drawn its print,
+            from the mesh the slicer was handed, and the print gate counts
+            that panel's fetch for the print file the slice wrote.  Called on
+            that print file right after, this draws the same slice again,
+            from the model the file carries.  ``shown.repeat`` says when the
+            panel just above already shows what this one draws.
 
             :param file_path: Path to an STL, OBJ, 3MF, STEP, ``.gcode.3mf``
                 or G-code file on this machine.

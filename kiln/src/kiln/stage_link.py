@@ -164,15 +164,21 @@ def _slicer_sidecar(path: Path) -> bytes | None:
         return None
 
 
+def _stage_key(sha: str, printer_id: str | None, slice_tag: str) -> str:
+    """What the stage draws, as one tag: the file's bytes, the bed it stands
+    on, and the slice this machine holds for it.  The link cache files a
+    stage under this, and the inline stage compares results by it, so the
+    two can never disagree about when a drawing changed."""
+    return f"{sha}:{printer_id or ''}:{slice_tag}"
+
+
 def stage_identity(path: Path) -> str:
-    """What the stage would draw for *path*, as a tag: the file's bytes and
-    the slice this machine holds for it.  Two stage results with equal tags
-    draw the same thing — same file, same pose, same EXTRAS — so the second
-    can say so; ``""`` when the file cannot be read, which never matches."""
+    """:func:`_stage_key` for *path* — ``""`` when the file cannot be read,
+    which never equals anything."""
     sha = _sha256_of(path)
     if not sha:
         return ""
-    return f"{sha}|{_slice_identity(path)}"
+    return _stage_key(sha, _stage_printer_id(), _slice_identity(path))
 
 
 def _sha256_of(path: Path) -> str | None:
@@ -343,7 +349,7 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     # config change between calls must not serve a link claiming the old bed.
     # The slice is too: a re-slice between calls must not serve a link
     # still wearing the previous slice's tower.
-    cache_key = f"{sha}:{printer_id or ''}:{slice_tag}"
+    cache_key = _stage_key(sha, printer_id, slice_tag)
     cached = _cache_get(cache_key)
     if cached:
         # Same bytes already staged — the sixteen-pose case, and the

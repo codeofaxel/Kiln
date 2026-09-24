@@ -672,6 +672,13 @@ def serve_safe_mode(diagnosis: Diagnosis, breadcrumb: Path | None) -> bool:
             file=sys.stderr,
             flush=True,
         )
+    # A restart_server that lands here arrives on a pipe the client already
+    # handshook: take that handshake up, so the client's next call reaches
+    # this server's explanation instead of a refusal.
+    with contextlib.suppress(Exception):
+        from kiln.mcp_compat import install_uninitialized_request_guard
+
+        install_uninitialized_request_guard(server)
     try:
         server.run()
         return True

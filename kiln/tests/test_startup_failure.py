@@ -707,6 +707,39 @@ class TestSafeModeAnswersInTheClient:
         assert diagnosis.headline in instructions
         assert "no such column" in instructions
 
+    def test_a_restart_that_lands_here_keeps_the_connection(
+        self, kiln_home, startup_error, monkeypatch
+    ):
+        """``restart_server`` keeps the pipe, so when the fresh process
+        cannot start, this server is what the client's next call reaches —
+        on a connection whose handshake the process before it received."""
+        from kiln import mcp_compat
+        from tests.test_restart_uninitialized_call import _CLIENT, _drive
+
+        monkeypatch.setattr(mcp_compat, "_handshake", None)
+        monkeypatch.setattr(mcp_compat, "_inherited", None)
+        monkeypatch.setenv(
+            mcp_compat.RESTART_HANDSHAKE_ENV,
+            json.dumps({"params": _CLIENT, "protocol_version": "2025-06-18"}),
+        )
+        diagnosis = startup_failure.explain(startup_error)
+        server = startup_failure.build_safe_mode_server(diagnosis, None)
+        monkeypatch.setattr(server, "run", lambda *a, **k: None)
+        monkeypatch.setattr(startup_failure, "build_safe_mode_server", lambda *a: server)
+        guarded: list[object] = []
+        real = mcp_compat.install_uninitialized_request_guard
+        monkeypatch.setattr(
+            mcp_compat, "install_uninitialized_request_guard",
+            lambda m: guarded.append(m) or real(m),
+        )
+
+        assert startup_failure.serve_safe_mode(diagnosis, None) is True
+        assert guarded == [server], "the recovery door must keep the connection too"
+        call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "get_started", "arguments": {}}}
+        (reply,) = _drive(server, [call], 1)
+        assert diagnosis.headline in reply["result"]["content"][0]["text"]
+
     def test_safe_mode_can_be_turned_off(self, monkeypatch):
         """For supervisors that would rather crash-loop than serve a
         server that cannot print."""

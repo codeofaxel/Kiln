@@ -74,6 +74,7 @@ from kiln.mcp_compat import (
     ask_user_to_confirm,
     host_can_ask_the_user,
     install_uninitialized_request_guard,
+    restart_keeps_connection,
     set_instructions,
     stamp_restart,
 )
@@ -979,7 +980,9 @@ def _build_instructions() -> str:
     parts.append(
         "SERVER: Call `restart_server()` to hot-restart the Kiln MCP server "
         "without closing the client app. Use after plugin updates, env var "
-        "changes, or code edits. The client auto-reconnects in ~1 second. "
+        "changes, or code edits. The connection carries over, so the next "
+        "call just works; tools the new code adds appear once the client "
+        "reconnects. "
         "Read the result's `relaunch` field before trusting a restart to "
         "pick up synced code: only \"wrapper\" re-runs launcher logic."
     )
@@ -11547,19 +11550,25 @@ _RESTART_OPEN_SESSIONS_NOTE = (
 )
 
 #: What the restart does to THIS connection.  ``os.execve`` keeps the stdio
-#: pipe, so the host sees no disconnect and repeats no handshake: its next
-#: call lands on a fresh, un-initialized process and is refused.  Measured
-#: 2026-09-23, twice — the refusal read "Invalid request parameters", the
-#: agent blamed a parameter it had passed and dropped it, and the retry
-#: only worked because the host had meanwhile re-initialized on its own
-#: (10 s and 24 s after each restart).  The refusal now names the restart
-#: (``kiln.mcp_compat.install_uninitialized_request_guard``); this sentence
-#: is the same fact, said by the tool that causes it, before it happens.
-_RESTART_SAME_PIPE_NOTE = (
-    "The connection does not drop: the fresh process inherits this pipe "
-    "without a new MCP handshake, so this chat's first Kiln call after the "
-    "restart may be refused with a message naming the restart — retry that "
-    "call unchanged (the parameters are not the problem), or reconnect the "
+#: pipe, so the host sees no disconnect and repeats no handshake.  Until
+#: 2026-09-23 its next call landed on an un-initialized process and was
+#: refused as "Invalid request parameters" (measured twice that day: the
+#: agent blamed a parameter it had passed and dropped it).  The fresh
+#: process now takes up the handshake this connection made
+#: (``kiln.mcp_compat.install_uninitialized_request_guard``), so the calls
+#: keep working; these sentences say which case this restart is.
+_RESTART_KEEPS_CONNECTION_NOTE = (
+    "This chat keeps its connection: the fresh process takes up the MCP "
+    "handshake this app already made, so the next Kiln call works without a "
+    "reconnect (it waits while the new process starts). Tools the new code "
+    "adds or changes reach this app when it reconnects the Kiln MCP server; "
+    "until then it offers the list it had."
+)
+_RESTART_REFUSAL_NOTE = (
+    "This connection's MCP handshake is not on record, so the fresh process "
+    "cannot take it up: this chat's first Kiln call after the restart may be "
+    "refused with a message naming the restart — retry it unchanged once (the "
+    "parameters are not the problem); if it is refused again, reconnect the "
     "Kiln MCP server in the app."
 )
 
@@ -11570,11 +11579,12 @@ def restart_server(clean_env: bool = True) -> dict:
 
     Replaces the current process with a fresh instance using
     ``os.execve``.  The exec keeps the stdio pipe, so the MCP client sees
-    no disconnect and repeats no ``initialize`` handshake: the first call
-    it makes on this connection afterwards is refused, in words that name
-    this restart, until it re-initializes (which the Claude desktop app
-    did on its own within half a minute, measured twice on 2026-09-23) or
-    the person reconnects the server.  The result says so.
+    no disconnect and repeats no ``initialize`` handshake; the fresh
+    process takes up the handshake this connection already made, so the
+    client's next call simply works.  The client keeps the tool list it
+    cached when it connected: tools the new code adds reach it when it
+    reconnects.  The result's ``keeps_connection`` says whether the
+    handshake was handed on.
 
     WHAT A RESTART REFRESHES depends on how this server was launched,
     and the result says which happened.  A launcher script that
@@ -11608,9 +11618,11 @@ def restart_server(clean_env: bool = True) -> dict:
     """
     import threading
 
-    # Stamped with the restart's moment so the fresh process can name this
-    # restart when it refuses the first un-handshaken call.
+    # Stamped with the restart's moment and this connection's handshake,
+    # so the fresh process can take the handshake up — or, without one,
+    # name this restart when it refuses the first call.
     new_env = stamp_restart(os.environ.copy())
+    keeps_connection = restart_keeps_connection()
     argv, relaunch, relaunch_note = _restart_exec_target(new_env)
     stripped: list[str] = []
     if clean_env:
@@ -11680,7 +11692,7 @@ def restart_server(clean_env: bool = True) -> dict:
             f" Stripped {len(stripped)} stale KILN_PRINTER_* env var(s) so "
             f"~/.kiln/config.yaml wins."
         )
-    msg += f" {_RESTART_SAME_PIPE_NOTE}"
+    msg += f" {_RESTART_KEEPS_CONNECTION_NOTE if keeps_connection else _RESTART_REFUSAL_NOTE}"
     msg += f" {_RESTART_OPEN_SESSIONS_NOTE}"
     return {
         "success": True,
@@ -11692,7 +11704,7 @@ def restart_server(clean_env: bool = True) -> dict:
         "stripped_env_vars": sorted(stripped),
         # Structured twins of the sentences in ``message``: a caller that
         # branches on them should not have to parse prose.
-        "first_call_may_be_refused": True,
+        "keeps_connection": keeps_connection,
         "open_sessions_lose_stage": True,
         "message": msg,
     }
@@ -17419,10 +17431,10 @@ def _start() -> None:
     except Exception:
         logger.debug("inline stage not installed", exc_info=True)
 
-    # A call that arrives before this connection's MCP handshake — the
-    # first one after restart_server, whose exec keeps the pipe — is
-    # refused either way; this makes the refusal say so instead of the
-    # SDK's "Invalid request parameters", which reads as a bad argument.
+    # restart_server's exec keeps the pipe but not the MCP handshake: this
+    # records the handshake, lets the fresh process take it up, and, when
+    # there is none to take, makes the refusal name the restart instead of
+    # the SDK's "Invalid request parameters", which reads as a bad argument.
     try:
         install_uninitialized_request_guard(mcp)
     except Exception:

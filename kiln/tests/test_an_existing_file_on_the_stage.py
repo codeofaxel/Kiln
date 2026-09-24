@@ -147,11 +147,11 @@ def _door(mcp: object):
     return mcp._tool_manager._tools["show_on_stage"]  # type: ignore[attr-defined]
 
 
-def _through_the_hook(mcp: object, host: _Host, body: dict) -> dict:
+def _through_the_hook(mcp: object, host: _Host, body: dict, name: str = "show_on_stage") -> dict:
     """Hand *body* — the door's own return value — to the real lowlevel
-    result hook, as ``tools/call`` for ``show_on_stage``, and return what
-    the host receives: the structured content the hook wrote, or the body
-    untouched when it wrote none (a refusal).  Same two-major shape as
+    result hook, as ``tools/call`` for *name*, and return what the host
+    receives: the structured content the hook wrote, or the body untouched
+    when it wrote none (a refusal).  Same two-major shape as
     ``test_local_stage``."""
     import anyio
     from mcp.types import CallToolRequestParams
@@ -160,7 +160,7 @@ def _through_the_hook(mcp: object, host: _Host, body: dict) -> dict:
 
     result = _Result(body)
     server = lowlevel_server(mcp)
-    params = CallToolRequestParams(name="show_on_stage", arguments={})
+    params = CallToolRequestParams(name=name, arguments={})
     if MCP_SDK_MAJOR >= 2:
         entry = server.get_request_handler("tools/call")
 
@@ -461,26 +461,90 @@ class TestAPlaceholderIsWhatTheModelHolds:
         assert out["dimensions"]["x_mm"] == pytest.approx(20.0, abs=0.01)
 
 
-class TestTheSameFileTwice:
-    """The host opens a panel for every call to a stamped door, so a second
-    call on the very same file draws a second, identical panel — measured
-    2026-09-23, ``slice_model`` then ``show_on_stage`` on one ``.gcode.3mf``.
-    The server cannot keep that panel from opening; it can say, in the
-    result, that the one above already shows this.  Only an exact repeat is
-    called one."""
+def _sliced_design_and_print(tmp_path: Path) -> tuple[str, str, str]:
+    """A painted-3MF design, the G-code sliced from it and the Bambu print
+    file wrapped around that G-code, recorded in the slice ledger the way
+    the slicer and the wrapper record them — the 2026-09-23 jar's shape."""
+    from kiln.printers.bambu_3mf import build_bambu_3mf
 
-    def test_the_second_result_says_the_stage_already_shows_it(self, tmp_path):
-        archive = _sliced_archive(tmp_path)
-        first = _show(archive)
+    design = _ball(tmp_path / "jar.3mf")
+    gcode = tmp_path / "jar.gcode"
+    gcode.write_text("; HEADER_BLOCK_START\n; HEADER_BLOCK_END\n" + _LAYERS)
+    monitor_twin.note_sliced(design, str(gcode))
+    archive = str(tmp_path / "jar.gcode.3mf")
+    build_bambu_3mf(_LAYERS, archive, source_3mf_path=design)
+    monitor_twin.note_wrapped(str(gcode), archive)
+    return design, str(gcode), archive
+
+
+def _slice_result(design: str, gcode: str, archive: str) -> dict:
+    """What the host received from ``slice_model`` on 2026-09-23, keys and
+    shape: the print file it wrote, and the mesh it was handed named as
+    the stage's file."""
+    mcp = _served_with_the_slice_door()
+    body = {
+        "success": True,
+        "output_path": archive,
+        "output_3mf_path": archive,
+        "raw_gcode_path": gcode,
+        "stage_mesh_path": design,
+        "message": f"Sliced {Path(design).name} -> {Path(gcode).name}",
+    }
+    return _through_the_hook(mcp, _Host(_Caps(extensions={_UI: {}})), body, name="slice_model")
+
+
+def _served_with_the_slice_door() -> object:
+    """``_served`` plus the real ``slice_model``, stamped the way ``kiln
+    serve`` stamps it."""
+    from kiln.mcp_compat import FastMCP
+    from kiln.plugins.mesh_tools import plugin
+    from kiln.plugins.slicer_tools import plugin as slicer_plugin
+
+    mcp = FastMCP("test")
+    plugin.register(mcp)
+    slicer_plugin.register(mcp)
+    _cache_the_stage()
+    local_stage.install(mcp)
+    return mcp
+
+
+class TestTheStageAboveAlreadyShowsIt:
+    """The host opens a panel for every call to a stamped door, so a second
+    call that draws what the panel above already drew opens a second,
+    identical panel the server cannot prevent.  Measured 2026-09-23:
+    ``slice_model`` drew a painted jar from the 3MF it was handed, its panel
+    fetched it, and ``show_on_stage`` on the ``.gcode.3mf`` it wrote drew the
+    same slice again.  The result says so; nothing is suppressed, and only
+    a drawing the panel above actually fetched counts."""
+
+    def test_the_print_file_after_its_slice_panel_is_the_same_slice(self, tmp_path):
+        design, gcode, archive = _sliced_design_and_print(tmp_path)
+        first = _slice_result(design, gcode, archive)
+        _panel_fetches(first)
         second = _show(archive)
-        assert not first["shown"].get("repeat")
-        assert second["shown"]["repeat"] is True
-        assert second["shown"]["reason"].startswith(local_stage.REPEAT_NOTE)
-        assert "nothing new" in second["shown"]["reason"]
+        assert second["shown"]["repeat"] == "same_slice"
+        note = second["shown"]["repeat_note"]
+        assert "jar.3mf, the mesh jar.gcode.3mf was sliced from" in note
+        assert "print gate already has the stage on record for jar.gcode.3mf" in note
+        refusal, _ = preview_evidence.judge(archive, "stage", host_renders=True, panel_proven=True)
+        assert refusal is None, "the note's gate clause must be what the gate says"
+
+    def test_nothing_is_claimed_when_the_panel_above_never_fetched(self, tmp_path):
+        design, gcode, archive = _sliced_design_and_print(tmp_path)
+        _slice_result(design, gcode, archive)
+        second = _show(archive)
+        assert "repeat" not in second["shown"], "a panel that never loaded showed nobody anything"
+
+    def test_the_same_file_twice_is_a_repeat(self, tmp_path):
+        archive = _sliced_archive(tmp_path)
+        _panel_fetches(_show(archive))
+        second = _show(archive)
+        assert second["shown"]["repeat"] == "same_file"
+        assert "already drew ball.gcode.3mf" in second["shown"]["repeat_note"]
 
     def test_a_repeat_is_said_never_suppressed(self, tmp_path):
         archive = _sliced_archive(tmp_path)
-        _show(archive)
+        _panel_fetches(_show(archive))
         second = _show(archive)
         assert second["success"] is True
         assert local_stage.resolve(second["artifact"]["artifact_token"]) == archive, (
@@ -490,30 +554,36 @@ class TestTheSameFileTwice:
     def test_a_different_file_in_between_makes_the_return_no_repeat(self, tmp_path):
         block = _block(tmp_path / "block.stl")
         ball = _ball(tmp_path / "ball.3mf")
-        _show(block)
-        other = _show(ball)
+        _panel_fetches(_show(block))
+        _panel_fetches(_show(ball))
         back = _show(block)
-        assert not other["shown"].get("repeat")
-        assert not back["shown"].get("repeat"), "only the stage result just before counts"
+        assert "repeat" not in back["shown"], "only the stage result just before counts"
 
     def test_changed_bytes_under_the_same_name_are_not_a_repeat(self, tmp_path):
         path = tmp_path / "part.stl"
         _block(path)
-        _show(str(path))
+        _panel_fetches(_show(str(path)))
         data = bytearray(path.read_bytes())
         data[-1] ^= 0xFF  # one byte of the last triangle
         path.write_bytes(bytes(data))
-        again = _show(str(path))
-        assert not again["shown"].get("repeat")
+        assert "repeat" not in _show(str(path))["shown"]
 
-    def test_a_slice_arriving_since_is_not_a_repeat(self, tmp_path, monkeypatch):
+    def test_a_slice_arriving_since_is_not_a_repeat(self, tmp_path):
         mesh = _block(tmp_path / "block.stl")
-        _show(mesh)
+        _panel_fetches(_show(mesh))
         # The same bytes, now with a slice this machine holds for them: the
-        # stage would dress it in skirt and tower — something new.
-        monkeypatch.setattr(
-            "kiln.stage_plate.resolve_sliced_gcode", lambda _p: str(tmp_path / "block.gcode")
-        )
-        (tmp_path / "block.gcode").write_text("G28\n")
-        again = _show(mesh)
-        assert not again["shown"].get("repeat")
+        # stage dresses it in skirt and tower — something new.
+        gcode = tmp_path / "block.gcode"
+        gcode.write_text("; HEADER_BLOCK_START\n; HEADER_BLOCK_END\n" + _LAYERS)
+        monitor_twin.note_sliced(mesh, str(gcode))
+        assert "repeat" not in _show(mesh)["shown"]
+
+    def test_a_print_file_from_a_newer_slice_is_not_the_same_slice(self, tmp_path):
+        design, gcode, archive = _sliced_design_and_print(tmp_path)
+        _panel_fetches(_slice_result(design, gcode, archive))
+        # Re-sliced since: the design's newest slice is no longer the one
+        # this print file carries.
+        newer = tmp_path / "jar_v2.gcode"
+        newer.write_text("; HEADER_BLOCK_START\n; HEADER_BLOCK_END\n" + _LAYERS + "G1 X30\n")
+        monitor_twin.note_sliced(design, str(newer))
+        assert "repeat" not in _show(archive)["shown"]

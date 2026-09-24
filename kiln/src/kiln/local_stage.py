@@ -341,24 +341,24 @@ _now = time.monotonic
 #: leaves on its fetch, or when it crosses the grace and is judged.
 _awaiting_fetch: dict[str, tuple[str, float, float]] = {}
 
-#: What the last stage result drew (:func:`kiln.stage_link.stage_identity`),
-#: so the next one can say when it draws the very same thing.  The HOST
+#: The stage result just before this one: its token, the file it drew and
+#: what it drew (:func:`kiln.stage_link.stage_identity`), so the next result
+#: can say when the panel above already shows the same thing.  The HOST
 #: opens a panel for every call to a stamped tool — the server cannot keep
-#: a second panel from appearing, and a result that carried no token would
-#: open that panel on nothing — so the one decision the server owns is to
-#: say, in the result, that the panel above already shows this.  Measured
-#: 2026-09-23: ``slice_model`` drew a sliced plate and ``show_on_stage`` on
-#: the same ``.gcode.3mf`` drew it again, identically, with nothing saying
-#: so.  Only an exact repeat is called one: a changed file, a new pose or
-#: EXTRAS that arrived since all change the tag.
-_last_staged: str = ""
+#: a second panel from appearing, and a result carrying no token would open
+#: that panel on nothing — so the one decision the server owns is to say
+#: so, in the result.  Measured 2026-09-23: ``slice_model`` drew a sliced
+#: jar from the 3MF it was handed, its panel fetched it, and
+#: ``show_on_stage`` on the ``.gcode.3mf`` it wrote drew the same slice
+#: again from the print file, with nothing saying so.
+_last_shown: tuple[str, str, str] | None = None
 
-#: The sentence a repeat carries, ahead of the door's own reason.
-REPEAT_NOTE = (
-    "Same file as the stage result just before this one — byte for byte, "
-    "with the same slice — so this panel shows nothing new; the stage was "
-    "already showing it, and the call above could have been skipped."
-)
+#: Tokens whose panel has fetched (or whose geometry rode the result): the
+#: person has that drawing on screen.  A repeat is only called one when the
+#: result above was actually drawn — a panel that never loaded left nothing
+#: to repeat.  Bounded; only the most recent result is ever asked about.
+_shown_tokens: dict[str, None] = {}
+_SHOWN_TOKENS_MAX = 64
 
 #: Set once a mint crossed the grace with no fetch on record anywhere.
 #: Sticky until a fetch lands.  Read by the result hook and by
@@ -571,6 +571,16 @@ def _fetch_arrived(token: str) -> None:
         _awaiting_fetch.pop(token, None)
         _fetches_stalled = False
         _panel_proven = True
+    _drawn(token)
+
+
+def _drawn(token: str) -> None:
+    """The geometry for *token* reached a panel: its drawing is on screen."""
+    with _lock:
+        _shown_tokens.pop(token, None)
+        _shown_tokens[token] = None
+        while len(_shown_tokens) > _SHOWN_TOKENS_MAX:
+            _shown_tokens.pop(next(iter(_shown_tokens)))
 
 
 def panel_proven() -> bool:
@@ -1222,24 +1232,87 @@ async def _attach_link_within_budget(sc: dict, mesh: str) -> bool:
     return True
 
 
-def _repeat_of_the_last(mesh: str) -> bool:
-    """Whether *mesh* is exactly what the last stage result drew — and
-    remember it for the next one.  Every stage result passes through here,
-    whichever door it takes, so "the last one" means the last stage result
-    of this server process."""
-    global _last_staged
+def _same_as_the_stage_above(token: str, mesh: str) -> dict[str, str] | None:
+    """How this result's drawing relates to the stage result just before it,
+    when the panel above already put the same thing on screen — else None.
+    Remembers this result for the next one.
+
+    Every stage result passes through here, whichever door it takes, so
+    "just before" means the previous stage result of this server process —
+    which, on the stdio transport Kiln serves, is this session.  Two
+    relations are named, and nothing looser:
+
+    * ``same_file`` — the same bytes, on the same bed, with the same slice
+      (the link cache's own key).
+    * ``same_slice`` — this is a print file the slice ledger joins to the
+      file drawn above, and both resolve to the same G-code: the slice
+      door drew the mesh it was handed, this draws the model the print
+      file carries.
+
+    Neither is claimed unless the panel above fetched: a panel that never
+    loaded left the person nothing to have seen.
+    """
+    global _last_shown
     if not mesh:
-        return False
+        return None
     try:
         from kiln.stage_link import stage_identity
 
         identity = stage_identity(Path(mesh))
-    except Exception:  # noqa: BLE001 — an unreadable file is not a repeat
+    except Exception:  # noqa: BLE001 — an unreadable file relates to nothing
         identity = ""
+    here = os.path.abspath(mesh)
     with _lock:
-        same = bool(identity) and identity == _last_staged
-        _last_staged = identity
-    return same
+        prev = _last_shown
+        _last_shown = (token, here, identity) if identity else None
+        drawn = prev is not None and prev[0] in _shown_tokens
+    if not (identity and drawn and prev):
+        return None
+    _, prev_path, prev_identity = prev
+    if identity == prev_identity:
+        return {"relation": "same_file", "file": Path(prev_path).name}
+    try:
+        from kiln.preview_evidence import design_mesh_for
+        from kiln.stage_plate import resolve_sliced_gcode
+
+        if (
+            design_mesh_for(here) == prev_path
+            and stage_identity(Path(prev_path)) == prev_identity
+            and (gcode := resolve_sliced_gcode(here))
+            and gcode == resolve_sliced_gcode(prev_path)
+        ):
+            return {"relation": "same_slice", "file": Path(prev_path).name}
+    except Exception:  # noqa: BLE001 — a missed relation is only a missed note
+        logger.debug("stage relation not resolved", exc_info=True)
+    return None
+
+
+def _same_as_above_note(same: dict[str, str], mesh: str) -> str:
+    """The sentence a result carries when the panel above already shows it."""
+    name = Path(mesh).name
+    if same["relation"] == "same_file":
+        note = (
+            f"The stage result just before this one already drew {name} — same "
+            "bytes, same bed, same slice — and its panel fetched it, so this panel "
+            "repeats it"
+        )
+    else:
+        note = (
+            f"The stage result just before this one already drew this print's slice "
+            f"from {same['file']}, the mesh {name} was sliced from, and its panel "
+            f"fetched it; this panel draws the same slice from the model {name} carries"
+        )
+    try:
+        from kiln.preview_evidence import DOOR_STAGE, evidence_for
+
+        if evidence_for(mesh).get(DOOR_STAGE):
+            note += (
+                f". The print gate already has the stage on record for {name}, so "
+                "issue_preview_token(door='stage') needs no second showing"
+            )
+    except Exception:  # noqa: BLE001 — the gate clause is extra, never required
+        logger.debug("gate evidence not read for the repeat note", exc_info=True)
+    return note + "."
 
 
 def _shown(
@@ -1389,6 +1462,7 @@ def _install_result_hook(mcp: Any) -> bool:
                     from kiln.preview_evidence import record as _record_evidence
 
                     _record_evidence("stage", mesh, via="inline")
+                    _drawn(token)
                     # A STEP import's analytic truth rides the payload so
                     # the stage labels the model as CAD over its display
                     # tessellation — or says the facts are unavailable,
@@ -1404,7 +1478,7 @@ def _install_result_hook(mcp: Any) -> bool:
                 # the NEXT result can tell whether it did.
                 _expect_fetch(token, mesh)
             proven = _panel_proven
-            repeat = _repeat_of_the_last(mesh)
+            same = _same_as_the_stage_above(token, mesh)
             link_pending = False
             if not opens or stalled or not proven:
                 # The panel is not known to work for this host — none was
@@ -1419,11 +1493,11 @@ def _install_result_hook(mcp: Any) -> bool:
                 linked=bool(sc.get("viewer_url")), link_pending=link_pending,
                 mesh=mesh,
             )
-            if repeat:
-                # Said, never suppressed: the token still rides and the
+            if same:
+                # Said, never suppressed: the token still rides and this
                 # panel still draws — it is the host's panel to open.
-                sc["shown"]["repeat"] = True
-                sc["shown"]["reason"] = f"{REPEAT_NOTE} {sc['shown']['reason']}"
+                sc["shown"]["repeat"] = same["relation"]
+                sc["shown"]["repeat_note"] = _same_as_above_note(same, mesh)
             inner.structuredContent = sc
         except Exception:  # noqa: BLE001
             logger.debug("local stage token not attached", exc_info=True)
@@ -1476,8 +1550,9 @@ def install(mcp: Any) -> dict[str, Any]:
 
 def _reset_for_tests() -> None:
     global _host_read_the_stage, _signal_logged, _fetches_stalled, _panel_proven
-    global _last_staged
-    _last_staged = ""
+    global _last_shown
+    _last_shown = None
+    _shown_tokens.clear()
     _tokens.clear()
     _awaiting_fetch.clear()
     _fetches_stalled = False
