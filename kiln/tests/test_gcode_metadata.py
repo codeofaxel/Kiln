@@ -238,6 +238,13 @@ class TestExtractMetadataCura:
         assert meta.slicer == "Cura_SteamEngine 5.5.0"
         assert meta.printer_model == "Ender-3 V2"
 
+    def test_two_filaments_are_summed(self) -> None:
+        # OrcaSlicer lists one value per extruder; a reader that kept the
+        # first lost the second filament of a two-colour plate.
+        content = "; filament used [mm] = 11040.26, 584.30\n"
+        meta = extract_metadata_from_content(content)
+        assert meta.filament_used_mm == pytest.approx(11624.56)
+
     def test_cura_filament_in_mm(self) -> None:
         content = ";Filament used: 4523.0mm\n"
         meta = extract_metadata_from_content(content)

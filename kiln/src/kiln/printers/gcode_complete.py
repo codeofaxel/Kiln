@@ -168,6 +168,7 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
+from kiln.gcode import axis_word_pattern, filament_values
 from kiln.printers.qoi import qoi_dimensions, qoi_encode_png
 
 logger = logging.getLogger(__name__)
@@ -688,34 +689,30 @@ _USED_MM_RE = re.compile(r"^;\s*filament used \[mm\]\s*=\s*(?P<v>[-\d., ]*)$", r
 _CONFIG_BEGIN_RE = re.compile(r"^;\s*\w*slicer_config = begin\s*$", re.MULTILINE)
 
 
-def _numbers(text: str | None) -> list[float]:
-    if not text:
-        return []
-    out: list[float] = []
-    for piece in re.split(r"[,;]", text):
-        piece = piece.strip()
-        if not piece:
-            continue
-        with contextlib.suppress(ValueError):
-            out.append(float(piece))
-    return out
+def _claimed(pattern: re.Pattern[str], text: str) -> float:
+    match = pattern.search(text)
+    return float(sum(filament_values(match.group("v"))[0])) if match else 0.0
 
 
 def declared_grams(text: str) -> float:
-    """The weight the file claims, in grams — 0.0 when it claims none."""
+    """The weight the file claims in the lines Moonraker and PrusaLink read,
+    in grams — 0.0 when it claims none.
+
+    Only those spellings count: a Bambu Studio ``total filament weight
+    [g] :`` line is a true weight that neither screen reads, so a file
+    carrying only that still needs its weight written.
+    """
     for pattern in (_TOTAL_G_RE, _USED_G_RE):
-        match = pattern.search(text)
-        if match:
-            total = sum(_numbers(match.group("v")))
-            if total > 0:
-                return total
+        total = _claimed(pattern, text)
+        if total > 0:
+            return total
     return 0.0
 
 
 def declared_mm(text: str) -> float:
-    """The filament length the file claims, in mm — 0.0 when it claims none."""
-    match = _USED_MM_RE.search(text)
-    return sum(_numbers(match.group("v"))) if match else 0.0
+    """The filament length the file claims in ``; filament used [mm]``,
+    every extruder summed — 0.0 when it claims none."""
+    return _claimed(_USED_MM_RE, text)
 
 
 def _is_gcode(path: Path, name: str | None = None) -> bool:
@@ -868,7 +865,7 @@ def _resize_png(source: bytes, width: int, height: int) -> bytes | None:
 #: subsampling.  A plate can be millions; a 400x300 tile cannot show them.
 _MAX_SEGMENTS = 120_000
 
-_XYZE_RE = re.compile(r"\b([XYZEF])\s*(-?\d*\.?\d+)")
+_XYZE_RE = axis_word_pattern("XYZEF")
 
 
 def _extruding_segments(text: str) -> list[tuple[float, float, float, float, float, float]]:

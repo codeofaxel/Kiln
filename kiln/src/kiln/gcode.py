@@ -35,6 +35,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -187,9 +188,55 @@ _MATERIAL_TEMPS: dict[str, tuple[float, float, float, float]] = {
 # Parsing helpers
 # ---------------------------------------------------------------------------
 
+#: A number the way G-code writers actually spell one.  Slicers drop the
+#: leading zero (OrcaSlicer and Bambu Studio write ``E.04805``, ``E-.8``,
+#: ``Z.2`` on most lines), firmware accepts a trailing point (``X10.``)
+#: and an explicit plus.  No exponent form: nothing that emits G-code
+#: writes one, and an ``E`` after digits is the extruder word.  Every
+#: reader that pulls an axis value out of a line uses this ONE spelling
+#: (``axis_value`` / ``has_axis_word`` below) — a private
+#: ``E([-+]?\d+\.?\d*)`` in one module silently dropped three quarters of
+#: a plate's plastic (2026-09-23), and a spelling stated twice drifts.
+GCODE_NUMBER = r"[-+]?(?:\d+\.?\d*|\.\d+)"
+
+_AXIS_WORD_PATTERNS: dict[str, re.Pattern[str]] = {}
+
+
+def axis_word_pattern(letters: str) -> re.Pattern[str]:
+    """Compiled pattern for any of *letters* as a G-code word.
+
+    Group 1 is the letter, group 2 the number.  The letter must not
+    follow another letter (so ``NAME=BEE.5`` is no E word) and may be
+    written in either case.
+    """
+    key = "".join(sorted(set(letters.upper())))
+    pattern = _AXIS_WORD_PATTERNS.get(key)
+    if pattern is None:
+        pattern = re.compile(
+            rf"(?<![A-Za-z])([{key}])\s*({GCODE_NUMBER})", re.IGNORECASE
+        )
+        _AXIS_WORD_PATTERNS[key] = pattern
+    return pattern
+
+
+def axis_value(line: str, letter: str) -> float | None:
+    """Value of the *letter* word on one G-code line, or ``None``.
+
+    Comments (``;`` onward) are ignored, so a value quoted in a comment
+    is never read as a move.
+    """
+    m = axis_word_pattern(letter).search(line.split(";", 1)[0])
+    return float(m.group(2)) if m else None
+
+
+def has_axis_word(line: str, letters: str) -> bool:
+    """Whether the line carries any of *letters* as a word with a number."""
+    return axis_word_pattern(letters).search(line.split(";", 1)[0]) is not None
+
+
 # Regex to extract parameters from a G-code command.  Matches a letter
 # followed by an optional sign and a number (integer or float).
-_PARAM_RE = re.compile(r"([A-Za-z])\s*([+-]?\d*\.?\d+)")
+_PARAM_RE = re.compile(rf"([A-Za-z])\s*({GCODE_NUMBER})")
 
 # Regex to extract the command word (letter + digits) from the start of
 # a stripped line.  Tolerates an optional space between letter and number.
@@ -1237,3 +1284,219 @@ def scan_gcode_file(
         _check_missing_temperatures(result)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Filament: the moves, and the slicer's own totals
+# ---------------------------------------------------------------------------
+
+#: Bambu's start sequence selects ``T255`` and ``T1000`` around its purge
+#: and unload; they are not trays.  The slicer counts what is extruded
+#: under them against the filament already selected, and so does Kiln.
+#: A real tray index is below this.
+FIRST_PSEUDO_TOOL = 255
+
+#: The command word at the head of a line: ``G1`` in ``G1X10E.5`` and in
+#: ``G01 X10``.  A subcode (``G91.1``, the arc-centre mode) is a different
+#: command and never changes how E is read.
+_COMMAND_WORD_RE = re.compile(r"([A-Za-z])\s*(\d+)(\.\d+)?")
+
+#: The moves that can lay filament down.  ``G0``/``G1`` are the straight
+#: ones; ``G2``/``G3`` arcs carry an E word exactly the same way.
+_EXTRUDING_MOVES = frozenset({"G0", "G1", "G2", "G3"})
+
+
+def extruded_mm_per_tool(gcode: str | Iterable[str]) -> list[float]:
+    """Filament laid down, in mm, per tool index (``[T0, T1, ...]``).
+
+    Counted so it matches the slicer's own ``filament used`` total: a
+    positive E delta on a move that also travels (an X, Y or Z word, or an
+    arc) is plastic on the plate; an E-only line is a retract, an
+    unretract or a prime, and retract and unretract cancel by definition.
+    On 13 unmodified OrcaSlicer and Bambu Studio files it matched the
+    slicer's total exactly, extruder by extruder.  Counting the primes ran
+    11% over on a plate with 1,300 retractions; subtracting the retracts
+    ran 7% under there, and 46% under on a three-colour plate whose every
+    filament change unloads with long retracts.
+
+    Absolute E (``M82``/``G90``, the G-code default) is differenced and
+    reset by ``G92``; relative E (``M83``/``G91``) is read as written, the
+    last mode word winning.  ``T<n>`` selects the tool the next moves
+    count against; a pseudo-tool (``T255``, ``T1000``) keeps the current
+    one.  Never raises; an empty list means nothing was extruded.
+    """
+    lines = gcode.splitlines() if isinstance(gcode, str) else gcode
+    totals: dict[int, float] = {}
+    tool = 0
+    relative = False
+    last_e = 0.0
+    for raw in lines:
+        code = raw.split(";", 1)[0].strip()
+        if not code:
+            continue
+        head = _COMMAND_WORD_RE.match(code)
+        if head is None or head.group(3):
+            continue
+        letter = head.group(1).upper()
+        number = int(head.group(2))
+        if letter == "T":
+            if number < FIRST_PSEUDO_TOOL:
+                tool = number
+            continue
+        word = f"{letter}{number}"
+        if word in ("M82", "G90"):
+            relative = False
+            continue
+        if word in ("M83", "G91"):
+            relative = True
+            continue
+        if word == "G92":
+            value = axis_value(code, "E")
+            if value is not None:
+                last_e = value
+            continue
+        if word not in _EXTRUDING_MOVES:
+            continue
+        value = axis_value(code, "E")
+        if value is None:
+            continue
+        if relative:
+            delta = value
+            last_e += value
+        else:
+            delta = value - last_e
+            last_e = value
+        if delta > 0 and (word in ("G2", "G3") or has_axis_word(code, "XYZ")):
+            totals[tool] = totals.get(tool, 0.0) + delta
+    if not totals:
+        return []
+    out = [0.0] * (max(totals) + 1)
+    for index, total in totals.items():
+        out[index] = total
+    return out
+
+
+@dataclass(frozen=True)
+class SlicerFilamentTotals:
+    """What a slicer wrote about the filament a file uses, per extruder.
+
+    ``mm``, ``grams`` and ``cm3`` list one value per extruder the print
+    uses, as the slicer lists them; empty when it wrote no such line.
+    ``total_g`` is the one-number total some slicers write beside the
+    list (``; total filament used [g]``), or ``None``.
+    """
+
+    mm: tuple[float, ...] = ()
+    grams: tuple[float, ...] = ()
+    cm3: tuple[float, ...] = ()
+    total_g: float | None = None
+
+    @property
+    def total_mm(self) -> float:
+        return float(sum(self.mm))
+
+    @property
+    def weight_g(self) -> float | None:
+        """The plate's grams: the per-extruder sum when it is written and
+        positive, else the one-number total, else ``None``."""
+        if self.grams and sum(self.grams) > 0:
+            return float(sum(self.grams))
+        if self.total_g is not None and self.total_g > 0:
+            return self.total_g
+        return None
+
+
+#: Each spelling of a filament total Kiln reads, with the kind of value it
+#: holds.  PrusaSlicer, SuperSlicer and OrcaSlicer write ``; filament used
+#: [mm] = 11040.26, 584.30`` (one value per extruder the print uses),
+#: Bambu Studio ``; total filament length [mm] : 1227.58``, Cura
+#: ``;Filament used: 4.523m``, Slic3r ``; filament used = 1034.5mm
+#: (7.4cm3)`` and Simplify3D ``; Filament length: 4523.4 mm``.  Where the
+#: kind is ``None`` the unit written with the value decides it, millimetres
+#: when none is written.  A reader that kept the first value of a list
+#: lost a two-colour plate's second filament (2026-09-23).
+_FILAMENT_LINES: tuple[tuple[str | None, re.Pattern[str]], ...] = (
+    ("mm", re.compile(r"^;\s*filament used \[mm\]\s*=\s*(?P<v>.+?)\s*$", re.I | re.M)),
+    ("mm", re.compile(r"^;\s*total filament length \[mm\]\s*:\s*(?P<v>.+?)\s*$", re.I | re.M)),
+    ("g", re.compile(r"^;\s*filament used \[g\]\s*=\s*(?P<v>.+?)\s*$", re.I | re.M)),
+    ("g", re.compile(r"^;\s*total filament weight \[g\]\s*:\s*(?P<v>.+?)\s*$", re.I | re.M)),
+    ("cm3", re.compile(r"^;\s*filament used \[cm3\]\s*=\s*(?P<v>.+?)\s*$", re.I | re.M)),
+    ("total_g", re.compile(r"^;\s*total filament used \[g\]\s*=\s*(?P<v>.+?)\s*$", re.I | re.M)),
+    (None, re.compile(r"^;\s*filament[ _]used\s*[:=]\s*(?P<v>.+?)\s*$", re.I | re.M)),
+    (None, re.compile(r"^;\s*filament length\s*[:=]?\s*(?P<v>.+?)\s*$", re.I | re.M)),
+)
+
+_FILAMENT_PIECE_RE = re.compile(rf"\s*(?P<n>{GCODE_NUMBER})\s*(?P<unit>mm|m|g|cm3)?(?![a-z])", re.I)
+_UNIT_KINDS = {"mm": ("mm", 1.0), "m": ("mm", 1000.0), "g": ("g", 1.0), "cm3": ("cm3", 1.0)}
+
+
+def filament_values(text: str) -> tuple[list[float], str | None]:
+    """The numbers of a slicer's comma-separated list, and their kind.
+
+    Each piece is read from its head, so trailing text is left alone
+    (``1034.5mm (7.4cm3)`` is 1034.5 mm), and metres become millimetres.
+    The kind is ``"mm"``, ``"g"`` or ``"cm3"`` when a unit is written and
+    ``None`` when none is.  The list stops at the first piece that does
+    not start with a number; pieces written in different kinds of unit
+    read as nothing.
+    """
+    values: list[float] = []
+    kinds: set[str] = set()
+    for piece in re.split(r"[,;]", text):
+        if not piece.strip():
+            break
+        m = _FILAMENT_PIECE_RE.match(piece)
+        if m is None:
+            break
+        value = float(m.group("n"))
+        unit = (m.group("unit") or "").lower()
+        if unit:
+            kind, scale = _UNIT_KINDS[unit]
+            kinds.add(kind)
+            value *= scale
+        values.append(value)
+    if len(kinds) > 1:
+        return [], None
+    return values, (kinds.pop() if kinds else None)
+
+
+def slicer_filament_totals(text: str) -> SlicerFilamentTotals:
+    """The filament totals a slicer wrote into *text*, per extruder.
+
+    The one reader for what a slicer says a file uses.  A door that must
+    find one printer's own spelling (the completion step for a printer
+    screen, :mod:`kiln.printers.gcode_complete`) matches that line itself
+    and reads its numbers with :func:`filament_values`.  The first line of
+    each kind wins.  Never raises.
+    """
+    # Only a comment that names filament can carry a total.  Reading those
+    # alone spares an 8 MB plate a full search per spelling (278 ms -> 22).
+    candidates = "\n".join(
+        line
+        for line in text.splitlines()
+        if ("ilament" in line or "ILAMENT" in line) and line.lstrip().startswith(";")
+    )
+    found: dict[str, tuple[float, ...]] = {}
+    total_g: float | None = None
+    for kind, pattern in _FILAMENT_LINES:
+        m = pattern.search(candidates)
+        if m is None:
+            continue
+        values, unit_kind = filament_values(m.group("v"))
+        if not values:
+            continue
+        if kind == "total_g":
+            if total_g is None and unit_kind in (None, "g"):
+                total_g = values[0]
+            continue
+        if kind is None:
+            kind = unit_kind or "mm"
+        elif unit_kind not in (None, kind):
+            continue
+        found.setdefault(kind, tuple(values))
+    return SlicerFilamentTotals(
+        mm=found.get("mm", ()),
+        grams=found.get("g", ()),
+        cm3=found.get("cm3", ()),
+        total_g=total_g,
+    )

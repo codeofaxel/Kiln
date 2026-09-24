@@ -39,6 +39,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.gcode import GCODE_NUMBER
+
 _logger = logging.getLogger(__name__)
 
 
@@ -80,9 +82,9 @@ _TYPE_NORMALIZE = {
 _LAYER_CHANGE_RE = re.compile(r"^\s*;\s*(LAYER_CHANGE|CHANGE_LAYER)\b", re.IGNORECASE)
 _LAYER_Z_RE = re.compile(r"^\s*;\s*Z:\s*(-?\d*\.?\d+)", re.IGNORECASE)
 _TYPE_RE = re.compile(r"^\s*;\s*TYPE:\s*(.+?)\s*$", re.IGNORECASE)
-_G1_Z_RE = re.compile(r"^\s*G[01]\b.*\bZ(-?\d*\.?\d+)", re.IGNORECASE)
-_G1_E_RE = re.compile(r"^\s*G[01]\b.*\bE(-?\d*\.?\d+)", re.IGNORECASE)
-_XY_RE = re.compile(r"\bX(-?\d*\.?\d+)\s+Y(-?\d*\.?\d+)", re.IGNORECASE)
+_G1_Z_RE = re.compile(rf"^\s*G[01]\b.*(?<![A-Za-z])Z({GCODE_NUMBER})", re.IGNORECASE)
+_G1_E_RE = re.compile(rf"^\s*G[01]\b.*(?<![A-Za-z])E({GCODE_NUMBER})", re.IGNORECASE)
+_XY_RE = re.compile(rf"(?<![A-Za-z])X({GCODE_NUMBER})\s+Y({GCODE_NUMBER})", re.IGNORECASE)
 _M104_RE = re.compile(r"^\s*M104\b.*\bS(-?\d*\.?\d+)", re.IGNORECASE)
 _M140_RE = re.compile(r"^\s*M140\b.*\bS(-?\d*\.?\d+)", re.IGNORECASE)
 _T_RE = re.compile(r"^\s*T(\d+)\b", re.IGNORECASE)

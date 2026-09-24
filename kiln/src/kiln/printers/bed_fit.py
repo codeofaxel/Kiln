@@ -31,6 +31,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from kiln.gcode import GCODE_NUMBER, axis_value
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -250,7 +252,7 @@ def compute_mesh_bbox(mesh_path: str) -> dict[str, float] | None:
 
 
 _GCODE_MOVE_RE = re.compile(
-    r"^G[01]\s+(?:.*\bX(?P<x>-?\d+\.?\d*))?(?:.*\bY(?P<y>-?\d+\.?\d*))?",
+    rf"^G[01]\s+(?:.*(?<![A-Za-z])X(?P<x>{GCODE_NUMBER}))?(?:.*(?<![A-Za-z])Y(?P<y>{GCODE_NUMBER}))?",
     re.MULTILINE,
 )
 
@@ -325,21 +327,20 @@ def compute_gcode_bbox(
                 # Robust extrusion check — exclude retraction-only moves
                 # (G1 E-0.8 F1800 has no X/Y).  The bbox we want is just
                 # the print area, so we need X and/or Y present AND E.
-                em = re.search(r"\bE(-?\d+\.?\d*)", code)
-                if em is None:
+                if axis_value(code, "E") is None:
                     continue
-                xm = re.search(r"\bX(-?\d+\.?\d*)", code)
-                ym = re.search(r"\bY(-?\d+\.?\d*)", code)
-                if xm:
+                xv = axis_value(code, "X")
+                yv = axis_value(code, "Y")
+                if xv is not None:
                     found = True
-                    v = float(xm.group(1))
+                    v = xv
                     if v < x_min:
                         x_min = v
                     if v > x_max:
                         x_max = v
-                if ym:
+                if yv is not None:
                     found = True
-                    v = float(ym.group(1))
+                    v = yv
                     if v < y_min:
                         y_min = v
                     if v > y_max:

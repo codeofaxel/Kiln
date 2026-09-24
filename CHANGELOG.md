@@ -286,6 +286,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Cost and filament estimates for OrcaSlicer and Bambu Studio files now match the slicer.**
+
 - **Slicing keeps your plate where you approved it, and the preview shows what will actually print.**
 
 - **Fine-pitch jar lids fit as snugly as the rest.**
