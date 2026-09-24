@@ -31,7 +31,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from kiln.gcode import GCODE_NUMBER, axis_value
+from kiln.gcode import _MAX_SCAN_BYTES, GCODE_NUMBER, axis_value
+from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 
 logger = logging.getLogger(__name__)
 
@@ -373,17 +374,13 @@ def compute_3mf_bbox(
         return None
     try:
         with zipfile.ZipFile(path) as zf:
-            # Find the plate gcode (plate_1.gcode for single-plate, but
-            # could be plate_N.gcode for multi-plate — we check all).
-            gcode_names = [
-                n for n in zf.namelist()
-                if n.startswith("Metadata/plate_") and n.endswith(".gcode")
-            ]
-            if not gcode_names:
+            # The plate the archive prints, by the one picker every door
+            # uses, unpacked within the bound a G-code file gets.
+            member = sliced_gcode_member(zf)
+            if member is None:
                 return None
-            # Use the first plate (most common case is single-plate)
-            gcode_bytes = zf.read(gcode_names[0])
-    except (zipfile.BadZipFile, KeyError) as exc:
+            gcode_bytes = read_member_text(zf, member, _MAX_SCAN_BYTES).encode("utf-8")
+    except (zipfile.BadZipFile, KeyError, ValueError) as exc:
         logger.warning("compute_3mf_bbox failed for %s: %s", threemf_path, exc)
         return None
     # Write to a temp file and reuse compute_gcode_bbox
@@ -700,15 +697,10 @@ def check_gcode_has_homing(
     if p.suffix.lower() == ".3mf" or str(p).lower().endswith(".gcode.3mf"):
         try:
             with zipfile.ZipFile(p) as zf:
-                gcode_names = [
-                    n for n in zf.namelist()
-                    if n.startswith("Metadata/plate_") and n.endswith(".gcode")
-                ]
-                if gcode_names:
-                    gcode_text = zf.read(gcode_names[0]).decode(
-                        "utf-8", errors="replace",
-                    )
-        except (zipfile.BadZipFile, KeyError):
+                member = sliced_gcode_member(zf)
+                if member is not None:
+                    gcode_text = read_member_text(zf, member, _MAX_SCAN_BYTES)
+        except (zipfile.BadZipFile, KeyError, ValueError):
             pass
     else:
         with contextlib.suppress(OSError):

@@ -5248,8 +5248,10 @@ def _estimate_print_cost(
         estimated_weight_g = total_hours * _AVG_FILAMENT_G_PER_HOUR
         weight_source = "time_estimate"
 
-    # Add AMS purge waste for multicolor
-    purge_waste_g = tool_changes * _AMS_PURGE_WASTE_G
+    # Purge waste per filament change, for the time heuristic only: a
+    # file's own grams already include every change (the slicer counts
+    # the tower in its total), so adding it again would count it twice.
+    purge_waste_g = 0.0 if from_file else tool_changes * _AMS_PURGE_WASTE_G
     total_weight_g = estimated_weight_g + purge_waste_g
 
     # --- Material cost ---
@@ -5862,70 +5864,34 @@ def monitor_print(
         )
 
         # --- Material usage & cost estimate ---
-        # Try to get filament weight from gcode metadata (more accurate
-        # than time-based heuristic).  Also count tool changes for purge waste.
-        _filament_weight_g: float | None = None
-        _file_material: str | None = None
+        # The file on this disk behind the printer-side name (the slice
+        # ledger's join, the same one the cutter and nozzle checks use),
+        # priced as its own filaments.  Falls back to the time heuristic.
+        _file_filaments: FilamentPricing | None = None
         _tool_changes = 0
         if file_name:
             try:
-                from kiln.printers.base import PrinterFile
+                from kiln._pro_cutter_bridge import local_sliced_path
 
-                # Check if we have the file locally (in prints dir or temp)
-                _local_paths = []
-                try:
-                    from kiln.cli.config import get_prints_dir
+                _local = local_sliced_path(file_name)
+                if _local:
+                    _file_filaments = _get_cost_estimator().filament_pricing(_local)
+                    from kiln.gcode import FIRST_PSEUDO_TOOL
 
-                    _prints = get_prints_dir()
-                    import glob as _globmod
-
-                    _local_paths = _globmod.glob(
-                        str(_prints / "**" / "gcode" / "*.gcode"),
-                        recursive=True,
-                    )
-                except Exception:
-                    pass
-
-                # Also check the uploaded file metadata from the printer
-                _pf = PrinterFile(name=file_name)
-                _meta = adapter.get_file_metadata(file_name)
-                _file_material = getattr(_meta, "material", None) if _meta else None
-                if _meta and hasattr(_meta, "filament_used_mm") and _meta.filament_used_mm:
-                    # Length to grams at the density of the material the file
-                    # was sliced for, from the one material table.
-                    import math as _math
-
-                    _row = resolve_material(_file_material) or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
-                    _radius_mm = _row.filament_diameter_mm / 2
-                    _vol_cm3 = _math.pi * _radius_mm**2 * _meta.filament_used_mm / 1000.0
-                    _filament_weight_g = _vol_cm3 * _row.density_g_per_cm3
+                    with open(_local, errors="replace") as _f:
+                        _seen = {
+                            int(w[1:]) for w in (ln.split(";", 1)[0].strip() for ln in _f)
+                            if len(w) > 1 and w[0] == "T" and w[1:].isdigit() and int(w[1:]) < FIRST_PSEUDO_TOOL
+                        }
+                    _tool_changes = max(0, len(_seen) - 1)
             except Exception:
                 pass  # Fallback to time-based
-
-            # Count T commands in merged gcode to estimate tool changes
-            try:
-                for _lp in _local_paths:
-                    if "merged" in _lp.lower() or "multicolor" in _lp.lower():
-                        import re as _re_mod
-
-                        with open(_lp) as _f:
-                            _gc = _f.read()
-                        _tool_changes = len(_re_mod.findall(r"^T\d+$", _gc, _re_mod.MULTILINE))
-                        # Also try to get filament weight from gcode comments
-                        if _filament_weight_g is None:
-                            from kiln.gcode import slicer_filament_totals
-
-                            _filament_weight_g = slicer_filament_totals(_gc).weight_g
-                        break
-            except Exception:
-                pass
 
         cost_info = _estimate_print_cost(
             elapsed_s,
             remaining_s,
-            material=_file_material,
-            filament_weight_g=_filament_weight_g,
             tool_changes=_tool_changes,
+            filaments=_file_filaments,
         )
         if cost_info is not None:
             weight_str = f"~{cost_info['estimated_weight_g']:.0f}g {cost_info['material']}"
@@ -7404,37 +7370,51 @@ def start_print(
             if _get_registry().count > 0:
                 _printer_id = target_name
 
+            # The file on this disk behind the printer-side name, weighed
+            # as its own filaments (the same join the cutter check uses),
+            # first; the printer's own listing of the file when it carries
+            # a length, for a backend that reports one.
             _planned_grams = 0.0
             _filament_material = ""
             try:
-                _files_for_nozzle = adapter.list_files()
-                for _pf in _files_for_nozzle:
-                    if (
-                        _pf.name.lower() == file_name.lower()
-                        or _pf.path.lower() == file_name.lower()
-                    ):
-                        if _pf.filament_used_mm:
-                            import math as _m
+                from kiln._pro_cutter_bridge import local_sliced_path
 
-                            # Length to grams at the density of the
-                            # material the file was sliced for, from the
-                            # one material table (PLA when it names none).
-                            _row = (
-                                resolve_material(_pf.material)
-                                or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
-                            )
-                            _vol_cm3 = (
-                                _m.pi
-                                * (_row.filament_diameter_mm / 2) ** 2
-                                * _pf.filament_used_mm
-                                / 1000.0
-                            )
-                            _planned_grams = _vol_cm3 * _row.density_g_per_cm3
-                        if _pf.material:
-                            _filament_material = _pf.material
-                        break
+                _local = local_sliced_path(file_name)
+                _pricing = _get_cost_estimator().filament_pricing(_local) if _local else None
+                if _pricing is not None:
+                    _planned_grams = _pricing.weight_g
+                    _filament_material = _pricing.material
             except Exception:
                 pass
+            if not _planned_grams:
+                try:
+                    for _pf in adapter.list_files():
+                        if (
+                            _pf.name.lower() == file_name.lower()
+                            or _pf.path.lower() == file_name.lower()
+                        ):
+                            if _pf.filament_used_mm:
+                                import math as _m
+
+                                # Length to grams at the density of the
+                                # material the file was sliced for, from
+                                # the one material table (PLA when none).
+                                _row = (
+                                    resolve_material(_pf.material)
+                                    or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
+                                )
+                                _vol_cm3 = (
+                                    _m.pi
+                                    * (_row.filament_diameter_mm / 2) ** 2
+                                    * _pf.filament_used_mm
+                                    / 1000.0
+                                )
+                                _planned_grams = _vol_cm3 * _row.density_g_per_cm3
+                            if _pf.material:
+                                _filament_material = _pf.material
+                            break
+                except Exception:
+                    pass
 
             if _printer_id and _planned_grams > 0:
                 _nozzle_verdict = _pro_nozzle_bridge.consult_capacity(

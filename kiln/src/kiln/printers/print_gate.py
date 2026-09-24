@@ -812,14 +812,14 @@ def _gcode_head(path: str, max_lines: int) -> list[str] | None:
         if low.endswith(".3mf"):
             import zipfile
 
+            from kiln.gcode import _MAX_SCAN_BYTES
+            from kiln.gcode_metadata import read_member_text, sliced_gcode_member
+
             with zipfile.ZipFile(path) as zf:
-                names = [
-                    n for n in zf.namelist()
-                    if n.startswith("Metadata/plate_") and n.endswith(".gcode")
-                ]
-                if not names:
+                member = sliced_gcode_member(zf)
+                if member is None:
                     return None
-                text = zf.read(names[0]).decode("utf-8", errors="replace")
+                text = read_member_text(zf, member, _MAX_SCAN_BYTES)
             return text.splitlines()[:max_lines]
         out: list[str] = []
         with open(path, encoding="utf-8", errors="replace") as fh:

@@ -600,6 +600,21 @@ class TestPreflightPricesTheFilesOwnFilament:
         read.assert_not_called()
 
 
+class TestAFilesGramsAreNeverCountedTwice:
+    def test_the_flat_purge_guess_applies_only_to_the_time_heuristic(self, tmp_path):
+        from kiln.server import _AMS_PURGE_WASTE_G, _estimate_print_cost
+
+        path = _write(tmp_path, "plate.gcode", _orca_plate())
+        pricing = CostEstimator().filament_pricing(path)
+        # The file's grams already include every filament change: no add-on.
+        from_file = _estimate_print_cost(3600, 0, tool_changes=2, filaments=pricing)
+        assert from_file["purge_waste_g"] == 0.0
+        assert from_file["estimated_weight_g"] == pytest.approx(pricing.weight_g, abs=0.1)
+        # The clock guess still adds the flat figure per change.
+        guessed = _estimate_print_cost(3600, 0, tool_changes=2)
+        assert guessed["purge_waste_g"] == pytest.approx(2 * _AMS_PURGE_WASTE_G)
+
+
 class TestTheWrapDoorReadsTheFile:
     def test_omitted_settings_are_the_files_own(self, tmp_path):
         """The door's own docs promise it: omitted, the type the slicer wrote

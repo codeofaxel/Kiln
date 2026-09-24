@@ -214,16 +214,16 @@ def _job_gcode_lines(job_path: str):
         return open(path, encoding="utf-8", errors="replace")
     if ext == ".3mf":
         try:
+            from kiln.gcode import _MAX_SCAN_BYTES
+            from kiln.gcode_metadata import read_member_text, sliced_gcode_member
+
             with zipfile.ZipFile(path) as zf:
-                names = [
-                    n for n in zf.namelist()
-                    if n.startswith("Metadata/plate_") and n.endswith(".gcode")
-                ]
-                if not names:
+                member = sliced_gcode_member(zf)
+                if member is None:
                     return None
-                data = zf.read(names[0]).decode("utf-8", errors="replace")
+                data = read_member_text(zf, member, _MAX_SCAN_BYTES)
             return io.StringIO(data)
-        except (zipfile.BadZipFile, KeyError, OSError):
+        except (zipfile.BadZipFile, KeyError, OSError, ValueError):
             return None
     return None
 
