@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -2785,23 +2787,6 @@ def search_templates(
 # Loop 15: Mesh weight estimation
 # ---------------------------------------------------------------------------
 
-# Material densities in g/cm³
-_MATERIAL_DENSITIES: dict[str, float] = {
-    "pla": 1.24,
-    "abs": 1.04,
-    "petg": 1.27,
-    "tpu": 1.21,
-    "nylon": 1.14,
-    "asa": 1.07,
-    "pc": 1.20,
-    "pva": 1.23,
-    "hips": 1.05,
-    "wood": 1.15,
-    "carbon_fiber": 1.30,
-    "resin": 1.10,
-}
-
-
 @dataclass
 class WeightEstimate:
     """Estimated weight of a 3D-printed part."""
@@ -2810,7 +2795,9 @@ class WeightEstimate:
     volume_mm3: float = 0.0
     volume_cm3: float = 0.0
     material: str = "pla"
-    density_g_cm3: float = 1.24
+    density_g_cm3: float = field(
+        default_factory=lambda: BUILTIN_MATERIALS[DEFAULT_MATERIAL].density_g_per_cm3
+    )
     infill_percent: float = 20.0
     wall_thickness_mm: float = 1.2
     solid_weight_g: float = 0.0
@@ -2860,7 +2847,8 @@ def estimate_weight(
     then applies material density and infill ratio to estimate weight.
 
     :param file_path: Path to an STL file.
-    :param material: Material name (must be in ``_MATERIAL_DENSITIES``).
+    :param material: Material name, looked up in the one material table
+        (:func:`kiln.cost_estimator.resolve_material`).
     :param infill_percent: Infill percentage (0-100).
     :param wall_thickness_mm: Perimeter wall thickness in mm.
     :returns: ``WeightEstimate`` dataclass.
@@ -2869,11 +2857,15 @@ def estimate_weight(
     if not fp.exists():
         raise FileNotFoundError(f"STL file not found: {file_path}")
 
-    mat_key = material.lower().strip()
-    density = _MATERIAL_DENSITIES.get(mat_key, 1.24)
+    # Density from the one material table, PLA's when it has no row.
+    row = resolve_material(material)
     notes: list[str] = []
-    if mat_key not in _MATERIAL_DENSITIES:
-        notes.append(f"Unknown material '{material}', using PLA density (1.24 g/cm³).")
+    if row is None:
+        row = BUILTIN_MATERIALS[DEFAULT_MATERIAL]
+        notes.append(
+            f"Unknown material '{material}', using {row.name} density ({row.density_g_per_cm3} g/cm³)."
+        )
+    density = row.density_g_per_cm3
 
     # Parse triangles
     triangles, _verts = _parse_stl_for_analysis(file_path)
@@ -2920,7 +2912,7 @@ def estimate_weight(
         file_path=file_path,
         volume_mm3=volume_mm3,
         volume_cm3=volume_cm3,
-        material=mat_key,
+        material=material.lower().strip(),
         density_g_cm3=density,
         infill_percent=infill_percent,
         wall_thickness_mm=wall_thickness_mm,

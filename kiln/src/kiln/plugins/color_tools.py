@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -35,7 +37,7 @@ _STL_TRIANGLE_SIZE = 50  # 12 (normal) + 36 (3 vertices) + 2 (attr)
 
 _DEFAULT_PALETTE = ["#FFFFFF", "#F72323", "#161616", "#898989"]
 
-_PLA_DENSITY_G_PER_CM3 = 1.24
+_PLA_DENSITY_G_PER_CM3 = BUILTIN_MATERIALS[DEFAULT_MATERIAL].density_g_per_cm3  # the table's own
 _DEFAULT_INFILL_FACTOR = 0.30
 
 # Rough FDM print-time estimate: weight * this factor (minutes per gram at

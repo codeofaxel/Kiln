@@ -45,6 +45,7 @@ from typing import Any
 from kiln.bambu_trays import TRAYS_PER_UNIT as _TRAYS_PER_UNIT
 from kiln.bambu_trays import tray_id as _bambu_tray_id
 from kiln.bambu_trays import tray_name as _bambu_tray_name
+from kiln.gcode import slicer_filament_types
 
 __all__ = [
     "AmsPlan",
@@ -71,7 +72,6 @@ MATCH_DELTA_E = 28.0
 _UNREAD_SENTINEL = "000000"
 
 _RE_COLOUR_LINE = re.compile(r";\s*filament_colou?r\s*=\s*(.+)", re.IGNORECASE)
-_RE_TYPE_LINE = re.compile(r";\s*filament_type\s*=\s*(.+)", re.IGNORECASE)
 _HEX6 = re.compile(r"^[0-9A-F]{6}$")
 
 #: How much of a G-code file to read from each end.  OrcaSlicer, Bambu
@@ -195,22 +195,15 @@ def _split_list(raw: str) -> list[str]:
 
 def _filaments_from_gcode_text(text: str) -> list[Filament]:
     colours: list[str] | None = None
-    types: list[str] | None = None
     for line in text.splitlines():
         s = line.strip()
-        if not s.startswith(";"):
-            continue
-        if colours is None:
+        if s.startswith(";"):
             m = _RE_COLOUR_LINE.match(s)
             if m:
                 colours = _split_list(m.group(1))
-                continue
-        if types is None:
-            m = _RE_TYPE_LINE.match(s)
-            if m:
-                types = _split_list(m.group(1))
-        if colours is not None and types is not None:
-            break
+                break
+    # The types, by the one reader of what a file was sliced for.
+    types = slicer_filament_types(text)
     if not colours:
         return []
     out: list[Filament] = []

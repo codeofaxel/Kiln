@@ -30,7 +30,12 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from typing import Any, BinaryIO
 
-from kiln.gcode import slicer_filament_totals, slicer_print_time
+from kiln.gcode import (
+    slicer_filament_totals,
+    slicer_filament_types,
+    slicer_material_label,
+    slicer_print_time,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -158,10 +163,6 @@ class GCodeMetadata:
 # ---------------------------------------------------------------------------
 
 # PrusaSlicer / OrcaSlicer / BambuStudio patterns
-_RE_PRUSA_MATERIAL = re.compile(
-    r";\s*filament_type\s*=\s*(.+)",
-    re.IGNORECASE,
-)
 _RE_PRUSA_TOOL_TEMP = re.compile(
     r";\s*(?:temperature|nozzle_temperature)\s*=\s*(\d+\.?\d*)",
     re.IGNORECASE,
@@ -184,10 +185,6 @@ _RE_PRUSA_PRINTER_MODEL = re.compile(
 )
 
 # Cura patterns
-_RE_CURA_MATERIAL = re.compile(
-    r";\s*MATERIAL\s*[:=]\s*(.+)",
-    re.IGNORECASE,
-)
 _RE_CURA_LAYER_HEIGHT = re.compile(
     r";\s*Layer height\s*[:=]\s*(\d+\.?\d*)",
     re.IGNORECASE,
@@ -260,6 +257,9 @@ def _extract_from_lines(lines: list[str]) -> GCodeMetadata:
     printed = slicer_print_time(text)
     if printed is not None:
         meta.estimated_time_seconds = printed.seconds
+    # The material: every filament type the file names, once each, read by
+    # the one reader of what a file was sliced for.
+    meta.material = slicer_material_label(_normalize_material(t) for t in slicer_filament_types(text))
 
     # Track whether temps came from comments (preferred) vs M-commands (fallback)
     _tool_temp_from_comment = False
@@ -272,14 +272,6 @@ def _extract_from_lines(lines: list[str]) -> GCodeMetadata:
 
         # --- Comment-based patterns (highest priority) ---
         if stripped.startswith(";"):
-            # Material
-            if meta.material is None:
-                for pat in (_RE_PRUSA_MATERIAL, _RE_CURA_MATERIAL):
-                    m = pat.match(stripped)
-                    if m:
-                        meta.material = _normalize_material(m.group(1))
-                        break
-
             # Tool temperature (from comment)
             if meta.tool_temp is None or not _tool_temp_from_comment:
                 for pat in (_RE_PRUSA_TOOL_TEMP, _RE_S3D_TOOL_TEMP):

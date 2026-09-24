@@ -61,7 +61,8 @@ class TestTheWindowReachesTheEnd:
         meta = extract_metadata(str(path))
         assert meta.extra["filament_used"] == pytest.approx(11624.56)
         assert meta.estimated_time_seconds == 1 * 3600 + 50 * 60 + 32
-        assert meta.material_hint == "PLA;PLA"
+        # Two PLA filaments are one material, not one called "PLA;PLA".
+        assert meta.material_hint == "PLA"
         assert meta.extra["printer_model"] == "bambu_a1_h679b"
         assert meta.extra["layer_height"] == pytest.approx(0.2)
         assert meta.slicer_hint.startswith("OrcaSlicer 2.3.2")

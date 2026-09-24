@@ -1578,14 +1578,18 @@ class TestPrintTimeEstimateWithRealModule:
         info = result["model_info"]
         assert info["estimated_print_time_min"] == 45
         assert info["estimated_filament_g"] == 12.0
-        assert abs(info["estimated_cost_usd"] - 0.24) < 0.01  # 12g * $0.02/g
+        # 12 g at PLA's price from the one material table.
+        from kiln.cost_estimator import BUILTIN_MATERIALS
+
+        cost = 12.0 * BUILTIN_MATERIALS["PLA"].cost_per_kg_usd / 1000.0
+        assert abs(info["estimated_cost_usd"] - cost) < 0.01
 
         # Check entry must appear with name="estimate" and passed=True
         est_checks = [c for c in result["checks"] if c["name"] == "estimate"]
         assert len(est_checks) == 1
         assert est_checks[0]["passed"] is True
         assert "45 min" in est_checks[0]["details"]
-        assert "$0.24" in est_checks[0]["details"]
+        assert f"${cost:.2f}" in est_checks[0]["details"]
 
         # Summary should include the time/cost snippet
         assert "45 min" in result["summary"] or "$0.24" in result["summary"]
@@ -1604,7 +1608,7 @@ class TestPrintTimeEstimateFallback:
         # Use the known-dims STL: 10×20×5mm → bbox vol = 1000 mm³ = 1.0 cm³
         # Expected rough: time = max(1, round(1.0 * 8)) = 8 min
         #                 filament = 1.0 * 1.24 * 0.3 = 0.372g → 0.4
-        #                 cost = 0.4 * 0.02 = 0.008 → 0.01
+        #                 cost = 0.4 * $0.025/g (PLA, the table's price) = 0.01
         stl = _make_known_binary_stl(tmp_path)
 
         # Force all analysis modules absent so inline STL parser runs and

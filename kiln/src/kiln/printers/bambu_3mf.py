@@ -113,6 +113,7 @@ from kiln.gcode import (
     extruded_mm_per_tool,
     has_axis_word,
     slicer_filament_totals,
+    slicer_filament_types,
     slicer_print_time,
 )
 
@@ -769,9 +770,9 @@ def resolve_settings_from_gcode(settings: BambuPrintSettings, gcode_body: str) -
     hotend, bed = _print_temperatures(gcode_body)
     filament_type = settings.filament_type
     if not filament_type:
-        match = _GCODE_FILAMENT_TYPE_RE.search(gcode_body)
-        if match:
-            filament_type = match.group(1).split(";")[0].split(",")[0].strip()
+        read = slicer_filament_types(gcode_body)
+        if read:
+            filament_type = read[0].split(",")[0].strip()
     filament_types = (
         [bambu_filament_type(t) for t in settings.filament_types]
         if settings.filament_types else None
@@ -1269,9 +1270,6 @@ _GCODE_TOOL_SELECT_RE = re.compile(r"^T(\d+)\b", re.MULTILINE)
 _GCODE_FILAMENT_COLOUR_RE = re.compile(
     r"^;\s*filament_colour\s*=\s*(.+)$", re.MULTILINE,
 )
-_GCODE_FILAMENT_TYPE_RE = re.compile(
-    r"^;\s*filament_type\s*=\s*(.+)$", re.MULTILINE,
-)
 
 #: What each slicer writes about filament consumed, measured 2026-09-18.
 #: PrusaSlicer 2.9.4 and OrcaSlicer 2.3.2 footer: ``; filament used [mm] =
@@ -1295,7 +1293,6 @@ _GCODE_FILAMENT_DIAMETER_RE = re.compile(
 #: up are the start sequence's pseudo-tools (T255, T1000), not trays.
 _GCODE_ANY_TOOL_SELECT_RE = re.compile(r"^\s*T(\d+)\b", re.MULTILINE)
 _FILAMENT_DIAMETER_MM = 1.75
-_DEFAULT_FILAMENT_DENSITY = 1.24  # PLA, the table's own figure
 
 
 @dataclass(frozen=True)
@@ -1342,10 +1339,10 @@ def _material_density(filament_type: str | None) -> float:
     (:func:`kiln.slicer_filament.material_density`), so the safety net and
     the slicer can never disagree about what a spool weighs.
     """
-    from kiln.slicer_filament import material_density
+    from kiln.slicer_filament import DEFAULT_MATERIAL, material_density
 
-    row = material_density(filament_type)
-    return row[1] if row else _DEFAULT_FILAMENT_DENSITY
+    row = material_density(filament_type) or material_density(DEFAULT_MATERIAL)
+    return row[1] if row else 0.0
 
 
 def _real_tools_used(gcode_body: str) -> list[int]:
@@ -1405,8 +1402,7 @@ def filament_usage_from_gcode(
         diameters = _number_list(
             (_GCODE_FILAMENT_DIAMETER_RE.search(gcode_body) or [None, ""])[1]
         )
-        type_match = _GCODE_FILAMENT_TYPE_RE.search(gcode_body)
-        body_types = [t.strip() for t in type_match.group(1).split(";")] if type_match else []
+        body_types = slicer_filament_types(gcode_body)
 
         def _pick(values: list[float], index: int) -> float | None:
             if index < len(values) and values[index] > 0:
@@ -1543,7 +1539,7 @@ def _declared_filaments_in_gcode(
         return (values + [filler] * count)[:count]
 
     colors = _fit(_declared(_GCODE_FILAMENT_COLOUR_RE), "#FFFFFF")
-    types = _fit(_declared(_GCODE_FILAMENT_TYPE_RE), "PLA")
+    types = _fit([t for t in slicer_filament_types(gcode_body) if t], "PLA")
     return count, colors, types
 
 
@@ -1776,6 +1772,9 @@ def _build_gcode_header(
 
     types = filament_types or [filament_type] * num_filaments
     type_str = ";".join(types)
+    # Each filament's density, as Bambu Studio writes it: the declared
+    # type's row in the one material table, never PLA's for every type.
+    density_str = ",".join(f"{_material_density(t):g}" for t in types)
 
     return (
         f"; HEADER_BLOCK_START\n"
@@ -1783,7 +1782,7 @@ def _build_gcode_header(
         f"; model printing time: {est_h}h {est_m}m {est_s}s; "
         f"total estimated time: {est_h}h {est_m + 5}m 0s\n"
         f"; total layer number: {total_layers}\n"
-        f"; filament_density: 1.24\n"
+        f"; filament_density: {density_str}\n"
         f"; filament_diameter: 1.75\n"
         f"; max_z_height: {max_z:.2f}\n"
         f"; filament: {num_filaments}\n"

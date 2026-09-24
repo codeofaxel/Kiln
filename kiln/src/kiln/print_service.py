@@ -143,17 +143,11 @@ def _validate_request(request: PrintServiceRequest) -> list[str]:
 
 def _estimate_local_cost(material: str, *, quantity: int = 1) -> dict[str, Any]:
     """Estimate cost for local printing."""
-    # Base cost estimates per material (USD per gram, approximate).
-    material_costs = {
-        "pla": 0.02,
-        "abs": 0.025,
-        "petg": 0.03,
-        "tpu": 0.04,
-        "nylon": 0.05,
-        "asa": 0.03,
-    }
+    # The material's price from the one material table, PLA's when it has no row.
+    from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
 
-    cost_per_gram = material_costs.get(material.lower(), 0.03)
+    row = resolve_material(material) or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
+    cost_per_gram = row.cost_per_kg_usd / 1000.0
     # Assume ~50g average model weight for estimation.
     estimated_grams = 50
     unit_cost = cost_per_gram * estimated_grams

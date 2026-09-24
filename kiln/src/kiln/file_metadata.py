@@ -33,7 +33,13 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from kiln.gcode import slicer_filament_totals, slicer_layer_count, slicer_print_time
+from kiln.gcode import (
+    slicer_filament_totals,
+    slicer_filament_types,
+    slicer_layer_count,
+    slicer_material_label,
+    slicer_print_time,
+)
 from kiln.gcode_metadata import read_head, read_head_and_tail
 
 logger = logging.getLogger(__name__)
@@ -98,10 +104,6 @@ class FileMetadata:
 # G-code header patterns (works for FDM G-code from all major slicers)
 # ---------------------------------------------------------------------------
 
-_RE_MATERIAL = re.compile(
-    r";\s*(?:material|filament_type)\s*[:=]\s*(.+)",
-    re.IGNORECASE,
-)
 _RE_SLICER = re.compile(
     r";\s*(?:slicer|generated\s*(?:by|with))\s*[:=]?\s*(.+)",
     re.IGNORECASE,
@@ -189,9 +191,11 @@ def _parse_dimensions_string(raw: str) -> dict[str, float] | None:
 
 def _what_the_slicer_says(meta: FileMetadata, lines: list[str]) -> None:
     """The slicer's own figures, read by the one reader of each: the print
-    time, the layer total, and every extruder's filament summed — in mm when
-    the file states a length, else in grams."""
+    time, the layer total, every extruder's filament summed — in mm when
+    the file states a length, else in grams — and the material, each
+    filament type once."""
     text = "\n".join(lines)
+    meta.material_hint = slicer_material_label(slicer_filament_types(text))
     printed = slicer_print_time(text)
     if printed is not None:
         meta.estimated_time_seconds = printed.seconds
@@ -369,16 +373,12 @@ def _parse_3mf_slicer_metadata(zf: zipfile.ZipFile, meta: FileMetadata) -> None:
 
 def _parse_config_text(content: str, meta: FileMetadata) -> None:
     """Parse key=value slicer config text for metadata fields."""
+    if meta.material_hint is None:
+        meta.material_hint = slicer_material_label(slicer_filament_types(content))
     for line in content.splitlines()[:200]:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-
-        # filament_type = PLA
-        if meta.material_hint is None:
-            m = re.match(r"filament_type\s*=\s*(.+)", stripped, re.IGNORECASE)
-            if m:
-                meta.material_hint = m.group(1).strip()
 
         # layer_height = 0.2
         if "layer_height" not in meta.extra:
@@ -465,11 +465,6 @@ def _extract_gcode_metadata_from_lines(lines: list[str]) -> FileMetadata:
         stripped = line.strip()
         if not stripped or not stripped.startswith(";"):
             continue
-
-        if meta.material_hint is None:
-            m = _RE_MATERIAL.match(stripped)
-            if m:
-                meta.material_hint = m.group(1).strip()
 
         if meta.slicer_hint is None:
             m = _RE_SLICER.match(stripped)

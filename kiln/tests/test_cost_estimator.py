@@ -494,9 +494,26 @@ class TestEstimateFrom3MF:
             "</plate></config>"
         )
         path = self._make_3mf(tmp_path, xml)
-        # Even though caller says PLA, 3MF says PETG — 3MF wins.
-        est = CostEstimator().estimate_from_file(path, material="PLA")
+        # Nobody named a material: the 3MF's own type prices it.
+        est = CostEstimator().estimate_from_file(path)
         assert est.material == "PETG"
+        assert est.material_source == "file"
+        assert est.filament_cost_usd == pytest.approx(30.0 / 1000 * BUILTIN_MATERIALS["PETG"].cost_per_kg_usd)
+
+    def test_a_named_material_wins_and_the_files_type_is_said(self, tmp_path):
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<config><plate>\n"
+            '  <filament id="1" type="PETG" used_m="10.0" used_g="30.0"/>\n'
+            "</plate></config>"
+        )
+        path = self._make_3mf(tmp_path, xml)
+        est = CostEstimator().estimate_from_file(path, material="PLA")
+        assert (est.material, est.material_source) == ("PLA", "named")
+        # The slicer's PETG grams, weighed again as PLA.
+        pla, petg = BUILTIN_MATERIALS["PLA"], BUILTIN_MATERIALS["PETG"]
+        assert est.filament_weight_grams == pytest.approx(30.0 * pla.density_g_per_cm3 / petg.density_g_per_cm3, abs=0.01)
+        assert any("sliced for PETG" in w for w in est.warnings)
 
 
 # -----------------------------------------------------------------------

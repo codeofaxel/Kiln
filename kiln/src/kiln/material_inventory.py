@@ -33,18 +33,6 @@ _FILAMENT_DIAMETER_MM: float = 1.75
 _FILAMENT_RADIUS_MM: float = _FILAMENT_DIAMETER_MM / 2.0
 _FILAMENT_CROSS_SECTION_MM2: float = math.pi * _FILAMENT_RADIUS_MM**2
 
-# Approximate density (g/cm^3) for common materials.  Used when converting
-# filament_used_mm to grams when no cost_estimator profile is available.
-_DEFAULT_DENSITIES: dict[str, float] = {
-    "PLA": 1.24,
-    "PETG": 1.27,
-    "ABS": 1.04,
-    "TPU": 1.21,
-    "ASA": 1.07,
-    "NYLON": 1.14,
-    "PC": 1.20,
-}
-_FALLBACK_DENSITY: float = 1.24  # PLA as default
 
 
 # ---------------------------------------------------------------------------
@@ -212,11 +200,12 @@ class FleetAssignment:
 def _mm_to_grams(filament_mm: float, material_type: str | None = None) -> float:
     """Convert extruded filament length (mm) to weight (grams).
 
-    Uses standard 1.75 mm filament diameter and material density.
+    Uses standard 1.75 mm filament diameter and the material's density from
+    the one material table, PLA's when the table has no row for it.
     """
-    density = _DEFAULT_DENSITIES.get(
-        (material_type or "").upper(), _FALLBACK_DENSITY
-    )
+    from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
+
+    density = (resolve_material(material_type) or BUILTIN_MATERIALS[DEFAULT_MATERIAL]).density_g_per_cm3
     volume_cm3 = (filament_mm * _FILAMENT_CROSS_SECTION_MM2) / 1000.0
     return volume_cm3 * density
 

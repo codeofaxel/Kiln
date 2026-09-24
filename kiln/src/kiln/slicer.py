@@ -1173,7 +1173,9 @@ def derive_filament_weight(estimates: dict[str, Any], material: str | None) -> N
     for G-code sliced elsewhere.  The volume is right there in the same
     G-code, so the missing half is only the material.
 
-    Weight is physics and is computed here when the caller names a material.
+    Weight is physics and is computed here when the caller names a material,
+    or, when the caller names none, when the file itself says what it was
+    sliced for (``filament_types``) and every filament is the same material.
     Cost is not: the table's price is a generic figure, not what anyone paid,
     and a made-up price is the kind of confident wrong number this is meant to
     stop.  ``estimate_material_cost`` takes a real ``cost_per_kg`` for that.
@@ -1181,22 +1183,31 @@ def derive_filament_weight(estimates: dict[str, Any], material: str | None) -> N
     Recorded as *generic*, because a table density is the family's nominal
     value and not a measurement of the spool on the shelf.
     """
-    if not material or estimates.get("filament_weight_g"):
+    if estimates.get("filament_weight_g"):
         return
     volume_cm3 = estimates.get("filament_volume_cm3")
     if not volume_cm3:
         return
     try:
-        from kiln.cost_estimator import BUILTIN_MATERIALS
+        from kiln.cost_estimator import resolve_material
     except ImportError:  # pragma: no cover — cost table always ships
         return
 
-    profile = BUILTIN_MATERIALS.get(str(material).strip().upper())
+    if material:
+        profile = resolve_material(material)
+        whose = "generic"
+    else:
+        # The file's own types: one material for the whole plate, or no
+        # single density can weigh it.
+        rows = [resolve_material(t) for t in estimates.get("filament_types") or () if t]
+        names = {row.name if row is not None else None for row in rows}
+        profile = rows[0] if rows and len(names) == 1 and None not in names else None
+        whose = "the file's own filament type, generic"
     if profile is None:
         return
     estimates["filament_weight_g"] = round(volume_cm3 * profile.density_g_per_cm3, 2)
     estimates["filament_weight_basis"] = (
-        f"computed from extruded volume x generic {profile.name} density "
+        f"computed from extruded volume x {whose} {profile.name} density "
         f"({profile.density_g_per_cm3} g/cm3)"
     )
 
@@ -1273,7 +1284,12 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     """
     import re as _re
 
-    from kiln.gcode import slicer_filament_totals, slicer_layer_count, slicer_print_time
+    from kiln.gcode import (
+        slicer_filament_totals,
+        slicer_filament_types,
+        slicer_layer_count,
+        slicer_print_time,
+    )
 
     estimates: dict[str, Any] = {"gcode_path": gcode_path}
 
@@ -1314,6 +1330,9 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     layers = slicer_layer_count(comments)
     if layers is not None:
         estimates["layer_count"] = layers
+    types = slicer_filament_types(comments)
+    if any(types):
+        estimates["filament_types"] = list(types)
 
     for line in search_lines:
         line = line.strip()
@@ -1729,13 +1748,19 @@ def merge_multipart_gcode(
 
     # Each part's own figures, read from the top and the end of its file,
     # where every slicer writes them: the merged print's time is their sum,
-    # and each tool's filament is its parts'.
-    from kiln.gcode import format_duration, slicer_filament_totals, slicer_print_time
+    # and each tool's filament, and the type it was sliced for, are its parts'.
+    from kiln.gcode import (
+        format_duration,
+        slicer_filament_totals,
+        slicer_filament_types,
+        slicer_print_time,
+    )
     from kiln.gcode_metadata import read_head_and_tail
 
     total_time = 0
     tool_mm: dict[int, float] = {}
     tool_g: dict[int, float] = {}
+    tool_type: dict[int, str] = {}
     every_part_states_mm = every_part_states_g = True
     for _header, _layers, part_info in parsed:
         gcode_path = part_info.get("gcode_path", "")
@@ -1748,6 +1773,9 @@ def merge_multipart_gcode(
             total_time += printed.seconds
         totals = slicer_filament_totals(part_text)
         tool = int(part_info["tool_index"])
+        part_types = slicer_filament_types(part_text)
+        if part_types and part_types[0]:
+            tool_type.setdefault(tool, part_types[0])
         if totals.mm:
             tool_mm[tool] = tool_mm.get(tool, 0.0) + totals.total_mm
         else:
@@ -1769,6 +1797,11 @@ def merge_multipart_gcode(
         merged_totals.append("; filament used [mm] = " + ", ".join(f"{tool_mm[t]:.2f}" for t in sorted(tool_mm)))
         if every_part_states_g and tool_g:
             merged_totals.append("; filament used [g] = " + ", ".join(f"{tool_g[t]:.2f}" for t in sorted(tool_g)))
+    if tool_type:
+        # One entry per tool slot, a slot no part names left blank, so
+        # entry i is T<i>'s.
+        slots = range(max(tool_type) + 1)
+        merged_totals.append("; filament_type = " + ";".join(tool_type.get(t, "") for t in slots))
 
     if not output_path:
         output_path = os.path.join(

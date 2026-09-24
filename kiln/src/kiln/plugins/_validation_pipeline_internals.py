@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
 from kiln.support_assessment import MATERIAL_ALIASES as _MATERIAL_ALIASES
 
 _logger = logging.getLogger(__name__)
@@ -113,9 +114,10 @@ _SCORE_PENALTY_REPAIR = 15  # deduction when mesh required repair
 # Material / cost estimation constants
 # ---------------------------------------------------------------------------
 
-_PLA_DENSITY_G_PER_CM3 = 1.24  # PLA material density in g/cm³
+# PLA's density and price, read from the one material table, never restated.
+_PLA_DENSITY_G_PER_CM3 = BUILTIN_MATERIALS[DEFAULT_MATERIAL].density_g_per_cm3
 _DEFAULT_INFILL_FACTOR = 0.3  # approximate infill ratio for volume estimation
-_MATERIAL_COST_PER_GRAM = 0.02  # $20/kg PLA → $0.02/g
+_MATERIAL_COST_PER_GRAM = BUILTIN_MATERIALS[DEFAULT_MATERIAL].cost_per_kg_usd / 1000.0
 _ABS_WARP_THRESHOLD_MM = 100.0  # bed footprint threshold for ABS/ASA warping warning
 
 

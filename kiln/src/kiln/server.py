@@ -114,7 +114,13 @@ except ImportError:
     BillingAlertManager = None  # Available in kiln-pro
 from kiln.cli.config import _normalize_printer_type, _validate_printer_url, save_printer
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
-from kiln.cost_estimator import CostEstimator
+from kiln.cost_estimator import (
+    BUILTIN_MATERIALS,
+    DEFAULT_MATERIAL,
+    CostEstimator,
+    FilamentPricing,
+    resolve_material,
+)
 from kiln.errors import HostedUnavailableError
 from kiln.events import Event, EventBus, EventType
 
@@ -5175,19 +5181,8 @@ def printer_status(
 
 
 # -- Material cost estimation --------------------------------------------------
-# Mirrors _MATERIAL_DB from kiln.generation.validation but kept local to avoid
-# importing the heavy mesh-analysis module at server startup.
-_MATERIAL_COST_PER_KG: dict[str, float] = {
-    "pla": 20.0,
-    "pla+": 22.0,
-    "petg": 22.0,
-    "abs": 18.0,
-    "tpu": 30.0,
-    "asa": 25.0,
-    "nylon": 35.0,
-    "pc": 40.0,
-    "carbon_fiber_pla": 45.0,
-}
+# Prices come from the one material table (kiln.cost_estimator), through the
+# one lookup every estimate uses.
 
 # Average FDM filament consumption: ~7.5 g/hour is a reasonable mid-range
 # estimate across typical desktop prints (5-10 g/hr range).
@@ -5209,11 +5204,17 @@ def _estimate_print_cost(
     material: str | None = None,
     filament_weight_g: float | None = None,
     tool_changes: int = 0,
+    filaments: FilamentPricing | None = None,
 ) -> dict[str, Any] | None:
     """Estimate print cost from filament weight and electricity.
 
     Prefers *filament_weight_g* (from gcode metadata) when available.
     Falls back to the time-based heuristic (g/hr) when no metadata exists.
+    *filaments* is a print file's own answer
+    (:meth:`kiln.cost_estimator.CostEstimator.filament_pricing`): when it
+    weighs anything, its weight, material and price win.  Otherwise
+    *material* is priced from the material table, PLA when it names
+    nothing the table has.
 
     Includes electricity cost based on printer wattage and total time.
     For multicolor prints, adds AMS purge waste per tool change.
@@ -5221,15 +5222,20 @@ def _estimate_print_cost(
     Returns a dict with cost breakdown, or ``None`` if estimation is not
     possible (e.g. both time values and weight are missing).
     """
+    if filaments is not None and filaments.weight_g > 0 and filaments.cost_per_kg_usd is not None:
+        filament_weight_g = filaments.weight_g
+        cost_per_kg = filaments.cost_per_kg_usd
+        mat_label = filaments.material
+    else:
+        row = resolve_material(material)
+        cost_per_kg = (row or BUILTIN_MATERIALS[DEFAULT_MATERIAL]).cost_per_kg_usd
+        mat_label = row.name if row is not None else (material or DEFAULT_MATERIAL).strip().upper()
+
     elapsed = elapsed_s if elapsed_s is not None and elapsed_s >= 0 else 0
     remaining = remaining_s if remaining_s is not None and remaining_s >= 0 else 0
     total_s = elapsed + remaining
     if total_s <= 0 and filament_weight_g is None:
         return None
-
-    mat_key = (material or "pla").lower().strip()
-    cost_per_kg = _MATERIAL_COST_PER_KG.get(mat_key, _MATERIAL_COST_PER_KG["pla"])
-    mat_label = mat_key.upper()
 
     # --- Filament weight ---
     if filament_weight_g is not None and filament_weight_g > 0:
@@ -5263,7 +5269,7 @@ def _estimate_print_cost(
         "material_cost_usd": round(material_cost, 2),
         "electricity_cost_usd": round(electricity_cost, 2),
         "total_cost_usd": round(total_cost, 2),
-        "cost_per_kg_usd": cost_per_kg,
+        "cost_per_kg_usd": round(cost_per_kg, 2),
         "total_print_time_hours": round(total_hours, 2),
         "tool_changes": tool_changes,
         "weight_source": weight_source,
@@ -5852,6 +5858,7 @@ def monitor_print(
         # Try to get filament weight from gcode metadata (more accurate
         # than time-based heuristic).  Also count tool changes for purge waste.
         _filament_weight_g: float | None = None
+        _file_material: str | None = None
         _tool_changes = 0
         if file_name:
             try:
@@ -5875,14 +5882,16 @@ def monitor_print(
                 # Also check the uploaded file metadata from the printer
                 _pf = PrinterFile(name=file_name)
                 _meta = adapter.get_file_metadata(file_name)
+                _file_material = getattr(_meta, "material", None) if _meta else None
                 if _meta and hasattr(_meta, "filament_used_mm") and _meta.filament_used_mm:
-                    # Convert mm to grams: volume = pi * (d/2)^2 * length
+                    # Length to grams at the density of the material the file
+                    # was sliced for, from the one material table.
                     import math as _math
 
-                    _d = 1.75  # mm filament diameter
-                    _vol_mm3 = _math.pi * (_d / 2) ** 2 * _meta.filament_used_mm
-                    _density = 0.00124  # PLA g/mm³
-                    _filament_weight_g = _vol_mm3 * _density
+                    _row = resolve_material(_file_material) or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
+                    _radius_mm = _row.filament_diameter_mm / 2
+                    _vol_cm3 = _math.pi * _radius_mm**2 * _meta.filament_used_mm / 1000.0
+                    _filament_weight_g = _vol_cm3 * _row.density_g_per_cm3
             except Exception:
                 pass  # Fallback to time-based
 
@@ -5907,6 +5916,7 @@ def monitor_print(
         cost_info = _estimate_print_cost(
             elapsed_s,
             remaining_s,
+            material=_file_material,
             filament_weight_g=_filament_weight_g,
             tool_changes=_tool_changes,
         )
@@ -7399,16 +7409,20 @@ def start_print(
                         if _pf.filament_used_mm:
                             import math as _m
 
-                            # 1.75 mm filament, PLA density
-                            # 0.00124 g/mm^3 — same baseline used
-                            # in slice_and_print's gcode metadata
-                            # parser (see _filament_weight_g logic).
-                            _vol_mm3 = (
-                                _m.pi
-                                * (1.75 / 2) ** 2
-                                * _pf.filament_used_mm
+                            # Length to grams at the density of the
+                            # material the file was sliced for, from the
+                            # one material table (PLA when it names none).
+                            _row = (
+                                resolve_material(_pf.material)
+                                or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
                             )
-                            _planned_grams = _vol_mm3 * 0.00124
+                            _vol_cm3 = (
+                                _m.pi
+                                * (_row.filament_diameter_mm / 2) ** 2
+                                * _pf.filament_used_mm
+                                / 1000.0
+                            )
+                            _planned_grams = _vol_cm3 * _row.density_g_per_cm3
                         if _pf.material:
                             _filament_material = _pf.material
                         break
@@ -10121,8 +10135,22 @@ def preflight_check(
             except Exception as exc:
                 logger.debug("Cost estimate gcode parse failed: %s", exc)
 
-        if _cost_time_s is not None and _cost_time_s > 0:
-            cost_estimate = _estimate_print_cost(_cost_time_s, 0, material=expected_material)
+        # 3) What the file itself will use: each filament's grams and the
+        #    material it was sliced for (the expected material wins when
+        #    given), priced from the one material table.
+        _file_filaments = None
+        if file_path is not None and Path(file_path).suffix.lower() in _GCODE_EXTENSIONS:
+            try:
+                _file_filaments = _get_cost_estimator().filament_pricing(
+                    str(file_path), material=expected_material
+                )
+            except Exception as exc:
+                logger.debug("Cost estimate filament read failed: %s", exc)
+
+        if (_cost_time_s is not None and _cost_time_s > 0) or _file_filaments is not None:
+            cost_estimate = _estimate_print_cost(
+                _cost_time_s, 0, material=expected_material, filaments=_file_filaments
+            )
 
         # -- Brand filament compatibility (advisory) ----------------------
         if expected_material is not None:
@@ -13332,7 +13360,7 @@ def await_print_completion(
 @mcp.tool()
 def compare_print_options(
     file_path: str,
-    material: str = "PLA",
+    material: str = "",
     fulfillment_material_id: str | None = None,
     quantity: int = 1,
     electricity_rate: float = 0.12,
@@ -13349,7 +13377,9 @@ def compare_print_options(
         file_path: Path to the G-code file (for local) or model file
             (STL/3MF for fulfillment).  If a G-code file is provided,
             only local estimate is returned.
-        material: Filament material for local estimate (PLA, PETG, etc.).
+        material: Filament material for the local estimate (PLA, PETG, …).
+            Leave empty to use what the file was sliced for, PLA when it
+            names nothing.
         fulfillment_material_id: Material ID from ``fulfillment_materials``
             for the outsourced quote.  If omitted, the fulfillment quote
             is skipped.
@@ -13366,7 +13396,7 @@ def compare_print_options(
     try:
         estimate = _get_cost_estimator().estimate_from_file(
             file_path,
-            material=material,
+            material=material or None,
             electricity_rate=electricity_rate,
             printer_wattage=printer_wattage,
         )

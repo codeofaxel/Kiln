@@ -2115,9 +2115,11 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
                 proj_area = tri_area * abs(nz)
                 support_volume += proj_area * height_above_bed
 
-    # Estimate support weight (typical PLA density ~1.24 g/cm³)
+    # Estimate support weight at the material table's default (PLA) density
+    from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
+
     support_volume_cm3 = support_volume / 1000.0
-    support_weight_g = support_volume_cm3 * 1.24
+    support_weight_g = support_volume_cm3 * BUILTIN_MATERIALS[DEFAULT_MATERIAL].density_g_per_cm3
 
     return {
         "support_volume_mm3": round(support_volume, 1),
@@ -3469,19 +3471,6 @@ def cad_intake_report(
 # Material cost estimation
 # ---------------------------------------------------------------------------
 
-# Common FDM material densities (g/cm³) and approximate costs ($/kg)
-_MATERIAL_DB: dict[str, dict[str, float]] = {
-    "pla": {"density": 1.24, "cost_per_kg": 20.0},
-    "petg": {"density": 1.27, "cost_per_kg": 22.0},
-    "abs": {"density": 1.04, "cost_per_kg": 18.0},
-    "tpu": {"density": 1.21, "cost_per_kg": 30.0},
-    "asa": {"density": 1.07, "cost_per_kg": 25.0},
-    "nylon": {"density": 1.14, "cost_per_kg": 35.0},
-    "pc": {"density": 1.20, "cost_per_kg": 40.0},
-    "pla+": {"density": 1.24, "cost_per_kg": 22.0},
-    "carbon_fiber_pla": {"density": 1.30, "cost_per_kg": 45.0},
-}
-
 
 def estimate_material_cost(
     file_path: str,
@@ -3514,9 +3503,12 @@ def estimate_material_cost(
     if analysis.volume_mm3 <= 0:
         raise ValueError("Cannot estimate cost: mesh has no volume")
 
-    mat = _MATERIAL_DB.get(material.lower(), _MATERIAL_DB["pla"])
-    density = mat["density"]
-    price = cost_per_kg if cost_per_kg is not None else mat["cost_per_kg"]
+    # Density and price from the one material table, PLA's when it has no row.
+    from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
+
+    row = resolve_material(material) or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
+    density = row.density_g_per_cm3
+    price = cost_per_kg if cost_per_kg is not None else row.cost_per_kg_usd
 
     # Approximate solid shell volume
     # Shell thickness ≈ wall_layers × nozzle_mm

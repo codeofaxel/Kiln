@@ -2319,7 +2319,7 @@ def resolve_filament(
     :param printer_id: Optional printer model for compatibility warnings.
     :returns: :class:`ResolvedFilament` with unified properties.
     """
-    from kiln.cost_estimator import BUILTIN_MATERIALS
+    from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
 
     key = material_or_brand.strip().lower()
     warnings: list[str] = []
@@ -2341,7 +2341,8 @@ def resolve_filament(
             brand_profile_id=brand.profile_id,
             display_name=f"{brand.brand} {brand.product_name}",
             is_brand_specific=True,
-            density_g_per_cm3=brand.density_g_cm3 or (parent_mat.density_g_per_cm3 if parent_mat else 1.24),
+            density_g_per_cm3=brand.density_g_cm3
+            or (parent_mat or BUILTIN_MATERIALS[DEFAULT_MATERIAL]).density_g_per_cm3,
             cost_per_kg_usd=cost,
             filament_diameter_mm=diameter,
             nozzle_temp_optimal_c=brand.nozzle_temp_optimal_c,
@@ -2358,20 +2359,9 @@ def resolve_filament(
             warnings=warnings,
         )
 
-    # --- Fall back to parent material ---
-    mat_upper = key.upper().replace("-", "_")
-    parent = BUILTIN_MATERIALS.get(mat_upper)
-    if parent is None:
-        # Try common aliases (PLA_PLUS → PLA+, CF_PLA → CF-PLA, etc.)
-        _ALIASES = {
-            "PLA_PLUS": "PLA+",
-            "CF_PLA": "CF-PLA",
-            "SILK_PLA": "SILK-PLA",
-        }
-        parent = BUILTIN_MATERIALS.get(_ALIASES.get(mat_upper, mat_upper))
-
-    if parent is None:
-        parent = BUILTIN_MATERIALS["PLA"]
+    # --- Fall back to parent material, through the one lookup every
+    # estimate uses (spellings, aliases, families), PLA when it has none ---
+    parent = resolve_material(key) or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
 
     return ResolvedFilament(
         material_id=key,

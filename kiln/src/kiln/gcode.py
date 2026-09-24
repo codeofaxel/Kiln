@@ -1502,6 +1502,49 @@ def slicer_filament_totals(text: str) -> SlicerFilamentTotals:
     )
 
 
+#: The filament types a slicer sliced for, one per filament slot:
+#: PrusaSlicer, OrcaSlicer and Bambu Studio write ``; filament_type =
+#: PLA;PLA;PETG`` in their settings block, and a 3MF's settings text writes
+#: the same line without the ``;``.  Cura-style headers write one
+#: ``;MATERIAL:PLA``.  OrcaSlicer's note at each prime-tower tool change,
+#: ``; material : PLA -> PETG``, is not a setting and is never read.
+_FILAMENT_TYPE_LINE = re.compile(r"^(?:;[ \t]*)?filament_type[ \t]*=[ \t]*(?P<v>.*?)[ \t]*$", re.I | re.M)
+_CURA_MATERIAL_LINE = re.compile(r"^;MATERIAL:[ \t]*(?P<v>\S.*?)[ \t]*$", re.M)
+
+
+def slicer_filament_types(text: str) -> tuple[str, ...]:
+    """The filament type the slicer sliced each filament slot for, as it
+    wrote them into *text* (a G-code file or a 3MF's settings text), or
+    ``()`` when it names none.
+
+    The one reader of a print file's material: every door that reports
+    what a file was sliced for calls it.  One entry per slot, in slot
+    order, so entry ``i`` is tool ``T<i>``'s; a slot the slicer left blank
+    stays ``""`` to keep that order.  The first line wins: a file Kiln
+    wrapped for a printer states the types it told the printer before the
+    slicer's own block.  Never raises.
+    """
+    candidates = "\n".join(
+        line.strip()
+        for line in text.splitlines()
+        if "ilament_type" in line or "ILAMENT_TYPE" in line or ";MATERIAL:" in line
+    )
+    m = _FILAMENT_TYPE_LINE.search(candidates)
+    if m is not None and m.group("v"):
+        return tuple(part.strip().strip('"').strip() for part in m.group("v").split(";"))
+    m = _CURA_MATERIAL_LINE.search(candidates)
+    return (m.group("v"),) if m is not None else ()
+
+
+def slicer_material_label(types: Iterable[str]) -> str | None:
+    """A print file's material as one label: each filament type once, in
+    slot order, upper-cased and joined with `` + `` (``"PLA"``, ``"PLA +
+    PETG"``); ``None`` when it names none.  What a listing shows; never the
+    raw per-slot list, which read as one material called ``"PLA;PLA"``."""
+    words = [str(t).strip().upper() for t in types]
+    return " + ".join(dict.fromkeys(w for w in words if w)) or None
+
+
 # ---------------------------------------------------------------------------
 # The slicer's own print time and layer count
 # ---------------------------------------------------------------------------

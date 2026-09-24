@@ -251,7 +251,12 @@ class _EstimateToolsPlugin:
                     fil = getattr(result, "filament", None)
                     known = isinstance(fil, SliceFilament)
                     diameter = fil.diameter_mm if known else 1.75
-                    density = fil.density_g_per_cm3 if known else 1.24
+                    if known:
+                        density = fil.density_g_per_cm3
+                    else:
+                        from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
+
+                        density = (resolve_material(material) or BUILTIN_MATERIALS[DEFAULT_MATERIAL]).density_g_per_cm3
                     filament_g = round(filament_mm * _math.pi * (diameter / 2) ** 2 * density / 1000.0, 2)
 
                 time_sec = meta.estimated_time_seconds if meta else None
@@ -373,7 +378,7 @@ class _EstimateToolsPlugin:
         @mcp.tool()
         def estimate_cost(
             file_path: str,
-            material: str = "PLA",
+            material: str = "",
             electricity_rate: float = 0.12,
             printer_wattage: float = 200.0,
         ) -> dict:
@@ -388,9 +393,16 @@ class _EstimateToolsPlugin:
             and a ``warnings`` entry names both numbers when Kiln's count
             sits more than 5% from the slicer's total.
 
+            Each filament is priced as the material the file was sliced
+            for; ``estimate.filaments`` lists them and
+            ``estimate.material_source`` says where the material came from.
+
             Args:
                 file_path: Path to the G-code file.
-                material: Filament material (PLA, PETG, ABS, TPU, ASA, NYLON, PC).
+                material: Filament material (PLA, PETG, ABS, TPU, ASA, NYLON,
+                    PC, …).  Leave empty to use what the file was sliced
+                    for, PLA when it names nothing; a named material prices
+                    every filament.
                 electricity_rate: Cost per kWh in USD (default 0.12).
                 printer_wattage: Printer power consumption in watts (default 200).
             """
@@ -399,7 +411,7 @@ class _EstimateToolsPlugin:
             try:
                 estimate = _srv._get_cost_estimator().estimate_from_file(
                     file_path,
-                    material=material,
+                    material=material or None,
                     electricity_rate=electricity_rate,
                     printer_wattage=printer_wattage,
                 )

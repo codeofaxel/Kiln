@@ -58,6 +58,10 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any
 
+# The last rung is the table's own default, PLA: its figure is the table's,
+# never restated here.
+from kiln.cost_estimator import DEFAULT_MATERIAL
+
 logger = logging.getLogger(__name__)
 
 #: Where a slice's density came from, in ladder order.
@@ -65,9 +69,6 @@ SOURCE_DECLARED = "declared"
 SOURCE_LOADED = "loaded"
 SOURCE_PROFILE = "profile"
 SOURCE_DEFAULT = "default"
-
-#: The last rung.  PLA's figure is the table's own, never restated here.
-DEFAULT_MATERIAL = "PLA"
 
 #: The INI keys the identity is written to.  PrusaSlicer's spelling; the
 #: Orca serializer maps them to its preset keys.
@@ -154,47 +155,17 @@ class SliceFilament:
 def material_density(name: str | None) -> tuple[str, float] | None:
     """The table row a material name lands on: ``(row, g/cm³)``, or ``None``.
 
-    Spellings arrive from three vocabularies -- the caller's (``"petg"``),
-    the AMS's (``"PLA-CF"``, ``"PA-CF"``) and the table's own (``"CF-PLA"``,
-    ``"NYLON"``) -- so the lookup tries, in order: the row itself, the
-    alias table :mod:`kiln.materials` keeps (``PA`` is nylon), the hyphen
-    pair reversed (Bambu writes the modifier last, the table writes it
-    first), and finally the family the name starts with (``PETG-HF`` is
-    PETG for weighing purposes).  ``None`` means the table has no row and
-    no family for it; the caller decides what that means.
+    The one lookup every estimate uses, :func:`kiln.cost_estimator.resolve_material`,
+    so a slice and a cost estimate can never disagree about what a spool
+    weighs.  ``None`` means the table has no row and no family for it; the
+    caller decides what that means.
     """
-    if not name:
-        return None
-    key = str(name).strip().upper()
-    if not key:
-        return None
     try:
-        from kiln.cost_estimator import BUILTIN_MATERIALS
+        from kiln.cost_estimator import resolve_material
     except ImportError:  # pragma: no cover -- the cost table always ships
         return None
-
-    def _row(candidate: str | None):
-        return BUILTIN_MATERIALS.get(candidate) if candidate else None
-
-    def _alias(candidate: str) -> str | None:
-        try:
-            from kiln.materials import normalise_material_type
-
-            return normalise_material_type(candidate)
-        except Exception:  # noqa: BLE001 -- an alias table that cannot load is no alias
-            return None
-
-    hit = _row(key) or _row(_alias(key))
-    if hit is None and "-" in key:
-        head, _, tail = key.partition("-")
-        hit = _row(f"{tail}-{head}")
-    if hit is None:
-        family = re.match(r"[A-Z]+", key)
-        if family:
-            hit = _row(family.group(0)) or _row(_alias(family.group(0)))
-    if hit is None:
-        return None
-    return hit.name, hit.density_g_per_cm3
+    row = resolve_material(name)
+    return (row.name, row.density_g_per_cm3) if row is not None else None
 
 
 def safe_filament_type(name: Any) -> str:

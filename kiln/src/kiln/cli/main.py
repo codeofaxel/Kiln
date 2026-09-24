@@ -2198,11 +2198,6 @@ def status(ctx: click.Context, json_mode: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
-# Material cost per kg — matches server.py _MATERIAL_COST_PER_KG
-_CLI_COST_PER_KG: dict[str, float] = {
-    "pla": 20.0, "pla+": 22.0, "petg": 22.0, "abs": 18.0,
-    "tpu": 30.0, "asa": 25.0, "nylon": 35.0, "pc": 40.0,
-}
 _CLI_AVG_G_PER_HOUR: float = 7.5
 
 
@@ -2221,13 +2216,17 @@ def _estimate_print_cost_cli(
     total_s = elapsed + remaining
     if total_s <= 0:
         return None
-    mat_key = (material or "pla").lower().strip()
-    cost_per_kg = _CLI_COST_PER_KG.get(mat_key, _CLI_COST_PER_KG["pla"])
+    # The price from the one material table, PLA's when it has no row.
+    from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
+
+    row = resolve_material(material)
+    cost_per_kg = (row or BUILTIN_MATERIALS[DEFAULT_MATERIAL]).cost_per_kg_usd
+    mat_label = row.name if row is not None else (material or DEFAULT_MATERIAL).strip().upper()
     total_hours = total_s / 3600.0
     estimated_weight_g = total_hours * _CLI_AVG_G_PER_HOUR
     estimated_cost = (estimated_weight_g / 1000.0) * cost_per_kg
     return {
-        "material": mat_key.upper(),
+        "material": mat_label,
         "estimated_weight_g": round(estimated_weight_g, 1),
         "estimated_cost_usd": round(estimated_cost, 2),
         "cost_per_kg_usd": cost_per_kg,
@@ -7095,13 +7094,18 @@ def ingest_service_status_cmd(config_path: str | None, tail_lines: int, json_mod
 
 @cli.command()
 @click.argument("file_path", type=click.Path(exists=True))
-@click.option("--material", "-m", default="PLA", help="Filament material (default PLA).")
+@click.option(
+    "--material",
+    "-m",
+    default=None,
+    help="Filament material. Default: what the file was sliced for, else PLA.",
+)
 @click.option("--electricity-rate", default=0.12, type=float, help="USD per kWh.")
 @click.option("--printer-wattage", default=200.0, type=float, help="Printer watts.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def cost(
     file_path: str,
-    material: str,
+    material: str | None,
     electricity_rate: float,
     printer_wattage: float,
     json_mode: bool,
@@ -7310,7 +7314,12 @@ def estimate_before_design_cmd(
 
 @cli.command("compare-cost")
 @click.argument("file_path", type=click.Path(exists=True))
-@click.option("--material", "-m", default="PLA", help="Filament material for local estimate.")
+@click.option(
+    "--material",
+    "-m",
+    default=None,
+    help="Filament material for the local estimate. Default: what the file was sliced for, else PLA.",
+)
 @click.option("--fulfillment-material", default=None, help="Material ID for fulfillment quote.")
 @click.option("--quantity", "-q", default=1, type=int, help="Quantity for fulfillment.")
 @click.option("--electricity-rate", default=0.12, type=float, help="USD per kWh.")
@@ -7325,7 +7334,7 @@ def estimate_before_design_cmd(
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def compare_cost(
     file_path: str,
-    material: str,
+    material: str | None,
     fulfillment_material: str | None,
     quantity: int,
     electricity_rate: float,

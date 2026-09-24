@@ -140,6 +140,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
+
 logger = logging.getLogger(__name__)
 
 #: Versioned discriminator for the block.
@@ -241,9 +243,10 @@ _WIDTH_RE = re.compile(r"^\s*;\s*WIDTH\s*:\s*(\d*\.?\d+)\s*$", re.IGNORECASE)
 #: What a stage draws a path at when the file never said (a common FDM
 #: line width, and Cura's default).
 DEFAULT_LINE_WIDTH_MM = 0.45
-#: The density the grams estimate assumes (PLA; PETG and ABS sit within
-#: a tenth of it) — the legend marks the figure as an estimate.
-FILAMENT_DENSITY_G_CM3 = 1.24
+#: The density the grams estimate assumes, the material table's default
+#: (PLA; PETG and ABS sit within a tenth of it) — the legend marks the
+#: figure as an estimate.
+FILAMENT_DENSITY_G_CM3 = BUILTIN_MATERIALS[DEFAULT_MATERIAL].density_g_per_cm3
 #: The layer height assumed when a class spans a single layer.
 DEFAULT_LAYER_HEIGHT_MM = 0.2
 

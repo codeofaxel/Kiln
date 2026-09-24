@@ -87,10 +87,11 @@ def _get_material_profile(material: str) -> dict[str, Any]:
         if resolved.is_brand_specific:
             name = resolved.display_name
         else:
-            # Resolve actual parent material name from cost_estimator
+            # The table row the name resolved to, through the one lookup
             from kiln.cost_estimator import BUILTIN_MATERIALS as _bm
-            _parent = _bm.get(resolved.material_id.upper()) or _bm.get("PLA")
-            name = _parent.name if _parent else "PLA"
+            from kiln.cost_estimator import DEFAULT_MATERIAL, resolve_material
+
+            name = (resolve_material(resolved.material_id) or _bm[DEFAULT_MATERIAL]).name
         return {
             "name": name,
             "density_g_per_cm3": resolved.density_g_per_cm3,
@@ -100,13 +101,13 @@ def _get_material_profile(material: str) -> dict[str, Any]:
     except Exception:
         _logger.debug("resolve_filament failed for '%s', using cost_estimator fallback", material)
 
-    # Fallback: direct lookup from cost_estimator (always works)
-    from kiln.cost_estimator import BUILTIN_MATERIALS
+    # Fallback: the one lookup on the table itself (always works)
+    from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
 
-    profile = BUILTIN_MATERIALS.get(material.upper())
+    profile = resolve_material(material)
     if profile is None:
         _logger.debug("Unknown material '%s', using PLA defaults", material)
-        profile = BUILTIN_MATERIALS["PLA"]
+        profile = BUILTIN_MATERIALS[DEFAULT_MATERIAL]
     return {
         "name": profile.name,
         "density_g_per_cm3": profile.density_g_per_cm3,
