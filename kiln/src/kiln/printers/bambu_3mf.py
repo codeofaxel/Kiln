@@ -113,6 +113,7 @@ from kiln.gcode import (
     extruded_mm_per_tool,
     has_axis_word,
     slicer_filament_totals,
+    slicer_print_time,
 )
 
 logger = logging.getLogger(__name__)
@@ -1251,36 +1252,6 @@ def _raise_absolute_z_to_floor(gcode: str, floor_mm: float) -> str:
 # ---------------------------------------------------------------------------
 # Gcode post-processing
 # ---------------------------------------------------------------------------
-
-
-def _extract_slicer_time_estimate(gcode_body: str) -> int:
-    """Extract the slicer's own print time estimate from gcode comments.
-
-    PrusaSlicer writes lines like::
-
-        ; estimated printing time (normal mode) = 1h 23m 45s
-
-    OrcaSlicer uses a similar format.  For merged multi-part gcodes that
-    contain multiple "normal mode" estimates (one per sliced part), all
-    estimates are summed to produce the total print time.
-
-    Returns seconds, or 0 if no estimate is found.
-    """
-    total_seconds = 0
-
-    for m in re.finditer(
-        r"estimated printing time \(normal mode\).*?=\s*"
-        r"(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
-        gcode_body,
-        re.IGNORECASE,
-    ):
-        d = int(m.group(1) or 0)
-        h = int(m.group(2) or 0)
-        mins = int(m.group(3) or 0)
-        s = int(m.group(4) or 0)
-        total_seconds += d * 86400 + h * 3600 + mins * 60 + s
-
-    return total_seconds
 
 
 def _count_layers(gcode_body: str) -> int:
@@ -2756,10 +2727,12 @@ def build_bambu_3mf(
 
     max_z = _find_max_z(gcode_body)
 
-    # Try to extract PrusaSlicer's own time estimate (much more accurate
-    # than a flat per-layer heuristic).  Falls back to layers * 6 if the
-    # slicer didn't embed an estimate.
-    est_time_sec = _extract_slicer_time_estimate(gcode_body)
+    # The slicer's own time estimate (much more accurate than a flat
+    # per-layer heuristic), read by the one reader of it.  A file Kiln merged
+    # from several parts states their sum at its top.  Falls back to a size
+    # heuristic if the slicer didn't embed an estimate.
+    printed = slicer_print_time(gcode_body)
+    est_time_sec = printed.seconds if printed is not None else 0
     if est_time_sec <= 0:
         # Fallback: estimate from gcode size.  Typical FDM printers process
         # ~40-60 bytes of gcode per second at normal speeds; 50 B/s is a

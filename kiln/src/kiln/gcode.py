@@ -1530,6 +1530,16 @@ def parse_duration(text: str) -> int | None:
     return int(round(sum(float(n) * _SECONDS_PER_UNIT[unit[0].lower()] for n, unit in parts)))
 
 
+def format_duration(seconds: int) -> str:
+    """*seconds* the way slicers write a duration (``1h 50m 32s``), which
+    :func:`parse_duration` reads back to the same number."""
+    days, rest = divmod(max(0, int(seconds)), 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    parts = [f"{n}{unit}" for n, unit in ((days, "d"), (hours, "h"), (minutes, "m"), (secs, "s")) if n]
+    return " ".join(parts) or "0s"
+
+
 @dataclass(frozen=True)
 class SlicerPrintTime:
     """The whole print's time as a slicer wrote it: seconds, and its words."""

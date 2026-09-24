@@ -1727,18 +1727,48 @@ def merge_multipart_gcode(
 
     merged_body = "".join(merged_blocks)
 
-    # Sum the slicer's own time estimate from each part's gcode, read from
-    # the top and the end of the file, where every slicer writes it.
-    from kiln.gcode import slicer_print_time
+    # Each part's own figures, read from the top and the end of its file,
+    # where every slicer writes them: the merged print's time is their sum,
+    # and each tool's filament is its parts'.
+    from kiln.gcode import format_duration, slicer_filament_totals, slicer_print_time
     from kiln.gcode_metadata import read_head_and_tail
 
     total_time = 0
+    tool_mm: dict[int, float] = {}
+    tool_g: dict[int, float] = {}
+    every_part_states_mm = every_part_states_g = True
     for _header, _layers, part_info in parsed:
         gcode_path = part_info.get("gcode_path", "")
-        if gcode_path and os.path.isfile(gcode_path):
-            printed = slicer_print_time("\n".join(read_head_and_tail(gcode_path)))
-            if printed is not None:
-                total_time += printed.seconds
+        if not (gcode_path and os.path.isfile(gcode_path)):
+            every_part_states_mm = every_part_states_g = False
+            continue
+        part_text = "\n".join(read_head_and_tail(gcode_path))
+        printed = slicer_print_time(part_text)
+        if printed is not None:
+            total_time += printed.seconds
+        totals = slicer_filament_totals(part_text)
+        tool = int(part_info["tool_index"])
+        if totals.mm:
+            tool_mm[tool] = tool_mm.get(tool, 0.0) + totals.total_mm
+        else:
+            every_part_states_mm = False
+        if totals.grams and sum(totals.grams) > 0:
+            tool_g[tool] = tool_g.get(tool, 0.0) + sum(totals.grams)
+        else:
+            every_part_states_g = False
+
+    # The merged file states its own totals at its very top, in the slicers'
+    # own spellings.  Each part's footer still rides in the body behind its
+    # last layer, so without these every reader took the first part's
+    # figures for the whole print's.
+    merged_totals = []
+    if total_time > 0:
+        merged_totals.append(f"; estimated printing time (normal mode) = {format_duration(total_time)}")
+    merged_totals.append(f"; total layer number: {total_layers}")
+    if every_part_states_mm and tool_mm:
+        merged_totals.append("; filament used [mm] = " + ", ".join(f"{tool_mm[t]:.2f}" for t in sorted(tool_mm)))
+        if every_part_states_g and tool_g:
+            merged_totals.append("; filament used [g] = " + ", ".join(f"{tool_g[t]:.2f}" for t in sorted(tool_g)))
 
     if not output_path:
         output_path = os.path.join(
@@ -1747,7 +1777,7 @@ def merge_multipart_gcode(
         )
 
     with open(output_path, "w") as f:
-        f.write(_KILN_GCODE_HEADER + merged_body)
+        f.write(_KILN_GCODE_HEADER + "".join(f"{line}\n" for line in merged_totals) + merged_body)
 
     return {
         "output_path": output_path,

@@ -949,6 +949,14 @@ class TestParseDuration:
 
         assert parse_duration(text) == seconds
 
+    def test_the_writer_and_the_reader_agree(self):
+        from kiln.gcode import format_duration, parse_duration
+
+        assert format_duration(6632) == "1h 50m 32s"
+        assert format_duration(0) == "0s"
+        for seconds in (0, 5, 60, 65, 3600, 6632, 93784):
+            assert parse_duration(format_duration(seconds)) == seconds
+
     @pytest.mark.parametrize("text", ["", "   ", "not a time"])
     def test_nothing_readable_is_none(self, text):
         from kiln.gcode import parse_duration
