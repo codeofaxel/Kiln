@@ -209,7 +209,43 @@ def _watchdog_state(printer_name: str) -> dict[str, Any]:
         "stall_seconds": _stall_threshold_seconds(),
         "red_flags": len(status.get("red_flags") or []),
         "yellow_flags": len(status.get("yellow_flags") or []),
+        # The latest flags themselves, so a surface can say WHICH rule was
+        # raised ("a weak Wi-Fi signal", from the rule words above) rather
+        # than only how many.  Bounded: a stall re-reported every poll must
+        # not grow the wire.
+        "flags": [
+            {"kind": f.get("kind"), "rule": f.get("rule"), "message": f.get("message")}
+            for f in (status.get("flags") or [])[-_FLAGS_CARRIED:]
+            if isinstance(f, dict)
+        ],
     }
+
+
+#: How many of the watchdog's most recent flags ride the watch state.
+_FLAGS_CARRIED = 5
+
+
+def _first_layer_state(printer_name: str) -> dict[str, Any]:
+    """Whether a first-layer session is running on *printer_name*.
+
+    ``start_monitored_print`` files each session in the server's own
+    registry, so this is a fact read off this process -- which is what lets
+    the coverage statement say the first layers are WATCHED.  Before this
+    reader the block carried no such fact, and a print with a live
+    first-layer session read "not watched: the first layer" while Kiln was
+    looking at its first layers (measured 2026-09-24, monitor 54996a32e863).
+    """
+    from kiln import server as _srv
+
+    live = 0
+    for monitor in list(getattr(_srv, "_first_layer_monitors", {}).values()):
+        if getattr(monitor, "_printer_name", None) != printer_name:
+            continue
+        if getattr(monitor, "running", False):
+            live += 1
+    if not live:
+        return {"active": False, "count": 0}
+    return {"active": True, "count": live}
 
 
 def _health_state(printer_name: str) -> dict[str, Any]:
@@ -303,6 +339,7 @@ def kiln_watch_state(
         ("watchdog", lambda: _watchdog_state(name), {"attached": False, "running": False}),
         ("health", lambda: _health_state(name), {"active": False}),
         ("watch", lambda: _watch_state(name), {"active": False, "count": 0}),
+        ("first_layer", lambda: _first_layer_state(name), {"active": False, "count": 0}),
         ("vision", _vision_state, {"armed": False}),
         ("watchers", _watcher_words, {}),
     )

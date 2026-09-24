@@ -46,6 +46,7 @@ def _quiet(monkeypatch) -> None:
 
     monkeypatch.setattr(server, "_print_watchdogs", {})
     monkeypatch.setattr(server, "_watchers", {})
+    monkeypatch.setattr(server, "_first_layer_monitors", {})
     monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda n=None: n or "default")
     monkeypatch.setattr(server, "_pro_bridge", lambda: None)
     from kiln import print_health_monitor as phm
@@ -231,3 +232,60 @@ def test_printing_is_read_off_the_state_word_the_caller_already_has(monkeypatch)
     # A stale reading cannot vouch for an empty bed: it counts as a print on the machine.
     assert watch_state.kiln_watch_state("default", adapter=_Adapter(), state_word="stale")["printing"] is True
     assert watch_state.kiln_watch_state("default", adapter=_Adapter())["printing"] is None
+
+
+def test_a_first_layer_session_is_watching_only_while_it_runs(monkeypatch) -> None:
+    """The session ``start_monitored_print`` files is a fact about this
+    process, and the block must carry it: with no ``first_layer`` block the
+    coverage statement read "not watched: the first layer" while a live
+    session was looking at the first layers (2026-09-24, monitor
+    54996a32e863) and the panel's First layer mark stayed dim."""
+    _quiet(monkeypatch)
+    from kiln import server
+
+    assert watch_state.kiln_watch_state("default", adapter=_Adapter())["first_layer"] == {
+        "active": False, "count": 0,
+    }
+    server._first_layer_monitors["54996a32e863"] = SimpleNamespace(_printer_name="default", running=True)
+    server._first_layer_monitors["finished"] = SimpleNamespace(_printer_name="default", running=False)
+    server._first_layer_monitors["elsewhere"] = SimpleNamespace(_printer_name="other", running=True)
+    assert watch_state.kiln_watch_state("default", adapter=_Adapter())["first_layer"] == {
+        "active": True, "count": 1,
+    }
+
+
+def test_the_watchdogs_latest_flags_ride_with_their_rule(monkeypatch) -> None:
+    """Counts say how many; a surface saying WHAT was raised needs the rule
+    (its words are already in ``watchers.watchdog``).  Bounded to the last
+    few, in order, and never a flag the watchdog did not shape."""
+    _quiet(monkeypatch)
+    from kiln import server
+
+    flags = [{"kind": "yellow", "rule": f"r{i}", "message": f"m{i}", "timestamp": i, "context": {}}
+             for i in range(7)]
+    flags.append({"kind": "red", "rule": "tool_drop", "message": "hotend 40 below", "timestamp": 9})
+    flags.append("not a flag")
+
+    class _Dog:
+        _poll_interval = 5.0
+
+        def status(self):
+            return {"running": True, "flags": flags,
+                    "red_flags": [flags[-2]], "yellow_flags": flags[:7]}
+
+    server._print_watchdogs["default"] = _Dog()
+    dog = watch_state.kiln_watch_state("default", adapter=_Adapter())["watchdog"]
+    assert dog["red_flags"] == 1 and dog["yellow_flags"] == 7
+    assert dog["flags"] == [
+        {"kind": "yellow", "rule": "r4", "message": "m4"},
+        {"kind": "yellow", "rule": "r5", "message": "m5"},
+        {"kind": "yellow", "rule": "r6", "message": "m6"},
+        {"kind": "red", "rule": "tool_drop", "message": "hotend 40 below"},
+    ]
+
+    class _OlderDog:
+        def status(self):
+            return {"running": True, "red_flags": [], "yellow_flags": []}
+
+    server._print_watchdogs["default"] = _OlderDog()
+    assert watch_state.kiln_watch_state("default", adapter=_Adapter())["watchdog"]["flags"] == []
