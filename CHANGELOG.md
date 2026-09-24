@@ -23,6 +23,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Cost estimates price each filament as the material your file was sliced for.**
+
 - **After slicing, the 3D stage shows the file going to your printer.** Asking to see it again gives a one-line "already on the stage above" instead of a second identical stage.
 
 - **Designs agents write come out rounder.**
@@ -287,6 +289,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   https://kiln3d.com/pricing.
 
 ### Fixed
+
+- **File details name the right material, print time and layer count for every slicer's files.**
 
 - **Kiln restarting mid-chat no longer breaks your next request.** It used to fail with "Invalid request parameters" and an empty 3D panel.
 
