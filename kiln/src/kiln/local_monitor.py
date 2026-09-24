@@ -584,12 +584,14 @@ def _stamp_tools(mcp: Any) -> int:
 
 
 #: When the panel for a printer last polled ``kiln_monitor_snapshot``, keyed
-#: by the ``printer_name`` argument the entry call named ("" for the default
-#: printer — the argument the panel echoes back on every poll).  The panel
-#: polls on its own once open, 5 s while a print is on screen and 30 s
-#: otherwise, so a recent poll is proof a live panel is above, and its
-#: absence is proof enough that none is: closed, torn down, or in a tab the
-#: host has hidden.  Bounded by the number of printers a session names.
+#: by the printer the call is EFFECTIVELY about (the registry's own answer
+#: for an unnamed call), so ``monitor_print()`` and
+#: ``monitor_print(printer_name="default")`` are one printer and one panel,
+#: not two.  The panel polls on its own once open, 5 s while a print is on
+#: screen and 30 s otherwise, so a recent poll is proof a live panel is
+#: above, and its absence is proof enough that none is: closed, torn down,
+#: or in a tab the host has hidden.  Bounded by the number of printers a
+#: session names.
 _panel_polls: dict[str, float] = {}
 
 #: How recently a poll must have landed for the panel above to count as
@@ -609,7 +611,16 @@ LIVE_PANEL_NOTE = (
 
 
 def _poll_key(printer_name: str | None) -> str:
-    return printer_name if isinstance(printer_name, str) and printer_name else ""
+    """The printer a call names, resolved the way every unnamed call is:
+    the raw argument keyed ``None`` and ``"default"`` as two printers, and
+    the second spelling drew a second panel."""
+    from kiln.server import _resolve_effective_printer_name
+
+    name = printer_name if isinstance(printer_name, str) and printer_name else None
+    try:
+        return _resolve_effective_printer_name(name)
+    except Exception:  # noqa: BLE001 — an unresolvable name still keys a panel, as given
+        return name or ""
 
 
 def _note_panel_poll(printer_name: str | None) -> None:

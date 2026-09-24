@@ -757,6 +757,17 @@ class TestARepeatWhileThePanelIsLive:
         sc = _run_hook(_apps_host(), "monitor_print", {"printer_name": "workshop-a1"})
         assert sc["shown"]["repeat"] == "live_panel"
 
+    def test_the_default_printer_is_one_panel_however_the_call_spells_it(self):
+        """``monitor_print()`` and ``monitor_print(printer_name="default")``
+        are one printer; keyed by the raw argument they were two, and the
+        second spelling drew a second live panel."""
+        self._poll()
+        sc = _run_hook(_apps_host(), "monitor_print", {"printer_name": "default"})
+        assert sc["shown"]["repeat"] == "live_panel"
+        local_monitor._reset_for_tests()
+        self._poll("default")
+        assert _run_hook(_apps_host(), "monitor_print")["shown"]["repeat"] == "live_panel"
+
     def test_the_vision_door_follows_the_same_rule(self):
         self._poll()
         assert _run_hook(_apps_host(), "monitor_print_vision")["shown"]["repeat"] == "live_panel"
