@@ -341,6 +341,25 @@ _now = time.monotonic
 #: leaves on its fetch, or when it crosses the grace and is judged.
 _awaiting_fetch: dict[str, tuple[str, float, float]] = {}
 
+#: What the last stage result drew (:func:`kiln.stage_link.stage_identity`),
+#: so the next one can say when it draws the very same thing.  The HOST
+#: opens a panel for every call to a stamped tool — the server cannot keep
+#: a second panel from appearing, and a result that carried no token would
+#: open that panel on nothing — so the one decision the server owns is to
+#: say, in the result, that the panel above already shows this.  Measured
+#: 2026-09-23: ``slice_model`` drew a sliced plate and ``show_on_stage`` on
+#: the same ``.gcode.3mf`` drew it again, identically, with nothing saying
+#: so.  Only an exact repeat is called one: a changed file, a new pose or
+#: EXTRAS that arrived since all change the tag.
+_last_staged: str = ""
+
+#: The sentence a repeat carries, ahead of the door's own reason.
+REPEAT_NOTE = (
+    "Same file as the stage result just before this one — byte for byte, "
+    "with the same slice — so this panel shows nothing new; the stage was "
+    "already showing it, and the call above could have been skipped."
+)
+
 #: Set once a mint crossed the grace with no fetch on record anywhere.
 #: Sticky until a fetch lands.  Read by the result hook and by
 #: ``visualize_model``; it never blocks anything.
@@ -1203,6 +1222,26 @@ async def _attach_link_within_budget(sc: dict, mesh: str) -> bool:
     return True
 
 
+def _repeat_of_the_last(mesh: str) -> bool:
+    """Whether *mesh* is exactly what the last stage result drew — and
+    remember it for the next one.  Every stage result passes through here,
+    whichever door it takes, so "the last one" means the last stage result
+    of this server process."""
+    global _last_staged
+    if not mesh:
+        return False
+    try:
+        from kiln.stage_link import stage_identity
+
+        identity = stage_identity(Path(mesh))
+    except Exception:  # noqa: BLE001 — an unreadable file is not a repeat
+        identity = ""
+    with _lock:
+        same = bool(identity) and identity == _last_staged
+        _last_staged = identity
+    return same
+
+
 def _shown(
     *, opens: bool, stalled: bool, proven: bool, linked: bool,
     link_pending: bool = False, mesh: str,
@@ -1365,6 +1404,7 @@ def _install_result_hook(mcp: Any) -> bool:
                 # the NEXT result can tell whether it did.
                 _expect_fetch(token, mesh)
             proven = _panel_proven
+            repeat = _repeat_of_the_last(mesh)
             link_pending = False
             if not opens or stalled or not proven:
                 # The panel is not known to work for this host — none was
@@ -1379,6 +1419,11 @@ def _install_result_hook(mcp: Any) -> bool:
                 linked=bool(sc.get("viewer_url")), link_pending=link_pending,
                 mesh=mesh,
             )
+            if repeat:
+                # Said, never suppressed: the token still rides and the
+                # panel still draws — it is the host's panel to open.
+                sc["shown"]["repeat"] = True
+                sc["shown"]["reason"] = f"{REPEAT_NOTE} {sc['shown']['reason']}"
             inner.structuredContent = sc
         except Exception:  # noqa: BLE001
             logger.debug("local stage token not attached", exc_info=True)
@@ -1431,6 +1476,8 @@ def install(mcp: Any) -> dict[str, Any]:
 
 def _reset_for_tests() -> None:
     global _host_read_the_stage, _signal_logged, _fetches_stalled, _panel_proven
+    global _last_staged
+    _last_staged = ""
     _tokens.clear()
     _awaiting_fetch.clear()
     _fetches_stalled = False

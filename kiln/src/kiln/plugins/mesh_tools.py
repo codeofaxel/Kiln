@@ -1667,6 +1667,12 @@ class _MeshToolsPlugin:
             yourself, and the sign-off only when neither this panel nor a
             link is possible.
 
+            If the result just above already opened the stage on this same
+            file (``slice_model`` and every other stage door say so in
+            ``shown``), the panel is already up: calling this draws the
+            identical file a second time, and the result's ``shown.repeat``
+            says so.
+
             :param file_path: Path to an STL, OBJ, 3MF, STEP, ``.gcode.3mf``
                 or G-code file on this machine.
             :returns: ``stage_mesh_path`` (the file the stage draws),

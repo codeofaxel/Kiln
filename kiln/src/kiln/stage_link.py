@@ -164,6 +164,17 @@ def _slicer_sidecar(path: Path) -> bytes | None:
         return None
 
 
+def stage_identity(path: Path) -> str:
+    """What the stage would draw for *path*, as a tag: the file's bytes and
+    the slice this machine holds for it.  Two stage results with equal tags
+    draw the same thing — same file, same pose, same EXTRAS — so the second
+    can say so; ``""`` when the file cannot be read, which never matches."""
+    sha = _sha256_of(path)
+    if not sha:
+        return ""
+    return f"{sha}|{_slice_identity(path)}"
+
+
 def _sha256_of(path: Path) -> str | None:
     try:
         h = hashlib.sha256()

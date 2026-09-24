@@ -73,17 +73,21 @@ __all__ = [
     "FunctionResource",
     "Image",
     "MCP_SDK_MAJOR",
+    "RESTART_MARKER_ENV",
     "ToolError",
     "ask_user_to_confirm",
     "capture_request_context",
     "client_capabilities",
     "current_session",
     "host_can_ask_the_user",
+    "install_uninitialized_request_guard",
     "lowlevel_server",
     "set_instructions",
+    "stamp_restart",
     "set_tool_input_schema",
     "tool_input_schema",
     "tool_result_blocks",
+    "uninitialized_request_message",
     "wrap_call_tool_result",
     "wrap_list_tools_result",
 ]
@@ -627,4 +631,169 @@ def wrap_list_tools_result(mcp: Any, mutate: Any) -> bool:
 
     setattr(_wrapped_v1, _LIST_MUTATORS, chain)
     handlers[ListToolsRequest] = _wrapped_v1
+    return True
+
+
+# ---------------------------------------------------------------------------
+# A request on a connection that was never initialized
+# ---------------------------------------------------------------------------
+#
+# ``restart_server`` re-execs over the running process with ``os.execve``,
+# which KEEPS the stdio pipe: the host never sees a disconnect, never repeats
+# the ``initialize`` handshake, and its next ``tools/call`` lands on a fresh
+# process that has not been initialized.  Both SDK majors answer that with
+# the JSON-RPC boilerplate "Invalid request parameters" — 1.x folds the
+# RuntimeError its session raises into that text, 2.x pins the same text as
+# a compat shape — so the agent reads a parameter it passed as the culprit,
+# drops it, and the retry, which lands after the host has torn the
+# connection down and re-initialized on its own, "works".  Measured
+# 2026-09-23, twice: the server log says "Received request before
+# initialization was complete" 11 s and 18 s after each restart, the two
+# parameters blamed (``printer_status(detail=...)``, ``slice_model(...,
+# printer_name=...)``) had not changed in any commit between the restarts,
+# and the host re-listed tools 10 s and 24 s later.
+#
+# The guard keeps the refusal — nothing runs before initialization — and
+# replaces the boilerplate with a sentence that names the restart when this
+# process knows it was restarted, says the parameters were not the problem,
+# and says what to do.  One place for both majors, like everything else in
+# this module; the server installs it once at startup.
+
+#: Set in the environment ``restart_server`` hands its child (an ISO time),
+#: so the fresh process can name the restart in what it says.
+RESTART_MARKER_ENV = "KILN_RESTARTED_AT"
+
+#: The SDK's own words for the refusal, on both majors.
+_SDK_UNINITIALIZED_TEXT = "Invalid request parameters"
+
+_GUARDED = "_kiln_guards_uninitialized_requests"
+
+
+def stamp_restart(env: dict[str, str]) -> dict[str, str]:
+    """Mark *env* — the environment a restart hands its child — with the
+    moment of the restart, and return it."""
+    from datetime import datetime
+
+    env[RESTART_MARKER_ENV] = datetime.now().astimezone().isoformat(timespec="seconds")
+    return env
+
+
+def _restart_clock() -> str:
+    """The wall-clock time of the restart this process came from, or ``""``."""
+    import os
+
+    raw = (os.environ.get(RESTART_MARKER_ENV) or "").strip()
+    if not raw:
+        return ""
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(raw).strftime("%H:%M:%S")
+    except ValueError:
+        return raw
+
+
+def uninitialized_request_message(method: str | None = None) -> str:
+    """What to say when a request arrives on a connection that never
+    completed the MCP handshake — in words that name the cause."""
+    what = "this tool call" if (method or "tools/call") == "tools/call" else f"this {method} request"
+    when = _restart_clock()
+    if when:
+        cause = (
+            f"Kiln's server restarted at {when} (restart_server) and this "
+            "connection has not re-initialized since"
+        )
+    else:
+        cause = "this connection to Kiln has not completed the MCP initialize handshake"
+    return (
+        f"{cause}, so {what} never ran — the parameters you passed were not "
+        "the problem. Retry the same call unchanged in a few seconds, or "
+        "reconnect the Kiln MCP server in the app."
+    )
+
+
+def install_uninitialized_request_guard(mcp: Any) -> bool:
+    """Make a pre-initialization refusal say why, on whichever SDK is running.
+
+    1.x: the check lives in ``ServerSession._received_request``, which raises
+    RuntimeError and lets the receive loop write the boilerplate; the guard
+    wraps that method on the class (sessions are built per connection deep
+    inside ``Server.run``, so the class is the one place) and answers the
+    request itself, with the sentence, before the loop can.
+
+    2.x: the check lives in the per-connection runner, inside the innermost
+    link of ``Server.middleware``; a middleware appended there sees the
+    ``MCPError`` it raises and re-raises it with the sentence.
+
+    Idempotent.  Never raises: a server that cannot explain a refusal still
+    serves.  Returns True when the guard is in place.
+    """
+    try:
+        if MCP_SDK_MAJOR >= 2:
+            return _guard_v2(mcp)
+        return _guard_v1()
+    except Exception:  # noqa: BLE001 — an unexplained refusal is not a failed server
+        _logger.debug("uninitialized-request guard not installed", exc_info=True)
+        return False
+
+
+def _guard_v1() -> bool:
+    from mcp.server import session as _session_mod
+    from mcp.types import INVALID_PARAMS, ErrorData
+
+    cls = _session_mod.ServerSession
+    if getattr(cls, _GUARDED, False):
+        return True
+    original = cls._received_request
+    initialized = _session_mod.InitializationState.Initialized
+
+    async def _guarded(self: Any, responder: Any) -> Any:
+        try:
+            return await original(self, responder)
+        except RuntimeError:
+            if getattr(self, "_initialization_state", initialized) == initialized:
+                raise  # not the handshake gate — the SDK's own business
+            method = getattr(getattr(responder.request, "root", None), "method", None)
+            message = uninitialized_request_message(method)
+            _logger.warning("refused %s before initialization: %s", method, message)
+            with responder:
+                await responder.respond(ErrorData(code=INVALID_PARAMS, message=message, data=""))
+            return None
+
+    cls._received_request = _guarded  # type: ignore[method-assign]
+    setattr(cls, _GUARDED, True)
+    return True
+
+
+def _guard_v2(mcp: Any) -> bool:
+    from mcp.shared.exceptions import MCPError  # type: ignore[import-not-found]
+    from mcp.types import INVALID_PARAMS
+
+    middleware = getattr(lowlevel_server(mcp), "middleware", None)
+    if not isinstance(middleware, list):
+        return False
+    if any(getattr(m, _GUARDED, False) for m in middleware):
+        return True
+
+    class _Guard:
+        async def __call__(self, ctx: Any, call_next: Any) -> Any:
+            try:
+                return await call_next(ctx)
+            except MCPError as exc:
+                error = getattr(exc, "error", None)
+                connection = getattr(getattr(ctx, "session", None), "_connection", None)
+                if (
+                    error is None
+                    or error.code != INVALID_PARAMS
+                    or error.message != _SDK_UNINITIALIZED_TEXT
+                    or getattr(connection, "initialize_accepted", True)
+                ):
+                    raise
+                method = getattr(ctx, "method", None)
+                message = uninitialized_request_message(method)
+                _logger.warning("refused %s before initialization: %s", method, message)
+                raise MCPError(code=INVALID_PARAMS, message=message, data="") from exc
+
+    setattr(_Guard, _GUARDED, True)
+    middleware.append(_Guard())
     return True

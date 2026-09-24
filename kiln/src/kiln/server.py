@@ -73,7 +73,9 @@ from kiln.mcp_compat import (
     FastMCP,
     ask_user_to_confirm,
     host_can_ask_the_user,
+    install_uninitialized_request_guard,
     set_instructions,
+    stamp_restart,
 )
 from kiln.print_consent import (
     NOT_ASKED_HOST_CANNOT,
@@ -11544,14 +11546,35 @@ _RESTART_OPEN_SESSIONS_NOTE = (
     "MCP server in the host, or open a new chat, to get the panel back."
 )
 
+#: What the restart does to THIS connection.  ``os.execve`` keeps the stdio
+#: pipe, so the host sees no disconnect and repeats no handshake: its next
+#: call lands on a fresh, un-initialized process and is refused.  Measured
+#: 2026-09-23, twice — the refusal read "Invalid request parameters", the
+#: agent blamed a parameter it had passed and dropped it, and the retry
+#: only worked because the host had meanwhile re-initialized on its own
+#: (10 s and 24 s after each restart).  The refusal now names the restart
+#: (``kiln.mcp_compat.install_uninitialized_request_guard``); this sentence
+#: is the same fact, said by the tool that causes it, before it happens.
+_RESTART_SAME_PIPE_NOTE = (
+    "The connection does not drop: the fresh process inherits this pipe "
+    "without a new MCP handshake, so this chat's first Kiln call after the "
+    "restart may be refused with a message naming the restart — retry that "
+    "call unchanged (the parameters are not the problem), or reconnect the "
+    "Kiln MCP server in the app."
+)
+
 
 @mcp.tool()
 def restart_server(clean_env: bool = True) -> dict:
     """Restart the Kiln MCP server process.
 
     Replaces the current process with a fresh instance using
-    ``os.execve``.  The MCP client (Claude Code, etc.) should detect
-    the connection drop and automatically reconnect.
+    ``os.execve``.  The exec keeps the stdio pipe, so the MCP client sees
+    no disconnect and repeats no ``initialize`` handshake: the first call
+    it makes on this connection afterwards is refused, in words that name
+    this restart, until it re-initializes (which the Claude desktop app
+    did on its own within half a minute, measured twice on 2026-09-23) or
+    the person reconnects the server.  The result says so.
 
     WHAT A RESTART REFRESHES depends on how this server was launched,
     and the result says which happened.  A launcher script that
@@ -11581,11 +11604,13 @@ def restart_server(clean_env: bool = True) -> dict:
         where config.yaml is absent or deliberately overridden).
     :returns: Confirmation that the restart is imminent, plus the list
         of env vars that were stripped (for debugging transparency).
-        The connection will drop within ~0.5 seconds.
+        The exec happens ~0.5 seconds after this returns.
     """
     import threading
 
-    new_env = os.environ.copy()
+    # Stamped with the restart's moment so the fresh process can name this
+    # restart when it refuses the first un-handshaken call.
+    new_env = stamp_restart(os.environ.copy())
     argv, relaunch, relaunch_note = _restart_exec_target(new_env)
     stripped: list[str] = []
     if clean_env:
@@ -11655,7 +11680,7 @@ def restart_server(clean_env: bool = True) -> dict:
             f" Stripped {len(stripped)} stale KILN_PRINTER_* env var(s) so "
             f"~/.kiln/config.yaml wins."
         )
-    msg += " MCP connection will drop and the client should auto-reconnect."
+    msg += f" {_RESTART_SAME_PIPE_NOTE}"
     msg += f" {_RESTART_OPEN_SESSIONS_NOTE}"
     return {
         "success": True,
@@ -11665,8 +11690,9 @@ def restart_server(clean_env: bool = True) -> dict:
         # near-miss).
         "relaunch": relaunch,
         "stripped_env_vars": sorted(stripped),
-        # Structured twin of the sentence in ``message``: a caller that
-        # branches on it should not have to parse prose.
+        # Structured twins of the sentences in ``message``: a caller that
+        # branches on them should not have to parse prose.
+        "first_call_may_be_refused": True,
         "open_sessions_lose_stage": True,
         "message": msg,
     }
@@ -17392,6 +17418,15 @@ def _start() -> None:
         local_stage.install(mcp)
     except Exception:
         logger.debug("inline stage not installed", exc_info=True)
+
+    # A call that arrives before this connection's MCP handshake — the
+    # first one after restart_server, whose exec keeps the pipe — is
+    # refused either way; this makes the refusal say so instead of the
+    # SDK's "Invalid request parameters", which reads as a bad argument.
+    try:
+        install_uninitialized_request_guard(mcp)
+    except Exception:
+        logger.debug("uninitialized-request guard not installed", exc_info=True)
 
     # The inline print monitor — the stage's sibling door (same MCP Apps
     # mechanism, same cached-document delivery, monitor tools instead of

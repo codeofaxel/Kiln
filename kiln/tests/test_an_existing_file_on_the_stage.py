@@ -459,3 +459,61 @@ class TestAPlaceholderIsWhatTheModelHolds:
 
         out = extract_model_from_3mf(_small_part_archive(tmp_path), output_path=str(tmp_path / "c.stl"))
         assert out["dimensions"]["x_mm"] == pytest.approx(20.0, abs=0.01)
+
+
+class TestTheSameFileTwice:
+    """The host opens a panel for every call to a stamped door, so a second
+    call on the very same file draws a second, identical panel — measured
+    2026-09-23, ``slice_model`` then ``show_on_stage`` on one ``.gcode.3mf``.
+    The server cannot keep that panel from opening; it can say, in the
+    result, that the one above already shows this.  Only an exact repeat is
+    called one."""
+
+    def test_the_second_result_says_the_stage_already_shows_it(self, tmp_path):
+        archive = _sliced_archive(tmp_path)
+        first = _show(archive)
+        second = _show(archive)
+        assert not first["shown"].get("repeat")
+        assert second["shown"]["repeat"] is True
+        assert second["shown"]["reason"].startswith(local_stage.REPEAT_NOTE)
+        assert "nothing new" in second["shown"]["reason"]
+
+    def test_a_repeat_is_said_never_suppressed(self, tmp_path):
+        archive = _sliced_archive(tmp_path)
+        _show(archive)
+        second = _show(archive)
+        assert second["success"] is True
+        assert local_stage.resolve(second["artifact"]["artifact_token"]) == archive, (
+            "the token must still ride: the host's panel opens either way"
+        )
+
+    def test_a_different_file_in_between_makes_the_return_no_repeat(self, tmp_path):
+        block = _block(tmp_path / "block.stl")
+        ball = _ball(tmp_path / "ball.3mf")
+        _show(block)
+        other = _show(ball)
+        back = _show(block)
+        assert not other["shown"].get("repeat")
+        assert not back["shown"].get("repeat"), "only the stage result just before counts"
+
+    def test_changed_bytes_under_the_same_name_are_not_a_repeat(self, tmp_path):
+        path = tmp_path / "part.stl"
+        _block(path)
+        _show(str(path))
+        data = bytearray(path.read_bytes())
+        data[-1] ^= 0xFF  # one byte of the last triangle
+        path.write_bytes(bytes(data))
+        again = _show(str(path))
+        assert not again["shown"].get("repeat")
+
+    def test_a_slice_arriving_since_is_not_a_repeat(self, tmp_path, monkeypatch):
+        mesh = _block(tmp_path / "block.stl")
+        _show(mesh)
+        # The same bytes, now with a slice this machine holds for them: the
+        # stage would dress it in skirt and tower — something new.
+        monkeypatch.setattr(
+            "kiln.stage_plate.resolve_sliced_gcode", lambda _p: str(tmp_path / "block.gcode")
+        )
+        (tmp_path / "block.gcode").write_text("G28\n")
+        again = _show(mesh)
+        assert not again["shown"].get("repeat")
