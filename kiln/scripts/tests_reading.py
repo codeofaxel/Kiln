@@ -71,10 +71,18 @@ def module_names(path: Path) -> set[str]:
 
     Bare stems are not needles — ``emit`` and ``model`` are English — and the
     top-level packages are too broad to mean anything.
+
+    A file outside the importable source tree is a script: no test can import
+    it, so every test that has one loads it by path (``root / "scripts" /
+    "audit_x.py"``, ``"kiln/scripts/audit_x.py"``).  Its file NAME is the
+    needle, which each of those spellings contains, and the surrounding
+    pattern keeps ``old_audit_x.py`` and ``audit_x.pyc`` out.
     """
     parts = path.with_suffix("").parts
     if parts[:2] == ("kiln", "src"):
         parts = parts[2:]
+    elif path.suffix == ".py" and path.stem not in _GENERIC and path.stem != "__init__":
+        return {path.name}
     if parts[-1] == "__init__":
         parts = parts[:-1]
     names: set[str] = set()

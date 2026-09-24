@@ -5,7 +5,8 @@ Coverage: a test that imports the changed module as ``from kiln import foo``
 parenthesised, aliased import, a nested package's module, and an import
 inside a test function; the module's bare name in a file that never imports
 it is not a reader; a test file in a subfolder of tests/ is read like any
-other.
+other; a script, which a test loads by its path rather than importing, is
+named by that path however the test spells it.
 """
 
 from __future__ import annotations
@@ -80,3 +81,31 @@ class TestReaders:
     def test_a_test_in_a_subfolder_is_a_reader(self, tests_dir):
         files = {"regression/test_sweep.py": "from kiln import foo\n"}
         assert _readers_of(tests_dir, "kiln/src/kiln/foo.py", files) == {"regression/test_sweep.py"}
+
+
+class TestScriptsLoadedByPath:
+    """A script is not importable from tests/, so a test names its path."""
+
+    def test_a_slash_path_to_the_script_is_a_reader(self, tests_dir):
+        text = 'SCRIPT = ROOT / "kiln/scripts/audit_thing.py"\n'
+        assert _readers_of(tests_dir, "kiln/scripts/audit_thing.py", {"test_a.py": text}) == {"test_a.py"}
+
+    def test_path_segments_naming_the_script_are_a_reader(self, tests_dir):
+        text = 'spec_from_file_location("audit_thing", root / "scripts" / "audit_thing.py")\n'
+        assert _readers_of(tests_dir, "kiln/scripts/audit_thing.py", {"test_a.py": text}) == {"test_a.py"}
+
+    def test_a_repo_root_script_is_a_reader(self, tests_dir):
+        text = 'subprocess.run([sys.executable, "scripts/generate_thing.py"])\n'
+        assert _readers_of(tests_dir, "scripts/generate_thing.py", {"test_a.py": text}) == {"test_a.py"}
+
+    def test_a_longer_name_ending_in_the_scripts_name_is_not_a_reader(self, tests_dir):
+        files = {"test_a.py": 'X = "old_audit_thing.py"\n', "test_b.py": 'Y = "audit_thing.pyc"\n'}
+        assert _readers_of(tests_dir, "kiln/scripts/audit_thing.py", files) == set()
+
+    def test_a_generically_named_script_is_not_matched_by_its_bare_name(self, tests_dir):
+        files = {"test_a.py": 'PATH = "main.py"\n'}
+        assert _readers_of(tests_dir, "kiln/scripts/main.py", files) == set()
+
+    def test_an_init_file_names_no_particular_file_so_it_is_not_a_needle(self, tests_dir):
+        files = {"test_a.py": 'PKG = "__init__.py"\n'}
+        assert _readers_of(tests_dir, "other-package/src/pkg/__init__.py", files) == set()
