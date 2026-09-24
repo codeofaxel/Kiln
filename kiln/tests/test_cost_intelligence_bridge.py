@@ -182,6 +182,16 @@ class TestEveryDoor:
             out = _estimate_tools()["estimate_cost"](_plate(tmp_path))
         assert out["estimate"]["cost_intelligence"] == {"success": True, "door": "tool"}
 
+    @pytest.mark.parametrize("door", ["estimate_cost", "compare_print_options"])
+    def test_a_named_printer_reaches_kiln_pro(self, tmp_path, door):
+        from kiln.server import compare_print_options
+
+        call = _estimate_tools()["estimate_cost"] if door == "estimate_cost" else compare_print_options
+        seen: dict = {}
+        with patch("kiln.server._pro_api_call", side_effect=lambda t, **kw: seen.update(kw) or {"success": True}):
+            call(_plate(tmp_path), printer_id="a1")
+        assert seen["printer_id"] == "a1"
+
     def test_the_comparison(self, tmp_path):
         from kiln.server import compare_print_options
 

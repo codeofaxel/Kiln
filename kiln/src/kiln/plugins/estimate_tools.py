@@ -381,6 +381,7 @@ class _EstimateToolsPlugin:
             material: str = "",
             electricity_rate: float = 0.12,
             printer_wattage: float = 200.0,
+            printer_id: str = "",
         ) -> dict:
             """Estimate the cost of a print job from a G-code file (already-sliced only).
 
@@ -408,6 +409,8 @@ class _EstimateToolsPlugin:
                     every filament.
                 electricity_rate: Cost per kWh in USD (default 0.12).
                 printer_wattage: Printer power consumption in watts (default 200).
+                printer_id: Optional registered printer the print is for;
+                    passed on with the file when kiln-pro is asked.
             """
             import kiln.server as _srv
 
@@ -421,7 +424,7 @@ class _EstimateToolsPlugin:
                 data = estimate.to_dict()
                 from kiln._pro_cost_bridge import attach_cost_intelligence
 
-                attach_cost_intelligence(data, file_path)
+                attach_cost_intelligence(data, file_path, printer_id=printer_id or "")
                 return {"success": True, "estimate": data}
             except FileNotFoundError as exc:
                 return _srv._error_dict(f"Failed to estimate cost: {exc}", code="FILE_NOT_FOUND")

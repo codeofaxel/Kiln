@@ -13367,6 +13367,7 @@ def compare_print_options(
     electricity_rate: float = 0.12,
     printer_wattage: float = 200.0,
     shipping_country: str = "US",
+    printer_id: str = "",
 ) -> dict:
     """Compare local printing cost vs. outsourced manufacturing.
 
@@ -13390,6 +13391,8 @@ def compare_print_options(
         electricity_rate: Cost per kWh in USD (default 0.12).
         printer_wattage: Printer power consumption in watts (default 200).
         shipping_country: ISO country code for fulfillment shipping.
+        printer_id: Optional registered printer the local print is for;
+            passed on with the file when kiln-pro is asked.
     """
     result: dict[str, Any] = {"success": True}
 
@@ -13406,7 +13409,7 @@ def compare_print_options(
         local_estimate = estimate.to_dict()
         from kiln._pro_cost_bridge import attach_cost_intelligence
 
-        attach_cost_intelligence(local_estimate, file_path)
+        attach_cost_intelligence(local_estimate, file_path, printer_id=printer_id or "")
     except FileNotFoundError:
         local_error = "G-code file not found"
     except Exception as exc:
