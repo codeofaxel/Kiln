@@ -259,9 +259,10 @@ def _direct_status(
     The status axis is literally ``printer_status(detail=...)`` — the same
     tool the hosted door relays — so the panel sees one shape on every door.
     ``lite`` is the polling shape; ``full`` rides only when the panel asks
-    for the machine's capabilities (``can_pause`` and friends), which it does
-    once per watched print, exactly as the hosted door does.  Imported lazily from the server module, which is importable by
-    the time anything calls this (it installed us).
+    for the machine's capabilities (``can_pause`` and friends), which it
+    does once, on its first poll of a print — the hosted door answers the
+    same ask the same way.  Imported lazily from the server module, which
+    is importable by the time anything calls this (it installed us).
 
     The refusal is UNWRAPPED here, because ``_error_dict`` nests it:
     ``{"success": false, "error": {"code", "message", "retryable"}}``.
@@ -404,8 +405,8 @@ def compose_local_payload(
     able to tell that from "bridge up".  Matches the hosted door's direct
     mode byte for byte.
     """
-    # Capabilities are a fact about the machine, read once per watched print:
-    # the panel asks for them on its first poll of a print and never again,
+    # Capabilities are a fact about the machine, read once: the panel asks
+    # for them on its first poll of a print and never again,
     # so the full status shape rides only that poll (the hosted door makes
     # the same lite/full choice from the same flag).  Before this flag was
     # accepted here the ask was silently ignored and the panel never learned
