@@ -703,6 +703,17 @@ def _declared_extensions(mcp: Any, ctx: Any = None) -> dict[str, Any]:
     return out
 
 
+def host_declares_apps(mcp: Any, ctx: Any = None) -> bool:
+    """Whether the host DECLARED the MCP Apps extension at initialize.
+
+    The declaration alone — not the stage-read safety net that
+    :func:`host_renders_apps` also honours — because a reader describing
+    the host (``kiln.agent_host``) wants what the host said about itself,
+    not what this session later proved.
+    """
+    return MCP_APPS_EXTENSION_ID in _declared_extensions(mcp, ctx)
+
+
 def host_renders_apps(mcp: Any, ctx: Any = None) -> bool:
     """Whether it is safe — and useful — to put geometry in the result.
 

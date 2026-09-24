@@ -321,6 +321,17 @@ def _empty_day() -> dict[str, Any]:
         # that absence must never be bucketed as a real surface.
         "surface_sessions": {},   # {"cli": 2, "mcp": 1}
         "surface_events": {},     # {"mcp": {"slices": 3}, "cli": {"slices": 1}}
+        # Which agent HOST drove the MCP server, and what it can do —
+        # read once per process from the MCP initialize handshake
+        # (kiln/agent_host.py), the way the surface is read once from the
+        # entry point.  agent_hosts: {host label: processes whose first
+        # tool call landed today}.  agent_host_facts: {"<host label>
+        # <fact>": the same count}, where the fact is v:<version>,
+        # model:<hint or unknown>, apps, or elicitation.  Names, versions
+        # and declared capabilities only; the model is "unknown" unless
+        # the host volunteered one, because the protocol never sends it.
+        "agent_hosts": {},        # {"claude-ai": 1, "claude-code claude-desktop": 2}
+        "agent_host_facts": {},   # {"claude-ai v:0.1.0": 1, "claude-ai apps": 1}
         # Which parametric design templates got built today —
         # {template_id: count}.  The `generations` scalar counts ~25
         # tools that make a model and cannot say whether any of them was
@@ -374,6 +385,7 @@ _ROLLOVER_MAPS = (
     "texture_names", "decoration_types", "slicer_profiles",
     "marketplace_sources", "template_uses",
     "surface_sessions", "surface_events",
+    "agent_hosts", "agent_host_facts",
     "multi_material_seen",
     "video_outcomes",
     "motion_refusals",
@@ -511,6 +523,37 @@ def record_surface_session() -> None:
         _surface_session_recorded = True
     except Exception as exc:
         _logger.debug("record_surface_session failed: %s", exc)
+
+
+def record_agent_host(label: str, facts: list[str]) -> None:
+    """Count one agent host in today's stats.  Never raises.
+
+    ``label`` is the host as the dashboard groups it (``kiln.agent_host
+    .AgentHost.label``) and ``facts`` its ``"<label> <fact>"`` keys; both
+    arrive already tokenised.  Once-per-process is the CALLER's rule
+    (``kiln.agent_host.record_once``), the way ``record_surface_session``
+    keeps its own flag: this function only writes.
+    """
+    if not isinstance(label, str) or not label:
+        return
+    try:
+        with _lock:
+            data = _read()
+            hosts = data.get("agent_hosts")
+            if not isinstance(hosts, dict):
+                hosts = {}
+            hosts[label] = int(hosts.get(label, 0)) + 1
+            data["agent_hosts"] = hosts
+            host_facts = data.get("agent_host_facts")
+            if not isinstance(host_facts, dict):
+                host_facts = {}
+            for fact in facts or ():
+                if isinstance(fact, str) and fact:
+                    host_facts[fact] = int(host_facts.get(fact, 0)) + 1
+            data["agent_host_facts"] = host_facts
+            _write(data)
+    except Exception as exc:
+        _logger.debug("record_agent_host failed: %s", exc)
 
 
 def record_event(event_type: str, *, detail: str | None = None) -> None:
@@ -1278,6 +1321,9 @@ def get_daily_stats() -> dict[str, Any]:
         # a map missing any leg of that chain ships {} forever.
         "surface_sessions": data.get("surface_sessions", {}),
         "surface_events": data.get("surface_events", {}),
+        # Same contract again: recorded, rolled over, returned.
+        "agent_hosts": data.get("agent_hosts", {}),
+        "agent_host_facts": data.get("agent_host_facts", {}),
         # Same contract again: recorded, rolled over, returned.
         "multi_material_seen": data.get("multi_material_seen", {}),
         # Same contract again: recorded, rolled over, returned.
