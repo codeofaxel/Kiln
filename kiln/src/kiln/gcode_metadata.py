@@ -25,6 +25,7 @@ import contextlib
 import logging
 import os
 import re
+import zipfile
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
@@ -123,6 +124,15 @@ def read_head_and_tail(file_path: str) -> list[str]:
     """
     with open(file_path, "rb") as fh:
         return _read_window(fh, os.fstat(fh.fileno()).st_size, tail=True)
+
+
+def sliced_gcode_member(zf: zipfile.ZipFile) -> str | None:
+    """The G-code a sliced 3MF prints: its first plate's
+    (``Metadata/plate_1.gcode``, the Bambu layout), else any ``.gcode``
+    member, else ``None`` -- a model-only 3MF has nothing to print yet."""
+    names = [n for n in zf.namelist() if n.lower().endswith(".gcode")]
+    plates = sorted(n for n in names if n.startswith("Metadata/plate_"))
+    return (plates or names or [None])[0]
 
 
 def read_head(fh: BinaryIO, size: int) -> list[str]:

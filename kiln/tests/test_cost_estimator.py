@@ -461,15 +461,91 @@ class TestEstimateFrom3MF:
         assert est.filament_weight_grams == 45.0
 
     def test_falls_back_to_gcode_when_no_metadata(self, tmp_path):
-        """A 3MF without slice_info.config falls back to gcode parsing."""
+        """A 3MF without slice_info.config is estimated from the G-code it holds."""
         import zipfile
 
         path = tmp_path / "no_meta.3mf"
         with zipfile.ZipFile(path, "w") as zf:
             zf.writestr("plate_1.gcode", "G1 X10 E50.0\n")
         est = CostEstimator().estimate_from_file(str(path))
-        # Falls back to text parsing — won't find valid gcode in a zip.
-        assert est.warnings  # Should have "No extrusion" warning
+        assert est.filament_length_meters == pytest.approx(0.05)
+        assert est.filament_source == "gcode_moves"
+
+    def test_a_wrapped_3mf_with_empty_slice_figures_is_estimated_from_its_gcode(self, tmp_path):
+        """A print file whose slice figures were never filled reads 0 g in its
+        slice_info; the plate's G-code carries the whole print, and a $0.00
+        estimate for it was a confident wrong number."""
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<config><plate>\n"
+            '  <metadata key="prediction" value="3600"/>\n'
+            '  <filament id="1" type="PETG" used_m="0.00" used_g="0.00"/>\n'
+            "</plate></config>"
+        )
+        gcode = (
+            "M83\nT0\nG1 X10 Y10 E1000\n"
+            "; filament used [mm] = 1000.00\n; filament used [g] = 3.05\n"
+            "; estimated printing time (normal mode) = 1h 0m 0s\n"
+            "; filament_type = PETG\n"
+        )
+        import zipfile
+
+        path = tmp_path / "wrapped.gcode.3mf"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("Metadata/slice_info.config", xml)
+            zf.writestr("Metadata/plate_1.gcode", gcode)
+        est = CostEstimator().estimate_from_file(str(path))
+        assert (est.filament_length_meters, est.filament_weight_grams) == (1.0, 3.05)
+        assert (est.material, est.filament_source) == ("PETG", "slicer_header")
+        assert est.filament_cost_usd == pytest.approx(3.05 * BUILTIN_MATERIALS["PETG"].cost_per_kg_usd / 1000)
+        assert est.estimated_time_seconds == 3600
+        # The filament-only door gives the same answer.
+        assert CostEstimator().filament_pricing(str(path)).weight_g == pytest.approx(3.05)
+
+    def test_a_model_3mf_is_refused_not_priced_at_zero(self, tmp_path):
+        import zipfile
+
+        path = tmp_path / "model.3mf"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", "<model/>")
+        with pytest.raises(ValueError, match="holds a model, not sliced G-code"):
+            CostEstimator().estimate_from_file(str(path))
+        assert CostEstimator().filament_pricing(str(path)) is None
+
+    def test_a_member_too_large_to_read_is_refused_before_unpacking(self, tmp_path, monkeypatch):
+        import zipfile
+
+        import kiln.gcode
+
+        path = tmp_path / "big.gcode.3mf"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("Metadata/plate_1.gcode", "G1 X10 E1\n" * 100)
+        monkeypatch.setattr(kiln.gcode, "_MAX_SCAN_BYTES", 64)
+        with pytest.raises(ValueError, match="unpacks to"):
+            CostEstimator().estimate_from_file(str(path))
+
+    def test_the_cost_tool_names_a_model_3mf_as_the_callers_mistake(self, tmp_path):
+        import zipfile
+
+        from kiln.plugins.estimate_tools import _EstimateToolsPlugin
+
+        tools: dict = {}
+
+        class _FakeMcp:
+            def tool(self, name=None, **_kwargs):
+                def decorator(fn):
+                    tools[name or fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        _EstimateToolsPlugin().register(_FakeMcp())
+        path = tmp_path / "model.3mf"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", "<model/>")
+        out = tools["estimate_cost"](str(path))
+        assert out["error"]["code"] == "INVALID_ARGS"
+        assert "slice it first" in out["error"]["message"]
 
     def test_falls_back_when_zero_weight(self, tmp_path):
         """Zero weight/length triggers fallback to gcode parsing."""

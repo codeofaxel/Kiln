@@ -418,6 +418,8 @@ class _EstimateToolsPlugin:
                 return {"success": True, "estimate": estimate.to_dict()}
             except FileNotFoundError as exc:
                 return _srv._error_dict(f"Failed to estimate cost: {exc}", code="FILE_NOT_FOUND")
+            except ValueError as exc:
+                return _srv._error_dict(f"Failed to estimate cost: {exc}", code="INVALID_ARGS")
             except Exception as exc:
                 _logger.exception("Unexpected error in estimate_cost")
                 return _srv._error_dict(

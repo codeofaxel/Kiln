@@ -270,6 +270,41 @@ def _parse_time_from_comments(lines: list[str]) -> int | None:
     return printed.seconds if printed is not None else None
 
 
+def _sliced_3mf_gcode_lines(file_path: str) -> list[str]:
+    """The lines of the G-code a sliced 3MF prints
+    (:func:`kiln.gcode_metadata.sliced_gcode_member`).
+
+    :raises ValueError: when the archive holds no G-code (a model, not a
+        print file), is not a readable archive, or unpacks to more than a
+        G-code file Kiln scans (:data:`kiln.gcode._MAX_SCAN_BYTES`), which
+        is refused before anything is unpacked.
+    """
+    import zipfile
+
+    from kiln.gcode import _MAX_SCAN_BYTES
+    from kiln.gcode_metadata import sliced_gcode_member
+
+    name = os.path.basename(file_path)
+    try:
+        with zipfile.ZipFile(file_path) as zf:
+            member = sliced_gcode_member(zf)
+            if member is None:
+                raise ValueError(
+                    f"{name} holds a model, not sliced G-code, so it has no print cost to read yet; "
+                    "slice it first (slice_and_estimate slices and estimates in one step)"
+                )
+            info = zf.getinfo(member)
+            if info.file_size > _MAX_SCAN_BYTES:
+                raise ValueError(
+                    f"{name}'s G-code unpacks to {info.file_size / 1024 / 1024:.0f} MB, "
+                    f"more than the {_MAX_SCAN_BYTES // (1024 * 1024)} MB Kiln reads"
+                )
+            text = zf.read(member).decode("utf-8", errors="replace")
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"{name} is not a readable 3MF archive: {exc}") from exc
+    return text.splitlines(keepends=True)
+
+
 def _comment_text(lines: list[str]) -> str:
     """Only the comment lines, joined: the slicer's own figures are all on
     them, and a plate's moves are 99% of its 8 MB."""
@@ -491,7 +526,9 @@ class CostEstimator:
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"G-code file not found: {file_path}")
 
-        # Try 3MF metadata extraction first for .3mf files.
+        # Try 3MF metadata extraction first for .3mf files, then the G-code
+        # the archive prints: a 3MF whose slice figures were never filled
+        # still carries the whole toolpath.
         if file_path.lower().endswith(".3mf"):
             result = self._estimate_from_3mf_metadata(
                 file_path,
@@ -501,9 +538,10 @@ class CostEstimator:
             )
             if result is not None:
                 return result
-
-        with open(file_path, errors="replace") as f:
-            lines = f.readlines()
+            lines = _sliced_3mf_gcode_lines(file_path)
+        else:
+            with open(file_path, errors="replace") as f:
+                lines = f.readlines()
 
         return self.estimate_from_gcode(
             lines=lines,
@@ -843,13 +881,16 @@ class CostEstimator:
         unless *material* names one.  ``None`` when the file cannot be
         read or says nothing about its filament.
         """
-        if file_path.lower().endswith(".3mf"):
-            found = self._slice_info_filaments(file_path, material)
-            return found[0] if found is not None else None
         try:
-            with open(file_path, errors="replace") as fh:
-                body = fh.read()
-        except OSError:
+            if file_path.lower().endswith(".3mf"):
+                found = self._slice_info_filaments(file_path, material)
+                if found is not None:
+                    return found[0]
+                body = "".join(_sliced_3mf_gcode_lines(file_path))
+            else:
+                with open(file_path, errors="replace") as fh:
+                    body = fh.read()
+        except (OSError, ValueError):
             return None
         comments = "\n".join(line for line in body.splitlines() if line.lstrip().startswith(";"))
         pricing = self._gcode_filaments(body, comments, material)

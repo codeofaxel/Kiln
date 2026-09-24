@@ -46,6 +46,7 @@ from kiln.bambu_trays import TRAYS_PER_UNIT as _TRAYS_PER_UNIT
 from kiln.bambu_trays import tray_id as _bambu_tray_id
 from kiln.bambu_trays import tray_name as _bambu_tray_name
 from kiln.gcode import slicer_filament_types
+from kiln.gcode_metadata import sliced_gcode_member
 
 __all__ = [
     "AmsPlan",
@@ -227,12 +228,6 @@ def _read_ends(path: str) -> str:
     return (head + b"\n" + tail).decode(errors="replace")
 
 
-def _gcode_member(zf: zipfile.ZipFile) -> str | None:
-    names = [n for n in zf.namelist() if n.lower().endswith(".gcode")]
-    plates = sorted(n for n in names if n.startswith("Metadata/plate_"))
-    return (plates or names or [None])[0]
-
-
 def _filaments_from_painted_3mf(path: str) -> list[Filament]:
     try:
         from kiln.threemf_parser import parse_colored_3mf
@@ -271,7 +266,7 @@ def read_file_filaments(path: str | None) -> FileFilaments:
     try:
         if lower.endswith(".3mf"):
             with zipfile.ZipFile(path) as zf:
-                member = _gcode_member(zf)
+                member = sliced_gcode_member(zf)
                 if member is not None:
                     data = zf.read(member)
                     text = (
