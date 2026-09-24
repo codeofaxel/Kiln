@@ -5889,9 +5889,9 @@ def monitor_print(
                         _tool_changes = len(_re_mod.findall(r"^T\d+$", _gc, _re_mod.MULTILINE))
                         # Also try to get filament weight from gcode comments
                         if _filament_weight_g is None:
-                            _fil_g_m = _re_mod.search(r"filament used \[g\]\s*=\s*([\d.]+)", _gc)
-                            if _fil_g_m:
-                                _filament_weight_g = float(_fil_g_m.group(1))
+                            from kiln.gcode import slicer_filament_totals
+
+                            _filament_weight_g = slicer_filament_totals(_gc).weight_g
                         break
             except Exception:
                 pass

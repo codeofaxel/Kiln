@@ -1255,22 +1255,6 @@ def estimates_for_result(result: SliceResult, material: str | None = None) -> di
     return estimates
 
 
-def _sum_of_numbers(text: str) -> float | None:
-    """The sum of a slicer's comma-separated per-extruder list, or ``None``
-    when it does not start with a number (``; filament used [mm] = 11040.26,
-    584.30`` is one plate's 11624.56 mm; reading the first value alone lost
-    the second filament).  Trailing text after a value is left alone."""
-    import re as _re
-
-    values: list[float] = []
-    for piece in text.split(","):
-        head = _re.match(r"\s*([-+]?(?:\d+\.?\d*|\.\d+))", piece)
-        if head is None:
-            break
-        values.append(float(head.group(1)))
-    return sum(values) if values else None
-
-
 def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     """Parse G-code file for slicer-generated estimates.
 
@@ -1289,6 +1273,8 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     """
     import re as _re
 
+    from kiln.gcode import slicer_filament_totals
+
     estimates: dict[str, Any] = {"gcode_path": gcode_path}
 
     try:
@@ -1296,6 +1282,25 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
             search_lines = [line for line in fh if line.startswith(";")]
     except OSError:
         return estimates
+
+    # The filament totals, read once by the one reader for what a slicer
+    # says (kiln.gcode.slicer_filament_totals): one value per extruder on a
+    # multi-filament plate, and the plate uses the sum.
+    #
+    # A zero weight is the slicer saying it could not work it out — it
+    # needs a filament density, which a Kiln slice now always carries
+    # (kiln.slicer_filament) and G-code sliced elsewhere may not.  Nothing
+    # that gets extruded weighs nothing, so the key is left ABSENT rather
+    # than recorded as 0: "I don't know" is a true statement about every
+    # print, "0 g" is a false one.  See derive_filament_weight, which fills
+    # it in when a material is named.
+    totals = slicer_filament_totals("".join(search_lines))
+    if totals.mm:
+        estimates["filament_length_mm"] = totals.total_mm
+    if totals.weight_g:
+        estimates["filament_weight_g"] = totals.weight_g
+    if totals.cm3:
+        estimates["filament_volume_cm3"] = float(sum(totals.cm3))
 
     for line in search_lines:
         line = line.strip()
@@ -1313,30 +1318,6 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
             s = int(time_match.group(4) or 0)
             estimates["estimated_time_seconds"] = d * 86400 + h * 3600 + m * 60 + s
             estimates["estimated_time_human"] = line.split("=", 1)[-1].strip()
-
-        # ; filament used [mm] = 1234.56 — one value per extruder, comma
-        # separated, on a multi-filament plate; the plate uses the sum.
-        fil_mm = _re.search(r"filament used \[mm\]\s*=\s*(.+)$", line, _re.IGNORECASE)
-        if fil_mm and (mm_total := _sum_of_numbers(fil_mm.group(1))) is not None:
-            estimates["filament_length_mm"] = mm_total
-
-        # ; filament used [g] = 12.34 or total filament used [g] = 12.34
-        #
-        # A zero here is the slicer saying it could not work the weight out —
-        # it needs a filament density, which a Kiln slice now always carries
-        # (kiln.slicer_filament) and G-code sliced elsewhere may not.
-        # Nothing that gets extruded weighs nothing, so the key is left
-        # ABSENT rather than recorded as 0: "I don't know" is a true
-        # statement about every print, "0 g" is a false one.  See
-        # derive_filament_weight, which fills it in when a material is named.
-        fil_g = _re.search(r"filament used \[g\]\s*=\s*(.+)$", line, _re.IGNORECASE)
-        if fil_g and (g_total := _sum_of_numbers(fil_g.group(1))) is not None and g_total > 0:
-            estimates["filament_weight_g"] = g_total
-
-        # ; filament used [cm3] = 12.34
-        fil_cm3 = _re.search(r"filament used \[cm3\]\s*=\s*(.+)$", line, _re.IGNORECASE)
-        if fil_cm3 and (cm3_total := _sum_of_numbers(fil_cm3.group(1))) is not None:
-            estimates["filament_volume_cm3"] = cm3_total
 
         # ; total layers count = 123
         layers = _re.search(r"total layers count\s*=\s*(\d+)", line, _re.IGNORECASE)

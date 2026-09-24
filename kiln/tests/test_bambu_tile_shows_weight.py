@@ -372,3 +372,33 @@ class TestRepackageDoorFillsTheWeight:
         # which is exactly what it did before.
         monkeypatch.setattr(bambu_3mf, "_slice_info_knows_its_weight", lambda _xml: True)
         assert _weight(_slice_info(self._repackage(tmp_path))) == "0.00"
+
+
+class TestEMovesCountLikeTheSlicer:
+    """The printer-screen fallback counts the way the slicer's own total is
+    counted, so a file with no slicer totals weighs what it would have."""
+
+    def test_a_bambu_studio_start_sequence_keeps_the_filament_through_t1000(self):
+        # Bambu Studio's nozzle-load line runs under T1000; everything
+        # printed after it used to be dropped as belonging to no tray.
+        body = (
+            "M83\nT0\nG1 X1 Y1 E100\n"
+            "T1000\nG1 X18 Y1 Z0.8 F18000\nG0 E2 F300\nG0 X240 E15 F4800\n"
+            "G1 X10 Y10 E200\nG1 X20 Y20 E300\n"
+        )
+        usage = bambu_3mf.filament_usage_from_gcode(body)
+        assert usage.source == "e_moves"
+        assert usage.mm == (pytest.approx(615.0),)
+
+    def test_a_wipe_retract_and_its_prime_are_not_plastic(self):
+        # OrcaSlicer retracts part-way while wiping (E-.32 on a travel),
+        # finishes the retract, then primes E.8 before the next wall.
+        # Signed sums netted +0.48 of that as filament.
+        body = "M83\nG1 X10 Y10 E5\nG1 X11 Y10 E-.32\nG1 E-.48 F1800\nG1 E.8 F1800\nG1 X20 Y10 E5\n"
+        usage = bambu_3mf.filament_usage_from_gcode(body)
+        assert usage.mm == (pytest.approx(10.0),)
+
+    def test_a_filament_change_unload_is_not_subtracted(self):
+        body = "M83\nT0\nG1 X1 Y1 E100\nG1 E-15 F6000\nG1 E-55.3 F5400\nT1\nG1 E30\nG1 X2 Y2 E40\n"
+        usage = bambu_3mf.filament_usage_from_gcode(body)
+        assert usage.mm == (pytest.approx(100.0), pytest.approx(40.0))

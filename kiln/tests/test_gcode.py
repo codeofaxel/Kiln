@@ -805,3 +805,122 @@ class TestAxisWords:
     def test_extract_param_takes_the_same_spelling(self):
         assert _extract_param("G1 X158.922 E.04805", "E") == pytest.approx(0.04805)
         assert _extract_param("G1 X1.", "X") == pytest.approx(1.0)
+
+
+# ===================================================================
+# Filament: the one counter and the one reader every door uses
+# ===================================================================
+
+
+class TestExtrudedMmPerTool:
+    """Counted the way slicers count their own total: positive E on a move
+    that travels, per selected tool; retract, unretract and prime are not
+    plastic; Bambu's pseudo-tools keep the current filament."""
+
+    def _count(self, text):
+        from kiln.gcode import extruded_mm_per_tool
+
+        return extruded_mm_per_tool(text)
+
+    def test_orca_spelling_and_wipe_retract(self):
+        text = (
+            "M83\n"
+            "G1 E.8 F1800\n"
+            "G1 X158.922 Y99.462 E.04805\n"
+            "G1 X160.875 Y99.53 E.06127\n"
+            "G1 X161 Y99.6 E-.32 ; wipe\n"
+            "G1 E-.48 F1800\n"
+            "G1 E.8 F1800\n"
+            "G1 X170 Y100 E2.03825\n"
+        )
+        assert self._count(text) == [pytest.approx(0.04805 + 0.06127 + 2.03825)]
+
+    def test_absolute_e_with_g92_reset(self):
+        assert self._count("M82\nG1 X1 E5\nG1 X2 E12\nG92 E0\nG1 X3 E3\n") == [pytest.approx(15.0)]
+
+    def test_relative_moves_advance_the_absolute_position(self):
+        # Firmware keeps counting through relative moves: after M83 +2 +3 the
+        # extruder sits at 15, and an absolute E12 after M82 is a retract.
+        text = "G1 X10 E5\nG1 X20 E10\nM83\nG1 X30 E2\nG1 X40 E3\nM82\nG1 X50 E12\n"
+        assert self._count(text) == [pytest.approx(15.0)]
+
+    def test_per_tool_and_pseudo_tools_keep_the_current_filament(self):
+        # Bambu's start sequence purges under T1000 and unloads under T255;
+        # the slicer counts those moves against the filament already
+        # selected, and so does Kiln.  A reader that dropped them read a
+        # Bambu Studio plate at 9% of its filament.
+        text = (
+            "M83\nT0\nG1 X1 Y1 E100\nT1000\nG1 X240 E15 F4800\nG1 E7\n"
+            "T1\nG1 X2 Y2 E50\nT0\nG1 X3 Y3 E25\nT255\nG1 X65 F12000\n"
+        )
+        assert self._count(text) == [pytest.approx(140.0), pytest.approx(50.0)]
+
+    def test_arcs_and_compact_spelling(self):
+        assert self._count(["M83", "G1X10Y10E.5", "G01 X20 Y10 E.5", "G2 X0 Y0 I-5 J0 E1"]) == [pytest.approx(2.0)]
+
+    def test_an_arc_mode_subcode_does_not_change_how_e_is_read(self):
+        # G91.1 sets arc centres relative on firmware that has it; read as
+        # G91 it would turn absolute E relative and count 6 as a 6 mm move.
+        assert self._count("M82\nG1 X1 E5\nG91.1\nG1 X2 E6\n") == [pytest.approx(6.0)]
+
+    def test_nothing_extruded_is_an_empty_list(self):
+        assert self._count("G28\nG1 X10 Y10\nM83\nG1 E5\n") == []
+
+    def test_the_cost_tool_and_the_printer_screen_count_the_same_way(self):
+        from kiln.cost_estimator import CostEstimator
+        from kiln.printers.bambu_3mf import filament_usage_from_gcode
+
+        text = "M83\nT0\nG1 X1 Y1 E400\nG1 E-.8\nG1 E.8\nG1 X2 Y2 E600\nT1\nG1 X3 Y3 E50\n"
+        usage = filament_usage_from_gcode(text)
+        assert usage.source == "e_moves"
+        assert sum(usage.mm) == pytest.approx(CostEstimator()._parse_extrusion(text.splitlines()))
+        assert usage.mm == (pytest.approx(1000.0), pytest.approx(50.0))
+
+
+class TestSlicerFilamentTotals:
+    def _read(self, text):
+        from kiln.gcode import slicer_filament_totals
+
+        return slicer_filament_totals(text)
+
+    def test_orca_lists_one_value_per_extruder(self):
+        t = self._read(
+            "; filament used [mm] = 11040.26, 584.30\n"
+            "; filament used [cm3] = 26.55, 1.41\n"
+            "; filament used [g] = 32.93, 1.74\n"
+            "; total filament used [g] = 34.67\n"
+        )
+        assert t.mm == (11040.26, 584.30)
+        assert t.grams == (32.93, 1.74)
+        assert t.cm3 == (26.55, 1.41)
+        assert t.total_g == 34.67
+        assert t.total_mm == pytest.approx(11624.56)
+        assert t.weight_g == pytest.approx(34.67)
+
+    def test_bambu_studio_writes_colons(self):
+        t = self._read("; total filament length [mm] : 1227.58\n; total filament weight [g] : 3.66\n")
+        assert t.mm == (1227.58,) and t.grams == (3.66,)
+
+    def test_cura_and_simplify3d_write_metres(self):
+        assert self._read(";Filament used: 4.523m\n").mm == (4523.0,)
+        assert self._read("; Filament length: 4523.4 mm (4.52 m)\n").mm == (4523.4,)
+        assert self._read("; Filament length: 4.523 m\n").mm == (4523.0,)
+
+    def test_a_zero_weight_falls_back_to_the_one_number_total(self):
+        t = self._read("; filament used [g] = 0\n; total filament used [g] = 34.67\n")
+        assert t.grams == (0.0,) and t.weight_g == pytest.approx(34.67)
+        assert self._read("; filament used [g] = 0\n; total filament used [g] = 0.00\n").weight_g is None
+
+    def test_slic3r_and_a_written_unit_decide_the_kind(self):
+        t = self._read("; filament used = 1034.5mm (7.4cm3)\n")
+        assert t.mm == (1034.5,) and t.grams == ()
+        assert self._read("; filament_used = 123\n").mm == (123.0,)
+        grams = self._read("; filament used: 12.3g\n")
+        assert grams.grams == (12.3,) and grams.mm == ()
+        assert self._read("; filament used [mm] = 12g\n").mm == ()
+        assert self._read("; filament used = 1.2m, 5g\n").mm == ()
+
+    def test_trailing_text_and_move_lines_are_ignored(self):
+        assert self._read("; filament used [mm] = 1234.56 (model only)\n").mm == (1234.56,)
+        assert self._read("G1 X1 E.5 ; filament used [mm] = 9\n").mm == ()
+        assert self._read("").mm == ()

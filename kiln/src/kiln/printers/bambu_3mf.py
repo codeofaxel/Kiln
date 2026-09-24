@@ -106,7 +106,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from kiln.gcode import GCODE_NUMBER, axis_value, has_axis_word
+from kiln.gcode import (
+    FIRST_PSEUDO_TOOL,
+    GCODE_NUMBER,
+    axis_value,
+    extruded_mm_per_tool,
+    has_axis_word,
+    slicer_filament_totals,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1306,14 +1313,6 @@ _GCODE_FILAMENT_TYPE_RE = re.compile(
 #: was the number that survived.  A slice through ``kiln.slicer`` now
 #: carries a density (:mod:`kiln.slicer_filament`) and the grams are the
 #: slicer's own; the length path remains for files sliced elsewhere.
-_GCODE_USED_MM_RE = re.compile(
-    r"^;\s*(?:filament used \[mm\]\s*=|total filament length \[mm\]\s*:)\s*(.+)$",
-    re.MULTILINE | re.IGNORECASE,
-)
-_GCODE_USED_G_RE = re.compile(
-    r"^;\s*(?:filament used \[g\]\s*=|total filament weight \[g\]\s*:)\s*(.+)$",
-    re.MULTILINE | re.IGNORECASE,
-)
 _GCODE_FILAMENT_DENSITY_RE = re.compile(
     r"^;\s*filament_density\s*[:=]\s*(.+)$", re.MULTILINE | re.IGNORECASE,
 )
@@ -1321,11 +1320,9 @@ _GCODE_FILAMENT_DIAMETER_RE = re.compile(
     r"^;\s*filament_diameter\s*[:=]\s*(.+)$", re.MULTILINE | re.IGNORECASE,
 )
 #: Tool selects wherever they sit on the line: Bambu's AMS blocks indent
-#: the real ``T0`` / ``T1``.  Tools from 255 up are the start sequence's
-#: pseudo-tools (T255, T1000), not trays.
+#: the real ``T0`` / ``T1``.  Tools from :data:`kiln.gcode.FIRST_PSEUDO_TOOL`
+#: up are the start sequence's pseudo-tools (T255, T1000), not trays.
 _GCODE_ANY_TOOL_SELECT_RE = re.compile(r"^\s*T(\d+)\b", re.MULTILINE)
-_BAMBU_FIRST_PSEUDO_TOOL = 255
-_GCODE_E_WORD_RE = re.compile(rf"(?<![A-Za-z])E({GCODE_NUMBER})")
 _FILAMENT_DIAMETER_MM = 1.75
 _DEFAULT_FILAMENT_DENSITY = 1.24  # PLA, the table's own figure
 
@@ -1337,8 +1334,8 @@ class FilamentUsage:
     ``source`` says where the grams came from: ``slicer_grams`` (the
     slicer wrote them), ``slicer_length`` (the slicer's length times the
     filament cross-section times the material density), ``e_moves`` (no
-    slicer comment at all — the E words were summed), or ``none`` (nothing
-    is extruded, and the zeros are the truth).
+    slicer total at all — the extruding moves were counted), or ``none``
+    (nothing is extruded, and the zeros are the truth).
     """
 
     mm: tuple[float, ...]
@@ -1385,7 +1382,7 @@ def _real_tools_used(gcode_body: str) -> list[int]:
         {
             int(t)
             for t in _GCODE_ANY_TOOL_SELECT_RE.findall(gcode_body)
-            if int(t) < _BAMBU_FIRST_PSEUDO_TOOL
+            if int(t) < FIRST_PSEUDO_TOOL
         }
     )
 
@@ -1398,60 +1395,6 @@ def _place_on_used_tools(values: list[float], tools: list[int]) -> list[float]:
     out = [0.0] * (max(tools) + 1)
     for tool, value in zip(tools, values, strict=True):
         out[tool] = value
-    return out
-
-
-def _sum_e_moves(gcode_body: str) -> list[float]:
-    """Net E per extruder from the moves themselves.
-
-    Retract and unretract cancel because deltas are signed.  Absolute E
-    (``M82``, the G-code default) is differenced and reset by ``G92``;
-    relative E (``M83``, what Kiln slices with) is summed as written.  Moves
-    under a pseudo-tool (Bambu's ``T1000`` unload / ``T255``) belong to no
-    tray and are not counted.
-    """
-    totals: dict[int, float] = {}
-    tool: int | None = 0
-    relative = False
-    last_e = 0.0
-    for line in gcode_body.splitlines():
-        code = line.split(";", 1)[0].strip()
-        if not code:
-            continue
-        if code[0] in "Tt" and code[1:2].isdigit():
-            number = int(re.match(r"\d+", code[1:]).group(0))
-            tool = number if number < _BAMBU_FIRST_PSEUDO_TOOL else None
-            continue
-        word = code.split(None, 1)[0].upper()
-        if word == "M82" or word == "G90":
-            relative = False
-            continue
-        if word == "M83" or word == "G91":
-            relative = True
-            continue
-        if word == "G92":
-            e_word = _GCODE_E_WORD_RE.search(code)
-            if e_word:
-                last_e = float(e_word.group(1))
-            continue
-        if word not in ("G0", "G1", "G2", "G3"):
-            continue
-        e_word = _GCODE_E_WORD_RE.search(code)
-        if not e_word:
-            continue
-        value = float(e_word.group(1))
-        if relative:
-            delta = value
-        else:
-            delta = value - last_e
-            last_e = value
-        if tool is not None:
-            totals[tool] = totals.get(tool, 0.0) + delta
-    if not totals:
-        return []
-    out = [0.0] * (max(totals) + 1)
-    for index, total in totals.items():
-        out[index] = max(total, 0.0)
     return out
 
 
@@ -1468,21 +1411,23 @@ def filament_usage_from_gcode(
     density is the slicer's own ``filament_density`` when it is not zero,
     else Kiln's table for the material — *filament_types* (what the caller
     declared and the AMS will be told) first, the body's ``filament_type``
-    line second, PLA last.  A body with no slicer comment at all has its E
-    words summed.  Never raises.
+    line second, PLA last.  A body with no slicer total at all has its
+    extruding moves counted (:func:`kiln.gcode.extruded_mm_per_tool`).
+    Never raises.
     """
     tools = _real_tools_used(gcode_body)
-    mm_match = _GCODE_USED_MM_RE.search(gcode_body)
-    mm = _place_on_used_tools(_number_list(mm_match.group(1)), tools) if mm_match else []
-    g_match = _GCODE_USED_G_RE.search(gcode_body)
-    grams = _place_on_used_tools(_number_list(g_match.group(1)), tools) if g_match else []
+    totals = slicer_filament_totals(gcode_body)
+    mm = _place_on_used_tools(list(totals.mm), tools) if totals.mm else []
+    grams = _place_on_used_tools(list(totals.grams), tools) if totals.grams else []
 
     if mm and grams and any(g > 0 for g in grams) and len(grams) == len(mm):
         source = "slicer_grams"
     else:
         source = "slicer_length" if mm else "e_moves"
         if not mm:
-            mm = _sum_e_moves(gcode_body)
+            # Counted the way the slicer counts its own total, so a file
+            # with no totals weighs what it would have said.
+            mm = extruded_mm_per_tool(gcode_body)
         densities = _number_list(
             (_GCODE_FILAMENT_DENSITY_RE.search(gcode_body) or [None, ""])[1]
         )

@@ -14,15 +14,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from kiln.gcode import axis_value, has_axis_word
-
-#: The command word at the head of a line, ``G1`` in ``G1X10E.5`` and
-#: ``G01 X10`` alike.
-_COMMAND_WORD_RE = re.compile(r"([A-Za-z])\s*(\d+)")
-
-#: The moves that can lay filament down.  ``G0``/``G1`` are the straight
-#: ones; ``G2``/``G3`` arcs carry an E word exactly the same way.
-_EXTRUDING_MOVES = frozenset({"G0", "G1", "G2", "G3"})
+from kiln.gcode import extruded_mm_per_tool, slicer_filament_totals
 
 #: How far Kiln's own count may sit from the slicer's ``filament used``
 #: total before the estimate says so.  The count matched OrcaSlicer to
@@ -215,17 +207,6 @@ _TIME_PATTERNS = [
 ]
 
 
-def _extract_e_value(line: str) -> float | None:
-    """Extract the E parameter value from a G-code line.
-
-    The number is read the one way every Kiln reader reads a G-code word
-    (:func:`kiln.gcode.axis_value`): OrcaSlicer and Bambu Studio write
-    ``E.04805`` with no leading zero on most lines, and a pattern that
-    wanted a digit first dropped three quarters of a plate's plastic.
-    """
-    return axis_value(line, "E")
-
-
 def _parse_time_from_comments(lines: list[str]) -> int | None:
     """Try to extract estimated print time from slicer comments."""
     for line in lines:
@@ -343,13 +324,9 @@ class CostEstimator:
         counted_e_mm = self._parse_extrusion(lines)
         est_time = _parse_time_from_comments(lines)
 
-        # The slicer's own totals, read by the one reader that owns them
-        # (imported lazily: this module stays light for callers that never
-        # see a file).
-        from kiln.printers.bambu_3mf import filament_usage_from_gcode
-
-        usage = filament_usage_from_gcode("\n".join(line.rstrip("\r\n") for line in lines))
-        header_e_mm = sum(usage.mm) if usage.source in ("slicer_grams", "slicer_length") else 0.0
+        # The slicer's own totals, read by the one reader that owns them.
+        totals = slicer_filament_totals("\n".join(line.rstrip("\r\n") for line in lines))
+        header_e_mm = totals.total_mm
 
         filament_source = "gcode_moves"
         total_e_mm = counted_e_mm
@@ -378,10 +355,8 @@ class CostEstimator:
 
         # Weight: the slicer's own grams when it wrote them (its density
         # for the filament it sliced), else length x the profile's density.
-        if usage.source == "slicer_grams":
-            weight_g = sum(usage.grams)
-        else:
-            weight_g = volume_cm3 * profile.density_g_per_cm3
+        slicer_g = totals.weight_g if header_e_mm > 0 else None
+        weight_g = slicer_g if slicer_g else volume_cm3 * profile.density_g_per_cm3
 
         # Filament cost
         filament_cost = (weight_g / 1000.0) * profile.cost_per_kg_usd
@@ -704,66 +679,12 @@ class CostEstimator:
         )
 
     def _parse_extrusion(self, lines: list[str]) -> float:
-        """Parse total filament extrusion in mm from G-code lines.
+        """Total filament laid down, in mm, counted from the moves.
 
-        Handles both absolute (default) and relative (M83) E-axis modes.
-        Counts filament the way the slicers count it for their own
-        ``filament used`` total: a positive E delta on a move that also
-        travels (X, Y or Z) lays plastic down; an E-only line is a
-        retract, an unretract or a prime, and retract and unretract cancel
-        by definition.  Counting unretracts too ran 11% over the slicer on
-        a plate with 1,300 retractions; subtracting retracts as well ran
-        7% under.  Arcs (``G2``/``G3``) extrude like straight moves.
+        The one counter every door uses
+        (:func:`kiln.gcode.extruded_mm_per_tool`): it matches the slicer's
+        own ``filament used`` total on every real file it was measured
+        against, and the weight written for a printer's screen is counted
+        the same way.
         """
-        total_e_mm = 0.0
-        last_e = 0.0
-        relative_mode = False
-
-        for raw_line in lines:
-            line = raw_line.strip()
-
-            # Skip empty lines and comments
-            if not line or line.startswith(";"):
-                continue
-
-            # Strip inline comments
-            if ";" in line:
-                line = line[: line.index(";")].strip()
-
-            head = _COMMAND_WORD_RE.match(line)
-            if head is None:
-                continue
-            word = f"{head.group(1).upper()}{int(head.group(2))}"
-
-            # Track E-axis mode
-            if word == "M82":
-                relative_mode = False
-                last_e = 0.0
-                continue
-            if word == "M83":
-                relative_mode = True
-                continue
-            # G92 E0 resets the E position
-            if word == "G92":
-                e_val = _extract_e_value(line)
-                if e_val is not None:
-                    last_e = e_val
-                continue
-
-            if word not in _EXTRUDING_MOVES:
-                continue
-
-            e_val = _extract_e_value(line)
-            if e_val is None:
-                continue
-
-            if relative_mode:
-                delta = e_val
-            else:
-                delta = e_val - last_e
-                last_e = e_val
-
-            if delta > 0 and has_axis_word(line, "XYZ"):
-                total_e_mm += delta
-
-        return total_e_mm
+        return float(sum(extruded_mm_per_tool(lines)))

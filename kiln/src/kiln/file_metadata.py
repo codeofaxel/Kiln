@@ -33,6 +33,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from kiln.gcode import slicer_filament_totals
+
 logger = logging.getLogger(__name__)
 
 _MAX_HEADER_LINES: int = 300
@@ -130,10 +132,6 @@ _RE_BOUNDS_Z = re.compile(
 )
 
 # FDM-specific header patterns
-_RE_FILAMENT_USED = re.compile(
-    r";\s*filament\s*(?:used|_used)\s*[:=]\s*(\d+\.?\d*)\s*(mm|g|m)?",
-    re.IGNORECASE,
-)
 _RE_NOZZLE_DIAMETER = re.compile(
     r";\s*nozzle_diameter\s*[:=]\s*(\d+\.?\d*)",
     re.IGNORECASE,
@@ -248,6 +246,18 @@ def _parse_dimensions_string(raw: str) -> dict[str, float] | None:
 # ---------------------------------------------------------------------------
 
 
+def _filament_used(meta: FileMetadata, lines: list[str]) -> None:
+    """Every extruder's filament total, summed, from the slicer's own lines —
+    in mm when the file states a length, else in grams."""
+    totals = slicer_filament_totals("\n".join(lines))
+    if totals.mm:
+        meta.extra["filament_used"] = totals.total_mm
+        meta.extra["filament_used_unit"] = "mm"
+    elif totals.weight_g:
+        meta.extra["filament_used"] = totals.weight_g
+        meta.extra["filament_used_unit"] = "g"
+
+
 def _extract_gcode_metadata(file_path: str) -> FileMetadata:
     """Parse G-code header comments for FDM printer metadata.
 
@@ -271,6 +281,7 @@ def _extract_gcode_metadata(file_path: str) -> FileMetadata:
         logger.warning("Could not read file for metadata: %s", exc)
         return meta
 
+    _filament_used(meta, lines)
     for line in lines:
         stripped = line.strip()
         if not stripped or not stripped.startswith(";"):
@@ -308,21 +319,6 @@ def _extract_gcode_metadata(file_path: str) -> FileMetadata:
                 meta.dimensions_mm = _parse_dimensions_string(m.group(1))
 
         # --- FDM-specific extras ---
-
-        # Filament used
-        if "filament_used" not in meta.extra:
-            m = _RE_FILAMENT_USED.match(stripped)
-            if m:
-                try:
-                    val = float(m.group(1))
-                    unit = (m.group(2) or "mm").lower()
-                    if unit == "m":
-                        val *= 1000.0
-                        unit = "mm"
-                    meta.extra["filament_used"] = val
-                    meta.extra["filament_used_unit"] = unit
-                except ValueError:
-                    pass
 
         # Nozzle diameter
         if "nozzle_diameter" not in meta.extra:
@@ -616,6 +612,7 @@ def _extract_gcode_metadata_from_lines(lines: list[str]) -> FileMetadata:
     """
     meta = FileMetadata(file_path="", file_type="gcode", file_format="gcode")
 
+    _filament_used(meta, lines)
     for line in lines:
         stripped = line.strip()
         if not stripped or not stripped.startswith(";"):
@@ -646,20 +643,6 @@ def _extract_gcode_metadata_from_lines(lines: list[str]) -> FileMetadata:
             m = _RE_DIMENSIONS.match(stripped)
             if m:
                 meta.dimensions_mm = _parse_dimensions_string(m.group(1))
-
-        if "filament_used" not in meta.extra:
-            m = _RE_FILAMENT_USED.match(stripped)
-            if m:
-                try:
-                    val = float(m.group(1))
-                    unit = (m.group(2) or "mm").lower()
-                    if unit == "m":
-                        val *= 1000.0
-                        unit = "mm"
-                    meta.extra["filament_used"] = val
-                    meta.extra["filament_used_unit"] = unit
-                except ValueError:
-                    pass
 
         if "nozzle_diameter" not in meta.extra:
             m = _RE_NOZZLE_DIAMETER.match(stripped)

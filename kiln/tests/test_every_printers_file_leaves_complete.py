@@ -691,3 +691,27 @@ class TestTheThreePrintDoors:
         upload_path, wrapped = prepare_upload_for_adapter(_Wrapping("bambu"), path)
         assert wrapped is True and upload_path.endswith(".3mf")
         assert Path(path).read_bytes() == before
+
+
+class TestTheWeightAScreenReads:
+    """A printer screen reads one spelling of the weight.  The completion
+    counts only the lines Moonraker and PrusaLink read, every extruder
+    summed; a true weight in a spelling neither reads still needs writing."""
+
+    def test_a_bambu_studio_weight_line_is_not_a_line_those_screens_read(self):
+        from kiln.printers.gcode_complete import declared_grams, declared_mm
+
+        text = "; total filament length [mm] : 1227.58\n; total filament weight [g] : 3.66\n"
+        assert declared_grams(text) == 0.0
+        assert declared_mm(text) == 0.0
+
+    def test_every_extruder_is_summed(self):
+        from kiln.printers.gcode_complete import declared_grams, declared_mm
+
+        text = (
+            "; filament used [mm] = 11040.26, 584.30\n"
+            "; filament used [g] = 32.93, 1.74\n"
+            "; total filament used [g] = 34.67\n"
+        )
+        assert declared_mm(text) == pytest.approx(11624.56)
+        assert declared_grams(text) == pytest.approx(34.67)

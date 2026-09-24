@@ -198,8 +198,9 @@ class TestParseExtrusion:
         assert self._parse(gcode) == pytest.approx(12.0)
 
     def test_mode_switching_m82_m83(self):
-        gcode = "G1 X10 E5.0\nG1 X20 E10.0\nM83\nG1 X30 E2.0\nG1 X40 E3.0\nM82\nG1 X50 E12.0"
-        # Absolute: (5-0)+(10-5)=10, M83 relative: 2+3=5, M82 resets last_e to 0: (12-0)=12 => 27
+        gcode = "G1 X10 E5.0\nG1 X20 E10.0\nM83\nG1 X30 E2.0\nG1 X40 E3.0\nM82\nG92 E0\nG1 X50 E12.0"
+        # Absolute: (5-0)+(10-5)=10, M83 relative: 2+3=5, then the G92 E0 a
+        # slicer writes after M82 zeroes the position: (12-0)=12 => 27
         assert self._parse(gcode) == pytest.approx(27.0)
 
     def test_g92_e0_reset(self):
