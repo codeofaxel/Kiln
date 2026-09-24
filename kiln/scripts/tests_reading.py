@@ -23,6 +23,11 @@ the diff added, removed or edited (``_STOP_KEYWORDS``, ``def
 parse_openscad_parameters``, ``class ParameterDef``), then greps ``tests/`` for any of them.  It
 over-approximates on purpose: a test that merely mentions a symbol is
 cheap to run and expensive to miss.
+
+A module is read however the import spells it.  ``import kiln.gcode`` and
+``from kiln.gcode import x`` write the dotted path out, so the grep sees
+them; ``from kiln import gcode`` never does, so each test's imports are
+also parsed and that spelling counted as ``kiln.gcode``.
 """
 
 from __future__ import annotations
@@ -152,17 +157,44 @@ def changed_symbols(base: str, path: Path) -> set[str]:
     }
 
 
+def _from_imports(text: str) -> set[str]:
+    """Each ``from a.b import c`` in *text*, as ``a.b.c``, wherever it sits.
+
+    The one import spelling that never writes a module's dotted path out.
+    A name that is not a module (``from kiln.gcode import parse``) comes out
+    as ``kiln.gcode.parse``, which still sits inside the module it came from.
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return set()
+    return {
+        f"{node.module}.{alias.name}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and not node.level
+        for alias in node.names
+        if alias.name != "*"
+    }
+
+
 def readers(needles: set[str]) -> list[Path]:
     hits: list[Path] = []
     pattern = re.compile(
         r"(?<![\w.])(?:" + "|".join(re.escape(n) for n in sorted(needles, key=len, reverse=True)) + r")(?![\w])"
     )
+    modules = {n for n in needles if "." in n}
+    # A module's last name is only a cheap filter before parsing, never a
+    # needle of its own: ``emit`` and ``model`` are English.
+    last_names = {m.rsplit(".", 1)[1] for m in modules}
     for test in sorted(_TESTS.glob("test_*.py")):
         try:
             text = test.read_text(encoding="utf-8")
         except OSError:
             continue
-        if pattern.search(text):
+        if pattern.search(text) or (
+            any(name in text for name in last_names)
+            and any(i == m or i.startswith(m + ".") for i in _from_imports(text) for m in modules)
+        ):
             hits.append(test.relative_to(_ROOT))
     return hits
 
