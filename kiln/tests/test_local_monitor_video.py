@@ -63,7 +63,7 @@ class TestTheWireCarriesVideo:
 
 class TestTheLocalDoorAsksTheRelay:
     def test_video_only_rides_when_asked(self, monkeypatch):
-        monkeypatch.setattr(local_monitor, "_direct_status", lambda pn: (_ACTIVE, None))
+        monkeypatch.setattr(local_monitor, "_direct_status", lambda pn, detail="lite": (_ACTIVE, None))
         monkeypatch.setattr(local_monitor, "_coverage_block", lambda pn: None)
         monkeypatch.setattr(local_monitor, "_video_block", lambda pn, status: (_BLOCK, None))
         with_video = local_monitor.compose_local_payload(include_video=True)

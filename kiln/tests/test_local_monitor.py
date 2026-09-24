@@ -83,7 +83,7 @@ def _stub_composition(monkeypatch):
     monkeypatch.setattr(
         local_monitor,
         "_direct_status",
-        lambda printer_name: (
+        lambda printer_name, detail="lite": (
             {
                 "success": True,
                 "printer": {"state": "printing", "connected": True},
@@ -240,7 +240,7 @@ class TestComposeLocalPayload:
         monkeypatch.setattr(
             local_monitor,
             "_direct_status",
-            lambda printer_name: (
+            lambda printer_name, detail="lite": (
                 None,
                 {"code": "NOT_FOUND", "message": "Printer 'x' not found."},
             ),
@@ -327,6 +327,37 @@ class TestTheAccountAxisAsksForAnAccountNotACredential:
     ):
         _isolated_auth.write_text("{not json", encoding="utf-8")
         assert self._real_signed_in() is False
+
+
+class TestCapabilitiesRideOnlyOnThePollThatAsks:
+    """The panel asks for the machine's capabilities once per watched print
+    (``include_capabilities``); that poll reads the full status shape, every
+    other poll stays lite.  Driven through the REAL ``_direct_status`` so the
+    ``detail`` handed to ``printer_status`` is the thing under test."""
+
+    _real_direct_status = staticmethod(local_monitor._direct_status)
+
+    def test_the_asking_poll_reads_full_and_the_rest_stay_lite(self, monkeypatch):
+        from kiln import server
+
+        asked: list[str | None] = []
+
+        def fake_status(printer_name=None, detail=None):
+            asked.append(detail)
+            answer = {"success": True, "printer": {"state": "printing"}, "job": {}}
+            if detail == "full":
+                answer["capabilities"] = {"can_pause": True}
+            return answer
+
+        monkeypatch.setattr(local_monitor, "_direct_status", self._real_direct_status)
+        monkeypatch.setattr(server, "printer_status", fake_status)
+
+        plain = local_monitor.compose_local_payload()
+        with_caps = local_monitor.compose_local_payload(include_capabilities=True)
+
+        assert asked == ["lite", "full"]
+        assert "capabilities" not in plain["status"]
+        assert with_caps["status"]["capabilities"] == {"can_pause": True}
 
 
 class TestTheStatusRefusalIsUnwrappedFromTheRealShape:
